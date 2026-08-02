@@ -1,0 +1,5 @@
+# <upstream-url> <deployed-sha>
+# Records what is deployed. Never triggers a pull — see bin/check-sources.
+# This is the fork; the deployed sha exists only there. Upstream is
+# https://github.com/hmoffatt/send2ereader.git, wired as the `upstream` remote.
+https://github.com/gsfernandes81/send2ereader.git 74065c994ac0391dd400c51bcd43058ca23b25ab

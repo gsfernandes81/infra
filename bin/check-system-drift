@@ -1,0 +1,50 @@
+#!/bin/sh
+# Diff this host's tracked /etc copies against what is actually live.
+#
+# READ-ONLY, and deliberately so: these copies document the system, they do not
+# control it. Nothing here writes to /etc. Generating boot-path files from the repo
+# was considered and rejected.
+#
+# usage: bin/check-system-drift [host]     (default: this host's name)
+# exit 0 = tracked copies match live   exit 1 = drift, or a tracked file is missing
+set -eu
+
+repo="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+host="${1:-$(hostname -s 2>/dev/null || hostname)}"
+dir="$repo/hosts/$host/system"
+
+if [ ! -d "$dir" ]; then
+	echo "no tracked system files for host '$host' ($dir does not exist)" >&2
+	exit 1
+fi
+
+rc=0
+found=0
+
+for tracked in "$dir"/*; do
+	[ -f "$tracked" ] || continue
+	found=1
+	name="$(basename -- "$tracked")"
+	live="/etc/$name"
+
+	if [ ! -e "$live" ]; then
+		echo "$name: tracked here, but $live does not exist"
+		rc=1
+		continue
+	fi
+
+	if diff -u "$tracked" "$live" > /dev/null 2>&1; then
+		echo "$name: ok"
+	else
+		echo "$name: DRIFT  (tracked vs $live)"
+		diff -u "$tracked" "$live" | sed 's/^/    /' || true
+		rc=1
+	fi
+done
+
+if [ "$found" -eq 0 ]; then
+	echo "no tracked system files under $dir"
+	exit 1
+fi
+
+exit $rc

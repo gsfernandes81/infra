@@ -1,0 +1,3 @@
+# <upstream-url> <deployed-sha>
+# Records what is deployed. Never triggers a pull — see bin/check-sources.
+https://github.com/gsfernandes81/ionic-traces.git 215f8a6f1bbcf40454397a9bc100e473359ae008

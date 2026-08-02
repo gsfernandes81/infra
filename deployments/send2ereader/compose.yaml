@@ -1,0 +1,21 @@
+# Deploy stub. The source lives in its own repo — see SOURCE.
+# Copied from the checkout's docker-compose.yaml, with the build context made absolute
+# so this file is safe to reach through a hosts/<host>/ symlink.
+#
+# The explicit `name:` is a no-op here, not a change: the checkout's file declared no
+# name, so Compose derived `send2ereader` from the directory, which is what the running
+# container is already labelled with. Stating it means the project name no longer
+# depends on which directory you happen to run from.
+name: send2ereader
+services:
+  send2ereader:
+    build:
+      context: ${SRC_ROOT:?set SRC_ROOT in deployments/send2ereader/.env, e.g. /home/gavin/src}/send2ereader
+      dockerfile: ./Dockerfile
+    container_name: send2ereader
+    # Restart means, Automatic re-start the container after a shutdown unless manual stop container
+    restart: unless-stopped
+    # Ports means, Bind external and internal docker ports, only change the external port, not the internal port
+    # Format: <External Port>:<Internal Port>
+    ports:
+      - 3001:3001

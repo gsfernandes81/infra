@@ -1,0 +1,45 @@
+# Deploy stub. The source lives in its own repo — see SOURCE.
+# Copied from the checkout's docker-compose.yml, with build contexts made absolute so
+# this file is safe to reach through a hosts/<host>/ symlink. Otherwise unchanged.
+name: ionic
+services:
+  mysql-ionic:
+    container_name: mysql-ionic
+    image: mysql:8
+    restart: always
+    expose:
+      - "3306"
+    environment:
+      - MYSQL_DATABASE=ionic
+    env_file:
+      - .env
+    volumes:
+      - /media/ionic-mysql:/var/lib/mysql
+
+  bot:
+    container_name: bot
+    restart: always
+    build:
+      context: ${SRC_ROOT:?set SRC_ROOT in deployments/ionic-traces/.env, e.g. /home/gavin/src}/ionic-traces
+      target: bot
+    environment:
+      - MYSQL_HOSTNAME=mysql-ionic
+      - MYSQL_PORT=3306
+      - MYSQL_DATABASE=ionic
+    env_file:
+      - .env
+
+  web:
+    container_name: web
+    restart: always
+    build:
+      context: ${SRC_ROOT:?set SRC_ROOT in deployments/ionic-traces/.env, e.g. /home/gavin/src}/ionic-traces
+      target: web
+    ports:
+      - 7777:7777
+    environment:
+      - MYSQL_HOSTNAME=mysql-ionic
+      - MYSQL_PORT=3306
+      - MYSQL_DATABASE=ionic
+    env_file:
+      - .env

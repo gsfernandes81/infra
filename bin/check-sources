@@ -1,0 +1,77 @@
+#!/bin/sh
+# Report drift between each stack's pinned SOURCE sha and the real checkout HEAD.
+#
+# READ-ONLY. This never fetches, never pulls, never checks out. SOURCE records what
+# is deployed; keeping it accurate is a deliberate act, not an automatic one.
+#
+# exit 0 = every pin matches   exit 1 = drift or a problem worth looking at
+set -eu
+
+repo="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+rc=0
+found=0
+
+for source_file in "$repo"/deployments/*/SOURCE; do
+	[ -e "$source_file" ] || continue
+	found=1
+	stack_dir="$(dirname -- "$source_file")"
+	stack="$(basename -- "$stack_dir")"
+
+	# SOURCE format, first non-comment line:  <upstream-url> <deployed-sha>
+	url="$(awk '/^[[:space:]]*#/ {next} NF >= 2 {print $1; exit}' "$source_file")"
+	pinned="$(awk '/^[[:space:]]*#/ {next} NF >= 2 {print $2; exit}' "$source_file")"
+
+	if [ -z "${url:-}" ] || [ -z "${pinned:-}" ]; then
+		echo "$stack: MALFORMED SOURCE (want '<url> <sha>')"
+		rc=1
+		continue
+	fi
+
+	# SRC_ROOT lives in the stack's gitignored .env, so it is per-host.
+	src_root=''
+	if [ -f "$stack_dir/.env" ]; then
+		src_root="$(sed -n 's/^[[:space:]]*SRC_ROOT[[:space:]]*=[[:space:]]*//p' "$stack_dir/.env" | tail -n1)"
+	fi
+	if [ -z "$src_root" ]; then
+		echo "$stack: SRC_ROOT not set in $stack_dir/.env — cannot locate checkout"
+		rc=1
+		continue
+	fi
+
+	checkout="$src_root/$stack"
+	if [ ! -d "$checkout/.git" ]; then
+		echo "$stack: no git checkout at $checkout"
+		rc=1
+		continue
+	fi
+
+	head="$(git -C "$checkout" rev-parse HEAD)"
+	remote="$(git -C "$checkout" config --get remote.origin.url || echo '')"
+
+	if [ "$head" != "$pinned" ]; then
+		echo "$stack: DRIFT"
+		echo "    pinned  $pinned"
+		echo "    HEAD    $head"
+		echo "    (rebuild and update SOURCE, or check out the pinned sha)"
+		rc=1
+	else
+		echo "$stack: ok  ${pinned%"${pinned#???????}"}"
+	fi
+
+	if [ -n "$remote" ] && [ "$remote" != "$url" ]; then
+		echo "$stack: remote mismatch — SOURCE says $url, checkout says $remote"
+		rc=1
+	fi
+
+	if [ -n "$(git -C "$checkout" status --porcelain)" ]; then
+		echo "$stack: checkout is DIRTY — the deployed image may not match any commit"
+		rc=1
+	fi
+done
+
+if [ "$found" -eq 0 ]; then
+	echo "no SOURCE files found under $repo/deployments/"
+	exit 1
+fi
+
+exit $rc

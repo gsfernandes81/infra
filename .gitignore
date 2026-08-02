@@ -1,0 +1,24 @@
+# Secrets — never commit.
+# Live secrets on this fleet: ProtonVPN OpenVPN credentials + an unused WireGuard
+# private key (torrents), Discord token + MySQL root password (ionic-traces),
+# the qBittorrent PBKDF2 hash (stays on /media), and the Cloudflare tunnel token
+# (stays in /etc/init.d/cloudflared).
+
+.env
+.env.*
+!.env.example
+
+# Key material of any kind — including the future LUKS keyfile for `zero`,
+# which is referenced by path in the tracked crypttab and backed up out of band.
+*.key
+*.keyfile
+*.pem
+id_rsa
+id_ed25519
+
+# qBittorrent's config carries WebUI\Password_PBKDF2. It lives on the data
+# volume at /media/torrents-config and must never be copied into this repo.
+qBittorrent.conf
+
+# Database dumps
+*.sql
