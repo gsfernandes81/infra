@@ -109,6 +109,23 @@ impossible rather than detected. On MicroOS, `RequiresMountsFor=` replaces it.
 mountpoints — `lsattr -d` on a *mounted* path reports the mounted filesystem's root,
 answering a different question.
 
+## Backups of secret-bearing files
+
+**A backup inherits both the secret and the permissions.** Moving the Cloudflare token
+out of `/etc/init.d/cloudflared` (755, world-readable) left
+`/etc/init.d/cloudflared.bak-token` — same mode, same token — so the exposure the whole
+exercise existed to remove was still there afterwards, and every check said PASS
+because they all looked at the file being fixed, not the copy beside it.
+
+Two rules:
+
+- Back up **outside the directory**, at mode 600. Never `foo.bak` next to `foo`.
+- Never in `/etc/init.d`: anything executable there is an OpenRC service, so the backup
+  appears in `rc-status` as a phantom stopped service on the boot path.
+
+Then grep the *directory*, not the file, before declaring it done:
+`grep -rlE '\-\-token [A-Za-z0-9_=-]{40,}' /etc/init.d/`
+
 ## Landmines
 
 - **Never `apk del containerd`.** `docker-engine` hard-depends on it; `/usr/bin/containerd`
