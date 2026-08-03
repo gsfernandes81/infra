@@ -25,16 +25,27 @@ for tracked in "$dir"/*; do
 	[ -f "$tracked" ] || continue
 	found=1
 	name="$(basename -- "$tracked")"
-	live="/etc/$name"
 
-	if [ ! -e "$live" ]; then
-		echo "$name: tracked here, but $live does not exist"
+	# Tracked files are flat, but they do not all live in /etc directly — OpenRC
+	# service scripts are in /etc/init.d. Search both.
+	#
+	# /etc/conf.d is DELIBERATELY NOT searched. By convention here that is where
+	# secrets live (the Cloudflare tunnel token is /etc/conf.d/cloudflared), and a
+	# name collision is not hypothetical: `cloudflared` exists in both init.d and
+	# conf.d. Matching the wrong one would print the token in the diff.
+	live=''
+	for cand in "/etc/$name" "/etc/init.d/$name"; do
+		[ -f "$cand" ] && { live="$cand"; break; }
+	done
+
+	if [ -z "$live" ]; then
+		echo "$name: tracked here, but neither /etc/$name nor /etc/init.d/$name exists"
 		rc=1
 		continue
 	fi
 
 	if diff -u "$tracked" "$live" > /dev/null 2>&1; then
-		echo "$name: ok"
+		echo "$name: ok  ($live)"
 	else
 		echo "$name: DRIFT  (tracked vs $live)"
 		diff -u "$tracked" "$live" | sed 's/^/    /' || true

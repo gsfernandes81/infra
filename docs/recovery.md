@@ -98,13 +98,14 @@ replaced by `RequiresMountsFor=`.
 
 ## Why a missing USB disk doesn't stop boot
 
-**`one`:** all four `/media/*` mounts are on `/dev/sdb1` and none carry `nofail`. On
-Alpine + OpenRC that's survivable: `critical_mounts` is empty in
-`/etc/conf.d/localmount` so `localmount` forces `rc=0`, and all four are passno 0 so
-fsck never touches them. Only `/` and `/boot` are fsck'd, both on the SD card.
-**`one` still needs the `nofail` treatment that `zero` has had**, plus `chattr +i` on
-its four bare mountpoints. Method in
-[`../CLAUDE.md`](../CLAUDE.md#mount-guards-zero-and-due-on-one).
+**`one`:** all four `/media/*` mounts are on `/dev/sdb1`. They now carry `nofail`, and
+all four bare mountpoints are `chattr +i` (Aug 2026) — all four were confirmed empty
+first, so the trap had never fired here. Independently of that, OpenRC would have
+survived a missing array anyway: `critical_mounts` is empty in `/etc/conf.d/localmount`
+so `localmount` forces `rc=0`, and all four are passno 0 so fsck never touches them.
+Only `/` and `/boot` are fsck'd, both on the SD card. The guards matter for the
+systemd migration, and for the `restart: always` containers that would otherwise
+populate an empty mountpoint today.
 
 **`two`:** diskless, running from RAM with the SD card read-only. It has no `/media/*`
 data mounts to guard, so `nofail` and `chattr +i` do not apply — but check rather than
@@ -116,8 +117,13 @@ could fail to mount.
 | | `nofail` | `chattr +i` | token moved out of the init script |
 |---|---|---|---|
 | `zero` | ✅ Aug 2026 | ✅ Aug 2026 | ✅ Aug 2026 — **not rotated** |
-| `one` | ❌ due | ❌ due | ❌ due |
+| `one` | ✅ Aug 2026 | ✅ Aug 2026 | ✅ Aug 2026 — **not rotated** |
 | `two` | n/a (diskless) | n/a | check |
+
+**Neither token has been rotated.** Both were world-readable in a 755 init script for
+months, so both must be assumed disclosed — anyone who copied one can still run a
+connector for that tunnel. Moving them shrank future exposure and did nothing about
+past exposure. Regenerate both in the Zero Trust dashboard when physically present.
 
 **`zero`:** all three `/media/*` entries now carry `nofail`. Its array is btrfs **RAID1
 across two bcache devices**, so *both* must assemble before it can mount read-write —
@@ -180,10 +186,22 @@ it can still run a connector for this tunnel until it is regenerated in the Zero
 dashboard. Moving it shrank future exposure; it did not undo past exposure. Rotate when
 physically present.
 
-**`one` and `two` — status per host, check before assuming.** If the token is still
-inline in the world-readable init script, the same fix applies: move it to
-`/etc/conf.d/cloudflared` (mode 600), reference `${CF_TUNNEL_TOKEN}`, verify, then
-rotate. Confirm with:
+**`one` — same, done Aug 2026, also NOT rotated.** Identical layout to `zero`, tracked
+under `hosts/one/system/`. The move was proven inert before restarting: the new config
+was sourced, `command_args` expanded, and its SHA-256 compared against the running
+command line — identical, so the daemon restarted with a byte-identical invocation. It
+recovered in 5s and the `connectorId` changed, which is what proves it actually
+re-registered rather than never having restarted.
+
+The probe that watched it was `http://127.0.0.1:20241/ready` (HTTP 200,
+`readyConnections >= 1`), chosen because it read healthy against the *working* tunnel.
+Port-7844 socket counts and the log file were both tried and rejected: on `one` they
+read dead while the tunnel was serving normally, and either would have rolled back a
+good change.
+
+**`two` — check before assuming.** If the token is still inline in the world-readable
+init script, the same fix applies: move it to `/etc/conf.d/cloudflared` (mode 600),
+reference `${CF_TUNNEL_TOKEN}`, verify, then rotate. Confirm with:
 
 ```sh
 grep -c 'eyJ' /etc/init.d/cloudflared      # 0 = already moved
