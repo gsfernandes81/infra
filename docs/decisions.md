@@ -14,6 +14,8 @@ not from scratch.
 | esmira, immich-ml dropped | Dead for months; esmira's data dirs were empty. |
 | Staying on OpenVPN | Works and is proven. The WireGuard key is unused but still live, so still gitignored. |
 | `gavin` not in `docker` group | Root-equivalent. Rootless Podman removes the need. |
+| Target OS is **openSUSE MicroOS** | Immutable root with btrfs snapshots and auto-rollback on a failed boot — the right shape for a box you can't reach for months. Official Pi 5 support. |
+| `two` retired, not migrated | Its armv6 was the *only* thing forcing a Debian fleet. Dropping one idle Pi 1 B+ removes the constraint entirely. |
 
 ## Two things the original inventory got wrong
 

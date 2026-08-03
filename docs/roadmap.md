@@ -4,15 +4,11 @@
 placeholder dirs under `hosts/`. None of this is urgent; none of it should be started
 remotely except step 1.
 
-## 1. Confirm `two`'s hardware — one command
+## 1. Onboard `zero` into this repo
 
-```sh
-uname -m; grep -m1 Model /proc/cpuinfo
-```
-
-It reports `armv6l` + 512 MB, which is **not** a Pi 2 (that's `armv7l`, 1 GB) — so
-it's a **Pi 1 B+ or a Zero**. That matters because armv6 means Raspberry Pi OS 32-bit
-only, which constrains the distro choice for the *whole fleet*.
+Same exercise as `one`, but every container is critical and the box is remote. The
+brief is in [`../hosts/zero/HANDOFF.md`](../hosts/zero/HANDOFF.md) — inventory and plan
+first, no changes.
 
 ## 2. Podman on `one`
 
@@ -23,32 +19,34 @@ network namespace or port forwarding breaks silently. See
 [port-forwarding.md](port-forwarding.md). The gluetun stack will likely need to be
 rootful.
 
-## 3. Distro migration
+## 3. openSUSE MicroOS — the target
 
-`two`'s armv6 is the blocker, not preference — there's essentially no non-Debian
-systemd distro for it. Arch ARM's `armv6h` froze Feb 2024; Alpine and Void are
-OpenRC/runit; Pi OS and DietPi are Debian.
+**Decided.** Transactional/immutable root with btrfs snapshots and automatic rollback
+on a failed boot, which is what you want on a box you can't physically reach for
+months. Official Pi 5 support since Nov 2025 (SUSE did the U-Boot work). Podman and
+Quadlet are the native container story.
 
-**Best value: replace `two` with a Pi Zero 2 W (~£15).** Quad-core, aarch64, same
-512 MB — ample for tang, and it makes all three hosts one architecture. Otherwise:
-leave it on Alpine (it's idle, and tang doesn't need systemd), or retire it and run
-tang in a container on `one`.
+`one` (Pi 4) first — prove the Quadlet conversion where breakage costs nothing — then
+`zero`.
 
-For `zero` (Pi 5) and `one` (Pi 4):
+**`two` is retired, not migrated.** Its armv6 was the only thing forcing a Debian
+fleet: Arch ARM's `armv6h` froze Feb 2024, Alpine and Void are OpenRC/runit, Pi OS and
+DietPi are Debian. Dropping it removes the constraint entirely. If tang is ever wanted,
+run it in a container on `one`, or add a Pi Zero 2 W (aarch64, ~£15) later.
 
-| Distro | Pi 5 support | Note |
-|---|---|---|
-| **openSUSE MicroOS** | official, Nov 2025 | Transactional/immutable, btrfs + snapper rollback — good for a box you can't touch for months. Leap Micro 6.3 expected late 2026. |
-| **AlmaLinux 10** | official since 9.4 | ~10-year support. Podman/Quadlet are Red Hat tech, so first-class. arm64 only. |
-| Arch ARM | unofficial | Rolling release on a box you visit twice a year. No. |
-| Fedora IoT | **no** | Best Quadlet story, but mainline Pi 5 RP1 ethernet is incomplete. |
-| NixOS | possible | Big pivot; Pi 5 needs `raspberry-pi-nix`. |
+What's different day-to-day on MicroOS, since it's easy to forget:
 
-**Plan:** `one` → MicroOS first (prove Quadlet where breakage is free), then `zero` →
-AlmaLinux 10 (lower risk today), then `two`.
+- **Root is read-only.** You don't `zypper install`; you run
+  `transactional-update pkg install <pkg>` and the change lands in a new btrfs snapshot
+  that takes effect **on reboot**. `transactional-update shell` for a throwaway session.
+- `/etc` is a writable overlay, so config edits work normally.
+- Health-checked boots roll back automatically to the last good snapshot.
+- Quadlet units go in `/etc/containers/systemd/`; `systemctl daemon-reload` generates
+  the services.
 
-**Before any systemd box reboots:** the `nofail` and `RequiresMountsFor=` items in
-[recovery.md](recovery.md). That's the one that could actually strand you.
+**Before the first reboot on it:** the `nofail` and `RequiresMountsFor=` items in
+[recovery.md](recovery.md). Alpine's OpenRC forgave a missing USB disk; systemd will
+not, and that's the failure that strands you.
 
 ## 4. Encrypted data volume on `zero`
 
@@ -66,10 +64,13 @@ Gotcha worth an evening: on Debian 12 a non-root device with only a crypttab ent
 **silently fails to unlock and never prompts** — it also needs an fstab entry with
 `_netdev`.
 
-Tang buys one thing: `zero` reboots unattended so long as `two` is up. A power cut
-still costs one SSH unlock, it just moves to `two`. Tang doesn't authenticate clients —
-it protects against the disk leaving the network, not an intruder on the LAN. Make sure
-`two` has no boot dependency on `zero`, or they deadlock.
+Tang buys one thing: `zero` reboots unattended so long as the tang host is up — the
+common case (kernel update, crash, OOM). A power cut still costs one SSH unlock, it
+just moves hosts. Tang doesn't authenticate clients: it protects against the disk
+leaving the network, not an intruder on the LAN.
+
+With `two` retired the tang host would be `one` (in a container) or a new Pi Zero 2 W.
+Whichever it is, it must have **no boot dependency on `zero`**, or the two deadlock.
 
 ## 5. Cloudflare token — in person only
 

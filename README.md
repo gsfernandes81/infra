@@ -25,8 +25,10 @@ docs/                  read these
 | Host | Hardware | Runs | In repo |
 |---|---|---|---|
 | `one` | Pi 4 | torrents, ionic-traces, send2ereader | yes |
-| `zero` | Pi 5 | Immich, Syncthing — **critical, remote** | not yet |
-| `two` | armv6, 512 MB — likely Pi 1 B+ | idle | not yet |
+| `zero` | Pi 5 | Immich (+ db, ml), Syncthing, 2× Claude dev — **all critical, remote** | not yet |
+| `two` | Pi 1 B+, armv6, 512 MB | idle — **being retired** | no |
+
+Target OS for `one` and `zero`: **openSUSE MicroOS** (see [roadmap](docs/roadmap.md)).
 
 Ports on `one`: **8080** qBittorrent · **7777** ionic-traces · **3001** send2ereader ·
 **8384/22000** syncthing.
