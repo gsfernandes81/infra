@@ -102,7 +102,22 @@ replaced by `RequiresMountsFor=`.
 Alpine + OpenRC that's survivable: `critical_mounts` is empty in
 `/etc/conf.d/localmount` so `localmount` forces `rc=0`, and all four are passno 0 so
 fsck never touches them. Only `/` and `/boot` are fsck'd, both on the SD card.
-**`one` still needs the `nofail` treatment that `zero` has had.**
+**`one` still needs the `nofail` treatment that `zero` has had**, plus `chattr +i` on
+its four bare mountpoints. Method in
+[`../CLAUDE.md`](../CLAUDE.md#mount-guards-zero-and-due-on-one).
+
+**`two`:** diskless, running from RAM with the SD card read-only. It has no `/media/*`
+data mounts to guard, so `nofail` and `chattr +i` do not apply — but check rather than
+assume, since the fix is only meaningful where a container bind-mounts a path that
+could fail to mount.
+
+**Per-host status, at a glance:**
+
+| | `nofail` | `chattr +i` | token moved out of the init script |
+|---|---|---|---|
+| `zero` | ✅ Aug 2026 | ✅ Aug 2026 | ✅ Aug 2026 — **not rotated** |
+| `one` | ❌ due | ❌ due | ❌ due |
+| `two` | n/a (diskless) | n/a | check |
 
 **`zero`:** all three `/media/*` entries now carry `nofail`. Its array is btrfs **RAID1
 across two bcache devices**, so *both* must assemble before it can mount read-write —
@@ -165,9 +180,19 @@ it can still run a connector for this tunnel until it is regenerated in the Zero
 dashboard. Moving it shrank future exposure; it did not undo past exposure. Rotate when
 physically present.
 
-**`one` — still has the token inline** in the world-readable init script. Same fix
-applies: move to `/etc/conf.d/cloudflared` (mode 600), reference `${CF_TUNNEL_TOKEN}`,
-verify, then rotate.
+**`one` and `two` — status per host, check before assuming.** If the token is still
+inline in the world-readable init script, the same fix applies: move it to
+`/etc/conf.d/cloudflared` (mode 600), reference `${CF_TUNNEL_TOKEN}`, verify, then
+rotate. Confirm with:
+
+```sh
+grep -c 'eyJ' /etc/init.d/cloudflared      # 0 = already moved
+ls -l /etc/conf.d/cloudflared              # expect 600 root:root
+```
+
+The step-by-step method — the two-phase split, the hash comparison that proves the new
+command line is byte-identical before anything restarts, and the rollback design — is
+in [`../CLAUDE.md`](../CLAUDE.md#changing-the-thing-you-are-connected-through).
 
 Doing this remotely is safe if — and only if — you are **not connected through the
 tunnel you are restarting**. On `zero` that meant the bastion (`ssh zero-two` via `two`)
