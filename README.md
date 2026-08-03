@@ -1,89 +1,62 @@
 # infra
 
-Container and system configuration for the three-host fleet: `zero`, `one`, `two`.
+Container and system config for `zero`, `one`, `two`. Config only — no source, no
+secrets, no data.
 
-Config only. No source code, no secrets, no data.
+## Run a stack
+
+```sh
+bin/compose torrents up -d          # torrents | ionic-traces | send2ereader
+bin/check-sources                   # is the deployed sha still the pinned one?
+bin/check-system-drift              # do tracked /etc copies still match live?
+```
 
 ## Layout
 
 ```
-deployments/<stack>/    canonical stack definition — host-agnostic. Run compose from here.
-hosts/<host>/           assignment map: symlinks into deployments/, plus tracked /etc copies
-bin/                    helper scripts, all read-only except the one-shot migrations
-docs/                   how this host boots, and what breaks it
+deployments/<stack>/   what a stack is — compose.yaml, .env (ignored), SOURCE
+hosts/<host>/          where it runs — symlinks into deployments/, tracked /etc copies
+bin/                   the three scripts above
+docs/                  read these
 ```
 
-`deployments/` says *what a stack is*. `hosts/` says *where it runs*. Keeping them
-apart is what lets each host move to a different distro later without touching the
-stack definitions.
+## Fleet
 
-## Running a stack
+| Host | Hardware | Runs | In repo |
+|---|---|---|---|
+| `one` | Pi 4 | torrents, ionic-traces, send2ereader | yes |
+| `zero` | Pi 5 | Immich, Syncthing — **critical, remote** | not yet |
+| `two` | armv6, 512 MB — likely Pi 1 B+ | idle | not yet |
 
-```sh
-bin/compose torrents up -d
-```
-
-That wrapper pins `--project-directory`, which makes the symlink question moot. The
-equivalent by hand:
-
-```sh
-docker compose -f deployments/torrents/compose.yaml up -d
-```
-
-## Rules that are not style preferences
-
-- **Never use `..` in a compose file.** Anything outside a stack directory gets an
-  absolute path. Because each stack is reachable both as `deployments/<stack>` and as
-  `hosts/one/<stack>`, a relative path that climbs out resolves differently depending
-  on which way you came in. Paths that stay inside the directory are safe either way.
-- **Every compose file declares an explicit `name:`.** Without it Compose derives the
-  project name from whichever directory you entered through. That is exactly the bug
-  that let `torrents` and `ionic-traces` both become project `ionic`, where a
-  `docker compose up --remove-orphans` in one would delete the other.
-- **Host-specific values live in `.env`,** which is gitignored. `SRC_ROOT` is the
-  only one so far. It uses `${SRC_ROOT:?...}` rather than a default so that an unset
-  value stops Compose with a readable error instead of silently building from the
-  wrong path.
-- **Not `$HOME`.** `HOME` is unset, or root's, when Compose runs from cron or an init
-  system — so `$HOME/src` works by hand and breaks when automated. Compose never
-  expands `~` at all; `~/src` in a compose file means a literal directory named `~`.
-
-## Source checkouts
-
-Stacks that build from source do not vendor it. Each has a `SOURCE` file:
-
-```
-<upstream-url> <deployed-sha>
-```
-
-`SOURCE` **records; it never pulls.** An auto-pull at build time means a restart at
-03:00 can deploy whatever upstream HEAD happens to be, and you find out over a laggy
-link from mid-ocean. Pinning means a rebuild reproduces what was running.
-
-`bin/check-sources` reports drift between each `SOURCE` and the real checkout HEAD.
-Updating is deliberate:
-
-```sh
-git -C ~/src/<name> pull && bin/compose <stack> build && $EDITOR deployments/<stack>/SOURCE
-```
-
-Checkouts live in `~/src/`, pointed at by `SRC_ROOT` in each stack's `.env`.
+Ports on `one`: **8080** qBittorrent · **7777** ionic-traces · **3001** send2ereader ·
+**8384/22000** syncthing.
 
 ## Secrets
 
-Never committed. `.gitignore` covers `.env`, key material, `qBittorrent.conf` and
-`*.sql`. What exists on this fleet, and where it actually lives:
+None are in git. `.gitignore` covers `.env`, `*.key`, `qBittorrent.conf`, `*.sql`.
 
-| Secret | Location | In repo? |
-|---|---|---|
-| ProtonVPN OpenVPN credentials | `deployments/torrents/.env` | ignored |
-| WireGuard private key (unused — stack is OpenVPN) | `deployments/torrents/.env` | ignored |
-| Discord token, MySQL root password | `deployments/ionic-traces/.env` | ignored |
-| qBittorrent `WebUI\Password_PBKDF2` | `/media/torrents-config/` | never — data volume |
-| Cloudflare tunnel token | `/etc/init.d/cloudflared` | never — see `docs/recovery.md` |
+| Secret | Lives in |
+|---|---|
+| ProtonVPN creds, WireGuard key (unused) | `deployments/torrents/.env` |
+| Discord token, MySQL root password | `deployments/ionic-traces/.env` |
+| qBittorrent `Password_PBKDF2` | `/media/torrents-config/` — data volume, never here |
+| Cloudflare tunnel token | `/etc/init.d/cloudflared` — plaintext, world-readable |
 
-## Reading order
+## Docs
 
-- `docs/recovery.md` — how `one` boots, what would stop it, and the remote-access path
-- `docs/port-forwarding.md` — the VPN port-forward chain and the one change that
-  silently breaks it
+| | |
+|---|---|
+| [recovery.md](docs/recovery.md) | It broke, or it rebooted. Start here. |
+| [port-forwarding.md](docs/port-forwarding.md) | The fragile bit. Read before touching the torrents stack. |
+| [roadmap.md](docs/roadmap.md) | What's next, and the traps waiting in it. |
+| [decisions.md](docs/decisions.md) | Why it looks like this. Don't relitigate. |
+
+## Three rules
+
+- **No `..` in a compose file.** Each stack is reachable via `deployments/` *and*
+  `hosts/one/`; a path climbing out resolves differently. Absolute paths outside a
+  stack dir.
+- **Every compose file declares `name:`.** Without it Compose invents one from the
+  directory — that's what made `torrents` and `ionic-traces` collide as `ionic`.
+- **`SRC_ROOT` goes in `.env`, never `$HOME`.** `HOME` is unset or root's under
+  cron/init, so `$HOME/src` works by hand and breaks when automated.
