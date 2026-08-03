@@ -54,7 +54,9 @@ Detail in [`../hosts/zero/system/README.md`](../hosts/zero/system/README.md). In
 
 1. The unlock **must be non-interactive** — a passphrase prompt on a headless remote
    box is fatal.
-2. Start with a keyfile on the unencrypted root. Clevis + Tang is a later upgrade.
+2. Start with a keyfile on the unencrypted root — and treat `zero`'s SD card as
+   sensitive from then on, because the key is on it. Tang is *not* an upgrade over this
+   unless it is off-site; see below.
 3. Nothing on the boot path may depend on it — a failed unlock should leave you a
    booted box with SSH, degraded not unreachable.
 4. Guard containers with `RequiresMountsFor=` or Immich writes a blank library into an
@@ -89,20 +91,43 @@ What is actually true about tang, and what it means:
   never be exposed to the internet** — LAN or Tailscale only. A publicly reachable tang
   server means the stolen disk unlocks from anywhere.
 
+**All three Pis sit in one stack, which collapses the choice.** Work through what each
+option actually protects against, and same-house tang stops being interesting:
+
+| Scenario | Keyfile on `zero`'s unencrypted root | Tang on `two`, same stack |
+|---|---|---|
+| Disk fails, gets RMA'd or binned | safe | safe |
+| Disk alone is taken | safe | safe |
+| Someone takes the stack | **lost** | **lost** |
+| Unattended reboot | works | works |
+
+They are the same. A keyfile unlock is already non-interactive, so tang buys no
+availability either — it is the keyfile with a network service in front of it. Its only
+genuine edge is that it leaves **no secret at rest on `zero`'s SD card**, which matters
+when that card is imaged, replaced or thrown away; a keyfile makes the SD card itself
+sensitive.
+
+So: **tang is only worth deploying if a factor lives somewhere the burglar doesn't
+reach.** Otherwise use the keyfile and spend the effort elsewhere.
+
 Three ways out, to be chosen deliberately:
 
 1. **Accept it: tang is for availability, not anti-theft.** Same-house tang, and the
    honest statement is that the encryption protects against a disposed or RMA'd drive,
    not a burglary. Cheapest, and possibly correct — but then say so out loud rather
    than believing in protection that isn't there.
-2. **One factor off-site.** Clevis supports Shamir secret sharing: a `t=2` policy over
-   two tang servers, one at home and one off-site (a friend's house, or a VPS reachable
-   only over Tailscale). Stealing the house yields one share, which unlocks nothing.
-   Cost: unlock now depends on the off-site host and the internet being up. Since this
-   is a late unlock of a data volume — not root, no initramfs networking — the network
-   *is* up by then, so this is more workable here than it usually is.
-3. **Physical separation only.** Tang hidden elsewhere in the building. Better than the
-   same shelf, worse than off-site, and it fails against anyone who searches properly.
+2. **One factor off-site — the only version that adds anything.** Clevis supports
+   Shamir secret sharing: a `t=2` policy over two tang servers, one at home and one
+   off-site. Stealing the stack yields one share, which unlocks nothing. Cost: unlock
+   depends on the off-site host and the internet. Since this is a late unlock of a data
+   volume — not root, no initramfs networking — the network *is* up by then, so it is
+   more workable here than usual.
+
+   **No hardware purchase needed.** `tangd` is a socket-activated C server that runs for
+   milliseconds per unlock; the cheapest VPS tier, or a container on a family member's
+   always-on box, is ample. Reach it over Tailscale so it is never internet-facing.
+3. ~~Physical separation within the building.~~ Ruled out — all three hosts are in one
+   stack, and relocating one within the same house fails against anyone who searches.
 
 Whatever is chosen, two things must exist before the disk is encrypted: a written
 **rotation/revocation procedure** that can be run from wherever you are, and a
@@ -147,8 +172,9 @@ tang becomes its job, since Alpine cannot provide it (see above).
 most worn card, while you are unreachable), backups, a log sink (SD wear), or anything
 Node.js-shaped.
 
-Caveat: the console role assumes `two` sits physically beside the others. If it does
-not, that half evaporates and the case narrows to watchdog and alerting.
+All three sit in one stack, so the console and power-cycle roles are viable — a short
+UART run and one smart plug. (That same colocation is what breaks the tang plan; see
+above.)
 
 ## 6. Cloudflare token — in person only
 
