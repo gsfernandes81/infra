@@ -1,0 +1,15 @@
+#!/sbin/openrc-run
+  
+cfgfile="/etc/$RC_SVCNAME/$RC_SVCNAME.conf"
+supervisor=supervise-daemon
+command="/usr/bin/cloudflared"
+command_args="--autoupdate-freq 24h0m0s tunnel run --token ${CF_TUNNEL_TOKEN}"
+command_user="root"
+pidfile="/var/run/$RC_SVCNAME.pid"
+stdout_log="/var/log/$RC_SVCNAME.log"
+stderr_log="/var/log/$RC_SVCNAME.err"
+command_background="yes"
+
+depend() {
+        need net
+}

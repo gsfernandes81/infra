@@ -155,13 +155,26 @@ it does not control it.
 
 ## Don't break remote access
 
-**Both hosts** run `cloudflared` from `/etc/init.d/cloudflared`, **with the tunnel token
-in plaintext** in that world-readable file. It's your way back in. Leave it alone
-remotely.
+Both hosts run `cloudflared` from `/etc/init.d/cloudflared`. It's your way back in.
 
-When you're physically present: move the token to `/etc/conf.d/cloudflared` (mode 600),
-source it from the init script, then rotate it — the old value has been readable by any
-local user for a long time.
+**`zero` — token moved, NOT yet rotated (Aug 2026).** The token now lives in
+`/etc/conf.d/cloudflared` at mode 600, sourced automatically by OpenRC; the init script
+references `${CF_TUNNEL_TOKEN}` and is tracked under `hosts/zero/system/`. **The old
+value was world-readable for months and must be assumed disclosed** — anyone who copied
+it can still run a connector for this tunnel until it is regenerated in the Zero Trust
+dashboard. Moving it shrank future exposure; it did not undo past exposure. Rotate when
+physically present.
+
+**`one` — still has the token inline** in the world-readable init script. Same fix
+applies: move to `/etc/conf.d/cloudflared` (mode 600), reference `${CF_TUNNEL_TOKEN}`,
+verify, then rotate.
+
+Doing this remotely is safe if — and only if — you are **not connected through the
+tunnel you are restarting**. On `zero` that meant the bastion (`ssh zero-two` via `two`)
+plus a `screen` session that survives its own SSH dying. Verify the health probe reads
+healthy against the *working* tunnel before trusting it as a verdict: counting sockets
+on port 7844 reads 0 here even while the tunnel serves, so a socket-based check would
+roll back a good change. Probe a public hostname end-to-end instead.
 
 On `zero` there is a second way in: **SSH from `one` over the LAN.** That is the reason
 every change on `zero` is designed to fail *degraded* — box up, network up, sshd up —

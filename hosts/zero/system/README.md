@@ -9,6 +9,7 @@ Tracked reference copies of `zero`'s `/etc` files. Nothing here is applied to th
 |---|---|---|
 | `fstab` | `/etc/fstab` | All three `/media/*` entries carry `nofail`, so a missing array can never stall boot. |
 | `bcache-register` | `/etc/init.d/bcache-register` | The array is btrfs RAID1 across **two** bcache devices; both must assemble before it can mount rw. This registers them and waits, bounded to 30s, then **always exits 0** — a failure here must never stop the boot. |
+| `cloudflared` | `/etc/init.d/cloudflared` | The tunnel — the remote way in. Only trackable since Aug 2026: it previously carried the tunnel token inline, so committing it would have committed a secret. The token now lives in `/etc/conf.d/cloudflared` (mode 600, **not** tracked) and this file references `${CF_TUNNEL_TOKEN}`. |
 
 **The mountpoints are `chattr +i`.** That is the actual protection against a failed
 mount silently destroying the Immich library, and it is not visible in any file here.
