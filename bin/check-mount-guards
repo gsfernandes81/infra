@@ -29,7 +29,19 @@
 
 set -u
 
-MOUNTS='/media/immich-data /media/immich-db /media/syncthing'
+# Mounts are DISCOVERED from /etc/fstab, not hardcoded, so this works unchanged on
+# every host: /media/* entries that are not `noauto`. On `zero` that is 3, on `one` 4.
+# A newly added data mount is therefore checked automatically — and correctly fails
+# until it has been guarded.
+#
+# Override by passing paths explicitly:  sudo bin/check-mount-guards /media/foo
+if [ "$#" -gt 0 ]; then
+	MOUNTS="$*"
+else
+	MOUNTS=$(awk '$1 !~ /^#/ && $2 ~ /^\/media\// && $4 !~ /noauto/ {print $2}' /etc/fstab | tr '\n' ' ')
+fi
+[ -n "${MOUNTS# }" ] || { echo "check-mount-guards: no /media/* data mounts found in /etc/fstab"; exit 0; }
+
 VIEW=/tmp/.mount-guard-view
 rc=0
 

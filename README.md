@@ -11,7 +11,7 @@ bin/compose immich   up -d          # zero: immich | syncthing
 bin/check-sources                   # is the deployed sha still the pinned one?
 bin/check-system-drift              # do tracked /etc copies still match live?
 bin/check-boot-layout               # can /boot be tampered with without a reboot?
-sudo bin/check-mount-guards         # zero: can a failed mount still eat the library?
+sudo bin/check-mount-guards         # can a failed mount still eat the data? (any host)
 ```
 
 ## Layout
