@@ -187,6 +187,24 @@ failure in [recovery.md](recovery.md). `two` is the way in:
   to actually reboot turns "bricked until I fly home" into a Tuesday.
 - **Dead-man's switch** — pings the other two and reports to ntfy or healthchecks.io.
   A watchdog running on the box being watched is not a watchdog.
+- **Boot-integrity monitoring** — the job that makes remote unlock defensible. Poll
+  `zero` and `one` for three things and alert on any change:
+
+  | Signal | Why |
+  |---|---|
+  | boot time (`/proc/uptime`) | a reboot is the cost of tampering with in-use storage — it is the detection channel |
+  | hash of `/boot` | catches a modified initramfs or kernel planted for the *next* boot |
+  | block devices present | catches a disk added or removed |
+
+  The trust logic, which is why this is worth building rather than assuming: **a system
+  that has not rebooted is still running the code you trust, so it can honestly measure
+  the storage that would compromise its next boot.** Signal 2 is only meaningful while
+  signal 1 says nothing has restarted — but when it does, it closes the swap-and-wait
+  attack. Keep the known-good `/boot` manifest off-box; this repo is a fine home for it.
+
+  Corollary: after an *unexplained* reboot none of this can be trusted, because a
+  landed payload lies about its own hashes. That is the point at which the honest
+  answer is to leave the volume locked until you are physically there.
 - **Independent access path** — Tailscale or WireGuard, separate from cloudflared.
   Throughput will be poor (no crypto extensions, NIC shares a USB 2.0 bus) and that is
   irrelevant for a management shell.

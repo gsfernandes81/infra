@@ -10,9 +10,20 @@ and x86-64 only). It is kept, powered on, for a different job.
 
 ## Its job: the lifeboat
 
-Serial console to `zero` and `one`, power-cycle authority via a smart plug, a
-dead-man's switch that reports the other hosts' health, and an access path independent
-of cloudflared. The full case is in
+Five jobs, all tiny, all suited to hardware that cannot do anything demanding:
+
+1. **Serial console** to `zero` and `one` — a login prompt when a box has dropped to
+   emergency mode with no network.
+2. **Power-cycle authority** via a smart plug.
+3. **Dead-man's switch** — reports the other hosts' health outward, because a watchdog
+   running on the box being watched is not a watchdog.
+4. **Boot-integrity monitoring** — boot time, `/boot` hash, block-device inventory.
+   This is what makes remote unlocking of `zero`'s encrypted volume defensible: it
+   turns "I have no idea whether anyone touched it" into a decision you can actually
+   make.
+5. **Independent access path** — Tailscale or WireGuard, separate from cloudflared.
+
+The full case, and the trust logic behind job 4, is in
 [`docs/roadmap.md`](../../../docs/roadmap.md#5-two--keep-it-as-the-lifeboat).
 
 **Stays on Alpine, in diskless mode** — running from RAM with the SD card read-only,
