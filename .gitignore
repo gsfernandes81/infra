@@ -20,5 +20,8 @@ id_ed25519
 # volume at /media/torrents-config and must never be copied into this repo.
 qBittorrent.conf
 
-# Database dumps
+# Database dumps. Immich writes a nightly pg_dump to /media/immich-data/backups/
+# as *.sql.gz — ~150 MB each. The bare `*.sql` pattern does not catch those.
 *.sql
+*.sql.gz
+*.dump

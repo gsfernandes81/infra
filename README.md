@@ -6,10 +6,12 @@ secrets, no data.
 ## Run a stack
 
 ```sh
-bin/compose torrents up -d          # torrents | ionic-traces | send2ereader
+bin/compose torrents up -d          # one:  torrents | ionic-traces | send2ereader
+bin/compose immich   up -d          # zero: immich | syncthing
 bin/check-sources                   # is the deployed sha still the pinned one?
 bin/check-system-drift              # do tracked /etc copies still match live?
 bin/check-boot-layout               # can /boot be tampered with without a reboot?
+sudo bin/check-mount-guards         # zero: can a failed mount still eat the library?
 ```
 
 ## Layout
@@ -17,7 +19,7 @@ bin/check-boot-layout               # can /boot be tampered with without a reboo
 ```
 deployments/<stack>/   what a stack is — compose.yaml, .env (ignored), SOURCE
 hosts/<host>/          where it runs — symlinks into deployments/, tracked /etc copies
-bin/                   the four scripts above
+bin/                   the five scripts above
 docs/                  read these
 ```
 
@@ -26,13 +28,20 @@ docs/                  read these
 | Host | Hardware | Runs | In repo |
 |---|---|---|---|
 | `one` | Pi 4 | torrents, ionic-traces, send2ereader | yes |
-| `zero` | Pi 5 | Immich (+ db, ml), Syncthing, 2× Claude dev — **all critical, remote** | not yet |
+| `zero` | Pi 5 | Immich (+ db, ml, redis), Syncthing — **all critical, remote** | yes |
 | `two` | Pi 1 B+, armv6, 512 MB | lifeboat: serial console, power-cycle, watchdog | stays on Alpine |
 
 Target OS for `one` and `zero`: **openSUSE MicroOS** (see [roadmap](docs/roadmap.md)).
 
 Ports on `one`: **8080** qBittorrent · **7777** ionic-traces · **3001** send2ereader ·
 **8384/22000** syncthing.
+
+Ports on `zero`: **2283** Immich · **8384/22000** syncthing · **2222/2223** dev containers.
+
+`zero` also runs two **Claude dev containers** (`dd-dev` + `dd-mysql`, `ds-dev`). They are
+deliberately **not** in this repo — they belong to their own application repos and are
+driven by `make dev` there. They are `restart=no` and hold live sessions. See
+[decisions.md](docs/decisions.md).
 
 ## Secrets
 
@@ -42,8 +51,10 @@ None are in git. `.gitignore` covers `.env`, `*.key`, `qBittorrent.conf`, `*.sql
 |---|---|
 | ProtonVPN creds, WireGuard key (unused) | `deployments/torrents/.env` |
 | Discord token, MySQL root password | `deployments/ionic-traces/.env` |
+| Immich Postgres password | `deployments/immich/.env` |
 | qBittorrent `Password_PBKDF2` | `/media/torrents-config/` — data volume, never here |
-| Cloudflare tunnel token | `/etc/init.d/cloudflared` — plaintext, world-readable |
+| Cloudflare tunnel token | `/etc/init.d/cloudflared` — plaintext, world-readable, **on both hosts** |
+| Discord tokens, Bungie + Sheets keys | `~/destiny-director/.env` on `zero` — app repo, not here |
 
 ## Docs
 

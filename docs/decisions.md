@@ -16,6 +16,10 @@ not from scratch.
 | `gavin` not in `docker` group | Root-equivalent. Rootless Podman removes the need. |
 | Target OS is **openSUSE MicroOS** | Immutable root with btrfs snapshots and auto-rollback on a failed boot — the right shape for a box you can't reach for months. Official Pi 5 support. |
 | `two` leaves the fleet, but is **kept as the lifeboat** | Its armv6 was the *only* thing forcing a Debian fleet, so it doesn't migrate. It stays powered on for serial console, power-cycling, and watchdog duty — the things that help when a critical box won't boot. Stays on Alpine, diskless. |
+| `chattr +i` on bare mountpoints, not a guard service | Makes the bad write **impossible** rather than detected, with no boot-path code. The guard service that was drafted instead added a new way for the box to come up with no containers, and had a false-failure mode: renaming a Syncthing share would have silently stopped Docker on the next reboot. |
+| Claude dev containers stay in their own app repos | They are developer tooling, not host services. Pulling them into `deployments/` would break `make dev` from a fresh app clone, invert the dependency, and — decisively — still leave both `Dockerfile.dev` files duplicated. It relocates the duplication instead of removing it. |
+| `containerd` service removed, package kept | `dockerd` spawns its own containerd; every moby shim uses `/var/run/docker/containerd/containerd.sock`, so the standalone service owned zero shims. But `docker-engine` **hard-depends on the package** — `apk del containerd` would kill every container at the next start. Service-level removal only. |
+| OpenCloud and k3s deleted, not migrated | Both confirmed unused. k3s was still *running* a live cluster (traefik, coredns, metrics-server) and holding ~880 MB of swap; removing it plus the dead `nextcloud` subvolume returned ~344 GiB to the array. |
 
 ## `zero`'s encrypted volume
 
@@ -31,6 +35,11 @@ so rebooting into a root shell — the cheapest Pi attack — gets them a locked
 one column so a same-stack tang protects nothing; and Alpine packages neither `tang`
 nor `clevis` on any architecture (checked Aug 2026). Reasoning in
 [roadmap.md](roadmap.md#tang--rejected).
+
+**bcache cache mode confirmed `writethrough`** (both devices, 0.0k dirty, Aug 2026), so
+the cache SSD holds nothing the backing disks don't. It is a disposable accelerator
+today — but that is a *setting*, not a guarantee, and switching to `writeback` would
+make it live data. Re-check before trusting it.
 
 ## Two things the original inventory got wrong
 

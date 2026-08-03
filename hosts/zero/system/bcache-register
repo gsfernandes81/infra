@@ -1,0 +1,52 @@
+#!/sbin/openrc-run
+# Registers the bcache devices, then waits (BOUNDED) for them to actually appear.
+#
+# The original wrote three UUIDs to /sys/fs/bcache/register and returned. That write
+# completes as soon as the kernel ACCEPTS the registration - it does NOT wait for
+# /dev/bcache0 and /dev/bcache1 to exist, so localmount could run first and skip the
+# /media mounts. The filesystem is btrfs RAID1 across BOTH devices, so both must
+# assemble before it can mount read-write.
+#
+# The original also used `|| return 1`, which failed the whole service if a device was
+# already registered. This version tolerates that.
+#
+# This ALWAYS returns success. A failure here must never stop the boot: the /media
+# entries carry nofail, and the mountpoints are chattr +i so nothing can write into
+# them while unmounted.
+
+name="bcache register"
+description="Register bcache devices via sysfs and wait (bounded) for them"
+
+depend() {
+	need sysfs devfs procfs
+	before fsck localmount
+}
+
+start() {
+	ebegin "Registering bcache devices"
+	for uuid in f5ec31d1-faf2-4e71-ba18-7769a1172323 \
+	            908229e0-adce-4258-8b25-57d8a21d1d01 \
+	            a3d7a86c-2caa-4141-b7b4-513c58e7295d; do
+		dev="/dev/disk/by-uuid/$uuid"
+		if [ -e "$dev" ]; then
+			echo "$dev" > /sys/fs/bcache/register 2>/dev/null || true
+		fi
+	done
+
+	i=0
+	while [ "$i" -lt 30 ]; do
+		if [ -b /dev/bcache0 ] && [ -b /dev/bcache1 ]; then
+			break
+		fi
+		sleep 1
+		i=$((i + 1))
+	done
+
+	if [ -b /dev/bcache0 ] && [ -b /dev/bcache1 ]; then
+		einfo "bcache0 and bcache1 present after ${i}s"
+	else
+		ewarn "bcache devices absent after ${i}s - /media mounts skipped (nofail)"
+		ewarn "Mountpoints are immutable, so nothing can write into them. Box stays up."
+	fi
+	eend 0
+}

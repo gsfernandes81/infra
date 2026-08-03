@@ -1,0 +1,10 @@
+UUID=c5dd2957-1b31-4d05-b2b8-a98fcc546840	/				ext4	rw,relatime												0 1
+UUID=BD9B-F550					/boot				vfat	rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,errors=remount-ro	0 2
+/dev/cdrom					/media/cdrom			iso9660	noauto,ro												0 0
+/dev/usbdisk					/media/usb			vfat	noauto													0 0
+tmpfs						/tmp				tmpfs	nosuid,nodev												0 0
+UUID=eedeca9c-13a8-483b-bee7-8467869ec91a	none				swap	defaults												0 0
+UUID=813c830a-0892-41e8-b39b-32d661c79e2c	/mnt/ext			btrfs	subvolid=5,noauto,nofail,autodefrag,noexec,noatime,acl,discard=async					0 0
+UUID=813c830a-0892-41e8-b39b-32d661c79e2c	/media/immich-data		btrfs	nofail,subvolid=280,autodefrag,noatime,acl,discard=async							0 0
+UUID=813c830a-0892-41e8-b39b-32d661c79e2c 	/media/immich-db		btrfs	nofail,subvolid=279,autodefrag,noatime,acl,discard=async							0 0
+UUID=813c830a-0892-41e8-b39b-32d661c79e2c	/media/syncthing		btrfs	nofail,subvolid=278,autodefrag,noatime,acl,discard=async							0 0

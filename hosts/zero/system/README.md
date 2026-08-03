@@ -1,10 +1,21 @@
 # hosts/zero/system
 
 Tracked reference copies of `zero`'s `/etc` files. Nothing here is applied to the host
-— `bin/check-system-drift zero` only reports differences. Empty until `zero` is brought
-into this repo.
+— `bin/check-system-drift zero` only reports differences.
 
 `zero` is the mission-critical box (Immich + Syncthing) and it is remote.
+
+| File | Live path | Why it's tracked |
+|---|---|---|
+| `fstab` | `/etc/fstab` | All three `/media/*` entries carry `nofail`, so a missing array can never stall boot. |
+| `bcache-register` | `/etc/init.d/bcache-register` | The array is btrfs RAID1 across **two** bcache devices; both must assemble before it can mount rw. This registers them and waits, bounded to 30s, then **always exits 0** — a failure here must never stop the boot. |
+
+**The mountpoints are `chattr +i`.** That is the actual protection against a failed
+mount silently destroying the Immich library, and it is not visible in any file here.
+`sudo bin/check-mount-guards` verifies it — including attempting a real write rather
+than trusting the flag. Read
+[`../../../docs/recovery.md`](../../../docs/recovery.md) before touching a bare
+mountpoint, or you will get `Permission denied` as root and not know why.
 
 ## When `crypttab` lands here
 
@@ -28,6 +39,12 @@ The design is decided; full reasoning in
 
 **LUKS goes on `/dev/bcache0`**, above the cache — not on the backing disk. Encrypting
 below bcache leaves the cache SSD holding plaintext of everything recently accessed.
+
+**Cache mode checked Aug 2026: `writethrough` on both devices, 0.0k dirty.** So the
+cache currently holds nothing the backing disks don't, and is a disposable accelerator
+rather than live data. That is a *setting*, not a guarantee — `writeback` would make the
+SSD hold dirty blocks and turn it into sensitive, non-removable state. Re-check with
+`cat /sys/block/bcache0/bcache/cache_mode` before relying on it.
 
 Gotchas:
 

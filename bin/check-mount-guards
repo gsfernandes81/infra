@@ -1,0 +1,103 @@
+#!/bin/sh
+# usage: sudo bin/check-mount-guards            (needs root — see WHY below)
+#
+# Verifies the two things standing between `zero` and a silently destroyed Immich
+# library:
+#
+#   1. Every /media data mount carries `nofail`, so a missing array cannot stall boot.
+#   2. Every BARE mountpoint — the directory on the root filesystem UNDERNEATH the
+#      btrfs mount — is `chattr +i`, so that if the array ever fails to mount, writes
+#      to that path fail with EPERM instead of Immich creating a blank library and
+#      Postgres initdb'ing a fresh cluster over nothing.
+#
+# WHY THIS NEEDS ROOT, AND WHY IT BIND-MOUNTS /
+#
+#   While the array is mounted, `lsattr -d /media/immich-data` reports the attributes
+#   of the MOUNTED btrfs root, not the ext4 directory hidden underneath it. Reading it
+#   that way would answer a different question than the one that matters, and would
+#   fail (or pass) for the wrong reason. So this bind-mounts / at a temporary path,
+#   which exposes the real mountpoint directories, and checks those.
+#
+# WHY IT WRITES INSTEAD OF JUST READING THE FLAG
+#
+#   A flag being present is not the same as a write being refused. This attempts an
+#   actual `touch` inside the bare (shadowed) directory and REQUIRES it to fail. That
+#   touches no live data — the bare directory sits underneath the mount and is empty.
+#   If the write unexpectedly succeeds, the test file is removed and the check fails.
+#
+# Exit status: 0 = all guards intact, 1 = at least one guard missing or ineffective.
+
+set -u
+
+MOUNTS='/media/immich-data /media/immich-db /media/syncthing'
+VIEW=/tmp/.mount-guard-view
+rc=0
+
+if [ "$(id -u)" -ne 0 ]; then
+	echo "check-mount-guards: must run as root (try: sudo bin/check-mount-guards)" >&2
+	exit 2
+fi
+
+cleanup() {
+	if grep -q " $VIEW " /proc/mounts 2>/dev/null; then
+		umount "$VIEW" 2>/dev/null || true
+	fi
+	[ -d "$VIEW" ] && rmdir "$VIEW" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+mkdir -p "$VIEW"
+mount -o bind / "$VIEW" || { echo "FAIL  could not bind-mount / at $VIEW" >&2; exit 2; }
+
+for m in $MOUNTS; do
+	name=${m#/media/}
+
+	# --- 1. mounted? (informational, but a missing mount is worth shouting about)
+	if grep -q " $m " /proc/mounts; then
+		echo "ok    $name  mounted"
+	else
+		echo "FAIL  $name  NOT MOUNTED — the array is missing right now"
+		rc=1
+	fi
+
+	# --- 2. nofail in fstab
+	if grep "[[:space:]]$m[[:space:]]" /etc/fstab | grep -q nofail; then
+		echo "ok    $name  fstab has nofail"
+	else
+		echo "FAIL  $name  fstab entry is MISSING nofail — a missing array can stall boot"
+		rc=1
+	fi
+
+	# --- 3. the bare mountpoint refuses writes
+	bare="$VIEW$m"
+	if [ ! -d "$bare" ]; then
+		echo "FAIL  $name  bare mountpoint $m does not exist on the root filesystem"
+		rc=1
+		continue
+	fi
+
+	if [ -n "$(ls -A "$bare" 2>/dev/null)" ]; then
+		echo "FAIL  $name  bare mountpoint is NOT EMPTY — something wrote to it while unmounted:"
+		ls -A "$bare" | sed 's/^/            /'
+		rc=1
+	fi
+
+	if touch "$bare/.guard-write-test" 2>/dev/null; then
+		rm -f "$bare/.guard-write-test"
+		echo "FAIL  $name  bare mountpoint ACCEPTED A WRITE — the guard is not effective"
+		echo "            fix: umount $m; chattr +i $m; mount $m"
+		rc=1
+	else
+		echo "ok    $name  bare mountpoint refuses writes (chattr +i effective)"
+	fi
+done
+
+echo
+if [ "$rc" -eq 0 ]; then
+	echo "All mount guards intact."
+else
+	echo "One or more guards are MISSING. Until fixed, a failed array mount can let"
+	echo "Immich write a blank library and Postgres initdb over an empty directory."
+	echo "See docs/recovery.md, 'The trap that silently eats data'."
+fi
+exit "$rc"

@@ -1,0 +1,27 @@
+# `name:` is REQUIRED by the repo invariant. It is set to `syncthing` — the exact
+# string Compose already derived from the old directory name — so project identity
+# is unchanged and no container is recreated by this file moving.
+name: syncthing
+
+services:
+  syncthing:
+    image: syncthing/syncthing
+    container_name: syncthing
+    hostname: syncthing.gsrpi.uk
+    environment:
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - /media/syncthing:/var/syncthing
+    network_mode: host
+    restart: unless-stopped
+    healthcheck:
+      test: curl -fkLsS -m 2 127.0.0.1:8384/rest/noauth/health | grep -o --color=never OK || exit 1
+      interval: 1m
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '3'
+          memory: '768M'
