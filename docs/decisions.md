@@ -17,13 +17,20 @@ not from scratch.
 | Target OS is **openSUSE MicroOS** | Immutable root with btrfs snapshots and auto-rollback on a failed boot — the right shape for a box you can't reach for months. Official Pi 5 support. |
 | `two` leaves the fleet, but is **kept as the lifeboat** | Its armv6 was the *only* thing forcing a Debian fleet, so it doesn't migrate. It stays powered on for serial console, power-cycling, and watchdog duty — the things that help when a critical box won't boot. Stays on Alpine, diskless. |
 
-## Explicitly not decided
+## `zero`'s encrypted volume
 
-**Tang.** Deliberately open, because same-house tang doesn't stop theft — it only
-changes what has to be stolen from `zero` to `zero` *and* the tang host. Don't deploy
-it until that's resolved one way or the other; the options and the constraints are in
-[roadmap.md](roadmap.md#tang--still-undecided-and-there-is-an-unresolved-problem).
-Alpine packages neither `tang` nor `clevis`, on any architecture (checked Aug 2026).
+**Immich serves by default; a security concern keeps it down.** That veto is the design
+— the monitoring exists to let you use it.
+
+Which settles the unlock: **manual passphrase over SSH, every boot. No keyfile, no
+tang, nothing automatic.** Anything that unlocks without you is a key at rest on
+hardware an attacker may be holding. The payoff is that a reboot *re-locks* the data,
+so rebooting into a root shell — the cheapest Pi attack — gets them a locked volume.
+
+**Tang: rejected**, not deferred. It exists to unlock without you; all three Pis share
+one column so a same-stack tang protects nothing; and Alpine packages neither `tang`
+nor `clevis` on any architecture (checked Aug 2026). Reasoning in
+[roadmap.md](roadmap.md#tang--rejected).
 
 ## Two things the original inventory got wrong
 

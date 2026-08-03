@@ -114,7 +114,8 @@ that here until the Immich database's storage is confirmed and a backup exists.
 later work, and `one` goes first as the guinea pig. Compose files are distro-agnostic,
 so onboarding `zero` now does not commit to anything.
 
-`two` (Pi 1 B+, armv6) is being retired.
+`two` (Pi 1 B+, armv6) stays on Alpine as the lifeboat — serial console, power-cycle,
+watchdog and boot-integrity monitoring for the other two.
 
 If `zero` gains an encrypted data volume later, the traps are already written up in
 `system/README.md` in this directory — the non-interactive unlock requirement is the

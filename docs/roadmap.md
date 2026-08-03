@@ -29,10 +29,10 @@ Quadlet are the native container story.
 `one` (Pi 4) first — prove the Quadlet conversion where breakage costs nothing — then
 `zero`.
 
-**`two` is retired, not migrated.** Its armv6 was the only thing forcing a Debian
-fleet: Arch ARM's `armv6h` froze Feb 2024, Alpine and Void are OpenRC/runit, Pi OS and
-DietPi are Debian. Dropping it removes the constraint entirely. If tang is ever wanted,
-run it in a container on `one`, or add a Pi Zero 2 W (aarch64, ~£15) later.
+**`two` doesn't migrate.** Its armv6 was the only thing forcing a Debian fleet: Arch
+ARM's `armv6h` froze Feb 2024, Alpine and Void are OpenRC/runit, Pi OS and DietPi are
+Debian. Leaving it out removes the constraint. It stays on Alpine with its own job —
+see [§5](#5-two--keep-it-as-the-lifeboat).
 
 What's different day-to-day on MicroOS, since it's easy to forget:
 
@@ -55,21 +55,62 @@ not, and that's the failure that strands you.
 
 ## 4. Encrypted data volume on `zero`
 
-Detail in [`../hosts/zero/system/README.md`](../hosts/zero/system/README.md). In order:
+Threat model: someone may have unsupervised physical access to the stack for weeks
+while you are away.
 
-1. The unlock **must be non-interactive** — a passphrase prompt on a headless remote
-   box is fatal.
-2. Start with a keyfile on the unencrypted root — and treat `zero`'s SD card as
-   sensitive from then on, because the key is on it. Tang is *not* an upgrade over this
-   unless it is off-site; see below.
-3. Nothing on the boot path may depend on it — a failed unlock should leave you a
-   booted box with SSH, degraded not unreachable.
-4. Guard containers with `RequiresMountsFor=` or Immich writes a blank library into an
-   empty mountpoint.
+**The policy: Immich serves by default, and a security concern keeps it down.** That
+veto is the whole design — everything below exists to give you enough information to
+use it, and it is only worth building if you will actually hold the line at week four
+of a trip.
 
-Gotcha worth an evening: on Debian 12 a non-root device with only a crypttab entry
-**silently fails to unlock and never prompts** — it also needs an fstab entry with
-`_netdev`.
+### Manual unlock only. No keyfile, no tang, nothing automatic.
+
+Any unlock that survives a reboot without you is a key **at rest on hardware the
+attacker holds**. A keyfile on the unencrypted root is readable by anyone who takes the
+box. Tang is the same property over a network. Both hand over the volume to whoever
+walks off with the stack.
+
+So the unlock is a passphrase you supply over SSH, every boot. Nothing else.
+
+This is a reversal of the earlier "start with a keyfile" plan, and of tang as a later
+upgrade. Both were written when unattended reboot was the goal. It isn't — you have
+said Immich can stay down — and once availability stops being the constraint, at-rest
+keys have nothing left to recommend them.
+
+### Why this is stronger than it looks: a reboot defends itself
+
+Because nothing auto-unlocks, **a reboot re-locks the data.** That closes the obvious
+physical attack: booting the machine into a root shell (`init=/bin/sh` in
+`cmdline.txt`, the cheapest Pi attack there is) now yields a running system with an
+encrypted volume the attacker cannot open. Rebooting destroys the thing they came for.
+
+Their remaining paths are narrow, and each is covered:
+
+| Path | Why it is hard here |
+|---|---|
+| Read the mounted volume on the running box | Needs code execution without rebooting. Headless, no credentials, no DMA-capable external ports. |
+| Modify persistent storage | Requires pulling a device in active use → halts the machine → reboot you can see. |
+| Swap `/boot` while running | Only possible if `/boot` is on its own device. On `zero` it is not — `/` and `/boot` share the SD card, confirmed. Run `bin/check-boot-layout` after any change. |
+| Tamper, then wait for you to unlock | The real one. This is what `two`'s boot-integrity monitoring exists to catch. |
+
+### Residual risks, stated plainly
+
+- **While the volume is mounted and serving, the data is decrypted.** Encryption
+  protects the powered-off box and the locked periods, not the serving ones. Off-site
+  backup is what covers the rest.
+- **An induced reboot can be disguised as a power cut.** The UPS closes this: with
+  mains blips no longer causing reboots, a reboot with no battery-exhaustion event in
+  the NUT log means someone rebooted that machine.
+- **You unlock without checking.** No technical control helps here.
+
+### Operational gotchas
+
+- On Debian 12 a non-root device with only a crypttab entry **silently fails to unlock
+  and never prompts** — it also needs an fstab entry carrying `_netdev`.
+- Nothing on the boot path may depend on the encrypted volume. A locked volume must
+  leave you a booted box with working SSH — degraded, not unreachable.
+- Guard the Immich units with `RequiresMountsFor=`, or a locked volume means Immich
+  starts against an empty directory and writes a blank library into it.
 
 ### bcache: LUKS goes *above* it, never below
 
@@ -95,85 +136,32 @@ Two consequences:
   backing disk — so it is not merely a cache, it is live data, and it must be treated
   as sensitive and as something you cannot casually remove.
 
-### Tang — still undecided, and there is an unresolved problem
+### Tang — rejected
 
-**Do not deploy tang until the question below is answered.**
+Decided, not deferred. Tang exists to make an unlock happen **without you**, and that
+is precisely what this design does not want.
 
-Tang buys unattended reboot: `zero` comes back on its own so long as a tang host is up
-— the common case (kernel update, crash, OOM). A power cut still costs one SSH unlock.
+Three independent reasons, any one sufficient:
 
-**The problem: a tang host in the same house doesn't stop theft, it just widens what
-has to be stolen.** The point of encrypting the disk is that walking off with it gets
-you nothing. If the unlock server sits on the same shelf, the thief takes both and is
-back where they started. "Run away with `zero`" becomes "run away with `zero` and
-`two`" — which is the same burglary.
+1. **It is an at-rest key by another name.** The value of manual unlock is that nothing
+   on or near the hardware can open the volume. Tang re-introduces exactly that.
+2. **Same-stack tang protects nothing.** All three Pis share one column. "Run away with
+   `zero`" becomes "run away with `zero` and `two`" — the same burglary. Only an
+   off-site factor (clevis Shamir `t=2`, one share on a VPS over Tailscale) would have
+   added anything, and that only mattered while unattended reboot was a goal.
+3. **Alpine packages neither `tang` nor `clevis`** — checked Aug 2026 across `main`,
+   `community` and `edge`, every architecture including `aarch64`. Only `jose`, their
+   dependency. So it was never cheap here either.
 
-What is actually true about tang, and what it means:
-
-- The tang server **never learns the encryption key** (McCallum–Relyea exchange), so a
-  stolen tang box on its own is worthless. The exposure is only ever *disk + reachable
-  tang*.
-- So the mitigations are: make tang unreachable to the thief, or be able to **revoke**.
-  Revocation means removing the old key from the tang server's key directory — which
-  you cannot do to a server that has been stolen.
-- Tang does not authenticate clients. Anyone who can reach it can use it. **It must
-  never be exposed to the internet** — LAN or Tailscale only. A publicly reachable tang
-  server means the stolen disk unlocks from anywhere.
-
-**All three Pis sit in one stack, which collapses the choice.** Work through what each
-option actually protects against, and same-house tang stops being interesting:
-
-| Scenario | Keyfile on `zero`'s unencrypted root | Tang on `two`, same stack |
-|---|---|---|
-| Disk fails, gets RMA'd or binned | safe | safe |
-| Disk alone is taken | safe | safe |
-| Someone takes the stack | **lost** | **lost** |
-| Unattended reboot | works | works |
-
-They are the same. A keyfile unlock is already non-interactive, so tang buys no
-availability either — it is the keyfile with a network service in front of it. Its only
-genuine edge is that it leaves **no secret at rest on `zero`'s SD card**, which matters
-when that card is imaged, replaced or thrown away; a keyfile makes the SD card itself
-sensitive.
-
-So: **tang is only worth deploying if a factor lives somewhere the burglar doesn't
-reach.** Otherwise use the keyfile and spend the effort elsewhere.
-
-Three ways out, to be chosen deliberately:
-
-1. **Accept it: tang is for availability, not anti-theft.** Same-house tang, and the
-   honest statement is that the encryption protects against a disposed or RMA'd drive,
-   not a burglary. Cheapest, and possibly correct — but then say so out loud rather
-   than believing in protection that isn't there.
-2. **One factor off-site — the only version that adds anything.** Clevis supports
-   Shamir secret sharing: a `t=2` policy over two tang servers, one at home and one
-   off-site. Stealing the stack yields one share, which unlocks nothing. Cost: unlock
-   depends on the off-site host and the internet. Since this is a late unlock of a data
-   volume — not root, no initramfs networking — the network *is* up by then, so it is
-   more workable here than usual.
-
-   **No hardware purchase needed.** `tangd` is a socket-activated C server that runs for
-   milliseconds per unlock; the cheapest VPS tier, or a container on a family member's
-   always-on box, is ample. Reach it over Tailscale so it is never internet-facing.
-3. ~~Physical separation within the building.~~ Ruled out — all three hosts are in one
-   stack, and relocating one within the same house fails against anyone who searches.
-
-Whatever is chosen, two things must exist before the disk is encrypted: a written
-**rotation/revocation procedure** that can be run from wherever you are, and a
-confirmation that the tang host has **no boot dependency on `zero`** — or the two
-deadlock waiting for each other.
-
-**Packaging constraint, checked Aug 2026:** Alpine does not package `tang` or `clevis`
-at all — not in `main`, `community` or `edge`, on any architecture including `aarch64`.
-Only `jose`, their dependency, is present. So tang cannot be `apk add`-ed on `two`, and
-`clevis` is unavailable on `zero` for as long as it runs Alpine. That pushes any tang
-plan onto Raspberry Pi OS (Debian packages both for armhf), a container on `one`, or
-`zero`'s move to MicroOS. Verify openSUSE's packaging before relying on it.
+Worth keeping in mind if this is ever revisited: the tang server never learns the key
+(McCallum–Relyea), so a stolen tang box alone is worthless — the exposure is only ever
+*disk + reachable tang*. And tang does not authenticate clients, so it must never face
+the internet.
 
 ## 5. `two` — keep it as the lifeboat
 
-Not joining the MicroOS fleet, but no longer being retired: it gets a defined job that
-suits a 700 MHz single-core box with 512 MB and no crypto acceleration.
+It doesn't join the MicroOS fleet, but it stays powered on with a defined job — one
+that suits a 700 MHz single-core box with 512 MB and no crypto acceleration.
 
 The recurring problem here isn't compute, it's **being months away from a critical box
 with no way in when the network path dies** — which is exactly the emergency-mode
