@@ -62,6 +62,7 @@ None are in git. `.gitignore` covers `.env`, `*.key`, `qBittorrent.conf`, `*.sql
 | | |
 |---|---|
 | [recovery.md](docs/recovery.md) | It broke, or it rebooted. Start here. |
+| [host-setup.md](docs/host-setup.md) | Building one of these boxes from bare Alpine. |
 | [port-forwarding.md](docs/port-forwarding.md) | The fragile bit. Read before touching the torrents stack. |
 | [roadmap.md](docs/roadmap.md) | What's next, and the traps waiting in it. |
 | [decisions.md](docs/decisions.md) | Why it looks like this. Don't relitigate. |
