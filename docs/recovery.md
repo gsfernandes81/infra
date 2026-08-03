@@ -62,6 +62,20 @@ RequiresMountsFor=/media/torrents
 `Wants=` is **not** enough — it's advisory, so the container starts anyway. Use
 `RequiresMountsFor=`, or `Requires=` + `After=`.
 
+## Name mounts by filesystem UUID — never `by-id`
+
+The Sabrent dual-bay USB enclosure reports an **identical serial (all zeros) and WWN
+for both drives**, so `/dev/disk/by-id/` names collide. On `one` they already resolve
+wrongly: the base link points at `sda` while its `-part1`/`-part2` links point into
+`sdb` — a different disk. `sda`/`sdb` can also swap across reboots.
+
+The usual advice is "use `by-id` instead of `/dev/sdX` for stability". **Here that
+advice is actively wrong.** Use filesystem UUIDs, which are stored inside the
+filesystem: `/etc/fstab` already does, and systemd `.mount` units must too
+(`What=/dev/disk/by-uuid/adc3a286-…`).
+
+A mount unit pointing at the wrong disk drops you straight into the trap above.
+
 ## Privileges
 
 `gavin` is in `wheel` (sudo needs a password) and deliberately **not** in `docker` —
