@@ -111,14 +111,29 @@ echo "--- waiting for gluetun to reconnect and Proton to assign a port ---"
 echo "    (this is the real test: the UP hook must write the new port into"
 echo "     qBittorrent.conf via the localhost auth bypass)"
 
+# "Did it change?" is NOT sufficient, and an earlier version of this script gave a
+# false PASS because of it. On startup qBittorrent immediately rewrites Session\Port
+# to its configured TORRENTING_PORT (6881) — seconds in, long before Proton assigns
+# anything. That is a restart artefact, not evidence the hook fired, so a bare
+# change test passes on the first poll and stops watching. Exclude the default and
+# keep waiting for a genuinely forwarded port.
+DEFAULT_PORT=$(sed -n 's/^ *- TORRENTING_PORT=//p' "$TORRENTS")
+: "${DEFAULT_PORT:=6881}"
+echo "    (ignoring $DEFAULT_PORT — that is TORRENTING_PORT, written on restart)"
+
 new_port=''
+saw_default=0
 i=0
 while [ "$i" -lt 60 ]; do
 	if [ -r "$QBCONF" ]; then
 		cur=$(sed -n 's/^Session\\Port=//p' "$QBCONF")
-		if [ -n "$cur" ] && [ "$cur" != "$PORT_BEFORE" ]; then
+		if [ -n "$cur" ] && [ "$cur" != "$PORT_BEFORE" ] && [ "$cur" != "$DEFAULT_PORT" ]; then
 			new_port=$cur
 			break
+		fi
+		if [ "$cur" = "$DEFAULT_PORT" ] && [ "$saw_default" -eq 0 ]; then
+			saw_default=1
+			echo "    qBittorrent restarted and reset to $DEFAULT_PORT; still waiting for Proton..."
 		fi
 	fi
 	i=$((i + 1))
@@ -127,11 +142,12 @@ done
 
 echo
 if [ -n "$new_port" ]; then
-	echo "PASS  Session\\Port changed: ${PORT_BEFORE:-unset} -> $new_port"
+	echo "PASS  Session\\Port: ${PORT_BEFORE:-unset} -> $new_port (a forwarded port)"
 	echo "      The port-forward hook fired and authenticated. This is the"
 	echo "      whole point of the exercise."
 else
-	echo "NOT YET  Session\\Port is still '${PORT_BEFORE:-unset}' after 5 minutes."
+	cur=$(sed -n 's/^Session\\Port=//p' "$QBCONF" 2>/dev/null)
+	echo "NOT YET  Session\\Port is '${cur:-unset}' after 5 minutes."
 	echo
 	echo "      This is not necessarily broken — Proton can take a while, and"
 	echo "      qBittorrent may not have flushed its config to disk yet. Check"
@@ -147,8 +163,14 @@ fi
 
 echo
 echo "--- gluetun's port-forwarding log lines ---"
+# Filter out gluetun's startup settings dump. Those lines echo the UP/DOWN commands
+# verbatim, so they contain the words "port forward" and match any naive grep —
+# which makes it look like something happened when nothing has yet. They are drawn
+# as a tree, so dropping lines with box-drawing glyphs leaves only real events.
 sudo docker logs "$(sudo docker ps -qf 'label=com.docker.compose.project=torrents' -f 'label=com.docker.compose.service=gluetun')" 2>&1 \
-	| grep -i -e 'port forward' -e forwarded | tail -5 || echo "(none found)"
+	| grep -i -e 'port forward' -e forwarded \
+	| grep -v -e '├' -e '└' -e '│' \
+	| tail -5 || echo "(no port-forwarding events yet — only the settings dump)"
 
 echo
 echo "--- listening ports (want 8080, 7777, 3001, 8384, 22000) ---"

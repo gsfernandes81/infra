@@ -77,6 +77,26 @@ After any recreate of the gluetun stack, Proton assigns a **new** port, so this 
 should *change*. That is the thing to watch, and it is the actual test that the stack
 came back correctly.
 
+**"It changed" is not good enough, and this trap has already been fallen into once.**
+On startup qBittorrent immediately rewrites `Session\Port` to its configured
+`TORRENTING_PORT` — `6881` — seconds into the recreate and long before Proton has
+assigned anything. Watch a bare change and you will "pass" on that restart artefact
+and stop looking. The real sequence during the Phase 2c recreate was:
+
+```
+43318   before the recreate
+ 6881   ~seconds in — qBittorrent's own default, means nothing
+52913   ~1 minute in — the actual forwarded port, written by the UP hook
+```
+
+So the test is: `Session\Port` differs from its previous value **and** is not
+`TORRENTING_PORT`. `bin/migrate-project-names.sh` encodes exactly that.
+
+The same care applies to gluetun's logs. Its startup settings dump echoes the UP and
+DOWN commands verbatim, so those lines contain the words "port forward" and match any
+naive grep — looking like an event when nothing has happened yet. The dump is drawn as
+a tree, so filtering out lines with box-drawing glyphs leaves only real events.
+
 If the hook fails, nothing is lost — the same `wget` can be run by hand inside the
 gluetun container to set the port.
 
