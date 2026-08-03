@@ -1,3 +1,8 @@
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /etc
+# infra-name: fstab
+# infra-mode: 0644
 UUID=f7a37943-d68e-4c8a-b154-e96d1047795e	/			ext4	rw,relatime 0 1
 UUID=66C1-5FD2					/boot			vfat	rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,errors=remount-ro 0 2
 /dev/cdrom					/media/cdrom		iso9660	noauto,ro 0 0
@@ -5,7 +10,7 @@ UUID=66C1-5FD2					/boot			vfat	rw,relatime,fmask=0022,dmask=0022,codepage=437,i
 tmpfs						/tmp			tmpfs	nosuid,nodev	0	0
 UUID=d2bb5b47-1a76-40a0-8b37-1dad005dc7c9	none			swap	defaults 0 0
 UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/mnt			btrfs	noauto,autodefrag,noatime,acl,discard=async 0 0
-UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/ionic-mysql	btrfs	subvolid=256,autodefrag,noatime,acl,discard=async 0 0
-UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/torrents		btrfs	subvolid=257,autodefrag,noatime,acl,discard=async 0 0
-UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/torrents-config	btrfs	subvolid=258,autodefrag,noatime,acl,discard=async 0 0
-UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/syncthing-config	btrfs	subvolid=259,autodefrag,noatime,acl,discard=async 0 0
+UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/ionic-mysql	btrfs	nofail,subvolid=256,autodefrag,noatime,acl,discard=async 0 0
+UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/torrents		btrfs	nofail,subvolid=257,autodefrag,noatime,acl,discard=async 0 0
+UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/torrents-config	btrfs	nofail,subvolid=258,autodefrag,noatime,acl,discard=async 0 0
+UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/syncthing-config	btrfs	nofail,subvolid=259,autodefrag,noatime,acl,discard=async 0 0

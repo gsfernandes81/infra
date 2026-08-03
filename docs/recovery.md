@@ -46,6 +46,58 @@ casually.
 
 ---
 
+## `one`: the array is missing and `lsblk` shows no `sda`/`sdb` at all
+
+**A failing disk in bay 0 of the Sabrent enclosure hangs the whole USB bridge, so the
+data disk never enumerates.** The array is on `sdb`; bay 0 holds an ADATA SP900 that is
+confirmed bad (Aug 2026: 1681 `Reported_Uncorrect`, self-test "completed: read failure",
+offline collection "aborted by the device with a fatal error"). It holds nothing.
+
+Recognise it in `dmesg` — the abort is always on **LUN 0**, and `sdb` never appears:
+
+```
+scsi 0:0:0:0: uas_eh_abort_handler ... CDB: opcode=0x12     <- INQUIRY, on sda
+usb usb2-port1: Cannot enable. Maybe the USB cable is bad?  <- x10, link won't retrain
+scsi 0:0:0:0: Device offlined - not ready after error recovery
+```
+
+**It does not self-heal.** Measured once: 433 seconds after the final disconnect, zero
+re-enumeration attempts. The kernel gives up and the port stays dead.
+
+Recover without physical access — this re-runs enumeration and usually succeeds:
+
+```sh
+sudo sh -c 'echo 0000:01:00.0 > /sys/bus/pci/drivers/xhci_hcd/unbind'
+sleep 5
+sudo sh -c 'echo 0000:01:00.0 > /sys/bus/pci/drivers/xhci_hcd/bind'
+sleep 20
+lsblk                                    # expect sda AND sdb
+sudo sh ~/recover-array.sh               # mounts, checks guards, cycles containers
+```
+
+**This is safe to do over SSH.** `eth0` is `bcmgenet` on the platform bus, not USB, so
+resetting the USB controller cannot cut your session. A missing array is an outage, never
+a stranding.
+
+Three things worth knowing before you touch it:
+
+- **Never run `smartctl` against `/dev/sda`.** A bare SMART read is enough to hang it —
+  it did so on 2026-08-03, provoking a bridge-wide reset. That reset happened to succeed;
+  the identical one at boot failed and cost ten minutes. `~/disk-watch.sh` polls `sdb`
+  only, deliberately.
+- **Enumeration is a coin flip, not a certainty.** The same re-bind that fails at boot
+  succeeds on retry. Reboots are the hazard; steady-state running is not, because
+  nothing on this box reads `sda`.
+- **`stop`/`start` the containers, never `up -d`.** They hold the bare mountpoints and
+  only need a fresh mount namespace. Recreating gluetun costs you the forwarded port.
+
+The real fix is pulling the SP900, which needs hands on the box. Until then the interim
+mitigation is the UAS quirk `174c:55aa:u`, writable at runtime via
+`/sys/module/usb_storage/parameters/quirks`. Note `usb-storage` is **built into this
+kernel**, so `/etc/modprobe.d/` does nothing — persisting it means `/boot/cmdline.txt`.
+
+---
+
 ## ⚠ The trap that silently eats data — and the flag that stops it
 
 If a volume fails to mount, a container bind-mounting that path **starts against an
@@ -98,13 +150,14 @@ replaced by `RequiresMountsFor=`.
 
 ## Why a missing USB disk doesn't stop boot
 
-**`one`:** all four `/media/*` mounts are on `/dev/sdb1` and none carry `nofail`. On
-Alpine + OpenRC that's survivable: `critical_mounts` is empty in
-`/etc/conf.d/localmount` so `localmount` forces `rc=0`, and all four are passno 0 so
-fsck never touches them. Only `/` and `/boot` are fsck'd, both on the SD card.
-**`one` still needs the `nofail` treatment that `zero` has had**, plus `chattr +i` on
-its four bare mountpoints. Method in
-[`../CLAUDE.md`](../CLAUDE.md#mount-guards-zero-and-due-on-one).
+**`one`:** all four `/media/*` mounts are on `/dev/sdb1`. They now carry `nofail`, and
+all four bare mountpoints are `chattr +i` (Aug 2026) — all four were confirmed empty
+first, so the trap had never fired here. Independently of that, OpenRC would have
+survived a missing array anyway: `critical_mounts` is empty in `/etc/conf.d/localmount`
+so `localmount` forces `rc=0`, and all four are passno 0 so fsck never touches them.
+Only `/` and `/boot` are fsck'd, both on the SD card. The guards matter for the
+systemd migration, and for the `restart: always` containers that would otherwise
+populate an empty mountpoint today.
 
 **`two`:** diskless, running from RAM with the SD card read-only. It has no `/media/*`
 data mounts to guard, so `nofail` and `chattr +i` do not apply — but check rather than
@@ -116,8 +169,13 @@ could fail to mount.
 | | `nofail` | `chattr +i` | token moved out of the init script |
 |---|---|---|---|
 | `zero` | ✅ Aug 2026 | ✅ Aug 2026 | ✅ Aug 2026 — **not rotated** |
-| `one` | ❌ due | ❌ due | ❌ due |
+| `one` | ✅ Aug 2026 | ✅ Aug 2026 | ✅ Aug 2026 — **not rotated** |
 | `two` | n/a (diskless) | n/a | check |
+
+**Neither token has been rotated.** Both were world-readable in a 755 init script for
+months, so both must be assumed disclosed — anyone who copied one can still run a
+connector for that tunnel. Moving them shrank future exposure and did nothing about
+past exposure. Regenerate both in the Zero Trust dashboard when physically present.
 
 **`zero`:** all three `/media/*` entries now carry `nofail`. Its array is btrfs **RAID1
 across two bcache devices**, so *both* must assemble before it can mount read-write —
@@ -180,10 +238,22 @@ it can still run a connector for this tunnel until it is regenerated in the Zero
 dashboard. Moving it shrank future exposure; it did not undo past exposure. Rotate when
 physically present.
 
-**`one` and `two` — status per host, check before assuming.** If the token is still
-inline in the world-readable init script, the same fix applies: move it to
-`/etc/conf.d/cloudflared` (mode 600), reference `${CF_TUNNEL_TOKEN}`, verify, then
-rotate. Confirm with:
+**`one` — same, done Aug 2026, also NOT rotated.** Identical layout to `zero`, tracked
+under `hosts/one/system/`. The move was proven inert before restarting: the new config
+was sourced, `command_args` expanded, and its SHA-256 compared against the running
+command line — identical, so the daemon restarted with a byte-identical invocation. It
+recovered in 5s and the `connectorId` changed, which is what proves it actually
+re-registered rather than never having restarted.
+
+The probe that watched it was `http://127.0.0.1:20241/ready` (HTTP 200,
+`readyConnections >= 1`), chosen because it read healthy against the *working* tunnel.
+Port-7844 socket counts and the log file were both tried and rejected: on `one` they
+read dead while the tunnel was serving normally, and either would have rolled back a
+good change.
+
+**`two` — check before assuming.** If the token is still inline in the world-readable
+init script, the same fix applies: move it to `/etc/conf.d/cloudflared` (mode 600),
+reference `${CF_TUNNEL_TOKEN}`, verify, then rotate. Confirm with:
 
 ```sh
 grep -c 'eyJ' /etc/init.d/cloudflared      # 0 = already moved

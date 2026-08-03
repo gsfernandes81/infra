@@ -26,6 +26,10 @@ HEADER_SCAN_LINES = 20
 HEADER_PREFIX = "# infra-"
 # Documentation, not configuration. Anything else without a header is an error.
 IGNORED_SUFFIXES = (".md",)
+# Repo-side tooling config that lives alongside the tracked /etc copies but is not one
+# of them. Named explicitly rather than matched by suffix, so a genuine /etc file that
+# happens to be TOML still fails loudly for having no header.
+IGNORED_NAMES = ("hw-inventory.toml",)
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -96,5 +100,7 @@ def tracked_files(host):
         return None
     return sorted(
         p for p in directory.iterdir()
-        if p.is_file() and p.suffix not in IGNORED_SUFFIXES
+        if p.is_file()
+        and p.suffix not in IGNORED_SUFFIXES
+        and p.name not in IGNORED_NAMES
     )

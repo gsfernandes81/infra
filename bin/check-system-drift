@@ -13,6 +13,13 @@
 # tracks nothing but fstab. A README table carried the real paths, and nothing checked
 # that the table and the tool agreed. They did not. See bin/_infra.py for the header.
 #
+# A searching version of this fix -- try /etc/<name>, then /etc/init.d/<name> -- was
+# written independently on `one` and is worth recording, because it identified a hazard
+# this design has to answer too: `cloudflared` exists in BOTH /etc/init.d and
+# /etc/conf.d, and /etc/conf.d is where the tunnel token lives. A search that guessed
+# wrong would print the token into a diff. Declaring the path removes the search, so
+# there is nothing left to guess wrong -- but never reintroduce path inference here.
+#
 # usage: bin/check-system-drift [host]     (default: this host's name)
 # exit 0 = tracked copies match live   exit 1 = drift, or a tracked file is missing
 
