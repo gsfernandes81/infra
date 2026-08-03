@@ -1,40 +1,53 @@
 #!/sbin/openrc-run
 # Registers the bcache devices, then waits (BOUNDED) for them to actually appear.
 #
-# The original wrote three UUIDs to /sys/fs/bcache/register and returned. That write
-# completes as soon as the kernel ACCEPTS the registration - it does NOT wait for
-# /dev/bcache0 and /dev/bcache1 to exist, so localmount could run first and skip the
-# /media mounts. The filesystem is btrfs RAID1 across BOTH devices, so both must
-# assemble before it can mount read-write.
+# ORDERING IS DECLARED, NOT ASSUMED. The 2026-08-03 reboot failed because OpenRC
+# ran this before mdev: /dev/disk/by-uuid/ did not exist for the whole 30s window,
+# every registration was skipped, and the wait could never succeed. Nothing orders
+# two OpenRC services unless a dependency says so, hence:
 #
-# The original also used `|| return 1`, which failed the whole service if a device was
-# already registered. This version tolerates that.
+#   need dev      - runs after mdev (which `provide`s dev). mdev's hotplug daemon
+#                   then keeps creating by-uuid symlinks as the USB disks
+#                   enumerate, so the retry loop below converges.
+#   after modules - bcache.ko is loaded via /etc/modules-load.d. The modprobe in
+#                   start() covers the case where modules is not scheduled in
+#                   this phase at all.
 #
-# This ALWAYS returns success. A failure here must never stop the boot: the /media
-# entries carry nofail, and the mountpoints are chattr +i so nothing can write into
-# them while unmounted.
+# Registration is RETRIED inside the wait loop rather than attempted once up
+# front: a symlink that appears at second 7 is registered at second 7. The
+# filesystem is btrfs RAID1 across BOTH backing devices and their cache is
+# attached, so /dev/bcache0 and /dev/bcache1 appear only once all three
+# (two backing, one cache) are registered.
+#
+# This ALWAYS returns success. A failure here must never stop the boot: the
+# /media entries carry nofail, and the mountpoints are chattr +i so nothing can
+# write into them while unmounted.
 
 name="bcache register"
 description="Register bcache devices via sysfs and wait (bounded) for them"
 
 depend() {
-	need sysfs devfs procfs
+	need sysfs devfs procfs dev
+	after modules
 	before fsck localmount
 }
 
 start() {
 	ebegin "Registering bcache devices"
-	for uuid in f5ec31d1-faf2-4e71-ba18-7769a1172323 \
-	            908229e0-adce-4258-8b25-57d8a21d1d01 \
-	            a3d7a86c-2caa-4141-b7b4-513c58e7295d; do
-		dev="/dev/disk/by-uuid/$uuid"
-		if [ -e "$dev" ]; then
-			echo "$dev" > /sys/fs/bcache/register 2>/dev/null || true
-		fi
-	done
+	modprobe -q bcache 2>/dev/null || true
 
+	registered=""
 	i=0
 	while [ "$i" -lt 30 ]; do
+		for uuid in f5ec31d1-faf2-4e71-ba18-7769a1172323 \
+		            908229e0-adce-4258-8b25-57d8a21d1d01 \
+		            a3d7a86c-2caa-4141-b7b4-513c58e7295d; do
+			case " $registered " in *" $uuid "*) continue ;; esac
+			dev="/dev/disk/by-uuid/$uuid"
+			if [ -e "$dev" ] && echo "$dev" > /sys/fs/bcache/register 2>/dev/null; then
+				registered="$registered $uuid"
+			fi
+		done
 		if [ -b /dev/bcache0 ] && [ -b /dev/bcache1 ]; then
 			break
 		fi
