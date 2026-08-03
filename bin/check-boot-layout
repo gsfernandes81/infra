@@ -1,0 +1,77 @@
+#!/bin/sh
+# Can /boot be tampered with WITHOUT causing a reboot?
+#
+# READ-ONLY. Busybox-safe: no findmnt, no lsblk, no GNU-only flags.
+#
+# Why this matters. An attacker with physical access needs to modify persistent
+# storage. If every such device is in active use, pulling one halts the machine —
+# and a reboot is detectable (services stop, uptime resets, the watchdog alerts).
+# That detection is what makes "unlock remotely, but only when nothing looks off"
+# a sound policy rather than a hopeful one.
+#
+# It fails if /boot sits on its own device. Nothing reads /boot on a running
+# system, so that device can be removed, altered and replaced with the machine
+# still up — no reboot, no alert. The payload then activates at the *next* reboot,
+# which may be a legitimate one you would never question.
+
+basedisk() {
+	d=${1#/dev/}
+	case "$d" in
+		mmcblk*|nvme*|loop*) printf '%s\n' "${d%p[0-9]*}" ;;
+		*) printf '%s\n' "$d" | sed 's/[0-9]*$//' ;;
+	esac
+}
+
+devfor() { awk -v m="$1" '$2==m{print $1; exit}' /proc/mounts; }
+
+root_dev=$(devfor /)
+boot_dev=$(devfor /boot)
+boot_mnt=/boot
+if [ -z "$boot_dev" ]; then
+	boot_dev=$(devfor /boot/firmware)
+	boot_mnt=/boot/firmware
+fi
+
+echo "root         : ${root_dev:-?}  -> disk $(basedisk "${root_dev:-}")"
+if [ -z "$boot_dev" ]; then
+	echo "boot         : not a separate mount (inside /)"
+else
+	echo "boot ($boot_mnt) : $boot_dev  -> disk $(basedisk "$boot_dev")"
+fi
+
+echo
+echo "block devices present:"
+for d in /dev/mmcblk[0-9] /dev/sd[a-z] /dev/nvme[0-9]n[0-9]; do
+	[ -e "$d" ] && echo "  $d"
+done
+
+echo
+up=$(cut -d. -f1 /proc/uptime)
+echo "uptime       : ${up}s  ($((up / 86400))d $((up % 86400 / 3600))h $((up % 3600 / 60))m)"
+echo "cmdline root=: $(tr ' ' '\n' < /proc/cmdline | grep '^root=' || echo '(none)')"
+
+echo
+echo "---------------------------------------------------------------"
+if [ -z "$boot_dev" ]; then
+	echo "OK — /boot is inside the root filesystem. Nothing can be pulled"
+	echo "     without halting the machine."
+	exit 0
+elif [ "$(basedisk "$root_dev")" = "$(basedisk "$boot_dev")" ]; then
+	echo "OK — /boot and / share one physical device ($(basedisk "$root_dev"))."
+	echo "     Removing it stops the machine, so tampering costs a reboot"
+	echo "     you would notice."
+	exit 0
+else
+	echo "*** GAP *** — /boot is on $(basedisk "$boot_dev"), root is on $(basedisk "$root_dev")."
+	echo
+	echo "     /boot is not in active use, so that device can be pulled,"
+	echo "     modified and replaced with no reboot and no alert. The payload"
+	echo "     lands at the next reboot — including a legitimate one."
+	echo
+	echo "     Fix, best first:"
+	echo "       1. Boot entirely from the SSD and remove the SD card."
+	echo "       2. Otherwise: verify /boot hashes against an off-box manifest"
+	echo "          before every remote unlock, and only trust that check when"
+	echo "          uptime proves no reboot has happened since you last looked."
+	exit 1
+fi

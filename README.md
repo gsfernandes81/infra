@@ -9,6 +9,7 @@ secrets, no data.
 bin/compose torrents up -d          # torrents | ionic-traces | send2ereader
 bin/check-sources                   # is the deployed sha still the pinned one?
 bin/check-system-drift              # do tracked /etc copies still match live?
+bin/check-boot-layout               # can /boot be tampered with without a reboot?
 ```
 
 ## Layout
@@ -16,7 +17,7 @@ bin/check-system-drift              # do tracked /etc copies still match live?
 ```
 deployments/<stack>/   what a stack is — compose.yaml, .env (ignored), SOURCE
 hosts/<host>/          where it runs — symlinks into deployments/, tracked /etc copies
-bin/                   the three scripts above
+bin/                   the four scripts above
 docs/                  read these
 ```
 
