@@ -25,3 +25,6 @@ qBittorrent.conf
 *.sql
 *.sql.gz
 *.dump
+
+# check-system-drift is Python
+__pycache__/

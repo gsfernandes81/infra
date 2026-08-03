@@ -1,4 +1,9 @@
 #!/sbin/openrc-run
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /etc/init.d
+# infra-name: cloudflared
+# infra-mode: 0755
   
 cfgfile="/etc/$RC_SVCNAME/$RC_SVCNAME.conf"
 supervisor=supervise-daemon

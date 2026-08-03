@@ -10,6 +10,7 @@ bin/compose torrents up -d          # one:  torrents | ionic-traces | send2eread
 bin/compose immich   up -d          # zero: immich | syncthing
 bin/check-sources                   # is the deployed sha still the pinned one?
 bin/check-system-drift              # do tracked /etc copies still match live?
+bin/install-system-file <name>      # install one of them (dry run without --commit)
 bin/check-boot-layout               # can /boot be tampered with without a reboot?
 sudo bin/check-mount-guards         # can a failed mount still eat the data? (any host)
 ```
@@ -19,7 +20,7 @@ sudo bin/check-mount-guards         # can a failed mount still eat the data? (an
 ```
 deployments/<stack>/   what a stack is — compose.yaml, .env (ignored), SOURCE
 hosts/<host>/          where it runs — symlinks into deployments/, tracked /etc copies
-bin/                   the five scripts above
+bin/                   the scripts above (_infra.py is their shared header parser)
 docs/                  read these
 ```
 

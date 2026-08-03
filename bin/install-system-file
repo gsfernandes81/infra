@@ -1,0 +1,318 @@
+#!/usr/bin/env python3
+# Install ONE tracked /etc copy onto this host, from the repo, with verification.
+#
+# This does the reversible half of a change and nothing else. It writes a file, sets
+# its mode, and validates the result. It NEVER starts, stops, restarts or reloads a
+# service -- that separation is the whole safety argument. CLAUDE.md already requires
+# splitting `prepare` (reversible, no restart) from `restart` (risky, needs a watched
+# rollback); this program is structurally incapable of the second half, so using it
+# cannot skip that discipline. Activating what you installed stays a human step.
+#
+# It also does not GENERATE anything. The bytes that land in /etc are the bytes in the
+# repo, which are the bytes you reviewed in a diff. Generating boot-path content from
+# templates was considered and rejected, and still is; copying a reviewed, tracked,
+# byte-identical file is a different thing and is what this does.
+#
+# Deliberate restrictions, each one closing a failure this repo has actually seen:
+#
+#   - Dry run by default. --commit is required to write anything.
+#   - ONE file per invocation. There is no --all: a bug here must not be able to
+#     rewrite every boot-path file on the box in one go.
+#   - Backups go OUTSIDE /etc/init.d. OpenRC treats every file in that directory as a
+#     service, so a backup left there lands in the dependency tree -- which happened on
+#     2026-08-03 with bcache-register.bak-20260803.
+#   - A content change beyond the infra- header needs --allow-content-change, so
+#     "just adding a comment" can never be cover for smuggling a real edit onto the
+#     boot path.
+#   - Post-install validation is type-aware, and a failure rolls back automatically.
+#     The rollback is then VERIFIED, and reported separately from the thing that
+#     triggered it -- an uncalibrated check once reported a good system as broken and
+#     then claimed its own rollback had failed too.
+#
+# usage: bin/install-system-file <name> [--commit] [--allow-content-change] [--new]
+# exit 0 = installed (or dry run clean)   1 = refused, failed, or rolled back
+
+import argparse
+import os
+import re
+import subprocess
+import stat
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _infra import (  # noqa: E402
+    host_init_system, live_path, parse_header, strip_header, system_dir, this_host,
+)
+
+BACKUP_ROOT = Path.home() / ".infra-backups"
+
+
+def run(cmd, **kw):
+    return subprocess.run(cmd, capture_output=True, text=True, **kw)
+
+
+def read_bytes(path):
+    """Read a file, falling back to sudo for root-only ones."""
+    try:
+        return path.read_bytes()
+    except PermissionError:
+        out = subprocess.run(["sudo", "cat", str(path)], capture_output=True)
+        if out.returncode != 0:
+            raise
+        return out.stdout
+
+
+def validate_openrc_script(path):
+    """A syntax error here is a service that cannot start at boot."""
+    out = run(["sh", "-n", str(path)])
+    if out.returncode != 0:
+        return [f"shell syntax error in {path}: {out.stderr.strip()}"]
+    return []
+
+
+def known_uuids():
+    """Every filesystem uuid this box can currently name, lowercased.
+
+    TWO sources, and the second is not optional. /dev/disk/by-uuid alone is WRONG
+    here: on `zero` it holds only the three bcache COMPONENT uuids (the ones
+    bcache-register registers) plus root, boot and swap. The btrfs FILESYSTEM uuid
+    813c830a-... never gets a symlink, because the array assembles through btrfs-scan
+    from /dev/bcache0 and /dev/bcache1, not through mdev -- so the live, mounted,
+    working array reads as "does not resolve" on the symlink test alone. That is a
+    check failing against known-good state, which CLAUDE.md says to calibrate for
+    before trusting any verdict.
+
+    Rejected alternatives:
+      - blkid: unprivileged, `blkid -U` exits 0 with NO output for a real uuid and a
+        nonsense one alike. It cannot distinguish them without root.
+      - "is the mountpoint mounted": passes for the wrong reason. Every entry on a
+        running box is mounted, so a typo'd uuid on / would read clean.
+
+    /sys/fs/btrfs/<fs-uuid>/ is the kernel's own registry of assembled btrfs
+    filesystems, it is readable unprivileged, and it names the multi-device case
+    correctly.
+    """
+    found = set()
+    for source in (Path("/dev/disk/by-uuid"), Path("/sys/fs/btrfs")):
+        try:
+            found.update(p.name.lower() for p in source.iterdir())
+        except OSError:
+            pass
+    found.discard("features")  # /sys/fs/btrfs holds this alongside the uuids
+    return found
+
+
+def validate_fstab(path):
+    """The file that decides whether this box comes back after a reboot.
+
+    Every entry has six fields, and every UUID= it names resolves to something. A
+    typo'd UUID is invisible until the reboot it strands you on.
+    """
+    problems = []
+    data = read_bytes(path).decode(errors="replace")
+    known = known_uuids()
+
+    for lineno, line in enumerate(data.splitlines(), 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        fields = line.split()
+        if len(fields) != 6:
+            problems.append(f"{path}:{lineno}: {len(fields)} fields, expected 6")
+            continue
+
+        spec, mountpoint, _fstype, opts, _dump, _passno = fields
+        m = re.match(r"^UUID=(.+)$", spec)
+        if not m:
+            continue
+
+        options = opts.split(",")
+        # noauto entries are deliberately absent -- cdrom and usb are the archetype,
+        # and /mnt/ext is the same idea. Nothing to verify.
+        if "noauto" in options:
+            continue
+
+        if m.group(1).lower() not in known:
+            note = ("carries nofail, so boot survives it"
+                    if "nofail" in options
+                    else "NO nofail -- this can stall or fail the boot")
+            problems.append(
+                f"{path}:{lineno}: UUID {m.group(1)} for {mountpoint} matches no "
+                f"block device or btrfs filesystem on this host ({note})"
+            )
+    return problems
+
+
+def validators_for(live):
+    v = []
+    if live.parent == Path("/etc/init.d"):
+        v.append(validate_openrc_script)
+    if live.name == "fstab":
+        v.append(validate_fstab)
+    return v
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Install one tracked /etc copy onto this host.",
+    )
+    ap.add_argument("name", help="filename under hosts/<thishost>/system/")
+    ap.add_argument("--commit", action="store_true",
+                    help="actually write (default is a dry run)")
+    ap.add_argument("--allow-content-change", action="store_true",
+                    help="permit changes beyond the infra- header")
+    ap.add_argument("--new", action="store_true",
+                    help="permit creating a file that does not exist yet")
+    args = ap.parse_args()
+
+    host = this_host()
+    entry = system_dir(host) / args.name
+    if not entry.is_file():
+        print(f"no tracked file {entry}", file=sys.stderr)
+        return 1
+
+    meta, err = parse_header(entry)
+    if err:
+        print(f"{args.name}: {err}", file=sys.stderr)
+        return 1
+
+    live = live_path(meta)
+    want_mode = int(meta["mode"], 8)
+
+    running = host_init_system()
+    if running and meta["init"] != running:
+        print(
+            f"refusing: {args.name} declares init={meta['init']} but this host runs "
+            f"{running}",
+            file=sys.stderr,
+        )
+        return 1
+
+    repo_bytes = entry.read_bytes()
+    exists = live.exists()
+
+    if not exists and not args.new:
+        print(
+            f"refusing: {live} does not exist. If you mean to create it, pass --new.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f"host:    {host}")
+    print(f"source:  {entry}")
+    print(f"target:  {live}  (mode {want_mode:04o})")
+
+    if exists:
+        live_bytes = read_bytes(live)
+        if live_bytes == repo_bytes:
+            print("\nalready identical, including the header. Nothing to do.")
+            return 0
+
+        header_only = strip_header(repo_bytes) == live_bytes
+        print(f"\nchange:  {'header only' if header_only else 'CONTENT CHANGE'}")
+
+        diff = run(["diff", "-u", "--label", str(live), "--label", str(entry),
+                    "/dev/stdin", str(entry)], input=live_bytes.decode(errors="replace"))
+        print("".join(f"    {ln}\n" for ln in diff.stdout.splitlines()))
+
+        if not header_only and not args.allow_content_change:
+            print(
+                "refusing: this changes more than the infra- header. Re-read the diff "
+                "above, then pass --allow-content-change if it is what you intend.",
+                file=sys.stderr,
+            )
+            return 1
+    else:
+        print("\nchange:  CREATING a new file")
+
+    for check in validators_for(live):
+        problems = check(entry)
+        if problems:
+            print(f"\nrefusing: the repo copy fails {check.__name__}:", file=sys.stderr)
+            for p in problems:
+                print(f"  {p}", file=sys.stderr)
+            return 1
+    print("pre-checks on the repo copy: ok")
+
+    if not args.commit:
+        print("\nDRY RUN. Nothing was written. Re-run with --commit to apply.")
+        if live.parent == Path("/etc/init.d"):
+            print("Note: installing a service file does NOT start or restart it.")
+        return 0
+
+    # ---- from here on we write ----
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    backup_dir = BACKUP_ROOT / host / stamp
+    backup = backup_dir / meta["name"]
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    if exists:
+        out = run(["sudo", "cp", "-a", str(live), str(backup)])
+        if out.returncode != 0:
+            print(f"\nbackup failed, nothing written: {out.stderr.strip()}",
+                  file=sys.stderr)
+            return 1
+        print(f"\nbacked up {live} -> {backup}")
+
+    out = run(["sudo", "install", "-o", "root", "-g", "root",
+               "-m", meta["mode"], str(entry), str(live)])
+    if out.returncode != 0:
+        print(f"install failed: {out.stderr.strip()}", file=sys.stderr)
+        return 1
+    print(f"installed {live}")
+
+    # ---- verify, and roll back if the box now disagrees with the repo ----
+    problems = []
+    if read_bytes(live) != repo_bytes:
+        problems.append(f"{live} does not match the repo copy after install")
+    live_mode = stat.S_IMODE(live.stat().st_mode)
+    if live_mode != want_mode:
+        problems.append(f"{live} is mode {live_mode:04o}, header says {want_mode:04o}")
+    for check in validators_for(live):
+        problems.extend(check(live))
+
+    if problems:
+        print("\nPOST-INSTALL CHECK FAILED:", file=sys.stderr)
+        for p in problems:
+            print(f"  {p}", file=sys.stderr)
+
+        if not exists:
+            print(f"  (file was newly created; removing {live})", file=sys.stderr)
+            run(["sudo", "rm", "-f", str(live)])
+            return 1
+
+        print("rolling back...", file=sys.stderr)
+        out = run(["sudo", "cp", "-a", str(backup), str(live)])
+        restored = out.returncode == 0 and read_bytes(live) == read_bytes(backup)
+        if restored:
+            print(f"ROLLED BACK: {live} restored from {backup}. The box is as it was; "
+                  f"the failure above is the thing to fix.", file=sys.stderr)
+        else:
+            print(f"ROLLBACK FAILED. {live} is in an unknown state. The backup is "
+                  f"intact at {backup} -- restore it by hand before rebooting.",
+                  file=sys.stderr)
+        return 1
+
+    print("post-install checks: ok")
+
+    # A cache rebuild, not a service action: OpenRC needs this to see a changed
+    # depend() block. It starts nothing.
+    if live.parent == Path("/etc/init.d"):
+        run(["sudo", "rc-update", "-u"])
+        deptree = Path("/run/openrc/deptree")
+        if deptree.exists() and ".bak" in deptree.read_text(errors="replace"):
+            print("WARNING: a stale .bak service appears in the OpenRC deptree")
+        else:
+            print("OpenRC dependency cache rebuilt; no stray .bak services")
+        print(f"\n{meta['name']} is installed but NOT restarted. That is deliberate.")
+
+    if live.name == "fstab":
+        print("\nfstab changes take effect at the next mount or reboot. "
+              "Nothing was remounted.")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

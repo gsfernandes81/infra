@@ -1,4 +1,9 @@
 #!/sbin/openrc-run
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /etc/init.d
+# infra-name: bcache-register
+# infra-mode: 0755
 # Registers the bcache devices, then waits (BOUNDED) for them to actually appear.
 #
 # ORDERING IS DECLARED, NOT ASSUMED. The 2026-08-03 reboot failed because OpenRC

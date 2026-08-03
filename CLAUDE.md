@@ -124,5 +124,40 @@ answering a different question.
 ## Repo invariants
 
 No `..` in compose files · every compose file declares `name:` · host-specific values
-in gitignored `.env` (never `$HOME`) · `/etc` copies under `hosts/<host>/system/` are
-read-only references, never applied.
+in gitignored `.env` (never `$HOME`).
+
+`/etc` copies under `hosts/<host>/system/` each declare where they install, in an
+`infra-` header carried by **both** the repo copy and the live file — see
+[`hosts/zero/system/README.md`](hosts/zero/system/README.md).
+
+Two programs, and the split is the point: `check-system-drift` reports and never
+writes; `install-system-file` writes and never restarts. Earlier wording here said
+these copies are "never applied", which was already untrue — `bcache-register` was
+installed by hand from the repo on 2026-08-03, and the ad-hoc block that did it left
+its backup in `/etc/init.d/`, where OpenRC picked the backup up as a service.
+
+`install-system-file` does the **reversible half only**. It writes a file, sets its
+mode, validates, and rolls back a failure. It cannot start, stop or restart anything,
+so it cannot be used to skip the two-phase procedure below. It also does not
+*generate*: the bytes that reach `/etc` are the reviewed bytes in the repo. Generating
+boot-path content from templates is still rejected.
+
+```sh
+bin/install-system-file <name>                     # dry run: shows the diff, writes nothing
+bin/install-system-file <name> --commit            # header-only changes
+bin/install-system-file <name> --commit --allow-content-change
+```
+
+A change beyond the `infra-` header needs the third form, so "just adding a comment"
+can never be cover for a real edit to a boot-path file. Activating what you installed
+stays a separate, human step.
+
+**When adding a validator to it, calibrate against known-good state first.** The fstab
+UUID check failed twice before it was right: `/dev/disk/by-uuid` alone reported the
+live, mounted array as unresolvable (the btrfs *filesystem* UUID never gets a symlink
+here — the array assembles via `btrfs-scan` from the bcache devices, and only the
+bcache *component* UUIDs appear there), and the mountpoint-based fix that replaced it
+passed a typo'd root UUID, because every entry on a running box is mounted.
+`/sys/fs/btrfs/<fs-uuid>/` is the registry that answers this correctly, unprivileged.
+`blkid -U` cannot: without root it exits 0 with no output for real and nonsense UUIDs
+alike.

@@ -1,3 +1,8 @@
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /etc
+# infra-name: fstab
+# infra-mode: 0644
 UUID=c5dd2957-1b31-4d05-b2b8-a98fcc546840	/				ext4	rw,relatime												0 1
 UUID=BD9B-F550					/boot				vfat	rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,errors=remount-ro	0 2
 /dev/cdrom					/media/cdrom			iso9660	noauto,ro												0 0

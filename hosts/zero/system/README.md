@@ -1,9 +1,37 @@
 # hosts/zero/system
 
-Tracked reference copies of `zero`'s `/etc` files. Nothing here is applied to the host
-— `bin/check-system-drift zero` only reports differences.
+Tracked reference copies of `zero`'s `/etc` files. `bin/check-system-drift` reports
+differences and never writes; `bin/install-system-file` installs one of these onto the
+host, and never restarts anything. See [`../../../CLAUDE.md`](../../../CLAUDE.md).
 
 `zero` is the mission-critical box (Immich + Syncthing) and it is remote.
+
+## Where each file installs is declared in the file
+
+Every file here carries an `infra-` header, and **the same header is present in the
+live file** — it is a comment, so it changes no behaviour, and keeping both copies
+byte-identical means `md5sum <tracked> <live>` stays a valid check:
+
+```
+# infra-os:   alpine          distro it was written for
+# infra-init: openrc          init system — the binding constraint for a service
+#                             file, and it changes fstab semantics too
+# infra-path: /etc/init.d     directory it installs into
+# infra-name: bcache-register filename there (split from the repo filename so a
+#                             MicroOS variant can install under the same name)
+# infra-mode: 0755            catches a wrong-mode install, which a diff cannot see
+```
+
+The table below is a summary for humans. **The header is what the checker reads** — a
+missing or malformed one is a hard failure, never a guess at the path. The previous
+checker inferred `/etc/<filename>`, so it looked for `/etc/bcache-register` and
+`/etc/cloudflared`, found neither, and reported three failures out of four tracked
+files; it passed on `one` only because `one` tracks nothing but `fstab`.
+
+`check-system-drift` is Python, so a host with tracked files needs `python3`.
+`zero` has it. **`one` has not been verified** — check before relying on the result
+there. `two` tracks no `/etc` files yet; when it does, it needs an interpreter or an
+exemption, which is a real cost on a 512 MB armv6 box running diskless.
 
 | File | Live path | Why it's tracked |
 |---|---|---|

@@ -1,50 +1,128 @@
-#!/bin/sh
+#!/usr/bin/env python3
 # Diff this host's tracked /etc copies against what is actually live.
 #
-# READ-ONLY, and deliberately so: these copies document the system, they do not
-# control it. Nothing here writes to /etc. Generating boot-path files from the repo
-# was considered and rejected.
+# READ-ONLY, and deliberately so. Nothing here writes to /etc, ever, under any flag.
+# Installing a tracked file is bin/install-system-file, which is a separate program on
+# purpose: the thing that reports whether the box agrees with the repo must not also be
+# the thing that makes it agree.
+#
+# WHERE A FILE GOES IS DECLARED IN THE FILE, not inferred from its name. The previous
+# version mapped hosts/<host>/system/<name> to /etc/<name>, so on `zero` it looked for
+# /etc/bcache-register and /etc/cloudflared -- neither of which exists -- and reported
+# three failures out of four tracked files. It passed on `one` only because `one`
+# tracks nothing but fstab. A README table carried the real paths, and nothing checked
+# that the table and the tool agreed. They did not. See bin/_infra.py for the header.
 #
 # usage: bin/check-system-drift [host]     (default: this host's name)
 # exit 0 = tracked copies match live   exit 1 = drift, or a tracked file is missing
-set -eu
 
-repo="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
-host="${1:-$(hostname -s 2>/dev/null || hostname)}"
-dir="$repo/hosts/$host/system"
+import stat
+import subprocess
+import sys
+from pathlib import Path
 
-if [ ! -d "$dir" ]; then
-	echo "no tracked system files for host '$host' ($dir does not exist)" >&2
-	exit 1
-fi
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _infra import (  # noqa: E402
+    host_init_system, live_path, parse_header, system_dir, this_host, tracked_files,
+)
 
-rc=0
-found=0
 
-for tracked in "$dir"/*; do
-	[ -f "$tracked" ] || continue
-	found=1
-	name="$(basename -- "$tracked")"
-	live="/etc/$name"
+def main():
+    host = sys.argv[1] if len(sys.argv) > 1 else this_host()
 
-	if [ ! -e "$live" ]; then
-		echo "$name: tracked here, but $live does not exist"
-		rc=1
-		continue
-	fi
+    # The old usage string invited `check-system-drift one` from any box, which would
+    # have compared one's tracked files against THIS host's /etc and reported nonsense.
+    if host != this_host():
+        print(
+            f"refusing to check '{host}' from '{this_host()}': this compares tracked "
+            f"copies against the LOCAL /etc, so the answer would be meaningless.\n"
+            f"run it on {host}.",
+            file=sys.stderr,
+        )
+        return 1
 
-	if diff -u "$tracked" "$live" > /dev/null 2>&1; then
-		echo "$name: ok"
-	else
-		echo "$name: DRIFT  (tracked vs $live)"
-		diff -u "$tracked" "$live" | sed 's/^/    /' || true
-		rc=1
-	fi
-done
+    tracked = tracked_files(host)
+    if tracked is None:
+        print(
+            f"no tracked system files for host '{host}' "
+            f"({system_dir(host)} does not exist)",
+            file=sys.stderr,
+        )
+        return 1
+    if not tracked:
+        print(f"no tracked system files under {system_dir(host)}", file=sys.stderr)
+        return 1
 
-if [ "$found" -eq 0 ]; then
-	echo "no tracked system files under $dir"
-	exit 1
-fi
+    rc = 0
+    claimed = {}
+    running = host_init_system()
 
-exit $rc
+    for entry in tracked:
+        name = entry.name
+
+        meta, err = parse_header(entry)
+        if err:
+            print(f"{name}: HEADER  {err}")
+            rc = 1
+            continue
+
+        live = live_path(meta)
+
+        # Two tracked files installing to one path means one of them is a lie.
+        if live in claimed:
+            print(f"{name}: CONFLICT  {live} is already claimed by {claimed[live]}")
+            rc = 1
+            continue
+        claimed[live] = name
+
+        if running and meta["init"] != running:
+            print(
+                f"{name}: INIT  declares init={meta['init']} but this host runs "
+                f"{running}"
+            )
+            rc = 1
+
+        if not live.exists():
+            print(f"{name}: tracked here, but {live} does not exist")
+            rc = 1
+            continue
+
+        problems = []
+        want_mode = int(meta["mode"], 8)
+
+        try:
+            live_mode = stat.S_IMODE(live.stat().st_mode)
+            if live_mode != want_mode:
+                problems.append(
+                    f"mode {live_mode:04o} on {live}, header says {want_mode:04o}"
+                )
+        except OSError as exc:
+            problems.append(f"cannot stat {live}: {exc}")
+
+        # The header is in both copies, so this is a plain byte comparison.
+        try:
+            same = entry.read_bytes() == live.read_bytes()
+        except OSError as exc:
+            problems.append(f"cannot read {live}: {exc}")
+            same = True  # already reported; do not also claim drift
+
+        if not same:
+            problems.append(f"content differs from {live}")
+
+        if problems:
+            print(f"{name}: DRIFT  ({'; '.join(problems)})")
+            if not same:
+                diff = subprocess.run(
+                    ["diff", "-u", str(entry), str(live)],
+                    capture_output=True, text=True,
+                ).stdout
+                print("".join(f"    {ln}\n" for ln in diff.splitlines()))
+            rc = 1
+        else:
+            print(f"{name}: ok  ({live}, mode {want_mode:04o})")
+
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())
