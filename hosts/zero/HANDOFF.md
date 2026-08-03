@@ -43,6 +43,12 @@ Read-only. `docker ps`, `docker inspect`, `docker compose config`, reading files
 - **Every bind mount and named volume**, and what backs it. For Immich specifically:
   where the library actually lives, where the database data directory lives, and
   whether either sits on a removable or late-mounting disk.
+- **The bcache topology.** `zero`'s data disk is fronted by an SSD cache, so the real
+  device is `/dev/bcache0`, not the disk you might expect from `lsblk` at a glance.
+  Record which device is backing and which is cache, and the cache mode
+  (`cat /sys/block/bcache0/bcache/cache_mode`). In `writeback` the SSD holds dirty
+  blocks that are not yet on the backing disk — it is live data, not a disposable
+  accelerator, and that changes what is safe to unplug and what has to be backed up.
 - **Secrets**: which `.env` files exist, what keys they hold. Do not print values. On
   `one` there were four secrets and one of them was somewhere nobody expected
   (a plaintext tunnel token in an OpenRC init script).

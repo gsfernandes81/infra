@@ -44,6 +44,11 @@ What's different day-to-day on MicroOS, since it's easy to forget:
 - Quadlet units go in `/etc/containers/systemd/`; `systemctl daemon-reload` generates
   the services.
 
+**Check bcache before migrating `zero`.** Its data disk is fronted by an SSD cache, so
+the target OS needs `bcache-tools` and must assemble `/dev/bcache0` before the mount
+units run. bcache is mainline, so the kernel side is fine; packaging and initramfs
+ordering are what to verify.
+
 **Before the first reboot on it:** the `nofail` and `RequiresMountsFor=` items in
 [recovery.md](recovery.md). Alpine's OpenRC forgave a missing USB disk; systemd will
 not, and that's the failure that strands you.
@@ -65,6 +70,30 @@ Detail in [`../hosts/zero/system/README.md`](../hosts/zero/system/README.md). In
 Gotcha worth an evening: on Debian 12 a non-root device with only a crypttab entry
 **silently fails to unlock and never prompts** — it also needs an fstab entry with
 `_netdev`.
+
+### bcache: LUKS goes *above* it, never below
+
+`zero`'s SSD is a **bcache cache** in front of the data disk, which dictates the
+layering:
+
+```
+correct    filesystem → LUKS → /dev/bcache0 → { cache SSD, backing disk }   both ciphertext
+WRONG      filesystem → /dev/bcache0 → { raw cache SSD, LUKS backing disk } cache holds PLAINTEXT
+```
+
+Encrypt `/dev/bcache0` — the assembled device. The tempting mistake is to encrypt the
+big backing disk and leave bcache on top of it, which caches *decrypted* blocks onto a
+bare SSD. Someone walking off with just the cache device then gets every recently
+accessed photo, and the disk encryption you paid for protects nothing that was warm.
+
+Two consequences:
+
+- **Wipe the cache when you encrypt.** It currently holds plaintext of today's
+  unencrypted data. Detach it and `blkdiscard` before reattaching, or old plaintext
+  survives on the SSD indefinitely.
+- **Check the cache mode.** In `writeback` the SSD holds dirty blocks not yet on the
+  backing disk — so it is not merely a cache, it is live data, and it must be treated
+  as sensitive and as something you cannot casually remove.
 
 ### Tang — still undecided, and there is an unresolved problem
 
