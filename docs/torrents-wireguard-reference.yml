@@ -8,11 +8,11 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     ports:
-      - 8778:8888/tcp		# HTTP Proxy
-      - 8001:8000/tcp		# GT Control Server
-      - 8080:8080		# QB
-      - 6881:6881		# QB
-      - 6881:6881/udp		# QB
+      - 8778:8888/tcp  # HTTP Proxy
+      - 8001:8000/tcp  # GT Control Server
+      - 8080:8080      # QB
+      - 6881:6881      # QB
+      - 6881:6881/udp  # QB
     environment:
       - VPN_SERVICE_PROVIDER=protonvpn
       - VPN_TYPE=wireguard
