@@ -46,6 +46,58 @@ casually.
 
 ---
 
+## `one`: the array is missing and `lsblk` shows no `sda`/`sdb` at all
+
+**A failing disk in bay 0 of the Sabrent enclosure hangs the whole USB bridge, so the
+data disk never enumerates.** The array is on `sdb`; bay 0 holds an ADATA SP900 that is
+confirmed bad (Aug 2026: 1681 `Reported_Uncorrect`, self-test "completed: read failure",
+offline collection "aborted by the device with a fatal error"). It holds nothing.
+
+Recognise it in `dmesg` — the abort is always on **LUN 0**, and `sdb` never appears:
+
+```
+scsi 0:0:0:0: uas_eh_abort_handler ... CDB: opcode=0x12     <- INQUIRY, on sda
+usb usb2-port1: Cannot enable. Maybe the USB cable is bad?  <- x10, link won't retrain
+scsi 0:0:0:0: Device offlined - not ready after error recovery
+```
+
+**It does not self-heal.** Measured once: 433 seconds after the final disconnect, zero
+re-enumeration attempts. The kernel gives up and the port stays dead.
+
+Recover without physical access — this re-runs enumeration and usually succeeds:
+
+```sh
+sudo sh -c 'echo 0000:01:00.0 > /sys/bus/pci/drivers/xhci_hcd/unbind'
+sleep 5
+sudo sh -c 'echo 0000:01:00.0 > /sys/bus/pci/drivers/xhci_hcd/bind'
+sleep 20
+lsblk                                    # expect sda AND sdb
+sudo sh ~/recover-array.sh               # mounts, checks guards, cycles containers
+```
+
+**This is safe to do over SSH.** `eth0` is `bcmgenet` on the platform bus, not USB, so
+resetting the USB controller cannot cut your session. A missing array is an outage, never
+a stranding.
+
+Three things worth knowing before you touch it:
+
+- **Never run `smartctl` against `/dev/sda`.** A bare SMART read is enough to hang it —
+  it did so on 2026-08-03, provoking a bridge-wide reset. That reset happened to succeed;
+  the identical one at boot failed and cost ten minutes. `~/disk-watch.sh` polls `sdb`
+  only, deliberately.
+- **Enumeration is a coin flip, not a certainty.** The same re-bind that fails at boot
+  succeeds on retry. Reboots are the hazard; steady-state running is not, because
+  nothing on this box reads `sda`.
+- **`stop`/`start` the containers, never `up -d`.** They hold the bare mountpoints and
+  only need a fresh mount namespace. Recreating gluetun costs you the forwarded port.
+
+The real fix is pulling the SP900, which needs hands on the box. Until then the interim
+mitigation is the UAS quirk `174c:55aa:u`, writable at runtime via
+`/sys/module/usb_storage/parameters/quirks`. Note `usb-storage` is **built into this
+kernel**, so `/etc/modprobe.d/` does nothing — persisting it means `/boot/cmdline.txt`.
+
+---
+
 ## ⚠ The trap that silently eats data — and the flag that stops it
 
 If a volume fails to mount, a container bind-mounting that path **starts against an

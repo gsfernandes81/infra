@@ -1,0 +1,49 @@
+# Per-host SMART policy and manual corrections for bin/hw-inventory.
+#
+# The PRESENCE of this file is what enables SMART polling on this host. `smart_skip`
+# then names the devices that must never be polled. A host with no file here gets a
+# sysfs-only inventory — so forgetting to think about it produces the safe outcome.
+#
+# Anything under [overrides.<dev>] wins over what the script detects.
+
+# /dev/sda is FAILING and must never be polled. A bare `smartctl` read of it stalls
+# for ~60s and provokes a bridge-wide USB reset; that reset succeeded once and failed
+# once, and the failure cost a ten-minute array outage. See docs/recovery.md.
+smart_skip = ["sda"]
+
+
+[overrides.sda]
+bay = "0"
+role = "expendable - holds nothing"
+
+# Recorded by hand because they can no longer be read safely. Captured 2026-08-03,
+# from the last SMART dump taken before polling was disabled.
+model = "ADATA SP900"
+serial = "03B30043000200000002"
+kind = "SSD"
+form_factor = "2.5in"
+
+# Left blank deliberately. Manufacture date is not a standard SMART field and this
+# drive's serial carries no decodable convention — a guessed date would send someone
+# to unplug the wrong disk, which is worse than an absent one.
+manufactured = ""
+
+note = """
+FAILING, and the reason the array does not come back after some reboots: it stalls \
+the bridge during INQUIRY to LUN 0, so sdb never enumerates. Confirmed bad 2026-08: \
+1681 Reported_Uncorrect, extended self-test "completed: read failure" at LBA 4652832, \
+offline data collection "aborted by the device with a fatal error", 16 retired blocks, \
+lifetime max temperature 89 C. Holds nothing. Pull it when physically present, and do \
+not replace it with anything that matters."""
+
+
+[overrides.sdb]
+bay = "1"
+role = "btrfs array (sdb1) + swap (sdb2, currently off)"
+# Model, serial, form factor and manufacture date are read from SMART — this disk is
+# healthy and safe to poll. Its Micron serial encodes YYWW, which the script decodes.
+
+
+[overrides.mmcblk0]
+bay = "onboard"
+role = "boot + root"

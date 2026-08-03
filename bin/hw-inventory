@@ -1,0 +1,485 @@
+#!/usr/bin/env python3
+"""Generate a host's hardware inventory into hosts/<host>/system/hardware.md.
+
+    bin/hw-inventory                 # write hosts/<host>/system/hardware.md
+    bin/hw-inventory --stdout        # print instead, change nothing
+    bin/hw-inventory --host two      # override the detected host name
+
+Drives are indexed by what you can recognise while holding one — capacity, form
+factor, SSD/HDD, manufacture date — not by serial. A serial identifies a drive you
+have already found; it does not help you decide which of two identical-looking disks
+to unplug from three thousand miles away.
+
+SMART SAFETY
+------------
+Some drives hang when polled. On `one`, a bare `smartctl` read of /dev/sda stalls for
+60s and provokes a bridge-wide USB reset that has already cost one ten-minute outage.
+
+So SMART is opt-in per host, never implicit: this script polls nothing unless
+hosts/<host>/system/hw-inventory.json exists and names the devices to skip. A host
+with no config gets a sysfs-only inventory and says so. Deciding not to think about
+it produces the safe outcome, not the dangerous one.
+
+Every smartctl call is also bounded by a timeout, so a device that hangs despite the
+skip list costs one missing table row rather than a wedged script.
+
+PORTABILITY
+-----------
+Python 3.11+, standard library only — 3.11 is the floor because `tomllib` landed
+there. That is not a constraint in practice: Alpine 3.24 ships 3.14 on both aarch64
+and the armv6 port, and MicroOS (Tumbleweed) defaults to 3.13, so every host in the
+fleet clears it with room to spare. TOML over YAML specifically to keep the
+dependency count at zero — MicroOS is immutable, where installing PyYAML would mean
+a transactional update and a reboot to run a script you reach for when a box is
+already unhealthy.
+
+Facts come from /sys, /proc and /etc/os-release,
+which are common to every Linux worth running here. External tools (smartctl, lsusb)
+are optional; each is probed and its absence degrades one section rather than failing
+the run. Board identity reads device-tree first (ARM) then DMI (x86).
+"""
+
+import argparse
+import os
+import pwd
+import re
+import shutil
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+SMARTCTL_TIMEOUT = 20  # seconds; the observed pathological hang was ~61s
+REPO = Path(__file__).resolve().parent.parent
+
+
+# ---------------------------------------------------------------- small helpers
+
+def read(path, default=""):
+    """Read a sysfs/procfs file, tolerating absence and NUL padding."""
+    try:
+        return Path(path).read_text(errors="replace").replace("\x00", "").strip()
+    except OSError:
+        return default
+
+
+def read_nul_list(path):
+    """Device-tree string lists are NUL-SEPARATED, not newline-separated.
+
+    read() strips NULs to make ordinary DT strings printable, which silently welds a
+    list into one token ('raspberrypi,4-model-b' + 'brcm,bcm2711'). Split first.
+    """
+    try:
+        raw = Path(path).read_bytes()
+    except OSError:
+        return []
+    return [s for s in raw.decode("utf-8", "replace").split("\x00") if s.strip()]
+
+
+def run(cmd, timeout=10):
+    """Run a command, returning stdout or None. Never raises."""
+    if not shutil.which(cmd[0]):
+        return None
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    return p.stdout if p.returncode == 0 or p.stdout else None
+
+
+def decimal_capacity(nbytes):
+    """Render capacity the way the label on the drive does — decimal, not binary.
+
+    A 500 GB disk is '500G' to a human holding it, even though it is 466 GiB to df.
+    This string is an identifier, so it must match what is printed on the drive.
+    """
+    for unit, div in (("T", 10**12), ("G", 10**9), ("M", 10**6)):
+        if nbytes >= div:
+            v = nbytes / div
+            # Round to whole units above 10 so real disks land on the number printed
+            # on the label: 500.107 GB -> '500G', 63.9 -> '64G'. A '500.1G' index
+            # would not match anything a human is looking for.
+            if v >= 10:
+                return f"{round(v)}{unit}"
+            return f"{v:.1f}".rstrip("0").rstrip(".") + unit
+    return f"{nbytes}B"
+
+
+# ---------------------------------------------------------------- config
+
+def load_config(host):
+    """Per-host SMART policy and manual overrides.
+
+    Absent config means SMART is not polled at all — see module docstring.
+    """
+    path = REPO / "hosts" / host / "system" / "hw-inventory.toml"
+    if not path.exists():
+        return None, path
+    try:
+        # tomllib requires binary mode; it decodes UTF-8 itself.
+        with path.open("rb") as fh:
+            return tomllib.load(fh), path
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        # Exit rather than fall back to "no config". Falling back would silently
+        # discard the smart_skip list and poll a device the file exists to protect.
+        print(f"hw-inventory: cannot parse {path}: {e}", file=sys.stderr)
+        sys.exit(2)
+
+
+# ---------------------------------------------------------------- identity
+
+def host_name():
+    return read("/proc/sys/kernel/hostname", "unknown").split(".")[0]
+
+
+def board_model():
+    """Device-tree on ARM, DMI on x86. Neither is guaranteed; both are cheap."""
+    dt = read("/sys/firmware/devicetree/base/model")
+    if dt:
+        return dt
+    vendor = read("/sys/class/dmi/id/sys_vendor")
+    name = read("/sys/class/dmi/id/product_name")
+    ver = read("/sys/class/dmi/id/product_version")
+    parts = [p for p in (vendor, name, ver) if p]
+    return " ".join(parts) or "unknown"
+
+
+def os_release():
+    data = {}
+    for line in read("/etc/os-release").splitlines():
+        if "=" in line:
+            k, _, v = line.partition("=")
+            data[k] = v.strip().strip('"')
+    return data.get("PRETTY_NAME") or data.get("NAME") or "unknown"
+
+
+def cpu_summary():
+    """CPU/SoC, kept distinct from the board.
+
+    /proc/cpuinfo on ARM carries a 'Model' line holding the BOARD name, so matching it
+    makes the CPU row a duplicate of the board row and says nothing about the silicon.
+    Match only x86's 'model name'; on ARM fall through to the device-tree compatible
+    string, whose last entry is the SoC.
+    """
+    model = ""
+    count = 0
+    for line in read("/proc/cpuinfo").splitlines():
+        if line.startswith("model name"):
+            model = line.split(":", 1)[1].strip()
+        if line.startswith("processor"):
+            count += 1
+    if not model:
+        compat = read_nul_list("/sys/firmware/devicetree/base/compatible")
+        model = compat[-1] if compat else "unknown"
+    return model, count
+
+
+def mem_total_bytes():
+    m = re.search(r"MemTotal:\s+(\d+) kB", read("/proc/meminfo"))
+    return int(m.group(1)) * 1024 if m else 0
+
+
+# ---------------------------------------------------------------- drives
+
+def block_devices():
+    """Physical block devices only — no loop, ram, zram, or device-mapper."""
+    out = []
+    for d in sorted(Path("/sys/block").iterdir()):
+        name = d.name
+        if name.startswith(("loop", "ram", "zram", "dm-", "md")):
+            continue
+        size_sectors = read(d / "size", "0")
+        try:
+            nbytes = int(size_sectors) * 512
+        except ValueError:
+            nbytes = 0
+        if nbytes == 0:
+            continue
+        out.append(name)
+    return out
+
+
+def smart_info(dev, timeout=SMARTCTL_TIMEOUT):
+    """Identity fields from SMART. Returns {} when unavailable for any reason."""
+    for dtype in ("sat", "auto"):
+        txt = run(["smartctl", "-i", "-d", dtype, f"/dev/{dev}"], timeout=timeout)
+        # Content check, not exit code: smartctl's status is a bitmask that also
+        # encodes drive findings, so a non-zero exit does not mean the read failed.
+        if txt and "Device Model" in txt or (txt and "Model Number" in txt):
+            info = {}
+            for line in txt.splitlines():
+                if ":" not in line:
+                    continue
+                k, _, v = line.partition(":")
+                info[k.strip()] = v.strip()
+            return info
+    return {}
+
+
+def manufacture_date(info, overrides):
+    """Manufacture date is NOT a standard SMART field.
+
+    Nothing in the ATA spec carries it, so this decodes the vendor conventions that
+    are known and legible, and otherwise returns blank for the overrides file to
+    fill in by hand. A wrong date is worse than an absent one — it would send you to
+    unplug the wrong disk — so nothing is guessed.
+    """
+    if overrides.get("manufactured"):
+        return overrides["manufactured"]
+
+    serial = info.get("Serial Number", "")
+    family = info.get("Model Family", "") + " " + info.get("Device Model", "")
+
+    # Micron/Crucial: serial begins YYWW (year, ISO week). '2210' -> 2022, week 10.
+    if re.search(r"Crucial|Micron|^CT", family, re.I) and re.match(r"^\d{4}", serial):
+        yy, ww = int(serial[:2]), int(serial[2:4])
+        if 1 <= ww <= 53:
+            month = min(12, max(1, round((ww * 7) / 30.44 + 0.5)))
+            return f"20{yy:02d}-{month:02d}"
+    return ""
+
+
+def form_factor(info, overrides):
+    if overrides.get("form_factor"):
+        return overrides["form_factor"]
+    ff = info.get("Form Factor", "")
+    m = re.search(r"([\d.]+)\s*inch", ff, re.I)
+    return f"{m.group(1)}in" if m else ""
+
+
+def describe_drive(dev, cfg, smart_allowed):
+    d = Path("/sys/block") / dev
+    nbytes = int(read(d / "size", "0") or 0) * 512
+    rotational = read(d / "queue/rotational", "")
+    kind = {"0": "SSD", "1": "HDD"}.get(rotational, "")
+    # An SD card is non-rotational but is not an SSD, and 'the 64G SD card' is how
+    # you would actually refer to it while looking for it.
+    if transport_of(dev) == "mmc":
+        kind = "SD"
+
+    overrides = (cfg or {}).get("overrides", {}).get(dev, {})
+    skipped = dev in (cfg or {}).get("smart_skip", [])
+
+    info = {}
+    if smart_allowed and not skipped:
+        info = smart_info(dev)
+
+    # sysfs vendor/model is the USB BRIDGE for enclosure-attached disks, which is why
+    # both bays read identically. Prefer SMART, which reaches the drive itself.
+    #
+    # When SMART is unavailable on a USB disk the sysfs name is not merely vague, it
+    # is WRONG — every bay reports the enclosure. Publishing that would send someone
+    # to unplug the wrong drive, so it is suppressed rather than shown.
+    transport = overrides.get("transport", "") or transport_of(dev)
+    sysfs_model = read(d / "device/model")
+    if transport == "usb" and not info:
+        sysfs_model = ""
+    if transport == "mmc":
+        sysfs_model = read(d / "device/name") or sysfs_model
+
+    model = (
+        overrides.get("model")
+        or info.get("Device Model")
+        or info.get("Model Number")
+        or sysfs_model
+        or ""
+    ).strip()
+    serial = (
+        overrides.get("serial")
+        or info.get("Serial Number")
+        or read(d / "device/serial")
+        or ""
+    ).strip()
+
+    return {
+        "dev": dev,
+        "bytes": nbytes,
+        "capacity": decimal_capacity(nbytes),
+        "kind": overrides.get("kind") or kind or "",
+        "form_factor": form_factor(info, overrides),
+        "manufactured": manufacture_date(info, overrides),
+        "model": model,
+        "serial": serial,
+        "transport": transport,
+        "bay": overrides.get("bay", ""),
+        "role": overrides.get("role", ""),
+        "note": overrides.get("note", ""),
+        "smart": bool(info),
+        "skipped": skipped,
+    }
+
+
+def transport_of(dev):
+    real = os.path.realpath(f"/sys/block/{dev}")
+    for tag, needle in (("usb", "/usb"), ("nvme", "/nvme"), ("mmc", "/mmc"), ("sata", "/ata")):
+        if needle in real:
+            return tag
+    return ""
+
+
+def assign_ids(drives):
+    """Build the human index: capacity-formfactor-kind-date, '?' for unknown parts.
+
+    A trailing -0/-1 is appended ONLY when two drives are otherwise identical, which
+    is the case the suffix exists for: same model bought at the same time. Ordering
+    is by serial so the suffix is stable across runs; without that, two identical
+    disks could swap numbers between inventories and quietly invalidate the doc.
+    """
+    for dr in drives:
+        parts = [
+            dr["capacity"] or "?",
+            dr["form_factor"] or "?",
+            dr["kind"] or "?",
+            dr["manufactured"] or "?",
+        ]
+        dr["base_id"] = "-".join(parts)
+
+    groups = {}
+    for dr in drives:
+        groups.setdefault(dr["base_id"], []).append(dr)
+
+    for base, members in groups.items():
+        if len(members) == 1:
+            members[0]["id"] = base
+            continue
+        for n, dr in enumerate(sorted(members, key=lambda x: (x["serial"], x["dev"]))):
+            dr["id"] = f"{base}-{n}"
+    return drives
+
+
+# ---------------------------------------------------------------- usb
+
+def usb_topology():
+    txt = run(["lsusb", "-t"])
+    if txt:
+        return txt.rstrip()
+    # Fall back to walking sysfs so this still says something without usbutils.
+    lines = []
+    root = Path("/sys/bus/usb/devices")
+    if root.exists():
+        for dev in sorted(root.iterdir()):
+            product = read(dev / "product")
+            vid, pid = read(dev / "idVendor"), read(dev / "idProduct")
+            if product or vid:
+                lines.append(f"{dev.name:<10} {vid}:{pid}  {product}")
+    return "\n".join(lines) or "(no USB information available)"
+
+
+# ---------------------------------------------------------------- render
+
+def render(host, drives, cfg, cfg_path, smart_allowed):
+    cpu, ncpu = cpu_summary()
+    mem = mem_total_bytes()
+    L = []
+    a = L.append
+
+    a(f"# `{host}` — hardware")
+    a("")
+    a("Generated by `bin/hw-inventory`. Do not hand-edit: corrections belong in")
+    a(f"`{cfg_path.relative_to(REPO)}` and are merged in on the next run.")
+    a("")
+    a("## Machine")
+    a("")
+    a("| | |")
+    a("|---|---|")
+    a(f"| Board | {board_model()} |")
+    a(f"| CPU | {cpu} ({ncpu} cores) |")
+    a(f"| Memory | {decimal_capacity(mem)} |")
+    a(f"| Arch | {os.uname().machine} |")
+    a(f"| OS | {os_release()} |")
+    a(f"| Kernel | {os.uname().release} |")
+    a("")
+
+    a("## Drives")
+    a("")
+    a("Indexed by what is legible on the drive itself. `?` means the fact is not")
+    a("readable here — fill it in via the overrides file rather than guessing.")
+    a("")
+    a("| Index | Dev | Bay | Role | Model | Serial |")
+    a("|---|---|---|---|---|---|")
+    for dr in drives:
+        a(
+            f"| `{dr['id']}` | {dr['dev']} | {dr['bay'] or '—'} | {dr['role'] or '—'} "
+            f"| {dr['model'] or '—'} | {dr['serial'] or '—'} |"
+        )
+    a("")
+
+    notes = [dr for dr in drives if dr["note"] or dr["skipped"]]
+    if notes:
+        a("### Notes")
+        a("")
+        for dr in notes:
+            bits = []
+            if dr["skipped"]:
+                bits.append("**SMART polling disabled for this device.**")
+            if dr["note"]:
+                bits.append(dr["note"])
+            a(f"- `{dr['id']}` ({dr['dev']}) — {' '.join(bits)}")
+        a("")
+
+    if not smart_allowed:
+        a("> **SMART was not read for this inventory.** Model, serial, form factor and")
+        a("> manufacture date are only available through SMART for enclosure-attached")
+        a("> disks — sysfs reports the bridge, not the drive. Re-run as root to fill")
+        a("> these in.")
+        a("")
+    if cfg is None:
+        a(f"> **No `{cfg_path.name}` for this host**, so SMART was skipped entirely and")
+        a("> no overrides were applied. Create it to enable polling — listing the")
+        a("> devices that must never be polled.")
+        a("")
+
+    a("## USB topology")
+    a("")
+    a("```")
+    a(usb_topology())
+    a("```")
+    return "\n".join(L) + "\n"
+
+
+# ---------------------------------------------------------------- main
+
+def main():
+    ap = argparse.ArgumentParser(description="Generate a host hardware inventory.")
+    ap.add_argument("--host", default=None, help="host name (default: this machine)")
+    ap.add_argument("--stdout", action="store_true", help="print instead of writing")
+    args = ap.parse_args()
+
+    host = args.host or host_name()
+    cfg, cfg_path = load_config(host)
+
+    # Two independent gates. Root is a capability; the config is a decision. Both are
+    # required, so an unconfigured host can never be probed by accident.
+    is_root = os.geteuid() == 0
+    smart_allowed = is_root and cfg is not None
+    if cfg is not None and not is_root:
+        print("hw-inventory: not root — SMART fields will be blank", file=sys.stderr)
+
+    drives = assign_ids(
+        [describe_drive(d, cfg, smart_allowed) for d in block_devices()]
+    )
+    doc = render(host, drives, cfg, cfg_path, smart_allowed)
+
+    if args.stdout:
+        sys.stdout.write(doc)
+        return
+
+    out = REPO / "hosts" / host / "system" / "hardware.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(doc)
+
+    # Running under sudo would otherwise leave a root-owned file in a repo the user
+    # has to edit and commit as themselves.
+    owner = os.environ.get("SUDO_USER")
+    if owner:
+        try:
+            p = pwd.getpwnam(owner)
+            os.chown(out, p.pw_uid, p.pw_gid)
+        except (KeyError, PermissionError):
+            pass
+
+    print(f"wrote {out.relative_to(REPO)}")
+
+
+if __name__ == "__main__":
+    main()
