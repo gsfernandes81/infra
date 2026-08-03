@@ -26,7 +26,7 @@ docs/                  read these
 |---|---|---|---|
 | `one` | Pi 4 | torrents, ionic-traces, send2ereader | yes |
 | `zero` | Pi 5 | Immich (+ db, ml), Syncthing, 2× Claude dev — **all critical, remote** | not yet |
-| `two` | Pi 1 B+, armv6, 512 MB | idle — **being retired** | no |
+| `two` | Pi 1 B+, armv6, 512 MB | lifeboat: serial console, power-cycle, watchdog | stays on Alpine |
 
 Target OS for `one` and `zero`: **openSUSE MicroOS** (see [roadmap](docs/roadmap.md)).
 

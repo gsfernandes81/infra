@@ -1,16 +1,40 @@
 # hosts/two/system
 
-**`two` is being retired.** Nothing here will be populated.
-
 **Raspberry Pi Model B Plus Rev 1.2, `armv6l`, 512 MB** (confirmed Aug 2026) —
-single-core ARM1176 at 700 MHz, 100 Mbit ethernet over USB. Not a Pi 2.
+single-core ARM1176 at 700 MHz, 100 Mbit ethernet sharing a USB 2.0 bus, no crypto
+acceleration.
 
-That architecture was the only thing forcing the fleet onto Debian: Arch ARM's `armv6h`
-port froze Feb 2024, Alpine and Void are OpenRC/runit, and Pi OS and DietPi are Debian.
-armv6 also rules out Claude Code, whose native build is arm64/x86-64 only. Retiring one
-idle box removes the constraint and lets `one` and `zero` go to openSUSE MicroOS.
+`two` does **not** join the MicroOS fleet — its armv6 was the only thing that would
+have forced the whole fleet onto Debian, and armv6 also rules out Claude Code (arm64
+and x86-64 only). It is kept, powered on, for a different job.
 
-If a second host is ever wanted — for tang, so `zero` can reboot unattended — either
-run tang in a container on `one`, or add a **Pi Zero 2 W** (~£15, quad-core, aarch64,
-same 512 MB, which is ample for a socket-activated service that runs for milliseconds
-per unlock).
+## Its job: the lifeboat
+
+Serial console to `zero` and `one`, power-cycle authority via a smart plug, a
+dead-man's switch that reports the other hosts' health, and an access path independent
+of cloudflared. The full case is in
+[`docs/roadmap.md`](../../../docs/roadmap.md#5-two--keep-it-as-the-lifeboat).
+
+**Stays on Alpine, in diskless mode** — running from RAM with the SD card read-only,
+committed via `lbu commit`. The box whose purpose is surviving other boxes' failures
+should be the one least able to die of SD-card corruption.
+
+Nothing household-critical goes here: no DNS, no backups, no log sink.
+
+## Tang is not currently possible here
+
+Alpine packages **neither `tang` nor `clevis`** — checked Aug 2026 across `main`,
+`community` and `edge`, on `armhf`, `armv7` and `aarch64`. Only `jose`, their
+dependency, is present. So tang cannot be `apk add`-ed on this box, and it would mean
+either building from source on a 700 MHz CPU or switching to Raspberry Pi OS, which
+does package both for armhf.
+
+That decision is on hold anyway, and for a better reason: a tang server sitting beside
+`zero` doesn't protect against theft, it just means the thief takes two boxes instead
+of one. See the roadmap before doing anything here.
+
+## Tracked `/etc` copies
+
+None yet, and there may never be — this is a reference directory, and
+`bin/check-system-drift two` only reports differences. Nothing here is applied to the
+host.

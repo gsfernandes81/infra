@@ -15,7 +15,15 @@ not from scratch.
 | Staying on OpenVPN | Works and is proven. The WireGuard key is unused but still live, so still gitignored. |
 | `gavin` not in `docker` group | Root-equivalent. Rootless Podman removes the need. |
 | Target OS is **openSUSE MicroOS** | Immutable root with btrfs snapshots and auto-rollback on a failed boot — the right shape for a box you can't reach for months. Official Pi 5 support. |
-| `two` retired, not migrated | Its armv6 was the *only* thing forcing a Debian fleet. Dropping one idle Pi 1 B+ removes the constraint entirely. |
+| `two` leaves the fleet, but is **kept as the lifeboat** | Its armv6 was the *only* thing forcing a Debian fleet, so it doesn't migrate. It stays powered on for serial console, power-cycling, and watchdog duty — the things that help when a critical box won't boot. Stays on Alpine, diskless. |
+
+## Explicitly not decided
+
+**Tang.** Deliberately open, because same-house tang doesn't stop theft — it only
+changes what has to be stolen from `zero` to `zero` *and* the tang host. Don't deploy
+it until that's resolved one way or the other; the options and the constraints are in
+[roadmap.md](roadmap.md#tang--still-undecided-and-there-is-an-unresolved-problem).
+Alpine packages neither `tang` nor `clevis`, on any architecture (checked Aug 2026).
 
 ## Two things the original inventory got wrong
 
