@@ -204,6 +204,17 @@ def main():
     print(f"target:  {live}  (mode {want_mode:04o})")
 
     if exists:
+        # Show a mode CHANGE before it happens, not after. `install -m` applies the
+        # header's mode unconditionally, so a header written for another host -- or
+        # guessed -- silently re-permissions a live file, and a plain diff cannot see it.
+        current_mode = stat.S_IMODE(live.stat().st_mode)
+        if current_mode != want_mode:
+            print(
+                f"mode:    {current_mode:04o} -> {want_mode:04o}  "
+                f"** THIS CHANGES PERMISSIONS ** — if {want_mode:04o} is wrong, fix "
+                f"infra-mode in the repo copy rather than installing this"
+            )
+
         live_bytes = read_bytes(live)
         if live_bytes == repo_bytes:
             print("\nalready identical, including the header. Nothing to do.")

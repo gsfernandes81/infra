@@ -455,9 +455,35 @@ def main():
     ap = argparse.ArgumentParser(description="Generate a host hardware inventory.")
     ap.add_argument("--host", default=None, help="host name (default: this machine)")
     ap.add_argument("--stdout", action="store_true", help="print instead of writing")
+    ap.add_argument(
+        "--force", action="store_true",
+        help="write another host's file anyway (see the warning it prints)",
+    )
     args = ap.parse_args()
 
     host = args.host or host_name()
+
+    # --host renames the OUTPUT. It cannot change whose hardware gets read: every fact
+    # below comes from THIS machine's /sys and /proc. So `--host one` run on zero reads
+    # zero's disks and writes them to hosts/one/system/hardware.md, silently replacing
+    # a record of hardware nobody inspected -- on a host whose real inventory documents
+    # a failing drive. The legitimate use is a box whose hostname does not match its
+    # directory name, where you ARE standing on the host; that still works, with
+    # --force to say so out loud.
+    if host != host_name():
+        print(
+            f"hw-inventory: --host {host} but this machine is {host_name()}. "
+            f"Hardware is read from THIS machine either way.",
+            file=sys.stderr,
+        )
+        if not args.stdout and not args.force:
+            print(
+                f"refusing to overwrite hosts/{host}/system/hardware.md with "
+                f"{host_name()}'s hardware. Use --stdout to look, or --force if this "
+                f"machine really is {host}.",
+                file=sys.stderr,
+            )
+            return 1
     cfg, cfg_path = load_config(host)
 
     # Two independent gates. Root is a capability; the config is a decision. Both are
@@ -494,4 +520,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
