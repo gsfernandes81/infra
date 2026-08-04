@@ -48,6 +48,12 @@ casually.
 
 ## `one`: the array is missing and `lsblk` shows no `sda`/`sdb` at all
 
+> **Added 2026-08-04 — delete this section once the SP900 is out of bay 0.**
+> After that it describes a fault that no longer exists, in the document you read while
+> something *else* is wrong, and it resembles a generic USB fault closely enough to send
+> you down the wrong path. Deleting it costs nothing: the evidence, measurements and
+> ruled-out hypotheses are in commit `0213a03` and stay searchable via `git log`.
+
 **A failing disk in bay 0 of the Sabrent enclosure hangs the whole USB bridge, so the
 data disk never enumerates.** The array is on `sdb`; bay 0 holds an ADATA SP900 that is
 confirmed bad (Aug 2026: 1681 `Reported_Uncorrect`, self-test "completed: read failure",
@@ -72,19 +78,43 @@ sleep 5
 sudo sh -c 'echo 0000:01:00.0 > /sys/bus/pci/drivers/xhci_hcd/bind'
 sleep 20
 lsblk                                    # expect sda AND sdb
-sudo sh ~/recover-array.sh               # mounts, checks guards, cycles containers
 ```
 
 **This is safe to do over SSH.** `eth0` is `bcmgenet` on the platform bus, not USB, so
 resetting the USB controller cannot cut your session. A missing array is an outage, never
 a stranding.
 
+Then mount and verify. Check the source device, not just that *something* mounted —
+`by-id` names collide on this enclosure, so a wrong-disk mount is the failure to exclude:
+
+```sh
+for m in ionic-mysql torrents torrents-config syncthing-config; do sudo mount /media/$m; done
+awk '$2 ~ /^\/media\// {print $1, $2, $3}' /proc/mounts    # expect 4x /dev/sdb1 ... btrfs
+sudo bin/check-mount-guards                                # guards still intact?
+```
+
+Then cycle only the containers holding `/media` bind mounts, so they re-resolve them.
+**Leave `gluetun` alone** — `torrent` shares its network namespace, and restarting
+`gluetun` reconnects the VPN and gets you a new forwarded port:
+
+```sh
+sudo docker restart mysql-ionic && sleep 30
+sudo docker restart bot web                # they hold dead connections to mysql
+sudo docker restart torrent syncthing
+sudo docker exec torrent ls /downloads | head   # proves it sees the ARRAY, not the
+sudo docker exec mysql-ionic ls /var/lib/mysql  # empty mountpoint underneath it
+```
+
+That last pair is the check that matters. A container still holding the bare mountpoint
+is running and looks healthy; only reading the path tells them apart.
+
 Three things worth knowing before you touch it:
 
 - **Never run `smartctl` against `/dev/sda`.** A bare SMART read is enough to hang it —
   it did so on 2026-08-03, provoking a bridge-wide reset. That reset happened to succeed;
-  the identical one at boot failed and cost ten minutes. `~/disk-watch.sh` polls `sdb`
-  only, deliberately.
+  the identical one at boot failed and cost ten minutes. The `sda` entry in
+  `hosts/one/system/hw-inventory.toml` is on `smart_skip` for exactly this reason, and
+  its model and serial are pinned there by hand because they can no longer be read.
 - **Enumeration is a coin flip, not a certainty.** The same re-bind that fails at boot
   succeeds on retry. Reboots are the hazard; steady-state running is not, because
   nothing on this box reads `sda`.
