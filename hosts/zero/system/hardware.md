@@ -22,20 +22,15 @@ readable here — fill it in via the overrides file rather than guessing.
 | Index | Dev | Bay | Role | Model | Serial |
 |---|---|---|---|---|---|
 | `128G-?-SD-?` | mmcblk0 | onboard | boot + root | YD4QD | 0x712f66af |
-| `500G-2.5in-SSD-?` | sda | ? | bcache cache (sda1) + swap (sda3); sda2 unused | — | — |
-| `1T-?-HDD-?-0` | sdb | ? | btrfs RAID1 member, backing disk for bcache1 | — | — |
-| `1T-?-HDD-?-1` | sdc | external | btrfs RAID1 member, backing disk for bcache0 | — | — |
+| `500G-2.5in-SSD-2022-02` | sda | ? | bcache cache (sda1) + swap (sda3); sda2 unused | CT500MX500SSD1 | 2206E60AB234 |
+| `1T-2.5in-HDD-?` | sdb | ? | btrfs RAID1 member, backing disk for bcache1 | WDC WD10SPZX-60Z10T0 | WD-WXP1A39702NU |
+| `1T-?-HDD-?` | sdc | external | btrfs RAID1 member, backing disk for bcache0 | WDC WD10JMVW-11AJGS4 | WD-WXC1A47JYJ7R |
 
 ### Notes
 
-- `500G-2.5in-SSD-?` (sda) — **SMART polling disabled for this device.** The bcache cache device, shared by both backing disks. Its by-id name is ata-Sabrent_Disk_Dev_00000000000000000000 — an ALL-ZEROS serial invented by the enclosure, which is the by-id collision recorded in this repo's history. Do not identify this drive by by-id path; two disks behind these bridges can present the same one. Cache mode was writethrough with 0.0k dirty as of 2026-08-03, so it holds nothing the backing disks do not — re-check before relying on that, because writeback would make it live data.
-- `1T-?-HDD-?-0` (sdb) — **SMART polling disabled for this device.** Reports model 'Sabrent Disk Dev', the same string as sda, so model does not distinguish them. sdc is a WD Elements and is the one that IS distinguishable by sight.
-- `1T-?-HDD-?-1` (sdc) — **SMART polling disabled for this device.** Reports model 'Elements 25A2' — a WD Elements in its own enclosure, and therefore the one drive here you can identify by eye without opening anything.
-
-> **SMART was not read for this inventory.** Model, serial, form factor and
-> manufacture date are only available through SMART for enclosure-attached
-> disks — sysfs reports the bridge, not the drive. Re-run as root to fill
-> these in.
+- `500G-2.5in-SSD-2022-02` (sda) — The bcache cache device, shared by both backing disks. Its by-id name is ata-Sabrent_Disk_Dev_00000000000000000000 — an ALL-ZEROS serial invented by the enclosure, which is the by-id collision recorded in this repo's history. Do not identify this drive by by-id path; two disks behind these bridges can present the same one. Cache mode was writethrough with 0.0k dirty as of 2026-08-03, so it holds nothing the backing disks do not — re-check before relying on that, because writeback would make it live data.
+- `1T-2.5in-HDD-?` (sdb) — Reports model 'Sabrent Disk Dev', the same string as sda, so model does not distinguish them. sdc is a WD Elements and is the one that IS distinguishable by sight.
+- `1T-?-HDD-?` (sdc) — Reports model 'Elements 25A2' — a WD Elements in its own enclosure, and therefore the one drive here you can identify by eye without opening anything.
 
 ## USB topology
 

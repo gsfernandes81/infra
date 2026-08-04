@@ -21,6 +21,28 @@ not from scratch.
 | `containerd` service removed, package kept | `dockerd` spawns its own containerd; every moby shim uses `/var/run/docker/containerd/containerd.sock`, so the standalone service owned zero shims. But `docker-engine` **hard-depends on the package** — `apk del containerd` would kill every container at the next start. Service-level removal only. |
 | OpenCloud and k3s deleted, not migrated | Both confirmed unused. k3s was still *running* a live cluster (traefik, coredns, metrics-server) and holding ~880 MB of swap; removing it plus the dead `nextcloud` subvolume returned ~344 GiB to the array. |
 
+## SSH between hosts: `two` is a jump host, and that is all
+
+**`two` exists as an SSH jump host and an out-of-band console. Nothing else in this
+repo runs over SSH between boxes.** Fleet work is done *on* the box it concerns.
+
+So there is no key on `zero` authorising it to reach `one` or `two`, and none should be
+added for convenience. `zero` is the internet-facing box — it runs the tunnel and
+Immich — and a key from it to the other two would mean a compromise of the most exposed
+host reaches the whole fleet. The lifeboat direction is the safe one: `two` reaches out,
+because `two` exposes nothing.
+
+This is why `bin/check-system-drift` and `bin/hw-inventory` both **refuse to operate on
+a host you are not standing on**. That is not a limitation to route around with SSH; it
+is this decision expressed in code. Each compares repo state against the *local* `/etc`
+or reads the *local* `/sys`, so running one "for" another host produces confident
+fiction — `hw-inventory --host one` on `zero` would have overwritten `one`'s inventory,
+including the record of its failing disk, with `zero`'s hardware.
+
+The cost is real and accepted: facts about `one` and `two` cannot be verified from
+`zero`, so anything unconfirmed is marked unverified in the docs rather than guessed —
+zram on both hosts, and `one`'s file modes, are the current examples.
+
 ## `zero`'s encrypted volume
 
 **Immich serves by default; a security concern keeps it down.** That veto is the design

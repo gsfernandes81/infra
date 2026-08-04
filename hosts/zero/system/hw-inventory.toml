@@ -6,18 +6,23 @@
 #
 # Anything under [overrides.<dev>] wins over what the script detects.
 
-# EVERY enclosure-attached disk is skipped, deliberately, and this is not a statement
-# that they are bad. On `one`, a bare smartctl read of a Sabrent-bridged disk stalled
-# ~60s and provoked a bridge-wide USB reset; one such reset cost a ten-minute array
-# outage. Two of these three disks are behind that same bridge, and this box is the
-# remote, mission-critical one — so the polling stays off until someone is physically
-# present to recover from a wedged bridge.
+# Nothing is skipped here, and that is a decision rather than an omission — an empty
+# list says someone looked, which a deleted line does not.
 #
-# Consequence, stated so it is not mistaken for a clean bill of health: model, serial,
-# form factor and manufacture date cannot be read for these drives, and the array's
-# btrfs error counters (wr 11875, rd 721, corrupt 3110 as of 2026-08-03) therefore have
-# no SMART context yet. smartmontools is not installed here either.
-smart_skip = ["sda", "sdb", "sdc"]
+# The caution was inherited from `one`, where a bare smartctl read of a Sabrent-bridged
+# disk stalled ~60s and provoked a bridge-wide USB reset that cost a ten-minute array
+# outage. Two of zero's three disks sit behind the same class of bridge, so all three
+# started out skipped.
+#
+# Tested 2026-08-04, deliberately in blast-radius order — sdc first (alone on its own
+# bridge), then sdb, then sda (which share one). All three `smartctl -i -d sat` reads
+# returned within a second, with no USB reset, no I/O error, and all three mounts
+# intact afterwards. Note what that does and does not establish: `one`'s hang was
+# provoked by a FAILING drive, not by the bridge alone, and zero's array had just
+# scrubbed clean across 130.86 GiB with zero errors. So this is safe while the disks
+# are healthy. If SMART ever reports a failing drive here, re-add it to this list
+# before polling it again.
+smart_skip = []
 
 
 [overrides.mmcblk0]
