@@ -746,6 +746,39 @@ else
 fi
 note "confirm the storage driver reads 'overlay' (not 'vfs') with: dd-ctl status"
 
+# The `tun` module, which passt/pasta cannot work without. Installing the package is not
+# enough and the failure is a long way from the cause: podman starts, netavark is happy,
+# the image pulls, the container is CREATED — and then starting it dies with
+#
+#     setting up Pasta: pasta failed with exit code 1:
+#     Failed to open() /dev/net/tun: No such file or directory
+#
+# Measured on `two` before this was added: tun.ko.xz shipped in /lib/modules, not built
+# into the kernel, not loaded, and /etc/modules held only `af_packet ipv6`. So every
+# rootless container that wanted a network failed, on a box where every other check
+# passed. Loading it here covers the current boot; /etc/modules covers the next one,
+# and OpenRC's `modules` service reads that file at boot.
+if [ -c /dev/net/tun ]; then
+	ok "/dev/net/tun present (pasta can build its tap device)"
+else
+	if modprobe tun 2>/dev/null && [ -c /dev/net/tun ]; then
+		changed "loaded the tun module — /dev/net/tun now present"
+	else
+		warn "could NOT load the tun module; rootless container networking will fail"
+		note "pasta needs /dev/net/tun. Without it every container fails at START with
+    'Failed to open() /dev/net/tun'. Check that tun.ko exists for this kernel:
+      find /lib/modules -name 'tun.ko*'
+    then load it by hand and re-run:  modprobe tun"
+	fi
+fi
+if [ -f /etc/modules ] && grep -qxF tun /etc/modules; then
+	ok "tun already in /etc/modules (survives reboot)"
+else
+	backup /etc/modules
+	printf 'tun\n' >> /etc/modules
+	changed "added tun to /etc/modules so it loads at boot"
+fi
+
 # ---------------------------------------------------------------------------------
 say "== 4/13  install dd-ctl"
 
