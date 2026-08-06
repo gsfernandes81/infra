@@ -264,6 +264,10 @@ STOP_TIMEOUT=60   # > supervisord's stopwaitsecs=45, so the bot gets its drain
 # reading it over SSH with no other context.
 READY_TIMEOUT=900
 READY_POLL=10
+# How often the wait prints a line. Must be a multiple of READY_POLL or the modulo in
+# wait_ready() never fires. 30s is often enough to keep an SSH session over the tunnel
+# from going idle, and at the 900s timeout it is 30 lines, not 90.
+HEARTBEAT_EVERY=30
 
 AUDIT_LOG="$HOME/.local/state/dd-ctl/audit.log"
 
@@ -581,6 +585,24 @@ wait_ready() {  # wait_ready <container> <bot>
         running and still trying. Look at 'dd-ctl logs-$_b'."
 		sleep "$READY_POLL"
 		_waited=$((_waited + READY_POLL))
+		# HEARTBEAT, AND IT IS NOT DECORATION. This runs as an SSH forced command over a
+		# Cloudflare tunnel, and the first real `deploy-both` died right here: beacon was
+		# created and verified, the wait began, and the session dropped with
+		# `client_loop: send disconnect: Broken pipe` — leaving beacon deployed and anchor
+		# never attempted. A wait that prints nothing for up to fifteen minutes is a
+		# silent connection, and a silent connection is the one an idle timeout or a
+		# tunnel reconnect is free to discard. Output every $HEARTBEAT_EVERY seconds keeps
+		# bytes flowing and, secondarily, tells whoever triggered it that the box has not
+		# hung.
+		#
+		# It does NOT make the deploy survive a drop — nothing here does; the shell dies
+		# with the session and anchor goes undeployed. Re-run `deploy-both` after a drop.
+		# That is safe (every step is idempotent) but not free: it force-recreates the
+		# beacon that had already come up, so it pays for the first bot's cold start
+		# again.
+		if [ $((_waited % HEARTBEAT_EVERY)) -eq 0 ]; then
+			printf '    ... %s not online yet (%ss elapsed)\n' "$_b" "$_waited"
+		fi
 	done
 }
 
