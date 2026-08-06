@@ -72,9 +72,14 @@ directory on power loss. Whichever way that is settled, settle it in
 
 **Swap: there is none.** Verified Aug 2026 — no zram, no swap file, no swap partition.
 `docs/host-setup.md` said `two` runs zram; it does not, and Alpine's `zram-init`
-package cannot be enabled the way that doc described. `root-setup.sh` §9 turns on a
-256 MB zram swap **live**, and it does not survive a reboot, because persisting it
-means boot-path code on the lifeboat box.
+package cannot be enabled either of the two ways that doc described. There is no OpenRC
+service and no `/etc/conf.d/zram-init` — both are Gentoo's packaging — **and the
+invocation it gave would not have run either**: it passed `-s 1`, which is not in that
+script's `getopts`. The real `armhf` binary answers `Illegal option -s` and exits, so
+the documented command failed while both files went on describing `two` as running zram.
+The verified line is `zram-init -d 0 -p 100 256`. `root-setup.sh` §9 runs that, **live**,
+and it does not survive a reboot, because persisting it means boot-path code on the
+lifeboat box.
 
 Nothing household-critical goes here: no DNS, no backups, no log sink. A test bot is
 not household-critical either — but it does put a continuous Postgres write load on a

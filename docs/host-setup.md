@@ -33,9 +33,14 @@ apk add bcache-tools          # zero only — data array behind an SSD cache
 ```
 
 **`two` takes the podman list instead**, not this one — and package names moved between
-Alpine 3.23 and 3.24 (`shadow-uidmap` no longer exists; the `newuidmap`/`newgidmap`
-binaries are in `shadow-subids`). Since `apk add` is atomic, one stale name aborts the
-whole install. The verified 3.24 `armhf` list is in
+Alpine 3.23 and 3.24: the `newuidmap`/`newgidmap` binaries were in `shadow-uidmap` and
+are now in `shadow-subids`. **`shadow-uidmap` has not stopped existing**, which is what
+this line used to claim. `shadow-subids` *provides* `shadow-uidmap=4.18.0-r1`, so
+`apk add shadow-uidmap` still resolves and installs cleanly; the old name would have
+worked. Write `shadow-subids` anyway — it is the real package, and it is what
+`apk info -e` answers with — but not because the other name is fatal. It isn't, and an
+invented reason is what gets copied into the next box's script. The verified 3.24
+`armhf` list is in
 [`../hosts/two/setup/root-setup.sh`](../hosts/two/setup/root-setup.sh) §3, with the
 reasoning for each name.
 
@@ -103,8 +108,17 @@ apk info -e zram-init && cat /proc/swaps && lsblk | grep zram
 Enabling it is a live one-shot; there is no service to add:
 
 ```sh
-zram-init -d 0 -s 1 -p 100 256      # 256 MB, one compression stream, priority 100
+zram-init -d 0 -p 100 256           # device 0, swap priority 100, 256 MB
 ```
+
+**There is no `-s`.** This line used to read `zram-init -d 0 -s 1 -p 100 256`, with
+`-s 1` glossed as "one compression stream, because there is one core". `-s` is not in
+that script's `getopts`: the real `armhf` binary answers `Illegal option -s` and exits,
+so every invocation documented here and in `root-setup.sh` §9 would have failed — while
+both files went on to describe `two` as running zram. `-d 0 -p 100 256` is what was
+verified to parse and reach `mkswap`/`swapon`. No `-a` either: the kernel default
+(lzo-rle on 6.x) is the right pick on a CPU with no NEON, and naming an algorithm this
+kernel may not have compiled in turns a cushion into an error.
 
 That does **not** survive a reboot, and persisting it means an OpenRC service — new
 boot-path code, which [decisions.md](decisions.md) rejected on `two` for the same
@@ -156,13 +170,16 @@ ACTION REQUIRED:` blocks; §12 prints what it *would* remove. Then re-run with
 
 Two things in it that are load-bearing and easy to undo by accident:
 
-- **`iptables` is installed in §3, before the removal in §12.** It is currently on `two`
-  only as an auto-installed dependency of `docker-engine`/`k3s`, and `apk del` reclaims
-  orphaned dependencies — so removing Docker would take `iptables` with it. netavark
-  shells out to `iptables` to program the bridge network's rules, including inside a
-  *rootless* netns, while **not** depending on the package. The stack would then have
-  broken days later for a reason nobody would connect back to a Docker cleanup.
-  Installing it first makes it a world member. Do not move §3 below §12.
+- **`iptables` and `ca-certificates` are installed in §3, before the removal in §12.**
+  Both are on `two` today only as auto-installed dependencies of `docker-engine`/`k3s`,
+  and `apk del` reclaims orphaned dependencies — so removing Docker would take both with
+  it. netavark shells out to `iptables` to program the bridge network's rules, including
+  inside a *rootless* netns, while **not** depending on the package; the stack would
+  have broken days later for a reason nobody would connect back to a Docker cleanup.
+  `ca-certificates` is worse, because it is the trust store `cloudflared` validates
+  Cloudflare's edge against: losing it cuts **the only way into the box**, minutes after
+  §12 reports success. Naming both in §3's `apk add` makes them world members that no
+  reclaim can touch. Do not move §3 below §12.
 - **`/usr/local/bin/dd-ctl` must stay a real root-owned file**, 0755, in a directory
   only root can write. See [`../hosts/two/system/README.md`](../hosts/two/system/README.md).
 

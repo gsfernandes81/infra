@@ -9,7 +9,16 @@
 #
 #   sh root-setup.sh                       # everything except the destructive parts
 #   DD_CTL_PUBKEY='ssh-ed25519 AAAA... label' sh root-setup.sh
-#   DD_REMOVE_DOCKER=1 sh root-setup.sh    # additionally uninstall docker/containerd
+#   DD_REMOVE_DOCKER=1 sh root-setup.sh    # prints `apk del --simulate` and STOPS
+#   DD_REMOVE_DOCKER=1 DD_REMOVE_DOCKER_CONFIRMED=1 sh root-setup.sh   # actually removes
+#
+# The docker removal takes THREE runs, not two, and the middle one is the point: the
+# package list §12 names is ten packages, but `apk del` reclaims orphaned dependencies
+# too and the real transaction is around 36 — including `coreutils`, pulled in by k3s.
+# Losing coreutils is not cosmetic: §7's `stat -f -c %T /sys/fs/cgroup` returns UNKNOWN
+# under busybox's stat instead of `cgroup2fs`, so a re-run of this script would then warn
+# about a cgroup setup that is in fact fine. A list nobody read is not an approval, so
+# the middle run prints `apk del --simulate` and refuses to go further.
 #
 # NOT EXECUTABLE, and not in bin/. Both are deliberate. CLAUDE.md's rule is that a
 # one-shot script which tears down live stacks must not be left sitting on anyone's
@@ -26,6 +35,15 @@
 # NOTE: `gavin`'s login shell is fish. Invoke this as `sh root-setup.sh`, never by
 # relying on the shebang through a fish `ssh host 'script'` — and see §8, which is why
 # a plain `.profile` export is not enough on this box.
+#
+# THAT LOGIN SHELL IS ALSO PART OF THE DEPLOY KEY'S TRUSTED COMPUTING BASE, which is the
+# single most important thing in this file. sshd does not exec a forced command; it runs
+# `$SHELL -c "<command>"`. fish reads /etc/fish/config.fish, ~/.config/fish/conf.d/*.fish
+# and ~/.config/fish/config.fish on EVERY startup, including a non-interactive `-c` (only
+# `fish -N` skips them), and ~/.config/fish/ is gavin-writable — §8 of this script writes
+# into it. So §4's proof that /usr/local/bin/dd-ctl is root-owned and unwritable is
+# defeated one level up. See §5 for the full statement and what is and is not done about
+# it.
 #
 # WHAT IT DOES NOT DO, and why. Each is a deliberate removal from the app repo's
 # deploy/pi-bplus/root-setup.sh that this file is derived from:
@@ -98,6 +116,19 @@ ok()      { printf '       ok   %s\n' "$*"; }
 warn()    { printf '       WARN %s\n' "$*"; }
 
 backup() {  # backup <path>
+	# NOT A SYMLINK, and the two tests are separate on purpose. `cp -a` preserves a
+	# symlink AS a symlink, and the `chmod 600` below then FOLLOWS it and changes the
+	# mode of whatever it points at — proven: a 755 target came back 600. So a backup of
+	# a planted link would silently re-permission a file nobody was thinking about, which
+	# is the same class of accident as the `.bak` in /etc/init.d this function's directory
+	# choice exists to avoid.
+	if [ -L "$1" ]; then
+		warn "$1 is a SYMLINK — not backed up, and not followed"
+		note "$1 is a symlink. It was NOT backed up (copying it and then chmod'ing the copy
+    would have changed the mode of its target). Find out who planted it before letting
+    anything here write through it."
+		return 0
+	fi
 	[ -f "$1" ] || return 0
 	mkdir -p "$BACKUP_DIR"
 	# The whole path with `/` mangled to `_`, not basename. Two files with the same
@@ -112,16 +143,88 @@ backup() {  # backup <path>
 	say "       backed up $1 -> $_bk (mode 600)"
 }
 
-pkg_installed() {  # pkg_installed <name>  — true only if actually installed
-	[ -n "$(apk info -e "$1" 2>/dev/null)" ]
+pkg_installed() {  # pkg_installed <name>  — true only if THAT package is installed
+	# `apk info -e <name>` MATCHES BY PROVIDES, and prints the providing package's real
+	# name — not the name asked for. `apk info -e shadow-uidmap` prints `shadow-subids`,
+	# and `apk info -e docker` prints `podman-docker` on a box where podman-docker is
+	# installed, because it provides `docker`. The old `[ -n "$(…)" ]` test therefore said
+	# yes for a package that is not installed, and §12 would have put `docker` on its
+	# removal list and taken podman-docker out with the real docker packages.
+	#
+	# So require the OUTPUT to be the name asked for, whole line and literally.
+	apk info -e "$1" 2>/dev/null | grep -qxF "$1"
 }
 
 mem_avail_mb() { awk '/^MemAvailable:/ {printf "%d", $2/1024}' /proc/meminfo; }
 
+# THE SUMMARY PRINTS EVEN WHEN THE RUN DIES. `set -e` plus a summary at the bottom of the
+# file means any mid-run abort — a failed `apk add`, a refusal in §4, a signal — leaves
+# the record of what already changed only in scrollback, on a box reached through a
+# tunnel. Every mutation above appends to CHANGED, so the trap is what makes that list
+# worth keeping. RUN_COMPLETED gates the "NEXT" block only: a half-applied box should not
+# be handed next steps as though it were built.
+RUN_COMPLETED=no
+summary() {
+	say ""
+	say "======================================================================"
+	[ "$RUN_COMPLETED" = yes ] || say "RUN DID NOT COMPLETE — the sections after the failure did not run."
+	if [ -n "$CHANGED" ]; then
+		say "CHANGED:$CHANGED"
+	elif [ "$RUN_COMPLETED" = yes ]; then
+		say "CHANGED: nothing — this box was already set up."
+	else
+		# NOT "already set up". The run stopped early, so "nothing changed" here means
+		# "nothing changed BEFORE the failure" and says nothing about the rest of the box.
+		say "CHANGED: nothing, up to the point where the run stopped."
+	fi
+	say ""
+	if [ -n "$NOTES" ]; then
+		say "NOTES / ACTION REQUIRED:$NOTES"
+		say ""
+	fi
+	[ "$RUN_COMPLETED" = yes ] || return 0
+	cat <<EOF
+NEXT, and none of it needs root. $DD_USER's shell is fish, so these are written to be
+pasted into an interactive fish session; anything with sh syntax is run as 'sh -c'.
+
+  1. as $DD_USER:
+       git clone <infra-repo-url> $DD_CHECKOUT
+       cp $DD_STACK_DIR/.env.example $DD_STACK_DIR/.env
+       chmod 600 $DD_STACK_DIR/.env
+       \$EDITOR $DD_STACK_DIR/.env          # fill it in; it is gitignored
+
+  2. from your workstation, with the restricted key:
+       ssh -i <key> $DD_USER@ssh-two.gsrpi.uk status
+       ssh -i <key> $DD_USER@ssh-two.gsrpi.uk deploy-beacon
+
+Nothing on this box starts at boot, by design. After a power cut it runs no containers
+and (see section 9) no swap until someone acts. That is intended, not a bug to fix by
+adding a local.d hook.
+EOF
+}
+trap summary EXIT
+
 # ---------------------------------------------------------------------------------
-say "== 1/12  preflight"
+say "== 1/13  preflight"
 
 [ "$(id -u)" = 0 ] || { echo "must run as root" >&2; exit 1; }
+# DD_CTL_PATH is interpolated into ANCHORED grep patterns below (§1 and §5), where it is
+# a basic regular expression rather than a fixed string — `grep -F` cannot anchor, and
+# anchoring is the whole point of those greps. So constrain the path to characters that
+# mean themselves. `.` is allowed and is the one benign exception: as a BRE it matches
+# any character, but the only strings that would then match are paths differing from this
+# one by a single character in that position, which is not a case anybody is attacking.
+case "$DD_CTL_PATH" in
+	/*) : ;;
+	*) echo "refusing: DD_CTL_PATH must be an absolute path" >&2; exit 1 ;;
+esac
+case "$DD_CTL_PATH" in
+	*[!A-Za-z0-9./_-]*)
+		echo "refusing: DD_CTL_PATH contains a character outside [A-Za-z0-9./_-]." >&2
+		echo "It is interpolated into anchored grep patterns; a metacharacter there" >&2
+		echo "would silently widen what those patterns match." >&2
+		exit 1 ;;
+esac
 id "$DD_USER" >/dev/null 2>&1 || {
 	echo "no such user: $DD_USER. This script does not create users — see the header." >&2
 	exit 1
@@ -189,8 +292,20 @@ if [ -n "${DD_CTL_PUBKEY:-}" ]; then
 		echo "appends a second, UNRESTRICTED key line. Supply exactly one key." >&2
 		exit 1
 	fi
+	# The key TYPES accepted include the FIDO/security-key variants. A hardware-backed
+	# `sk-ssh-ed25519@openssh.com` key is the better key to hold for a deploy that can
+	# become root, so rejecting it as "malformed" pushed the operator toward the weaker
+	# option with a message that blamed their key.
+	#
+	# The COMMENT field permits tabs. `[^[:cntrl:]]` excludes tab — tab IS a control
+	# character — so a key pasted out of a wiki or a spreadsheet, where the separator
+	# arrives as a tab, was refused for a reason the message did not name. The literal
+	# tab is built here rather than written as `\t`, which is not portable inside a
+	# bracket expression; the `x` suffix survives command substitution's stripping of
+	# trailing NEWLINES only, but costs nothing and makes the intent explicit.
+	TAB="$(printf '\tx')"; TAB="${TAB%x}"
 	if ! printf '%s\n' "$DD_CTL_PUBKEY" | grep -Eq \
-		'^(ssh-ed25519|ecdsa-sha2-[a-z0-9-]+|ssh-rsa) [A-Za-z0-9+/=]+( [^[:cntrl:]]*)?$'
+		"^(ssh-ed25519|sk-ssh-ed25519@openssh\.com|ecdsa-sha2-[a-z0-9-]+|sk-ecdsa-sha2-[a-z0-9-]+@openssh\.com|ssh-rsa) [A-Za-z0-9+/=]+([ $TAB][[:print:]$TAB]*)?\$"
 	then
 		echo "refusing: DD_CTL_PUBKEY is not a single '<type> <base64> [comment]' key." >&2
 		echo "Options and the command= prefix are added by this script — do not include" >&2
@@ -201,20 +316,39 @@ if [ -n "${DD_CTL_PUBKEY:-}" ]; then
 fi
 
 HAVE_FORCED_KEY=no
+# EVERY TEST BELOW IS ANCHORED, and that is not a style preference. The unanchored
+# `grep -qF` these replaced matched a COMMENTED-OUT copy of the forced-command line as
+# readily as a live one, so a line sshd ignores entirely set HAVE_FORCED_KEY=yes and this
+# script then reported the box as already holding the restricted key. The same bug, in
+# §5, made the dedupe say "this exact line is already present" and skip installing the
+# key — with nothing in CHANGED: to show for it. A check that passes for the wrong reason
+# is worse than no check (docs/decisions.md); one that passes on a comment is that in its
+# purest form.
+#
+# `^command="…",restrict ` is the FULL prefix, not just `command=`. A hand-written line
+# without `restrict` gets a pty, agent forwarding, port forwarding and ~/.ssh/rc — a
+# materially weaker thing. Accepting it as "already have the forced key" means the weak
+# line is never noticed and never replaced.
 if [ -f "$AUTHKEYS" ]; then
-	# The FULL prefix, including `restrict`, not just `command=`. A hand-written line
-	# without `restrict` gets a pty, agent forwarding, port forwarding and ~/.ssh/rc —
-	# a materially weaker thing. Accepting it as "already have the forced key" means
-	# the weak line is never noticed and never replaced.
-	if grep -qF "command=\"$DD_CTL_PATH\",restrict " "$AUTHKEYS"; then
+	if grep -q "^command=\"$DD_CTL_PATH\",restrict " "$AUTHKEYS"; then
 		HAVE_FORCED_KEY=yes
 	fi
-	if grep -F "$DD_CTL_PATH" "$AUTHKEYS" | grep -qv 'restrict'; then
-		warn "$AUTHKEYS has a dd-ctl line WITHOUT 'restrict'"
-		note "A dd-ctl forced-command line in $AUTHKEYS lacks 'restrict', so that key still gets
-    a pty and agent/port forwarding. Replace it by hand with:
+	# Lines that NAME dd-ctl but are not that exact prefix. The old form asked whether
+	# the line contained the string `restrict` anywhere, which a key COMMENT of
+	# `dd-ctl-restricted@laptop` satisfies — defeating the warning on exactly the weak
+	# line it exists to find. Comment lines are dropped first because sshd ignores them,
+	# so warning about one is noise. The pipeline's exit status is the LAST grep's, which
+	# is what is wanted here and is stated because CLAUDE.md records the general trap.
+	if grep -v '^[[:space:]]*#' "$AUTHKEYS" \
+		| grep -F "$DD_CTL_PATH" \
+		| grep -qv "^command=\"$DD_CTL_PATH\",restrict "
+	then
+		warn "$AUTHKEYS has a dd-ctl line that is NOT 'command=\"$DD_CTL_PATH\",restrict …'"
+		note "A line in $AUTHKEYS names $DD_CTL_PATH but does not begin with
       command=\"$DD_CTL_PATH\",restrict <type> <base64> <comment>
-    This script appends and never edits, so it will not fix that line for you."
+    so it is either missing 'restrict' — that key still gets a pty and agent/port
+    forwarding — or carries options this script did not write. Fix it by hand; this
+    script appends and never edits. The census at the end of this run lists every key."
 	fi
 fi
 if [ -z "${DD_CTL_PUBKEY:-}" ] && [ "$HAVE_FORCED_KEY" = no ]; then
@@ -231,7 +365,7 @@ EOF
 fi
 
 # ---------------------------------------------------------------------------------
-say "== 2/12  apk repositories"
+say "== 2/13  apk repositories"
 
 # The obvious one-liner here — `sed -i 's|^#\(.*/community\)$|\1|'` — uncomments EVERY
 # commented line ending in /community. That includes an `edge/community` somebody
@@ -281,7 +415,7 @@ fi
 apk update
 
 # ---------------------------------------------------------------------------------
-say "== 3/12  packages"
+say "== 3/13  packages"
 
 # Verified against the real Alpine v3.24 armhf APKINDEX (main + community), not against
 # 3.23 and not from memory. The names that matter:
@@ -295,11 +429,18 @@ say "== 3/12  packages"
 #   crun                  named explicitly because podman depends on the virtual
 #                         `oci-runtime`, which BOTH crun and runc provide. runc has no
 #                         good armv6 story; letting apk pick is not worth the risk.
-#   shadow-subids         THE RENAME. On Alpine 3.23 this was `shadow-uidmap`; on 3.24
-#                         the newuidmap/newgidmap binaries live in `shadow-subids` and
-#                         `shadow-uidmap` DOES NOT EXIST. `apk add` is atomic, so the
-#                         old name would abort this entire install with a "package not
-#                         found" and nothing else would happen.
+#   shadow-subids         THE RENAME — and the name here is right for a reason this
+#                         comment used to get wrong. On Alpine 3.23 the newuidmap/
+#                         newgidmap binaries were in `shadow-uidmap`; on 3.24 they are in
+#                         `shadow-subids`. What is NOT true, and was claimed here, is
+#                         that `shadow-uidmap` "does not exist" on 3.24 and would abort
+#                         the install: `shadow-subids` PROVIDES `shadow-uidmap=4.18.0-r1`
+#                         and `apk add shadow-uidmap` resolves and installs it cleanly.
+#                         The old name would have worked. `shadow-subids` is still the
+#                         right thing to write — it is the real package, and it is what
+#                         `apk info -e` answers with, which is what pkg_installed()
+#                         compares against — but "the other name is fatal" was a fiction,
+#                         and a fiction is what gets copied into the next box's script.
 #   iptables              THE TRAP, and it is now a double one:
 #                         (a) netavark shells out to iptables to program the bridge
 #                             network's NAT and filter rules — including inside a
@@ -314,8 +455,21 @@ say "== 3/12  packages"
 #                         Installing it HERE, before §12, makes it an explicit member of
 #                         the world set, so the docker removal cannot reclaim it. That
 #                         ordering is load-bearing. Do not move this below §12.
-#                         ip6tables is deliberately not installed: nothing here creates
-#                         an IPv6-enabled network.
+#                         THERE IS NO SEPARATE ip6tables DECISION. An earlier version of
+#                         this comment said ip6tables was "deliberately not installed";
+#                         there is no such package to not install — Alpine's `iptables`
+#                         package PROVIDES `ip6tables` and ships /sbin/ip6tables and
+#                         ip6tables-restore in the same apk. Whatever the box does about
+#                         IPv6, that line is already installed by the line above.
+#   ca-certificates       PINNED HERE FOR THE SAME REASON AS iptables, and it is just as
+#                         load-bearing. It is on this box today only as a dependency —
+#                         docker-engine pulls it — and §12's `apk del` reclaims orphaned
+#                         auto-installed dependencies. Losing it takes the trust store
+#                         with it, and the trust store is what cloudflared validates
+#                         Cloudflare's edge against: the removal would cut the only way
+#                         into the box, some minutes after reporting success. Naming it
+#                         in this `apk add` makes it a world member that no reclaim can
+#                         touch. Do not move it below §12 either.
 #   git                   already present, listed so a rebuild of this box still gets
 #                         it. Needed to clone the infra repo; nothing is built here.
 #   zram-init             a plain wrapper script (/usr/sbin/zram-init) — see §9. On
@@ -342,7 +496,7 @@ fi
 note "confirm the storage driver reads 'overlay' (not 'vfs') with: dd-ctl status"
 
 # ---------------------------------------------------------------------------------
-say "== 4/12  install dd-ctl"
+say "== 4/13  install dd-ctl"
 
 # THE DESTINATION MUST BE A REAL FILE OWNED BY ROOT, 0755, in a directory only root can
 # write. Not a symlink, and never the checkout's copy run in place. $DD_USER owns the
@@ -388,16 +542,36 @@ sh -n "$DD_CTL_SRC" || {
 	echo "refusing: $DD_CTL_SRC fails 'sh -n'" >&2
 	exit 1
 }
+
+# THE DIRECTORY IS CHECKED BEFORE ANYTHING IS WRITTEN INTO IT, not after. A root-owned
+# file in a group- or world-writable directory can be replaced wholesale by anyone who
+# can write the directory: unlink-and-create is not a write to the file. Checking that
+# after installing meant the script had already created a file — and, below, a temporary
+# one — in a directory it had not yet established anyone could trust.
+DD_CTL_DIR="$(dirname -- "$DD_CTL_PATH")"
+DD_CTL_DIR_OWNER="$(stat -c '%U' "$DD_CTL_DIR")"
+DD_CTL_DIR_MODE="$(stat -c '%a' "$DD_CTL_DIR")"
+if [ "$DD_CTL_DIR_OWNER" != root ] || [ $(( 0$DD_CTL_DIR_MODE & 022 )) -ne 0 ]; then
+	echo "refusing to continue: $DD_CTL_DIR is $DD_CTL_DIR_OWNER $DD_CTL_DIR_MODE — a" >&2
+	echo "non-root or group/world-writable directory lets $DD_CTL_PATH be replaced." >&2
+	exit 1
+fi
+
 if [ -f "$DD_CTL_PATH" ] && [ ! -L "$DD_CTL_PATH" ] && cmp -s "$DD_CTL_SRC" "$DD_CTL_PATH"; then
 	ok "$DD_CTL_PATH already identical"
 else
 	backup "$DD_CTL_PATH"
-	# `install` copies CONTENT, so the destination is a real file even when the source
-	# is reached through a symlinked path. A pre-existing symlink at the destination is
-	# removed first — otherwise install would follow it and write through to whatever it
-	# points at, which on a compromised box is the whole problem.
-	rm -f "$DD_CTL_PATH"
-	install -o root -g root -m 0755 "$DD_CTL_SRC" "$DD_CTL_PATH"
+	# INSTALL BESIDE, THEN RENAME. The previous form was `rm -f "$DD_CTL_PATH"` followed
+	# by `install`, which opens a window in which the live dispatcher does not exist: if
+	# `install` fails — a full SD card is the obvious way — the forced command points at
+	# nothing and every `ssh two deploy-beacon` dies, on the box you reach through a
+	# tunnel. `mv` within one directory is a rename(2): the replacement is atomic, and it
+	# replaces a pre-existing SYMLINK at the destination rather than writing through it,
+	# which is the property `rm -f` was there for. `install` copies CONTENT, so the result
+	# is a real file even when the source was reached through a symlinked path.
+	rm -f "$DD_CTL_PATH.new"
+	install -o root -g root -m 0755 "$DD_CTL_SRC" "$DD_CTL_PATH.new"
+	mv -f "$DD_CTL_PATH.new" "$DD_CTL_PATH"
 	changed "installed $DD_CTL_PATH (root:root 0755) from $DD_CTL_SRC"
 	say "       installed $DD_CTL_PATH"
 fi
@@ -413,20 +587,94 @@ DD_CTL_ID="$(stat -c '%U:%G %a' "$DD_CTL_PATH")"
 	echo "refusing to continue: $DD_CTL_PATH is '$DD_CTL_ID', want 'root:root 755'" >&2
 	exit 1
 }
-DD_CTL_DIR="$(dirname -- "$DD_CTL_PATH")"
-DD_CTL_DIR_OWNER="$(stat -c '%U' "$DD_CTL_DIR")"
-DD_CTL_DIR_MODE="$(stat -c '%a' "$DD_CTL_DIR")"
-# A root-owned file in a group- or world-writable directory can be replaced wholesale by
-# anyone who can write the directory: unlink and create is not a write to the file.
-if [ "$DD_CTL_DIR_OWNER" != root ] || [ $(( 0$DD_CTL_DIR_MODE & 022 )) -ne 0 ]; then
-	echo "refusing to continue: $DD_CTL_DIR is $DD_CTL_DIR_OWNER $DD_CTL_DIR_MODE — a" >&2
-	echo "non-root or group/world-writable directory lets $DD_CTL_PATH be replaced." >&2
-	exit 1
-fi
 ok "$DD_CTL_PATH: real file, root:root 0755, in $DD_CTL_DIR ($DD_CTL_DIR_OWNER $DD_CTL_DIR_MODE)"
 
+# --- and the part everything above is not enough for -------------------------------
+#
+# SSHD DOES NOT EXEC A FORCED COMMAND. It runs `$SHELL -c "<command>"`. $DD_USER's login
+# shell is fish, and fish reads /etc/fish/config.fish, ~/.config/fish/conf.d/*.fish and
+# ~/.config/fish/config.fish on EVERY startup, including a non-interactive `-c` — only
+# `fish -N` skips them. So the four files below run, as $DD_USER, before dd-ctl does, and
+# any one of them can replace the dispatch entirely. `restrict` does not help: it implies
+# `no-user-rc`, which is about ~/.ssh/rc, a different file.
+#
+# Three of the four are inside $DD_USER's own home and are therefore WRITABLE BY
+# $DD_USER BY CONSTRUCTION — §8 of this script writes one of them. Nothing here can
+# change that, and pretending otherwise is how the previous version of this file ended up
+# claiming the forced command "bypasses gavin's fish login shell entirely", which is
+# false. What CAN be established, and is:
+#
+#   * that no THIRD party can write them (no group or world write bit, owner is
+#     $DD_USER or root),
+#   * that /etc/fish/config.fish — the one file outside the home, which every fish on
+#     the box reads — is root-owned and not writable by anyone else,
+#   * and that conf.d/ holds nothing this script did not write, which the census at the
+#     end of the run lists in full.
+#
+# The residual is stated rather than closed: the ambient login shell is inside the deploy
+# key's trusted computing base, and the only thing that removes it is a dedicated deploy
+# account with /bin/sh and an empty home. docs/decisions.md rejected that account — and
+# did so WITHOUT this fact in front of it. It is restated there with the fact included.
+FISH_STARTUP_FILES="/etc/fish/config.fish $DD_HOME/.profile $DD_HOME/.config/fish/config.fish"
+FISH_CONFD="$DD_HOME/.config/fish/conf.d"
+check_startup_file() {  # check_startup_file <path>
+	[ -e "$1" ] || { ok "$1 absent"; return 0; }
+	if [ -L "$1" ]; then
+		warn "$1 is a SYMLINK — it runs before dd-ctl does, and points somewhere else"
+		note "$1 is a symlink. It is executed by fish before the dd-ctl forced command runs.
+    Resolve where it points and who owns that, by hand."
+		return 0
+	fi
+	_o="$(stat -c '%U' "$1")"
+	_m="$(stat -c '%a' "$1")"
+	case "$1" in
+		/etc/*) _want_owner=root ;;
+		*)      _want_owner="$DD_USER" ;;
+	esac
+	if [ "$_o" != "$_want_owner" ] && [ "$_o" != root ]; then
+		warn "$1 is owned by '$_o', expected $_want_owner or root"
+		note "$1 runs as $DD_USER before dd-ctl does, and is owned by '$_o' — a third account
+    controls the deploy path. Fix the ownership by hand."
+	elif [ $(( 0$_m & 022 )) -ne 0 ]; then
+		warn "$1 is mode $_m — group- or world-writable"
+		note "$1 is mode $_m. fish executes it before the dd-ctl forced command, so any account
+    that can write it controls what the deploy key runs. chmod it to 644 (or 600)."
+	else
+		ok "$1: $_o, mode $_m"
+	fi
+}
+for f in $FISH_STARTUP_FILES; do check_startup_file "$f"; done
+if [ -d "$FISH_CONFD" ]; then
+	_cd_o="$(stat -c '%U' "$FISH_CONFD")"
+	_cd_m="$(stat -c '%a' "$FISH_CONFD")"
+	if [ "$_cd_o" != "$DD_USER" ] && [ "$_cd_o" != root ]; then
+		warn "$FISH_CONFD is owned by '$_cd_o'"
+		note "$FISH_CONFD is owned by '$_cd_o'. Every .fish file in it runs before dd-ctl."
+	elif [ $(( 0$_cd_m & 022 )) -ne 0 ]; then
+		warn "$FISH_CONFD is mode $_cd_m — group- or world-writable"
+		note "$FISH_CONFD is mode $_cd_m, so anyone who can write it can DROP IN a new .fish file
+    that runs before the dd-ctl forced command. chmod 700 it."
+	else
+		ok "$FISH_CONFD: $_cd_o, mode $_cd_m"
+	fi
+	# podman.fish is the only file §8 writes. Anything else here is unaccounted for.
+	for f in "$FISH_CONFD"/*.fish; do
+		[ -e "$f" ] || continue
+		case "$f" in
+			"$FISH_CONFD/podman.fish") : ;;
+			*)
+				warn "UNEXPECTED fish startup file: $f"
+				note "$f is in $DD_USER's fish conf.d and was NOT written by this script. fish runs it
+    before the dd-ctl forced command, as $DD_USER. Read it before the next deploy."
+				;;
+		esac
+	done
+else
+	ok "$FISH_CONFD absent (§8 creates it)"
+fi
+
 # ---------------------------------------------------------------------------------
-say "== 5/12  restricted SSH key for $DD_USER"
+say "== 5/13  restricted SSH key for $DD_USER"
 
 mkdir -p "$DD_HOME/.ssh"
 touch "$AUTHKEYS"
@@ -438,14 +686,29 @@ if [ -n "${DD_CTL_PUBKEY:-}" ]; then
 	# `restrict` is the allow-nothing baseline (no pty, no agent/port/X11 forwarding, no
 	# ~/.ssh/rc); `command=` replaces whatever the client asked for with dd-ctl and hands
 	# the client's string over in SSH_ORIGINAL_COMMAND. dd-ctl treats that as hostile —
-	# see its header. It also means the forced command bypasses gavin's fish login shell
-	# entirely, which is one less thing to get wrong.
+	# see its header.
+	#
+	# IT DOES NOT BYPASS $DD_USER'S LOGIN SHELL. This comment used to say that it did —
+	# "the forced command bypasses gavin's fish login shell entirely, which is one less
+	# thing to get wrong" — and that was simply false. sshd runs a forced command as
+	# `$SHELL -c "<command>"`, so fish starts first and reads /etc/fish/config.fish,
+	# ~/.config/fish/conf.d/*.fish and ~/.config/fish/config.fish on the way, including
+	# for a non-interactive `-c`. `restrict` does not help; it implies `no-user-rc`, which
+	# governs ~/.ssh/rc, an unrelated file. §4 checks those four paths' ownership and
+	# modes, dd-ctl re-execs itself under `env -i` so that nothing fish exported survives
+	# into podman's environment, and the part neither of those fixes — that $DD_USER can
+	# always write $DD_USER's own dotfiles — is recorded as a residual in
+	# docs/decisions.md rather than papered over here.
 	#
 	# APPENDED, never replacing the file: gavin's own unrestricted key lives here too,
 	# and rewriting authorized_keys from a setup script is how you lock yourself out of a
 	# box reachable only through a Cloudflare tunnel. No sshd restart is needed or done.
 	LINE="command=\"$DD_CTL_PATH\",restrict $DD_CTL_PUBKEY"
-	if grep -qF "$LINE" "$AUTHKEYS"; then
+	# WHOLE LINE (-x), not substring. `grep -qF` without -x matched a COMMENTED-OUT copy
+	# of this exact line, so the script reported "already present" and installed nothing —
+	# and put nothing in CHANGED: either, so the run's own summary agreed with it. The
+	# operator would have walked away believing the deploy key was installed.
+	if grep -qxF "$LINE" "$AUTHKEYS"; then
 		ok "this exact forced-command line is already present"
 	else
 		backup "$AUTHKEYS"
@@ -461,7 +724,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------------
-say "== 6/12  subuid/subgid ranges for $DD_USER"
+say "== 6/13  subuid/subgid ranges for $DD_USER"
 
 # 65536 sub-ids is the conventional single-range grant; podman maps the container's
 # uid 0..65535 onto it. Without it (and without shadow-subids above) every rootless
@@ -481,7 +744,7 @@ for f in /etc/subuid /etc/subgid; do
 done
 
 # ---------------------------------------------------------------------------------
-say "== 7/12  cgroups — VERIFY ONLY"
+say "== 7/13  cgroups — VERIFY ONLY"
 
 # Already correct on this box: /sys/fs/cgroup is cgroup2fs, the OpenRC `cgroups` service
 # is started, and cgroup.controllers lists memory. Nothing to do — so this section
@@ -528,7 +791,7 @@ for want in cgroup_memory=1 cgroup_enable=memory; do
 done
 
 # ---------------------------------------------------------------------------------
-say "== 8/12  XDG_RUNTIME_DIR for interactive sessions"
+say "== 8/13  XDG_RUNTIME_DIR for interactive sessions"
 
 # Rootless podman needs XDG_RUNTIME_DIR and will not invent one. The usual answer,
 # /run/user/<uid>, is created by logind — which Alpine does not have — or by the boot
@@ -560,7 +823,14 @@ if [ -L "$RUNTIME_DIR" ]; then
 	note "$RUNTIME_DIR is a symlink. Somebody else planted it. Remove it by hand, check who
     owns the target, and re-run. dd-ctl will refuse to start until this is resolved."
 elif [ ! -d "$RUNTIME_DIR" ]; then
-	mkdir -m 700 "$RUNTIME_DIR"
+	# `-p` as well as `-m 700`, matching what dd-ctl already does. Without it, losing the
+	# race against anything else that creates this directory between the test above and
+	# the mkdir is a non-zero exit, and under `set -e` that aborts the whole run — after
+	# §1-§7 have applied and before §9-§12 have. The verification immediately below is
+	# what actually decides whether the directory is acceptable, so `-p` costs nothing:
+	# a directory created by somebody else still fails the ownership and mode check.
+	# shellcheck disable=SC2174  # -m applies to the deepest dir only; that is the only one
+	mkdir -m 700 -p "$RUNTIME_DIR"
 	chown "$DD_USER:$DD_GROUP" "$RUNTIME_DIR"
 	changed "created $RUNTIME_DIR (0700, $DD_USER:$DD_GROUP)"
 	say "       created $RUNTIME_DIR"
@@ -577,9 +847,36 @@ if [ -d "$RUNTIME_DIR" ] && [ ! -L "$RUNTIME_DIR" ]; then
 	fi
 fi
 
+# THE VALUE, NOT THE NAME. Both checks below used to ask only whether the file mentioned
+# `XDG_RUNTIME_DIR` at all. A file already setting it to something else — /run/user/1000
+# is the obvious wrong answer, and the one anybody transplanting a systemd box's dotfiles
+# would bring with them — was reported `ok` and left in place. That produces EXACTLY the
+# symptom the comments above exist to warn about: an empty `podman ps` standing next to a
+# running bot, with the setup script's own output saying the file was fine.
+#
+# $RUNTIME_DIR is /tmp/podman-run-<uid> and contains no regular-expression metacharacter,
+# so it is safe to interpolate into these patterns; the anchor at the end is what stops
+# /tmp/podman-run-1000x passing as /tmp/podman-run-1000.
+#
+# A WRONG VALUE IS NOT OVERWRITTEN. Appending a second, correct export would leave a file
+# that contradicts itself and works only because of ordering, and this script's doctrine
+# everywhere else is that it appends and never edits. It warns instead, loudly, and the
+# NOTES block carries the fix.
+has_runtime_dir_value() {  # has_runtime_dir_value <file>
+	grep -Eq "XDG_RUNTIME_DIR[= ]\"?$RUNTIME_DIR\"?[[:space:]]*\$" "$1"
+}
+
 PROFILE="$DD_HOME/.profile"
-if [ -f "$PROFILE" ] && grep -q 'XDG_RUNTIME_DIR' "$PROFILE"; then
-	ok "$PROFILE already sets XDG_RUNTIME_DIR"
+if [ -f "$PROFILE" ] && has_runtime_dir_value "$PROFILE"; then
+	ok "$PROFILE already sets XDG_RUNTIME_DIR=$RUNTIME_DIR"
+elif [ -f "$PROFILE" ] && grep -q 'XDG_RUNTIME_DIR' "$PROFILE"; then
+	warn "$PROFILE sets XDG_RUNTIME_DIR to something OTHER than $RUNTIME_DIR"
+	note "$PROFILE sets XDG_RUNTIME_DIR to a value that is not $RUNTIME_DIR. Containers
+    started by dd-ctl will be INVISIBLE to podman in an interactive sh/ash/bash session —
+    an empty \`podman ps\` beside a running bot. Nothing was written; fix it by hand:
+      export XDG_RUNTIME_DIR=$RUNTIME_DIR
+    Current line(s):
+      $(grep -n 'XDG_RUNTIME_DIR' "$PROFILE" | tr '\n' ' ')"
 else
 	printf 'export XDG_RUNTIME_DIR=%s\n' "$RUNTIME_DIR" >> "$PROFILE"
 	chown "$DD_USER:$DD_GROUP" "$PROFILE"
@@ -588,10 +885,24 @@ else
 fi
 
 FISHCONF="$DD_HOME/.config/fish/conf.d/podman.fish"
-if [ -f "$FISHCONF" ] && grep -q 'XDG_RUNTIME_DIR' "$FISHCONF"; then
-	ok "$FISHCONF already sets XDG_RUNTIME_DIR"
+if [ -f "$FISHCONF" ] && has_runtime_dir_value "$FISHCONF"; then
+	ok "$FISHCONF already sets XDG_RUNTIME_DIR=$RUNTIME_DIR"
+elif [ -f "$FISHCONF" ] && grep -q 'XDG_RUNTIME_DIR' "$FISHCONF"; then
+	warn "$FISHCONF sets XDG_RUNTIME_DIR to something OTHER than $RUNTIME_DIR"
+	note "$FISHCONF sets XDG_RUNTIME_DIR to a value that is not $RUNTIME_DIR, and fish is
+    $DD_USER's login shell — so this is the file that decides what an interactive
+    \`podman ps\` looks at. Nothing was written; fix it by hand:
+      set -gx XDG_RUNTIME_DIR $RUNTIME_DIR
+    Current line(s):
+      $(grep -n 'XDG_RUNTIME_DIR' "$FISHCONF" | tr '\n' ' ')"
 else
 	mkdir -p "$DD_HOME/.config/fish/conf.d"
+	# THE ONLY FILE THIS SCRIPT TRUNCATES, so it is the only one that needed a backup and
+	# was the only one without. `cat > file` destroys what was there before cat runs —
+	# CLAUDE.md's first shell trap — and reaching this branch means the file either does
+	# not exist or does not mention XDG_RUNTIME_DIR at all, i.e. it holds something else
+	# somebody wrote. backup() no-ops on a file that is not there.
+	backup "$FISHCONF"
 	cat > "$FISHCONF" <<EOF
 # Written by root-setup.sh. Rootless podman's runtime directory.
 # MUST match the value dd-ctl sets for itself — see /usr/local/bin/dd-ctl. Containers
@@ -604,7 +915,7 @@ EOF
 fi
 
 # ---------------------------------------------------------------------------------
-say "== 9/12  zram swap"
+say "== 9/13  zram swap"
 
 # This box has NO swap at all right now (/proc/swaps is empty) and no zram configured,
 # despite what infra's docs/host-setup.md says about `two`. That doc also describes a
@@ -628,11 +939,17 @@ elif grep -q '^/dev/zram' /proc/swaps 2>/dev/null; then
 	ok "a zram swap device is already active:"
 	sed 's/^/            /' /proc/swaps
 else
-	# No -a (compression algorithm): the kernel default (lzo-rle on 6.x) is the right
-	# pick on a CPU with no NEON, and hardcoding an algorithm this kernel may not have
-	# compiled in turns a cushion into an error. -s 1 = one compression stream, because
-	# there is one core.
-	if zram-init -d 0 -s 1 -p 100 "$ZRAM_SIZE_MB"; then
+	# NO `-s 1`. It was here to mean "one compression stream, because there is one core",
+	# and it does not exist: `-s` is not in the getopts string of Alpine's zram-init
+	# 13.0.1-r2. The real armhf binary answers `Illegal option -s` and exits, so every
+	# invocation this script and docs/host-setup.md documented would have failed — while
+	# both files went on to describe zram as enabled. `-d 0 -p 100 256` is what was
+	# verified to parse and reach mkswap/swapon.
+	#
+	# No -a (compression algorithm) either: the kernel default (lzo-rle on 6.x) is the
+	# right pick on a CPU with no NEON, and hardcoding an algorithm this kernel may not
+	# have compiled in turns a cushion into an error.
+	if zram-init -d 0 -p 100 "$ZRAM_SIZE_MB"; then
 		changed "enabled ${ZRAM_SIZE_MB} MB zram swap on /dev/zram0 (LIVE ONLY — gone after a reboot)"
 		say "       zram swap active:"
 		sed 's/^/            /' /proc/swaps
@@ -665,7 +982,7 @@ EOF
 fi
 
 # ---------------------------------------------------------------------------------
-say "== 10/12  /boot — VERIFY ONLY, nothing written"
+say "== 10/13  /boot — VERIFY ONLY, nothing written"
 
 boot_grep() {  # boot_grep <pattern> <description>
 	found=''
@@ -695,7 +1012,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------------
-say "== 11/12  root filesystem mount options — VERIFY ONLY"
+say "== 11/13  root filesystem mount options — VERIFY ONLY"
 
 if awk '$2 == "/" && $4 ~ /noatime/ {found=1} END {exit !found}' /etc/fstab 2>/dev/null; then
 	ok "root fstab entry already carries noatime"
@@ -708,21 +1025,39 @@ else
 fi
 
 # ---------------------------------------------------------------------------------
-say "== 12/12  docker / containerd / k3s removal"
+say "== 12/13  docker / containerd / k3s removal"
 
 # Docker 29.5.3 and containerd are installed and running on this box, and containerd
 # alone holds ~34 MB RSS out of 475 MB. The owner has approved removing all of it: this
 # deployment is rootless podman, gavin is not in the docker group and is not going to
 # be, and running two container runtimes on this board is paying twice for one job.
 #
-# DESTRUCTIVE, so it is OPT-IN: without DD_REMOVE_DOCKER=1 this section only reports.
-# Run the script once without it, read what it says, then run it again with it.
+# DESTRUCTIVE, so it is OPT-IN, AND IN TWO STAGES:
+#
+#   (no variable)                 report the installed packages only.
+#   DD_REMOVE_DOCKER=1            additionally run `apk del --simulate` and STOP.
+#   …=1 DD_REMOVE_DOCKER_CONFIRMED=1   actually remove.
+#
+# The middle stage exists because THE PACKAGE LIST BELOW IS NOT THE TRANSACTION. `apk
+# del` also reclaims dependencies that nothing else in `world` needs, and on this box
+# that turns ten named packages into roughly 36 — twenty-two of which appear nowhere in
+# this file. One of them is `coreutils`, pulled in by k3s: losing it silently swaps GNU
+# `stat` for busybox's, and §7's `stat -f -c %T /sys/fs/cgroup` then answers `UNKNOWN`
+# instead of `cgroup2fs`, so a later re-run of this script warns about a cgroup setup
+# that is in fact correct. `--simulate` is the only thing that shows that list before it
+# happens, and a list printed after the fact is not an approval.
 #
 # ORDERING, and it matters:
-#   1. iptables was already made an explicit world member in §3. `apk del` reclaims
-#      orphaned auto-installed dependencies, and iptables is a dependency of both
-#      docker-engine and k3s — without §3 first, this section would silently take
-#      podman's networking with it.
+#   1. iptables AND ca-certificates were already made explicit world members in §3.
+#      `apk del` reclaims orphaned auto-installed dependencies, and both are on this box
+#      today only as dependencies of docker-engine and/or k3s. Without §3 running first,
+#      this section takes them with it — iptables silently breaks podman's networking
+#      days later, and ca-certificates is worse: it is the trust store cloudflared
+#      validates Cloudflare's edge against, so losing it cuts THE ONLY WAY INTO THIS BOX,
+#      minutes after this section reports success. Naming them in §3's `apk add` is what
+#      makes them unreclaimable. This ordering is load-bearing for both; an earlier
+#      version of this comment justified only iptables, which reads as though
+#      ca-certificates were incidental.
 #   2. Services are stopped and removed from their runlevels BEFORE the packages go.
 #      Deleting a package out from under a running service leaves a service script
 #      pointing at a missing binary.
@@ -735,9 +1070,18 @@ say "== 12/12  docker / containerd / k3s removal"
 #      this: measure before deleting. Its size is reported so the decision can be made
 #      with a number in it.
 
+# The subpackages matter as much as the main ones: apk will not reclaim a completion or
+# a -doc package that is in `world`, so one left behind keeps its parent's name alive in
+# the package database and leaves `docker` on PATH as a shell completion nobody can run.
+# `docker-fish-completion` is the plausible one here — $DD_USER's shell is fish.
+# `docker` itself is on this list, and pkg_installed() is what makes that safe: it
+# matches by NAME, not by `provides`, so a future `podman-docker` (which provides
+# `docker`) is not swept up by it.
 DOCKER_PKGS=''
 for p in docker docker-engine docker-cli docker-cli-buildx docker-cli-compose \
-         docker-openrc containerd containerd-openrc k3s k3s-openrc; do
+         docker-openrc docker-rootless-extras docker-rootless-extras-openrc \
+         docker-bash-completion docker-fish-completion docker-zsh-completion \
+         docker-doc containerd containerd-openrc k3s k3s-openrc k3s-doc; do
 	if pkg_installed "$p"; then DOCKER_PKGS="$DOCKER_PKGS $p"; fi
 done
 
@@ -779,17 +1123,20 @@ fi
 # when the evidence is merely absent. Two independent facts, both required:
 #
 #   1. OpenRC reports the service started.
-#   2. The running cloudflared's parent chain reaches pid 1 with no containerd, dockerd,
-#      shim, conmon or runtime in it. A containerised process is reparented to a shim,
-#      so this tells the two apart without trusting any name a container chose for
+#   2. EVERY running cloudflared's parent chain reaches pid 1 with no containerd,
+#      dockerd, shim, conmon or runtime in it. A containerised process is reparented to a
+#      shim, so this tells the two apart without trusting any name a container chose for
 #      itself. Read from /proc/<pid>/status, not /proc/<pid>/stat — a comm containing
 #      spaces or parentheses breaks field-numbered parsing of the latter.
-cloudflared_is_openrc_service() {
-	command -v rc-service >/dev/null 2>&1 || return 1
-	rc-service cloudflared status 2>/dev/null | grep -qi 'started' || return 1
-	CF_PID="$(pgrep -x cloudflared 2>/dev/null | head -n1)"
-	[ -n "${CF_PID:-}" ] || return 1
-	_p="$CF_PID"
+#
+# EVERY pid, not the first. The previous form took `pgrep -x cloudflared | head -n1`,
+# i.e. the LOWEST pid, and pids are not ordered by anything that matters here — an
+# OpenRC-supervised cloudflared started at boot has a low pid, so a SECOND, containerised
+# cloudflared started later would never be looked at. The section would then confirm "the
+# tunnel is the OpenRC service", stop docker, and cut the containerised tunnel that was
+# actually carrying the session. Requiring all of them to pass turns that into a refusal.
+cloudflared_parent_chain_is_clean() {  # <pid>
+	_p="$1"
 	_hops=0
 	while [ "$_p" -gt 1 ] 2>/dev/null; do
 		[ "$_hops" -lt 32 ] || return 1
@@ -802,6 +1149,16 @@ cloudflared_is_openrc_service() {
 		_hops=$((_hops + 1))
 	done
 	[ "$_p" = 1 ]
+}
+cloudflared_is_openrc_service() {
+	command -v rc-service >/dev/null 2>&1 || return 1
+	rc-service cloudflared status 2>/dev/null | grep -qi 'started' || return 1
+	CF_PIDS="$(pgrep -x cloudflared 2>/dev/null | tr '\n' ' ')"
+	[ -n "${CF_PIDS% }" ] || return 1
+	for _cf in $CF_PIDS; do
+		cloudflared_parent_chain_is_clean "$_cf" || return 1
+	done
+	return 0
 }
 
 if [ -n "$DOCKER_PKGS" ] && [ -n "${DD_REMOVE_DOCKER:-}" ]; then
@@ -818,7 +1175,7 @@ if [ -n "$DOCKER_PKGS" ] && [ -n "${DD_REMOVE_DOCKER:-}" ]; then
       cat /proc/\$(pgrep -x cloudflared)/status"
 		DOCKER_PKGS=''
 	else
-		ok "cloudflared is the OpenRC service (pid $CF_PID, parent chain reaches init)"
+		ok "cloudflared is the OpenRC service (pids ${CF_PIDS% }, every parent chain reaches init)"
 	fi
 fi
 
@@ -827,6 +1184,44 @@ if [ -n "$DOCKER_PKGS" ] && [ -n "${DD_REMOVE_DOCKER:-}" ]; then
 		warn "$DOCKER_RUNNING container(s) are RUNNING — refusing"
 		note "docker removal refused: containers are running. Look at what they are (listed
     above). If they are genuinely disposable, re-run with DD_REMOVE_DOCKER_FORCE=1."
+	else
+		# THE FULL TRANSACTION, BEFORE ANY OF IT HAPPENS — and before the services are
+		# stopped, so a refusal here leaves the box exactly as it was found rather than
+		# with docker stopped and its packages still installed. `--simulate` exists in the
+		# apk on this box (3.0.7, verified) and prints every package the removal would
+		# take, orphaned dependencies included. That is the list that matters: see the
+		# section header on coreutils.
+		say ""
+		say "       apk del --simulate$DOCKER_PKGS"
+		say "       ----------------------------------------------------------"
+		# shellcheck disable=SC2086  # deliberate word splitting of our own built list
+		apk del --simulate $DOCKER_PKGS 2>&1 | sed 's/^/       /' || {
+			warn "apk del --simulate failed — refusing to run the real removal"
+			note "docker removal refused: 'apk del --simulate' did not succeed, so the real
+    transaction's contents are unknown. Nothing was stopped and nothing was removed."
+			DOCKER_PKGS=''
+		}
+		say "       ----------------------------------------------------------"
+		if [ -n "$DOCKER_PKGS" ] && [ -z "${DD_REMOVE_DOCKER_CONFIRMED:-}" ]; then
+			say ""
+			say "       STOPPING HERE. Read the simulation above — it is longer than the"
+			say "       package list this script names, and losing coreutils is in it."
+			say "       When you are satisfied:"
+			say "         DD_REMOVE_DOCKER=1 DD_REMOVE_DOCKER_CONFIRMED=1 sh $0"
+			note "docker removal NOT performed. 'apk del --simulate' was printed and the run
+    stopped there, by design: the real transaction reclaims orphaned dependencies that
+    this script does not name — coreutils among them, which changes what \`stat -f\`
+    reports in §7. Nothing was stopped and nothing was removed. Re-run with
+    DD_REMOVE_DOCKER_CONFIRMED=1 once you have read the list."
+			DOCKER_PKGS=''
+		fi
+	fi
+fi
+
+if [ -n "$DOCKER_PKGS" ] && [ -n "${DD_REMOVE_DOCKER:-}" ] \
+	&& [ -n "${DD_REMOVE_DOCKER_CONFIRMED:-}" ]; then
+	if [ "${DOCKER_RUNNING:-0}" != 0 ] && [ -z "${DD_REMOVE_DOCKER_FORCE:-}" ]; then
+		:  # already refused above
 	else
 		MEM_BEFORE="$(mem_avail_mb)"
 		DISK_BEFORE="$(df -k / | awk 'NR==2 {print $4}')"
@@ -843,8 +1238,12 @@ if [ -n "$DOCKER_PKGS" ] && [ -n "${DD_REMOVE_DOCKER:-}" ]; then
 
 		# One transaction, so apk resolves the dependency order itself and containerd is
 		# never removed while a dependent still needs it.
-		# shellcheck disable=SC2086  # deliberate word splitting of our own built list
 		say "       apk del$DOCKER_PKGS"
+		# The directive attaches to the NEXT LINE, so it has to sit immediately above the
+		# `apk del` and not above the `say`. It was above the `say` — which is quoted and
+		# needs no exemption — leaving the one unquoted expansion in this file with no
+		# directive at all, and shellcheck's SC2086 on it unsuppressed.
+		# shellcheck disable=SC2086  # deliberate word splitting of our own built list
 		apk del $DOCKER_PKGS
 		changed "removed packages:$DOCKER_PKGS"
 
@@ -879,33 +1278,90 @@ elif [ -n "$DOCKER_PKGS" ]; then
 fi
 
 # ---------------------------------------------------------------------------------
-say ""
-say "======================================================================"
-if [ -n "$CHANGED" ]; then
-	say "CHANGED:$CHANGED"
+say "== 13/13  authorized_keys census — READ ONLY"
+
+# WITHOUT THIS SECTION THE SCRIPT CANNOT SUBSTANTIATE ITS OWN CENTRAL CLAIM. Everything
+# above is about the key this script installs: §1 looks for the dd-ctl forced command,
+# §5 appends one. Neither looks at the OTHER lines in the file. So a pre-existing
+# unrestricted key — gavin's own, an old laptop's, one a colleague added in 2023 — is
+# completely invisible to this run, and yet "the box is restricted" is what a reader
+# takes away from a run that ends in `ok`. It is not restricted; ONE KEY is. The census
+# is what makes the difference visible rather than assumed, and it is what §1's and §4's
+# notes promise when they say "the census at the end of this run lists every key".
+#
+# READ ONLY. It prints and changes nothing, and it deliberately does not prune: removing
+# somebody's key from a box reached through a tunnel is a decision, not a cleanup.
+#
+# THE PARSE IS FIELD-BASED, and its limits are stated rather than hidden. Options are
+# whatever precedes the first field that IS a key type; the comment is whatever follows
+# the base64. That reconstructs a normal line exactly, including options containing a
+# quoted space. It is defeated by an option whose QUOTED VALUE contains a bare key-type
+# word (`command="echo ssh-rsa"`), and by a line with no recognised key type at all —
+# both of which are reported as UNPARSED and handed to a human rather than classified
+# wrongly. A census that guesses is the same failure as a check that passes for the
+# wrong reason.
+if [ ! -f "$AUTHKEYS" ]; then
+	warn "$AUTHKEYS does not exist — no keys to list"
 else
-	say "CHANGED: nothing — this box was already set up."
-fi
-say ""
-if [ -n "$NOTES" ]; then
-	say "NOTES / ACTION REQUIRED:$NOTES"
+	say "       $AUTHKEYS"
 	say ""
+	awk '
+		/^[[:space:]]*($|#)/ { next }
+		{
+			ti = 0
+			for (i = 1; i <= NF; i++) {
+				if ($i ~ /^(ssh-ed25519|ssh-rsa|ssh-dss|ecdsa-sha2-[a-z0-9-]+|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-[a-z0-9-]+@openssh\.com)$/) { ti = i; break }
+			}
+			if (ti == 0) {
+				printf "         line %-4d UNPARSED — no recognised key type. Read this line by hand.\n", FNR
+				unparsed++
+				next
+			}
+			opts = ""
+			for (i = 1; i < ti; i++) opts = opts (i > 1 ? " " : "") $i
+			cmt = ""
+			for (i = ti + 2; i <= NF; i++) cmt = cmt (i > ti + 2 ? " " : "") $i
+			has_cmd = (opts ~ /(^|,)command=/) ? "yes" : "NO "
+			has_res = (opts ~ /(^|,)restrict(,|$)/) ? "yes" : "NO "
+			if (has_cmd == "NO ") open_keys++
+			printf "         line %-4d command= %s  restrict %s  %-32s %s\n", \
+				FNR, has_cmd, has_res, $ti, (cmt == "" ? "(no comment)" : cmt)
+			total++
+		}
+		END {
+			printf "\n         %d key line(s); %d with no command= (a full shell); %d unparsed\n", \
+				total + 0, open_keys + 0, unparsed + 0
+		}
+	' "$AUTHKEYS"
+	say ""
+	# The count again, in the shell, because the NOTES block has to carry it and awk
+	# cannot set a variable in this shell. A second pass over a handful of lines is free.
+	AK_OPEN="$(awk '
+		/^[[:space:]]*($|#)/ { next }
+		{
+			ti = 0
+			for (i = 1; i <= NF; i++) if ($i ~ /^(ssh-ed25519|ssh-rsa|ssh-dss|ecdsa-sha2-[a-z0-9-]+|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-[a-z0-9-]+@openssh\.com)$/) { ti = i; break }
+			if (ti == 0) next
+			opts = ""
+			for (i = 1; i < ti; i++) opts = opts (i > 1 ? " " : "") $i
+			if (opts !~ /(^|,)command=/) n++
+		}
+		END { print n + 0 }
+	' "$AUTHKEYS")"
+	if [ "$AK_OPEN" -gt 0 ]; then
+		warn "$AK_OPEN key line(s) carry NO command= — each is a full shell as $DD_USER"
+		note "$AK_OPEN key line(s) in $AUTHKEYS have no command= restriction. Each one is a full
+    login shell as $DD_USER, who is in wheel with sudo — so the dd-ctl forced command
+    restricts ONE KEY, not this box. That may be exactly right: gavin's own key belongs
+    there, and removing it from a box reached only through a tunnel is how you lose the
+    box. It is listed so it is a decision rather than an assumption. Nothing was pruned."
+	else
+		ok "every key line in $AUTHKEYS carries a command= restriction"
+	fi
 fi
-cat <<EOF
-NEXT, and none of it needs root. $DD_USER's shell is fish, so these are written to be
-pasted into an interactive fish session; anything with sh syntax is run as 'sh -c'.
 
-  1. as $DD_USER:
-       git clone <infra-repo-url> $DD_CHECKOUT
-       cp $DD_STACK_DIR/.env.example $DD_STACK_DIR/.env
-       chmod 600 $DD_STACK_DIR/.env
-       \$EDITOR $DD_STACK_DIR/.env          # fill it in; it is gitignored
-
-  2. from your workstation, with the restricted key:
-       ssh -i <key> $DD_USER@ssh-two.gsrpi.uk status
-       ssh -i <key> $DD_USER@ssh-two.gsrpi.uk deploy-beacon
-
-Nothing on this box starts at boot, by design. After a power cut it runs no containers
-and (see section 9) no swap until someone acts. That is intended, not a bug to fix by
-adding a local.d hook.
-EOF
+# ---------------------------------------------------------------------------------
+# The summary is printed by the EXIT trap installed at the top of this file, so that a
+# run which dies in §7 still reports what §1-§6 changed. All that is left to do here is
+# record that the run reached the end, which is what unlocks the trap's "NEXT" block.
+RUN_COMPLETED=yes
