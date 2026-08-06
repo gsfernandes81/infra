@@ -563,7 +563,28 @@ EOF
         back. Look at 'dd-ctl logs-postgres' and 'dd-ctl status', fix the cause, and run
         the deploy again — it is idempotent."
 	printf '==> creating the bot (%s)\n' "$bot"
-	compose up -d --force-recreate bot || die "the bot container was not created.
+	#    --no-deps IS LOAD-BEARING AND COST A DATABASE. `bot` declares `depends_on:
+	#    postgres`, and podman-compose 1.6.0 applies --force-recreate to EVERY container
+	#    it brings up — dependencies included. So without this flag the line below
+	#    destroys and recreates dd-postgres, roughly a minute after the previous line
+	#    started it. Proven on the box, same compose file: `up -d --force-recreate bot`
+	#    changed dd-postgres's container ID.
+	#
+	#    Against an existing database that is a pointless bounce. ON A FRESH pgdata
+	#    VOLUME IT IS FATAL, because `initdb` on this board takes longer than that gap.
+	#    The entrypoint appends the `host all all all …` line to pg_hba.conf and creates
+	#    POSTGRES_DB only AFTER initdb returns, so a recreate landing mid-initdb leaves a
+	#    data directory that has PG_VERSION but neither. Every subsequent start then
+	#    prints "Skipping initialization" and the cluster is stuck FOREVER — observed
+	#    twice, with only `template1` in pg_database (no template0, no postgres, no
+	#    kyber) and a pg_hba.conf carrying no non-localhost entry. The bot loops on
+	#    "Database unavailable" against a server that is up, healthy, and will never be
+	#    usable. The only repair is `podman volume rm destiny-director_pgdata` and a
+	#    redeploy, which is why this is a comment and not a one-word flag.
+	#
+	#    postgres is already up from the previous step, so skipping deps is also just
+	#    correct: deploying the bot has no business touching the database.
+	compose up -d --no-deps --force-recreate bot || die "the bot container was not created.
         THERE IS NO BOT RUNNING: step 2 removed the old container before this step. The
         stack is DOWN, not rolled back — postgres is up, the bot is absent. Run
         'dd-ctl status', fix the cause, and run the deploy again."

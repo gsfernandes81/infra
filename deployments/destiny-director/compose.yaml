@@ -142,6 +142,13 @@ services:
     # looking. The bot does the real waiting itself (dd.common.schemas.wait_for_db runs
     # before `alembic upgrade head` in its own StartingEvent hook), which is where a
     # cold-start race against initdb actually gets handled.
+    #
+    # THAT COVERS THE BOT STARTING TOO EARLY. IT DOES NOT COVER initdb BEING KILLED,
+    # which is the failure this stack actually hit, twice, and which no amount of
+    # client-side retrying can survive: a half-written data directory keeps a running,
+    # healthy-looking server that has no `kyber` database and no pg_hba entry to reach
+    # it with, forever. The cause was `--force-recreate` reaching this service through
+    # `depends_on`; the fix is `--no-deps` in dd-ctl, where the long version is written.
     restart: always
 
   bot:
