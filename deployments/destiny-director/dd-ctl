@@ -4,62 +4,86 @@
 # THIS IS THE CANONICAL COPY, and the only one in the repo. It lives beside the stack it
 # drives rather than in bin/, because it drives exactly this stack and nothing else;
 # bin/ holds fleet-wide tools. There is no symlink to it anywhere, deliberately — a
-# script reachable by two paths is a script whose behaviour can depend on which path
-# you used, and one location has no such class of mistake. The README's "Run a stack"
-# block points here so it is still findable from where the other tooling lives.
+# script reachable by two paths is a script whose behaviour can depend on which path you
+# used. The README's "Run a stack" block points here so it is still findable.
 #
-# It carries NO infra- header and is NOT under hosts/two/system/, so neither
-# bin/check-system-drift nor bin/install-system-file sees it. That is on purpose: those
-# read the header as the single source of truth for tracked /etc copies (bin/_infra.py),
-# and a header on a file no parser ever reads would be decoration that looks like a
-# checked invariant — the exact README-and-checker disagreement _infra.py exists to end.
-# The live copy is installed and updated by hosts/two/setup/root-setup.sh §4, which
-# refuses on `sh -n` failure and is idempotent. Drift is checked by hand:
+# It carries no infra- header and is not under hosts/two/system/, so neither
+# bin/check-system-drift nor bin/install-system-file sees it: those read the header as
+# the single source of truth for tracked /etc copies (bin/_infra.py), and a header no
+# parser reads would be decoration that looks like a checked invariant. The live copy is
+# installed by hosts/two/setup/root-setup.sh §4. Drift is checked by hand:
 #
 #   md5sum /usr/local/bin/dd-ctl ~/infra/deployments/destiny-director/dd-ctl
 #
 # THE INSTALLED COPY MUST BE A REAL FILE OWNED BY ROOT, mode 0755, at
-# /usr/local/bin/dd-ctl — never a symlink into the checkout, and never run out of the
-# checkout directly. `gavin` owns ~/infra, so a forced command resolving through any
-# path gavin can rewrite is not a restriction: the key holder would simply replace the
-# target and have an unrestricted shell. Root-owned destination, gavin-owned source,
-# and a deliberate `install` step between them is the whole arrangement. Do not
-# "simplify" it by pointing authorized_keys at the checkout.
+# /usr/local/bin/dd-ctl, in a directory only root can write — never a symlink into the
+# checkout, and never the checkout's copy run in place. `gavin` owns ~/infra, so a
+# forced command resolving through any path gavin can rewrite is not a restriction: the
+# key holder replaces the target and has a shell. root-setup.sh §4 verifies all three
+# properties after installing rather than trusting `install` to have produced them.
 #
 #   command="/usr/local/bin/dd-ctl",restrict ssh-ed25519 AAAA... dd-ctl@yourbox
 #
-# so `ssh two 'deploy beacon dev'` runs THIS with the client's string in
+# so `ssh two deploy-beacon` runs THIS with the client's string in
 # SSH_ORIGINAL_COMMAND, and `ssh two` with no command runs it with that variable unset.
 #
-#   dd-ctl deploy <beacon|anchor> [<tag>|sha256:<64 hex>]
-#   dd-ctl down
-#   dd-ctl logs [bot|postgres] [--tail N]
-#   dd-ctl ps
-#   dd-ctl status
+#   dd-ctl deploy-beacon | deploy-anchor | down | status | logs | logs-postgres
 #
 # ---------------------------------------------------------------------------------
-# THE THREAT MODEL, stated plainly so it is not mis-read in either direction.
+# THE THREAT MODEL. Read the first paragraph before making any judgement about the rest.
 #
-# SSH_ORIGINAL_COMMAND is attacker-controlled text. Whoever holds the private half of
-# that key writes it, and if the key ever leaks, so does whoever stole it. Therefore:
+# `gavin` IS IN `wheel` AND `sudo` IS INSTALLED. So anything that escapes this forced
+# command lands on an account that can become root. There is nothing behind this script;
+# it is the whole boundary, and its blast radius is root, not "some unprivileged user".
+# Do not describe it anywhere as contained or unprivileged. It has NOT had a dedicated
+# adversarial review — hosts/two/system/README.md lists what such a review still owes.
 #
-#   * The verb is matched against a closed list. Anything else exits 2 with usage.
-#   * Every argument is matched against an explicit, conservative pattern before it is
-#     used for anything. Rejection is the default; acceptance is the special case.
-#   * There is NO eval, NO `sh -c`, NO backticks, and the original string is never
-#     passed to a shell, a printf format, or a filename. Arguments reach podman as
-#     separate argv entries, always quoted.
-#   * The string is split into words ONCE, with globbing disabled (`set -f`) and IFS
-#     pinned to whitespace, which is plain field splitting — the shell does not re-parse
-#     metacharacters in a variable's value, so `;`, `$(...)`, `&&` and friends are inert
-#     text that then fails validation anyway.
-#   * Rejected input is NOT echoed back. A usage message is printed instead. Echoing
-#     attacker text into a terminal (or into a log somebody later `cat`s) hands them
-#     control sequences for free.
+# SSH_ORIGINAL_COMMAND is attacker-controlled text: whoever holds the private half of
+# that key writes it, and so does whoever steals the key. The design answer is to give
+# that text almost nothing to act on.
 #
-# What this is NOT: a privilege boundary against `gavin`. gavin owns the compose file
-# and the .env and can run podman directly; dd-ctl restricts the KEY, not the account.
-# It is root-owned so the key holder cannot rewrite the thing restricting them.
+# NO VERB TAKES AN ARGUMENT. That is the entire input-handling strategy, and it is a
+# deliberate replacement for an earlier version of this file that accepted
+# `deploy <bot> [tag|digest]` and `logs [service] [--tail N]`. That version carried tag
+# charset validation, digest validation, `--tail` bounds checks, per-verb arity checks,
+# a `..` rejection, and a controlled word-split under `set -f` with a pinned IFS —
+# every line of which existed only to make arguments safe. Deleting the arguments
+# deletes that entire class of bug, and the code that could be wrong about it.
+#
+# It also narrows a hole that no amount of validation would have: WITH AN ARGUMENT, THE
+# KEYHOLDER CHOOSES THE IMAGE. `deploy beacon <tag>` let whoever held the key pick which
+# tag was pulled, and therefore what code ran as a user with sudo — a perfectly
+# well-formed tag pointing at an image of their choosing passes every charset check
+# there is. With `deploy-beacon`, the image reference is a literal in compose.yaml,
+# which only the operator can edit. Someone will eventually want to "improve" this by
+# adding the tag back as an argument. That is the thing this file exists not to do.
+#
+# NARROWS, NOT CLOSES — be precise, because the weaker claim is the true one. The
+# keyholder cannot choose which image or which branch. But compose.yaml names a MOVING
+# BRANCH TAG, so anyone with push access to that branch decides what code runs on the
+# next deploy, as a user in `wheel` with sudo. That trust boundary sits upstream of this
+# box entirely and no amount of dispatcher design touches it. The lever, if it is ever
+# wanted, is pointing compose.yaml at a branch only the owner pushes to, at the cost of
+# a merge per deploy. Not done today. Written down so nobody reads the paragraph above
+# as "locked down".
+#
+# What remains, therefore:
+#
+#   * The request is ONE string, compared against a closed list of exact literals and
+#     then discarded. It is never word-split, never interpolated into a command, never
+#     used as a path or a printf format, and never echoed back — echoing attacker text
+#     into a terminal, or into a log somebody later `cat`s, hands them control sequences
+#     for free. The audit log records the CATEGORY of a rejection, never the input.
+#   * There is no eval, no `sh -c`, and no backticks. Every command below is a fixed
+#     line of literals; nothing derived from input reaches podman in any form.
+#   * `case` patterns are globs, so they are kept boringly literal. The hostile string
+#     is always the SUBJECT and never a pattern, so it cannot introduce one.
+#
+# A stricter arrangement exists and was considered: one keypair per operation, each with
+# its own fixed `command=` line in authorized_keys, so the dispatch happens inside
+# sshd's key matching and this script handles no input at all. It was not chosen because
+# it costs six keypairs to generate, install and hold. It is the fallback if the `case`
+# below is ever judged insufficient.
 # ---------------------------------------------------------------------------------
 set -eu
 
@@ -74,37 +98,51 @@ export LC_ALL
 # usual answer, but /run is root-owned and nothing on this box creates that directory at
 # boot: there is no logind, and the local.d hook that used to do it was removed with the
 # boot autostart it also carried. So use podman's own fallback location, which an
-# unprivileged process can create for itself, and create it on every invocation.
+# unprivileged process can create for itself.
 #
 # IT MUST BE THE SAME VALUE EVERYWHERE. Containers started under one XDG_RUNTIME_DIR are
 # invisible to podman running under another — you get an empty `podman ps` next to a
-# running bot. root-setup.sh exports this same path from gavin's .profile for that
+# running bot. root-setup.sh §8 exports this same path into gavin's shells for that
 # reason; if you change it here, change it there.
+#
+# /tmp IS WORLD-WRITABLE AND THIS PATH IS PREDICTABLE, so another local uid can create
+# it first. Podman checks ownership and mode and would refuse, so the exposure is denial
+# of service rather than takeover — but a clear refusal beats podman's, and a runtime
+# directory that is silently the wrong one is how you get an empty `podman ps` beside a
+# running bot. Created with `mkdir -m 700` in one step (mkdir-then-chmod leaves a window
+# at the default mode), then VERIFIED, because creating it says nothing about what was
+# already there.
 : "${HOME:?dd-ctl: HOME is unset — cannot locate podman's storage}"
 XDG_RUNTIME_DIR="/tmp/podman-run-$(id -u)"
 export XDG_RUNTIME_DIR
-mkdir -p "$XDG_RUNTIME_DIR"
-chmod 700 "$XDG_RUNTIME_DIR"
+mkdir -m 700 -p "$XDG_RUNTIME_DIR" 2>/dev/null || :
+if [ -L "$XDG_RUNTIME_DIR" ] || [ ! -d "$XDG_RUNTIME_DIR" ]; then
+	printf 'dd-ctl: %s is missing, or is a symlink. Refusing.\n' "$XDG_RUNTIME_DIR" >&2
+	exit 1
+fi
+_rt="$(stat -c '%u %a' "$XDG_RUNTIME_DIR")"
+if [ "$_rt" != "$(id -u) 700" ]; then
+	printf 'dd-ctl: %s is "%s", want "%s 700".\n' "$XDG_RUNTIME_DIR" "$_rt" "$(id -u)" >&2
+	printf 'Another uid owns this runtime directory. Refusing to use it.\n' >&2
+	exit 1
+fi
+unset _rt
 
 # --- fixed configuration ----------------------------------------------------------
-# Edit these two lines if the checkout moves. They are literals, not templated at
-# install time: the bytes reviewed are the bytes installed.
+# Edit these if the checkout moves. They are literals, not templated at install time:
+# the bytes reviewed are the bytes installed.
 #
 # NOT derived from $0. The installed copy lives at /usr/local/bin/dd-ctl, outside the
-# checkout and root-owned (see the header) — so there is no sibling compose.yaml to find
-# and nothing sensible for a $0-relative lookup to return. Stating the path outright is
-# also the safer half of the trade: a resolved path is a path an attacker who can move
-# or link the script gets a say in, and this script's entire job is not letting input
-# decide anything.
+# checkout and root-owned (see the header), so there is no sibling compose.yaml for a
+# $0-relative lookup to find. Stating the path outright is also the safer half of the
+# trade: a resolved path is a path that whoever can move or link the script gets a say
+# in, and this script's whole job is letting input decide nothing.
 STACK_DIR=/home/gavin/infra/deployments/destiny-director
 COMPOSE_FILE="$STACK_DIR/compose.yaml"
 
-# The registry path is pinned in compose.yaml, NOT here and NOT by the caller. The
-# caller supplies only the part after it (`:tag` or `@sha256:...`), so a malformed or
-# malicious argument can at worst name a nonexistent tag in this one repository — it
-# can never redirect the pull to another registry.
-IMAGE_REPO=ghcr.io/gsfernandes81/destiny-director
-
+# THE IMAGE IS NOT CHOSEN HERE, and not by the caller. It is a literal in compose.yaml,
+# editable only by the operator. See the header for why that is the point rather than an
+# inconvenience.
 BOT_CONTAINER=dd-bot
 DB_CONTAINER=dd-postgres
 
@@ -113,244 +151,105 @@ DB_CONTAINER=dd-postgres
 # jemalloc's default of 4*ncpu reserves per-arena metadata that bloats anchor's small
 # single-loop process for no benefit. It cannot be baked per-bot: one image, one
 # supervisord program, and supervisord has no conditionals. This dispatcher is the place
-# it can be fixed, so it is fixed here.
+# it can be fixed, so it is fixed here. Both are constants; neither comes from input.
 MALLOC_BEACON='background_thread:true,dirty_decay_ms:10000,muzzy_decay_ms:10000'
 MALLOC_ANCHOR='narenas:2,background_thread:true,dirty_decay_ms:10000,muzzy_decay_ms:10000'
 
-# Remembers the last successful deploy so `down`/`ps`/`logs`/`status` can reconstruct
-# the same interpolation without the caller repeating it. Kept OUT of the infra checkout
-# so a deploy never leaves the repo dirty.
-STATE_DIR="$HOME/.local/state/dd-ctl"
-STATE_FILE="$STATE_DIR/deployed"
-AUDIT_LOG="$STATE_DIR/audit.log"
-
-# The tag used when `deploy <bot>` is given no second argument.
-#
-# NOT `dev`, even though the workflow lists `dev` among its trigger branches: querying
-# the registry anonymously (Aug 2026) the package holds exactly two tags — `slim-stack`
-# and `sha-e35f665e0a7377d29cb212c4753bc6825530e796` — and `:dev` returns HTTP 404. A
-# default of `dev` would 404 on the very first deploy. Re-point this the day a `dev`
-# build is actually pushed.
-#
-# It is a BRANCH tag, so it moves. That is fine for the default convenience path on a
-# test box; pin a digest (`deploy beacon sha256:<64 hex>`) or the immutable
-# `sha-<commit>` tag for anything you want to reproduce later.
-DEFAULT_TAG=slim-stack
-MAX_TAG_LEN=128
-DEFAULT_TAIL=200
-MAX_TAIL=10000
+TAIL_LINES=200    # fixed. `logs` used to take `--tail N`; it no longer takes anything.
 STOP_TIMEOUT=60   # > supervisord's stopwaitsecs=45, so the bot gets its drain
 
-# --- helpers ----------------------------------------------------------------------
-die() { printf 'dd-ctl: %s\n' "$1" >&2; exit "${2:-2}"; }
+AUDIT_LOG="$HOME/.local/state/dd-ctl/audit.log"
 
+# There is no state file. An earlier version recorded the last deploy so `down` and
+# `status` could reconstruct it, and then re-validated that file on read because a file
+# we wrote is still a file that can be edited. `status` now asks the RUNNING CONTAINER
+# which bot it is, which is both the truthful answer and one less thing to parse.
+
+# --- helpers ----------------------------------------------------------------------
 usage() {
 	cat >&2 <<'EOF'
 dd-ctl — restricted deploy control for the destiny-director test stack on `two`
 
-  deploy <beacon|anchor> [<tag>|sha256:<64 hex>]
-        pull the image and (re)create the bot. Defaults to the `slim-stack`
-        tag. The argument is a bare tag (slim-stack, sha-<commit>) or a bare
-        digest (sha256:<64 hex>) — do NOT quote it: the quotes arrive as
-        literal characters and fail validation.
-        Switching bots stops and removes the running one first — only one bot
-        ever runs on this box.
-  down
-        stop and remove the stack. Named volumes are NEVER removed.
-  logs [bot|postgres] [--tail N]
-        last N lines (default 200, max 10000). There is no follow mode: a
-        forced command that never returns is a hung SSH session.
-  ps
-        container states.
-  status
-        what is deployed, what is running, and the runtime's own view of itself.
+Six operations. NONE of them takes an argument — that is deliberate, see the
+comments at the top of this file.
+
+  deploy-beacon    pull and (re)create the stack running dd.beacon
+  deploy-anchor    pull and (re)create the stack running dd.anchor
+  down             stop and remove the stack. Named volumes are NEVER removed.
+  status           what is running, what it thinks it is, and the runtime's
+                   own view of itself
+  logs             last 200 lines from the bot
+  logs-postgres    last 200 lines from postgres
+
+Which image is deployed is set in compose.yaml, by the operator, on the box.
+There is no follow mode: a forced command that never returns is a hung session.
 EOF
 	exit 2
 }
 
-audit() {  # only ever called with values this script produced or already validated
-	mkdir -p "$STATE_DIR"
+audit() {  # only ever called with a literal this script chose — never with input
+	mkdir -p "$(dirname -- "$AUDIT_LOG")"
 	printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$1" >> "$AUDIT_LOG"
 }
 
-# --- validators -------------------------------------------------------------------
-# Each one answers a yes/no question about ONE argument and prints nothing. A caller
-# that gets `no` prints usage and exits; it never reports what the bad value was.
+die() { printf 'dd-ctl: %s\n' "$1" >&2; exit "${2:-1}"; }
 
-is_safe_word() {  # non-empty, <= MAX_TAG_LEN, only [A-Za-z0-9._-], no traversal
-	[ -n "$1" ] || return 1
-	[ "${#1}" -le "$MAX_TAG_LEN" ] || return 1
-	# One bracket expression, negated: anything outside the allowed set rejects the
-	# whole word. This is what excludes / \ $ ` ; & | < > * ? ( ) ' " space and newline.
-	case "$1" in
-		*[!A-Za-z0-9._-]*) return 1 ;;
-	esac
-	# An OCI tag must start with an alphanumeric or underscore. Enforcing that also
-	# kills a leading `-` (which could otherwise be read as an option by something
-	# downstream) and a leading `.`.
-	case "$1" in
-		[A-Za-z0-9_]*) ;;
-		*) return 1 ;;
-	esac
-	# `..` cannot traverse anywhere here — there is no `/` in the accepted charset and
-	# the value is never used as a path — but it is rejected anyway. Defence that costs
-	# nothing outlives the reasoning that made it unnecessary.
-	case "$1" in
-		*..*) return 1 ;;
-	esac
-	return 0
-}
-
-is_digest() {  # exactly sha256:<64 lowercase hex>
-	case "$1" in
-		sha256:*) ;;
-		*) return 1 ;;
-	esac
-	hex=${1#sha256:}
-	[ "${#hex}" -eq 64 ] || return 1
-	case "$hex" in
-		*[!0-9a-f]*) return 1 ;;
-	esac
-	return 0
-}
-
-is_count() {  # a plain positive integer, no sign, no leading zero, bounded
-	[ -n "$1" ] || return 1
-	[ "${#1}" -le 5 ] || return 1
-	case "$1" in
-		*[!0-9]*) return 1 ;;
-		0*) return 1 ;;
-	esac
-	[ "$1" -ge 1 ] && [ "$1" -le "$MAX_TAIL" ]
-}
-
-# --- .env sanity ------------------------------------------------------------------
-# podman-compose HAS FLIPPED THIS PRECEDENCE BETWEEN RELEASES, so nothing here relies on
-# either answer. Both were read in the source, not guessed:
+# podman-compose HAS FLIPPED .env-vs-process-environment precedence between releases:
 #
 #   1.0.6   self.environ = dict(os.environ) ; .update(dotenv_dict)   -> .env WINS
 #   1.6.0   self.environ = dotenv_dict      ; .update(os.environ)    -> process env WINS
 #
-# Alpine 3.24 ships 1.6.0, so today the exported values below would win. Under 1.0.6 a
-# stray uncommented DD_BOT in .env would instead have pinned every deploy to one bot
-# while this script cheerfully reported the other. The design does not depend on which
-# version is installed: DD_* simply must not appear in .env at all, and this refuses to
-# deploy if one does. `dd-ctl status` prints the podman-compose version, so a future
-# flip is visible rather than inferred.
+# Alpine 3.24 ships 1.6.0, so today the exported values below win. Under 1.0.6 a stray
+# uncommented DD_BOT in .env would instead have pinned every deploy to one bot while
+# this script cheerfully reported the other. The design depends on neither answer: these
+# names simply must not appear in .env at all, and this refuses to deploy if one does.
 assert_env_clean() {
-	[ -f "$STACK_DIR/.env" ] || die "no $STACK_DIR/.env — copy .env.example and fill it in" 1
-	for var in DD_BOT DD_IMAGE_REF DD_MALLOC_CONF RAILWAY_SERVICE_NAME MALLOC_CONF; do
+	[ -f "$STACK_DIR/.env" ] || die "no $STACK_DIR/.env — copy .env.example and fill it in"
+	for var in DD_BOT DD_MALLOC_CONF RAILWAY_SERVICE_NAME MALLOC_CONF; do
 		if grep -Eq "^[[:space:]]*(export[[:space:]]+)?$var[[:space:]]*=" "$STACK_DIR/.env"; then
-			die "$var is set in $STACK_DIR/.env — dd-ctl supplies it per deploy. Comment it out." 1
+			die "$var is set in $STACK_DIR/.env — dd-ctl supplies it. Comment it out."
 		fi
 	done
 }
 
-save_state() {  # save_state <bot> <image-ref>
-	mkdir -p "$STATE_DIR"
-	printf 'DD_BOT=%s\nDD_IMAGE_REF=%s\n' "$1" "$2" > "$STATE_FILE.tmp"
-	mv "$STATE_FILE.tmp" "$STATE_FILE"   # write-then-rename; `> file` truncates first
-}
-
-load_state() {
-	SAVED_BOT=''
-	SAVED_REF=''
-	[ -f "$STATE_FILE" ] || return 0
-	# Parsed by hand rather than sourced: this file is ours, but sourcing anything is a
-	# habit worth not having in a script whose whole job is not executing input.
-	SAVED_BOT=$(sed -n 's/^DD_BOT=\(.*\)$/\1/p' "$STATE_FILE" | tail -n1)
-	SAVED_REF=$(sed -n 's/^DD_IMAGE_REF=\(.*\)$/\1/p' "$STATE_FILE" | tail -n1)
-	# The state file is ours, but validate it anyway — a corrupt or hand-edited line
-	# must not become the first unvalidated string in the pipeline.
-	case "$SAVED_BOT" in beacon|anchor) ;; *) SAVED_BOT='' ;; esac
-	case "$SAVED_REF" in
-		:*) is_safe_word "${SAVED_REF#:}" || SAVED_REF='' ;;
-		@*) is_digest "${SAVED_REF#@}" || SAVED_REF='' ;;
-		*) SAVED_REF='' ;;
-	esac
-}
-
-# Exports the three variables compose.yaml interpolates. Every verb needs them, because
-# podman-compose has to parse the file before it can do anything with it.
-export_compose_env() {  # export_compose_env <bot> <image-ref>
+# Exports the two variables compose.yaml interpolates. Called only with the literals
+# `beacon` and `anchor`, from the two deploy branches below.
+export_compose_env() {  # export_compose_env <beacon|anchor>
 	DD_BOT=$1
-	DD_IMAGE_REF=$2
 	case "$1" in
 		beacon) DD_MALLOC_CONF=$MALLOC_BEACON ;;
 		anchor) DD_MALLOC_CONF=$MALLOC_ANCHOR ;;
 		*) die "internal: unknown bot" 1 ;;
 	esac
-	export DD_BOT DD_IMAGE_REF DD_MALLOC_CONF
+	export DD_BOT DD_MALLOC_CONF
 }
 
-compose() {  # compose <args...>
-	podman-compose -f "$COMPOSE_FILE" "$@"
-}
+compose() { podman-compose -f "$COMPOSE_FILE" "$@"; }
 
-# --- parse SSH_ORIGINAL_COMMAND ---------------------------------------------------
-# The one and only place the hostile string is touched. `set -f` off means a `*` in the
-# string would be glob-expanded against the cwd; with it on, the value is split into
-# fields and nothing else happens to it.
-if [ "$#" -eq 0 ] && [ -n "${SSH_ORIGINAL_COMMAND:-}" ]; then
-	set -f
-	# Space, tab, newline — built without a literal tab in the source so nobody's editor
-	# can quietly turn it into spaces and change what counts as a separator.
-	_nl='
-'
-	IFS=" $(printf '\t')$_nl"
-	# shellcheck disable=SC2086  # deliberate, controlled word splitting — see above
-	set -- $SSH_ORIGINAL_COMMAND
-	unset IFS _nl
-	set +f
-fi
-
-[ "$#" -ge 1 ] || usage
-VERB=$1
-shift
-
-# Closed list. Note this happens before any argument is looked at, so an unknown verb
-# never reaches argument handling.
-case "$VERB" in
-	deploy|down|logs|ps|status) ;;
-	*) audit "REJECTED unknown-verb"; usage ;;
-esac
-
-case "$VERB" in
-
-deploy)
-	[ "$#" -ge 1 ] || { audit "REJECTED deploy missing-bot"; usage; }
-	[ "$#" -le 2 ] || { audit "REJECTED deploy too-many-args"; usage; }
-	BOT=$1
-	case "$BOT" in
-		beacon|anchor) ;;
-		*) audit "REJECTED deploy bad-bot"; usage ;;
-	esac
-
-	if [ "$#" -eq 2 ]; then
-		ARG=$2
-		if is_digest "$ARG"; then
-			IMAGE_REF="@$ARG"
-		elif is_safe_word "$ARG"; then
-			IMAGE_REF=":$ARG"
-		else
-			audit "REJECTED deploy bad-tag-or-digest"
-			usage
-		fi
-	else
-		IMAGE_REF=":$DEFAULT_TAG"
-	fi
-
+deploy() {  # deploy <beacon|anchor> — called only with a literal
+	bot=$1
 	assert_env_clean
-	audit "deploy $BOT $IMAGE_REF"
-	export_compose_env "$BOT" "$IMAGE_REF"
+	export_compose_env "$bot"
 
-	# 1. Pull first, explicitly, so a registry problem is reported as a registry problem.
-	#    The most likely one by far: GHCR packages are PRIVATE by default and visibility
-	#    is a setting on the package in GitHub's UI, not something the workflow can grant
-	#    — an unauthenticated pull from this box 403s until an owner flips it.
-	printf '==> pulling %s%s\n' "$IMAGE_REPO" "$IMAGE_REF"
-	if ! podman pull "${IMAGE_REPO}${IMAGE_REF}"; then
-		cat >&2 <<EOF
+	# 1. PULL FIRST, EXPLICITLY, AND UNCONDITIONALLY. compose.yaml names a moving branch
+	#    tag, and podman will not re-resolve a tag it already holds locally: without this
+	#    step `up -d` happily keeps running last week's image under the same name. It is
+	#    `podman-compose pull` rather than `podman pull <ref>` so the image reference
+	#    stays in exactly one place — duplicating it here is how the two drift.
+	#
+	#    NO DIGEST COMPARISON, NO CHANGE DETECTION, deliberately: the deploy is a
+	#    deliberate act somebody triggered over SSH, so "pull and recreate" is what they
+	#    asked for. Skipping work when the digest looks unchanged is not an optimisation
+	#    here, it is a second thing that can be wrong about what is running.
+	#
+	#    Doing it as its own step also means a registry problem is reported as a registry
+	#    problem. The most likely one by far: GHCR packages are PRIVATE by default and
+	#    visibility is a setting on the package in GitHub's UI, not something the
+	#    workflow can grant — an unauthenticated pull from this box 403s until an owner
+	#    flips it.
+	printf '==> pulling the images named in compose.yaml\n'
+	if ! compose pull; then
+		cat >&2 <<'EOF'
 dd-ctl: pull failed.
         If this is a 403/denied: the GHCR package is probably still private.
         Package page -> Package settings -> Danger Zone -> Change visibility.
@@ -363,10 +262,6 @@ EOF
 	#    especially when switching bots, where a survivor would mean beacon and anchor
 	#    on the same test guild at once. --ignore makes this a no-op when nothing is
 	#    there, so it is safe on a first deploy.
-	load_state
-	if [ -n "$SAVED_BOT" ] && [ "$SAVED_BOT" != "$BOT" ]; then
-		printf '==> switching %s -> %s: removing the running bot first\n' "$SAVED_BOT" "$BOT"
-	fi
 	podman stop --ignore --time "$STOP_TIMEOUT" "$BOT_CONTAINER" >/dev/null
 	podman rm --ignore --force "$BOT_CONTAINER" >/dev/null
 
@@ -375,7 +270,7 @@ EOF
 	#    container whose tag now points at a different image.
 	printf '==> bringing up postgres\n'
 	compose up -d postgres
-	printf '==> creating the bot (%s)\n' "$BOT"
+	printf '==> creating the bot (%s)\n' "$bot"
 	compose up -d --force-recreate bot
 
 	# 4. Verify END TO END, from the container that actually exists, that it is running
@@ -387,109 +282,49 @@ EOF
 	#    not to assume. This asks the only question that matters, of the only thing that
 	#    can answer it.
 	sleep 2
-	BOT_ENV=$(podman inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+	bot_env=$(podman inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
 		"$BOT_CONTAINER" 2>/dev/null || true)
-	if printf '%s\n' "$BOT_ENV" | grep -qx "RAILWAY_SERVICE_NAME=$BOT"; then
-		printf '==> verified: %s is running as %s\n' "$BOT_CONTAINER" "$BOT"
+	if printf '%s\n' "$bot_env" | grep -qx "RAILWAY_SERVICE_NAME=$bot"; then
+		printf '==> verified: %s is running as %s\n' "$BOT_CONTAINER" "$bot"
 	else
 		cat >&2 <<EOF
-dd-ctl: FAILED VERIFICATION. $BOT_CONTAINER does not carry RAILWAY_SERVICE_NAME=$BOT.
+dd-ctl: FAILED VERIFICATION. $BOT_CONTAINER does not carry RAILWAY_SERVICE_NAME=$bot.
         The container may be running the OTHER bot, or none at all. Most likely cause:
         RAILWAY_SERVICE_NAME or DD_BOT is set in $STACK_DIR/.env and is winning the
         interpolation, or this podman-compose version resolves env precedence
         differently. Do not assume the deploy worked. Check:
             dd-ctl status
-            podman inspect $BOT_CONTAINER --format '{{.Config.Env}}'
 EOF
 		exit 1
 	fi
-	SEEN_MALLOC=$(printf '%s\n' "$BOT_ENV" | sed -n 's/^MALLOC_CONF=//p' | head -n1)
-	if [ -n "$SEEN_MALLOC" ]; then
-		printf '==> MALLOC_CONF: %s\n' "$SEEN_MALLOC"
+	seen_malloc=$(printf '%s\n' "$bot_env" | sed -n 's/^MALLOC_CONF=//p' | head -n1)
+	if [ -n "$seen_malloc" ]; then
+		printf '==> MALLOC_CONF: %s\n' "$seen_malloc"
 	else
-		printf 'dd-ctl: warning — no MALLOC_CONF in the container. Costs anchor a little RAM; nothing breaks.\n' >&2
+		printf 'dd-ctl: warning — no MALLOC_CONF in the container. Costs anchor a little RAM.\n' >&2
 	fi
-
-	save_state "$BOT" "$IMAGE_REF"
 	printf '==> deployed. Startup on this CPU is slow — 60-90s of silence is normal.\n'
-	;;
+}
 
-down)
-	[ "$#" -eq 0 ] || { audit "REJECTED down extra-args"; usage; }
-	audit "down"
-	load_state
-	export_compose_env "${SAVED_BOT:-beacon}" "${SAVED_REF:-:$DEFAULT_TAG}"
-	# No --volumes, ever, and no way to ask for it. The pgdata volume is the only state
-	# this box holds for the stack; losing it to a typo'd verb is not a recoverable
-	# mistake, and `podman volume rm` by hand is the right amount of friction for it.
-	compose down
-	printf '==> stack down. The pgdata volume is untouched.\n'
-	;;
-
-logs)
-	# Raw `podman logs` against the known container names rather than
-	# `podman-compose logs`: it needs no compose parsing (so no interpolation, so no
-	# way for a missing variable to turn "show me the logs" into an error) and its
-	# flags have been stable across every podman version this box will see.
-	SERVICE=bot
-	TAIL=$DEFAULT_TAIL
-	[ "$#" -le 3 ] || { audit "REJECTED logs too-many-args"; usage; }
-	while [ "$#" -gt 0 ]; do
-		case "$1" in
-			bot|postgres)
-				SERVICE=$1
-				shift
-				;;
-			--tail)
-				[ "$#" -ge 2 ] || { audit "REJECTED logs tail-missing-value"; usage; }
-				is_count "$2" || { audit "REJECTED logs bad-tail"; usage; }
-				TAIL=$2
-				shift 2
-				;;
-			*)
-				audit "REJECTED logs bad-arg"
-				usage
-				;;
-		esac
-	done
-	case "$SERVICE" in
-		bot) CONTAINER=$BOT_CONTAINER ;;
-		postgres) CONTAINER=$DB_CONTAINER ;;
-		*) die "internal: unknown service" 1 ;;
-	esac
-	audit "logs $SERVICE --tail $TAIL"
-	podman logs --tail "$TAIL" "$CONTAINER"
-	;;
-
-ps)
-	[ "$#" -eq 0 ] || { audit "REJECTED ps extra-args"; usage; }
-	audit "ps"
-	podman ps -a \
-		--filter "name=$BOT_CONTAINER" \
-		--filter "name=$DB_CONTAINER" \
-		--format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
-	;;
-
-status)
-	[ "$#" -eq 0 ] || { audit "REJECTED status extra-args"; usage; }
-	audit "status"
-	load_state
-	printf '=== deployed (per %s) ===\n' "$STATE_FILE"
-	printf 'bot        %s\n' "${SAVED_BOT:-<none recorded>}"
-	printf 'image      %s%s\n' "$IMAGE_REPO" "${SAVED_REF:-<none recorded>}"
-	printf '\n=== containers ===\n'
+status() {
+	printf '=== containers ===\n'
 	podman ps -a \
 		--filter "name=$BOT_CONTAINER" \
 		--filter "name=$DB_CONTAINER" \
 		--format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' || true
 	printf '\n=== what the bot container actually thinks it is ===\n'
+	# Asked of the container, not read back out of a file this script wrote. It is the
+	# only source that cannot agree with a mistake made earlier in the pipeline.
 	podman inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$BOT_CONTAINER" 2>/dev/null \
 		| grep -E '^(RAILWAY_SERVICE_NAME|MALLOC_CONF|DATABASE_SSL|TEST_ENV)=' \
 		|| printf '(no bot container)\n'
+	printf '\n=== image ===\n'
+	podman inspect --format '{{.ImageName}}{{"\n"}}{{.Image}}' "$BOT_CONTAINER" 2>/dev/null \
+		|| printf '(no bot container)\n'
 	printf '\n=== runtime ===\n'
-	# The four things that are worth confirming rather than assuming on this board:
-	# native rootless overlay (not vfs, which copies every layer onto the SD card),
-	# crun, cgroup v2, and netavark — see root-setup.sh sections 2 and 6.
+	# The four things worth confirming rather than assuming on this board: native
+	# rootless overlay (not vfs, which copies every layer onto the SD card), crun,
+	# cgroup v2, and netavark — see root-setup.sh §2 and §6.
 	podman info --format \
 		'storage    {{.Store.GraphDriverName}}
 runtime    {{.Host.OCIRuntime.Name}}
@@ -501,7 +336,68 @@ rootless   {{.Host.Security.Rootless}}' 2>/dev/null || printf '(podman info fail
 	printf '\n=== memory ===\n'
 	free -m || true
 	printf '\nNothing on this box starts at boot. After a reboot or a power cut the\n'
-	printf 'stack stays down until someone runs `dd-ctl deploy`. That is intended.\n'
-	;;
+	printf 'stack stays down until someone runs `dd-ctl deploy-beacon`. That is intended.\n'
+}
 
+# --- dispatch ---------------------------------------------------------------------
+# ONE string. When this runs as a forced command sshd hands the client's entire request
+# over in SSH_ORIGINAL_COMMAND; when a human runs it on the box it is the first
+# argument. Either way it is compared against fixed literals and then discarded — never
+# split into words, never interpolated into a command, never used as a path, never
+# logged. No verb takes an argument, so more than one is simply a rejection.
+[ "$#" -le 1 ] || { audit "REJECTED too-many-arguments"; usage; }
+if [ "$#" -eq 1 ]; then
+	request="$1"
+else
+	request="${SSH_ORIGINAL_COMMAND-}"
+fi
+
+# The subject is quoted, so no word splitting. The patterns are plain literals with no
+# glob metacharacters — `case` patterns ARE globs, and while the hostile string is
+# always the subject and can never become a pattern, keeping them boring means nobody
+# has to re-derive that.
+case "$request" in
+deploy-beacon)
+	audit "deploy-beacon"
+	deploy beacon
+	;;
+deploy-anchor)
+	audit "deploy-anchor"
+	deploy anchor
+	;;
+down)
+	audit "down"
+	# The two variables exist only so podman-compose can parse the file; teardown is by
+	# project name and neither value affects it. Fixed literals, as everywhere else.
+	export_compose_env beacon
+	# No --volumes, ever, and no way to ask for it. The pgdata volume is the only state
+	# this box holds for the stack; losing it to a mistyped verb is not a recoverable
+	# mistake, and `podman volume rm` by hand is the right amount of friction.
+	compose down
+	printf '==> stack down. The pgdata volume is untouched.\n'
+	;;
+status)
+	audit "status"
+	status
+	;;
+logs)
+	audit "logs"
+	# exec: no shell survives the dispatch. Raw `podman logs` against the known
+	# container name rather than `podman-compose logs` — it needs no compose parsing,
+	# so no interpolation, so no way for a missing variable to turn "show me the logs"
+	# into an error, and its flags have been stable across every podman this box will
+	# see. Every word of the command line is a literal or a constant set above.
+	exec podman logs --tail "$TAIL_LINES" "$BOT_CONTAINER"
+	;;
+logs-postgres)
+	audit "logs-postgres"
+	# A second fixed verb rather than an argument to the first. Postgres is worth its
+	# own verb: on a cold start it runs initdb before the bot can connect, and when that
+	# is what went wrong the bot's own log cannot say so.
+	exec podman logs --tail "$TAIL_LINES" "$DB_CONTAINER"
+	;;
+*)
+	audit "REJECTED unknown-verb"
+	usage
+	;;
 esac

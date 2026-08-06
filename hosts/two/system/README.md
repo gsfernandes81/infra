@@ -118,6 +118,36 @@ can rewrite is not a restriction at all: replace the target, get a shell. `root-
 §4 verifies all three properties after installing rather than trusting `install` to
 have produced them.
 
+## `dd-ctl` is not signed off
+
+**`gavin` is in `wheel` and `sudo` is installed.** So anything that escapes the
+`dd-ctl` forced command lands on an account that can become root. The dispatcher is the
+entire boundary and there is nothing behind it. Nothing in this repo describes it as
+contained or unprivileged, and nothing should.
+
+Its design answer is to give hostile input almost nothing to act on: six verbs
+(`deploy-beacon`, `deploy-anchor`, `down`, `status`, `logs`, `logs-postgres`), **none of
+which takes an argument**, matched against exact literals and then discarded. But `sh
+-n` is a syntax check, not a review, and that is all this repo has run against it. A
+dedicated adversarial read is outstanding. What it still owes:
+
+| Question | Why it is the question |
+|---|---|
+| How is `SSH_ORIGINAL_COMMAND` handled end to end? | It is one string compared against literals and dropped — but that is a claim about the code, verified by reading it, not by anything automated. |
+| What does each fixed command line actually *do*? | The verbs are fixed, so the remaining risk is in what they invoke. A `git pull`-shaped verb would hand control of the deployed `compose.yaml` to whoever controls the git remote; there is none today, and there must not be one. |
+| Can the deployed stack gain a writable mount under `$HOME`? | A bind mount over `~/.ssh` would let the keyholder strip `restrict` from their own `authorized_keys` line and walk out of the forced command entirely. |
+
+On that last one: **`compose.yaml` currently uses only named volumes** (`pgdata`,
+`sshhostkeys`) and declares no host bind mounts at all — verified by reading it. That is
+a property of the file as it stands, **not an enforced invariant**, and nothing checks
+it on deploy. Making it one belongs with the adversarial review rather than ahead of it,
+because the place to enforce it is `dd-ctl` itself and that file should be changed once,
+by whoever reads it properly, not twice.
+
+**The trust boundary that is not about `dd-ctl` at all:** `compose.yaml` names a moving
+branch tag, so anyone with push access to that branch decides what runs as `gavin` on
+the next deploy. See [`docs/decisions.md`](../../../docs/decisions.md).
+
 **Known gap, for when a tracked executable does land here:**
 `bin/install-system-file`'s `validators_for()` keys on `live.parent == /etc/init.d` and
 on the filename `fstab`, so an executable installing anywhere else would get **no**

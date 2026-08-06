@@ -2,8 +2,10 @@
 # One-time ROOT setup for the destiny-director test bot on `two`
 # (Raspberry Pi 1 B+, armv6l, ~475 MB usable RAM, Alpine 3.24.1 `sys` install, OpenRC).
 #
-# Read this before running it. It is the only privileged step in the whole deployment:
-# everything afterwards happens unprivileged as `gavin`, over SSH, through `dd-ctl`.
+# Read this before running it. It is the only step that NEEDS root: everything afterwards
+# happens as `gavin`, over SSH, through `dd-ctl`. That is not the same as "afterwards is
+# unprivileged" — `gavin` is in `wheel` with sudo installed, so `dd-ctl`'s dispatch is
+# the whole boundary and its blast radius is root. See §1 and dd-ctl's own header.
 #
 #   sh root-setup.sh                       # everything except the destructive parts
 #   DD_CTL_PUBKEY='ssh-ed25519 AAAA... label' sh root-setup.sh
@@ -98,9 +100,16 @@ warn()    { printf '       WARN %s\n' "$*"; }
 backup() {  # backup <path>
 	[ -f "$1" ] || return 0
 	mkdir -p "$BACKUP_DIR"
-	cp -a "$1" "$BACKUP_DIR/$(basename -- "$1")"
-	chmod 600 "$BACKUP_DIR/$(basename -- "$1")"
-	say "       backed up $1 -> $BACKUP_DIR/$(basename -- "$1") (mode 600)"
+	# The whole path with `/` mangled to `_`, not basename. Two files with the same
+	# basename from different directories would otherwise land on each other inside one
+	# run's backup directory, and the second would silently overwrite the first — so the
+	# backup you reach for is of a file you were not thinking about. It does not happen
+	# with the files this script touches today; it would be discovered the hard way if a
+	# future section added one.
+	_bk="$BACKUP_DIR/$(printf '%s' "${1#/}" | tr / _)"
+	cp -a "$1" "$_bk"
+	chmod 600 "$_bk"
+	say "       backed up $1 -> $_bk (mode 600)"
 }
 
 pkg_installed() {  # pkg_installed <name>  — true only if actually installed
@@ -139,17 +148,74 @@ ok "root fs: $(df -h / | awk 'NR==2 {print $4" free of "$2}')"
 DD_UID="$(id -u "$DD_USER")"
 DD_HOME="$(getent passwd "$DD_USER" | cut -d: -f6)"
 DD_SHELL="$(getent passwd "$DD_USER" | cut -d: -f7)"
+# The primary GROUP, asked for rather than assumed to equal the username. `chown
+# gavin:gavin` fails outright if the primary group is `users`, and under `set -e` that
+# kills this script mid-§5 — after the .ssh mkdir, before the key append, leaving a
+# half-applied state on a box you reach through a tunnel.
+DD_GROUP="$(id -gn "$DD_USER")"
 [ -n "$DD_HOME" ] || { echo "cannot resolve $DD_USER's home directory" >&2; exit 1; }
-ok "$DD_USER: uid $DD_UID, home $DD_HOME, shell $DD_SHELL"
+[ -n "$DD_GROUP" ] || { echo "cannot resolve $DD_USER's primary group" >&2; exit 1; }
+ok "$DD_USER: uid $DD_UID, group $DD_GROUP, home $DD_HOME, shell $DD_SHELL"
+
+# `sudo` and the `wheel` group are relevant to everything below, so state them here
+# rather than leaving them to be discovered. `gavin` is in `wheel` and sudo is
+# installed, so anything that escapes the dd-ctl forced command lands on an account
+# that can become root. Read the blast radius as root, not as "some unprivileged user".
+if id -nG "$DD_USER" 2>/dev/null | tr ' ' '\n' | grep -qx wheel; then
+	warn "$DD_USER is in 'wheel' and sudo is present: an escape from dd-ctl is a root escape"
+	note "THE DEPLOY KEY'S BLAST RADIUS IS ROOT. $DD_USER is in wheel with sudo installed, so
+    dd-ctl's argument validation is the whole boundary and there is nothing behind it.
+    dd-ctl has NOT had an adversarial review — see hosts/two/system/README.md."
+fi
 
 # The public key that gets the restricted forced command. A public key is not a secret,
 # but nothing here bakes one in either — supply it, or leave an already installed one
 # alone. There is no default: a wrong default key silently authorises somebody else's
 # laptop.
+#
+# VALIDATED BEFORE ANYTHING IS WRITTEN, and validated here in the preflight so a bad
+# value costs nothing. It is appended to authorized_keys AS ROOT in §5, and an embedded
+# newline in it would append a SECOND line — one with no `command=` and no `restrict`,
+# i.e. an entirely unrestricted key — while the run's output looked completely normal.
+# Keys get copied out of chat windows, wikis and other people's terminals, so "a human
+# supplied it" is not an assurance about its bytes. REFUSED, never sanitised: silently
+# rewriting key material installs something nobody reviewed.
 AUTHKEYS="$DD_HOME/.ssh/authorized_keys"
+if [ -n "${DD_CTL_PUBKEY:-}" ]; then
+	# The line count is checked SEPARATELY and FIRST, because grep matches per line and
+	# would pass a two-line value on the strength of whichever line matched.
+	if [ "$(printf '%s\n' "$DD_CTL_PUBKEY" | wc -l | tr -d ' ')" != 1 ]; then
+		echo "refusing: DD_CTL_PUBKEY spans more than one line. An embedded newline" >&2
+		echo "appends a second, UNRESTRICTED key line. Supply exactly one key." >&2
+		exit 1
+	fi
+	if ! printf '%s\n' "$DD_CTL_PUBKEY" | grep -Eq \
+		'^(ssh-ed25519|ecdsa-sha2-[a-z0-9-]+|ssh-rsa) [A-Za-z0-9+/=]+( [^[:cntrl:]]*)?$'
+	then
+		echo "refusing: DD_CTL_PUBKEY is not a single '<type> <base64> [comment]' key." >&2
+		echo "Options and the command= prefix are added by this script — do not include" >&2
+		echo "them, and do not include anything that is not a public key." >&2
+		exit 1
+	fi
+	ok "DD_CTL_PUBKEY parses as one '<type> <base64> [comment]' public key"
+fi
+
 HAVE_FORCED_KEY=no
-if [ -f "$AUTHKEYS" ] && grep -q "command=\"$DD_CTL_PATH\"" "$AUTHKEYS"; then
-	HAVE_FORCED_KEY=yes
+if [ -f "$AUTHKEYS" ]; then
+	# The FULL prefix, including `restrict`, not just `command=`. A hand-written line
+	# without `restrict` gets a pty, agent forwarding, port forwarding and ~/.ssh/rc —
+	# a materially weaker thing. Accepting it as "already have the forced key" means
+	# the weak line is never noticed and never replaced.
+	if grep -qF "command=\"$DD_CTL_PATH\",restrict " "$AUTHKEYS"; then
+		HAVE_FORCED_KEY=yes
+	fi
+	if grep -F "$DD_CTL_PATH" "$AUTHKEYS" | grep -qv 'restrict'; then
+		warn "$AUTHKEYS has a dd-ctl line WITHOUT 'restrict'"
+		note "A dd-ctl forced-command line in $AUTHKEYS lacks 'restrict', so that key still gets
+    a pty and agent/port forwarding. Replace it by hand with:
+      command=\"$DD_CTL_PATH\",restrict <type> <base64> <comment>
+    This script appends and never edits, so it will not fix that line for you."
+	fi
 fi
 if [ -z "${DD_CTL_PUBKEY:-}" ] && [ "$HAVE_FORCED_KEY" = no ]; then
 	cat >&2 <<EOF
@@ -167,13 +233,50 @@ fi
 # ---------------------------------------------------------------------------------
 say "== 2/12  apk repositories"
 
-if grep -q '^#.*/community$' /etc/apk/repositories; then
-	backup /etc/apk/repositories
-	sed -i 's|^#\(.*/community\)$|\1|' /etc/apk/repositories
-	changed "enabled the community apk repository"
-	say "       enabled community"
+# The obvious one-liner here — `sed -i 's|^#\(.*/community\)$|\1|'` — uncomments EVERY
+# commented line ending in /community. That includes an `edge/community` somebody
+# disabled on purpose, and a second mirror's line. Silently changing which RELEASE
+# packages come from is not a small bug on a box you reach through a tunnel; it is how
+# you end up with edge packages on a stable box and no memory of asking.
+#
+# So the wanted line is DERIVED from the /main line that is already enabled, and only
+# that exact string is uncommented. This box has two mirrors present in the file
+# (dl-cdn.alpinelinux.org and alpine.mirror.wearetriple.com) and is pinned to
+# `latest-stable`, so "the community belonging to the main we are already using" is the
+# only definition that yields one answer rather than two.
+MAIN_REPO="$(awk '!/^[[:space:]]*#/ && /\/main[[:space:]]*$/ {print $1; exit}' /etc/apk/repositories)"
+if [ -z "$MAIN_REPO" ]; then
+	warn "no enabled */main line in /etc/apk/repositories — leaving the file alone"
+	note "Could not derive the community repository from an enabled */main line. Enable it by
+    hand before re-running, or §3 will fail on packages that live in community."
 else
-	ok "community repository already enabled"
+	WANT_COMMUNITY="${MAIN_REPO%/main}/community"
+	if grep -qxF "$WANT_COMMUNITY" /etc/apk/repositories; then
+		ok "community already enabled: $WANT_COMMUNITY"
+	else
+		# Compare each line's UNCOMMENTED form against the one string we want, so a
+		# leading `# ` or `#` both match and nothing else can. The temp file is written
+		# inside /etc — root-only — because `cmd > file` truncates before cmd runs and
+		# because a temp in world-writable /tmp is its own problem.
+		REPO_TMP=/etc/apk/repositories.infra-tmp
+		awk -v want="$WANT_COMMUNITY" '
+			{ s = $0; sub(/^[[:space:]]*#[[:space:]]*/, "", s) }
+			s == want { print want; next }
+			{ print }
+		' /etc/apk/repositories > "$REPO_TMP"
+		if cmp -s "$REPO_TMP" /etc/apk/repositories; then
+			rm -f "$REPO_TMP"
+			warn "no commented line for $WANT_COMMUNITY — community NOT enabled"
+			note "Add this line to /etc/apk/repositories by hand, then re-run:
+      $WANT_COMMUNITY"
+		else
+			backup /etc/apk/repositories
+			mv "$REPO_TMP" /etc/apk/repositories
+			chmod 644 /etc/apk/repositories
+			changed "enabled $WANT_COMMUNITY (that line only)"
+			say "       enabled $WANT_COMMUNITY"
+		fi
+	fi
 fi
 apk update
 
@@ -327,7 +430,7 @@ say "== 5/12  restricted SSH key for $DD_USER"
 
 mkdir -p "$DD_HOME/.ssh"
 touch "$AUTHKEYS"
-chown -R "$DD_USER:$DD_USER" "$DD_HOME/.ssh"
+chown -R "$DD_USER:$DD_GROUP" "$DD_HOME/.ssh"
 chmod 700 "$DD_HOME/.ssh"
 chmod 600 "$AUTHKEYS"
 
@@ -347,7 +450,7 @@ if [ -n "${DD_CTL_PUBKEY:-}" ]; then
 	else
 		backup "$AUTHKEYS"
 		printf '%s\n' "$LINE" >> "$AUTHKEYS"
-		chown "$DD_USER:$DD_USER" "$AUTHKEYS"
+		chown "$DD_USER:$DD_GROUP" "$AUTHKEYS"
 		chmod 600 "$AUTHKEYS"
 		changed "appended a dd-ctl forced-command key to $AUTHKEYS"
 		say "       appended forced-command entry"
@@ -442,12 +545,44 @@ say "== 8/12  XDG_RUNTIME_DIR for interactive sessions"
 # was ash — would leave every interactive `podman ps` looking at an empty runtime dir.
 RUNTIME_DIR="/tmp/podman-run-$DD_UID"
 
+# /tmp IS WORLD-WRITABLE AND THIS PATH IS PREDICTABLE, so any other local uid — in
+# principle including one of the subuids granted in §6 — can create it first and own it.
+# Podman checks ownership and mode and refuses, so the exposure is denial of service
+# rather than takeover; but the failure would present as podman being broken rather than
+# as somebody else owning the directory, which is the expensive kind of wrong.
+#
+# Create it here, `mkdir -m 700` in one step (mkdir-then-chmod leaves a window at the
+# default mode), and then VERIFY — creating it says nothing about what was already
+# there. dd-ctl repeats this check on every invocation, because this script runs once
+# and /tmp does not survive a reboot.
+if [ -L "$RUNTIME_DIR" ]; then
+	warn "$RUNTIME_DIR exists and is a SYMLINK — refusing to touch it"
+	note "$RUNTIME_DIR is a symlink. Somebody else planted it. Remove it by hand, check who
+    owns the target, and re-run. dd-ctl will refuse to start until this is resolved."
+elif [ ! -d "$RUNTIME_DIR" ]; then
+	mkdir -m 700 "$RUNTIME_DIR"
+	chown "$DD_USER:$DD_GROUP" "$RUNTIME_DIR"
+	changed "created $RUNTIME_DIR (0700, $DD_USER:$DD_GROUP)"
+	say "       created $RUNTIME_DIR"
+fi
+if [ -d "$RUNTIME_DIR" ] && [ ! -L "$RUNTIME_DIR" ]; then
+	RT_ID="$(stat -c '%U %a' "$RUNTIME_DIR")"
+	if [ "$RT_ID" = "$DD_USER 700" ]; then
+		ok "$RUNTIME_DIR is $DD_USER, mode 700"
+	else
+		warn "$RUNTIME_DIR is '$RT_ID', want '$DD_USER 700'"
+		note "$RUNTIME_DIR is owned by somebody other than $DD_USER, or is not mode 700. Podman
+    will refuse to use it and dd-ctl will refuse to start. Find out who created it
+    before removing it — on a shared /tmp that is a question worth the answer."
+	fi
+fi
+
 PROFILE="$DD_HOME/.profile"
 if [ -f "$PROFILE" ] && grep -q 'XDG_RUNTIME_DIR' "$PROFILE"; then
 	ok "$PROFILE already sets XDG_RUNTIME_DIR"
 else
 	printf 'export XDG_RUNTIME_DIR=%s\n' "$RUNTIME_DIR" >> "$PROFILE"
-	chown "$DD_USER:$DD_USER" "$PROFILE"
+	chown "$DD_USER:$DD_GROUP" "$PROFILE"
 	changed "added XDG_RUNTIME_DIR to $PROFILE (sh/ash/bash sessions)"
 	say "       wrote $PROFILE"
 fi
@@ -463,7 +598,7 @@ else
 # created under a different XDG_RUNTIME_DIR are invisible to podman here.
 set -gx XDG_RUNTIME_DIR $RUNTIME_DIR
 EOF
-	chown -R "$DD_USER:$DD_USER" "$DD_HOME/.config/fish"
+	chown -R "$DD_USER:$DD_GROUP" "$DD_HOME/.config/fish"
 	changed "wrote $FISHCONF (fish is $DD_USER's login shell, and fish ignores .profile)"
 	say "       wrote $FISHCONF"
 fi
@@ -618,16 +753,6 @@ else
 		DOCKER_RUNNING="$(docker ps -q 2>/dev/null | wc -l | tr -d ' ')"
 		say "       containers: $DOCKER_CONTAINERS total, $DOCKER_RUNNING running"
 		[ "$DOCKER_RUNNING" != 0 ] && docker ps --format '            {{.Names}}  {{.Image}}  {{.Status}}'
-		# THE ONE THING THAT MUST NOT HAPPEN: this box is reachable only through a
-		# Cloudflare tunnel. If cloudflared turned out to be a docker container rather
-		# than the OpenRC service it is believed to be, stopping docker would cut the
-		# session doing the stopping — and leave no way back in.
-		if docker ps --format '{{.Image}} {{.Names}}' 2>/dev/null | grep -qi cloudflare; then
-			warn "cloudflared appears to be a DOCKER CONTAINER on this box"
-			note "REFUSED to remove docker: cloudflared looks containerised, and it is the only
-    way into this box. Resolve that first, from a session that does not traverse it."
-			DOCKER_PKGS=''
-		fi
 	else
 		DOCKER_CONTAINERS=0
 		DOCKER_RUNNING=0
@@ -635,6 +760,65 @@ else
 	fi
 	if [ -d /var/lib/docker ]; then
 		say "       /var/lib/docker: $(du -sh /var/lib/docker 2>/dev/null | cut -f1) (NOT deleted by this script)"
+	fi
+fi
+
+# THE ONE THING THAT MUST NOT HAPPEN: this box is reachable only through a Cloudflare
+# tunnel. If cloudflared were a docker container rather than the OpenRC service it is
+# believed to be, stopping docker would cut the session doing the stopping and leave no
+# way back in.
+#
+# The check this replaces asked `docker ps | grep -i cloudflare` and refused on a match.
+# That is proving a negative from container NAMES: a tunnel container called `tunnel`,
+# `argo`, or started from a retagged image sails past it, and the check then reads
+# "safe" for exactly the case it exists to catch. It also only ran when the docker CLI
+# answered, so a sick daemon skipped it entirely. A check that can pass for the wrong
+# reason is worse than no check (docs/decisions.md).
+#
+# Inverted: REQUIRE positive proof that cloudflared is the OpenRC service, and refuse
+# when the evidence is merely absent. Two independent facts, both required:
+#
+#   1. OpenRC reports the service started.
+#   2. The running cloudflared's parent chain reaches pid 1 with no containerd, dockerd,
+#      shim, conmon or runtime in it. A containerised process is reparented to a shim,
+#      so this tells the two apart without trusting any name a container chose for
+#      itself. Read from /proc/<pid>/status, not /proc/<pid>/stat — a comm containing
+#      spaces or parentheses breaks field-numbered parsing of the latter.
+cloudflared_is_openrc_service() {
+	command -v rc-service >/dev/null 2>&1 || return 1
+	rc-service cloudflared status 2>/dev/null | grep -qi 'started' || return 1
+	CF_PID="$(pgrep -x cloudflared 2>/dev/null | head -n1)"
+	[ -n "${CF_PID:-}" ] || return 1
+	_p="$CF_PID"
+	_hops=0
+	while [ "$_p" -gt 1 ] 2>/dev/null; do
+		[ "$_hops" -lt 32 ] || return 1
+		case "$(cat "/proc/$_p/comm" 2>/dev/null || echo '?')" in
+			*containerd*|*dockerd*|*shim*|*conmon*|*runc*|*crun*) return 1 ;;
+			'?') return 1 ;;
+		esac
+		_p="$(awk '/^PPid:/ {print $2; exit}' "/proc/$_p/status" 2>/dev/null || echo '')"
+		[ -n "$_p" ] || return 1
+		_hops=$((_hops + 1))
+	done
+	[ "$_p" = 1 ]
+}
+
+if [ -n "$DOCKER_PKGS" ] && [ -n "${DD_REMOVE_DOCKER:-}" ]; then
+	if ! cloudflared_is_openrc_service; then
+		warn "could NOT confirm cloudflared is running as the OpenRC service"
+		note "REFUSED to remove docker. This box is reachable only through the Cloudflare
+    tunnel, and this script requires POSITIVE proof that cloudflared is the OpenRC
+    service and is not containerised before it will stop docker. It could not get
+    that proof — which may mean the tunnel is containerised, or only that the
+    service is stopped or cloudflared is not running right now. Establish which,
+    from a session that does not traverse the tunnel, then re-run. Check:
+      rc-service cloudflared status
+      pgrep -x cloudflared
+      cat /proc/\$(pgrep -x cloudflared)/status"
+		DOCKER_PKGS=''
+	else
+		ok "cloudflared is the OpenRC service (pid $CF_PID, parent chain reaches init)"
 	fi
 fi
 
@@ -719,7 +903,7 @@ pasted into an interactive fish session; anything with sh syntax is run as 'sh -
 
   2. from your workstation, with the restricted key:
        ssh -i <key> $DD_USER@ssh-two.gsrpi.uk status
-       ssh -i <key> $DD_USER@ssh-two.gsrpi.uk deploy beacon slim-stack
+       ssh -i <key> $DD_USER@ssh-two.gsrpi.uk deploy-beacon
 
 Nothing on this box starts at boot, by design. After a power cut it runs no containers
 and (see section 9) no swap until someone acts. That is intended, not a bug to fix by

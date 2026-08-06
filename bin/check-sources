@@ -67,8 +67,8 @@ for source_file in "$repo"/deployments/*/SOURCE; do
 		# Nothing to verify from here, and nothing here that can be wrong — so this
 		# reports and moves on rather than inventing a verdict it has no basis for.
 		echo "$stack: registry-deployed  $url"
-		echo "    (no sha here by design — a published image, deployed on the host;"
-		echo "     ask the host what is running)"
+		echo "    (no sha here by design — a published image on a moving tag, deployed"
+		echo "     on the host. compose.yaml says which branch; the host says which commit.)"
 		continue
 	fi
 

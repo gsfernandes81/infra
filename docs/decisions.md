@@ -22,8 +22,10 @@ not from scratch.
 | OpenCloud and k3s deleted, not migrated | Both confirmed unused. k3s was still *running* a live cluster (traefik, coredns, metrics-server) and holding ~880 MB of swap; removing it plus the dead `nextcloud` subvolume returned ~344 GiB to the array. |
 | **Docker and containerd removed from `two`; rootless podman instead** | Two daemons and their shims cost roughly 34 MB RSS on a board with ~475 MB total, and `two` ran no docker containers worth the price. Rootless podman is daemonless — nothing is resident when nothing is running — and it needs no `docker` group, which this repo already refuses to grant. It is also where `one` and `zero` are headed under MicroOS, so `two` is the cheap place to learn it. |
 | **No new user, no boot autostart on `two`** | Rootless podman's isolation comes from the user namespace, not from which unprivileged uid owns it, so a second service account buys nothing over `gavin`. And a test bot that resurrects itself at 03:00 and takes 200 MB of a 475 MB lifeboat is the wrong default: `restart: always` covers a crashed container, and a reboot deliberately leaves the box running nothing until someone deploys. |
-| **`bin/compose` stays docker-only and refuses `destiny-director` by name** | Making it runtime-aware would not have helped: that stack cannot be driven from `bin/compose` on *any* host, because its compose file interpolates three variables only `dd-ctl` supplies. And `docker compose` and `podman-compose` are not interchangeable — different project-directory semantics that agree here by coincidence. A wrapper hiding that will eventually hide a difference that matters. The conversion belongs to the MicroOS move, where there are stacks to test it against. |
+| **`bin/compose` stays docker-only and refuses `destiny-director` by name** | Making it runtime-aware would not have helped: that stack cannot be driven from `bin/compose` on *any* host, because its compose file interpolates two variables only `dd-ctl` supplies. And `docker compose` and `podman-compose` are not interchangeable — different project-directory semantics that agree here by coincidence. A wrapper hiding that will eventually hide a difference that matters. The conversion belongs to the MicroOS move, where there are stacks to test it against. |
 | **`dd-ctl` has exactly one copy, and it is not in `bin/`** | It drives one stack, so it lives beside that stack; `bin/` is for fleet-wide tools, and the README points at it from there. No symlink to it anywhere: a script reachable two ways is a script whose behaviour can depend on which way you came. It carries no `infra-` header either, because `_infra.py` only reads those under `hosts/<host>/system/` — a header no parser reads is decoration dressed as a checked invariant. |
+| **`dd-ctl`'s verbs take no arguments** | Deleting the arguments deletes every line of validation that existed to make them safe, and the bugs that could hide in it. It also means the keyholder cannot name the image. It does **not** mean the image is safe from everyone — see below. |
+| **The deployed image is a literal in `compose.yaml`, not a variable** | It is the one knob, and it is tracked. `SOURCE` already withholds the commit deliberately; putting the *branch* in a gitignored `.env` too would leave this repo unable to say anything at all about what `two` runs. It also removes a `${…:?}` failure path and any chance of `.env` and `compose.yaml` disagreeing. Editing it to test a branch shows up as local drift, which is the desired signal. |
 | **The live `dd-ctl` is root-owned, and that is the whole mechanism** | `/usr/local/bin/dd-ctl`, a real file, 0755, in a root-only-writable directory — never a symlink into `~gavin/infra` and never the checkout's copy run in place. `gavin` owns the checkout, so a forced command resolving through anything `gavin` can rewrite is not a restriction: replace the target, get an unrestricted shell. It was never a boundary *against* `gavin`, who has sudo; it stops the holder of the **restricted key** rewriting the thing that restricts them. |
 
 ## `two` also runs a test bot, and what that bends
@@ -67,18 +69,53 @@ this paragraph.
 ### Deploys are SSH-triggered, not commit-triggered
 
 Every other stack changes by editing this repo. This one changes by
-`ssh two deploy beacon <tag>`, and the deploy is recorded on the box
-(`~gavin/.local/state/dd-ctl/deployed`, plus an audit log), not here.
+`ssh two deploy-beacon`, which pulls the branch tag in `compose.yaml` and recreates the
+container. The deploy is recorded on the box (`dd-ctl`'s audit log), not here.
 
 That is deliberate: it is a rapidly-iterated test bot, and a commit per deploy would be
 pure noise in a repository whose value is that its history is all signal. The trade is
-real and worth stating — **this repo cannot tell you what is running on `two`.** Only
-`dd-ctl status` can, and the README says so rather than leaving the gap to be discovered.
+real and worth stating — **this repo cannot tell you which commit is running on `two`.**
+It can tell you which *branch*, because that is a tracked literal in `compose.yaml`; the
+commit is `dd-ctl status`'s answer alone, and the README says so rather than leaving the
+gap to be found.
 
-The dispatcher is a restricted SSH forced command with a closed verb list and
-reject-by-default argument validation; `SSH_ORIGINAL_COMMAND` is treated as hostile
-text throughout. The registry and repository are pinned in `compose.yaml`, so the
-caller supplies only a `:tag` or `@sha256:` suffix and can never redirect the pull.
+That split is the reason the branch is not a `.env` variable. The deployed version is
+already deliberately invisible to git; putting the deployed branch in a gitignored file
+too would leave two blind spots where there is currently one, and a one-line edit to
+`compose.yaml` to test a feature branch *should* show up as local drift — "this box is
+running something non-standard" is worth seeing.
+
+**The dispatcher takes no arguments at all.** Not validated arguments — none. Six fixed
+verbs (`deploy-beacon`, `deploy-anchor`, `down`, `status`, `logs`, `logs-postgres`),
+matched against exact literals, each running a fixed command line. An earlier version
+accepted `deploy <bot> [tag|digest]` and `logs [service] [--tail N]` behind charset
+checks, arity checks and a controlled word-split; all of that existed only to make
+arguments safe, and deleting the arguments deleted the whole class of bug along with the
+code that could be wrong about it. The stricter form — one keypair per operation, each
+with its own `command=` in `authorized_keys`, so sshd does the dispatch and the script
+handles no input — was considered and costs six keypairs to hold; it is the fallback if
+the `case` is ever judged insufficient.
+
+### What that does and does not buy — the accurate version
+
+**`gavin` is in `wheel` and `sudo` is installed**, so anything escaping the forced
+command lands on an account that can become root. The dispatcher is the whole boundary
+and there is nothing behind it. Nothing in this repo should describe it as contained or
+unprivileged, and **it has not had a dedicated adversarial review** — what such a review
+still owes is listed in
+[`hosts/two/system/README.md`](../hosts/two/system/README.md).
+
+Removing the arguments means the keyholder cannot choose which image or which branch
+runs. It does **not** mean nobody can:
+
+> `compose.yaml` names a **moving branch tag**, so anyone with push access to that
+> branch determines what code runs as `gavin` on the next deploy.
+
+That is the real trust boundary, it sits upstream of this repo entirely, and it is
+recorded here because the tempting summary ("the keyholder no longer chooses the image")
+is true and yet leaves the larger exposure unstated. The lever, if it is ever wanted:
+point `compose.yaml` at a branch only the owner pushes to, at the cost of a merge per
+deploy. Not done — the current setup is a deliberate position, not a locked-down one.
 
 ### The lifeboat tension, stated rather than left for a reviewer
 

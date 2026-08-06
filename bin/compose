@@ -13,8 +13,8 @@
 #
 #   * `two` runs exactly one stack, destiny-director, and that stack cannot be driven
 #     from here on ANY host, for a reason that has nothing to do with the runtime — its
-#     compose file interpolates three variables (DD_BOT, DD_IMAGE_REF, DD_MALLOC_CONF)
-#     with `:?`, and only its own dd-ctl supplies them. A runtime-aware wrapper would
+#     compose file interpolates two variables (DD_BOT, DD_MALLOC_CONF) with `:?`, and
+#     only its own dd-ctl supplies them. A runtime-aware wrapper would
 #     have produced a different error message for the same refusal. So this refuses by
 #     name, below, and says where to go instead.
 #   * The two front-ends are not interchangeable. `docker compose` takes
@@ -53,7 +53,7 @@ destiny-director)
 	cat >&2 <<-EOF
 	${0##*/}: refusing to drive $stack — it is not a docker compose stack.
 
-	  Its compose file interpolates DD_BOT, DD_IMAGE_REF and DD_MALLOC_CONF with ':?',
+	  Its compose file interpolates DD_BOT and DD_MALLOC_CONF with ':?',
 	  and only deployments/destiny-director/dd-ctl supplies them. Running it from here
 	  would stop with a missing-variable error at best, and on a host that is not \`two\`
 	  it would pull an armv6 image and start a bot against no .env at worst.
@@ -61,7 +61,7 @@ destiny-director)
 	  It runs on \`two\`, which has no docker, and it is deployed over SSH:
 
 	      ssh -i ~/.ssh/dd-ctl gavin@ssh-two.gsrpi.uk status
-	      ssh -i ~/.ssh/dd-ctl gavin@ssh-two.gsrpi.uk deploy beacon
+	      ssh -i ~/.ssh/dd-ctl gavin@ssh-two.gsrpi.uk deploy-beacon
 
 	  See deployments/$stack/dd-ctl and docs/decisions.md.
 	EOF

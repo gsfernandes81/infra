@@ -17,15 +17,15 @@ sudo bin/check-mount-guards         # can a failed mount still eat the data? (an
 
 **`two` is the exception, and its tool is deliberately not in `bin/`.** Its one stack,
 `destiny-director`, cannot be driven by `bin/compose` on any host — its compose file
-needs three variables `bin/compose` does not supply, and `two` has no docker at all —
+needs two variables `bin/compose` does not supply, and `two` has no docker at all —
 so `bin/compose destiny-director` refuses by name and says where to go. It is deployed
 over SSH by a restricted forced command whose single copy lives beside the stack, at
 [`deployments/destiny-director/dd-ctl`](deployments/destiny-director/dd-ctl):
 
 ```sh
 ssh -i ~/.ssh/dd-ctl gavin@ssh-two.gsrpi.uk status
-ssh -i ~/.ssh/dd-ctl gavin@ssh-two.gsrpi.uk deploy beacon
-ssh -i ~/.ssh/dd-ctl gavin@ssh-two.gsrpi.uk logs bot --tail 100
+ssh -i ~/.ssh/dd-ctl gavin@ssh-two.gsrpi.uk deploy-beacon
+ssh -i ~/.ssh/dd-ctl gavin@ssh-two.gsrpi.uk logs
 ```
 
 Nothing on `two` starts at boot, by decision: after a power cut it runs nothing until
