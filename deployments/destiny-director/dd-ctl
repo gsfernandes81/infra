@@ -499,6 +499,14 @@ EOF
 	compose_images="$(awk '$1 == "image:" && NF >= 2 { print $2 }' "$COMPOSE_FILE")"
 	[ -n "$compose_images" ] || die "no image: line found in $COMPOSE_FILE. Refusing —
         this script cannot confirm what the pull was supposed to fetch."
+	#    THIS RUNS BEFORE STEP 2 ON PURPOSE, so its failure direction is the safe one: a
+	#    refusal here leaves the running bot exactly where it was. That matters because
+	#    one input to it is unverified from anywhere but the box — whether `podman image
+	#    exists` matches a `name:tag@sha256:…` reference (postgres is pinned that way).
+	#    If it does not, the symptom is this refusal on a box that is actually fine; drop
+	#    the tag from the pin in compose.yaml and it becomes a plain digest reference.
+	#    A check that refuses wrongly is a nuisance; one that destroys a bot wrongly is
+	#    not, which is why the order is this way round.
 	for img in $compose_images; do
 		podman image exists "$img" || die "the pull reported success but $img is not in
         local storage. Nothing has been stopped. Do not read this as a transient
