@@ -15,6 +15,19 @@
 #
 #   md5sum /usr/local/bin/dd-ctl ~/infra/deployments/destiny-director/dd-ctl
 #
+# THAT md5sum IS NOT THE WHOLE DRIFT CHECK, and on its own it answers a narrower question
+# than it appears to. sshd runs a forced command as `$SHELL -c "<command>"`, so four
+# files execute as gavin BEFORE this script does, and none of them is dd-ctl:
+#
+#   ls -ln /etc/fish/config.fish ~/.profile ~/.config/fish/config.fish
+#   ls -lnd ~ ~/.config ~/.config/fish ~/.config/fish/conf.d
+#   ls -ln  ~/.config/fish/conf.d/            # expect podman.fish and nothing else
+#
+# A `md5sum` that matches while `~/.config/fish/conf.d/` has gained a second file is a
+# green light for a dispatcher that no longer decides anything. root-setup.sh §4 runs
+# exactly these checks and warns on anything it did not write; the lines above are how
+# you ask the same question between runs of it.
+#
 # THE INSTALLED COPY MUST BE A REAL FILE OWNED BY ROOT, mode 0755, at
 # /usr/local/bin/dd-ctl, in a directory only root can write — never a symlink into the
 # checkout, and never the checkout's copy run in place. `gavin` owns ~/infra, so a

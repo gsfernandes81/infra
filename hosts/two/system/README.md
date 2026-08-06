@@ -114,7 +114,15 @@ hand:
 
 ```sh
 md5sum /usr/local/bin/dd-ctl ~/infra/deployments/destiny-director/dd-ctl
+ls -ln  /etc/fish/config.fish ~/.profile ~/.config/fish/config.fish
+ls -lnd ~ ~/.config ~/.config/fish ~/.config/fish/conf.d
+ls -ln  ~/.config/fish/conf.d/          # expect podman.fish, and nothing else
 ```
+
+**The `md5sum` alone is not the drift check**, and the four lines under it are not
+padding — see "the login shell is in the TCB" below. A matching hash while
+`~/.config/fish/conf.d/` has gained a second file is a green light for a dispatcher that
+no longer decides anything.
 
 **The installed copy must be a real file owned by root, mode 0755, in a directory only
 root can write** — never a symlink into the checkout, and never the checkout's copy run
@@ -122,6 +130,41 @@ in place. `gavin` owns `~/infra`, so a forced command resolving through anything
 can rewrite is not a restriction at all: replace the target, get a shell. `root-setup.sh`
 §4 verifies all three properties after installing rather than trusting `install` to
 have produced them.
+
+## The login shell is in the deploy key's TCB
+
+**sshd does not exec a forced command. It runs `$SHELL -c "<command>"`** — and `gavin`'s
+login shell is fish, which reads `/etc/fish/config.fish`,
+`~/.config/fish/conf.d/*.fish` and `~/.config/fish/config.fish` on *every* startup,
+including a non-interactive `-c`. Only `fish -N` skips them. So four files run, as
+`gavin`, before `/usr/local/bin/dd-ctl` is reached, and any one of them can replace the
+dispatch entirely.
+
+That defeats the section above one level up. `/usr/local/bin/dd-ctl` being root-owned
+and unwritable is still true and still worth having; it is just not sufficient, because
+the thing that *decides whether dd-ctl runs at all* is a file `gavin` owns by
+construction — and `root-setup.sh` §8 writes one of them itself. `restrict` does not
+help: it implies `no-user-rc`, which governs `~/.ssh/rc`, an unrelated file.
+
+What is actually done about it:
+
+- `root-setup.sh` §4 checks all four files' ownership and modes, **and the directories
+  holding them** (`~`, `~/.config`, `~/.config/fish`, `~/.config/fish/conf.d`,
+  `/etc/fish`) — because a writable directory lets a file be replaced by unlink-and-
+  create, which no check on the file itself can see. It warns on anything in `conf.d/`
+  that it did not write.
+- `dd-ctl` re-execs itself under `env -i`, keeping four names, so nothing fish exported
+  reaches podman.
+- The drift check above lists those paths, so a hash comparison cannot pass while the
+  shell that runs first has changed.
+
+**None of that removes the residual, and it is not claimed to.** `gavin` can always
+write `gavin`'s dotfiles. The only arrangement that takes the ambient shell out of this
+key's trusted computing base is a **dedicated deploy account with `/bin/sh` and an empty
+home** — which [`docs/decisions.md`](../../../docs/decisions.md) rejected, on reasoning
+that did not have this fact in it. That entry now states the trade with the fact
+included. The decision has not been reversed here; it has been re-stated honestly, which
+is the difference between a settled decision and one resting on a false premise.
 
 ## `dd-ctl` is not signed off
 

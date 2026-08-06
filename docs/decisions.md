@@ -21,12 +21,12 @@ not from scratch.
 | `containerd` service removed, package kept | `dockerd` spawns its own containerd; every moby shim uses `/var/run/docker/containerd/containerd.sock`, so the standalone service owned zero shims. But `docker-engine` **hard-depends on the package** — `apk del containerd` would kill every container at the next start. Service-level removal only. **On `one` and `zero`.** On `two` the package goes too, in one transaction with every dependent — see below; the rule was always "never *alone*", not "never". |
 | OpenCloud and k3s deleted, not migrated | Both confirmed unused. k3s was still *running* a live cluster (traefik, coredns, metrics-server) and holding ~880 MB of swap; removing it plus the dead `nextcloud` subvolume returned ~344 GiB to the array. |
 | **Docker and containerd removed from `two`; rootless podman instead** | Two daemons and their shims cost roughly 34 MB RSS on a board with ~475 MB total, and `two` ran no docker containers worth the price. Rootless podman is daemonless — nothing is resident when nothing is running — and it needs no `docker` group, which this repo already refuses to grant. It is also where `one` and `zero` are headed under MicroOS, so `two` is the cheap place to learn it. |
-| **No new user, no boot autostart on `two`** | Rootless podman's isolation comes from the user namespace, not from which unprivileged uid owns it, so a second service account buys nothing over `gavin`. And a test bot that resurrects itself at 03:00 and takes 200 MB of a 475 MB lifeboat is the wrong default: `restart: always` covers a crashed container, and a reboot deliberately leaves the box running nothing until someone deploys. |
+| **No new user, no boot autostart on `two`** | Rootless podman's isolation comes from the user namespace, not from which unprivileged uid owns it, so a second service account buys nothing over `gavin`. **That reasoning was incomplete and the entry is re-stated below** — a dedicated account also buys a `/bin/sh` login shell and an empty home, which is the only thing that takes the ambient login shell out of the deploy key's TCB. Still not done; see "The forced command runs inside `gavin`'s login shell". And a test bot that resurrects itself at 03:00 and takes 200 MB of a 475 MB lifeboat is the wrong default: `restart: always` covers a crashed container, and a reboot deliberately leaves the box running nothing until someone deploys. |
 | **`bin/compose` stays docker-only and refuses `destiny-director` by name** | Making it runtime-aware would not have helped: that stack cannot be driven from `bin/compose` on *any* host, because its compose file interpolates two variables only `dd-ctl` supplies. And `docker compose` and `podman-compose` are not interchangeable — different project-directory semantics that agree here by coincidence. A wrapper hiding that will eventually hide a difference that matters. The conversion belongs to the MicroOS move, where there are stacks to test it against. |
 | **`dd-ctl` has exactly one copy, and it is not in `bin/`** | It drives one stack, so it lives beside that stack; `bin/` is for fleet-wide tools, and the README points at it from there. No symlink to it anywhere: a script reachable two ways is a script whose behaviour can depend on which way you came. It carries no `infra-` header either, because `_infra.py` only reads those under `hosts/<host>/system/` — a header no parser reads is decoration dressed as a checked invariant. |
 | **`dd-ctl`'s verbs take no arguments** | Deleting the arguments deletes every line of validation that existed to make them safe, and the bugs that could hide in it. It also means the keyholder cannot name the image. It does **not** mean the image is safe from everyone — see below. |
 | **The deployed image is a literal in `compose.yaml`, not a variable** | It is the one knob, and it is tracked. `SOURCE` already withholds the commit deliberately; putting the *branch* in a gitignored `.env` too would leave this repo unable to say anything at all about what `two` runs. It also removes a `${…:?}` failure path and any chance of `.env` and `compose.yaml` disagreeing. Editing it to test a branch shows up as local drift, which is the desired signal. |
-| **The live `dd-ctl` is root-owned, and that is the whole mechanism** | `/usr/local/bin/dd-ctl`, a real file, 0755, in a root-only-writable directory — never a symlink into `~gavin/infra` and never the checkout's copy run in place. `gavin` owns the checkout, so a forced command resolving through anything `gavin` can rewrite is not a restriction: replace the target, get an unrestricted shell. It was never a boundary *against* `gavin`, who has sudo; it stops the holder of the **restricted key** rewriting the thing that restricts them. |
+| **The live `dd-ctl` is root-owned, and that is the whole mechanism** | `/usr/local/bin/dd-ctl`, a real file, 0755, in a root-only-writable directory — never a symlink into `~gavin/infra` and never the checkout's copy run in place. `gavin` owns the checkout, so a forced command resolving through anything `gavin` can rewrite is not a restriction: replace the target, get an unrestricted shell. It was never a boundary *against* `gavin`, who has sudo; it stops the holder of the **restricted key** rewriting the thing that restricts them. **It is not sufficient on its own** — the login shell runs first; see below. |
 
 ## `two` also runs a test bot, and what that bends
 
@@ -116,6 +116,54 @@ recorded here because the tempting summary ("the keyholder no longer chooses the
 is true and yet leaves the larger exposure unstated. The lever, if it is ever wanted:
 point `compose.yaml` at a branch only the owner pushes to, at the cost of a merge per
 deploy. Not done — the current setup is a deliberate position, not a locked-down one.
+
+### The forced command runs inside `gavin`'s login shell
+
+**sshd does not exec a forced command — it runs `$SHELL -c "<command>"`.** `gavin`'s
+shell is fish, and fish reads `/etc/fish/config.fish`, `~/.config/fish/conf.d/*.fish`
+and `~/.config/fish/config.fish` on every startup, including a non-interactive `-c`;
+only `fish -N` skips them. Three of those paths are `gavin`-writable by construction and
+`root-setup.sh` §8 writes one of them itself.
+
+So the row above — *"the live `dd-ctl` is root-owned, and that is the whole mechanism"* —
+is true about the file and wrong about the word *whole*. Root-owning the dispatcher stops
+the keyholder rewriting the dispatcher. It does not stop the deploy path being decided
+one level up, by a file the same account owns, and the documented `md5sum` drift check
+cannot see that happen. `restrict` does not help either: it implies `no-user-rc`, which
+is about `~/.ssh/rc`.
+
+**The ambient login shell is inside the deploy key's trusted computing base.** That is
+the honest statement, and nothing below removes it:
+
+- `root-setup.sh` §4 checks those four files' ownership and modes, and the directories
+  holding them, and warns about anything in `conf.d/` it did not write — so a *third
+  party* cannot get in there unnoticed.
+- `dd-ctl` re-execs under `env -i`, so nothing fish exported reaches podman.
+- The drift check in [`hosts/two/system/README.md`](../hosts/two/system/README.md) now
+  lists those paths alongside the `md5sum`.
+
+Which brings back the entry near the top of this file: **no new user on `two`.** Its
+stated reason was that rootless podman's isolation comes from the user namespace, so a
+second unprivileged uid buys nothing. That reason is correct and it is not the whole
+question, because a dedicated deploy account also buys **a `/bin/sh` login shell and an
+empty home** — the only arrangement that takes the ambient shell out of this key's TCB.
+That fact was not in front of the decision when it was made.
+
+**Re-stated with the fact in it, the decision still stands, and it is now a trade rather
+than an oversight.** Against the account: a second uid to manage, `authorized_keys` and
+subuid/subgid to duplicate, a second home for podman's storage on a 29 G SD card that
+already worries about wear — and podman's storage is per-user, so the images and the
+`pgdata` volume would have to move, which is a migration on the box that is the fleet's
+lifeboat. For it: the deploy key would no longer run through a file `gavin` edits daily.
+The deciding consideration is the first paragraph of this section's parent: `gavin` is
+in `wheel` with `sudo`, so an escape from the forced command reaches root regardless of
+which account it started from. The dotfile path is a *shortcut* to a place the key can
+already get to; a dedicated account closes the shortcut without closing the destination.
+It is worth doing on the day `gavin` loses sudo, and not obviously before.
+
+**Do not let a future reader re-derive this as "the forced command bypasses the login
+shell".** It does not, and the previous version of `root-setup.sh` said so in those
+words.
 
 ### The lifeboat tension, stated rather than left for a reviewer
 

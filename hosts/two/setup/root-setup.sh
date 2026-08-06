@@ -643,20 +643,38 @@ check_startup_file() {  # check_startup_file <path>
 		ok "$1: $_o, mode $_m"
 	fi
 }
-for f in $FISH_STARTUP_FILES; do check_startup_file "$f"; done
-if [ -d "$FISH_CONFD" ]; then
-	_cd_o="$(stat -c '%U' "$FISH_CONFD")"
-	_cd_m="$(stat -c '%a' "$FISH_CONFD")"
-	if [ "$_cd_o" != "$DD_USER" ] && [ "$_cd_o" != root ]; then
-		warn "$FISH_CONFD is owned by '$_cd_o'"
-		note "$FISH_CONFD is owned by '$_cd_o'. Every .fish file in it runs before dd-ctl."
-	elif [ $(( 0$_cd_m & 022 )) -ne 0 ]; then
-		warn "$FISH_CONFD is mode $_cd_m — group- or world-writable"
-		note "$FISH_CONFD is mode $_cd_m, so anyone who can write it can DROP IN a new .fish file
-    that runs before the dd-ctl forced command. chmod 700 it."
+# THE DIRECTORIES, NOT JUST THE FILES. Checking a file's mode while the directory
+# holding it is group- or world-writable is a check that passes for the wrong reason:
+# anyone who can write the directory can unlink the file and create their own — that is
+# not a write to the file, and no amount of `stat` on the file sees it coming. It is the
+# same reasoning that makes §4 check $DD_CTL_DIR before installing into it, applied to
+# the four startup files. The chain stops at $DD_HOME; /home and / are the distribution's
+# to get right, and if they are wrong this box has larger problems than a deploy key.
+check_startup_dir() {  # check_startup_dir <path> <what-lives-here>
+	[ -d "$1" ] || { ok "$1 absent"; return 0; }
+	_o="$(stat -c '%U' "$1")"
+	_m="$(stat -c '%a' "$1")"
+	if [ "$_o" != "$DD_USER" ] && [ "$_o" != root ]; then
+		warn "$1 is owned by '$_o' — it holds $2"
+		note "$1 is owned by '$_o', and it holds $2. Whoever owns a directory can replace the
+    files in it wholesale — unlink and create is not a write, so the file's own mode
+    says nothing. Fix the ownership by hand."
+	elif [ $(( 0$_m & 022 )) -ne 0 ]; then
+		warn "$1 is mode $_m — group- or world-writable, and it holds $2"
+		note "$1 is mode $_m, so any account that can write it can REPLACE $2 — unlink and
+    create, which the file's own mode does not prevent. Every one of those files runs
+    as $DD_USER before the dd-ctl forced command does. chmod it to 755 or tighter."
 	else
-		ok "$FISH_CONFD: $_cd_o, mode $_cd_m"
+		ok "$1: $_o, mode $_m"
 	fi
+}
+for f in $FISH_STARTUP_FILES; do check_startup_file "$f"; done
+check_startup_dir /etc/fish "config.fish, which every fish on this box reads"
+check_startup_dir "$DD_HOME" ".profile"
+check_startup_dir "$DD_HOME/.config" "the fish configuration tree"
+check_startup_dir "$DD_HOME/.config/fish" "config.fish and conf.d/"
+if [ -d "$FISH_CONFD" ]; then
+	check_startup_dir "$FISH_CONFD" "every .fish file fish runs at startup"
 	# podman.fish is the only file §8 writes. Anything else here is unaccounted for.
 	for f in "$FISH_CONFD"/*.fish; do
 		[ -e "$f" ] || continue
