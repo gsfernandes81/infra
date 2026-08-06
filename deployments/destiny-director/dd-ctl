@@ -708,14 +708,17 @@ logs)
 	# so no interpolation, so no way for a missing variable to turn "show me the logs"
 	# into an error, and its flags have been stable across every podman this box will
 	# see. Every word of the command line is a literal or a constant set above.
-	exec pod logs --tail "$TAIL_LINES" "$BOT_CONTAINER"
+	# `exec` replaces the shell with a BINARY, so it cannot run the pod() function —
+	# hence podman directly here, with the same 9>&- the wrapper would have applied.
+	exec podman logs --tail "$TAIL_LINES" "$BOT_CONTAINER" 9>&-
 	;;
 logs-postgres)
 	audit "logs-postgres"
 	# A second fixed verb rather than an argument to the first. Postgres is worth its
 	# own verb: on a cold start it runs initdb before the bot can connect, and when that
 	# is what went wrong the bot's own log cannot say so.
-	exec pod logs --tail "$TAIL_LINES" "$DB_CONTAINER"
+	# Direct podman, not pod(): see the note on the `logs` verb above.
+	exec podman logs --tail "$TAIL_LINES" "$DB_CONTAINER" 9>&-
 	;;
 *)
 	audit "REJECTED unknown-verb"
