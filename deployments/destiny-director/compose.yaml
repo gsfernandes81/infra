@@ -27,14 +27,30 @@
 # wanted: point this at a branch only the owner pushes to, at the cost of a merge per
 # deploy. Not done today; recorded so the current setup is not mistaken for locked down.
 #
-# ONE IMAGE SERVES BOTH BOTS. supervisord's only program is
-# `python -OO -m dd.$RAILWAY_SERVICE_NAME`, so the bot is chosen at container start, and
-# only ONE bot ever runs on this box. dd-ctl supplies DD_BOT and DD_MALLOC_CONF per
-# deploy, as fixed constants; they are deliberately NOT in .env. podman-compose has
-# FLIPPED the .env-vs-process-environment precedence between releases (1.0.6: .env wins;
-# 1.6.0, which Alpine 3.24 ships: the process environment wins), so keeping these out of
-# .env entirely is the only arrangement that behaves the same on both. dd-ctl refuses to
-# deploy if it finds one of them set there.
+# ONE IMAGE SERVES BOTH BOTS, AND BOTH RUN AT ONCE. supervisord's only program is
+# `python -OO -m dd.$RAILWAY_SERVICE_NAME`, so the bot is chosen at container start —
+# which means two containers off the same image, differing only in that one variable, are
+# two different bots. They are declared below as two services, `beacon` and `anchor`.
+#
+# THIS REPLACED A ONE-BOT-AT-A-TIME DESIGN, and the difference is worth stating because
+# most of dd-ctl was written under the old rule. There used to be a single `bot` service
+# whose RAILWAY_SERVICE_NAME came from `${DD_BOT:?}`, exported per-deploy by dd-ctl, and
+# every deploy stopped and removed the one container before creating the next. The
+# variables are gone: with a service per bot the value is a literal in each, which is one
+# fewer interpolation, one fewer `${…:?}` failure path on a box reached through a tunnel,
+# and it removes the whole podman-compose precedence question (1.0.6 let .env win, 1.6.0
+# lets the process environment win) rather than documenting it. dd-ctl still refuses to
+# deploy if RAILWAY_SERVICE_NAME or MALLOC_CONF appears in .env — belt and braces now
+# rather than load-bearing, since `environment:` below cannot lose to .env either way.
+#
+# WHAT THIS COSTS IS RAM, on a 512 MB board, and that was a deliberate call by the owner
+# against a measurement that suggested otherwise (beacon + postgres idle at ~122 MB used
+# / 342 MB available, with swap already touched; anchor's Railway prod max was 336 MB
+# over 24h). Prod numbers are for a far larger guild count than this test box carries, so
+# they are an upper bound, not a prediction. If the pair does not fit, the symptom will
+# be the OOM killer taking whichever process has the highest oom_score_adj — which is
+# deliberately the BOT, not supervisord or the break-glass sshd (see OOM_SCORE_ADJ in
+# .env and dd.common.lifecycle). Watch `dd-ctl status` after the first `deploy-both`.
 #
 # Written to the podman-compose-safe subset the app repo's deploy/pi-bplus/compose.yml
 # documents: plain long-established keys only (image, container_name, environment,
@@ -151,7 +167,21 @@ services:
     # `depends_on`; the fix is `--no-deps` in dd-ctl, where the long version is written.
     restart: always
 
-  bot:
+  # THE TWO BOT SERVICES ARE DELIBERATELY DUPLICATED RATHER THAN FACTORED. YAML anchors
+  # (`&bot` / `<<: *bot`) and `extends:` would express this in half the lines, and both
+  # are on this file's banned list at the top: podman-compose's support for them has
+  # varied by version, and a version-dependent merge on a box you reach through a tunnel
+  # is the worst place to discover an unsupported key. So the two blocks below are near
+  # copies, and the FOUR lines that differ between them are the point:
+  #
+  #   container_name          dd-beacon / dd-anchor
+  #   RAILWAY_SERVICE_NAME    beacon / anchor  — picks the bot at container start
+  #   MALLOC_CONF             anchor adds narenas:2
+  #   volumes                 a separate sshd host-key volume each
+  #
+  # Everything else — image, security_opt, user, env_file, depends_on, restart — is
+  # identical and must stay identical. If you change one, change the other.
+  beacon:
     # Pulled from GHCR, never `localhost/`. WHOLLY LITERAL — registry, repository and
     # tag. No interpolation, so there is no variable for a caller to influence and
     # nothing dd-ctl can be talked into substituting.
@@ -185,8 +215,12 @@ services:
     #   * Testing a feature branch is a one-line edit here, and that edit showing up as
     #     local drift against the checkout is the POINT — "this box is running something
     #     non-standard" should be visible, not hidden in an ignored file.
+    # BOTH SERVICES MUST NAME THE SAME IMAGE. One build serves both bots, and deploying
+    # them from different tags would be a state nothing here can report coherently —
+    # `dd-ctl status` prints an image per container precisely so a drift like that is
+    # visible, not so it is supported.
     image: ghcr.io/gsfernandes81/destiny-director:dev
-    container_name: dd-bot
+    container_name: dd-beacon
     # NOT digest-pinned, unlike postgres. A moving branch tag is the whole design here —
     # see the block above. The pin belongs on the dependency nobody wanted to move.
     security_opt:
@@ -207,14 +241,14 @@ services:
       # way, so these override anything of the same name in .env. dd-ctl verifies that
       # from the running container rather than trusting it.
       #
-      # Which bot this container is. supervisord refuses to start at all if it is unset,
-      # rather than guessing — a missing value fails loudly and immediately.
-      RAILWAY_SERVICE_NAME: ${DD_BOT:?set DD_BOT — dd-ctl does this; beacon or anchor}
-      # jemalloc. The image bakes the beacon-correct settings; anchor additionally wants
-      # narenas:2. It cannot be baked per-bot (one image, one supervisord program, no
-      # conditionals in supervisord), so dd-ctl sets the right string for the bot it is
-      # deploying and it arrives here.
-      MALLOC_CONF: ${DD_MALLOC_CONF:?set DD_MALLOC_CONF — dd-ctl does this}
+      # Which bot this container is, and the ONLY thing that decides it: supervisord's
+      # single program is `python -OO -m dd.$RAILWAY_SERVICE_NAME`, and it refuses to
+      # start at all if this is unset rather than guessing.
+      RAILWAY_SERVICE_NAME: beacon
+      # jemalloc. This restates what the image already bakes, so the two are visible side
+      # by side and anchor's one difference below reads as a difference rather than as a
+      # mystery.
+      MALLOC_CONF: background_thread:true,dirty_decay_ms:10000,muzzy_decay_ms:10000
     # Plain list, and it must stay one. `condition: service_healthy` would wait forever
     # here with no error and no timeout, because (see postgres above) nothing on this box
     # ever runs the healthcheck that would satisfy it. This is start-ORDER only; the
@@ -228,7 +262,15 @@ services:
       # and your client warns about a changed host key after every deploy. It must be a
       # NAMED volume: the image pre-creates .ssh-host/etc/ssh and a named volume is
       # seeded from the image, whereas a bind mount would hide it.
-      - sshhostkeys:/home/dd/.ssh-host
+      #
+      # ONE VOLUME PER BOT, not one shared between them. Two containers sharing it would
+      # both run `ssh-keygen -A` against the same directory on a cold start and race to
+      # write the same key files; and two sshds presenting the same host key is a thing
+      # you would then have to reason about. Cheap to keep separate. (This renamed the
+      # old single `sshhostkeys` volume, which is now orphaned — `podman volume rm
+      # destiny-director_sshhostkeys` when you are satisfied. Both bots' host keys are
+      # regenerated once, so expect one changed-host-key warning each.)
+      - sshhostkeys_beacon:/home/dd/.ssh-host
     # No mem_limit / --memory anywhere, and that is not an oversight. Rootless podman
     # under OpenRC has no cgroup delegation for user slices — there is no systemd or
     # logind to hand a user a writable sub-tree — so a per-container memory.max cannot
@@ -247,26 +289,61 @@ services:
     # `restart: always` means podman restarts this on a crash. It does NOT bring the
     # stack back after a reboot: that needs a boot-time hook, and this box deliberately
     # has none. A power cut leaves `two` running nothing until someone runs
-    # `dd-ctl deploy`.
+    # `dd-ctl deploy-both`. (If that is ever unwanted, `podman-openrc` — already
+    # installed here — exposes `rc-service podman start_containers`, which restarts
+    # exactly the containers with this policy and needs no new script. Do NOT enable the
+    # podman API service that the same init script also starts; a podman socket
+    # reachable as gavin bypasses every restriction dd-ctl imposes.)
     restart: always
 
-    # Nothing is published to the host, deliberately. Two ports exist inside the
+    # Nothing is published to the host, deliberately. Two ports exist inside each
     # container and neither is exposed:
     #
-    #   8080  anchor's web UI (Bungie OAuth callback + rotation editor). Only meaningful
-    #         when RAILWAY_SERVICE_NAME=anchor, and compose cannot publish a port
-    #         conditionally — so publishing it would leave beacon deploys with a stray
-    #         mapping. If you need it, uncomment below AND set PUBLIC_BASE_URL in .env.
+    #   8080  anchor's web UI (Bungie OAuth callback + rotation editor). Meaningful only
+    #         in the anchor service below; publishing it is a decision about exposing a
+    #         service on the network `two` sits on, and nobody has asked for it. If you
+    #         want it, uncomment the mapping in THAT service and set PUBLIC_BASE_URL.
+    #         (This used to be impossible to express — one service could not publish a
+    #         port conditionally on which bot it was running. Two services can.)
     #   2222  the break-glass sshd. Reach it with `podman exec` unless you have a
-    #         specific reason to expose an sshd on the network `two` sits on.
-    #
+    #         specific reason to expose an sshd on that network. Note that with two bots
+    #         there are now two of them, and they cannot both take host port 2222.
+
+  # Anchor. See the note above `beacon:` — this is a near copy on purpose, and only the
+  # four listed lines differ. anchor is the heavier of the two: the aiohttp web UI, the
+  # Bungie API client, and the manifest download/parse, which is the allocation spike
+  # that jemalloc's settings below exist for.
+  anchor:
+    image: ghcr.io/gsfernandes81/destiny-director:dev
+    container_name: dd-anchor
+    security_opt:
+      - "no-new-privileges:true"
+    user: dd
+    env_file:
+      - .env
+    environment:
+      RAILWAY_SERVICE_NAME: anchor
+      # narenas:2 — jemalloc's default of 4*ncpu reserves per-arena metadata that bloats
+      # anchor's single-loop process for no benefit. This is the one setting that has to
+      # differ per bot, and a service per bot is what finally makes it expressible in the
+      # compose file instead of in the dispatcher.
+      MALLOC_CONF: narenas:2,background_thread:true,dirty_decay_ms:10000,muzzy_decay_ms:10000
+    depends_on:
+      - postgres
+    volumes:
+      - sshhostkeys_anchor:/home/dd/.ssh-host
+    restart: always
+
+    # The web UI, unpublished. Uncommenting this is what makes anchor's rotation editor
+    # and Bungie OAuth callback reachable from the host; PUBLIC_BASE_URL in .env must
+    # agree with however it is then reached.
     # ports:
     #   - 8080:8080
-    #   - 2222:2222
 
 volumes:
   # Rootless named volumes live under ~/.local/share/containers/storage/volumes on the
   # SD card. `dd-ctl down` never removes them; `podman volume rm` by hand is the right
   # amount of friction for destroying the only state this box holds.
   pgdata:
-  sshhostkeys:
+  sshhostkeys_beacon:
+  sshhostkeys_anchor:

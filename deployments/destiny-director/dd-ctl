@@ -40,7 +40,8 @@
 # so `ssh two deploy-beacon` runs THIS with the client's string in
 # SSH_ORIGINAL_COMMAND, and `ssh two` with no command runs it with that variable unset.
 #
-#   dd-ctl deploy-beacon | deploy-anchor | down | status | logs | logs-postgres
+#   dd-ctl deploy-beacon | deploy-anchor | deploy-both | down | status
+#          | logs-beacon | logs-anchor | logs-postgres
 #
 # ---------------------------------------------------------------------------------
 # THE THREAT MODEL. Read the first paragraph before making any judgement about the rest.
@@ -233,20 +234,36 @@ COMPOSE_FILE="$STACK_DIR/compose.yaml"
 # THE IMAGE IS NOT CHOSEN HERE, and not by the caller. It is a literal in compose.yaml,
 # editable only by the operator. See the header for why that is the point rather than an
 # inconvenience.
-BOT_CONTAINER=dd-bot
+#
+# BOTH BOTS RUN AT ONCE, which is a change from this script's original design. There used
+# to be one `BOT_CONTAINER=dd-bot`, and every deploy stopped and removed it before
+# creating the next, so beacon and anchor could never be on the test guild together. That
+# is no longer the rule: compose.yaml declares a service per bot, each deploy touches
+# ONLY its own container, and `deploy-both` brings up the pair. Anything below that still
+# reads as if there were one bot is a bug, not a survival.
+BEACON_CONTAINER=dd-beacon
+ANCHOR_CONTAINER=dd-anchor
 DB_CONTAINER=dd-postgres
 
-# jemalloc settings per bot. beacon gets the value the image already bakes (restated
-# rather than inherited, so the two are visible side by side); anchor adds narenas:2 —
-# jemalloc's default of 4*ncpu reserves per-arena metadata that bloats anchor's small
-# single-loop process for no benefit. It cannot be baked per-bot: one image, one
-# supervisord program, and supervisord has no conditionals. This dispatcher is the place
-# it can be fixed, so it is fixed here. Both are constants; neither comes from input.
-MALLOC_BEACON='background_thread:true,dirty_decay_ms:10000,muzzy_decay_ms:10000'
-MALLOC_ANCHOR='narenas:2,background_thread:true,dirty_decay_ms:10000,muzzy_decay_ms:10000'
+# jemalloc settings used to live here as MALLOC_BEACON/MALLOC_ANCHOR, exported per deploy
+# into `${DD_MALLOC_CONF:?}`. They are now literals in compose.yaml, one per service —
+# with a service per bot the value no longer has to be chosen at deploy time by anything.
 
-TAIL_LINES=200    # fixed. `logs` used to take `--tail N`; it no longer takes anything.
+TAIL_LINES=200    # fixed. The log verbs take no arguments; there is one per container.
 STOP_TIMEOUT=60   # > supervisord's stopwaitsecs=45, so the bot gets its drain
+
+# How long to wait for a bot to report itself online, and how often to look. The marker
+# is hikari's own "started successfully in approx Ns" line — see wait_ready().
+#
+# 900s is not padding. A measured cold start on this board, single bot, with the image
+# already pulled: container spawned 21:03:41, `started successfully` at 21:09:23 — 5m42s,
+# of which ~4 minutes was Python import and extension loading before hikari printed
+# anything at all. `deploy-both` runs two of those on one 700 MHz core, and they overlap.
+# A timeout that expires on a healthy-but-slow start would be worse than no timeout: it
+# reports failure for a bot that is about to come up, and whoever is reading it is
+# reading it over SSH with no other context.
+READY_TIMEOUT=900
+READY_POLL=10
 
 AUDIT_LOG="$HOME/.local/state/dd-ctl/audit.log"
 
@@ -277,19 +294,27 @@ usage() {
 	cat >&2 <<'EOF'
 dd-ctl — restricted deploy control for the destiny-director test stack on `two`
 
-Six operations. NONE of them takes an argument — that is deliberate, see the
+Eight operations. NONE of them takes an argument — that is deliberate, see the
 comments at the top of this file.
 
-  deploy-beacon    pull and (re)create the stack running dd.beacon
-  deploy-anchor    pull and (re)create the stack running dd.anchor
+  deploy-beacon    pull and (re)create dd.beacon. Leaves anchor alone.
+  deploy-anchor    pull and (re)create dd.anchor. Leaves beacon alone.
+  deploy-both      deploy beacon, wait until it is on the gateway, then anchor.
+                   Waits again. Both bots end up running.
   down             stop and remove the stack. Named volumes are NEVER removed.
-  status           what is running, what it thinks it is, and the runtime's
-                   own view of itself
-  logs             last 200 lines from the bot
+  status           what is running, what each bot thinks it is, and the
+                   runtime's own view of itself
+  logs-beacon      last 200 lines from beacon
+  logs-anchor      last 200 lines from anchor
   logs-postgres    last 200 lines from postgres
 
+BOTH BOTS RUN AT ONCE on this box. `logs` is gone — there are two bots now, and
+no verb here takes an argument, so there is a verb per container instead.
+
 Which image is deployed is set in compose.yaml, by the operator, on the box.
-There is no follow mode: a forced command that never returns is a hung session.
+There is no follow mode: a forced command that never returns is a hung session
+— `deploy-both` is the one long-running verb, and it is bounded (see
+READY_TIMEOUT).
 EOF
 	exit 2
 }
@@ -358,29 +383,29 @@ pod() { podman "$@" 9>&-; }
 #   1.0.6   self.environ = dict(os.environ) ; .update(dotenv_dict)   -> .env WINS
 #   1.6.0   self.environ = dotenv_dict      ; .update(os.environ)    -> process env WINS
 #
-# Alpine 3.24 ships 1.6.0, so today the exported values below win. Under 1.0.6 a stray
-# uncommented DD_BOT in .env would instead have pinned every deploy to one bot while
-# this script cheerfully reported the other. The design depends on neither answer: these
-# names simply must not appear in .env at all, and this refuses to deploy if one does.
+# Alpine 3.24 ships 1.6.0. This USED to be load-bearing: compose.yaml interpolated
+# `${DD_BOT:?}`, this script exported it, and under 1.0.6 a stray uncommented DD_BOT in
+# .env would have pinned every deploy to one bot while this script cheerfully reported
+# the other. compose.yaml now names both bots as literals in a service each, so .env
+# cannot win that argument no matter which version is installed, and DD_BOT/DD_MALLOC_CONF
+# are not read by anything any more.
+#
+# THE CHECK STAYS ANYWAY, for the two names that still mean something. RAILWAY_SERVICE_NAME
+# in .env would be shadowed by `environment:` today — but "shadowed by a precedence rule
+# that has already flipped once" is exactly the kind of thing this file does not rely on,
+# and a RAILWAY_SERVICE_NAME sitting in .env is a misconception worth failing on rather
+# than silently ignoring. DD_BOT and DD_MALLOC_CONF are kept in the list for one release
+# so that an .env left over from the one-bot design is reported instead of quietly
+# ignored; they can go once no such .env exists.
 assert_env_clean() {
 	[ -f "$STACK_DIR/.env" ] || die "no $STACK_DIR/.env — copy .env.example and fill it in"
 	for var in DD_BOT DD_MALLOC_CONF RAILWAY_SERVICE_NAME MALLOC_CONF; do
 		if grep -Eq "^[[:space:]]*(export[[:space:]]+)?${var}[[:space:]]*=" "$STACK_DIR/.env"; then
-			die "$var is set in $STACK_DIR/.env — dd-ctl supplies it. Comment it out."
+			die "$var is set in $STACK_DIR/.env — compose.yaml supplies it, per service.
+        Comment it out. (If this is DD_BOT or DD_MALLOC_CONF, it is a leftover from the
+        one-bot-at-a-time design and is simply dead now.)"
 		fi
 	done
-}
-
-# Exports the two variables compose.yaml interpolates. Called only with the literals
-# `beacon` and `anchor`, from the two deploy branches below.
-export_compose_env() {  # export_compose_env <beacon|anchor>
-	DD_BOT=$1
-	case "$1" in
-		beacon) DD_MALLOC_CONF=$MALLOC_BEACON ;;
-		anchor) DD_MALLOC_CONF=$MALLOC_ANCHOR ;;
-		*) die "internal: unknown bot" 1 ;;
-	esac
-	export DD_BOT DD_MALLOC_CONF
 }
 
 compose() { podman-compose -f "$COMPOSE_FILE" "$@" 9>&-; }
@@ -410,18 +435,19 @@ compose() { podman-compose -f "$COMPOSE_FILE" "$@" 9>&-; }
 #      the mount is live and refusing without removing it would be a warning, not a
 #      guard.
 #
-# LAYER 2 IS UNCALIBRATED. CLAUDE.md's rule is to run a new check against known-good
-# state before trusting its verdict, and that has not been possible from here: it rests
-# on podman's `.Mounts` listing only user-requested mounts (not /etc/resolv.conf,
-# /etc/hosts, /run/.containerenv, which podman reports elsewhere). If that is wrong, the
-# FIRST deploy after this change refuses and tears down a healthy bot. So watch the
-# first one, and calibrate it by hand first if you can:
+# LAYER 2 IS NOW CALIBRATED, against a running dd-bot on 2026-08-06, which is what
+# CLAUDE.md's rule asks for before a new check's verdict is trusted. It rests on podman's
+# `.Mounts` listing only user-requested mounts (not /etc/resolv.conf, /etc/hosts,
+# /run/.containerenv, which podman reports elsewhere), and that held:
 #
-#     podman inspect --format '{{range .Mounts}}{{.Type}}|{{.Source}}|{{.Destination}}
+#     podman inspect --format '{{range .Mounts}}{{.Type}}|{{.Name}}|{{.Destination}}
 #     {{end}}' dd-bot
+#     volume|destiny-director_sshhostkeys|/home/dd/.ssh-host
 #
-# Expect exactly one line, `volume|…|/home/dd/.ssh-host`. Anything else and this check
-# is wrong, not the box.
+# Exactly one line, and no bind mount among podman's own injected files. Each bot
+# container should now show exactly one such line for ITS OWN host-key volume
+# (sshhostkeys_beacon / sshhostkeys_anchor). Anything else and this check is wrong, not
+# the box.
 assert_compose_named_volumes_only() {
 	awk '
 		{ l = $0; sub(/#.*/, "", l); sub(/[[:space:]]+$/, "", l) }
@@ -476,11 +502,98 @@ assert_no_bind_mounts() {  # assert_no_bind_mounts <container>
 	fi
 }
 
+# MIGRATION GUARD, and a dangerous one to omit. compose.yaml used to declare a single
+# service `bot` with container_name `dd-bot`; it now declares `beacon` and `anchor`. A
+# `dd-bot` left over from before the rename is INVISIBLE to podman-compose — the project
+# no longer has a service that owns it — so `down` will not stop it and `up` will not
+# replace it. It just keeps running, under `restart: always`, as a second copy of
+# whichever bot it was, on the same test guild as the new one. That is precisely the
+# duplicate this stack has always been arranged to prevent, arriving by the one route
+# nothing was watching.
+#
+# It is removed rather than merely refused, because there is no reading under which a
+# `dd-bot` should still exist: no compose file in this repo can create one any more.
+#
+# THIS IS DELETABLE once no box has a pre-rename container left — it is a one-time
+# migration, not an invariant. Left in with its own name and this comment so that
+# deleting it later is an obvious call rather than an archaeological one.
+assert_no_legacy_bot() {
+	pod container exists dd-bot 2>/dev/null || return 0
+	# shellcheck disable=SC2016  # the backticks are prose and are meant to stay literal
+	printf 'dd-ctl: found a legacy `dd-bot` container from the one-bot-at-a-time\n' >&2
+	printf '        layout. compose.yaml no longer owns it, so nothing else would ever\n' >&2
+	printf '        stop it and it would run as a duplicate bot. Removing it.\n' >&2
+	pod stop --ignore --time "$STOP_TIMEOUT" dd-bot >/dev/null 2>&1 || :
+	pod rm --ignore --force dd-bot >/dev/null 2>&1 || :
+	# `if`, NOT `pod container exists … && die`. `set -e` is on, and an && list whose
+	# left side fails makes the LIST fail — so the happy path here (the container is
+	# gone, `exists` returns non-zero) would have exited the script with status 1 from
+	# the one branch that means everything worked.
+	if pod container exists dd-bot 2>/dev/null; then
+		die "could not remove the legacy dd-bot container. Refusing to deploy on top
+        of it — that would put two of the same bot on the test guild. Remove it by hand
+        with 'podman rm -f dd-bot' and try again."
+	fi
+	return 0
+}
+
+# Blocks until a bot reports itself online, or gives up with a message that says what to
+# look at. Called only with a literal container name this script chose.
+#
+# THE SIGNAL IS A LOG LINE, and that deserves justifying rather than apologising for.
+# The obvious alternative — a container healthcheck — does not exist on this box: podman
+# schedules healthchecks with systemd transient timers, there is no systemd here, and a
+# healthcheck compiles to something that never runs (see compose.yaml, where one was
+# deliberately not added). `podman ps` reporting Up is no answer either: Up means
+# supervisord is alive, and supervisord is alive for the whole ~4 minutes of Python
+# imports before hikari has done anything, and stays alive if the bot then crash-loops.
+# The only thing on this box that knows the bot is on Discord is the bot, and the only
+# way it says so is this line.
+#
+# NO STALE-MATCH RISK, because the container this greps was just created by
+# --force-recreate: a new container has a new, empty log. It is NOT safe to reuse this
+# against a container that has been up for a while.
+wait_ready() {  # wait_ready <container> <bot>
+	_c=$1; _b=$2; _waited=0
+	printf '==> waiting for %s to come online (up to %ss)\n' "$_b" "$READY_TIMEOUT"
+	while :; do
+		# hikari's own line, printed once the shard has identified and the bot is on the
+		# gateway. Matched as a fixed string, not a regex with a number in it.
+		if pod logs "$_c" 2>&1 | grep -qF 'started successfully in approx'; then
+			printf '==> %s is online after %ss\n' "$_b" "$_waited"
+			return 0
+		fi
+		# Fail FAST rather than waiting out the timeout when the container is gone or
+		# stopped. `restart: always` means a crashing bot comes back and this keeps
+		# waiting — which is correct, since a slow crash-loop is indistinguishable from a
+		# slow start until the timeout says otherwise — but a container that no longer
+		# exists is never going to print anything.
+		_state=$(pod inspect --format '{{.State.Status}}' "$_c" 2>/dev/null || true)
+		case "$_state" in
+			running|restarting|created|"") : ;;
+			*) die "$_b's container is '$_state', not running. It will not come online.
+        Look at 'dd-ctl logs-$_b'." ;;
+		esac
+		[ "$_waited" -lt "$READY_TIMEOUT" ] || die "$_b did not come online within
+        ${READY_TIMEOUT}s. It may still be starting — this board is slow and the timeout
+        is a guess, not a verdict — or it may be crash-looping under 'restart: always',
+        which looks identical from here. The container was NOT touched; it is still
+        running and still trying. Look at 'dd-ctl logs-$_b'."
+		sleep "$READY_POLL"
+		_waited=$((_waited + READY_POLL))
+	done
+}
+
 deploy() {  # deploy <beacon|anchor> — called only with a literal
 	bot=$1
+	case "$bot" in
+		beacon) container=$BEACON_CONTAINER ;;
+		anchor) container=$ANCHOR_CONTAINER ;;
+		*) die "internal: unknown bot" 1 ;;
+	esac
 	assert_env_clean
 	assert_compose_named_volumes_only
-	export_compose_env "$bot"
+	assert_no_legacy_bot
 
 	# 1. PULL FIRST, EXPLICITLY, AND UNCONDITIONALLY. compose.yaml names a moving branch
 	#    tag, and podman will not re-resolve a tag it already holds locally: without this
@@ -537,37 +650,40 @@ EOF
         evidence here. Check the pull output above."
 	done
 
-	# 2. Only one bot ever runs here. Stop and remove the existing bot container before
-	#    creating the new one, rather than trusting --force-recreate to have done it —
-	#    especially when switching bots, where a survivor would mean beacon and anchor
-	#    on the same test guild at once. --ignore makes this a no-op when nothing is
-	#    there, so it is safe on a first deploy.
-	pod stop --ignore --time "$STOP_TIMEOUT" "$BOT_CONTAINER" >/dev/null
-	pod rm --ignore --force "$BOT_CONTAINER" >/dev/null
+	# 2. Stop and remove THIS BOT'S container — and only this bot's. Under the old
+	#    one-bot-at-a-time design this step was what stopped beacon and anchor ever
+	#    coexisting; that is no longer its job, and it must not touch the other bot.
+	#
+	#    It still earns its place: --force-recreate below removes the container with
+	#    podman's own default stop timeout, whereas this stops it with $STOP_TIMEOUT,
+	#    which is deliberately longer than supervisord's stopwaitsecs=45 so the bot
+	#    actually gets its drain instead of being killed mid-flush. --ignore makes it a
+	#    no-op when nothing is there, so it is safe on a first deploy.
+	pod stop --ignore --time "$STOP_TIMEOUT" "$container" >/dev/null
+	pod rm --ignore --force "$container" >/dev/null
 
 	# 3. Database first (a no-op when already up), then the bot, force-recreated so a
 	#    moving tag actually takes effect — `up -d` alone will happily keep a running
 	#    container whose tag now points at a different image.
 	#
-	#    STEP 2 HAS ALREADY REMOVED THE OLD BOT, so a failure anywhere in this step
-	#    leaves the box with NO BOT RUNNING — not the previous one. That is inherent to
-	#    the ordering (stop-then-create is what makes a bot switch safe; create-then-stop
-	#    would run beacon and anchor against the same test guild at once for as long as
-	#    it takes), so it is not a bug to fix here. It is a fact the person reading the
-	#    failure needs, and they will be reading it over SSH with no other context, so
-	#    each failure path says it outright rather than leaving them to infer it.
+	#    STEP 2 HAS ALREADY REMOVED THIS BOT, so a failure anywhere in this step leaves
+	#    the box without it — not with the previous copy of it. The OTHER bot, if it was
+	#    running, is untouched throughout. Whoever reads the failure will be reading it
+	#    over SSH with no other context, so each failure path says outright which bots
+	#    are down rather than leaving them to infer it.
 	printf '==> bringing up postgres\n'
 	compose up -d postgres || die "postgres did not come up.
-        THERE IS NO BOT RUNNING: step 2 removed the old container before this step, and
-        this step never got as far as creating a new one. The stack is DOWN, not rolled
-        back. Look at 'dd-ctl logs-postgres' and 'dd-ctl status', fix the cause, and run
-        the deploy again — it is idempotent."
+        $bot IS NOT RUNNING: step 2 removed its container before this step, and this step
+        never got as far as creating a new one. Any OTHER bot is unaffected. Look at
+        'dd-ctl logs-postgres' and 'dd-ctl status', fix the cause, and run the deploy
+        again — it is idempotent."
 	printf '==> creating the bot (%s)\n' "$bot"
-	#    --no-deps IS LOAD-BEARING AND COST A DATABASE. `bot` declares `depends_on:
-	#    postgres`, and podman-compose 1.6.0 applies --force-recreate to EVERY container
+	#    --no-deps IS LOAD-BEARING AND COST A DATABASE. Each bot service declares
+	#    `depends_on: postgres`, and podman-compose 1.6.0 applies --force-recreate to EVERY
+	#    container
 	#    it brings up — dependencies included. So without this flag the line below
 	#    destroys and recreates dd-postgres, roughly a minute after the previous line
-	#    started it. Proven on the box, same compose file: `up -d --force-recreate bot`
+	#    started it. Proven on the box, same compose file: `up -d --force-recreate <bot>`
 	#    changed dd-postgres's container ID.
 	#
 	#    Against an existing database that is a pointless bounce. ON A FRESH pgdata
@@ -583,16 +699,23 @@ EOF
 	#    redeploy, which is why this is a comment and not a one-word flag.
 	#
 	#    postgres is already up from the previous step, so skipping deps is also just
-	#    correct: deploying the bot has no business touching the database.
-	compose up -d --no-deps --force-recreate bot || die "the bot container was not created.
-        THERE IS NO BOT RUNNING: step 2 removed the old container before this step. The
-        stack is DOWN, not rolled back — postgres is up, the bot is absent. Run
-        'dd-ctl status', fix the cause, and run the deploy again."
+	#    correct: deploying a bot has no business touching the database — nor, now that
+	#    there are two of them, the other bot.
+	#
+	#    THE SERVICE NAME IS THE BOT NAME. compose.yaml's services are `beacon` and
+	#    `anchor` (they were one service called `bot`), so $bot names the service here and
+	#    the container name is derived separately above. They must not be confused: the
+	#    service is what podman-compose is told, the container is what podman is asked
+	#    about afterwards.
+	compose up -d --no-deps --force-recreate "$bot" || die "the $bot container was not created.
+        $bot IS NOT RUNNING: step 2 removed its container before this step. postgres is
+        up, $bot is absent, and any OTHER bot is unaffected. Run 'dd-ctl status', fix the
+        cause, and run the deploy again."
 
 	#    And before anything else looks at it: no bind mounts. This is layer 2 of the
 	#    named-volumes-only rule, and it is here rather than after the verification below
 	#    because a bind mount under $HOME is live from the moment the container starts.
-	assert_no_bind_mounts "$BOT_CONTAINER"
+	assert_no_bind_mounts "$container"
 	assert_no_bind_mounts "$DB_CONTAINER"
 
 	# 4. Verify END TO END, from the container that actually exists, that it is running
@@ -605,16 +728,16 @@ EOF
 	#    can answer it.
 	sleep 2
 	bot_env=$(pod inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
-		"$BOT_CONTAINER" 2>/dev/null || true)
+		"$container" 2>/dev/null || true)
 	if printf '%s\n' "$bot_env" | grep -qx "RAILWAY_SERVICE_NAME=$bot"; then
-		printf '==> verified: %s is running as %s\n' "$BOT_CONTAINER" "$bot"
+		printf '==> verified: %s is running as %s\n' "$container" "$bot"
 	else
 		cat >&2 <<EOF
-dd-ctl: FAILED VERIFICATION. $BOT_CONTAINER does not carry RAILWAY_SERVICE_NAME=$bot.
+dd-ctl: FAILED VERIFICATION. $container does not carry RAILWAY_SERVICE_NAME=$bot.
         The container may be running the OTHER bot, or none at all. Most likely cause:
-        RAILWAY_SERVICE_NAME or DD_BOT is set in $STACK_DIR/.env and is winning the
-        interpolation, or this podman-compose version resolves env precedence
-        differently. Do not assume the deploy worked. Check:
+        RAILWAY_SERVICE_NAME is set in $STACK_DIR/.env and is winning, or this
+        podman-compose version resolves env precedence differently. Do not assume the
+        deploy worked. Check:
             dd-ctl status
 EOF
 		exit 1
@@ -625,24 +748,37 @@ EOF
 	else
 		printf 'dd-ctl: warning — no MALLOC_CONF in the container. Costs anchor a little RAM.\n' >&2
 	fi
-	printf '==> deployed. Startup on this CPU is slow — 60-90s of silence is normal.\n'
+	printf '==> created. Startup on this CPU is slow — a measured cold start was 5m42s.\n'
 }
 
 status() {
 	printf '=== containers ===\n'
 	pod ps -a \
-		--filter "name=$BOT_CONTAINER" \
+		--filter "name=$BEACON_CONTAINER" \
+		--filter "name=$ANCHOR_CONTAINER" \
 		--filter "name=$DB_CONTAINER" \
 		--format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' || true
-	printf '\n=== what the bot container actually thinks it is ===\n'
-	# Asked of the container, not read back out of a file this script wrote. It is the
-	# only source that cannot agree with a mistake made earlier in the pipeline.
-	pod inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$BOT_CONTAINER" 2>/dev/null \
-		| grep -E '^(RAILWAY_SERVICE_NAME|MALLOC_CONF|DATABASE_SSL|TEST_ENV)=' \
-		|| printf '(no bot container)\n'
-	printf '\n=== image ===\n'
-	pod inspect --format '{{.ImageName}}{{"\n"}}{{.Image}}' "$BOT_CONTAINER" 2>/dev/null \
-		|| printf '(no bot container)\n'
+	# Per bot, and BOTH are reported whether or not both are deployed — "(not deployed)"
+	# is an answer, and a status that silently omitted the missing one would read as if
+	# only one had ever been asked for.
+	for _pair in "beacon $BEACON_CONTAINER" "anchor $ANCHOR_CONTAINER"; do
+		# shellcheck disable=SC2086  # deliberate split of a literal pair this loop wrote
+		set -- $_pair
+		printf '\n=== %s: what the container actually thinks it is ===\n' "$1"
+		# Asked of the container, not read back out of a file this script wrote. It is
+		# the only source that cannot agree with a mistake made earlier in the pipeline.
+		pod inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$2" 2>/dev/null \
+			| grep -E '^(RAILWAY_SERVICE_NAME|MALLOC_CONF|DATABASE_SSL|TEST_ENV)=' \
+			|| printf '(not deployed)\n'
+		# Leading '%s' rather than a literal '---': a format string that STARTS with a
+		# dash is a printf option as far as POSIX is concerned (shellcheck SC3045).
+		printf '%s\n' "--- $1 image ---"
+		# Both bots come from ONE image and are expected to be identical here. If these
+		# two blocks ever disagree, someone edited one service's `image:` and not the
+		# other, and that is worth seeing rather than averaging away.
+		pod inspect --format '{{.ImageName}}{{"\n"}}{{.Image}}' "$2" 2>/dev/null \
+			|| printf '(not deployed)\n'
+	done
 	printf '\n=== runtime ===\n'
 	# The four things worth confirming rather than assuming on this board: native
 	# rootless overlay (not vfs, which copies every layer onto the SD card), crun,
@@ -672,7 +808,7 @@ rootless   {{.Host.Security.Rootless}}' 2>/dev/null || printf '(pod info failed)
 	pod system df 2>/dev/null || printf '(pod system df failed)\n'
 	printf '\nNothing on this box starts at boot. After a reboot or a power cut the\n'
 	# shellcheck disable=SC2016  # the backticks are prose, and are meant to stay literal
-	printf 'stack stays down until someone runs `dd-ctl deploy-beacon`. That is intended.\n'
+	printf 'stack stays down until someone runs `dd-ctl deploy-both`. That is intended.\n'
 }
 
 # --- dispatch ---------------------------------------------------------------------
@@ -706,12 +842,31 @@ deploy-anchor)
 	take_lock
 	deploy anchor
 	;;
+deploy-both)
+	audit "deploy-both"
+	# ONE LOCK FOR THE WHOLE SEQUENCE, taken once here rather than by each deploy. This
+	# is a single mutating operation that happens to have two halves; a second caller
+	# arriving between them would be exactly the concurrent-deploy case take_lock exists
+	# to refuse.
+	take_lock
+	# SEQUENTIAL, AND THE WAIT BETWEEN THEM IS THE POINT — not politeness. One 700 MHz
+	# core: starting the second bot while the first is still doing its ~4 minutes of
+	# Python imports means both crawl, and on a 512 MB board they would also reach their
+	# peak startup allocation at the same moment. Waiting for the first to be genuinely
+	# on the gateway staggers the two costs that actually collide.
+	#
+	# BEACON FIRST, deliberately. It is the lighter of the two, so if the pair does not
+	# fit in RAM the failure lands on anchor — the one being added — rather than taking
+	# out a beacon that was fine on its own.
+	deploy beacon
+	wait_ready "$BEACON_CONTAINER" beacon
+	deploy anchor
+	wait_ready "$ANCHOR_CONTAINER" anchor
+	printf '==> both bots are online.\n'
+	;;
 down)
 	audit "down"
 	take_lock
-	# The two variables exist only so podman-compose can parse the file; teardown is by
-	# project name and neither value affects it. Fixed literals, as everywhere else.
-	export_compose_env beacon
 	# No --volumes, ever, and no way to ask for it. The pgdata volume is the only state
 	# this box holds for the stack; losing it to a mistyped verb is not a recoverable
 	# mistake, and `podman volume rm` by hand is the right amount of friction.
@@ -722,8 +877,12 @@ status)
 	audit "status"
 	status
 	;;
-logs)
-	audit "logs"
+logs-beacon)
+	audit "logs-beacon"
+	# ONE VERB PER CONTAINER, not `logs <bot>`. There used to be a single `logs` for the
+	# single bot; with two bots the alternative to two verbs is an argument, and no verb
+	# here takes an argument — see the header. Two literals cost a line each.
+	#
 	# exec: no shell survives the dispatch. Raw `podman logs` against the known
 	# container name rather than `podman-compose logs` — it needs no compose parsing,
 	# so no interpolation, so no way for a missing variable to turn "show me the logs"
@@ -731,14 +890,18 @@ logs)
 	# see. Every word of the command line is a literal or a constant set above.
 	# `exec` replaces the shell with a BINARY, so it cannot run the pod() function —
 	# hence podman directly here, with the same 9>&- the wrapper would have applied.
-	exec podman logs --tail "$TAIL_LINES" "$BOT_CONTAINER" 9>&-
+	exec podman logs --tail "$TAIL_LINES" "$BEACON_CONTAINER" 9>&-
+	;;
+logs-anchor)
+	audit "logs-anchor"
+	# Direct podman, not pod(): see the note on `logs-beacon` above.
+	exec podman logs --tail "$TAIL_LINES" "$ANCHOR_CONTAINER" 9>&-
 	;;
 logs-postgres)
 	audit "logs-postgres"
-	# A second fixed verb rather than an argument to the first. Postgres is worth its
-	# own verb: on a cold start it runs initdb before the bot can connect, and when that
-	# is what went wrong the bot's own log cannot say so.
-	# Direct podman, not pod(): see the note on the `logs` verb above.
+	# Postgres is worth its own verb: on a cold start it runs initdb before either bot
+	# can connect, and when that is what went wrong neither bot's log can say so.
+	# Direct podman, not pod(): see the note on `logs-beacon` above.
 	exec podman logs --tail "$TAIL_LINES" "$DB_CONTAINER" 9>&-
 	;;
 *)
