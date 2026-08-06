@@ -1,0 +1,161 @@
+# Deploy stub for the destiny-director test bot on `two` (Pi 1 B+, armv6, 512 MB,
+# Alpine `sys`, OpenRC, rootless podman + podman-compose).
+#
+# Unlike every other stack in this repo there is no build and no SRC_ROOT: nothing is
+# built on a 700 MHz single core. The image is prebuilt for linux/arm/v6 by the app
+# repo's .github/workflows/pi-image.yml and pulled from GHCR, so what selects the deploy
+# is the image reference, not a checkout sha. SOURCE therefore records the upstream URL
+# and NO sha; bin/check-sources understands that shape and reports the stack as
+# `registry-deployed`. Read SOURCE for why the pin is absent by design.
+#
+# `bin/compose destiny-director …` REFUSES this stack, on every host — see bin/compose.
+# It is driven by ./dd-ctl over SSH, which is the only thing that supplies the three
+# variables interpolated below.
+#
+# ONE IMAGE SERVES BOTH BOTS. supervisord's only program is
+# `python -OO -m dd.$RAILWAY_SERVICE_NAME`, so the bot is chosen at container start, and
+# only ONE bot ever runs on this box. dd-ctl supplies DD_BOT / DD_MALLOC_CONF /
+# DD_IMAGE_REF per deploy; they are deliberately NOT in .env. podman-compose has FLIPPED
+# the .env-vs-process-environment precedence between releases (1.0.6: .env wins;
+# 1.6.0, which Alpine 3.24 ships: the process environment wins), so keeping these out of
+# .env entirely is the only arrangement that behaves the same on both. dd-ctl refuses to
+# deploy if it finds one of them set there.
+#
+# Validated against podman-compose 1.6.0 with `config`: `${VAR:?msg}` raises with the
+# message, and a `:tag` and an `@sha256:...` digest both interpolate correctly.
+#
+# Written to the podman-compose-safe subset the app repo's deploy/pi-bplus/compose.yml
+# documents: plain long-established keys only (image, container_name, environment,
+# env_file, command as a list, depends_on as a PLAIN LIST, volumes, restart). No
+# profiles, no extends, no YAML anchors, no conditional depends_on — podman-compose
+# supports those inconsistently across versions, and inconsistent support on the box you
+# reach through a tunnel is the worst kind.
+#
+# No `..` anywhere (repo invariant): this file is reachable both as
+# deployments/destiny-director/ and as hosts/two/destiny-director/, and podman-compose
+# realpath's its own directory, so `.env` resolves the same either way.
+name: destiny-director
+
+services:
+  postgres:
+    image: docker.io/arm32v6/postgres:17-alpine
+    container_name: dd-postgres
+    environment:
+      # Not secret, so stated here rather than hidden in .env. POSTGRES_PASSWORD comes
+      # from .env below and MUST match the password inside DATABASE_URL there.
+      POSTGRES_USER: dd
+      POSTGRES_DB: kyber
+    env_file:
+      - .env
+    # Low-RAM / SD-friendly tuning for a 512 MB board. synchronous_commit=off is a real
+    # durability trade: the last few committed transactions can be lost on a HARD POWER
+    # LOSS (not on a process crash or a container restart). Acceptable for a test bot;
+    # do not copy this into anything that holds data you would miss.
+    command:
+      - "-c"
+      - "shared_buffers=16MB"
+      - "-c"
+      - "max_connections=25"
+      - "-c"
+      - "work_mem=2MB"
+      - "-c"
+      - "synchronous_commit=off"
+      - "-c"
+      - "wal_compression=on"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # NO HEALTHCHECK, deliberately — do not "fix" this by adding one back.
+    #
+    # Podman's healthchecks are scheduled by systemd transient timers. There is no
+    # systemd on this box, so a healthcheck compiles to nothing that ever runs: in
+    # testing a container sat at Health=starting for 52 seconds with zero health log
+    # entries, which is not a slow check, it is no check. A healthcheck here would be
+    # decorative, and decorative checks are worse than none because they stop you
+    # looking. The bot does the real waiting itself (dd.common.schemas.wait_for_db runs
+    # before `alembic upgrade head` in its own StartingEvent hook), which is where a
+    # cold-start race against initdb actually gets handled.
+    restart: always
+
+  bot:
+    # Pulled from GHCR, never `localhost/`. The registry and repository are FIXED here;
+    # dd-ctl supplies only DD_IMAGE_REF, which is exactly `:<tag>` or `@sha256:<64 hex>`
+    # after validation. That split is on purpose: a malformed or hostile argument can at
+    # worst name a tag that does not exist in this one repository — it can never
+    # redirect the pull to a registry of the caller's choosing.
+    #
+    # `:?` rather than `:-` (repo decision): an unset value must stop compose with this
+    # message, not deploy something nobody chose.
+    image: ghcr.io/gsfernandes81/destiny-director${DD_IMAGE_REF:?set DD_IMAGE_REF — dd-ctl does this; e.g. :slim-stack or @sha256:<64 hex>}
+    container_name: dd-bot
+    env_file:
+      - .env
+    environment:
+      # These become `-e` on the podman command line, emitted AFTER the ones derived
+      # from `env_file:` (podman-compose 1.0.6 passed `--env-file`; 1.6.0 reads the file
+      # itself and expands it into `-e` pairs first). Later `-e` wins in podman either
+      # way, so these override anything of the same name in .env. dd-ctl verifies that
+      # from the running container rather than trusting it.
+      #
+      # Which bot this container is. supervisord refuses to start at all if it is unset,
+      # rather than guessing — a missing value fails loudly and immediately.
+      RAILWAY_SERVICE_NAME: ${DD_BOT:?set DD_BOT — dd-ctl does this; beacon or anchor}
+      # jemalloc. The image bakes the beacon-correct settings; anchor additionally wants
+      # narenas:2. It cannot be baked per-bot (one image, one supervisord program, no
+      # conditionals in supervisord), so dd-ctl sets the right string for the bot it is
+      # deploying and it arrives here.
+      MALLOC_CONF: ${DD_MALLOC_CONF:?set DD_MALLOC_CONF — dd-ctl does this}
+    # Plain list, and it must stay one. `condition: service_healthy` would wait forever
+    # here with no error and no timeout, because (see postgres above) nothing on this box
+    # ever runs the healthcheck that would satisfy it. This is start-ORDER only; the
+    # bot's own wait_for_db covers the gap.
+    depends_on:
+      - postgres
+    volumes:
+      # The break-glass sshd's host keys. Generated at runtime, never baked into the
+      # image (a baked host key is the same private key in every deployment), so without
+      # somewhere to persist them they are regenerated on every container replacement
+      # and your client warns about a changed host key after every deploy. It must be a
+      # NAMED volume: the image pre-creates .ssh-host/etc/ssh and a named volume is
+      # seeded from the image, whereas a bind mount would hide it.
+      - sshhostkeys:/home/dd/.ssh-host
+    # No mem_limit / --memory anywhere, and that is not an oversight. Rootless podman
+    # under OpenRC has no cgroup delegation for user slices — there is no systemd or
+    # logind to hand a user a writable sub-tree — so a per-container memory.max cannot
+    # be set here at all.
+    #
+    # No `oom_score_adj:` key either, which IS a change from the app repo's
+    # deploy/pi-bplus/compose.yml. That file raised the whole container to 800; but
+    # oom_score_adj is inherited by every process in it, Linux only lets a process RAISE
+    # its own value without CAP_SYS_RESOURCE, and rootless podman cannot grant that — so
+    # supervisord and the break-glass sshd would be stuck at 800 too, and the OOM killer
+    # could reap the supervisor and the only way into a sick container. Instead the
+    # container baseline stays at 0 and the BOT raises itself, via OOM_SCORE_ADJ in .env
+    # (dd.common.lifecycle). Same preference, applied to the one process it should apply
+    # to. See the OOM_SCORE_ADJ comment in .env-example in the app repo.
+    #
+    # `restart: always` means podman restarts this on a crash. It does NOT bring the
+    # stack back after a reboot: that needs a boot-time hook, and this box deliberately
+    # has none. A power cut leaves `two` running nothing until someone runs
+    # `dd-ctl deploy`.
+    restart: always
+
+    # Nothing is published to the host, deliberately. Two ports exist inside the
+    # container and neither is exposed:
+    #
+    #   8080  anchor's web UI (Bungie OAuth callback + rotation editor). Only meaningful
+    #         when RAILWAY_SERVICE_NAME=anchor, and compose cannot publish a port
+    #         conditionally — so publishing it would leave beacon deploys with a stray
+    #         mapping. If you need it, uncomment below AND set PUBLIC_BASE_URL in .env.
+    #   2222  the break-glass sshd. Reach it with `podman exec` unless you have a
+    #         specific reason to expose an sshd on the network `two` sits on.
+    #
+    # ports:
+    #   - 8080:8080
+    #   - 2222:2222
+
+volumes:
+  # Rootless named volumes live under ~/.local/share/containers/storage/volumes on the
+  # SD card. `dd-ctl down` never removes them; `podman volume rm` by hand is the right
+  # amount of friction for destroying the only state this box holds.
+  pgdata:
+  sshhostkeys:

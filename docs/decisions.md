@@ -15,11 +15,95 @@ not from scratch.
 | Staying on OpenVPN | Works and is proven. The WireGuard key is unused but still live, so still gitignored. |
 | `gavin` not in `docker` group | Root-equivalent. Rootless Podman removes the need. |
 | Target OS is **openSUSE MicroOS** | Immutable root with btrfs snapshots and auto-rollback on a failed boot — the right shape for a box you can't reach for months. Official Pi 5 support. |
-| `two` leaves the fleet, but is **kept as the lifeboat** | Its armv6 was the *only* thing forcing a Debian fleet, so it doesn't migrate. It stays powered on for serial console, power-cycling, and watchdog duty — the things that help when a critical box won't boot. Stays on Alpine, diskless. |
+| `two` leaves the fleet, but is **kept as the lifeboat** | Its armv6 was the *only* thing forcing a Debian fleet, so it doesn't migrate. It stays powered on for serial console, power-cycling, and watchdog duty — the things that help when a critical box won't boot. Stays on Alpine. *Diskless was written here as settled and is not:* `two` is a `sys` install today, and now has a Postgres data directory arguing against the switch — see "`two` also runs a test bot" below. |
 | `chattr +i` on bare mountpoints, not a guard service | Makes the bad write **impossible** rather than detected, with no boot-path code. The guard service that was drafted instead added a new way for the box to come up with no containers, and had a false-failure mode: renaming a Syncthing share would have silently stopped Docker on the next reboot. |
 | Claude dev containers stay in their own app repos | They are developer tooling, not host services. Pulling them into `deployments/` would break `make dev` from a fresh app clone, invert the dependency, and — decisively — still leave both `Dockerfile.dev` files duplicated. It relocates the duplication instead of removing it. |
-| `containerd` service removed, package kept | `dockerd` spawns its own containerd; every moby shim uses `/var/run/docker/containerd/containerd.sock`, so the standalone service owned zero shims. But `docker-engine` **hard-depends on the package** — `apk del containerd` would kill every container at the next start. Service-level removal only. |
+| `containerd` service removed, package kept | `dockerd` spawns its own containerd; every moby shim uses `/var/run/docker/containerd/containerd.sock`, so the standalone service owned zero shims. But `docker-engine` **hard-depends on the package** — `apk del containerd` would kill every container at the next start. Service-level removal only. **On `one` and `zero`.** On `two` the package goes too, in one transaction with every dependent — see below; the rule was always "never *alone*", not "never". |
 | OpenCloud and k3s deleted, not migrated | Both confirmed unused. k3s was still *running* a live cluster (traefik, coredns, metrics-server) and holding ~880 MB of swap; removing it plus the dead `nextcloud` subvolume returned ~344 GiB to the array. |
+| **Docker and containerd removed from `two`; rootless podman instead** | Two daemons and their shims cost roughly 34 MB RSS on a board with ~475 MB total, and `two` ran no docker containers worth the price. Rootless podman is daemonless — nothing is resident when nothing is running — and it needs no `docker` group, which this repo already refuses to grant. It is also where `one` and `zero` are headed under MicroOS, so `two` is the cheap place to learn it. |
+| **No new user, no boot autostart on `two`** | Rootless podman's isolation comes from the user namespace, not from which unprivileged uid owns it, so a second service account buys nothing over `gavin`. And a test bot that resurrects itself at 03:00 and takes 200 MB of a 475 MB lifeboat is the wrong default: `restart: always` covers a crashed container, and a reboot deliberately leaves the box running nothing until someone deploys. |
+| **`bin/compose` stays docker-only and refuses `destiny-director` by name** | Making it runtime-aware would not have helped: that stack cannot be driven from `bin/compose` on *any* host, because its compose file interpolates three variables only `dd-ctl` supplies. And `docker compose` and `podman-compose` are not interchangeable — different project-directory semantics that agree here by coincidence. A wrapper hiding that will eventually hide a difference that matters. The conversion belongs to the MicroOS move, where there are stacks to test it against. |
+| **`dd-ctl` has exactly one copy, and it is not in `bin/`** | It drives one stack, so it lives beside that stack; `bin/` is for fleet-wide tools, and the README points at it from there. No symlink to it anywhere: a script reachable two ways is a script whose behaviour can depend on which way you came. It carries no `infra-` header either, because `_infra.py` only reads those under `hosts/<host>/system/` — a header no parser reads is decoration dressed as a checked invariant. |
+| **The live `dd-ctl` is root-owned, and that is the whole mechanism** | `/usr/local/bin/dd-ctl`, a real file, 0755, in a root-only-writable directory — never a symlink into `~gavin/infra` and never the checkout's copy run in place. `gavin` owns the checkout, so a forced command resolving through anything `gavin` can rewrite is not a restriction: replace the target, get an unrestricted shell. It was never a boundary *against* `gavin`, who has sudo; it stops the holder of the **restricted key** rewriting the thing that restricts them. |
+
+## `two` also runs a test bot, and what that bends
+
+`two` runs a **test** instance of the `destiny-director` Discord bot plus its Postgres,
+under rootless podman, deployed on demand over SSH. See
+[`deployments/destiny-director/`](../deployments/destiny-director/). Two things in this
+file bend for it, and both are scoped deliberately, because the whole point of writing
+them down was to stop them being re-derived loosely elsewhere.
+
+### The `SOURCE` pin is absent here, and only here
+
+The rule above is *"`SOURCE` records a sha, never pulls"*, and its reason is exact:
+otherwise a restart at 03:00 silently deploys whatever upstream HEAD is, and you find
+out from mid-ocean. That reason does not reach this stack, for three independent
+reasons:
+
+1. **Nothing here restarts into a new version.** There is no boot autostart on `two` and
+   `restart: always` re-runs the *same* image. A power cut leaves the box running
+   nothing. There is no 03:00 to be surprised by.
+2. **There is nothing to pin.** No source is built on a 700 MHz core; the image is built
+   for `linux/arm/v6` by the upstream repo's CI and pulled from GHCR. There is no
+   checkout on `two` whose HEAD a sha could be compared against, so a sha in `SOURCE`
+   would be a number nothing on either side could check — the shape of pass-for-the-
+   wrong-reason this file ends on.
+3. **The stakes are a test bot.** If it deploys the wrong build, a test guild sees a
+   wrong reply. Nobody is mid-ocean.
+
+So `SOURCE` keeps the upstream URL and carries no sha, and `bin/check-sources` reports
+the stack as **registry-deployed** — a recognised state, not drift and not an error.
+It is recognised narrowly: one field that looks like a URL. A truncated file, a second
+field that is not a sha, a third field — all still fail loudly. Absence of a pin is the
+design here; a garbled `SOURCE` must never pass for one.
+
+**This does not generalise, and must not.** For `torrents`, `immich`, `ionic-traces`
+and `send2ereader` the original reason holds in full: they are built from checkouts, on
+hosts that come back by themselves, and two of them are critical and remote. If a
+future stack wants the same treatment, it has to clear all three tests above, not cite
+this paragraph.
+
+### Deploys are SSH-triggered, not commit-triggered
+
+Every other stack changes by editing this repo. This one changes by
+`ssh two deploy beacon <tag>`, and the deploy is recorded on the box
+(`~gavin/.local/state/dd-ctl/deployed`, plus an audit log), not here.
+
+That is deliberate: it is a rapidly-iterated test bot, and a commit per deploy would be
+pure noise in a repository whose value is that its history is all signal. The trade is
+real and worth stating — **this repo cannot tell you what is running on `two`.** Only
+`dd-ctl status` can, and the README says so rather than leaving the gap to be discovered.
+
+The dispatcher is a restricted SSH forced command with a closed verb list and
+reject-by-default argument validation; `SSH_ORIGINAL_COMMAND` is treated as hostile
+text throughout. The registry and repository are pinned in `compose.yaml`, so the
+caller supplies only a `:tag` or `@sha256:` suffix and can never redirect the pull.
+
+### The lifeboat tension, stated rather than left for a reviewer
+
+The roadmap says of `two`: *"Do not put on it: DNS/Pi-hole, backups, a log sink (SD
+wear), or anything Node.js-shaped"*, and `hosts/two/system/README.md` says nothing
+household-critical goes there. A test bot is none of those and breaks no letter of it.
+But it is not lifeboat duty either, and two costs are new:
+
+- **~200–330 MB of a 475 MB board while deployed.** Removing docker and containerd buys
+  back roughly 34 MB, so the net standing position is better than before — but the peak
+  is much higher, and nothing on this box can set a per-container memory limit (rootless
+  podman under OpenRC has no cgroup delegation for user slices).
+- **Postgres writes continuously to a decade-old SD card.** That is the one that
+  eventually matters, because the lifeboat argument rests on that card outliving the
+  boxes it watches.
+
+**Settled for now: the bot yields.** If `two`'s lifeboat jobs are built (roadmap §5),
+they take precedence and this stack moves or goes. It is a test bot; they are the
+fleet's last way in. Recorded now so that when the two collide, it is not re-argued
+from scratch under pressure.
+
+Consequence worth keeping in view: it also weakens the case for the planned diskless
+switch. A 512 MB board cannot hold its OS image in RAM *and* Postgres's buffers, and an
+unsynced diskless system loses the data directory on power loss. Diskless and this stack
+are not obviously compatible, and that has not been resolved.
 
 ## SSH between hosts: `two` is a jump host, and that is all
 

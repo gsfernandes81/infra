@@ -128,10 +128,19 @@ Then grep the *directory*, not the file, before declaring it done:
 
 ## Landmines
 
-- **Never `apk del containerd`.** `docker-engine` hard-depends on it; `/usr/bin/containerd`
-  and `containerd-shim-runc-v2` are what dockerd's own containerd and every running shim
-  exec from. Removing it kills every container at the next start. The standalone
-  `containerd` *service* is unused and safe to drop from the runlevel — the package is not.
+- **Never `apk del containerd` on its own.** `docker-engine` hard-depends on it, and so
+  does `k3s`; `/usr/bin/containerd` and `containerd-shim-runc-v2` are what dockerd's own
+  containerd and every running shim exec from. Removing it kills every container at the
+  next start. The standalone `containerd` *service* is unused and safe to drop from the
+  runlevel — the package is not. **The exception, which is only an exception because it
+  is a different operation:** removing it in one `apk del` transaction with every
+  dependent, after stopping the services, is how docker leaves `two` entirely
+  (`hosts/two/setup/root-setup.sh` §12). apk resolves the order itself; containerd is
+  never removed alone. The trap that comes with it: `iptables` is on that box only as an
+  auto-installed dependency of docker/k3s, `apk del` reclaims orphans, and netavark
+  needs `iptables` while **not** depending on it — so it must be installed explicitly
+  *before* the removal or rootless podman networking breaks days later, for a reason
+  nobody would connect back to a docker cleanup.
 - **"Exited" is not "absent".** A stack with an exited container, a registered compose
   project, or surviving named volumes must be torn down properly. Deleting its files
   first orphans them permanently.

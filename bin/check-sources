@@ -4,6 +4,24 @@
 # READ-ONLY. This never fetches, never pulls, never checks out. SOURCE records what
 # is deployed; keeping it accurate is a deliberate act, not an automatic one.
 #
+# A SOURCE file has one of two shapes, and the difference is the point:
+#
+#   <upstream-url> <sha>   PINNED. Built on the host from a checkout. The sha is
+#                          compared against that checkout's HEAD; a mismatch, a missing
+#                          checkout, a dirty tree and a different remote all report and
+#                          all fail.
+#   <upstream-url>         REGISTRY-DEPLOYED. Nothing is built and there is no checkout
+#                          to compare against — the artefact is a published image, and
+#                          which one is running is decided on the host at deploy time,
+#                          so no sha belongs here. Reported as such; does NOT affect the
+#                          exit status. `destiny-director` is the case: read its SOURCE.
+#
+# The second shape is a design, not a gap, and it is recognised NARROWLY on purpose:
+# exactly one field, and that field must look like a URL. Anything else — two fields
+# whose second is not a sha, three fields, a lone sha whose URL was lost to a bad edit
+# — is still MALFORMED and still fails. A checker that shrugged at a garbled SOURCE
+# would be the wrong-reason pass docs/decisions.md ends on, dressed up as tolerance.
+#
 # exit 0 = every pin matches   exit 1 = drift or a problem worth looking at
 set -eu
 
@@ -17,12 +35,51 @@ for source_file in "$repo"/deployments/*/SOURCE; do
 	stack_dir="$(dirname -- "$source_file")"
 	stack="$(basename -- "$stack_dir")"
 
-	# SOURCE format, first non-comment line:  <upstream-url> <deployed-sha>
-	url="$(awk '/^[[:space:]]*#/ {next} NF >= 2 {print $1; exit}' "$source_file")"
-	pinned="$(awk '/^[[:space:]]*#/ {next} NF >= 2 {print $2; exit}' "$source_file")"
+	# The first line that is neither blank nor a comment is the whole declaration.
+	# Split it ONCE, with globbing off and IFS pinned, so a `*` in a URL cannot be
+	# expanded against the cwd and a stray tab cannot change what counts as a field.
+	line="$(awk '/^[[:space:]]*#/ {next} NF {print; exit}' "$source_file")"
+	set -f
+	IFS=" $(printf '\t')"
+	# shellcheck disable=SC2086  # deliberate, controlled word splitting — see above
+	set -- $line
+	set +f
+	unset IFS
+	url="${1:-}"
+	pinned="${2:-}"
+	third="${3:-}"
 
-	if [ -z "${url:-}" ] || [ -z "${pinned:-}" ]; then
-		echo "$stack: MALFORMED SOURCE (want '<url> <sha>')"
+	# Field 1 must be a URL under every shape. This is what stops a truncated file
+	# whose remaining line is a bare sha from reading as "deliberately unpinned".
+	case "$url" in
+		https://*|http://*|ssh://*|git@*:*) ;;
+		*) url='' ;;
+	esac
+
+	if [ -z "$url" ] || [ -n "$third" ]; then
+		echo "$stack: MALFORMED SOURCE (want '<url> <sha>', or '<url>' alone)"
+		rc=1
+		continue
+	fi
+
+	if [ -z "$pinned" ]; then
+		# No sha, by design. See the header, and the stack's own SOURCE for why.
+		# Nothing to verify from here, and nothing here that can be wrong — so this
+		# reports and moves on rather than inventing a verdict it has no basis for.
+		echo "$stack: registry-deployed  $url"
+		echo "    (no sha here by design — a published image, deployed on the host;"
+		echo "     ask the host what is running)"
+		continue
+	fi
+
+	# A pinned sha is hex and nothing else. Without this a garbled second field would
+	# reach the comparison below and be reported as DRIFT — loud, but the wrong reason,
+	# and it would send you looking at the checkout instead of at this file.
+	case "$pinned" in
+		*[!0-9a-fA-F]*) pinned='' ;;
+	esac
+	if [ -z "$pinned" ] || [ "${#pinned}" -lt 7 ] || [ "${#pinned}" -gt 64 ]; then
+		echo "$stack: MALFORMED SOURCE (second field is not a sha)"
 		rc=1
 		continue
 	fi

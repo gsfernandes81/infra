@@ -14,6 +14,16 @@ first, no changes.
 
 `one` is the right guinea pig — non-critical and fully described here.
 
+**`two` got there first**, by accident of needing it: it runs rootless podman +
+podman-compose as `gavin`, with docker and containerd removed, for the
+`destiny-director` test stack. It is a much smaller sample than the torrents stack —
+one bot and a Postgres, no VPN namespace sharing — but the packaging is real and
+verified for Alpine 3.24 `armhf` in `hosts/two/setup/root-setup.sh` §3, including the
+`iptables`/netavark trap. Read that before doing this on `one`.
+
+`bin/compose` still execs `docker compose` and stays that way until this conversion —
+see [decisions.md](decisions.md) for why a runtime probe was not added speculatively.
+
 **The one thing not to get wrong:** gluetun and qBittorrent must stay in a shared
 network namespace or port forwarding breaks silently. See
 [port-forwarding.md](port-forwarding.md). The gluetun stack will likely need to be
@@ -197,15 +207,25 @@ failure in [recovery.md](recovery.md). `two` is the way in:
   Throughput will be poor (no crypto extensions, NIC shares a USB 2.0 bus) and that is
   irrelevant for a management shell.
 
-**Stay on Alpine, in diskless mode.** Running from RAM with the SD card read-only —
-committing only via `lbu commit` — makes the box whose entire purpose is surviving
-others' failures immune to SD-card corruption. That matters more than package choice on
-hardware whose card has had a decade to wear out. Only switch to Raspberry Pi OS if
-tang becomes its job, since Alpine cannot provide it (see above).
+**Stay on Alpine.** Diskless — running from RAM with the SD card read-only, committing
+only via `lbu commit` — would make the box whose entire purpose is surviving others'
+failures immune to SD-card corruption, and that matters more than package choice on
+hardware whose card has had a decade to wear out. It is **planned, not done**: `two` is
+a `sys` install today, and it now holds a Postgres data directory that an unsynced
+diskless system would lose on power loss. See [decisions.md](decisions.md); the two are
+not obviously compatible and that is unresolved. Only switch to Raspberry Pi OS if tang
+becomes its job, since Alpine cannot provide it (see above).
 
 **Do not put on it:** DNS/Pi-hole (household-critical on the oldest hardware and the
 most worn card, while you are unreachable), backups, a log sink (SD wear), or anything
 Node.js-shaped.
+
+**None of the five jobs above exists yet.** What `two` actually runs today is
+`cloudflared`, `crond`, `sshd`, and the `destiny-director` **test** bot with its
+Postgres. That last one is on none of the lists above and breaks no letter of them, but
+it is not lifeboat duty either, and it costs RAM and continuous SD writes. If these jobs
+get built they take precedence and the bot moves — settled in
+[decisions.md](decisions.md) so it is not re-argued under pressure.
 
 All three sit in one stack, so the console and power-cycle roles are viable — a short
 UART run and one smart plug. (That same colocation is what breaks the tang plan; see

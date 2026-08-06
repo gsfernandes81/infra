@@ -1,0 +1,20 @@
+# <upstream-url> [<deployed-sha>]
+# Records what is deployed. Never triggers a pull — see bin/check-sources.
+#
+# NO SHA HERE, DELIBERATELY. This stack is *registry-deployed*: nothing is built on
+# `two` (a 700 MHz single core), so there is no checkout on the box for a sha to name.
+# The image is built for linux/arm/v6 by the upstream repo's own CI and published to
+# ghcr.io/gsfernandes81/destiny-director; which image runs is chosen per deploy by
+# `dd-ctl deploy <bot> [tag|sha256:…]` over SSH, and recorded on the host in
+# ~gavin/.local/state/dd-ctl/deployed. It is not recorded by a commit here, on purpose:
+# this is a fast-iterating test bot, and a commit per deploy would be noise.
+#
+# So the line below records provenance, and only that. bin/check-sources recognises a
+# URL-only SOURCE and reports the stack as `registry-deployed` — not drift, not
+# malformed, and it does not affect the exit status. A second field that is not a sha,
+# a third field, or a first field that is not a URL is still a hard failure there:
+# absence of a pin is the design here, but a garbled SOURCE must never pass for one.
+#
+# `dd-ctl status` on `two` is where you ask what is actually deployed. That question
+# cannot be answered from this repo, and it should not look as though it can.
+https://github.com/gsfernandes81/destiny-director.git

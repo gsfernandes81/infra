@@ -2,11 +2,42 @@
 
 **Raspberry Pi Model B Plus Rev 1.2, `armv6l`, 512 MB** (confirmed Aug 2026) —
 single-core ARM1176 at 700 MHz, 100 Mbit ethernet sharing a USB 2.0 bus, no crypto
-acceleration.
+acceleration. `MemTotal` is 486 272 kB, so **~475 MB usable**, not the ~490 MB an
+earlier note here and in `docs/host-setup.md` claimed. Alpine **3.24.1** (not 3.23 —
+package names moved between the two; see `hosts/two/setup/root-setup.sh` §3).
 
 `two` does **not** join the MicroOS fleet — its armv6 was the only thing that would
 have forced the whole fleet onto Debian, and armv6 also rules out Claude Code (arm64
 and x86-64 only). It is kept, powered on, for a different job.
+
+## What changed, Aug 2026
+
+`two` now also runs the **destiny-director test bot** — see
+[`deployments/destiny-director/`](../../../deployments/destiny-director/), reachable
+here as [`hosts/two/destiny-director`](../destiny-director). That is a real change to
+this box's brief, and the tension with the lifeboat role is recorded in
+[`docs/decisions.md`](../../../docs/decisions.md).
+
+With it come three host changes:
+
+- **Docker and containerd are removed**, and **rootless podman + podman-compose**
+  replace them. `gavin` is not in any new group and no new user is created; rootless
+  podman's isolation comes from the user namespace, not from which uid owns it.
+- **`python3` is now installed** as a dependency of `podman-compose` 1.6.0. That
+  removes the stated objection to tracking `/etc` files here (see below): the
+  interpreter `bin/check-system-drift` needs is no longer a cost this box would pay
+  only for the checker's sake.
+- **`/usr/local/bin/dd-ctl`** — a restricted SSH forced command, root-owned, the only
+  thing the deploy key can run. Its canonical copy is
+  [`deployments/destiny-director/dd-ctl`](../../../deployments/destiny-director/dd-ctl).
+
+The privileged half is [`../setup/root-setup.sh`](../setup/root-setup.sh) — one
+reviewable script, `sh`-invoked, mode 0644 so it is never on a PATH.
+
+> **Status: not applied as of 2026-08-06.** The script has been reviewed and syntax
+> checked, and nothing in it has been run on the box. Docker removal is opt-in behind
+> `DD_REMOVE_DOCKER=1` and is a separate second run. Treat the three bullets above as
+> the intended end state, and confirm on the box before writing them down as fact.
 
 ## Its job: the lifeboat
 
@@ -26,11 +57,28 @@ Five jobs, all tiny, all suited to hardware that cannot do anything demanding:
 The full case, and the trust logic behind job 4, is in
 [`docs/roadmap.md`](../../../docs/roadmap.md#5-two--keep-it-as-the-lifeboat).
 
-**Stays on Alpine, in diskless mode** — running from RAM with the SD card read-only,
-committed via `lbu commit`. The box whose purpose is surviving other boxes' failures
-should be the one least able to die of SD-card corruption.
+**Stays on Alpine. It is a `sys` install today, not diskless** — root on
+`/dev/mmcblk0p2`, 29 G with 27 G free (verified over SSH, Aug 2026). This section
+previously read as though diskless were already done; it is not, and
+[`docs/host-setup.md`](../../../docs/host-setup.md) had it right all along.
 
-Nothing household-critical goes here: no DNS, no backups, no log sink.
+Diskless — running from RAM with the SD card read-only, committed via `lbu commit` —
+remains the argument for the lifeboat: the box whose purpose is surviving other boxes'
+failures should be the one least able to die of SD-card corruption. But it is now in
+tension with what else is on here. A 512 MB board cannot hold its OS image in RAM
+*and* Postgres's buffers, and an unsynced diskless system loses Postgres's data
+directory on power loss. Whichever way that is settled, settle it in
+[`docs/decisions.md`](../../../docs/decisions.md) rather than by drifting.
+
+**Swap: there is none.** Verified Aug 2026 — no zram, no swap file, no swap partition.
+`docs/host-setup.md` said `two` runs zram; it does not, and Alpine's `zram-init`
+package cannot be enabled the way that doc described. `root-setup.sh` §9 turns on a
+256 MB zram swap **live**, and it does not survive a reboot, because persisting it
+means boot-path code on the lifeboat box.
+
+Nothing household-critical goes here: no DNS, no backups, no log sink. A test bot is
+not household-critical either — but it does put a continuous Postgres write load on a
+decade-old SD card, which is the cost worth watching.
 
 ## Tang is not currently possible here
 
@@ -46,6 +94,34 @@ of one. See the roadmap before doing anything here.
 
 ## Tracked `/etc` copies
 
-None yet, and there may never be — this is a reference directory, and
-`bin/check-system-drift two` only reports differences. Nothing here is applied to the
-host.
+**Still none.** This is a reference directory, and `bin/check-system-drift two` only
+reports differences. Nothing here is applied to the host.
+
+`/usr/local/bin/dd-ctl` is the obvious candidate and is deliberately **not** one. Its
+single canonical copy lives beside the stack it drives, at
+[`deployments/destiny-director/dd-ctl`](../../../deployments/destiny-director/dd-ctl),
+with no second path to it anywhere — a script reachable two ways is a script whose
+behaviour can depend on which way you came. It therefore carries no `infra-` header,
+because `bin/_infra.py` is the single parser for those and it only ever looks in
+`hosts/<host>/system/`; a header no parser reads would be decoration dressed as a
+checked invariant. The live copy is installed by `root-setup.sh` §4 and compared by
+hand:
+
+```sh
+md5sum /usr/local/bin/dd-ctl ~/infra/deployments/destiny-director/dd-ctl
+```
+
+**The installed copy must be a real file owned by root, mode 0755, in a directory only
+root can write** — never a symlink into the checkout, and never the checkout's copy run
+in place. `gavin` owns `~/infra`, so a forced command resolving through anything gavin
+can rewrite is not a restriction at all: replace the target, get a shell. `root-setup.sh`
+§4 verifies all three properties after installing rather than trusting `install` to
+have produced them.
+
+**Known gap, for when a tracked executable does land here:**
+`bin/install-system-file`'s `validators_for()` keys on `live.parent == /etc/init.d` and
+on the filename `fstab`, so an executable installing anywhere else would get **no**
+post-install check — not even `sh -n`. Widening it is the right fix, but this repo's
+own rule is to calibrate a new validator against known-good state first, and there is
+currently no tracked file of that shape to calibrate against. Add the file and the
+validator together.
