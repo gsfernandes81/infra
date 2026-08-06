@@ -38,20 +38,76 @@
 #
 # Written to the podman-compose-safe subset the app repo's deploy/pi-bplus/compose.yml
 # documents: plain long-established keys only (image, container_name, environment,
-# env_file, command as a list, depends_on as a PLAIN LIST, volumes, restart). No
-# profiles, no extends, no YAML anchors, no conditional depends_on — podman-compose
-# supports those inconsistently across versions, and inconsistent support on the box you
-# reach through a tunnel is the worst kind.
+# env_file, command as a list, depends_on as a PLAIN LIST, volumes, restart, user,
+# security_opt). No profiles, no extends, no YAML anchors, no conditional depends_on —
+# podman-compose supports those inconsistently across versions, and inconsistent support
+# on the box you reach through a tunnel is the worst kind.
 #
 # No `..` anywhere (repo invariant): this file is reachable both as
 # deployments/destiny-director/ and as hosts/two/destiny-director/, and podman-compose
-# realpath's its own directory, so `.env` resolves the same either way.
+# realpaths the compose file's own directory before resolving `env_file:`, so the `.env`
+# named below is this directory's either way.
+#
+# THAT IS NOT THE WHOLE STORY ABOUT `.env`, and the missing half bit. podman-compose
+# 1.6.0 — the version this box actually runs — ALSO reads a `.env` from the CURRENT
+# WORKING DIRECTORY, and lets it win over this one. Under the SSH forced command the cwd
+# is `$HOME`, so `~/.env` would silently override POSTGRES_PASSWORD and DATABASE_URL.
+# This comment used to describe 1.0.6's behaviour as though it were current; it is not.
+# `dd-ctl` now `cd`s into this directory before invoking podman-compose, which is what
+# makes the paragraph above true rather than merely intended.
+#
+# NAMED VOLUMES ONLY, and it is now enforced rather than observed. `dd-ctl` refuses to
+# deploy if this file declares a host-path volume, and refuses again — stopping and
+# removing the container — if podman reports a bind mount after `up`. Rootless podman
+# maps container uid 0 to gavin's real uid, so a bind mount under `$HOME` writes host
+# files AS GAVIN: a mount over `~/.ssh` would let the holder of the deploy key strip
+# `restrict` from their own authorized_keys line and leave the forced command behind.
+# Do not add one here without reading dd-ctl's `assert_compose_named_volumes_only`.
 name: destiny-director
 
 services:
   postgres:
-    image: docker.io/arm32v6/postgres:17-alpine
+    # DIGEST-PINNED, unlike the bot. The two are pinned differently on purpose: the bot's
+    # moving branch tag is the point of this deployment (see below), whereas nothing here
+    # wants a surprise Postgres major or a rebuilt base image arriving on a deploy that
+    # was about the bot. The tag is kept alongside the digest for readability; podman
+    # resolves the digest and ignores it.
+    #
+    # sha256:6215… is the multi-platform index for `17-alpine` as published on
+    # 2026-08-06, and it carries exactly one real platform: linux/arm/v6
+    # (postgres 17.10-alpine3.24). Re-pin deliberately, with:
+    #
+    #   podman manifest inspect docker.io/arm32v6/postgres:17-alpine
+    #
+    # AND NOTE WHAT THIS LINE IS: a SECOND registry dependency, on Docker Hub, pulled
+    # ANONYMOUSLY. GHCR carries the bot; this one line is why a deploy also depends on
+    # hub.docker.com being reachable and willing. Anonymous pulls are rate-limited per
+    # source IP — on the order of a hundred pulls per six hours, shared with everything
+    # else behind the same address — and `dd-ctl` pulls unconditionally on every deploy,
+    # so roughly fifty deploys in an afternoon can lock the box out of deploying at all,
+    # with a 429 that reads like a network fault. The digest pin helps: podman does not
+    # re-fetch a layer set it already has, so a pinned image that is already local costs
+    # a manifest HEAD rather than a pull. It does not make the dependency go away.
+    image: docker.io/arm32v6/postgres:17-alpine@sha256:621538417da90f59f6dfb1475c35893fb3d5defebe179b46c89210ae59ee97e5
     container_name: dd-postgres
+    # NO NEW PRIVILEGES. Cheap, and it costs this image nothing: its entrypoint starts as
+    # root, chowns the data directory and drops to the `postgres` user with su-exec — a
+    # setuid(2) call downward, which no_new_privs does not touch. What it does block is
+    # anything in this container GAINING privilege through a setuid binary or file
+    # capabilities later.
+    security_opt:
+      - "no-new-privileges:true"
+    #
+    # NO `user:` HERE, and that is deliberate rather than an omission. This image's
+    # entrypoint has to start as root: on a fresh `pgdata` volume it runs `initdb`, and
+    # before that it chowns the data directory to the postgres uid. A named volume is
+    # created owned by the container's root (= gavin, rootless), so pinning `user:` to
+    # the postgres uid would leave initdb unable to write the directory it was just
+    # given — a stack that comes up fine on an existing volume and fails only the day
+    # somebody recreates it. And the privilege it would remove is small: container root
+    # here IS gavin, confined to the user namespace, so "root in this container" is not
+    # a privilege over the host. The bot, whose image already declares its own user, is
+    # pinned below.
     environment:
       # Not secret, so stated here rather than hidden in .env. POSTGRES_PASSWORD comes
       # from .env below and MUST match the password inside DATABASE_URL there.
@@ -124,6 +180,17 @@ services:
     #     non-standard" should be visible, not hidden in an ignored file.
     image: ghcr.io/gsfernandes81/destiny-director:dev
     container_name: dd-bot
+    # NOT digest-pinned, unlike postgres. A moving branch tag is the whole design here —
+    # see the block above. The pin belongs on the dependency nobody wanted to move.
+    security_opt:
+      - "no-new-privileges:true"
+    # RESTATES WHAT THE IMAGE ALREADY DOES, on purpose. The image declares `USER dd`, so
+    # this changes nothing today. It exists so that an image which one day loses that
+    # line cannot silently promote this container to root: the tag MOVES, and what runs
+    # on the next deploy is decided upstream of this box entirely. A name, not a uid —
+    # the number is the image's business, and a wrong number here would fail at deploy
+    # time in front of whoever triggered it, which is the failure mode to prefer.
+    user: dd
     env_file:
       - .env
     environment:

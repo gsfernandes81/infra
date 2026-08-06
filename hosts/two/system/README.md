@@ -142,12 +142,20 @@ dedicated adversarial read is outstanding. What it still owes:
 | What does each fixed command line actually *do*? | The verbs are fixed, so the remaining risk is in what they invoke. A `git pull`-shaped verb would hand control of the deployed `compose.yaml` to whoever controls the git remote; there is none today, and there must not be one. |
 | Can the deployed stack gain a writable mount under `$HOME`? | A bind mount over `~/.ssh` would let the keyholder strip `restrict` from their own `authorized_keys` line and walk out of the forced command entirely. |
 
-On that last one: **`compose.yaml` currently uses only named volumes** (`pgdata`,
-`sshhostkeys`) and declares no host bind mounts at all — verified by reading it. That is
-a property of the file as it stands, **not an enforced invariant**, and nothing checks
-it on deploy. Making it one belongs with the adversarial review rather than ahead of it,
-because the place to enforce it is `dd-ctl` itself and that file should be changed once,
-by whoever reads it properly, not twice.
+On that last one: **`compose.yaml` uses only named volumes** (`pgdata`, `sshhostkeys`),
+and as of 2026-08-06 that is **enforced, not merely observed**. `dd-ctl` refuses to
+deploy if `compose.yaml` declares a volume whose source is not a bare name, and refuses
+again after `up` — stopping and removing the container — if `podman inspect` reports a
+mount of type `bind`. Two layers because they fail differently: the first is a text scan
+that cannot destroy anything, the second asks podman and catches what the scan does not
+model.
+
+> The second layer is **uncalibrated**. It rests on podman's `.Mounts` listing only
+> user-requested mounts, which has not been checked against this box. Per this repo's
+> own rule, calibrate before trusting the verdict: run
+> `podman inspect --format '{{range .Mounts}}{{.Type}}|{{.Source}}|{{.Destination}}{{println}}{{end}}' dd-bot`
+> and expect exactly one `volume|…|/home/dd/.ssh-host` line. Watch the first deploy
+> after this change; if it refuses, suspect the check before the box.
 
 **The trust boundary that is not about `dd-ctl` at all:** `compose.yaml` names a moving
 branch tag, so anyone with push access to that branch decides what runs as `gavin` on
