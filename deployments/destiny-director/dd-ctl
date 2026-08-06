@@ -321,14 +321,37 @@ audit() {  # only ever called with a literal this script chose — never with in
 # this uses; the lock is released when the process exits and the fd closes. If flock is
 # somehow absent this REFUSES rather than continuing unlocked: a guard that silently
 # is not there is worse than no guard, because the header above now says there is one.
+#
+# THE fd MUST BE CLOSED FOR EVERY podman CHILD — see `pod()` and `compose()` below, which
+# both append `9>&-`. An open fd is inherited across fork+exec, and podman leaves
+# LONG-LIVED supervisors behind: one `conmon` per container plus `aardvark-dns`, all of
+# which outlive the dd-ctl that started them and run for as long as the stack is up.
+# Without `9>&-` they inherit this lock and hold it forever, so the FIRST successful
+# deploy locks out every deploy after it. Observed on `two` exactly that way:
+#
+#     pid 9400 (aardvark-dns) holds 9 -> /tmp/podman-run-1000/dd-ctl.lock
+#     pid 9403 (conmon)       holds 9 -> ...   [dd-postgres]
+#     pid 9505 (conmon)       holds 9 -> ...   [dd-bot]
+#
+# and every subsequent `deploy-beacon` refused with "another dd-ctl is already running"
+# while nothing was running. Note the failure is not a hang or a crash — it is a guard
+# that reports a true-sounding thing that is false, which is the worst shape available.
 LOCK_FILE="$XDG_RUNTIME_DIR/dd-ctl.lock"
 take_lock() {
 	command -v flock >/dev/null 2>&1 \
 		|| die "flock is not installed, so the single-flight lock cannot be taken. Refusing."
 	exec 9>"$LOCK_FILE"
 	flock -n 9 || die "another dd-ctl is already running (a deploy or a down). Nothing was
-        started. \`status\`, \`logs\` and \`logs-postgres\` still work while it runs."
+        started. \`status\`, \`logs\` and \`logs-postgres\` still work while it runs.
+        If nothing IS running, a previous deploy's conmon may be holding the lock fd;
+        check with: for p in /proc/[0-9]*; do readlink \$p/fd/9 2>/dev/null | grep -q
+        dd-ctl.lock && echo \$p; done"
 }
+
+# Every podman invocation goes through one of these two, so the `9>&-` that stops the
+# lock fd leaking into podman's long-lived children lives in exactly two places rather
+# than being repeated at each call site (where the next one added would forget it).
+pod() { podman "$@" 9>&-; }
 
 # podman-compose HAS FLIPPED .env-vs-process-environment precedence between releases:
 #
@@ -360,7 +383,7 @@ export_compose_env() {  # export_compose_env <beacon|anchor>
 	export DD_BOT DD_MALLOC_CONF
 }
 
-compose() { podman-compose -f "$COMPOSE_FILE" "$@"; }
+compose() { podman-compose -f "$COMPOSE_FILE" "$@" 9>&-; }
 
 # --- named volumes only, enforced twice ---------------------------------------------
 #
@@ -437,7 +460,7 @@ assert_compose_named_volumes_only() {
 }
 
 assert_no_bind_mounts() {  # assert_no_bind_mounts <container>
-	_mounts="$(podman inspect \
+	_mounts="$(pod inspect \
 		--format '{{range .Mounts}}{{.Type}}|{{.Source}}|{{.Destination}}{{println}}{{end}}' \
 		"$1" 2>/dev/null)" \
 		|| die "cannot inspect $1's mounts, so whether it has a bind mount is unknown.
@@ -445,8 +468,8 @@ assert_no_bind_mounts() {  # assert_no_bind_mounts <container>
 	if printf '%s\n' "$_mounts" | grep -q '^bind|'; then
 		printf 'dd-ctl: %s has a BIND MOUNT. Its mounts:\n' "$1" >&2
 		printf '%s\n' "$_mounts" | sed 's/^/        /' >&2
-		podman stop --ignore --time 10 "$1" >/dev/null 2>&1 || :
-		podman rm --ignore --force "$1" >/dev/null 2>&1 || :
+		pod stop --ignore --time 10 "$1" >/dev/null 2>&1 || :
+		pod rm --ignore --force "$1" >/dev/null 2>&1 || :
 		die "$1 has been STOPPED AND REMOVED. A bind mount writes host files as gavin,
         so a mount under \$HOME can rewrite ~/.ssh/authorized_keys — the file that
         restricts the key that asked for this deploy. Named volumes only."
@@ -508,7 +531,7 @@ EOF
 	#    A check that refuses wrongly is a nuisance; one that destroys a bot wrongly is
 	#    not, which is why the order is this way round.
 	for img in $compose_images; do
-		podman image exists "$img" || die "the pull reported success but $img is not in
+		pod image exists "$img" || die "the pull reported success but $img is not in
         local storage. Nothing has been stopped. Do not read this as a transient
         failure: on podman-compose 1.0.6 a failed pull exits 0, so an exit code is not
         evidence here. Check the pull output above."
@@ -519,8 +542,8 @@ EOF
 	#    especially when switching bots, where a survivor would mean beacon and anchor
 	#    on the same test guild at once. --ignore makes this a no-op when nothing is
 	#    there, so it is safe on a first deploy.
-	podman stop --ignore --time "$STOP_TIMEOUT" "$BOT_CONTAINER" >/dev/null
-	podman rm --ignore --force "$BOT_CONTAINER" >/dev/null
+	pod stop --ignore --time "$STOP_TIMEOUT" "$BOT_CONTAINER" >/dev/null
+	pod rm --ignore --force "$BOT_CONTAINER" >/dev/null
 
 	# 3. Database first (a no-op when already up), then the bot, force-recreated so a
 	#    moving tag actually takes effect — `up -d` alone will happily keep a running
@@ -560,7 +583,7 @@ EOF
 	#    not to assume. This asks the only question that matters, of the only thing that
 	#    can answer it.
 	sleep 2
-	bot_env=$(podman inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+	bot_env=$(pod inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
 		"$BOT_CONTAINER" 2>/dev/null || true)
 	if printf '%s\n' "$bot_env" | grep -qx "RAILWAY_SERVICE_NAME=$bot"; then
 		printf '==> verified: %s is running as %s\n' "$BOT_CONTAINER" "$bot"
@@ -586,29 +609,29 @@ EOF
 
 status() {
 	printf '=== containers ===\n'
-	podman ps -a \
+	pod ps -a \
 		--filter "name=$BOT_CONTAINER" \
 		--filter "name=$DB_CONTAINER" \
 		--format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' || true
 	printf '\n=== what the bot container actually thinks it is ===\n'
 	# Asked of the container, not read back out of a file this script wrote. It is the
 	# only source that cannot agree with a mistake made earlier in the pipeline.
-	podman inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$BOT_CONTAINER" 2>/dev/null \
+	pod inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$BOT_CONTAINER" 2>/dev/null \
 		| grep -E '^(RAILWAY_SERVICE_NAME|MALLOC_CONF|DATABASE_SSL|TEST_ENV)=' \
 		|| printf '(no bot container)\n'
 	printf '\n=== image ===\n'
-	podman inspect --format '{{.ImageName}}{{"\n"}}{{.Image}}' "$BOT_CONTAINER" 2>/dev/null \
+	pod inspect --format '{{.ImageName}}{{"\n"}}{{.Image}}' "$BOT_CONTAINER" 2>/dev/null \
 		|| printf '(no bot container)\n'
 	printf '\n=== runtime ===\n'
 	# The four things worth confirming rather than assuming on this board: native
 	# rootless overlay (not vfs, which copies every layer onto the SD card), crun,
 	# cgroup v2, and netavark — see root-setup.sh §2 and §6.
-	podman info --format \
+	pod info --format \
 		'storage    {{.Store.GraphDriverName}}
 runtime    {{.Host.OCIRuntime.Name}}
 cgroups    {{.Host.CgroupsVersion}} / manager {{.Host.CgroupManager}}
 network    {{.Host.NetworkBackend}}
-rootless   {{.Host.Security.Rootless}}' 2>/dev/null || printf '(podman info failed)\n'
+rootless   {{.Host.Security.Rootless}}' 2>/dev/null || printf '(pod info failed)\n'
 	printf 'compose    %s\n' "$(podman-compose --version 2>&1 | sed -n 's/^podman-compose version //p' | head -n1)"
 	printf 'runtimedir %s\n' "$XDG_RUNTIME_DIR"
 	printf '\n=== memory and disk ===\n'
@@ -625,7 +648,7 @@ rootless   {{.Host.Security.Rootless}}' 2>/dev/null || printf '(podman info fail
 	printf '\n'
 	df -h / || true
 	printf '\n=== podman storage ===\n'
-	podman system df 2>/dev/null || printf '(podman system df failed)\n'
+	pod system df 2>/dev/null || printf '(pod system df failed)\n'
 	printf '\nNothing on this box starts at boot. After a reboot or a power cut the\n'
 	# shellcheck disable=SC2016  # the backticks are prose, and are meant to stay literal
 	printf 'stack stays down until someone runs `dd-ctl deploy-beacon`. That is intended.\n'
@@ -685,14 +708,14 @@ logs)
 	# so no interpolation, so no way for a missing variable to turn "show me the logs"
 	# into an error, and its flags have been stable across every podman this box will
 	# see. Every word of the command line is a literal or a constant set above.
-	exec podman logs --tail "$TAIL_LINES" "$BOT_CONTAINER"
+	exec pod logs --tail "$TAIL_LINES" "$BOT_CONTAINER"
 	;;
 logs-postgres)
 	audit "logs-postgres"
 	# A second fixed verb rather than an argument to the first. Postgres is worth its
 	# own verb: on a cold start it runs initdb before the bot can connect, and when that
 	# is what went wrong the bot's own log cannot say so.
-	exec podman logs --tail "$TAIL_LINES" "$DB_CONTAINER"
+	exec pod logs --tail "$TAIL_LINES" "$DB_CONTAINER"
 	;;
 *)
 	audit "REJECTED unknown-verb"
