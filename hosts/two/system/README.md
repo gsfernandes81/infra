@@ -117,6 +117,7 @@ md5sum /usr/local/bin/dd-ctl ~/infra/deployments/destiny-director/dd-ctl
 ls -ln  /etc/fish/config.fish ~/.profile ~/.config/fish/config.fish
 ls -lnd ~ ~/.config ~/.config/fish ~/.config/fish/conf.d
 ls -ln  ~/.config/fish/conf.d/          # expect podman.fish, and nothing else
+grep -c '^command="/usr/local/bin/dd-ctl",restrict ' ~/.ssh/authorized_keys   # expect 1
 ```
 
 **The `md5sum` alone is not the drift check**, and the four lines under it are not
@@ -130,6 +131,62 @@ in place. `gavin` owns `~/infra`, so a forced command resolving through anything
 can rewrite is not a restriction at all: replace the target, get a shell. `root-setup.sh`
 §4 verifies all three properties after installing rather than trusting `install` to
 have produced them.
+
+## The dispatch key: made on the box, held in two places
+
+**Nothing has to be prepared before running `root-setup.sh`.** §5 generates an ed25519
+keypair itself, on tmpfs, installs the public half as the
+`command="/usr/local/bin/dd-ctl",restrict …` line in `~gavin/.ssh/authorized_keys`, prints
+the private half **once** as a single base64 line, and shreds the directory it was
+generated in before the script exits. The private half never reaches the SD card, and
+nothing on `two` keeps a copy.
+
+The operator's whole job is to paste that one line into the Claude Code cloud environment
+variable block as `DD_CTL_KEY_B64`. A committed `SessionStart` hook in the
+destiny-director repo decodes it to `~/.ssh/id_ed25519_ddctl` (mode 600) at the start of
+every agent session, so an ephemeral container has a working deploy key without anyone
+re-authorising anything. Base64 because an environment block holds one line per value and
+an OpenSSH private key is a multi-line PEM.
+
+**The environment block's values are not masked.** Anyone who can open that environment's
+settings can read them. That is precisely why the only key that belongs there is this one
+— a key whose entire reach is dd-ctl's six argument-less verbs, behind `restrict`. A key
+that gets a shell must never go in it. (What "restricted" is and is not worth on this box:
+see the two sections below, and remember `gavin` has sudo.)
+
+**Exactly one dispatch line, ever.** A re-run with a dispatch key already installed does
+**not** generate a second one — it reports the installed key's fingerprint and skips.
+Two working dispatch keys is the failure worth designing against: both authenticate, sshd
+reports nothing unusual, and the operator cannot tell which one their environment holds,
+so revoking the wrong one looks like a broken deploy rather than a revocation.
+
+Rotation is therefore explicit — `DD_CTL_ROTATE=1 sh root-setup.sh` — and it **replaces**:
+
+```sh
+DD_CTL_ROTATE=1 sh root-setup.sh        # old line removed, new key printed once
+```
+
+That is the one deliberate exception to this script's append-never-rewrite rule for
+`authorized_keys` (append-never-rewrite is right, because a botched rewrite on a
+tunnel-only box is unrecoverable). It is taken with a backup first, with the new file
+built beside the live one and renamed over it atomically, and with every line that is
+*not* a dispatch line compared byte-for-byte before the rename — so `gavin`'s own key
+cannot be lost to a rotation. The old key stops working the moment it completes; anything
+still holding it is locked out of deploying.
+
+`DD_CTL_PUBKEY='ssh-ed25519 AAAA… label'` still works and is the escape hatch: a key
+already in a password manager, or a FIDO `sk-` key, which the script cannot generate for
+you. It goes through the same validation and the same rotation gate.
+
+To ask which key is installed, without trying a deploy:
+
+```sh
+ssh-keygen -lf ~/.ssh/authorized_keys     # fingerprints, one per key line
+```
+
+The census `root-setup.sh` prints at the end of every run marks the dispatch lines and
+counts them, so a box that has somehow acquired two says so whether or not that run
+touched the file.
 
 ## The login shell is in the deploy key's TCB
 

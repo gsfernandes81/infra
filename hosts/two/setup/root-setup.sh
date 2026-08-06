@@ -8,9 +8,44 @@
 # the whole boundary and its blast radius is root. See §1 and dd-ctl's own header.
 #
 #   sh root-setup.sh                       # everything except the destructive parts
-#   DD_CTL_PUBKEY='ssh-ed25519 AAAA... label' sh root-setup.sh
+#   DD_CTL_ROTATE=1 sh root-setup.sh       # REPLACE an already-installed dispatch key
+#   DD_CTL_PUBKEY='ssh-ed25519 AAAA... label' sh root-setup.sh   # bring your own key
 #   DD_REMOVE_DOCKER=1 sh root-setup.sh    # prints `apk del --simulate` and STOPS
 #   DD_REMOVE_DOCKER=1 DD_REMOVE_DOCKER_CONFIRMED=1 sh root-setup.sh   # actually removes
+#
+# THE DISPATCH KEY IS GENERATED HERE, and nothing has to be prepared before running this.
+# §5 runs `ssh-keygen -t ed25519` into a directory on tmpfs, installs the PUBLIC half as
+# the `command="…",restrict` line in $DD_USER's authorized_keys, prints the PRIVATE half
+# ONCE as base64, and removes the directory before the script exits. Nothing on this box
+# keeps a copy, and the private half never touches the SD card.
+#
+# The operator's whole job is to copy that one base64 line into the Claude Code cloud
+# environment variable block as DD_CTL_KEY_B64. A SessionStart hook in the destiny-director
+# repo writes it back out to ~/.ssh/id_ed25519_ddctl at the start of every agent session,
+# so an ephemeral container has the key without anyone re-authorising anything.
+#
+# WHY BASE64: an environment variable block holds one line per value, and an OpenSSH
+# private key is a multi-line PEM. Base64 of the whole file is the only encoding that
+# survives that round trip without anyone hand-editing newlines back in.
+#
+# THE TWO HALVES LIVE IN TWO PLACES, and only one of them is secret: the public half on
+# `two`, the private half in the cloud environment block. THAT BLOCK IS NOT MASKED — its
+# values are readable to anyone who can open the environment's settings — which is exactly
+# why the only key that belongs in it is this one: a key whose entire reach is the six
+# argument-less verbs in dd-ctl. A shell key must never go there.
+#
+# ROTATION IS EXPLICIT, and that is the important half of this. If a dispatch line is
+# already installed, a plain re-run does NOT generate a second one: two valid dispatch
+# keys, with the operator unable to tell which one their environment holds, is worse than
+# either alone. It reports the installed key's fingerprint and skips. DD_CTL_ROTATE=1 is
+# how you replace it, and it REPLACES — the one deliberate exception to this file's
+# append-never-rewrite doctrine for authorized_keys, taken with a backup first and with
+# every other line in the file compared byte-for-byte before the new file is moved into
+# place. See §5.
+#
+# DD_CTL_PUBKEY still works and is the escape hatch: a key already in a password manager,
+# or a FIDO/`sk-` key, which this script cannot generate for you. Supplied keys go through
+# the same validation, the same one-line rule and the same rotation gate as generated ones.
 #
 # The docker removal takes THREE runs, not two, and the middle one is the point: the
 # package list §12 names is ten packages, but `apk del` reclaims orphaned dependencies
@@ -157,12 +192,200 @@ pkg_installed() {  # pkg_installed <name>  — true only if THAT package is inst
 
 mem_avail_mb() { awk '/^MemAvailable:/ {printf "%d", $2/1024}' /proc/meminfo; }
 
+# --- the dispatch key ---------------------------------------------------------------
+#
+# EXACTLY ONE dispatch line in authorized_keys, at any time. Everything below exists to
+# hold that invariant, because the failure it prevents is silent: append a second
+# `command="…",restrict` line and the box has two valid dispatch keys, both working, with
+# no way for the operator to tell which one their environment block holds. Revoking the
+# wrong one then looks like a broken deploy rather than a revocation.
+#
+# DD_CTL_PREFIX is the full option string, not just `command=`. A hand-written line
+# missing `restrict` gets a pty, agent forwarding, port forwarding and ~/.ssh/rc — a
+# materially weaker key — so treating it as "the dispatch key is installed" would mean the
+# weak line is never noticed and never replaced.
+#
+# THE TESTS BELOW ARE LITERAL PREFIX TESTS (`index($0, pfx) == 1`), not regular
+# expressions. That is stronger than the anchored greps this replaces in two ways: no
+# character in DD_CTL_PATH can widen what matches, and a COMMENTED-OUT copy of a dispatch
+# line cannot match, because `#` is at position 1 and the prefix therefore is not.
+DD_CTL_PREFIX=''   # set in §1, once DD_CTL_PATH has been validated
+
+check_pubkey() {  # check_pubkey <value> <label>  — refuses, never sanitises
+	# VALIDATED BEFORE ANYTHING IS WRITTEN. The value is appended to authorized_keys AS
+	# ROOT, and an embedded newline in it would append a SECOND line — one with no
+	# `command=` and no `restrict`, i.e. an entirely unrestricted key — while the run's
+	# output looked completely normal. Keys get copied out of chat windows, wikis and other
+	# people's terminals, so "a human supplied it" is not an assurance about its bytes.
+	# REFUSED, never sanitised: silently rewriting key material installs something nobody
+	# reviewed.
+	#
+	# THE GENERATED KEY GOES THROUGH THIS TOO. ssh-keygen's output needs no sanity check
+	# for its own sake; running it through the same function is what makes the two paths
+	# provably produce the same shape of line, so the census, the dedupe and the rotation
+	# logic below cannot be reasoning about one shape while §5 installs another.
+	_v="$1"; _label="$2"
+	# The line count is checked SEPARATELY and FIRST, because grep matches per line and
+	# would pass a two-line value on the strength of whichever line matched.
+	if [ "$(printf '%s\n' "$_v" | wc -l | tr -d ' ')" != 1 ]; then
+		echo "refusing: $_label spans more than one line. An embedded newline" >&2
+		echo "appends a second, UNRESTRICTED key line. Supply exactly one key." >&2
+		return 1
+	fi
+	# The key TYPES accepted include the FIDO/security-key variants. A hardware-backed
+	# `sk-ssh-ed25519@openssh.com` key is the better key to hold for a deploy that can
+	# become root, so rejecting it as "malformed" pushed the operator toward the weaker
+	# option with a message that blamed their key. It is also the case this script cannot
+	# generate for itself, which is the whole reason DD_CTL_PUBKEY survives.
+	#
+	# The COMMENT field permits tabs. `[^[:cntrl:]]` excludes tab — tab IS a control
+	# character — so a key pasted out of a wiki or a spreadsheet, where the separator
+	# arrives as a tab, was refused for a reason the message did not name. The literal
+	# tab is built here rather than written as `\t`, which is not portable inside a
+	# bracket expression; the `x` suffix survives command substitution's stripping of
+	# trailing NEWLINES only, but costs nothing and makes the intent explicit.
+	_tab="$(printf '\tx')"; _tab="${_tab%x}"
+	if ! printf '%s\n' "$_v" | grep -Eq \
+		"^(ssh-ed25519|sk-ssh-ed25519@openssh\.com|ecdsa-sha2-[a-z0-9-]+|sk-ecdsa-sha2-[a-z0-9-]+@openssh\.com|ssh-rsa) [A-Za-z0-9+/=]+([ $_tab][[:print:]$_tab]*)?\$"
+	then
+		echo "refusing: $_label is not a single '<type> <base64> [comment]' key." >&2
+		echo "Options and the command= prefix are added by this script — do not include" >&2
+		echo "them, and do not include anything that is not a public key." >&2
+		return 1
+	fi
+}
+
+dispatch_count() {  # dispatch_count <authorized_keys>  — how many live dispatch lines
+	[ -f "$1" ] || { echo 0; return 0; }
+	awk -v pfx="$DD_CTL_PREFIX" 'index($0, pfx) == 1 { n++ } END { print n + 0 }' "$1"
+}
+
+dispatch_fingerprints() {  # dispatch_fingerprints <authorized_keys>
+	# The fingerprint is how the operator identifies this key later — in this file's own
+	# census, in `ssh -v` output, and against whatever their environment block holds. A
+	# line ssh-keygen cannot read is reported as such rather than skipped: a fingerprint
+	# list that silently omits a line is a check that passes for the wrong reason.
+	awk -v pfx="$DD_CTL_PREFIX" \
+		'index($0, pfx) == 1 { print substr($0, length(pfx) + 1) }' "$1" \
+	| while IFS= read -r _dk; do
+		printf '%s\n' "$_dk" | ssh-keygen -lf - 2>/dev/null \
+			|| printf 'UNREADABLE — ssh-keygen cannot fingerprint this line\n'
+	done
+}
+
+append_dispatch_line() {  # append_dispatch_line <authorized_keys> <line>
+	# The doctrine everywhere else in this file: append, never rewrite. $DD_USER's own
+	# unrestricted key lives in this file, and rewriting authorized_keys from a setup
+	# script is how you lock yourself out of a box reachable only through a tunnel.
+	printf '%s\n' "$2" >> "$1"
+}
+
+replace_dispatch_line() {  # replace_dispatch_line <authorized_keys> <line>
+	# THE ONE DELIBERATE EXCEPTION to append-never-rewrite, and it is why rotation has to
+	# be asked for by name. Everything here is arranged so that a botched rewrite cannot
+	# reach the live file: the new content is built beside it, checked, and only then
+	# renamed over it. rename(2) within a directory is atomic — there is no instant at
+	# which authorized_keys is half-written or missing.
+	#
+	# The check that matters is the third one: every line that is NOT a dispatch line must
+	# come back byte-for-byte identical. That is what distinguishes "replaced the dispatch
+	# key" from "rewrote gavin's authorized_keys and hoped". Counting lines would not catch
+	# a mangled key; comparing the kept lines does.
+	_ak="$1"; _line="$2"
+	_tmp="$_ak.infra-tmp"; _keep="$_ak.infra-keep"
+	rm -f "$_tmp" "$_keep"
+	awk -v pfx="$DD_CTL_PREFIX" 'index($0, pfx) != 1' "$_ak" > "$_keep"
+	cp "$_keep" "$_tmp"
+	printf '%s\n' "$_line" >> "$_tmp"
+	chmod 600 "$_tmp"
+	# `awk … | cmp -s - file` takes CMP's exit status, which is the one wanted here.
+	# CLAUDE.md records the general trap (`a | b || c` tests b); this is the case where
+	# that is the intent, stated so the next reader does not "fix" it.
+	if ! awk -v pfx="$DD_CTL_PREFIX" 'index($0, pfx) != 1' "$_tmp" | cmp -s - "$_keep"; then
+		rm -f "$_tmp" "$_keep"
+		echo "refusing: rewriting $_ak would have changed a line that is not a dispatch line" >&2
+		return 1
+	fi
+	if [ "$(dispatch_count "$_tmp")" != 1 ] || ! grep -qxF "$_line" "$_tmp"; then
+		rm -f "$_tmp" "$_keep"
+		echo "refusing: the rewritten $_ak does not hold exactly one dispatch line" >&2
+		return 1
+	fi
+	# And that the result is a file sshd can still parse. ssh-keygen -lf exits non-zero
+	# when it can read no key at all from the file, which is the wholesale-corruption case
+	# this is here to catch — it does not, and is not asked to, validate every line.
+	if ! ssh-keygen -lf "$_tmp" >/dev/null 2>&1; then
+		rm -f "$_tmp" "$_keep"
+		echo "refusing: ssh-keygen cannot read any key from the rewritten $_ak" >&2
+		return 1
+	fi
+	mv -f "$_tmp" "$_ak"
+	rm -f "$_keep"
+}
+
+# WHERE THE PRIVATE HALF IS GENERATED. /dev/shm first: it is tmpfs, so the key exists in
+# RAM and never reaches the SD card — which is the only storage on this box that keeps
+# what you delete. The fallback under /root is honest about being second best: on flash,
+# `shred` overwrites the logical block and the controller's FTL is free to leave the
+# original one intact, so the fallback is best-effort where /dev/shm is exact.
+#
+# /proc/mounts, not `stat -f -c %T`. §12 can remove coreutils, and busybox's `stat -f`
+# answers UNKNOWN for filesystems it does not name — the same trap §7's cgroup check
+# documents. Asking /proc/mounts whether /dev/shm is a tmpfs mount is exact under either
+# stat, and unprivileged.
+KEYDIR=''
+make_keydir() {
+	if [ -d /dev/shm ] && [ ! -L /dev/shm ] \
+		&& awk '$2 == "/dev/shm" && $3 == "tmpfs" { found = 1 } END { exit !found }' /proc/mounts
+	then
+		KEYDIR="$(mktemp -d /dev/shm/dd-ctl-key.XXXXXX)"
+	else
+		warn "/dev/shm is not a tmpfs mount — generating under /root instead"
+		note "The dispatch key was generated in a directory on /root, not on tmpfs, because
+    /dev/shm is not a tmpfs mount. It was shredded and removed, but shred on flash
+    overwrites a logical block and the card's controller may keep the original. Treat
+    the key as having touched the SD card."
+		KEYDIR="$(mktemp -d /root/.dd-ctl-key.XXXXXX)"
+	fi
+	# mktemp -d already creates at 0700; asserted rather than assumed, because everything
+	# below writes a private key into it.
+	chmod 700 "$KEYDIR"
+	[ "$(stat -c '%U %a' "$KEYDIR")" = "root 700" ] || {
+		echo "refusing: $KEYDIR is not root-owned mode 700" >&2
+		exit 1
+	}
+}
+
+scrub_keydir() {
+	# CALLED FROM THE EXIT TRAP, so an abort anywhere below §5 still removes the private
+	# key. It must stay safe to call when nothing was generated, and safe to call twice.
+	[ -n "$KEYDIR" ] || return 0
+	if [ -d "$KEYDIR" ]; then
+		# `find … -type f` rather than a fixed list of names: ssh-keygen's output file set
+		# is its business, and a file this function did not think of is exactly the one
+		# that would be left behind. -n 1, not the default 3 — on flash the extra passes
+		# buy nothing but wear, and on tmpfs the first pass is already the whole story.
+		find "$KEYDIR" -type f -exec shred -f -u -n 1 {} \; 2>/dev/null || true
+		rm -rf "$KEYDIR"
+	fi
+	# An `x && warn` here would make the function's exit status 1 in the normal case, and
+	# this runs from the EXIT trap under `set -e` — which would take the summary with it.
+	if [ -e "$KEYDIR" ]; then
+		warn "could NOT remove $KEYDIR — it may still hold the private key"
+	fi
+	KEYDIR=''
+}
+
 # THE SUMMARY PRINTS EVEN WHEN THE RUN DIES. `set -e` plus a summary at the bottom of the
 # file means any mid-run abort — a failed `apk add`, a refusal in §4, a signal — leaves
 # the record of what already changed only in scrollback, on a box reached through a
 # tunnel. Every mutation above appends to CHANGED, so the trap is what makes that list
 # worth keeping. RUN_COMPLETED gates the "NEXT" block only: a half-applied box should not
 # be handed next steps as though it were built.
+#
+# The trap now also scrubs the generated private key, and the two belong together: both
+# are things that must happen however the run ends. scrub_keydir runs FIRST, because if
+# anything in summary() were to fail, the key would still be gone.
 RUN_COMPLETED=no
 summary() {
 	say ""
@@ -193,16 +416,32 @@ pasted into an interactive fish session; anything with sh syntax is run as 'sh -
        chmod 600 $DD_STACK_DIR/.env
        \$EDITOR $DD_STACK_DIR/.env          # fill it in; it is gitignored
 
-  2. from your workstation, with the restricted key:
-       ssh -i <key> $DD_USER@ssh-two.gsrpi.uk status
-       ssh -i <key> $DD_USER@ssh-two.gsrpi.uk deploy-beacon
+  2. wherever the dispatch key's private half now lives — a Claude Code session that
+     has DD_CTL_KEY_B64 in its environment block, or your own workstation:
+       ssh -i ~/.ssh/id_ed25519_ddctl $DD_USER@ssh-two.gsrpi.uk status
+       ssh -i ~/.ssh/id_ed25519_ddctl $DD_USER@ssh-two.gsrpi.uk deploy-beacon
+
+  3. if this run PRINTED a private key: paste it into the environment block as
+     DD_CTL_KEY_B64, then clear this terminal's scrollback. It is not recoverable
+     from this box — DD_CTL_ROTATE=1 issues a new one, and invalidates this one.
 
 Nothing on this box starts at boot, by design. After a power cut it runs no containers
 and (see section 9) no swap until someone acts. That is intended, not a bug to fix by
 adding a local.d hook.
 EOF
 }
-trap summary EXIT
+trap 'scrub_keydir; summary' EXIT
+
+# AND THE SIGNALS, WHICH THE EXIT TRAP DOES NOT COVER BY ITSELF. That claim above — "a
+# signal" — was not true of the previous version: an untrapped SIGINT or SIGTERM
+# terminates a POSIX shell without running the EXIT trap at all (verified against dash and
+# busybox ash 1.37). It cost nothing when the trap only printed a summary. It costs a
+# private key sitting in /dev/shm now, on the one run where the operator hits ^C while
+# reading the output. Each handler does nothing but `exit`, which DOES run the EXIT trap,
+# so there is still exactly one place that scrubs and one place that prints.
+trap 'exit 130' INT
+trap 'exit 129' HUP
+trap 'exit 143' TERM
 
 # ---------------------------------------------------------------------------------
 say "== 1/13  preflight"
@@ -225,6 +464,11 @@ case "$DD_CTL_PATH" in
 		echo "would silently widen what those patterns match." >&2
 		exit 1 ;;
 esac
+# The literal prefix the dispatch-line helpers match on. They use it with awk's index()
+# and with `grep -F`, so no character in it is special to them — the charset check above
+# still matters, but only for the one remaining BRE, the "names dd-ctl but is not a
+# dispatch line" grep further down this section.
+DD_CTL_PREFIX="command=\"$DD_CTL_PATH\",restrict "
 id "$DD_USER" >/dev/null 2>&1 || {
 	echo "no such user: $DD_USER. This script does not create users — see the header." >&2
 	exit 1
@@ -271,69 +515,41 @@ if id -nG "$DD_USER" 2>/dev/null | tr ' ' '\n' | grep -qx wheel; then
     dd-ctl has NOT had an adversarial review — see hosts/two/system/README.md."
 fi
 
-# The public key that gets the restricted forced command. A public key is not a secret,
-# but nothing here bakes one in either — supply it, or leave an already installed one
-# alone. There is no default: a wrong default key silently authorises somebody else's
-# laptop.
+# The public key that gets the restricted forced command. It arrives one of two ways —
+# generated by §5 (the default, and nothing needs preparing for it) or supplied in
+# DD_CTL_PUBKEY — and this block decides which, and whether it is installed at all,
+# BEFORE anything is written. A bad value costs nothing here.
 #
-# VALIDATED BEFORE ANYTHING IS WRITTEN, and validated here in the preflight so a bad
-# value costs nothing. It is appended to authorized_keys AS ROOT in §5, and an embedded
-# newline in it would append a SECOND line — one with no `command=` and no `restrict`,
-# i.e. an entirely unrestricted key — while the run's output looked completely normal.
-# Keys get copied out of chat windows, wikis and other people's terminals, so "a human
-# supplied it" is not an assurance about its bytes. REFUSED, never sanitised: silently
-# rewriting key material installs something nobody reviewed.
+# There is still no default key baked in, and there never can be: a wrong default silently
+# authorises somebody else's laptop. "Generate one" is not a default key; it is a new key
+# nobody else has ever held.
 AUTHKEYS="$DD_HOME/.ssh/authorized_keys"
 if [ -n "${DD_CTL_PUBKEY:-}" ]; then
-	# The line count is checked SEPARATELY and FIRST, because grep matches per line and
-	# would pass a two-line value on the strength of whichever line matched.
-	if [ "$(printf '%s\n' "$DD_CTL_PUBKEY" | wc -l | tr -d ' ')" != 1 ]; then
-		echo "refusing: DD_CTL_PUBKEY spans more than one line. An embedded newline" >&2
-		echo "appends a second, UNRESTRICTED key line. Supply exactly one key." >&2
-		exit 1
-	fi
-	# The key TYPES accepted include the FIDO/security-key variants. A hardware-backed
-	# `sk-ssh-ed25519@openssh.com` key is the better key to hold for a deploy that can
-	# become root, so rejecting it as "malformed" pushed the operator toward the weaker
-	# option with a message that blamed their key.
-	#
-	# The COMMENT field permits tabs. `[^[:cntrl:]]` excludes tab — tab IS a control
-	# character — so a key pasted out of a wiki or a spreadsheet, where the separator
-	# arrives as a tab, was refused for a reason the message did not name. The literal
-	# tab is built here rather than written as `\t`, which is not portable inside a
-	# bracket expression; the `x` suffix survives command substitution's stripping of
-	# trailing NEWLINES only, but costs nothing and makes the intent explicit.
-	TAB="$(printf '\tx')"; TAB="${TAB%x}"
-	if ! printf '%s\n' "$DD_CTL_PUBKEY" | grep -Eq \
-		"^(ssh-ed25519|sk-ssh-ed25519@openssh\.com|ecdsa-sha2-[a-z0-9-]+|sk-ecdsa-sha2-[a-z0-9-]+@openssh\.com|ssh-rsa) [A-Za-z0-9+/=]+([ $TAB][[:print:]$TAB]*)?\$"
-	then
-		echo "refusing: DD_CTL_PUBKEY is not a single '<type> <base64> [comment]' key." >&2
-		echo "Options and the command= prefix are added by this script — do not include" >&2
-		echo "them, and do not include anything that is not a public key." >&2
-		exit 1
-	fi
+	check_pubkey "$DD_CTL_PUBKEY" DD_CTL_PUBKEY || exit 1
+	KEY_SOURCE=supplied
 	ok "DD_CTL_PUBKEY parses as one '<type> <base64> [comment]' public key"
+else
+	KEY_SOURCE=generate
+	command -v ssh-keygen >/dev/null 2>&1 || {
+		echo "refusing: no ssh-keygen, and no DD_CTL_PUBKEY to fall back on." >&2
+		echo "ssh-keygen ships in openssh-keygen, which openssh-server depends on — a box" >&2
+		echo "running sshd should have it. Install it, or supply DD_CTL_PUBKEY yourself." >&2
+		exit 1
+	}
 fi
 
-HAVE_FORCED_KEY=no
-# EVERY TEST BELOW IS ANCHORED, and that is not a style preference. The unanchored
-# `grep -qF` these replaced matched a COMMENTED-OUT copy of the forced-command line as
-# readily as a live one, so a line sshd ignores entirely set HAVE_FORCED_KEY=yes and this
-# script then reported the box as already holding the restricted key. The same bug, in
-# §5, made the dedupe say "this exact line is already present" and skip installing the
-# key — with nothing in CHANGED: to show for it. A check that passes for the wrong reason
-# is worse than no check (docs/decisions.md); one that passes on a comment is that in its
-# purest form.
+# HOW MANY DISPATCH LINES ARE ALREADY THERE. Counted, not merely detected, because the
+# whole point of the rotation gate is that the answer must never become 2.
 #
-# `^command="…",restrict ` is the FULL prefix, not just `command=`. A hand-written line
-# without `restrict` gets a pty, agent forwarding, port forwarding and ~/.ssh/rc — a
-# materially weaker thing. Accepting it as "already have the forced key" means the weak
-# line is never noticed and never replaced.
+# dispatch_count() matches a LITERAL prefix at position 1, which is what makes a
+# COMMENTED-OUT copy of a dispatch line impossible to mistake for a live one. An earlier
+# unanchored `grep -qF` did exactly that: a line sshd ignores entirely reported the box as
+# already holding the restricted key, and §5's dedupe then said "already present" and
+# installed nothing — with nothing in CHANGED: to show for it. A check that passes for the
+# wrong reason is worse than no check (docs/decisions.md).
+DISPATCH_N="$(dispatch_count "$AUTHKEYS")"
 if [ -f "$AUTHKEYS" ]; then
-	if grep -q "^command=\"$DD_CTL_PATH\",restrict " "$AUTHKEYS"; then
-		HAVE_FORCED_KEY=yes
-	fi
-	# Lines that NAME dd-ctl but are not that exact prefix. The old form asked whether
+	# Lines that NAME dd-ctl but are not a dispatch line. The old form asked whether
 	# the line contained the string `restrict` anywhere, which a key COMMENT of
 	# `dd-ctl-restricted@laptop` satisfies — defeating the warning on exactly the weak
 	# line it exists to find. Comment lines are dropped first because sshd ignores them,
@@ -343,25 +559,60 @@ if [ -f "$AUTHKEYS" ]; then
 		| grep -F "$DD_CTL_PATH" \
 		| grep -qv "^command=\"$DD_CTL_PATH\",restrict "
 	then
-		warn "$AUTHKEYS has a dd-ctl line that is NOT 'command=\"$DD_CTL_PATH\",restrict …'"
+		warn "$AUTHKEYS has a dd-ctl line that is NOT '$DD_CTL_PREFIX…'"
 		note "A line in $AUTHKEYS names $DD_CTL_PATH but does not begin with
-      command=\"$DD_CTL_PATH\",restrict <type> <base64> <comment>
+      ${DD_CTL_PREFIX}<type> <base64> <comment>
     so it is either missing 'restrict' — that key still gets a pty and agent/port
-    forwarding — or carries options this script did not write. Fix it by hand; this
-    script appends and never edits. The census at the end of this run lists every key."
+    forwarding — or carries options this script did not write. Fix it by hand: rotation
+    replaces dispatch lines and will not touch this one. The census at the end of this
+    run lists every key."
 	fi
 fi
-if [ -z "${DD_CTL_PUBKEY:-}" ] && [ "$HAVE_FORCED_KEY" = no ]; then
-	cat >&2 <<EOF
 
-refusing: no DD_CTL_PUBKEY, and no dd-ctl forced command in $AUTHKEYS.
-
-Re-run with the deploy key's PUBLIC half:
-
-  DD_CTL_PUBKEY='ssh-ed25519 AAAA... dd-ctl@yourbox' sh $0
-
-EOF
-	exit 1
+# THE PLAN, DECIDED HERE AND ANNOUNCED HERE, so the operator learns what §5 intends before
+# §2-§4 have scrolled it off the screen. Four outcomes:
+#
+#   install   nothing is installed yet — install one (generated or supplied).
+#   present   the supplied key IS the installed dispatch key. Nothing to do, no rotation
+#             needed; re-running with the same DD_CTL_PUBKEY is not a request to churn.
+#   keep      a dispatch key is installed and no rotation was asked for. SKIP — do not
+#             generate, do not append. This is the case that matters: appending here would
+#             leave two valid dispatch keys, both working, and the operator could not tell
+#             which one their environment block holds. Reported with the fingerprint so it
+#             can be matched against what they have.
+#   rotate    DD_CTL_ROTATE=1 and something is installed — REPLACE it.
+#
+# The gate applies to supplied keys too, and deliberately. The hazard is not "the script
+# generated a key"; it is "authorized_keys grew a second dispatch line", which a supplied
+# key does just as readily. Before this, DD_CTL_PUBKEY with a different key silently
+# appended.
+if [ "$DISPATCH_N" -eq 0 ]; then
+	KEY_PLAN=install
+elif [ "$KEY_SOURCE" = supplied ] && [ "$DISPATCH_N" -eq 1 ] \
+	&& grep -qxF "$DD_CTL_PREFIX$DD_CTL_PUBKEY" "$AUTHKEYS"; then
+	KEY_PLAN=present
+elif [ -n "${DD_CTL_ROTATE:-}" ]; then
+	KEY_PLAN=rotate
+else
+	KEY_PLAN=keep
+fi
+case "$KEY_PLAN" in
+	install)
+		[ -z "${DD_CTL_ROTATE:-}" ] || warn "DD_CTL_ROTATE is set, but no dispatch key is installed — installing one"
+		ok "no dd-ctl dispatch key installed; §5 will install one ($KEY_SOURCE)" ;;
+	present)
+		ok "the key in DD_CTL_PUBKEY is already the installed dispatch key; §5 has nothing to do" ;;
+	keep)
+		ok "a dd-ctl dispatch key is already installed; §5 will leave it alone (DD_CTL_ROTATE=1 to replace)" ;;
+	rotate)
+		warn "DD_CTL_ROTATE=1 — §5 will REPLACE the $DISPATCH_N installed dispatch line(s)" ;;
+esac
+if [ "$DISPATCH_N" -gt 1 ]; then
+	warn "$AUTHKEYS holds $DISPATCH_N dispatch lines — there should be exactly one"
+	note "$AUTHKEYS holds $DISPATCH_N dd-ctl dispatch lines. Every one of them is a working
+    deploy key, and nothing here can tell you which one is in use. Rotating
+    (DD_CTL_ROTATE=1) collapses them to a single new key, which is the fix; removing the
+    surplus by hand is the other. The census at the end of this run lists them all."
 fi
 
 # ---------------------------------------------------------------------------------
@@ -692,7 +943,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------------
-say "== 5/13  restricted SSH key for $DD_USER"
+say "== 5/13  the dd-ctl dispatch key for $DD_USER — plan: $KEY_PLAN"
 
 mkdir -p "$DD_HOME/.ssh"
 touch "$AUTHKEYS"
@@ -700,46 +951,161 @@ chown -R "$DD_USER:$DD_GROUP" "$DD_HOME/.ssh"
 chmod 700 "$DD_HOME/.ssh"
 chmod 600 "$AUTHKEYS"
 
-if [ -n "${DD_CTL_PUBKEY:-}" ]; then
-	# `restrict` is the allow-nothing baseline (no pty, no agent/port/X11 forwarding, no
-	# ~/.ssh/rc); `command=` replaces whatever the client asked for with dd-ctl and hands
-	# the client's string over in SSH_ORIGINAL_COMMAND. dd-ctl treats that as hostile —
-	# see its header.
-	#
-	# IT DOES NOT BYPASS $DD_USER'S LOGIN SHELL. This comment used to say that it did —
-	# "the forced command bypasses gavin's fish login shell entirely, which is one less
-	# thing to get wrong" — and that was simply false. sshd runs a forced command as
-	# `$SHELL -c "<command>"`, so fish starts first and reads /etc/fish/config.fish,
-	# ~/.config/fish/conf.d/*.fish and ~/.config/fish/config.fish on the way, including
-	# for a non-interactive `-c`. `restrict` does not help; it implies `no-user-rc`, which
-	# governs ~/.ssh/rc, an unrelated file. §4 checks those four paths' ownership and
-	# modes, dd-ctl re-execs itself under `env -i` so that nothing fish exported survives
-	# into podman's environment, and the part neither of those fixes — that $DD_USER can
-	# always write $DD_USER's own dotfiles — is recorded as a residual in
-	# docs/decisions.md rather than papered over here.
-	#
-	# APPENDED, never replacing the file: gavin's own unrestricted key lives here too,
-	# and rewriting authorized_keys from a setup script is how you lock yourself out of a
-	# box reachable only through a Cloudflare tunnel. No sshd restart is needed or done.
-	LINE="command=\"$DD_CTL_PATH\",restrict $DD_CTL_PUBKEY"
-	# WHOLE LINE (-x), not substring. `grep -qF` without -x matched a COMMENTED-OUT copy
-	# of this exact line, so the script reported "already present" and installed nothing —
-	# and put nothing in CHANGED: either, so the run's own summary agreed with it. The
-	# operator would have walked away believing the deploy key was installed.
-	if grep -qxF "$LINE" "$AUTHKEYS"; then
-		ok "this exact forced-command line is already present"
+# `restrict` is the allow-nothing baseline (no pty, no agent/port/X11 forwarding, no
+# ~/.ssh/rc); `command=` replaces whatever the client asked for with dd-ctl and hands the
+# client's string over in SSH_ORIGINAL_COMMAND. dd-ctl treats that as hostile — see its
+# header.
+#
+# IT DOES NOT BYPASS $DD_USER'S LOGIN SHELL. This comment used to say that it did — "the
+# forced command bypasses gavin's fish login shell entirely, which is one less thing to
+# get wrong" — and that was simply false. sshd runs a forced command as
+# `$SHELL -c "<command>"`, so fish starts first and reads /etc/fish/config.fish,
+# ~/.config/fish/conf.d/*.fish and ~/.config/fish/config.fish on the way, including for a
+# non-interactive `-c`. `restrict` does not help; it implies `no-user-rc`, which governs
+# ~/.ssh/rc, an unrelated file. §4 checks those four paths' ownership and modes, dd-ctl
+# re-execs itself under `env -i` so that nothing fish exported survives into podman's
+# environment, and the part neither of those fixes — that $DD_USER can always write
+# $DD_USER's own dotfiles — is recorded as a residual in docs/decisions.md rather than
+# papered over here.
+case "$KEY_PLAN" in
+present)
+	ok "this exact dispatch line is already present — nothing written"
+	;;
+keep)
+	# THE CASE THIS SECTION EXISTS TO GET RIGHT. Doing nothing is the correct action, and
+	# it has to be loud, because "the script ran and said ok" must not be mistaken for
+	# "the key I hold is the key that is installed". The fingerprint is what settles that.
+	ok "a dd-ctl dispatch key is already installed — NOT generating another"
+	say "       installed dispatch key(s):"
+	dispatch_fingerprints "$AUTHKEYS" | sed 's/^/            /'
+	say "       to replace it: DD_CTL_ROTATE=1 sh $0"
+	note "A dd-ctl dispatch key was already installed, so this run generated nothing and
+    appended nothing. Its fingerprint is printed in §5 — check it against the key your
+    environment block holds. If they do not match, the key you have is not the key that
+    works, and DD_CTL_ROTATE=1 issues a fresh one."
+	;;
+install|rotate)
+	# THE KEY MATERIAL. Generated here unless the operator brought their own.
+	if [ "$KEY_SOURCE" = generate ]; then
+		make_keydir
+		# -N '' — no passphrase, because nothing interactive is there to type one at the
+		# far end: the SessionStart hook writes this key into a container and ssh uses it
+		# unattended. The protection is the forced command, not a passphrase.
+		# The comment carries this run's timestamp, so a key found in authorized_keys or in
+		# a backup can be dated to the run that issued it without consulting anything else.
+		ssh-keygen -q -t ed25519 -N '' -C "dd-ctl-dispatch-$STAMP" -f "$KEYDIR/id_ddctl"
+		DD_CTL_PUBKEY="$(cat "$KEYDIR/id_ddctl.pub")"
+		check_pubkey "$DD_CTL_PUBKEY" "the generated public key" || exit 1
+		KEY_FPR="$(ssh-keygen -lf "$KEYDIR/id_ddctl.pub")"
+		ok "generated an ed25519 keypair in $KEYDIR (tmpfs, removed before this script exits)"
 	else
-		backup "$AUTHKEYS"
-		printf '%s\n' "$LINE" >> "$AUTHKEYS"
+		KEY_FPR="$(printf '%s\n' "$DD_CTL_PUBKEY" | ssh-keygen -lf - 2>/dev/null || echo 'unknown')"
+	fi
+	LINE="$DD_CTL_PREFIX$DD_CTL_PUBKEY"
+
+	# BACKED UP BEFORE EITHER PATH, not just before the rewrite. An append is recoverable
+	# by hand and a rewrite is not, but the backup costs one file copy and the run where
+	# it is wanted is the run nobody predicted.
+	backup "$AUTHKEYS"
+	if [ "$KEY_PLAN" = rotate ]; then
+		# THE ONE DELIBERATE EXCEPTION to append-never-rewrite. Announced before it
+		# happens and in the terms that matter: the old line stops working the moment
+		# this returns, so anyone still holding it is locked out of deploying.
+		say "       ROTATING. The $DISPATCH_N dispatch line(s) below are being REPLACED —"
+		say "       the key(s) they hold stop working now:"
+		dispatch_fingerprints "$AUTHKEYS" | sed 's/^/            /'
+		replace_dispatch_line "$AUTHKEYS" "$LINE" || exit 1
 		chown "$DD_USER:$DD_GROUP" "$AUTHKEYS"
 		chmod 600 "$AUTHKEYS"
-		changed "appended a dd-ctl forced-command key to $AUTHKEYS"
-		say "       appended forced-command entry"
-		note "older dd-ctl keys in $AUTHKEYS are NOT pruned — review and remove any you no longer want"
+		changed "REPLACED $DISPATCH_N dd-ctl dispatch line(s) in $AUTHKEYS with a new key ($KEY_SOURCE)"
+		say "       replaced; $AUTHKEYS now holds exactly $(dispatch_count "$AUTHKEYS") dispatch line"
+		note "THE PREVIOUS DISPATCH KEY NO LONGER WORKS. Anything still holding it — another
+    workstation, a second environment block, a CI secret — is now locked out of
+    deploying and will fail with 'Permission denied (publickey)'. The backup of the
+    old $AUTHKEYS is in $BACKUP_DIR."
+	else
+		# APPENDED, never replacing the file: gavin's own unrestricted key lives here too,
+		# and rewriting authorized_keys from a setup script is how you lock yourself out of
+		# a box reachable only through a Cloudflare tunnel. No sshd restart is needed or
+		# done.
+		append_dispatch_line "$AUTHKEYS" "$LINE"
+		chown "$DD_USER:$DD_GROUP" "$AUTHKEYS"
+		chmod 600 "$AUTHKEYS"
+		changed "appended a dd-ctl dispatch key to $AUTHKEYS ($KEY_SOURCE)"
+		say "       appended the dispatch entry"
 	fi
-else
-	ok "no DD_CTL_PUBKEY given; leaving the existing forced-command entries alone"
-fi
+	# VERIFIED AFTER THE WRITE, both paths. Exactly one dispatch line, and it is ours.
+	if [ "$(dispatch_count "$AUTHKEYS")" != 1 ] || ! grep -qxF "$LINE" "$AUTHKEYS"; then
+		echo "refusing to continue: $AUTHKEYS does not hold exactly one dispatch line," >&2
+		echo "or the line just written is not in it. Restore from $BACKUP_DIR." >&2
+		exit 1
+	fi
+	ok "$AUTHKEYS holds exactly one dd-ctl dispatch line"
+	say "       $KEY_FPR"
+
+	if [ "$KEY_SOURCE" = generate ]; then
+		# THE ONE MOMENT THE PRIVATE HALF IS EXPOSED. Printed here, once, and then the
+		# directory holding it is shredded by the EXIT trap.
+		#
+		# NOTHING BELOW ASSIGNS THE KEY TO A VARIABLE. `base64` reads the file and writes
+		# to stdout, and that is the whole path: no shell variable holds it, so it cannot
+		# reach CHANGED, NOTES, the backup directory or any file this run leaves behind.
+		# That is a property worth keeping — a summary that helpfully echoed "the key we
+		# installed" would put it in the one place the operator is most likely to paste
+		# somewhere else.
+		#
+		# `base64 -w0` — VERIFIED against the real busybox 1.37.0-r31 armhf binary from
+		# Alpine v3.24 (`base64 [-d] [-w COL]`, `-w 0` disables wrapping) and against GNU
+		# coreutils 9.4, byte-identical output. Both matter here: coreutils is on this box
+		# today only because k3s pulled it in, and §12's `apk del` reclaims it, so the same
+		# line has to work under either implementation. Neither emits a trailing newline
+		# at -w0, hence the explicit printf.
+		#
+		# The base64 line itself is printed FLUSH LEFT while everything around it is
+		# indented, and that is not an oversight: a leading space is copied along with the
+		# line, and `base64 -d` on a value with a stray space in front of it fails in a way
+		# that reads as a corrupt key rather than as a copy-paste artefact.
+		say ""
+		say "  ======================================================================"
+		say "  THE PRIVATE HALF, PRINTED ONCE. Nothing on this box keeps a copy."
+		say "  ======================================================================"
+		say ""
+		say "  Paste the line between the markers into your Claude Code cloud"
+		say "  environment variable block, as:"
+		say ""
+		say "      DD_CTL_KEY_B64=<that line>"
+		say ""
+		say "  The SessionStart hook in the destiny-director repo decodes it to"
+		say "  ~/.ssh/id_ed25519_ddctl (mode 600) at the start of every agent session."
+		say ""
+		say "  -----BEGIN DD_CTL_KEY_B64-----"
+		base64 -w0 < "$KEYDIR/id_ddctl"
+		printf '\n'
+		say "  ------END DD_CTL_KEY_B64------"
+		say ""
+		say "  fingerprint: $KEY_FPR"
+		say "  public half, as installed:"
+		say "      $LINE"
+		say ""
+		say "  THIS IS NOW IN YOUR TERMINAL SCROLLBACK, and in anything recording this"
+		say "  session — tmux history, an SSH client's log, a screen recording, a CI job's"
+		say "  output. That is the one exposure this design has, and it is unavoidable:"
+		say "  the key has to reach you somehow. Once it is pasted into the environment"
+		say "  block, clear it: close the terminal, or clear the scrollback buffer"
+		say "  (tmux: 'clear-history'). Do not paste this run's output anywhere."
+		say ""
+		say "  It cannot be printed again. The directory holding it is shredded when this"
+		say "  script exits. If you lose it, re-run with DD_CTL_ROTATE=1 for a new one."
+		say ""
+		note "THE PRIVATE KEY WAS PRINTED IN §5 — scroll up for it. It is not repeated here, and
+    deliberately: nothing in this summary, in $BACKUP_DIR, or in any file this run
+    leaves behind holds key material. Paste it into the cloud environment block as
+    DD_CTL_KEY_B64, then clear your scrollback. Note that the environment block's
+    values are NOT masked, which is why only this restricted dispatch key belongs in
+    it — never a key that gets a shell."
+	fi
+	;;
+esac
 
 # ---------------------------------------------------------------------------------
 say "== 6/13  subuid/subgid ranges for $DD_USER"
@@ -1299,13 +1665,19 @@ fi
 say "== 13/13  authorized_keys census — READ ONLY"
 
 # WITHOUT THIS SECTION THE SCRIPT CANNOT SUBSTANTIATE ITS OWN CENTRAL CLAIM. Everything
-# above is about the key this script installs: §1 looks for the dd-ctl forced command,
-# §5 appends one. Neither looks at the OTHER lines in the file. So a pre-existing
+# above is about the key this script installs: §1 counts dispatch lines, §5 installs or
+# replaces one. Neither looks at the OTHER lines in the file. So a pre-existing
 # unrestricted key — gavin's own, an old laptop's, one a colleague added in 2023 — is
 # completely invisible to this run, and yet "the box is restricted" is what a reader
 # takes away from a run that ends in `ok`. It is not restricted; ONE KEY is. The census
 # is what makes the difference visible rather than assumed, and it is what §1's and §4's
 # notes promise when they say "the census at the end of this run lists every key".
+#
+# IT ALSO MARKS THE DISPATCH LINES AND COUNTS THEM, which is the claim §5 now rests on:
+# that this box has exactly one working deploy key, so the one in the operator's
+# environment block is unambiguously the one that runs. Two dispatch lines is not an
+# error sshd will ever report — both simply work — so the only place it can surface is
+# here, at the end, in a count printed whether or not this run touched the file.
 #
 # READ ONLY. It prints and changes nothing, and it deliberately does not prune: removing
 # somebody's key from a box reached through a tunnel is a decision, not a cleanup.
@@ -1323,7 +1695,7 @@ if [ ! -f "$AUTHKEYS" ]; then
 else
 	say "       $AUTHKEYS"
 	say ""
-	awk '
+	awk -v pfx="$DD_CTL_PREFIX" '
 		/^[[:space:]]*($|#)/ { next }
 		{
 			ti = 0
@@ -1341,14 +1713,18 @@ else
 			for (i = ti + 2; i <= NF; i++) cmt = cmt (i > ti + 2 ? " " : "") $i
 			has_cmd = (opts ~ /(^|,)command=/) ? "yes" : "NO "
 			has_res = (opts ~ /(^|,)restrict(,|$)/) ? "yes" : "NO "
+			is_disp = (index($0, pfx) == 1) ? "DISPATCH" : "        "
 			if (has_cmd == "NO ") open_keys++
-			printf "         line %-4d command= %s  restrict %s  %-32s %s\n", \
-				FNR, has_cmd, has_res, $ti, (cmt == "" ? "(no comment)" : cmt)
+			if (is_disp == "DISPATCH") dispatch++
+			printf "         line %-4d command= %s  restrict %s  %s  %-32s %s\n", \
+				FNR, has_cmd, has_res, is_disp, $ti, (cmt == "" ? "(no comment)" : cmt)
 			total++
 		}
 		END {
 			printf "\n         %d key line(s); %d with no command= (a full shell); %d unparsed\n", \
 				total + 0, open_keys + 0, unparsed + 0
+			printf "         %d dd-ctl DISPATCH line(s) — there should be exactly one\n", \
+				dispatch + 0
 		}
 	' "$AUTHKEYS"
 	say ""
@@ -1376,6 +1752,27 @@ else
 	else
 		ok "every key line in $AUTHKEYS carries a command= restriction"
 	fi
+
+	# The dispatch lines, counted again in the shell for the same reason, and fingerprinted
+	# so the operator can match what is installed against what they hold. Fingerprints are
+	# public information — printing them here costs nothing and is the only way to answer
+	# "is the key in my environment block the key on this box?" without trying a deploy.
+	AK_DISPATCH="$(dispatch_count "$AUTHKEYS")"
+	case "$AK_DISPATCH" in
+		1)
+			ok "exactly one dd-ctl dispatch line:"
+			dispatch_fingerprints "$AUTHKEYS" | sed 's/^/            /' ;;
+		0)
+			warn "NO dd-ctl dispatch line — nothing can deploy"
+			note "$AUTHKEYS holds no dd-ctl dispatch line, so no key can run dd-ctl. Re-run this
+    script to install one." ;;
+		*)
+			warn "$AK_DISPATCH dd-ctl dispatch lines — every one of them is a working deploy key"
+			dispatch_fingerprints "$AUTHKEYS" | sed 's/^/            /'
+			note "$AUTHKEYS holds $AK_DISPATCH dd-ctl dispatch lines. Each is a working deploy key and
+    nothing here can tell you which one is in use. DD_CTL_ROTATE=1 collapses them to a
+    single new key; removing the surplus by hand is the other fix." ;;
+	esac
 fi
 
 # ---------------------------------------------------------------------------------

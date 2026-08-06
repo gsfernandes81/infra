@@ -164,6 +164,23 @@ zram, and the opt-in Docker removal. It is mode 0644 and not in `bin/`, so it mu
 invoked as `sh root-setup.sh` — which is also the only way that works, since `gavin`'s
 login shell is fish and `ssh two 'snippet'` is executed by fish.
 
+**Nothing needs preparing before the first run — including the deploy key.** §5 generates
+the keypair itself on tmpfs, installs the public half as the restricted forced-command
+line, and prints the private half once as base64 for the Claude Code cloud environment
+block (`DD_CTL_KEY_B64`). It is not recoverable afterwards: the directory holding it is
+shredded when the script exits. Copy it before closing the terminal, then clear the
+scrollback — that print is the one moment the key is exposed.
+
+A re-run does **not** issue a second key. With a dispatch line already installed it
+reports that key's fingerprint and skips, because two working deploy keys is a state
+nobody can diagnose from the outside — both authenticate, and neither the box nor the
+operator can say which one is in use. `DD_CTL_ROTATE=1` replaces the installed one;
+`DD_CTL_PUBKEY='ssh-ed25519 …'` still overrides generation for a key you already hold
+(one in a password manager, or a FIDO `sk-` key, which the script cannot generate). The
+full picture — including why the environment block, whose values are **not masked**, is
+the wrong place for anything less restricted than this key — is in
+[`../hosts/two/system/README.md`](../hosts/two/system/README.md).
+
 Run it once with no `DD_REMOVE_DOCKER` first and read its `CHANGED:` and `NOTES /
 ACTION REQUIRED:` blocks; §12 prints what it *would* remove. Then re-run with
 `DD_REMOVE_DOCKER=1`.
