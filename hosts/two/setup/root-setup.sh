@@ -1534,10 +1534,33 @@ cloudflared_parent_chain_is_clean() {  # <pid>
 	done
 	[ "$_p" = 1 ]
 }
+# Enumerate /proc and compare comm ourselves rather than asking pgrep. `pgrep -x` is
+# NOT portable in the way it looks: procps matches -x against the process name, but
+# BUSYBOX matches it against the full argv[0] PATH. Measured on this box (busybox
+# 1.37.0, the pgrep on `two` -- /usr/bin/pgrep is a symlink to /bin/busybox):
+#
+#     pgrep    cloudflared            -> 1945
+#     pgrep -x cloudflared            -> (nothing)
+#     pgrep -x /usr/bin/cloudflared   -> 1945
+#
+# So the guard found no cloudflared at all and refused, on a box where the tunnel was
+# demonstrably the OpenRC service. Note how this passed review: `-x` IS in busybox's
+# usage string, so checking that the flag exists confirmed nothing about what it does.
+# Dropping -x is not the fix either -- plain `pgrep cloudflared` treats its argument as
+# a REGEX and would match `cloudflared-proxy` or a container that named itself
+# `my-cloudflared`, which is precisely the "trusting a name the container chose" this
+# guard exists to avoid. /proc/<pid>/comm compared with `=` is exact, needs no external
+# tool, and behaves the same under every userland this box will ever have.
+cloudflared_procs() {
+	for _d in /proc/[0-9]*; do
+		[ -r "$_d/comm" ] || continue
+		[ "$(cat "$_d/comm" 2>/dev/null)" = "cloudflared" ] && printf '%s ' "${_d#/proc/}"
+	done
+}
 cloudflared_is_openrc_service() {
 	command -v rc-service >/dev/null 2>&1 || return 1
 	rc-service cloudflared status 2>/dev/null | grep -qi 'started' || return 1
-	CF_PIDS="$(pgrep -x cloudflared 2>/dev/null | tr '\n' ' ')"
+	CF_PIDS="$(cloudflared_procs)"
 	[ -n "${CF_PIDS% }" ] || return 1
 	for _cf in $CF_PIDS; do
 		cloudflared_parent_chain_is_clean "$_cf" || return 1
@@ -1555,8 +1578,11 @@ if [ -n "$DOCKER_PKGS" ] && [ -n "${DD_REMOVE_DOCKER:-}" ]; then
     service is stopped or cloudflared is not running right now. Establish which,
     from a session that does not traverse the tunnel, then re-run. Check:
       rc-service cloudflared status
-      pgrep -x cloudflared
-      cat /proc/\$(pgrep -x cloudflared)/status"
+      for d in /proc/[0-9]*; do [ \"\$(cat \$d/comm 2>/dev/null)\" = cloudflared ] \\
+          && echo \"\${d#/proc/}\"; done
+      cat /proc/<that-pid>/status   # PPid: should lead to init, not a shim
+    Do NOT substitute \`pgrep -x cloudflared\` here: busybox matches -x against the
+    full argv[0] path, so it finds nothing on this box even when the tunnel is up."
 		DOCKER_PKGS=''
 	else
 		ok "cloudflared is the OpenRC service (pids ${CF_PIDS% }, every parent chain reaches init)"
