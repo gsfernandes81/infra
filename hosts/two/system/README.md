@@ -4,7 +4,7 @@
 single-core ARM1176 at 700 MHz, 100 Mbit ethernet sharing a USB 2.0 bus, no crypto
 acceleration. `MemTotal` is 486 272 kB, so **~475 MB usable**, not the ~490 MB an
 earlier note here and in `docs/host-setup.md` claimed. Alpine **3.24.1** (not 3.23 —
-package names moved between the two; see `hosts/two/setup/root-setup.sh` §3).
+package names moved between the two; see `hosts/two/setup/README.md` step 1).
 
 `two` does **not** join the MicroOS fleet — its armv6 was the only thing that would
 have forced the whole fleet onto Debian, and armv6 also rules out Claude Code (arm64
@@ -21,18 +21,17 @@ this box's brief, and the tension with the lifeboat role is recorded in
 With it come three host changes:
 
 - **Docker and containerd are removed**, and **rootless podman + podman-compose**
-  replace them. `gavin` is not in any new group and no new user is created; rootless
-  podman's isolation comes from the user namespace, not from which uid owns it.
+  replace them.
 - **`python3` is now installed** as a dependency of `podman-compose` 1.6.0. That
   removes the stated objection to tracking `/etc` files here (see below): the
   interpreter `bin/check-system-drift` needs is no longer a cost this box would pay
   only for the checker's sake.
-- **`/usr/local/bin/dd-ctl`** — a restricted SSH forced command, root-owned, the only
-  thing the deploy key can run. Its canonical copy is
-  [`deployments/destiny-director/dd-ctl`](../../../deployments/destiny-director/dd-ctl).
+- **An unprivileged `claude` account** deploys the stack, with an ordinary SSH key and
+  plain `podman-compose`. This reverses the "no new user on `two`" decision — see
+  [`docs/decisions.md`](../../../docs/decisions.md) and the section below.
 
-The privileged half is [`../setup/root-setup.sh`](../setup/root-setup.sh) — one
-reviewable script, `sh`-invoked, mode 0644 so it is never on a PATH.
+The build is [`../setup/README.md`](../setup/README.md), a numbered instruction manual.
+It replaced an 1800-line `root-setup.sh`.
 
 > **Status: not applied as of 2026-08-06.** The script has been reviewed and syntax
 > checked, and nothing in it has been run on the box. Docker removal is opt-in behind
@@ -77,7 +76,7 @@ service and no `/etc/conf.d/zram-init` — both are Gentoo's packaging — **and
 invocation it gave would not have run either**: it passed `-s 1`, which is not in that
 script's `getopts`. The real `armhf` binary answers `Illegal option -s` and exits, so
 the documented command failed while both files went on describing `two` as running zram.
-The verified line is `zram-init -d 0 -p 100 256`. `root-setup.sh` §9 runs that, **live**,
+The verified line is `zram-init -d 0 -p 100 256`. `../setup/README.md` step 3 runs that, **live**,
 and it does not survive a reboot, because persisting it means boot-path code on the
 lifeboat box.
 
@@ -102,164 +101,96 @@ of one. See the roadmap before doing anything here.
 **Still none.** This is a reference directory, and `bin/check-system-drift two` only
 reports differences. Nothing here is applied to the host.
 
-`/usr/local/bin/dd-ctl` is the obvious candidate and is deliberately **not** one. Its
-single canonical copy lives beside the stack it drives, at
-[`deployments/destiny-director/dd-ctl`](../../../deployments/destiny-director/dd-ctl),
-with no second path to it anywhere — a script reachable two ways is a script whose
-behaviour can depend on which way you came. It therefore carries no `infra-` header,
-because `bin/_infra.py` is the single parser for those and it only ever looks in
-`hosts/<host>/system/`; a header no parser reads would be decoration dressed as a
-checked invariant. The live copy is installed by `root-setup.sh` §4 and compared by
-hand:
+There is no longer an installed executable to track. `/usr/local/bin/dd-ctl` used to be
+the obvious candidate; it is gone along with the forced command it implemented.
+
+What is worth checking by hand on this box now is smaller, and none of it is a hash:
 
 ```sh
-md5sum /usr/local/bin/dd-ctl ~/infra/deployments/destiny-director/dd-ctl
-ls -ln  /etc/fish/config.fish ~/.profile ~/.config/fish/config.fish
-ls -lnd ~ ~/.config ~/.config/fish ~/.config/fish/conf.d
-ls -ln  ~/.config/fish/conf.d/          # expect podman.fish, and nothing else
-grep -c '^command="/usr/local/bin/dd-ctl",restrict ' ~/.ssh/authorized_keys   # expect 1
+id claude                                  # expect no wheel
+stat -c '%U:%G %a' /srv/infra              # expect gavin:deploy 2750
+stat -c '%U:%G %a' /srv/infra/deployments/destiny-director/.env   # expect gavin:deploy 640
+iptables -S OUTPUT | grep -c REJECT        # expect the LAN rules, step 8
+cat /etc/local.d/oom.start                 # cloudflared pinned to -1000
 ```
 
-**The `md5sum` alone is not the drift check**, and the four lines under it are not
-padding — see "the login shell is in the TCB" below. A matching hash while
-`~/.config/fish/conf.d/` has gained a second file is a green light for a dispatcher that
-no longer decides anything.
+The files that mattered under the old design — `gavin`'s fish config and the four paths
+around it — no longer decide anything. They were in the deploy key's TCB because sshd
+runs a forced command as `$SHELL -c`, and `gavin`'s shell is fish; `claude`'s shell is
+`/bin/sh` with an empty home, and there is no forced command to subvert.
 
-**The installed copy must be a real file owned by root, mode 0755, in a directory only
-root can write** — never a symlink into the checkout, and never the checkout's copy run
-in place. `gavin` owns `~/infra`, so a forced command resolving through anything gavin
-can rewrite is not a restriction at all: replace the target, get a shell. `root-setup.sh`
-§4 verifies all three properties after installing rather than trusting `install` to
-have produced them.
+## The deploy account
 
-## The dispatch key: made on the box, held in two places
+Deploys run as **`claude`**, an unprivileged account created for the purpose. Not in
+`wheel`, `/bin/sh` login shell, empty home, its own subuid/subgid range. It holds an
+ordinary SSH key — no forced command — and deploys with plain `podman-compose`.
+[`../setup/README.md`](../setup/README.md) is the build.
 
-**Nothing has to be prepared before running `root-setup.sh`.** §5 generates an ed25519
-keypair itself, on tmpfs, installs the public half as the
-`command="/usr/local/bin/dd-ctl",restrict …` line in `~gavin/.ssh/authorized_keys`, prints
-the private half **once** as a single base64 line, and shreds the directory it was
-generated in before the script exits. The private half never reaches the SD card, and
-nothing on `two` keeps a copy.
+**This replaced a restricted forced command** (`dd-ctl`, ~800 lines) that ran as `gavin`.
+The reasoning for that design, and for reversing it, is in
+[`docs/decisions.md`](../../../docs/decisions.md); the short version is that the
+dispatcher was ~800 lines of shell whose correctness *was* the boundary, and only because
+`gavin` is in `wheel`. Moving the deploy to an account that cannot become root replaces
+all of it with uid separation the kernel enforces.
 
-The operator's whole job is to paste that one line into the Claude Code cloud environment
-variable block as `DD_CTL_KEY_B64`. A committed `SessionStart` hook in the
-destiny-director repo decodes it to `~/.ssh/id_ed25519_ddctl` (mode 600) at the start of
-every agent session, so an ephemeral container has a working deploy key without anyone
-re-authorising anything. Base64 because an environment block holds one line per value and
-an OpenSSH private key is a multi-line PEM.
+Three properties that used to be script-enforced are now enforced by the OS:
 
-**The environment block's values are not masked.** Anyone who can open that environment's
-settings can read them. That is precisely why the only key that belongs there is this one
-— a key whose entire reach is dd-ctl's six argument-less verbs, behind `restrict`. A key
-that gets a shell must never go in it. (What "restricted" is and is not worth on this box:
-see the two sections below, and remember `gavin` has sudo.)
+| Property | Was | Is |
+|---|---|---|
+| Cannot become root | the dispatcher never ran a shell | `claude` is not in `wheel` |
+| Cannot choose the deployed image | verbs took no arguments | `/srv/infra` is operator-owned, group-readable; `claude` cannot write `compose.yaml` |
+| The login shell is not in the TCB | it *was* — `gavin`'s fish config ran first | `claude`'s shell is `/bin/sh`, home empty |
 
-**Exactly one dispatch line, ever.** A re-run with a dispatch key already installed does
-**not** generate a second one — it reports the installed key's fingerprint and skips.
-Two working dispatch keys is the failure worth designing against: both authenticate, sshd
-reports nothing unusual, and the operator cannot tell which one their environment holds,
-so revoking the wrong one looks like a broken deploy rather than a revocation.
+The old key lived in the Claude Code cloud environment block as `DD_CTL_KEY_B64`. **That
+block is not masked**, which was only acceptable while the key's entire reach was six
+argument-less verbs. The current key reaches a shell, so it must **not** go there.
 
-Rotation is therefore explicit — `DD_CTL_ROTATE=1 sh root-setup.sh` — and it **replaces**:
+## The checkout is shared, and read-only to the deploy account
 
-```sh
-DD_CTL_ROTATE=1 sh root-setup.sh        # old line removed, new key printed once
-```
+One clone at **`/srv/infra`**, in neither home directory: `gavin:deploy`, dirs `2750`,
+files `0640`. `gavin` pulls and edits; `claude` reads. That is what makes "the deploy
+account cannot choose the image" a permission rather than a claim.
 
-That is the one deliberate exception to this script's append-never-rewrite rule for
-`authorized_keys` (append-never-rewrite is right, because a botched rewrite on a
-tunnel-only box is unrecoverable). It is taken with a backup first, with the new file
-built beside the live one and renamed over it atomically, and with every line that is
-*not* a dispatch line compared byte-for-byte before the rename — so `gavin`'s own key
-cannot be lost to a rotation. The old key stops working the moment it completes; anything
-still holding it is locked out of deploying.
+`.env` is `0640 gavin:deploy`, so **every member of `deploy` reads the test Discord
+tokens, the Postgres password and the Bungie/Sheets keys**. That is `claude`, which needs
+them to run the bots. Keep the group to those two.
 
-`DD_CTL_PUBKEY='ssh-ed25519 AAAA… label'` still works and is the escape hatch: a key
-already in a password manager, or a FIDO `sk-` key, which the script cannot generate for
-you. It goes through the same validation and the same rotation gate.
+## What the uid split does not cover
 
-To ask which key is installed, without trying a deploy:
+**Resource exhaustion.** Rootless podman under OpenRC has no cgroup delegation, so a
+per-container memory limit is not merely unset — it is impossible. On 475 MB the OOM
+killer is the only limiter, and the plausible victim is `cloudflared`, which is the only
+way into this box. Mitigated from both ends rather than fixed:
 
-```sh
-ssh-keygen -lf ~/.ssh/authorized_keys     # fingerprints, one per key line
-```
+- `cloudflared` is pinned to `oom_score_adj -1000` (`/etc/local.d/oom.start`).
+- Everything `claude` starts from a login shell inherits `+500`; the bots raise
+  themselves to 800 via `OOM_SCORE_ADJ` in `.env`.
 
-The census `root-setup.sh` prints at the end of every run marks the dispatch lines and
-counts them, so a box that has somehow acquired two says so whether or not that run
-touched the file.
+Neither is a limit. Two concurrent deploys can still take the box down; do one at a time.
 
-## The login shell is in the deploy key's TCB
+**The LAN.** A container running as `claude` can reach anything the Pi can. Closed with
+iptables rather than a VLAN — egress to RFC1918 is rejected except the gateway, ingress
+from the LAN is dropped. See [`../setup/README.md`](../setup/README.md) step 8. Note this
+is the *only* thing standing between a container and the rest of the network; `two` sits
+on the same wire as everything else.
 
-**sshd does not exec a forced command. It runs `$SHELL -c "<command>"`** — and `gavin`'s
-login shell is fish, which reads `/etc/fish/config.fish`,
-`~/.config/fish/conf.d/*.fish` and `~/.config/fish/config.fish` on *every* startup,
-including a non-interactive `-c`. Only `fish -N` skips them. So four files run, as
-`gavin`, before `/usr/local/bin/dd-ctl` is reached, and any one of them can replace the
-dispatch entirely.
+**Prompt injection.** The account exists so an agent can deploy unattended. An agent
+processes untrusted text — fetched pages, API responses, repository comments — and a full
+shell is a much larger lever for that than six fixed verbs were. The uid split bounds
+where a mistake lands; it does not reduce how likely one is.
 
-That defeats the section above one level up. `/usr/local/bin/dd-ctl` being root-owned
-and unwritable is still true and still worth having; it is just not sufficient, because
-the thing that *decides whether dd-ctl runs at all* is a file `gavin` owns by
-construction — and `root-setup.sh` §8 writes one of them itself. `restrict` does not
-help: it implies `no-user-rc`, which governs `~/.ssh/rc`, an unrelated file.
+**Named volumes.** `compose.yaml` uses only named volumes (`pgdata`,
+`sshhostkeys_beacon`, `sshhostkeys_anchor`). This used to be enforced twice by the
+dispatcher, because a bind mount under `$HOME` writes host files as the deploy user and a
+mount over `~/.ssh` would let a container rewrite its own `authorized_keys`. With that
+account unprivileged the blast radius is the account itself, so it is a convention again
+— but keep it. The check that verified it was calibrated on 2026-08-06 against a running
+container, which reported exactly one mount line and none of type `bind`.
 
-What is actually done about it:
-
-- `root-setup.sh` §4 checks all four files' ownership and modes, **and the directories
-  holding them** (`~`, `~/.config`, `~/.config/fish`, `~/.config/fish/conf.d`,
-  `/etc/fish`) — because a writable directory lets a file be replaced by unlink-and-
-  create, which no check on the file itself can see. It warns on anything in `conf.d/`
-  that it did not write.
-- `dd-ctl` re-execs itself under `env -i`, keeping four names, so nothing fish exported
-  reaches podman.
-- The drift check above lists those paths, so a hash comparison cannot pass while the
-  shell that runs first has changed.
-
-**None of that removes the residual, and it is not claimed to.** `gavin` can always
-write `gavin`'s dotfiles. The only arrangement that takes the ambient shell out of this
-key's trusted computing base is a **dedicated deploy account with `/bin/sh` and an empty
-home** — which [`docs/decisions.md`](../../../docs/decisions.md) rejected, on reasoning
-that did not have this fact in it. That entry now states the trade with the fact
-included. The decision has not been reversed here; it has been re-stated honestly, which
-is the difference between a settled decision and one resting on a false premise.
-
-## `dd-ctl` is not signed off
-
-**`gavin` is in `wheel` and `sudo` is installed.** So anything that escapes the
-`dd-ctl` forced command lands on an account that can become root. The dispatcher is the
-entire boundary and there is nothing behind it. Nothing in this repo describes it as
-contained or unprivileged, and nothing should.
-
-Its design answer is to give hostile input almost nothing to act on: six verbs
-(`deploy-beacon`, `deploy-anchor`, `down`, `status`, `logs`, `logs-postgres`), **none of
-which takes an argument**, matched against exact literals and then discarded. But `sh
--n` is a syntax check, not a review, and that is all this repo has run against it. A
-dedicated adversarial read is outstanding. What it still owes:
-
-| Question | Why it is the question |
-|---|---|
-| How is `SSH_ORIGINAL_COMMAND` handled end to end? | It is one string compared against literals and dropped — but that is a claim about the code, verified by reading it, not by anything automated. |
-| What does each fixed command line actually *do*? | The verbs are fixed, so the remaining risk is in what they invoke. A `git pull`-shaped verb would hand control of the deployed `compose.yaml` to whoever controls the git remote; there is none today, and there must not be one. |
-| Can the deployed stack gain a writable mount under `$HOME`? | A bind mount over `~/.ssh` would let the keyholder strip `restrict` from their own `authorized_keys` line and walk out of the forced command entirely. |
-
-On that last one: **`compose.yaml` uses only named volumes** (`pgdata`, `sshhostkeys`),
-and as of 2026-08-06 that is **enforced, not merely observed**. `dd-ctl` refuses to
-deploy if `compose.yaml` declares a volume whose source is not a bare name, and refuses
-again after `up` — stopping and removing the container — if `podman inspect` reports a
-mount of type `bind`. Two layers because they fail differently: the first is a text scan
-that cannot destroy anything, the second asks podman and catches what the scan does not
-model.
-
-> The second layer is **uncalibrated**. It rests on podman's `.Mounts` listing only
-> user-requested mounts, which has not been checked against this box. Per this repo's
-> own rule, calibrate before trusting the verdict: run
-> `podman inspect --format '{{range .Mounts}}{{.Type}}|{{.Source}}|{{.Destination}}{{println}}{{end}}' dd-bot`
-> and expect exactly one `volume|…|/home/dd/.ssh-host` line. Watch the first deploy
-> after this change; if it refuses, suspect the check before the box.
-
-**The trust boundary that is not about `dd-ctl` at all:** `compose.yaml` names a moving
-branch tag, so anyone with push access to that branch decides what runs as `gavin` on
-the next deploy. See [`docs/decisions.md`](../../../docs/decisions.md).
+**The moving tag, which was never about the dispatcher.** `compose.yaml` names a moving
+branch tag, so anyone with push access to that branch decides what code runs on the next
+deploy. That is the real trust boundary and it sits upstream of this repo entirely. See
+[`docs/decisions.md`](../../../docs/decisions.md).
 
 **Known gap, for when a tracked executable does land here:**
 `bin/install-system-file`'s `validators_for()` keys on `live.parent == /etc/init.d` and

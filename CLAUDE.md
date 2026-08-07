@@ -135,7 +135,7 @@ Then grep the *directory*, not the file, before declaring it done:
   runlevel — the package is not. **The exception, which is only an exception because it
   is a different operation:** removing it in one `apk del` transaction with every
   dependent, after stopping the services, is how docker leaves `two` entirely
-  (`hosts/two/setup/root-setup.sh` §12). apk resolves the order itself; containerd is
+  (see `hosts/two/setup/README.md`). apk resolves the order itself; containerd is
   never removed alone. The trap that comes with it: `iptables` is on that box only as an
   auto-installed dependency of docker/k3s, `apk del` reclaims orphans, and netavark
   needs `iptables` while **not** depending on it — so it must be installed explicitly

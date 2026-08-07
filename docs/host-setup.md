@@ -41,7 +41,7 @@ worked. Write `shadow-subids` anyway — it is the real package, and it is what
 `apk info -e` answers with — but not because the other name is fatal. It isn't, and an
 invented reason is what gets copied into the next box's script. The verified 3.24
 `armhf` list is in
-[`../hosts/two/setup/root-setup.sh`](../hosts/two/setup/root-setup.sh) §3, with the
+[`../hosts/two/setup/README.md`](../hosts/two/setup/README.md) step 1, with the
 reasoning for each name.
 
 `smartmontools` is **missing on `zero`** and belongs there: `smartctl -d sat` is how you
@@ -114,7 +114,7 @@ zram-init -d 0 -p 100 256           # device 0, swap priority 100, 256 MB
 **There is no `-s`.** This line used to read `zram-init -d 0 -s 1 -p 100 256`, with
 `-s 1` glossed as "one compression stream, because there is one core". `-s` is not in
 that script's `getopts`: the real `armhf` binary answers `Illegal option -s` and exits,
-so every invocation documented here and in `root-setup.sh` §9 would have failed — while
+so every invocation documented here would have failed — while
 both files went on to describe `two` as running zram. `-d 0 -p 100 256` is what was
 verified to parse and reach `mkswap`/`swapon`. No `-a` either: the kernel default
 (lzo-rle on 6.x) is the right pick on a CPU with no NEON, and naming an algorithm this
@@ -122,13 +122,13 @@ kernel may not have compiled in turns a cushion into an error.
 
 That does **not** survive a reboot, and persisting it means an OpenRC service — new
 boot-path code, which [decisions.md](decisions.md) rejected on `two` for the same
-reason it rejected the mount-guard service. `hosts/two/setup/root-setup.sh` §9 does the
+reason it rejected the mount-guard service. `hosts/two/setup/README.md` step 3 does the
 live half and says so rather than implying persistence.
 
 The tuning path is `/etc/sysctl.d/*.conf`. The original build note said
 `/etc/sysctl.conf.d`, which does not exist on Alpine and silently does nothing — and
 `two` has no `/etc/sysctl.d/*zram*` either, so there the tuning has never been applied
-anywhere. `root-setup.sh` §9 writes `/etc/sysctl.d/60-zram.conf`.
+anywhere. `hosts/two/setup/README.md` step 3 writes `/etc/sysctl.d/60-zram.conf`.
 
 ## Docker — `one` and `zero`
 
@@ -142,7 +142,7 @@ service docker start
 `k3s` both hard-depend on the package, so `apk del containerd` on its own kills every
 container at the next start. [CLAUDE.md](../CLAUDE.md) has the reasoning. Removing it
 *in the same `apk del` transaction as every dependent*, after stopping the services, is
-a different operation and is what `hosts/two/setup/root-setup.sh` §12 does; apk
+a different operation; apk
 resolves the order itself and containerd is never removed alone.
 
 Docker's init declares only `need sysfs cgroups net`, so it starts whether or not
@@ -152,62 +152,43 @@ verified by `sudo bin/check-mount-guards`.
 
 **`two` does not run Docker.** It runs rootless podman + podman-compose as `gavin`, and
 Docker and containerd are removed from it — see
-[decisions.md](decisions.md) and [`../hosts/two/setup/root-setup.sh`](../hosts/two/setup/root-setup.sh).
+[decisions.md](decisions.md) and [`../hosts/two/setup/README.md`](../hosts/two/setup/README.md).
 Nothing there is in the `docker` group and nothing starts at boot.
 
-## `two` — the whole build, in one reviewable script
+## `two` — the whole build
 
-[`hosts/two/setup/root-setup.sh`](../hosts/two/setup/root-setup.sh) is the privileged
-half of building `two` for the destiny-director test bot: packages, `dd-ctl` install,
-the restricted SSH key, subuid/subgid, cgroup and `/boot` **verification only**, live
-zram, and the opt-in Docker removal. It is mode 0644 and not in `bin/`, so it must be
-invoked as `sh root-setup.sh` — which is also the only way that works, since `gavin`'s
-login shell is fish and `ssh two 'snippet'` is executed by fish.
+[`hosts/two/setup/README.md`](../hosts/two/setup/README.md) is the build of `two` for the
+destiny-director test bot, as a numbered instruction manual: packages, kernel modules,
+zram, the unprivileged deploy user, subuid/subgid, runtime directory and OOM priority,
+firewall, the shared `/srv/infra` checkout, and SSH access. Follow it top to bottom.
 
-**Nothing needs preparing before the first run — including the deploy key.** §5 generates
-the keypair itself on tmpfs, installs the public half as the restricted forced-command
-line, and prints the private half once as base64 for the Claude Code cloud environment
-block (`DD_CTL_KEY_B64`). It is not recoverable afterwards: the directory holding it is
-shredded when the script exits. Copy it before closing the terminal, then clear the
-scrollback — that print is the one moment the key is exposed.
+It replaced an 1800-line `root-setup.sh` that did the same work with checks and a change
+report. The script also generated a restricted SSH deploy key and installed `dd-ctl` as a
+forced command; both are gone — the account that deploys is unprivileged now, so the
+boundary is uid separation instead of a shell script, and the key is an ordinary one.
 
-A re-run does **not** issue a second key. With a dispatch line already installed it
-reports that key's fingerprint and skips, because two working deploy keys is a state
-nobody can diagnose from the outside — both authenticate, and neither the box nor the
-operator can say which one is in use. `DD_CTL_ROTATE=1` replaces the installed one;
-`DD_CTL_PUBKEY='ssh-ed25519 …'` still overrides generation for a key you already hold
-(one in a password manager, or a FIDO `sk-` key, which the script cannot generate). The
-full picture — including why the environment block, whose values are **not masked**, is
-the wrong place for anything less restricted than this key — is in
-[`../hosts/two/system/README.md`](../hosts/two/system/README.md).
+Two things from that script that are still load-bearing and easy to undo by accident:
 
-Run it once with no `DD_REMOVE_DOCKER` first and read its `CHANGED:` and `NOTES /
-ACTION REQUIRED:` blocks; §12 prints what it *would* remove. Then re-run with
-`DD_REMOVE_DOCKER=1`.
+- **Install `iptables` and `ca-certificates` explicitly**, before any `apk del` of
+  Docker or k3s. Both are on `two` only as auto-installed dependencies of
+  `docker-engine`/`k3s`, and `apk del` reclaims orphaned dependencies. netavark shells
+  out to `iptables` to program the bridge network's rules, including inside a *rootless*
+  netns, while **not** depending on the package; the stack would break days later for a
+  reason nobody would connect back to a Docker cleanup. `ca-certificates` is worse,
+  because it is the trust store `cloudflared` validates Cloudflare's edge against:
+  losing it cuts **the only way into the box**. Naming both in an explicit `apk add`
+  makes them world members that no reclaim can touch.
+- **The `tun` module must be loaded and persisted.** Installing `passt` is not enough,
+  and the failure is a long way from the cause: the container is created and then fails
+  to start with `Failed to open() /dev/net/tun`.
 
-Two things in it that are load-bearing and easy to undo by accident:
-
-- **`iptables` and `ca-certificates` are installed in §3, before the removal in §12.**
-  Both are on `two` today only as auto-installed dependencies of `docker-engine`/`k3s`,
-  and `apk del` reclaims orphaned dependencies — so removing Docker would take both with
-  it. netavark shells out to `iptables` to program the bridge network's rules, including
-  inside a *rootless* netns, while **not** depending on the package; the stack would
-  have broken days later for a reason nobody would connect back to a Docker cleanup.
-  `ca-certificates` is worse, because it is the trust store `cloudflared` validates
-  Cloudflare's edge against: losing it cuts **the only way into the box**, minutes after
-  §12 reports success. Naming both in §3's `apk add` makes them world members that no
-  reclaim can touch. Do not move §3 below §12.
-- **`/usr/local/bin/dd-ctl` must stay a real root-owned file**, 0755, in a directory
-  only root can write. See [`../hosts/two/system/README.md`](../hosts/two/system/README.md).
-
-Two things it reports and refuses to fix, because `/boot` is the red line:
+Two things `/boot` — the red line — needs by hand, not by script:
 
 - `two`'s kernel cmdline carries **both `cgroup_disable=memory` and
   `cgroup_enable=memory`**. The enable is winning — the memory controller is live — but
   a boot line that argues with itself resolves by kernel parsing order rather than by
   intent. Clean it up by hand, on a day you can watch the reboot.
-- `/etc/fstab` is tracked read-only and never generated on this fleet, so §11 prints its
-  mount-option recommendation and writes nothing.
+- `/etc/fstab` is tracked read-only and never generated on this fleet.
 
 ## cloudflared
 

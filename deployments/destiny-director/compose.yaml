@@ -9,39 +9,41 @@
 # `registry-deployed`. Read SOURCE for why the pin is absent by design.
 #
 # `bin/compose destiny-director …` REFUSES this stack, on every host — see bin/compose.
-# It is driven by ./dd-ctl over SSH, which is the only thing that supplies the two
-# variables interpolated below.
+# It is driven by plain `podman-compose` in the deploy user's shell; hosts/two/setup has
+# the exact sequence. There used to be a restricted SSH dispatcher (`dd-ctl`, ~800 lines)
+# in this directory. It is gone: it existed to keep a deploy key from escaping into
+# `gavin`, who is in `wheel`, and the account that deploys now is an unprivileged user of
+# its own. The boundary is uid separation, enforced by the kernel, instead of a shell
+# script that had to be kept correct.
 #
 # THIS FILE IS WHERE THE DEPLOYED IMAGE IS CHOSEN, and that is a security property, not
-# a convenience. dd-ctl's verbs take NO arguments, so the holder of the deploy key
-# cannot name a tag, a digest, or a branch; the line below is editable only by whoever
-# can edit this file on the box. An earlier design had `deploy <bot> <tag>`, which let
-# the keyholder point the pull at an image of their choosing — a perfectly well-formed
-# tag passes every charset check there is. Do not move the tag back out to an argument.
+# a convenience — now enforced by file permissions rather than by a dispatcher that took
+# no arguments. The checkout is group-readable and owned by the operator (see
+# hosts/two/setup), so the deploy account can read this file and cannot write it. It
+# therefore cannot choose a tag, a digest, or a branch.
 #
 # BE PRECISE ABOUT WHAT THAT DOES AND DOES NOT BUY, because the weaker claim is the true
-# one. The keyholder cannot choose WHICH branch runs. But the tag below moves, so
-# ANYONE WITH PUSH ACCESS TO THAT BRANCH decides what code runs on the next deploy — and
-# it runs as `gavin`, who is in `wheel` with sudo installed. That is the real trust
-# boundary here, and it is upstream of this repo entirely. The lever, if it is ever
-# wanted: point this at a branch only the owner pushes to, at the cost of a merge per
-# deploy. Not done today; recorded so the current setup is not mistaken for locked down.
+# one. The deploy account cannot choose WHICH branch runs. But the tag below moves, so
+# ANYONE WITH PUSH ACCESS TO THAT BRANCH decides what code runs on the next deploy. That
+# is the real trust boundary here, and it is upstream of this repo entirely. The lever,
+# if it is ever wanted: point this at a branch only the owner pushes to, at the cost of a
+# merge per deploy. Not done today; recorded so the current setup is not mistaken for
+# locked down.
 #
 # ONE IMAGE SERVES BOTH BOTS, AND BOTH RUN AT ONCE. supervisord's only program is
 # `python -OO -m dd.$RAILWAY_SERVICE_NAME`, so the bot is chosen at container start —
 # which means two containers off the same image, differing only in that one variable, are
 # two different bots. They are declared below as two services, `beacon` and `anchor`.
 #
-# THIS REPLACED A ONE-BOT-AT-A-TIME DESIGN, and the difference is worth stating because
-# most of dd-ctl was written under the old rule. There used to be a single `bot` service
-# whose RAILWAY_SERVICE_NAME came from `${DD_BOT:?}`, exported per-deploy by dd-ctl, and
+# THIS REPLACED A ONE-BOT-AT-A-TIME DESIGN. There used to be a single `bot` service whose
+# RAILWAY_SERVICE_NAME came from `${DD_BOT:?}`, supplied per-deploy by the dispatcher, and
 # every deploy stopped and removed the one container before creating the next. The
 # variables are gone: with a service per bot the value is a literal in each, which is one
 # fewer interpolation, one fewer `${…:?}` failure path on a box reached through a tunnel,
 # and it removes the whole podman-compose precedence question (1.0.6 let .env win, 1.6.0
-# lets the process environment win) rather than documenting it. dd-ctl still refuses to
-# deploy if RAILWAY_SERVICE_NAME or MALLOC_CONF appears in .env — belt and braces now
-# rather than load-bearing, since `environment:` below cannot lose to .env either way.
+# lets the process environment win) rather than documenting it. Do not set
+# RAILWAY_SERVICE_NAME or MALLOC_CONF in .env; `environment:` below wins on 1.6.0, but
+# that precedence has already flipped once.
 #
 # WHAT THIS COSTS IS RAM, on a 512 MB board, and that was a deliberate call by the owner
 # against a measurement that suggested otherwise (beacon + postgres idle at ~122 MB used
@@ -50,7 +52,7 @@
 # they are an upper bound, not a prediction. If the pair does not fit, the symptom will
 # be the OOM killer taking whichever process has the highest oom_score_adj — which is
 # deliberately the BOT, not supervisord or the break-glass sshd (see OOM_SCORE_ADJ in
-# .env and dd.common.lifecycle). Watch `dd-ctl status` after the first `deploy-both`.
+# .env and dd.common.lifecycle). Watch `podman stats` after the first deploy of the pair.
 #
 # Written to the podman-compose-safe subset the app repo's deploy/pi-bplus/compose.yml
 # documents: plain long-established keys only (image, container_name, environment,
@@ -69,16 +71,14 @@
 # WORKING DIRECTORY, and lets it win over this one. Under the SSH forced command the cwd
 # is `$HOME`, so `~/.env` would silently override POSTGRES_PASSWORD and DATABASE_URL.
 # This comment used to describe 1.0.6's behaviour as though it were current; it is not.
-# `dd-ctl` now `cd`s into this directory before invoking podman-compose, which is what
-# makes the paragraph above true rather than merely intended.
+# ALWAYS `cd` into this directory before invoking podman-compose. That is the whole fix,
+# and it is a step in hosts/two/setup rather than something a wrapper does for you now.
 #
-# NAMED VOLUMES ONLY, and it is now enforced rather than observed. `dd-ctl` refuses to
-# deploy if this file declares a host-path volume, and refuses again — stopping and
-# removing the container — if podman reports a bind mount after `up`. Rootless podman
-# maps container uid 0 to gavin's real uid, so a bind mount under `$HOME` writes host
-# files AS GAVIN: a mount over `~/.ssh` would let the holder of the deploy key strip
-# `restrict` from their own authorized_keys line and leave the forced command behind.
-# Do not add one here without reading dd-ctl's `assert_compose_named_volumes_only`.
+# NAMED VOLUMES ONLY. Rootless podman maps container uid 0 to the deploy user's real uid,
+# so a bind mount under `$HOME` writes host files AS THAT USER — a mount over `~/.ssh`
+# would let the container rewrite the account's own authorized_keys. This used to be
+# enforced by the dispatcher, twice; with the deploy account unprivileged the blast radius
+# is that account alone, so it is a convention again. Keep it.
 name: destiny-director
 
 services:
@@ -99,7 +99,7 @@ services:
     # ANONYMOUSLY. GHCR carries the bot; this one line is why a deploy also depends on
     # hub.docker.com being reachable and willing. Anonymous pulls are rate-limited per
     # source IP — on the order of a hundred pulls per six hours, shared with everything
-    # else behind the same address — and `dd-ctl` pulls unconditionally on every deploy,
+    # else behind the same address — and a deploy pulls unconditionally every time,
     # so roughly fifty deploys in an afternoon can lock the box out of deploying at all,
     # with a 429 that reads like a network fault. The digest pin helps: podman does not
     # re-fetch a layer set it already has, so a pinned image that is already local costs
@@ -164,7 +164,7 @@ services:
     # client-side retrying can survive: a half-written data directory keeps a running,
     # healthy-looking server that has no `kyber` database and no pg_hba entry to reach
     # it with, forever. The cause was `--force-recreate` reaching this service through
-    # `depends_on`; the fix is `--no-deps` in dd-ctl, where the long version is written.
+    # `depends_on`. ALWAYS pass `--no-deps` when recreating a bot. See hosts/two/setup.
     restart: always
 
   # THE TWO BOT SERVICES ARE DELIBERATELY DUPLICATED RATHER THAN FACTORED. YAML anchors
@@ -184,7 +184,7 @@ services:
   beacon:
     # Pulled from GHCR, never `localhost/`. WHOLLY LITERAL — registry, repository and
     # tag. No interpolation, so there is no variable for a caller to influence and
-    # nothing dd-ctl can be talked into substituting.
+    # nothing a caller can substitute.
     #
     # THIS LINE IS THE ONE KNOB. `dev` is a BRANCH tag published by the app repo's
     # .github/workflows/pi-image.yml (`type=ref,event=branch`, alongside `slim-stack`
@@ -198,7 +198,7 @@ services:
     #
     # (Anonymous registry query, Aug 2026: the package was public and held `slim-stack`
     # and `sha-e35f665e...`; `:dev` 404'd because nothing had been pushed to `dev` yet.
-    # Re-check with `dd-ctl status` after the first deploy rather than assuming.)
+    # Re-check with `podman inspect` after the first deploy rather than assuming.)
     #
     # A LITERAL, NOT A VARIABLE — do not "improve" this into `${DD_IMAGE_TAG:?…}` or
     # move it into .env. Four reasons, and the first is the one that matters:
@@ -217,8 +217,7 @@ services:
     #     non-standard" should be visible, not hidden in an ignored file.
     # BOTH SERVICES MUST NAME THE SAME IMAGE. One build serves both bots, and deploying
     # them from different tags would be a state nothing here can report coherently —
-    # `dd-ctl status` prints an image per container precisely so a drift like that is
-    # visible, not so it is supported.
+    # `podman ps --format '{{.Names}}\t{{.Image}}'` shows a drift like that at a glance.
     image: ghcr.io/gsfernandes81/destiny-director:dev
     container_name: dd-beacon
     # NOT digest-pinned, unlike postgres. A moving branch tag is the whole design here —
@@ -238,8 +237,8 @@ services:
       # These become `-e` on the podman command line, emitted AFTER the ones derived
       # from `env_file:` (podman-compose 1.0.6 passed `--env-file`; 1.6.0 reads the file
       # itself and expands it into `-e` pairs first). Later `-e` wins in podman either
-      # way, so these override anything of the same name in .env. dd-ctl verifies that
-      # from the running container rather than trusting it.
+      # way, so these override anything of the same name in .env. Verify from the running
+      # container (`podman inspect`) rather than trusting it.
       #
       # Which bot this container is, and the ONLY thing that decides it: supervisord's
       # single program is `python -OO -m dd.$RAILWAY_SERVICE_NAME`, and it refuses to
@@ -289,11 +288,11 @@ services:
     # `restart: always` means podman restarts this on a crash. It does NOT bring the
     # stack back after a reboot: that needs a boot-time hook, and this box deliberately
     # has none. A power cut leaves `two` running nothing until someone runs
-    # `dd-ctl deploy-both`. (If that is ever unwanted, `podman-openrc` — already
-    # installed here — exposes `rc-service podman start_containers`, which restarts
-    # exactly the containers with this policy and needs no new script. Do NOT enable the
-    # podman API service that the same init script also starts; a podman socket
-    # reachable as gavin bypasses every restriction dd-ctl imposes.)
+    # the deploy by hand. (If that is ever unwanted, `podman-openrc` — already installed
+    # here — exposes `rc-service podman start_containers`, which restarts exactly the
+    # containers with this policy and needs no new script. Do NOT enable the podman API
+    # service that the same init script also starts: a podman socket is a container-create
+    # primitive with no restrictions on it at all.)
     restart: always
 
     # Nothing is published to the host, deliberately. Two ports exist inside each
@@ -342,8 +341,8 @@ services:
 
 volumes:
   # Rootless named volumes live under ~/.local/share/containers/storage/volumes on the
-  # SD card. `dd-ctl down` never removes them; `podman volume rm` by hand is the right
-  # amount of friction for destroying the only state this box holds.
+  # SD card. Never pass `--volumes` to `podman-compose down`; `podman volume rm` by hand
+  # is the right amount of friction for destroying the only state this box holds.
   pgdata:
   sshhostkeys_beacon:
   sshhostkeys_anchor:

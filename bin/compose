@@ -13,10 +13,9 @@
 #
 #   * `two` runs exactly one stack, destiny-director, and that stack cannot be driven
 #     from here on ANY host, for a reason that has nothing to do with the runtime — its
-#     compose file interpolates two variables (DD_BOT, DD_MALLOC_CONF) with `:?`, and
-#     only its own dd-ctl supplies them. A runtime-aware wrapper would
-#     have produced a different error message for the same refusal. So this refuses by
-#     name, below, and says where to go instead.
+#     images are linux/arm/v6 and its .env lives only on that box. A runtime-aware
+#     wrapper would have produced a different error message for the same refusal. So
+#     this refuses by name, below, and says where to go instead.
 #   * The two front-ends are not interchangeable. `docker compose` takes
 #     `--project-directory`; `podman-compose` has no such flag and derives the project
 #     directory from the compose file's realpath. Here they agree — but for different
@@ -53,17 +52,17 @@ destiny-director)
 	cat >&2 <<-EOF
 	${0##*/}: refusing to drive $stack — it is not a docker compose stack.
 
-	  Its compose file interpolates DD_BOT and DD_MALLOC_CONF with ':?',
-	  and only deployments/destiny-director/dd-ctl supplies them. Running it from here
-	  would stop with a missing-variable error at best, and on a host that is not \`two\`
-	  it would pull an armv6 image and start a bot against no .env at worst.
+	  Its images are linux/arm/v6 and its .env exists only on \`two\`. Running it
+	  from any other host would pull an armv6 image and start a bot against no
+	  .env.
 
-	  It runs on \`two\`, which has no docker, and it is deployed over SSH:
+	  It runs on \`two\`, which has no docker. Deploy it there, in the deploy
+	  user's shell:
 
-	      ssh -i ~/.ssh/dd-ctl gavin@ssh-two.gsrpi.uk status
-	      ssh -i ~/.ssh/dd-ctl gavin@ssh-two.gsrpi.uk deploy-beacon
+	      ssh claude@ssh-two.gsrpi.uk
+	      cd /srv/infra/deployments/$stack && podman-compose pull
 
-	  See deployments/$stack/dd-ctl and docs/decisions.md.
+	  See hosts/two/setup/README.md and docs/decisions.md.
 	EOF
 	exit 2
 	;;

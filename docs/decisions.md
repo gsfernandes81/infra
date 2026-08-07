@@ -3,6 +3,9 @@
 Settled. The reasoning is here so it doesn't get re-derived — argue with the reason,
 not from scratch.
 
+Rows marked ⚠︎SUPERSEDED describe the `dd-ctl` / `root-setup.sh` era on `two`. See the
+boxed note in "`two` also runs a test bot" below for what replaced them and why.
+
 | Decision | Because |
 |---|---|
 | Named `infra`, not `containers` | It holds host system config too. |
@@ -21,14 +24,14 @@ not from scratch.
 | `containerd` service removed, package kept | `dockerd` spawns its own containerd; every moby shim uses `/var/run/docker/containerd/containerd.sock`, so the standalone service owned zero shims. But `docker-engine` **hard-depends on the package** — `apk del containerd` would kill every container at the next start. Service-level removal only. **On `one` and `zero`.** On `two` the package goes too, in one transaction with every dependent — see below; the rule was always "never *alone*", not "never". |
 | OpenCloud and k3s deleted, not migrated | Both confirmed unused. k3s was still *running* a live cluster (traefik, coredns, metrics-server) and holding ~880 MB of swap; removing it plus the dead `nextcloud` subvolume returned ~344 GiB to the array. |
 | **Docker and containerd removed from `two`; rootless podman instead** | Two daemons and their shims cost roughly 34 MB RSS on a board with ~475 MB total, and `two` ran no docker containers worth the price. Rootless podman is daemonless — nothing is resident when nothing is running — and it needs no `docker` group, which this repo already refuses to grant. It is also where `one` and `zero` are headed under MicroOS, so `two` is the cheap place to learn it. |
-| **No new user, no boot autostart on `two`** | Rootless podman's isolation comes from the user namespace, not from which unprivileged uid owns it, so a second service account buys nothing over `gavin`. **That reasoning was incomplete and the entry is re-stated below** — a dedicated account also buys a `/bin/sh` login shell and an empty home, which is the only thing that takes the ambient login shell out of the deploy key's TCB. Still not done; see "The forced command runs inside `gavin`'s login shell". And a test bot that resurrects itself at 03:00 and takes 200 MB of a 475 MB lifeboat is the wrong default: `restart: always` covers a crashed container, and a reboot deliberately leaves the box running nothing until someone deploys. |
-| **`bin/compose` stays docker-only and refuses `destiny-director` by name** | Making it runtime-aware would not have helped: that stack cannot be driven from `bin/compose` on *any* host, because its compose file interpolates two variables only `dd-ctl` supplies. And `docker compose` and `podman-compose` are not interchangeable — different project-directory semantics that agree here by coincidence. A wrapper hiding that will eventually hide a difference that matters. The conversion belongs to the MicroOS move, where there are stacks to test it against. |
-| **`dd-ctl` has exactly one copy, and it is not in `bin/`** | It drives one stack, so it lives beside that stack; `bin/` is for fleet-wide tools, and the README points at it from there. No symlink to it anywhere: a script reachable two ways is a script whose behaviour can depend on which way you came. It carries no `infra-` header either, because `_infra.py` only reads those under `hosts/<host>/system/` — a header no parser reads is decoration dressed as a checked invariant. |
-| **`dd-ctl`'s verbs take no arguments** | Deleting the arguments deletes every line of validation that existed to make them safe, and the bugs that could hide in it. It also means the keyholder cannot name the image. It does **not** mean the image is safe from everyone — see below. |
+| **No new user, no boot autostart on `two`** ⚠︎SUPERSEDED | Rootless podman's isolation comes from the user namespace, not from which unprivileged uid owns it, so a second service account buys nothing over `gavin`. **That reasoning was incomplete and the entry is re-stated below** — a dedicated account also buys a `/bin/sh` login shell and an empty home, which is the only thing that takes the ambient login shell out of the deploy key's TCB. Still not done; see "The forced command runs inside `gavin`'s login shell". And a test bot that resurrects itself at 03:00 and takes 200 MB of a 475 MB lifeboat is the wrong default: `restart: always` covers a crashed container, and a reboot deliberately leaves the box running nothing until someone deploys. |
+| **`bin/compose` stays docker-only and refuses `destiny-director` by name** ⚠︎SUPERSEDED | Making it runtime-aware would not have helped: that stack cannot be driven from `bin/compose` on *any* host, because its compose file interpolates two variables only `dd-ctl` supplies. And `docker compose` and `podman-compose` are not interchangeable — different project-directory semantics that agree here by coincidence. A wrapper hiding that will eventually hide a difference that matters. The conversion belongs to the MicroOS move, where there are stacks to test it against. |
+| **`dd-ctl` has exactly one copy, and it is not in `bin/`** ⚠︎SUPERSEDED | It drives one stack, so it lives beside that stack; `bin/` is for fleet-wide tools, and the README points at it from there. No symlink to it anywhere: a script reachable two ways is a script whose behaviour can depend on which way you came. It carries no `infra-` header either, because `_infra.py` only reads those under `hosts/<host>/system/` — a header no parser reads is decoration dressed as a checked invariant. |
+| **`dd-ctl`'s verbs take no arguments** ⚠︎SUPERSEDED | Deleting the arguments deletes every line of validation that existed to make them safe, and the bugs that could hide in it. It also means the keyholder cannot name the image. It does **not** mean the image is safe from everyone — see below. |
 | **The deployed image is a literal in `compose.yaml`, not a variable** | It is the one knob, and it is tracked. `SOURCE` already withholds the commit deliberately; putting the *branch* in a gitignored `.env` too would leave this repo unable to say anything at all about what `two` runs. It also removes a `${…:?}` failure path and any chance of `.env` and `compose.yaml` disagreeing. Editing it to test a branch shows up as local drift, which is the desired signal. |
-| **`root-setup.sh` generates the dispatch key itself; the private half goes in the Claude Code environment block** | The operator had to arrive with a keypair and paste its public half in. Now the box makes one, installs the public half, and prints the private half once as base64 for `DD_CTL_KEY_B64`; a `SessionStart` hook in the app repo materialises it per session, so ephemeral containers keep working with nothing to re-authorise. The private half never touches the SD card — generated on tmpfs, shredded on exit. **That environment block is not masked**, and that is the constraint the whole arrangement is built around: only a key whose entire reach is dd-ctl's six argument-less verbs may go in it. Never a key that gets a shell. The one exposure is the print itself, in terminal scrollback; the script says so rather than letting it pass. |
-| **Exactly one dispatch line, and rotation is opt-in** | A second `command=…,restrict` line is not an error anyone can see: both keys authenticate, sshd reports nothing, and neither the box nor the operator can say which one the environment block holds — so revoking the wrong one reads as a broken deploy. A plain re-run therefore reports the installed key's fingerprint and generates nothing, and `DD_CTL_ROTATE=1` **replaces**. That is the single deliberate exception to append-never-rewrite for `authorized_keys` (which is right, because a botched rewrite on a tunnel-only box is unrecoverable): backup first, build beside and rename atomically, and require every non-dispatch line to come back byte-for-byte — so a rotation cannot cost `gavin` his own key. |
-| **The live `dd-ctl` is root-owned, and that is the whole mechanism** | `/usr/local/bin/dd-ctl`, a real file, 0755, in a root-only-writable directory — never a symlink into `~gavin/infra` and never the checkout's copy run in place. `gavin` owns the checkout, so a forced command resolving through anything `gavin` can rewrite is not a restriction: replace the target, get an unrestricted shell. It was never a boundary *against* `gavin`, who has sudo; it stops the holder of the **restricted key** rewriting the thing that restricts them. **It is not sufficient on its own** — the login shell runs first; see below. |
+| **`root-setup.sh` generates the dispatch key itself; the private half goes in the Claude Code environment block** ⚠︎SUPERSEDED | The operator had to arrive with a keypair and paste its public half in. Now the box makes one, installs the public half, and prints the private half once as base64 for `DD_CTL_KEY_B64`; a `SessionStart` hook in the app repo materialises it per session, so ephemeral containers keep working with nothing to re-authorise. The private half never touches the SD card — generated on tmpfs, shredded on exit. **That environment block is not masked**, and that is the constraint the whole arrangement is built around: only a key whose entire reach is dd-ctl's six argument-less verbs may go in it. Never a key that gets a shell. The one exposure is the print itself, in terminal scrollback; the script says so rather than letting it pass. |
+| **Exactly one dispatch line, and rotation is opt-in** ⚠︎SUPERSEDED | A second `command=…,restrict` line is not an error anyone can see: both keys authenticate, sshd reports nothing, and neither the box nor the operator can say which one the environment block holds — so revoking the wrong one reads as a broken deploy. A plain re-run therefore reports the installed key's fingerprint and generates nothing, and `DD_CTL_ROTATE=1` **replaces**. That is the single deliberate exception to append-never-rewrite for `authorized_keys` (which is right, because a botched rewrite on a tunnel-only box is unrecoverable): backup first, build beside and rename atomically, and require every non-dispatch line to come back byte-for-byte — so a rotation cannot cost `gavin` his own key. |
+| **The live `dd-ctl` is root-owned, and that is the whole mechanism** ⚠︎SUPERSEDED | `/usr/local/bin/dd-ctl`, a real file, 0755, in a root-only-writable directory — never a symlink into `~gavin/infra` and never the checkout's copy run in place. `gavin` owns the checkout, so a forced command resolving through anything `gavin` can rewrite is not a restriction: replace the target, get an unrestricted shell. It was never a boundary *against* `gavin`, who has sudo; it stops the holder of the **restricted key** rewriting the thing that restricts them. **It is not sufficient on its own** — the login shell runs first; see below. |
 
 ## `two` also runs a test bot, and what that bends
 
@@ -37,6 +40,39 @@ under rootless podman, deployed on demand over SSH. See
 [`deployments/destiny-director/`](../deployments/destiny-director/). Two things in this
 file bend for it, and both are scoped deliberately, because the whole point of writing
 them down was to stop them being re-derived loosely elsewhere.
+
+> ### ⚠ SUPERSEDED, Aug 2026 — read this before the rest of the section
+>
+> **There is no `dd-ctl` and no `root-setup.sh`.** Deploys are plain `podman-compose`
+> commands run in the shell of an unprivileged account (`claude`) that is **not** in
+> `wheel`. [`hosts/two/setup/README.md`](../hosts/two/setup/README.md) is the build.
+>
+> Everything below about the forced command, its argument-less verbs, the root-owned
+> dispatcher, the dispatch key and `DD_CTL_KEY_B64` describes an arrangement that no
+> longer exists. It is kept because the reasoning is still the reasoning — and because
+> the last subsection below called this outcome and named the wrong trigger for it.
+>
+> **What changed and why.** That subsection concluded a dedicated deploy account was
+> "worth doing on the day `gavin` loses sudo, and not obviously before." The trigger was
+> different: the account is for an **agent**, which needs to deploy, tear down and retry
+> freely — and a fixed six-verb dispatcher cannot express that. Given a full shell was
+> going to be needed either way, the question stopped being "how tightly can the verbs
+> be constrained" and became "which account should hold that shell". An unprivileged one.
+>
+> **What it bought.** The dispatcher existed only because an escape landed on an account
+> with sudo. With the deploy account unprivileged, an escape lands on the deploy account
+> — so ~800 lines of shell whose correctness *was* the boundary are replaced by uid
+> separation the kernel enforces. Two properties that were script-enforced are now
+> enforced by the OS: the deploy account cannot become root (no `wheel`), and cannot
+> choose the deployed image (the checkout is operator-owned and group-readable, at
+> `/srv/infra`). The ambient-login-shell problem below dissolves with it — `claude`'s
+> shell is `/bin/sh` with an empty home.
+>
+> **What it did not buy.** Resource exhaustion is unchanged: no cgroup delegation means
+> no memory limit is possible, and the plausible OOM victim is still `cloudflared`, the
+> only way in. That is mitigated the other way round now — `cloudflared` is pinned to
+> `oom_score_adj -1000`, everything the deploy account runs starts at `+500`. Lateral
+> movement onto the LAN is closed with iptables rather than a VLAN.
 
 ### The `SOURCE` pin is absent here, and only here
 
@@ -72,13 +108,14 @@ this paragraph.
 
 Every other stack changes by editing this repo. This one changes by
 `ssh two deploy-beacon`, which pulls the branch tag in `compose.yaml` and recreates the
-container. The deploy is recorded on the box (`dd-ctl`'s audit log), not here.
+container. The deploy is not recorded anywhere now — the dispatcher that kept an audit
+log is gone.
 
 That is deliberate: it is a rapidly-iterated test bot, and a commit per deploy would be
 pure noise in a repository whose value is that its history is all signal. The trade is
 real and worth stating — **this repo cannot tell you which commit is running on `two`.**
 It can tell you which *branch*, because that is a tracked literal in `compose.yaml`; the
-commit is `dd-ctl status`'s answer alone, and the README says so rather than leaving the
+commit is `podman inspect`'s answer alone, and the README says so rather than leaving the
 gap to be found.
 
 That split is the reason the branch is not a `.env` variable. The deployed version is

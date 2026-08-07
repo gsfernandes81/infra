@@ -7,8 +7,8 @@
 # ghcr.io/gsfernandes81/destiny-director.
 #
 # And there would be nothing stable to write down even if there were somewhere to write
-# it: compose.yaml names a MOVING BRANCH TAG (`:dev`), and `dd-ctl deploy-beacon` pulls
-# it unconditionally, so every deploy takes whatever that branch points at then. A sha
+# it: compose.yaml names a MOVING BRANCH TAG (`:dev`), and every deploy pulls it
+# unconditionally, so a deploy takes whatever that branch points at then. A sha
 # in this file would go stale the next time anyone pushed, silently, and nothing on
 # either side could catch it — the shape of pass-for-the-wrong-reason docs/decisions.md
 # ends on. The two facts are one design, not two exceptions: the deploy deliberately
@@ -16,8 +16,9 @@
 #
 # WHAT IS RECORDED WHERE, since the answer is split:
 #   which line of code    compose.yaml, tracked here — the one knob, a literal tag
-#   which commit          only the box. `dd-ctl status` on `two`.
-#   which deploys ran     ~gavin/.local/state/dd-ctl/audit.log on `two`
+#   which commit          only the box. `podman inspect dd-beacon --format '{{.Image}}'`
+#   which deploys ran     nowhere. The dispatcher that kept an audit log is gone; a
+#                         deploy is now a shell command in the deploy user's history.
 #
 # So the line below records provenance, and only that. bin/check-sources recognises a
 # URL-only SOURCE and reports the stack as `registry-deployed` — not drift, not
