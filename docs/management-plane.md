@@ -173,12 +173,19 @@ two-way secret scan ritual in [`../CLAUDE.md`](../CLAUDE.md) retires with it.
 
 **It also dissolves the per-host `.env` problem without a design of its own.** Today
 `deployments/<stack>/.env` is one file, so a stack carrying host-specific values cannot be
-*defined once* and run on two hosts. **No stack exercises this today**, and the way it is
-avoided is worth seeing: Syncthing runs on both `zero` and `one`, as two separate
-definitions — `deployments/syncthing/` for `zero`, and a `syncthing` service inside
-`deployments/torrents/` for `one`. Duplication is the current answer to running one thing
-on two hosts. That is a latent limit on exactly the mobility this document is for, and
-`host_vars/` / `group_vars/` is what removes it.
+*defined once* and run on two hosts.
+
+**Nothing exercises this today, and the near-miss is worth stating so it is not
+mis-read.** Syncthing runs on both `zero` and `one`, which looks like the case — it is
+not. They are two different services that happen to be the same software: `zero`'s
+(`deployments/syncthing/`, `syncthing.gsrpi.uk`, `/media/syncthing`) syncs the general
+share, and `one`'s (a service inside `deployments/torrents/`, `syncthing-torrents.gsrpi.uk`,
+`/media/torrents`) distributes completed torrents. Two definitions because there are two
+jobs, not because one definition could not stretch to two hosts.
+
+So the limit is **latent rather than worked around** — no stack in this repo runs on two
+hosts at all, and the first one that wants to will meet it. That is exactly the mobility
+this document is for, and `host_vars/` / `group_vars/` is what removes it.
 
 Two costs to record rather than discover:
 
