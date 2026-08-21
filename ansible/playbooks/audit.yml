@@ -45,6 +45,14 @@
       # The {% raw %} guard is load-bearing: Docker's --format is Go template syntax and
       # uses the same {{ }} delimiters as Jinja, so without it Ansible tries to resolve
       # `.Name` as an Ansible variable and the task dies before docker ever sees it.
+      #
+      # NEVER WIDEN THIS FORMAT STRING TO `{{json .}}`, AND NEVER ADD `.Config.Env`.
+      # Six named fields are extracted on purpose. `ionic-traces` and `destiny-director`
+      # pass their secrets with `env_file:`, so those containers' Config.Env holds a live
+      # Discord token and a MySQL root password — and this task's output is rendered into
+      # docs/fleet-inventory.md, which is COMMITTED. A dump-everything format would put
+      # those secrets in git history, where CLAUDE.md's two-way scan would find them only
+      # after the fact. `{{json .}}` is the obvious simplification and it is the bug.
       ansible.builtin.shell: >-
         set -o pipefail;
         {{ container_cli }} ps -aq | xargs -r {{ container_cli }} inspect --format

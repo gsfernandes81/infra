@@ -7,6 +7,14 @@
   It records what the BOXES say, not what this repo says, and that is the point: every
   fact below used to live in prose in three places and had drifted in all three. Anything
   here that surprises you is a real difference between the repo and the fleet.
+
+  THIS FILE IS COMMITTED. Whatever the audit collects lands in git history. That is why
+  the playbook extracts six named container fields rather than dumping inspect output:
+  Config.Env on the bot containers holds live tokens. If you widen what is gathered,
+  widen it knowing this file is the destination.
+
+  Commit FULL runs only. A --limit run says PARTIAL RUN at the top and must not be
+  committed over a complete one.
 -->
 
 Generated {{ report_generated }} — from the hosts, not from this repo.
