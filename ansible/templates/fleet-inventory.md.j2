@@ -32,7 +32,9 @@ as a picture of the fleet.
 ## `{{ host }}`
 
 {% if facts.distribution is defined %}
-{{ facts.distribution }} {{ facts.distribution_version }} · kernel {{ facts.kernel }} · {{ facts.architecture }} · {{ facts.memtotal_mb }} MB RAM
+{{ facts.distribution }} {{ facts.distribution_version }} · kernel {{ facts.kernel }}
+<!-- No arch or RAM here: hosts/<host>/system/hardware.md owns what does not change,
+     this file owns what does. Reporting both in two formats is what started this. -->
 {% else %}
 **UNREACHABLE** — no facts gathered. Nothing below is known for this host.
 {% endif %}

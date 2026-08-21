@@ -32,7 +32,12 @@ kind = "SD"
 
 
 [overrides.sda]
-bay = "?"
+# LUN 0 of the Sabrent dual bridge. Read 2026-08-21 from the sysfs path:
+# sda and sdb are both under usb2/2-1/2-1:1.0 and differ only in the final LUN
+# (1:0:0:0 vs 1:0:0:1), which is the bay. sdc sits alone on usb4, i.e. its own
+# enclosure. That matches the SMART blast-radius note below, which already said
+# sdc is alone on its bridge and sda/sdb share one.
+bay = "0"
 role = "bcache cache (sda1) + swap (sda3); sda2 unused"
 kind = "SSD"
 form_factor = "2.5in"
@@ -50,7 +55,8 @@ make it live data."""
 
 
 [overrides.sdb]
-bay = "?"
+# LUN 1 of the same Sabrent bridge as sda — see the note under [overrides.sda].
+bay = "1"
 role = "btrfs RAID1 member, backing disk for bcache1"
 kind = "HDD"
 note = """
