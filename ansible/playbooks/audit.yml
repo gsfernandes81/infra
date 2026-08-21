@@ -31,7 +31,23 @@
       # The authoritative answer to "what is published here" — better than any compose
       # file, because it is what the kernel thinks. -p needs root for process names; the
       # socket list itself does not, so a failed become still leaves useful output.
-      ansible.builtin.command: ss -H -ltnp
+      #
+      # ss(8) is iproute2, and only `zero` has it — BusyBox provides netstat but not ss,
+      # so this read came back UNREADABLE on `one` and `two` until the fallback existed.
+      # netstat is the right fallback rather than a second-best one: docs/recovery.md
+      # already greps `netstat -tln` to check the ports after a reboot, so it is the tool
+      # this fleet reaches for anyway.
+      #
+      # Spelled as an explicit if/else, not `command -v ss && ss || netstat`: CLAUDE.md
+      # records that `a && b || c` tests b's status, so a present-but-failing ss would
+      # silently fall through and the output would not say which tool answered.
+      ansible.builtin.shell: |
+        if command -v ss >/dev/null 2>&1; then
+          ss -H -ltnp
+        else
+          echo "# ss(8) absent on this host — netstat below, different columns"
+          netstat -tlnp 2>/dev/null || netstat -tln
+        fi
       register: audit_sockets
       changed_when: false
       check_mode: false

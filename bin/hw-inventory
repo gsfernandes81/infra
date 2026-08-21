@@ -390,9 +390,14 @@ def usb_topology():
     if root.exists():
         for dev in sorted(root.iterdir()):
             product = read(dev / "product")
+            # `manufacturer` as well as `product`: without it `one`'s Sabrent bridge
+            # reads "Dual SATA Bridge", losing the vendor — and the vendor is half of
+            # how you recognise the enclosure in your hand.
+            vendor = read(dev / "manufacturer")
             vid, pid = read(dev / "idVendor"), read(dev / "idProduct")
             if product or vid:
-                lines.append(f"{dev.name:<10} {vid}:{pid}  {product}")
+                name = " ".join(x for x in (vendor, product) if x)
+                lines.append(f"{dev.name:<10} {vid}:{pid}  {name}")
     tree = run(["lsusb", "-t"])
     # Keep it only if it really is a tree. BusyBox answers `-t` with a flat listing
     # and exit 0, which would silently paste a second copy of the block above.
