@@ -86,17 +86,27 @@
         audit_sockets.rc | default(1) != 0
         or (audit_containers.rc | default(0)) not in [0]
 
-- name: Render the fleet inventory
-  hosts: localhost
-  connection: local
-  # Facts ON here, unlike most localhost plays: the report is stamped with
-  # ansible_date_time, and an inventory of a live fleet with no date on it is a document
-  # you cannot tell is stale.
-  gather_facts: true
-
-  tasks:
     - name: Write the report
+      # In THIS play, delegated, rather than a second play against localhost. A second
+      # play is the obvious shape and it has a trap: `--limit zero` excludes localhost
+      # too, so the play matches no hosts, the report is silently never written, and the
+      # run still reports ok=4 failed=0. Delegating keeps the render inside the play that
+      # gathered the facts, so it happens whatever --limit says.
+      #
+      # run_once with the linear strategy runs this after every host has finished the
+      # tasks above, so hostvars are fully populated by the time the template renders.
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../templates/fleet-inventory.md.j2"
         dest: "{{ audit_report }}"
         mode: "0644"
+      delegate_to: localhost
+      run_once: true
+      vars:
+        # lookups always run on the control node, so this is the phone's clock and not
+        # some audited host's — which matters, since one thing this audit has already
+        # found is a host whose container timestamps sit in 1970.
+        report_generated: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+        # Which hosts this run actually asked. A --limit run renders the others as
+        # UNREACHABLE, and without this line a partial report is indistinguishable from
+        # a full one where two hosts were down.
+        audited_hosts: "{{ ansible_play_hosts_all }}"

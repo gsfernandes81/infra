@@ -9,7 +9,14 @@
   here that surprises you is a real difference between the repo and the fleet.
 -->
 
-Generated {{ ansible_date_time.iso8601 | default('(no timestamp — run with gather_facts)') }} — from the hosts, not from this repo.
+Generated {{ report_generated }} — from the hosts, not from this repo.
+
+Asked this run: {{ audited_hosts | join(', ') }}.
+{% if audited_hosts | length < groups['fleet'] | length %}
+**PARTIAL RUN.** Hosts missing from that list were **not asked** — they are rendered
+below as UNREACHABLE, which here means "not audited", not "down". Do not read this file
+as a picture of the fleet.
+{% endif %}
 
 {% for host in groups['fleet'] %}
 {% set h = hostvars[host] %}
@@ -26,7 +33,7 @@ Generated {{ ansible_date_time.iso8601 | default('(no timestamp — run with gat
 {% if host not in groups['containerized'] | default([]) %}
 Not audited for containers by design — see `ansible/inventory`.
 {% elif h.audit_containers is not defined or h.audit_containers.rc | default(1) != 0 %}
-**UNREADABLE.** The container runtime could not be queried{% if h.audit_containers.stderr | default('') %} (`{{ h.audit_containers.stderr | trim | truncate(120) }}`){% endif %}. This is not the same as "no containers" — treat it as unknown.
+**UNREADABLE.** The container runtime could not be queried{% set _err = (h.audit_containers | default({})).stderr | default('') %}{% if _err %} (`{{ _err | trim | truncate(120) }}`){% endif %}. This is not the same as "no containers" — treat it as unknown.
 {% elif not h.audit_containers.stdout | trim %}
 None.
 {% else %}
