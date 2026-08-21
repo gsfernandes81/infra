@@ -18,7 +18,6 @@ stored three to five times, by hand, in prose. So every one of them has drifted:
 | `zero` runs `or3-dev` on port 2224 | nowhere in this repo | absent |
 | 2222 = `dd-dev`, 2223 = `ds-dev`, 2224 = `or3-dev` | a **comment in or3's `dev/compose.yaml`** | the port registry for `zero` lives in the newest claimant's app repo |
 | `zero`'s dev containers | `README.md` says "two" and names `dd-dev`, `dd-mysql`, `ds-dev`; [`recovery.md`](recovery.md) names only `dd-dev` and `dd-mysql` | two records, both wrong, wrong differently |
-| `syncthing` runs on `one` | `README.md` ports line only — there is **no `hosts/one/syncthing` symlink** | a stack on two hosts that `hosts/` can express only once |
 | `zero` and `two` are onboarded | [`roadmap.md`](roadmap.md) §1 says they "aren't in it yet — only placeholder dirs" | stale; both have symlinks |
 | — | `roadmap.md` links `hosts/zero/HANDOFF.md` and `hosts/two/setup/root-setup.sh` | neither file exists |
 
@@ -173,9 +172,13 @@ been. Encrypted in a private repo it is versioned, reviewable and recoverable, a
 two-way secret scan ritual in [`../CLAUDE.md`](../CLAUDE.md) retires with it.
 
 **It also dissolves the per-host `.env` problem without a design of its own.** Today
-`deployments/<stack>/.env` is one file for one host, so a stack with host-specific values
-genuinely cannot run on two hosts — `syncthing` gets away with it only by having no `.env`
-at all. That is precisely what Ansible's `host_vars/` and `group_vars/` model.
+`deployments/<stack>/.env` is one file, so a stack carrying host-specific values cannot be
+*defined once* and run on two hosts. **No stack exercises this today**, and the way it is
+avoided is worth seeing: Syncthing runs on both `zero` and `one`, as two separate
+definitions — `deployments/syncthing/` for `zero`, and a `syncthing` service inside
+`deployments/torrents/` for `one`. Duplication is the current answer to running one thing
+on two hosts. That is a latent limit on exactly the mobility this document is for, and
+`host_vars/` / `group_vars/` is what removes it.
 
 Two costs to record rather than discover:
 
