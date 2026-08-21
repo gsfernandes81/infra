@@ -1,8 +1,4 @@
 ---
 extra_packages:
-  - btrfs-progs
-  - smartmontools    # present. NEVER `rc-update add smartd` HERE — see CLAUDE.md landmines:
-                     # bay 0 holds a failing SP900 that stalls the bridge and takes the
-                     # array with it. hw-inventory is safe because hw-inventory.toml skips
-                     # sda; a daemon would not read that file.
-  - zram-init
+  - docker
+  - docker-cli-compose

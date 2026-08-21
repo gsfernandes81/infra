@@ -1,12 +1,5 @@
 ---
 # Fleet-wide variables.
-#
-# host_vars/ is empty and that is deliberate: it is where per-host values go when one stack
-# needs different values on different hosts. Nothing needs that yet — no stack in this repo
-# runs on two hosts. (Syncthing looks like it does and does not: zero's syncs the general
-# share, one's distributes completed torrents from inside the torrents stack. Two jobs, two
-# definitions.) The directory exists now so Phase 4 is an addition rather than a
-# restructure. See docs/management-plane.md.
 
 # The container CLI, per host group. Only [containerized] hosts are asked.
 container_cli: docker
@@ -17,27 +10,46 @@ container_cli: docker
 # Termux and has no such path.
 ansible_python_interpreter: /usr/bin/python3
 
-# Packages every host must have, because this repo's own automation depends on them.
-# Kept short deliberately: the fleet-wide package audit of 2026-08-21 found that exactly
-# two absences had ever caused a fallback to be written, and this list exists to remove
-# those rather than to make three machines identical for its own sake.
+# ---------------------------------------------------------------- packages
 #
-#   iproute2  ss(8). Absent on one and two, which is why playbooks/audit.yml carries a
-#             netstat branch. That branch stays after this — it is correct, and a host
-#             built tomorrow will not have run this playbook yet.
-#   usbutils  lsusb -t. Absent on one, where BusyBox's applet answers -t with a flat
-#             listing and exit 0 — the divergence that made one's hardware.md look
-#             hand-edited for a while.
+# EVERY package the fleet installs is here unless there is very strong justification for
+# it being per-host. Today exactly one thing clears that bar — the container runtime —
+# and it is per-host because the hosts genuinely differ: `two` had docker and containerd
+# removed deliberately and must never get them back.
 #
-# The rest are already on all three and are named so a fresh host gets them without
-# anyone remembering: the tools recovery.md and hw-inventory reach for.
+# The bias is deliberate and it is the opposite of where this list started. A first pass
+# scattered smartmontools, btrfs-progs, bcache-tools, docs and zram-init across host_vars
+# on the reasoning that each host should carry only what its hardware needs. That produces
+# three machines that differ in ways nobody chose, which is what a fallback is written
+# against: audit.yml grew a netstat branch because ss was on one host out of three, and
+# one's hardware.md looked hand-edited for a week because usbutils was on two out of three.
+# Every divergence here has to earn itself; unexplained divergence is the bug.
+#
+# INSTALLING A TOOL IS NOT ENABLING IT.
+#   zram-init on `zero` does not mean zero runs zram — host-setup.md says it has the RAM
+#   and does not, and Alpine's package is a wrapper script plus a modprobe.d conf with no
+#   service to start. smartmontools on `two` does not mean anything polls: two has no
+#   hw-inventory.toml, so SMART is skipped there entirely, and `smartd` must never be put
+#   in a runlevel on `one` — see the landmine in CLAUDE.md. Having the tool present means
+#   it is there when a box is broken and the network is not helping.
 base_packages:
+  - bcache-tools
+  - btrfs-progs
+  - ca-certificates   # cloudflared validates Cloudflare's edge against this on all three;
+                      # hosts/two/setup/README.md notes losing it cuts the only way in
   - curl
+  - docs
   - fish
   - git
   - htop
-  - iproute2
+  - hwids-usb
+  - iproute2          # ss(8) — its absence is why audit.yml carries a netstat branch
+  - iptables          # named explicitly so `apk del`'s orphan reclaim can never take it:
+                      # netavark shells out to it while not depending on it, which is the
+                      # trap in CLAUDE.md that broke rootless podman days after a cleanup
   - lsblk
   - python3
+  - smartmontools
   - sudo
-  - usbutils
+  - usbutils          # lsusb -t — absent on one, where BusyBox answers -t with a flat list
+  - zram-init

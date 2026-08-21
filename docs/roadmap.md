@@ -210,8 +210,11 @@ failure in [recovery.md](recovery.md). `two` is the way in:
 
 **Stay on Alpine.** Diskless — running from RAM with the SD card read-only, committing
 only via `lbu commit` — would make the box whose entire purpose is surviving others'
-failures immune to SD-card corruption, and that matters more than package choice on
-hardware whose card has had a decade to wear out. It is **planned, not done**: `two` is
+failures immune to SD-card corruption, and that matters more than package choice on the
+box everything else falls back to. (This sentence used to say "hardware whose card has
+had a decade to wear out". The *board* is that old; the card is not — see
+[decisions.md](decisions.md). The case for diskless is corruption-immunity on the
+lifeboat, which stands on its own; it is not a race against a worn-out card.) It is **planned, not done**: `two` is
 a `sys` install today, and it now holds a Postgres data directory that an unsynced
 diskless system would lose on power loss. See [decisions.md](decisions.md); the two are
 not obviously compatible and that is unresolved. Only switch to Raspberry Pi OS if tang

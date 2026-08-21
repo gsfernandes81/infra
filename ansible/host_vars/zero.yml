@@ -1,8 +1,6 @@
 ---
-# Hardware- and role-driven, not taste. Everything here is already installed; the list
-# exists so a rebuilt `zero` gets it without anyone recalling why.
+# The container runtime, and nothing else. If something new lands here it needs the same
+# kind of justification this has: the hosts genuinely cannot share it.
 extra_packages:
-  - bcache-tools     # the data array assembles from bcache devices — see recovery.md
-  - btrfs-progs
-  - smartmontools    # present, verified 2026-08-21. NEVER pair with smartd — see CLAUDE.md
-  - docs
+  - docker
+  - docker-cli-compose

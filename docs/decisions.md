@@ -215,9 +215,16 @@ But it is not lifeboat duty either, and two costs are new:
   back roughly 34 MB, so the net standing position is better than before — but the peak
   is much higher, and nothing on this box can set a per-container memory limit (rootless
   podman under OpenRC has no cgroup delegation for user slices).
-- **Postgres writes continuously to a decade-old SD card.** That is the one that
-  eventually matters, because the lifeboat argument rests on that card outliving the
-  boxes it watches.
+- **Postgres writes continuously to the SD card.** Weaker than it was written, and the
+  correction matters because this argument appears in three places. **The board is a
+  decade old; the card is not** — confirmed by the owner, 2026-08-21. Every version of
+  this bullet, and roadmap §5, said "decade-old SD card" and reasoned from a card that
+  had had ten years to wear out. It had not. SD cards still wear, so a continuous
+  Postgres write load is still a cost worth watching and the lifeboat still rests on
+  that card outliving the boxes it watches — but the wear budget is a replaceable
+  fiver's worth of flash of known age, not an unknown remainder. Anything that leaned
+  on the stronger version, the diskless switch above included, leans on less than it
+  appeared to.
 
 **Settled for now: the bot yields.** If `two`'s lifeboat jobs are built (roadmap §5),
 they take precedence and this stack moves or goes. It is a test bot; they are the

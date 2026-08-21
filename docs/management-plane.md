@@ -106,8 +106,9 @@ Management-node duty is close enough to lifeboat duty to trigger that clause. Wh
 runs afterwards is `cloudflared`, `crond`, `sshd`, Ansible on demand, and eventually
 roadmap §5.
 
-**SD-card wear is the cost to watch.** The lifeboat argument rests on that decade-old card
-outliving the boxes it watches. Scheduled Ansible runs write logs and a fact cache; both
+**SD-card wear is the cost to watch.** The lifeboat argument rests on that card outliving
+the boxes it watches — the board is a decade old, the card is not, so the budget is real
+but not nearly spent. Scheduled Ansible runs write logs and a fact cache; both
 must go to tmpfs or be disabled, and no scheduled run may be frequent. This is a
 constraint on the implementation, not a detail — record what was chosen and why.
 

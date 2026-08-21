@@ -81,8 +81,9 @@ and it does not survive a reboot, because persisting it means boot-path code on 
 lifeboat box.
 
 Nothing household-critical goes here: no DNS, no backups, no log sink. A test bot is
-not household-critical either — but it does put a continuous Postgres write load on a
-decade-old SD card, which is the cost worth watching.
+not household-critical either — but it does put a continuous Postgres write load on the
+SD card, which is the cost worth watching. (The board is a decade old; the card is not —
+this line previously said otherwise. See docs/decisions.md.)
 
 ## Tang is not currently possible here
 

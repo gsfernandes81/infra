@@ -1,6 +1,19 @@
 ---
-# smartmontools is deliberately ABSENT. two's only drive is an SD card, which reports no
-# SMART, so the package buys nothing and costs writes on the card the lifeboat argument
-# depends on. See docs/host-setup.md.
+# THE ONE REAL EXCEPTION IN THE FLEET, AND IT IS LOAD-BEARING IN BOTH DIRECTIONS.
+#
+# `two` runs rootless podman. Docker and containerd were removed from it deliberately —
+# two daemons cost ~34 MB of a 475 MB board, and podman is daemonless. Adding `docker`
+# here would undo that, and CLAUDE.md's containerd landmine is about the reverse mistake
+# on the other two. Neither list may drift toward the other.
+#
+# The dependency set is the verified Alpine 3.24 armhf one from
+# hosts/two/setup/README.md step 1. iptables and ca-certificates are NOT here because they
+# are in base_packages, where they protect all three hosts from the orphan-reclaim trap
+# rather than just this one.
 extra_packages:
-  - zram-init
+  - podman
+  - podman-compose
+  - crun
+  - conmon
+  - netavark
+  - aardvark-dns
