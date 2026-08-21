@@ -1,7 +1,8 @@
 # The management plane
 
-> **Status: proposal. Nothing here is built.** This is the argument, written down before
-> the work, so the work can be argued with rather than reverse-engineered. Sections marked
+> **Status: in progress. Phase 0 done, Phase 1 written and unrun** — see *Sequencing*
+> below for what that means precisely. This is the argument, written down before the work,
+> so the work can be argued with rather than reverse-engineered. Sections marked
 > **DECIDED** are settled unless someone argues with the reason. Sections marked **OPEN**
 > are genuinely undecided and must not be quietly resolved by whoever implements first.
 >
@@ -328,6 +329,107 @@ logged in. `CLAUDE.md` says to calibrate a check against known-good state before
 its verdict; that step was skipped, and the result was a **failure for the wrong reason** —
 the same defect as a pass for the wrong reason, and harder to notice because a red result
 looks like information.
+
+## Sequencing, and where podman fits
+
+Ordered by risk, not by appeal. **Phases 0–2 change nothing on any host**, and they are the
+ones that answer the question this document started from.
+
+| # | Phase | Touches | Gated on | State |
+|---|---|---|---|---|
+| 0 | Control node on Termux, inventory, `ansible fleet -m ping` | nothing | — | **done** 2026-08-21 |
+| 1 | Read-only audit playbook | nothing | 0 | written, **not yet run against a host** |
+| 2 | `README.md` + `recovery.md` cite the generated inventory | docs only | 1 | |
+| 3 | First stack adopted: `send2ereader` on `one` | one stack, non-critical box | 2 | |
+| 4 | Vault: `send2ereader`, then `ionic-traces` | secrets for two stacks | 3 | |
+| 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | |
+| 6 | `dd` off `two` | `two`, `one` | arm64 CI, upstream | |
+| 7 | **Rootless podman on `one`** — roadmap §2 | `one` | 3 | |
+| 8 | `two` as the scheduled read-only control node | `two` | 6, 7 | |
+
+**Phase 7 moved.** Rootless podman was going to be a follow-on; it is a **precondition of
+Phase 8**, because `podman ps` as the connecting user needs no sudo. The audit playbook
+takes `-K` today only because `gavin` is not in the `docker` group and NOPASSWD sudo is
+refused, and a scheduled run cannot type a password. `decisions.md` said this in one line
+long before Ansible existed here: *"`gavin` not in `docker` group | Root-equivalent.
+**Rootless Podman removes the need.**"*
+
+**But it only removes it for `one`.** `zero` keeps needing sudo until MicroOS — see the
+table below — so Phase 8 starts out able to audit `one` unprivileged and `zero` not at all
+on a schedule. That is a partial unblock, and calling it a full one is the mistake to
+avoid.
+
+`one` first is also roadmap §2's own answer, for its own reason: it is the non-critical
+box, its stacks are disposable, and it is where the `bin/compose` docker-vs-podman-compose
+question finally gets tested against something real.
+
+### What rootless podman costs on OpenRC — the trade table
+
+| | `docker` group removed | memory limits |
+|---|---|---|
+| docker — today | no | yes |
+| rootless podman on OpenRC | **yes** | **no** |
+| rootful podman on OpenRC | no | yes |
+| rootless podman on MicroOS | **yes** | **yes** |
+
+On Alpine you pick one. On MicroOS you get both, because systemd performs the cgroup
+delegation. Rootful podman is not a middle path — it does not buy the thing rootless was
+for.
+
+**The limits half is upstream's position, not an inference from `two`.** Rootless with the
+`cgroupfs` manager is not a supported path for resource limits; the maintainer's answer to
+exactly this question is to use the systemd cgroup driver. Manual delegation is the obvious
+workaround and is documented failing: a non-root user cannot write
+`/sys/fs/cgroup/cgroup.subtree_control`, and even after `chown`-ing a subtree by hand the
+runtime still cannot write `cgroup.procs`.
+([podman#8330](https://github.com/containers/podman/issues/8330),
+[podman discussion #19158](https://github.com/containers/podman/discussions/19158).)
+
+**Autostart is *not* on this list, and an earlier draft wrongly said it was.** `podman-restart`
+covers rootful, and rootless on OpenRC is a small `local.d` or init script running
+`podman start --all` as the user. Not built in the way systemd user services and lingering
+are, but a few lines written once. The objection also differs in kind from the one
+`decisions.md` actually upheld: the mount-guard service was refused for adding *a new way
+for the box to come up with no containers* plus a false-failure mode, whereas an autostart
+script that fails leaves a booted, reachable box with no containers — the same state a
+power cut leaves today, since the dev containers are already `restart: no`. Degraded, not
+stranded. Confirm the mechanism against Alpine's own Podman wiki page before writing it.
+
+### The limit that would go quiet
+
+`deployments/syncthing/compose.yaml` declares `deploy.resources.limits.memory: 768M`, and
+Compose v2 enforces it. Under rootless podman on OpenRC that limit would be **silently
+ignored** — still in the file, still read as protection, enforcing nothing. A declared
+limit that does not bind is worse than no limit, for the reason this repo already knows: it
+stops you looking. Any host that converts must have its declared limits either proven to
+bind or deleted from the compose file.
+
+### `oom_score_adj` is a mitigation, not a replacement
+
+It decides **who dies once the box is already out of memory**. A memory cap makes the
+runaway fail inside its own cgroup, where nothing else notices. Everything between "started
+allocating" and "OOM killer fires" is thrashing and swap — which is where Immich's latency
+goes and where Postgres starts timing out — and the kernel's victim choice is a heuristic.
+It protects survival, not service. `two` already uses it correctly, pinning `cloudflared`
+to −1000 to keep the only way in alive; that is the job it is good at.
+
+**The better answer is the work already in flight.** `or3-dev` carries
+`mem_limit: 1536m` precisely so a build cannot reap Immich. Move the dev containers to a
+host that is not serving Immich — Phase 5 — and the constraint disappears without any
+cgroup configuration at all. Mobility solves this more cleanly than delegation would.
+
+### What `one` must answer before `zero` is considered
+
+Two questions, and they are why the test happens on the disposable box:
+
+- **Can an existing Postgres data directory be adopted, or does it need a dump and
+  restore?** That is the difference between a migration and a maintenance window on the
+  critical, remote box.
+- **Does `--userns=keep-id` map correctly onto the `/media` bind mounts, or does ownership
+  on disk have to change?** If ownership must change, that is a change to the data itself,
+  not merely to how it is served.
+
+A throwaway Immich on `one` answers both and risks nothing.
 
 ## Decision reversals this requires — record in `decisions.md`
 
