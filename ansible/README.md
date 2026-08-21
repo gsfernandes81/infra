@@ -67,6 +67,38 @@ knowledge, so it went.
 the number belongs in `docs/data-ledger.md` in the or3 repo; it is just a smaller number
 than this file used to claim.
 
+## Where "prefer the standard tool" loses — the audit's `docker inspect`
+
+`playbooks/audit.yml` reads containers with a hand-rolled `docker inspect --format`, not
+`community.docker.docker_container_info`, and that is deliberate rather than left over.
+It is the first case where the rule recorded in `docs/management-plane.md` does not win,
+so the reason is here rather than assumed.
+
+**Checked 2026-08-21, after two wrong guesses.** `docker_container_info` talks to the
+Docker API through the Python Docker SDK on the *target*. The SDK is absent on `zero` and
+`one`; Alpine does package it, as **`py3-docker-py`** (an earlier probe of mine looked for
+`py3-docker`, found nothing, and nearly concluded it was unavailable). So adopting it is
+possible — it costs `py3-docker-py` plus `py3-requests`, `py3-urllib3`,
+`py3-websocket-client` and `py3-packaging` on two hosts.
+
+Two things make the hand-roll the better answer here anyway:
+
+- **The narrow format string is a safety property, not a style.** `docs/fleet-inventory.md`
+  is committed to git. The format string extracts six named fields, so `Config.Env` — which
+  holds a live Discord token and a MySQL root password on the bot containers — is never in
+  the data at all. `docker_container_info` returns the entire inspect dict, Env included,
+  and one careless `to_nice_json` in the template would put those in git history. The
+  module makes a leak possible that the current shape makes impossible.
+- **The cost lands on the critical box.** Five Python packages on `zero` to replace four
+  lines of shell that work is not what "more to type" meant.
+
+`community.docker` still earns its place: **`docker_compose_v2` needs no SDK** — it invokes
+the Compose CLI plugin directly, requiring only Docker CLI with compose ≥ 2.18.0 — which is
+what makes retiring `bin/compose` at Phase 3 cheap. Worth knowing that it parses CLI output
+rather than using an API, and upstream says a new Compose plugin release can break it; that
+is a reason to keep `recovery.md`'s bring-back commands as plain `docker compose`, which
+this repo was going to do anyway.
+
 ## The two things in here that are easy to break
 
 **The `{% raw %}` guard in `audit.yml`.** Docker's `--format` is Go template syntax and
