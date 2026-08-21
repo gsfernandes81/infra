@@ -419,6 +419,33 @@ to −1000 to keep the only way in alive; that is the job it is good at.
 host that is not serving Immich — Phase 5 — and the constraint disappears without any
 cgroup configuration at all. Mobility solves this more cleanly than delegation would.
 
+### `bin/compose` goes, at Phase 3 — DECIDED
+
+Ansible drives stacks through `community.docker`, and `bin/compose` is deleted rather than
+wrapped. An earlier draft here said the opposite — that the playbook should call
+`bin/compose` so "how a stack is driven" had one spelling — and that was the wrong read of
+which spelling is worth keeping.
+
+**The deciding argument is that stock tooling is knowledge that transfers.** `docker
+compose --project-directory … -f …` is longer to type than `bin/compose immich up -d`, and
+it is known to every operator, every agent and every search result in the world.
+`bin/compose` is known to this repository. On the box you reach at 3am from a ship link,
+the command that needs no local knowledge is worth more than the one that is short.
+
+What it did turns out to be covered already, which is why this is cheap:
+
+- **`--project-directory` pinning** was belt-and-braces. `hosts/<host>/<stack>` is a
+  symlink to the same directory, so `.env` is literally the same file, and the project
+  name cannot drift because *every compose file declares `name:`* — a repo invariant that
+  predates the wrapper.
+- **Refusing `destiny-director` by name** is error-message quality, not a guard. That
+  stack interpolates variables that exist only on `two`, so running it elsewhere fails
+  regardless — just less legibly.
+
+**The work is not the deletion.** It is rewriting [`recovery.md`](recovery.md)'s bring-back
+commands in the same commit, so the document read when a box has rebooted never names a
+script that no longer exists. Do both together or neither.
+
 ### What `one` must answer before `zero` is considered
 
 Two questions, and they are why the test happens on the disposable box:
