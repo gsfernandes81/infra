@@ -151,6 +151,13 @@ Then grep the *directory*, not the file, before declaring it done:
   package installed months earlier. Alpine does not add it to a runlevel on install, so
   the package is safe; the trap is the obvious next step, someone seeing `smartd` and
   thinking "monitoring, good".
+  **`smartmontools` is now fleet-wide** — it is in `base_packages` in
+  `ansible/group_vars/fleet.yml`, so `ansible/playbooks/packages.yml` puts it on all
+  three, and the comment there says why installing a tool is not enabling it. That makes
+  this landmine *more* live, not less: the tool is now present on `one` by policy, so the
+  only thing standing between the fleet and a ten-minute array outage is nobody running
+  `rc-update add smartd`. If `rc-status --all | grep smartd` ever returns a line on `one`,
+  that is the incident, and the fix is `rc-update del smartd` before anything else.
 - **"Exited" is not "absent".** A stack with an exited container, a registered compose
   project, or surviving named volumes must be torn down properly. Deleting its files
   first orphans them permanently.
