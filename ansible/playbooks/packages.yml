@@ -1,7 +1,7 @@
 ---
 # The first playbook in this repo that CHANGES a host. Everything before it reads.
 #
-#     ansible-playbook playbooks/packages.yml -K --check --diff --limit one   # prove
+#     ansible-playbook playbooks/packages.yml --check --diff --limit one      # prove, no -K
 #     ansible-playbook playbooks/packages.yml -K --diff --limit one           # apply
 #
 # Apply smallest blast radius first: one, then two, then zero.
@@ -37,7 +37,7 @@
 - name: Bring every host up to the declared package set
   hosts: fleet
   gather_facts: true
-  become: true
+  become: false
 
   vars:
     declared_packages: "{{ base_packages + (extra_packages | default([])) }}"
@@ -50,7 +50,18 @@
       community.general.apk:
         name: "{{ declared_packages }}"
         state: present
-        update_cache: true
+        # Updating the index WRITES to the host — /var/cache/apk and apk's log. A --check
+        # run must not do that: a check with a side effect is a small version of exactly
+        # what this repo keeps designing against. Verified unprivileged on all three,
+        # 2026-08-21: `apk update` fails with "Unable to open log: Permission denied".
+        update_cache: "{{ not ansible_check_mode }}"
+      # Escalate only when actually installing. `apk add --simulate` needs no root —
+      # measured on all three hosts, same day — so a --check run of this playbook costs no
+      # sudo password at all. That matters more than it looks: the cheapest, safest way to
+      # ask "what would change" is the one you will actually run before changing anything,
+      # so it is the one that must not demand a credential. An earlier revision had -K on
+      # --check purely because the play escalated unconditionally.
+      become: "{{ not ansible_check_mode }}"
       register: pkg
 
     - name: Name what changed
