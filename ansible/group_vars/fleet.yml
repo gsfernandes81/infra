@@ -1,0 +1,12 @@
+---
+# Fleet-wide variables.
+#
+# host_vars/ is empty and that is deliberate: it is where per-host values go when one stack
+# needs different values on different hosts. Nothing needs that yet — no stack in this repo
+# runs on two hosts. (Syncthing looks like it does and does not: zero's syncs the general
+# share, one's distributes completed torrents from inside the torrents stack. Two jobs, two
+# definitions.) The directory exists now so Phase 4 is an addition rather than a
+# restructure. See docs/management-plane.md.
+
+# The container CLI, per host group. Only [containerized] hosts are asked.
+container_cli: docker

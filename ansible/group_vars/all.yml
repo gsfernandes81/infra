@@ -1,0 +1,8 @@
+---
+# Applies to every host INCLUDING the implicit localhost, which is what renders the
+# report. Keeping it here rather than in fleet.yml avoids the second play having to reach
+# into hostvars for a value it is about to use itself.
+
+# Where the audit report is written, on the CONTROL NODE. Anchored to the playbook rather
+# than the working directory, so it lands in the repo whichever directory you ran from.
+audit_report: "{{ playbook_dir }}/../../docs/fleet-inventory.md"

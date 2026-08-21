@@ -1,0 +1,102 @@
+---
+# Phase 1 — the read-only audit. What actually runs where.
+#
+#     cd ansible && ansible-playbook playbooks/audit.yml -K
+#
+# This CHANGES NOTHING on any host. Every task is a read, every one is
+# `changed_when: false`, and there is no handler, no template and no copy aimed at a
+# target. The only file written is the report, on the control node.
+#
+# WHY -K IS NEEDED, and why that is the design rather than a wart:
+#   `gavin` is not in the `docker` group — decisions.md, because it is root-equivalent —
+#   and NOPASSWD sudo is in roadmap.md's "Not doing". So reading the docker socket costs
+#   one password prompt per run. That is fine for a human-run audit and it is exactly why
+#   Phase 7 (a scheduled read-only audit from `two`) CANNOT simply run this playbook: it
+#   would need passwordless sudo on zero and one, which this repo refuses. That problem is
+#   real, it is not solved here, and the shape of the answer is probably the one
+#   bin/hw-inventory already uses — each host writes its own report locally, and Ansible
+#   fetches it unprivileged. Recorded so it is met at design time rather than at 03:00.
+#
+# `check_mode: false` on the command tasks is deliberate: under --check, command/shell are
+# skipped by default, so a `--check` run of a read-only playbook would report nothing and
+# look like success. A read is safe in check mode by definition.
+
+- name: Audit what runs on the fleet
+  hosts: fleet
+  gather_facts: true
+  become: false
+
+  tasks:
+    - name: Listening TCP sockets
+      # The authoritative answer to "what is published here" — better than any compose
+      # file, because it is what the kernel thinks. -p needs root for process names; the
+      # socket list itself does not, so a failed become still leaves useful output.
+      ansible.builtin.command: ss -H -ltnp
+      register: audit_sockets
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      become: true
+
+    - name: Containers, with restart policy and published ports
+      # One inspect per host rather than ps + inspect merged in Jinja. `xargs -r` is what
+      # stops a host with no containers running a bare `docker inspect` and failing.
+      #
+      # The {% raw %} guard is load-bearing: Docker's --format is Go template syntax and
+      # uses the same {{ }} delimiters as Jinja, so without it Ansible tries to resolve
+      # `.Name` as an Ansible variable and the task dies before docker ever sees it.
+      ansible.builtin.shell: >-
+        set -o pipefail;
+        {{ container_cli }} ps -aq | xargs -r {{ container_cli }} inspect --format
+        '{% raw %}{{.Name}}|{{.Config.Image}}|{{.State.Status}}|{{.HostConfig.RestartPolicy.Name}}|{{index .Config.Labels "com.docker.compose.project"}}|{{range $p, $c := .NetworkSettings.Ports}}{{if $c}}{{(index $c 0).HostIp}}:{{(index $c 0).HostPort}}->{{$p}} {{end}}{{end}}{% endraw %}'
+        | sed 's|^/||'
+      args:
+        executable: /bin/sh
+      register: audit_containers
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      become: true
+      when: inventory_hostname in groups['containerized'] | default([])
+
+    - name: Named volumes
+      # Here because a dev container's volume IS its login and its history — 22 MB of
+      # transcripts in or3-dev's case — so a volume nobody has listed is a thing nobody
+      # knows they would lose. See docs/management-plane.md.
+      ansible.builtin.command: >-
+        {{ container_cli }} volume ls --format
+        '{% raw %}{{.Name}}{% endraw %}'
+      register: audit_volumes
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      become: true
+      when: inventory_hostname in groups['containerized'] | default([])
+
+    - name: Report what could not be read
+      # A partial audit that looks complete is the wrong-reason pass this repo keeps
+      # designing against. If a read failed, say so on the host it failed on.
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}: could not read
+          {{ 'sockets ' if audit_sockets.rc | default(1) != 0 else '' }}
+          {{ 'containers ' if (audit_containers.rc | default(0)) not in [0] else '' }}
+          — the report will show this as UNREADABLE, not as empty.
+      when: >-
+        audit_sockets.rc | default(1) != 0
+        or (audit_containers.rc | default(0)) not in [0]
+
+- name: Render the fleet inventory
+  hosts: localhost
+  connection: local
+  # Facts ON here, unlike most localhost plays: the report is stamped with
+  # ansible_date_time, and an inventory of a live fleet with no date on it is a document
+  # you cannot tell is stale.
+  gather_facts: true
+
+  tasks:
+    - name: Write the report
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/fleet-inventory.md.j2"
+        dest: "{{ audit_report }}"
+        mode: "0644"

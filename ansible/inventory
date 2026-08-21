@@ -1,0 +1,24 @@
+# The inventory is deliberately thin.
+#
+# ~/.ssh/config owns the transport — hostname, user, port, ProxyCommand, identity file.
+# Repeating any of it here would give two copies of "how to reach this box" that can
+# disagree, and the one Ansible uses would not be the one you test with `ssh zero`. It
+# also means the Cloudflare Access path, when it lands, is a ProxyCommand change in one
+# file and this inventory never moves.
+#
+# If an SSH alias differs from the name wanted here, bridge it with ansible_host — the
+# value is handed to ssh, so an alias resolves through ~/.ssh/config exactly as it would
+# on the command line.
+
+[fleet]
+zero
+one
+two
+
+# Hosts that run containers, and are therefore worth auditing for them. `two` is absent
+# on purpose: its one stack is leaving (see docs/management-plane.md), its podman is
+# rootless under a different account, and auditing it for containers would mean reaching
+# that account. It stays in [fleet] and reports OS facts like the others.
+[containerized]
+zero
+one

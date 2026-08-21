@@ -28,3 +28,11 @@ qBittorrent.conf
 
 # check-system-drift is Python
 __pycache__/
+
+# Ansible retry files — a list of failed hosts, regenerated on demand.
+*.retry
+
+# Vault password files. The password belongs on the control node, never in the repo.
+.vault_pass
+.vault-pass
+vault_pass.txt
