@@ -481,6 +481,22 @@ Two entries change. Neither is a small edit and both should carry their reason.
 `decisions.md`'s **"Claude dev containers stay in their own app repos"** is *not* reversed.
 It gains a sentence saying where they are now recorded.
 
+## A principle to apply more widely, later
+
+**Prefer the interface an outsider already knows over the one this repo invented.** It is
+why `bin/compose` goes at Phase 3, why the hand-rolled `apk` loop went, and — the owner's
+own example — why `make` carries so much of the project management in these repos instead
+of bespoke scripts. A `Makefile` is an interface every developer and every agent can read
+on sight; a script in `bin/` is knowledge that exists only here, and has to be learned
+before anything can be done with it.
+
+Not a sweep to run now, and deliberately not scoped: `bin/` currently holds
+`check-sources`, `check-system-drift`, `check-boot-layout`, `check-mount-guards`,
+`hw-inventory` and `install-system-file`, and several of those earn their place by doing
+something no standard tool does. The rule is not "delete scripts", it is "when a standard
+tool would do, the standard tool wins, even when it is more to type". Applying it host by
+host is a later pass with its own review.
+
 ## OPEN — do not resolve these by implementing
 
 1. **Does a moved dev container carry its history, or start clean with only the login?**
