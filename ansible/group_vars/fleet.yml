@@ -16,3 +16,28 @@ container_cli: docker
 # both warns and can pick wrong. Scoped to the fleet, never global: the control node is
 # Termux and has no such path.
 ansible_python_interpreter: /usr/bin/python3
+
+# Packages every host must have, because this repo's own automation depends on them.
+# Kept short deliberately: the fleet-wide package audit of 2026-08-21 found that exactly
+# two absences had ever caused a fallback to be written, and this list exists to remove
+# those rather than to make three machines identical for its own sake.
+#
+#   iproute2  ss(8). Absent on one and two, which is why playbooks/audit.yml carries a
+#             netstat branch. That branch stays after this — it is correct, and a host
+#             built tomorrow will not have run this playbook yet.
+#   usbutils  lsusb -t. Absent on one, where BusyBox's applet answers -t with a flat
+#             listing and exit 0 — the divergence that made one's hardware.md look
+#             hand-edited for a while.
+#
+# The rest are already on all three and are named so a fresh host gets them without
+# anyone remembering: the tools recovery.md and hw-inventory reach for.
+base_packages:
+  - curl
+  - fish
+  - git
+  - htop
+  - iproute2
+  - lsblk
+  - python3
+  - sudo
+  - usbutils

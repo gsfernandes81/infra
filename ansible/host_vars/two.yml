@@ -1,0 +1,6 @@
+---
+# smartmontools is deliberately ABSENT. two's only drive is an SD card, which reports no
+# SMART, so the package buys nothing and costs writes on the card the lifeboat argument
+# depends on. See docs/host-setup.md.
+extra_packages:
+  - zram-init

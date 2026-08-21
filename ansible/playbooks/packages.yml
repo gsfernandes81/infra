@@ -1,0 +1,62 @@
+---
+# The first playbook in this repo that CHANGES a host. Everything before it reads.
+#
+#     ansible-playbook playbooks/packages.yml -K --check --diff --limit one   # prove
+#     ansible-playbook playbooks/packages.yml -K --limit one                  # apply
+#
+# Order to apply in, smallest blast radius first: one, then two, then zero. `zero` needs
+# nothing at all — the 2026-08-21 audit found it already holds every package in these
+# lists — so the critical, remote box is untouched by this playbook. Run it there anyway,
+# once the others are done, to prove that claim rather than assume it: a clean run on
+# zero is the calibration, and if it wants to change something, the LIST is wrong.
+#
+# INSTALL ONLY. NOTHING HERE MAY EVER REMOVE A PACKAGE.
+#   `apk del` reclaims orphaned dependencies, and CLAUDE.md records what that costs: on
+#   `two`, iptables was present only as an auto-installed dependency of docker/k3s, and
+#   netavark shells out to it while not depending on it — so a tidy-up would have broken
+#   rootless podman networking days later, for a reason nobody would connect back. The
+#   audit found `bcache-tools` and `btrfs-progs` installed on hosts that have neither
+#   bcache nor btrfs. Leave them. They are inert; removing them is not.
+#
+# WHY THE FALLBACKS STAY
+#   Installing iproute2 does not license deleting the netstat branch in audit.yml. A host
+#   built tomorrow has not run this playbook yet, and the branch is what makes that
+#   host's Listening section a reading rather than an UNREADABLE. The packages remove the
+#   need to *rely* on the fallback, not the need to *have* one.
+
+- name: Bring every host up to the declared package set
+  hosts: fleet
+  gather_facts: true
+  become: true
+
+  tasks:
+    - name: Refuse to run on anything but Alpine
+      # apk is assumed throughout. On MicroOS this playbook is wrong rather than merely
+      # ineffective, and roadmap §3 has one and zero headed there — so this fails loudly
+      # on the day that lands instead of silently doing nothing.
+      ansible.builtin.assert:
+        that: ansible_facts.pkg_mgr == 'apk'
+        fail_msg: >-
+          {{ inventory_hostname }} uses {{ ansible_facts.pkg_mgr }}, not apk.
+          This playbook is Alpine-only — see roadmap.md §3.
+        success_msg: "apk — proceed"
+
+    - name: Install the base set and this host's extras
+      # state: present, never latest. `latest` would turn a package playbook into an
+      # unscheduled upgrade of whatever it names, on boxes where a kernel or docker
+      # bump is a thing you do while watching, not a side effect of adding lsusb.
+      ansible.builtin.apk:
+        name: "{{ base_packages + (extra_packages | default([])) }}"
+        state: present
+        update_cache: true
+      register: pkg_result
+
+    - name: Say what changed, per host
+      # The apk module reports a single changed/not-changed for the whole set, so this
+      # names the host and leaves the detail to --diff. A run that changes nothing is the
+      # expected steady state and should read as such rather than as nothing happening.
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}:
+          {{ 'PACKAGES INSTALLED — see --diff for which' if pkg_result.changed
+             else 'already complete, nothing to do' }}

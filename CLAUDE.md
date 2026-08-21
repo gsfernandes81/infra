@@ -141,6 +141,16 @@ Then grep the *directory*, not the file, before declaring it done:
   needs `iptables` while **not** depending on it — so it must be installed explicitly
   *before* the removal or rootless podman networking breaks days later, for a reason
   nobody would connect back to a docker cleanup.
+- **Install `smartmontools`; never add `smartd` to a runlevel on `one`.** The two are
+  not the same act. `bin/hw-inventory` polls once, when a person runs it, and honours
+  `smart_skip` in that host's `hw-inventory.toml` — which is why `one`'s failing bay-0
+  SP900 is named there and never touched. `smartd` is a daemon, knows nothing about that
+  file, and polls **every** disk on a schedule. On `one` that means periodically issuing
+  the INQUIRY that stalls the Sabrent bridge, which takes `sdb` and therefore the array
+  with it: a ten-minute outage, on a timer, for a reason nobody would connect to a
+  package installed months earlier. Alpine does not add it to a runlevel on install, so
+  the package is safe; the trap is the obvious next step, someone seeing `smartd` and
+  thinking "monitoring, good".
 - **"Exited" is not "absent".** A stack with an exited container, a registered compose
   project, or surviving named volumes must be torn down properly. Deleting its files
   first orphans them permanently.

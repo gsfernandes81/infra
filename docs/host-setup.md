@@ -44,8 +44,16 @@ invented reason is what gets copied into the next box's script. The verified 3.2
 [`../hosts/two/setup/README.md`](../hosts/two/setup/README.md) step 1, with the
 reasoning for each name.
 
-`smartmontools` is **missing on `zero`** and belongs there: `smartctl -d sat` is how you
-separate a failing disk from a flaky USB enclosure when btrfs reports corruption.
+`smartmontools` is **installed on `zero`** — verified 2026-08-21 by a fleet-wide package
+audit. This paragraph previously said it was missing and belonged there; that was already
+untrue when written, and `hosts/zero/system/hw-inventory.toml` was the file that gave it
+away, recording three real `smartctl -i -d sat` reads on 2026-08-04 which could not have
+run without it. `smartctl -d sat` is how you separate a failing disk from a flaky USB
+enclosure when btrfs reports corruption.
+
+It is **absent on `two`, and stays that way**: that box's only drive is an SD card, which
+reports no SMART at all, so the package would buy nothing and cost writes on the card the
+whole lifeboat argument rests on.
 
 ## sudo
 
