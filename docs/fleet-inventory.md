@@ -17,7 +17,7 @@
   committed over a complete one.
 -->
 
-Generated 2026-08-21T18:26:22Z — from the hosts, not from this repo.
+Generated 2026-08-21T23:35:54Z — from the hosts, not from this repo.
 
 Asked this run: zero, one, two.
 
@@ -97,19 +97,16 @@ Alpine 3.24.1 · kernel 6.18.35-0-rpi
 ### Listening
 
 ```
-# ss(8) absent on this host — netstat below, different columns
-Active Internet connections (only servers)
-Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name    
-tcp        0      0 0.0.0.0:3001            0.0.0.0:*               LISTEN      3965/docker-proxy
-tcp        0      0 0.0.0.0:8080            0.0.0.0:*               LISTEN      3860/docker-proxy
-tcp        0      0 127.0.0.1:20241         0.0.0.0:*               LISTEN      26929/cloudflared
-tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      2630/sshd [listener
-tcp        0      0 0.0.0.0:7777            0.0.0.0:*               LISTEN      4004/docker-proxy
-tcp        0      0 127.0.0.1:39281         0.0.0.0:*               LISTEN      2503/containerd
-tcp        0      0 :::3001                 :::*                    LISTEN      3975/docker-proxy
-tcp        0      0 :::8080                 :::*                    LISTEN      3868/docker-proxy
-tcp        0      0 :::22                   :::*                    LISTEN      2630/sshd [listener
-tcp        0      0 :::7777                 :::*                    LISTEN      4012/docker-proxy
+LISTEN 0      4096     0.0.0.0:3001  0.0.0.0:* users:(("docker-proxy",pid=3965,fd=8))
+LISTEN 0      4096     0.0.0.0:8080  0.0.0.0:* users:(("docker-proxy",pid=3860,fd=8))
+LISTEN 0      4096   127.0.0.1:20241 0.0.0.0:* users:(("cloudflared",pid=26929,fd=9))
+LISTEN 0      128      0.0.0.0:22    0.0.0.0:* users:(("sshd",pid=2630,fd=6))
+LISTEN 0      4096     0.0.0.0:7777  0.0.0.0:* users:(("docker-proxy",pid=4004,fd=8))
+LISTEN 0      4096   127.0.0.1:39281 0.0.0.0:* users:(("containerd",pid=2503,fd=14))
+LISTEN 0      4096        [::]:3001     [::]:* users:(("docker-proxy",pid=3975,fd=8))
+LISTEN 0      4096        [::]:8080     [::]:* users:(("docker-proxy",pid=3868,fd=8))
+LISTEN 0      128         [::]:22       [::]:* users:(("sshd",pid=2630,fd=7))
+LISTEN 0      4096        [::]:7777     [::]:* users:(("docker-proxy",pid=4012,fd=8))
 ```
 
 ### Volumes
@@ -129,12 +126,9 @@ Not audited for containers by design — see `ansible/inventory`.
 ### Listening
 
 ```
-# ss(8) absent on this host — netstat below, different columns
-Active Internet connections (only servers)
-Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name    
-tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      2046/sshd [listener
-tcp        0      0 127.0.0.1:20241         0.0.0.0:*               LISTEN      6593/cloudflared
-tcp        0      0 :::22                   :::*                    LISTEN      2046/sshd [listener
+LISTEN 0      128      0.0.0.0:22    0.0.0.0:* users:(("sshd",pid=2046,fd=6))
+LISTEN 0      4096   127.0.0.1:20241 0.0.0.0:* users:(("cloudflared",pid=6593,fd=10))
+LISTEN 0      128         [::]:22       [::]:* users:(("sshd",pid=2046,fd=7))
 ```
 
 ### Volumes
