@@ -38,7 +38,19 @@ base_packages:
   - ca-certificates   # cloudflared validates Cloudflare's edge against this on all three;
                       # hosts/two/setup/README.md notes losing it cuts the only way in
   - curl
-  - docs
+  # NO `docs`. It was here, and the --check run of 2026-08-21 is why it is not.
+  #
+  # `docs` is a metapackage that pulls the `-doc` subpackage of everything already
+  # installed, so it expands differently on every host — the opposite of the
+  # standardisation it was added for. On `one` it resolved to the entire TeX Live
+  # documentation set (texmf-dist-langarabic-doc, texmf-dist-langcjk-doc, texlive-doc,
+  # ghostscript-doc …) plus X11 library docs, onto a 1 GB Pi; on `two` it was ~90 -doc
+  # packages onto the lifeboat's SD card. Neither was asked for and neither is a tool.
+  #
+  # The original intent — man pages present when a box is broken and the network is not
+  # helping — is still reasonable and still unserved: `mandoc` + `man-pages` gives the
+  # Linux man pages but not per-tool ones, since those live in each package's own -doc.
+  # If that is wanted it is its own decision, with the per-host size measured first.
   - fish
   - git
   - htop
