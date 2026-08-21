@@ -61,7 +61,10 @@ naming first. Nothing below is weakened by this document.
 - **`gavin` is not in the `docker` group, and nothing privileged runs from an agent
   session.** Ansible does not change this: playbooks are run by a person, from a control
   node, in their own terminal.
-- **`bin/compose` stays docker-only and stays refusing `destiny-director` by name.**
+- ~~**`bin/compose` stays docker-only and stays refusing `destiny-director` by name.**~~
+  **Reversed** — see *`bin/compose` goes, at Phase 3* below. Struck rather than deleted,
+  because this list is what the document promises it is not disturbing, and quietly
+  dropping a line from it would make the promise unfalsifiable.
 
 ## The control plane — DECIDED
 
