@@ -9,7 +9,7 @@
   here that surprises you is a real difference between the repo and the fleet.
 
   THIS FILE IS COMMITTED. Whatever the audit collects lands in git history. That is why
-  the playbook extracts six named container fields rather than dumping inspect output:
+  the playbook extracts seven named container fields rather than dumping inspect output:
   Config.Env on the bot containers holds live tokens. If you widen what is gathered,
   widen it knowing this file is the destination.
 
@@ -52,7 +52,18 @@ None.
 |---|---|---|---|---|---|
 {% for line in h.audit_containers.stdout_lines %}
 {% set f = line.split('|') %}
-| `{{ f[0] }}` | {{ f[1] | default('') }} | {{ f[2] | default('') }} | {{ f[3] | default('') or '—' }} | {{ f[4] | default('') or '—' }} | {{ f[5] | default('') | trim or '—' }} |
+{# Published is the one cell that cannot be read straight off Docker. A container that
+   does not own its network stack has NO port mappings, so the raw answer is empty for
+   `syncthing` (host networking) and for `torrent` (inside gluetun's namespace) — and an
+   empty cell there says "publishes nothing", which is false for both. NetworkMode is
+   what tells the two apart, so the cell answers "how is this reached" instead. #}
+{% set net = f[5] | default('') | trim %}
+{% set pub = f[6] | default('') | trim %}
+{% set reach = pub if pub
+   else ('host net — see Listening' if net == 'host'
+   else (('net of `' ~ net.split(':', 1)[1][:12] ~ '`') if ':' in net
+   else '—')) %}
+| `{{ f[0] }}` | {{ f[1] | default('') }} | {{ f[2] | default('') }} | {{ f[3] | default('') or '—' }} | {{ f[4] | default('') or '—' }} | {{ reach }} |
 {% endfor %}
 {% endif %}
 
@@ -89,3 +100,16 @@ None.
 collapsed: a failed read looks exactly like an empty result, and treating one as the other
 is how a check passes for the wrong reason. A host that answered and holds nothing says
 `None`; a host that could not be asked says `UNREADABLE`.
+
+**Published is "how is this reached", not "what did Docker map".** A container on host
+networking or inside another container's namespace has no port mappings at all, so the
+literal answer for both Syncthings and for `torrent` is empty — and empty would read as
+"publishes nothing" while `zero`'s Syncthing serves 8384/22000 and `torrent` answers on
+8080. Those say `host net` and `net of <container>` instead, and the ports themselves are
+in **Listening**, which reads the kernel and so covers every case. A bare `—` here means
+Docker maps nothing *and* the container owns its own stack.
+
+**Listening is the authority when the two disagree.** Containers is what Docker was
+configured to do; Listening is what the box is doing. `one`'s Syncthing is the worked
+example: it is defined with host networking on 8384/22000, it is `exited`, and neither
+port appears below it.
