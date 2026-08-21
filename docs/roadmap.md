@@ -1,14 +1,15 @@
 # What's left
 
-`one` is fully in this repo and working. `zero` and `two` aren't in it yet — only
-placeholder dirs under `hosts/`. None of this is urgent; none of it should be started
-remotely except step 1.
+All three hosts are in this repo now: `hosts/<host>/` carries each one's stacks as
+symlinks into `deployments/`, plus its tracked `/etc` copies. None of what follows is
+urgent; none of it should be started remotely.
 
-## 1. Onboard `zero` into this repo
+## 1. Onboard `zero` into this repo — done
 
-Same exercise as `one`, but every container is critical and the box is remote. The
-brief is in [`../hosts/zero/HANDOFF.md`](../hosts/zero/HANDOFF.md) — inventory and plan
-first, no changes.
+`hosts/zero/` carries `immich` and `syncthing` and its tracked `/etc` copies; `two`
+followed, with `destiny-director` and [its whole build](../hosts/two/setup/README.md).
+The entry stays rather than being deleted so the numbering below keeps the anchors that
+`README.md`, `host-setup.md`, `decisions.md` and both host READMEs link to.
 
 ## 2. Podman on `one`
 
@@ -18,7 +19,7 @@ first, no changes.
 podman-compose as `gavin`, with docker and containerd removed, for the
 `destiny-director` test stack. It is a much smaller sample than the torrents stack —
 one bot and a Postgres, no VPN namespace sharing — but the packaging is real and
-verified for Alpine 3.24 `armhf` in `hosts/two/setup/root-setup.sh` §3, including the
+verified for Alpine 3.24 `armhf` in [`hosts/two/setup/README.md`](../hosts/two/setup/README.md) step 1, including the
 `iptables`/netavark trap. Read that before doing this on `one`.
 
 `bin/compose` still execs `docker compose` and stays that way until this conversion —
