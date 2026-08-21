@@ -1,8 +1,8 @@
 ---
 # The first playbook in this repo that CHANGES a host. Everything before it reads.
 #
-#     ansible-playbook playbooks/packages.yml -K --check --diff --limit one   # prove
-#     ansible-playbook playbooks/packages.yml -K --diff --limit one           # apply
+#     ansible-playbook playbooks/packages.yml --check --diff --limit one   # prove (no -K)
+#     ansible-playbook playbooks/packages.yml -K --diff --limit one        # apply
 #
 # Apply smallest blast radius first: one, then two, then zero.
 #
@@ -11,6 +11,15 @@
 # runtime, because `two` had docker and containerd removed deliberately. Unexplained
 # divergence between the three boxes is treated as the bug — it is what made audit.yml
 # grow a netstat branch and made one's hardware.md look hand-edited.
+#
+# ansible.builtin ONLY — NO COLLECTIONS.
+#   This fleet runs ansible-core, not the `ansible` metapackage, because the control node
+#   is a phone on a metered radio and the metapackage is ~50 MB of collections for AWS,
+#   Azure and VMware to talk to three Pis. So `community.general.apk` is not available and
+#   neither is anything else outside ansible.builtin. An earlier version of this file used
+#   `ansible.builtin.apk`, which simply does not exist — apk has always been in
+#   community.general — and it failed at the first task. The same mistake had already cost
+#   a run with `stdout_callback = yaml`. See ansible/README.md.
 #
 # INSTALL ONLY. NOTHING HERE MAY EVER REMOVE A PACKAGE.
 #   `apk del` reclaims orphaned dependencies, and CLAUDE.md records the cost: on `two`,
@@ -24,34 +33,79 @@
 #   built tomorrow has not run this playbook yet, and that branch is what makes its
 #   Listening section a reading rather than an UNREADABLE. Packages remove the need to
 #   *rely* on a fallback, not the need to *have* one.
-#
-# No platform guard. An earlier version asserted `pkg_mgr == 'apk'` before doing anything;
-# that is scaffolding, and stand-up is heading into Ansible too, at which point these
-# playbooks should compose rather than each re-checking the platform. The apk module fails
-# clearly enough on its own when apk is not there.
 
 - name: Bring every host up to the declared package set
   hosts: fleet
   gather_facts: true
-  become: true
+  become: false
+
+  vars:
+    declared_packages: "{{ base_packages + (extra_packages | default([])) }}"
 
   tasks:
-    - name: Install the base set and this host's runtime
-      # state: present, never latest. `latest` would turn a package playbook into an
-      # unscheduled upgrade of whatever it names, on boxes where a kernel or docker bump
-      # is something you do while watching, not a side effect of adding lsusb.
-      ansible.builtin.apk:
-        name: "{{ base_packages + (extra_packages | default([])) }}"
-        state: present
-        update_cache: true
-      register: pkg_result
+    - name: Find which declared packages are absent
+      # Unprivileged: `apk info -e` reads the installed database and needs no root, so a
+      # --check run of this playbook needs no sudo password at all. That matters — the
+      # cheapest way to look should not require the credential that lets you change things.
+      #
+      # check_mode: false because a read is safe in check mode by definition, and without
+      # it --check would skip this and report nothing to install on every host.
+      ansible.builtin.shell: |
+        for p in {{ declared_packages | join(' ') }}; do
+          apk info -e "$p" >/dev/null 2>&1 || printf '%s ' "$p"
+        done
+      register: pkg_missing
+      changed_when: false
+      check_mode: false
 
-    - name: Say what happened, per host
-      # The apk module reports one changed/not-changed for the whole set, so this names
-      # the host and leaves the detail to --diff. A run that changes nothing is the
-      # expected steady state and should read as that, not as nothing having happened.
+    - name: Say what is missing, by name
+      # The whole reason for doing this by hand rather than with a package module: the
+      # dry run names the packages. A module reports one changed/not-changed for the set,
+      # which tells you something will happen but not what — and "something will happen"
+      # on a remote box you cannot see is not a thing worth acting on.
       ansible.builtin.debug:
         msg: >-
           {{ inventory_hostname }}:
-          {{ 'PACKAGES INSTALLED — see --diff for which' if pkg_result.changed
-             else 'already complete, nothing to do' }}
+          {{ ('WOULD INSTALL — ' + pkg_missing.stdout | trim)
+             if pkg_missing.stdout | trim
+             else 'complete, nothing to install' }}
+
+    - name: Install the missing packages
+      # argv form, so a package name can never be re-split by a shell.
+      #
+      # `add` and nothing else. Not `upgrade`, not `--upgrade`: this must never become an
+      # unscheduled kernel or docker bump on a remote box because someone wanted lsusb.
+      # `--no-cache` refreshes the index for this transaction without leaving cache files
+      # behind — relevant on `two`, where writes land on the SD card.
+      #
+      # `command` is skipped under --check automatically, which is what makes the dry run
+      # above a genuine dry run rather than a description of something already done.
+      ansible.builtin.command:
+        argv: "{{ ['apk', 'add', '--no-cache'] + pkg_missing.stdout.split() }}"
+      when: pkg_missing.stdout | trim | length > 0
+      become: true
+      register: pkg_add
+      changed_when: pkg_add.rc == 0
+
+    - name: Confirm nothing is still missing
+      # Re-read rather than trust the installer's exit code. apk returning 0 says the
+      # transaction ran; this says the packages are actually there, which is the claim
+      # the playbook is really making.
+      ansible.builtin.shell: |
+        for p in {{ declared_packages | join(' ') }}; do
+          apk info -e "$p" >/dev/null 2>&1 || printf '%s ' "$p"
+        done
+      register: pkg_recheck
+      changed_when: false
+      check_mode: false
+      when: pkg_missing.stdout | trim | length > 0
+
+    - name: Fail if the re-read disagrees with the install
+      ansible.builtin.assert:
+        that: not (pkg_recheck.stdout | default('') | trim)
+        fail_msg: >-
+          {{ inventory_hostname }}: apk exited 0 but these are still absent —
+          {{ pkg_recheck.stdout | trim }}. A package name in the lists is probably wrong
+          for this architecture; `two` is armhf and does not carry everything.
+        success_msg: "{{ inventory_hostname }}: all declared packages present"
+      when: pkg_missing.stdout | trim | length > 0

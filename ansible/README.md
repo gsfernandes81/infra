@@ -35,6 +35,27 @@ repo refuses. The likely answer is the shape `bin/hw-inventory` already uses —
 writes its own report locally, and Ansible fetches it unprivileged — but that is not
 built, and pretending otherwise now would only find it later.
 
+## ansible-core only — no collections
+
+This fleet installs **`ansible-core`**, not the `ansible` metapackage. The control node is
+a phone on a metered radio, and the metapackage is roughly 50 MB of collections for AWS,
+Azure and VMware in order to talk to three Raspberry Pis.
+
+**So only `ansible.builtin.*` may be used here.** That is a real constraint, not a
+preference, and it has already cost two runs:
+
+- `stdout_callback = yaml` lives in `community.general`. Every playbook run failed on the
+  callback until it was replaced with core's `result_format = yaml`, which does the same
+  job and ships in core.
+- `ansible.builtin.apk` **does not exist** — apk has always been `community.general.apk`.
+  `playbooks/packages.yml` failed at its first task until it was rewritten with
+  `ansible.builtin.shell` and `ansible.builtin.command`.
+
+Before using a module or plugin here, check it is in `ansible.builtin`. If something
+genuinely needs a collection, that is a decision with a data cost attached, and it belongs
+in `docs/data-ledger.md` in the or3 repo alongside every other metered purchase — not in a
+quiet `ansible-galaxy collection install`.
+
 ## The two things in here that are easy to break
 
 **The `{% raw %}` guard in `audit.yml`.** Docker's `--format` is Go template syntax and
