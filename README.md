@@ -67,19 +67,41 @@ monitoring — are the [roadmap's §5](docs/roadmap.md#5-two--keep-it-as-the-lif
 `sshd`, and now this stack. It is also the only host on **rootless podman**; docker and
 containerd are removed from it. See [decisions.md](docs/decisions.md).
 
-Ports on `one`: **8080** qBittorrent · **7777** ionic-traces · **3001** send2ereader ·
-**8384/22000** syncthing.
+### Ports
 
-Ports on `zero`: **2283** Immich · **8384/22000** syncthing · **2222/2223** dev containers.
+**These are what the compose files ask for. What is actually listening is
+[fleet-inventory.md](docs/fleet-inventory.md), generated from the boxes.** Where the two
+disagree, the inventory is right and something is down — that is the whole reason it
+exists, and the first run of it found exactly that on `one`.
 
-Ports on `two`: **none published.** The bot's web UI (8080) and its break-glass sshd
-(2222) exist inside the container and are deliberately not mapped — see the commented
-`ports:` block in `deployments/destiny-director/compose.yaml` for why.
+| Host | |
+|---|---|
+| `one` | **8080** qBittorrent (via gluetun) · **7777** ionic-traces · **3001** send2ereader · **8384/22000** syncthing |
+| `zero` | **2283** Immich · **8384/22000** syncthing · **127.0.0.1:2224** the `or3-dev` container |
+| `two` | **none published** — the bot's web UI (8080) and break-glass sshd (2222) exist inside the container and are deliberately not mapped. See the commented `ports:` block in `deployments/destiny-director/compose.yaml` |
 
-`zero` also runs two **Claude dev containers** (`dd-dev` + `dd-mysql`, `ds-dev`). They are
-deliberately **not** in this repo — they belong to their own application repos and are
-driven by `make dev` there. They are `restart=no` and hold live sessions. See
-[decisions.md](docs/decisions.md).
+Both Syncthings and `torrent` are on **host or shared networking**, so `docker ps` shows
+them publishing nothing. They are still reachable; the inventory's Published column says
+which case each is, and its Listening section is the answer that covers all of them.
+
+### Dev containers on `zero`
+
+Three, in their own application repos and **deliberately not in this one** — they are
+driven by `make dev` there, are `restart=no`, and hold live sessions and uncommitted
+worktrees. See [decisions.md](docs/decisions.md).
+
+| Container | Repo | SSH |
+|---|---|---|
+| `or3-dev` | `or3` | `127.0.0.1:2224` |
+| `dd-dev` (+ `dd-mysql`) | `destiny-director` | 2222 |
+| `ds-dev` | `dossier` | 2223 |
+
+**Only `or3-dev` was up at the last audit**, and only its port was listening. The other
+two being down is the normal resting state, not a fault: nothing starts them but a person.
+Their named volumes survive regardless, and those volumes are the thing that matters —
+`or3-dev_or3-claude` is 22 MB of login and session history, and a dev container that
+moves hosts without its volume arrives logged out and empty. The inventory lists every
+volume on both hosts for that reason.
 
 ## Secrets
 
@@ -101,6 +123,8 @@ None are in git. `.gitignore` covers `.env`, `*.key`, `qBittorrent.conf`, `*.sql
 | | |
 |---|---|
 | [recovery.md](docs/recovery.md) | It broke, or it rebooted. Start here. |
+| [fleet-inventory.md](docs/fleet-inventory.md) | What is *actually* running, read off the boxes. Generated — never hand-edited. |
+| [management-plane.md](docs/management-plane.md) | How the fleet is managed, and why it is Ansible. |
 | [host-setup.md](docs/host-setup.md) | Building one of these boxes from bare Alpine. |
 | [port-forwarding.md](docs/port-forwarding.md) | The fragile bit. Read before touching the torrents stack. |
 | [roadmap.md](docs/roadmap.md) | What's next, and the traps waiting in it. |

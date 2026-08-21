@@ -342,8 +342,9 @@ ones that answer the question this document started from.
 | # | Phase | Touches | Gated on | State |
 |---|---|---|---|---|
 | 0 | Control node on Termux, inventory, `ansible fleet -m ping` | nothing | — | **done** 2026-08-21 |
-| 1 | Read-only audit playbook | nothing | 0 | written, **not yet run against a host** |
-| 2 | `README.md` + `recovery.md` cite the generated inventory | docs only | 1 | |
+| 1 | Read-only audit playbook | nothing | 0 | **done** 2026-08-21 — run against all three; `docs/fleet-inventory.md` is generated and committed |
+| 1b | Fleet package standardisation — `playbooks/packages.yml` | all three | 1 | **done** 2026-08-21 |
+| 2 | `README.md` + `recovery.md` cite the generated inventory | docs only | 1 | **done** 2026-08-21 |
 | 3 | First stack adopted: `send2ereader` on `one` | one stack, non-critical box | 2 | |
 | 4 | Vault: `send2ereader`, then `ionic-traces` | secrets for two stacks | 3 | |
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | |
@@ -366,6 +367,33 @@ avoid.
 `one` first is also roadmap §2's own answer, for its own reason: it is the non-critical
 box, its stacks are disposable, and it is where the `bin/compose` docker-vs-podman-compose
 question finally gets tested against something real.
+
+### What Phases 1–2 actually bought
+
+Three things, and none of them was the plan's stated goal — which is the argument for
+having run the read-only phase before the writing ones.
+
+- **The audit found live faults nobody had reported.** `one`'s Syncthing is `exited`,
+  `mysql-ionic` is `restarting` in a crash loop, and two containers on `zero` report
+  uptimes in the 1970s because they started before NTP. None of that is in any prose in
+  this repo, and none of it would have been found by reading it.
+- **A `--check` run stopped a change rather than confirming one.** `docs` was in
+  `base_packages` for a day; the dry run showed it expanding to the entire TeX Live
+  documentation set on a 1 GB Pi. It was removed before anything was applied. Every
+  earlier dry run in this repo had agreed with the real one, which is how a dry run
+  becomes a formality — this is the one that paid for the habit.
+- **Standardising packages deleted two divergences that had been read as facts.** The
+  netstat branch in `audit.yml` existed because `ss` was on one host out of three, and
+  `one`'s `hardware.md` looked hand-edited because `usbutils` was on two out of three.
+  Both are gone, and the fallbacks stay: a host built tomorrow has not run
+  `packages.yml` yet.
+
+Phase 2's own corrections were smaller and all of the same shape — the docs asserted
+ports that were not listening (`8384/22000` on `one`, `2222` on `zero`) and a dev
+container count that was two when it is three. The fix is not better prose; it is that
+`README.md` and `recovery.md` now say **what the compose files ask for** and point at
+the generated inventory for **what the boxes are doing**, so the two can be compared
+instead of quietly disagreeing.
 
 ### What rootless podman costs on OpenRC — the trade table
 
