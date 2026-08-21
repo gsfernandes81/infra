@@ -10,3 +10,9 @@
 
 # The container CLI, per host group. Only [containerized] hosts are asked.
 container_cli: docker
+
+# Pinned rather than discovered: all three hosts have /usr/bin/python3 — bin/hw-inventory
+# and bin/check-system-drift are Python and run there — and discovery on a minimal Alpine
+# both warns and can pick wrong. Scoped to the fleet, never global: the control node is
+# Termux and has no such path.
+ansible_python_interpreter: /usr/bin/python3

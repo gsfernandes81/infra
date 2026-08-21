@@ -1,0 +1,17 @@
+---
+# The control node is Termux, and two of Ansible's defaults are wrong there.
+#
+# 1. `~` does not expand to $HOME. Android's passwd entry for an app uid reports a home
+#    of /data, which is not writable, so the default remote_tmp of ~/.ansible/tmp becomes
+#    /data/.ansible/tmp and every delegated task dies with
+#    "Failed to transfer file ... No such file or directory". lookup('env', 'HOME') asks
+#    the environment instead of the passwd database, which is the one that is right here.
+#
+# 2. There is no /usr/bin/python3. ansible_playbook_python is whatever interpreter is
+#    running ansible-playbook — correct by construction, on Termux and anywhere else.
+#
+# This file applies to the delegated report-writing task in playbooks/audit.yml. It is
+# host_vars rather than a global setting because both values are wrong for the Pis.
+ansible_connection: local
+ansible_python_interpreter: "{{ ansible_playbook_python }}"
+ansible_remote_tmp: "{{ lookup('env', 'HOME') }}/.ansible/tmp"

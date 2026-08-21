@@ -22,3 +22,8 @@ two
 [containerized]
 zero
 one
+
+# Declared so host_vars/localhost.yml is loaded for the delegated report task. Termux
+# needs both an interpreter and a tmp path that Ansible's defaults get wrong there.
+[control]
+localhost

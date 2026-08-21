@@ -20,10 +20,11 @@ as a picture of the fleet.
 
 {% for host in groups['fleet'] %}
 {% set h = hostvars[host] %}
+{% set facts = h.ansible_facts | default({}) %}
 ## `{{ host }}`
 
-{% if h.ansible_distribution is defined %}
-{{ h.ansible_distribution }} {{ h.ansible_distribution_version }} · kernel {{ h.ansible_kernel }} · {{ h.ansible_architecture }} · {{ h.ansible_memtotal_mb }} MB RAM
+{% if facts.distribution is defined %}
+{{ facts.distribution }} {{ facts.distribution_version }} · kernel {{ facts.kernel }} · {{ facts.architecture }} · {{ facts.memtotal_mb }} MB RAM
 {% else %}
 **UNREACHABLE** — no facts gathered. Nothing below is known for this host.
 {% endif %}
