@@ -35,26 +35,37 @@ repo refuses. The likely answer is the shape `bin/hw-inventory` already uses —
 writes its own report locally, and Ansible fetches it unprivileged — but that is not
 built, and pretending otherwise now would only find it later.
 
-## ansible-core only — no collections
+## ansible-core, plus three named collections
 
-This fleet installs **`ansible-core`**, not the `ansible` metapackage. The control node is
-a phone on a metered radio, and the metapackage is roughly 50 MB of collections for AWS,
-Azure and VMware in order to talk to three Raspberry Pis.
+This fleet installs **`ansible-core`**, not the `ansible` metapackage — the metapackage
+bundles about a hundred collections for AWS, Azure and VMware in order to talk to three
+Raspberry Pis. The collections it actually needs are named in
+[`requirements.yml`](requirements.yml) and installed deliberately:
 
-**So only `ansible.builtin.*` may be used here.** That is a real constraint, not a
-preference, and it has already cost two runs:
+```sh
+ansible-galaxy collection install -r requirements.yml
+```
 
-- `stdout_callback = yaml` lives in `community.general`. Every playbook run failed on the
-  callback until it was replaced with core's `result_format = yaml`, which does the same
-  job and ships in core.
-- `ansible.builtin.apk` **does not exist** — apk has always been `community.general.apk`.
-  `playbooks/packages.yml` failed at its first task until it was rewritten with
-  `ansible.builtin.shell` and `ansible.builtin.command`.
+**Check `ansible.builtin` first, then add a collection on purpose.** Two runs were lost to
+reaching for things that were not there:
 
-Before using a module or plugin here, check it is in `ansible.builtin`. If something
-genuinely needs a collection, that is a decision with a data cost attached, and it belongs
-in `docs/data-ledger.md` in the or3 repo alongside every other metered purchase — not in a
-quiet `ansible-galaxy collection install`.
+- `stdout_callback = yaml` lives in `community.general`, and core's `result_format = yaml`
+  does the same job — so that one was a core setting all along.
+- `ansible.builtin.apk` **does not exist and never did**; apk has always been
+  `community.general.apk`. `playbooks/packages.yml` failed at its first task.
+
+**The cost argument that shaped this was wrong, and correcting it changed a decision.**
+The apk task was first rewritten by hand rather than adding a collection, on the belief
+that collections were expensive over the phone's metered radio. Measured from Galaxy's API
+on 2026-08-21: `ansible.posix` 0.16 MiB, `community.general` 2.70 MiB, `community.docker`
+0.57 MiB. The ~50 MiB figure was the metapackage, not any one collection. The hand-rolled
+version was then also inconsistent with dropping `bin/compose` for being repo-specific
+knowledge, so it went.
+
+`containers.podman` is 7.93 MiB and is **deferred** until Phase 7 needs it — see
+`requirements.yml`. Adding a collection is still a decision with a number attached, and
+the number belongs in `docs/data-ledger.md` in the or3 repo; it is just a smaller number
+than this file used to claim.
 
 ## The two things in here that are easy to break
 

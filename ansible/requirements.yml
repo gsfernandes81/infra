@@ -1,0 +1,34 @@
+---
+# Collection dependencies. Install with:
+#
+#     ansible-galaxy collection install -r requirements.yml
+#
+# Sized before committing to them, 2026-08-21, from Galaxy's API rather than by
+# downloading: ansible.posix 0.16 MiB, community.general 2.70 MiB, community.docker
+# 0.57 MiB — 3.43 MiB in total over the phone's metered radio. Record it in or3's
+# docs/data-ledger.md when installed.
+collections:
+  # authorized_key and sysctl. authorized_key earns its place on decisions.md's own
+  # reasoning: "append-never-rewrite for authorized_keys (which is right, because a
+  # botched rewrite on a tunnel-only box is unrecoverable)". It manages one key
+  # idempotently; hand-rolling that with lineinfile is precisely the botched rewrite,
+  # on precisely the box where it cannot be undone.
+  - name: ansible.posix
+    version: ">=2.2.2"
+
+  # apk. There is no ansible.builtin.apk and there never was.
+  - name: community.general
+    version: ">=13.3.0"
+
+  # docker_compose_v2 and docker_container_info — what replaces bin/compose at Phase 3.
+  # See docs/management-plane.md.
+  - name: community.docker
+    version: ">=5.2.2"
+
+# DEFERRED, deliberately:
+#
+#   containers.podman — 7.93 MiB, the most expensive of the four, and not needed until
+#   Phase 7 puts rootless podman on `one`. It may not be needed then either: if podman
+#   ends up driven through podman-compose the same way docker is driven through
+#   docker_compose_v2, community.docker may cover it. Decide when there is something to
+#   test it against, not now.

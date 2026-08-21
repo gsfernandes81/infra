@@ -1,8 +1,8 @@
 ---
 # The first playbook in this repo that CHANGES a host. Everything before it reads.
 #
-#     ansible-playbook playbooks/packages.yml --check --diff --limit one   # prove (no -K)
-#     ansible-playbook playbooks/packages.yml -K --diff --limit one        # apply
+#     ansible-playbook playbooks/packages.yml -K --check --diff --limit one   # prove
+#     ansible-playbook playbooks/packages.yml -K --diff --limit one           # apply
 #
 # Apply smallest blast radius first: one, then two, then zero.
 #
@@ -12,21 +12,21 @@
 # divergence between the three boxes is treated as the bug — it is what made audit.yml
 # grow a netstat branch and made one's hardware.md look hand-edited.
 #
-# ansible.builtin ONLY — NO COLLECTIONS.
-#   This fleet runs ansible-core, not the `ansible` metapackage, because the control node
-#   is a phone on a metered radio and the metapackage is ~50 MB of collections for AWS,
-#   Azure and VMware to talk to three Pis. So `community.general.apk` is not available and
-#   neither is anything else outside ansible.builtin. An earlier version of this file used
-#   `ansible.builtin.apk`, which simply does not exist — apk has always been in
-#   community.general — and it failed at the first task. The same mistake had already cost
-#   a run with `stdout_callback = yaml`. See ansible/README.md.
+# NEEDS community.general — see ../requirements.yml. An earlier version of this file did
+# the work with a hand-rolled `apk info -e` loop and `command: apk add`, on the reasoning
+# that collections were expensive over a metered radio. That reasoning was wrong on the
+# numbers: community.general is 2.70 MiB, not the ~50 MiB of the `ansible` metapackage it
+# was confused with. It was also inconsistent — this repo is dropping `bin/compose`
+# because stock tooling is knowledge that transfers, and a bespoke shell loop is
+# repo-specific knowledge in exactly the same way.
 #
 # INSTALL ONLY. NOTHING HERE MAY EVER REMOVE A PACKAGE.
 #   `apk del` reclaims orphaned dependencies, and CLAUDE.md records the cost: on `two`,
 #   iptables was present only as an auto-installed dependency of docker/k3s, and netavark
 #   shells out to it while not depending on it — so a tidy-up would have broken rootless
 #   podman networking days later, for a reason nobody would connect back. Anything found
-#   installed that these lists do not name is left alone.
+#   installed that these lists do not name is left alone. That is why `state: present`
+#   rather than any spelling that prunes.
 #
 # WHY THE FALLBACKS STAY
 #   Installing iproute2 does not license deleting the netstat branch in audit.yml. A host
@@ -37,75 +37,60 @@
 - name: Bring every host up to the declared package set
   hosts: fleet
   gather_facts: true
-  become: false
+  become: true
 
   vars:
     declared_packages: "{{ base_packages + (extra_packages | default([])) }}"
 
   tasks:
-    - name: Find which declared packages are absent
-      # Unprivileged: `apk info -e` reads the installed database and needs no root, so a
-      # --check run of this playbook needs no sudo password at all. That matters — the
-      # cheapest way to look should not require the credential that lets you change things.
-      #
-      # check_mode: false because a read is safe in check mode by definition, and without
-      # it --check would skip this and report nothing to install on every host.
-      ansible.builtin.shell: |
-        for p in {{ declared_packages | join(' ') }}; do
-          apk info -e "$p" >/dev/null 2>&1 || printf '%s ' "$p"
-        done
-      register: pkg_missing
-      changed_when: false
-      check_mode: false
+    - name: Install the base set and this host's runtime
+      # state: present, never latest. `latest` would turn a package playbook into an
+      # unscheduled upgrade of whatever it names, on boxes where a kernel or docker bump
+      # is something you do while watching, not a side effect of adding lsusb.
+      community.general.apk:
+        name: "{{ declared_packages }}"
+        state: present
+        update_cache: true
+      register: pkg
 
-    - name: Say what is missing, by name
-      # The whole reason for doing this by hand rather than with a package module: the
-      # dry run names the packages. A module reports one changed/not-changed for the set,
-      # which tells you something will happen but not what — and "something will happen"
-      # on a remote box you cannot see is not a thing worth acting on.
+    - name: Name what changed
+      # The module returns the packages it acted on, so say them. "Something changed on
+      # zero" is not actionable when you cannot see zero; a list of names is.
       ansible.builtin.debug:
         msg: >-
           {{ inventory_hostname }}:
-          {{ ('WOULD INSTALL — ' + pkg_missing.stdout | trim)
-             if pkg_missing.stdout | trim
-             else 'complete, nothing to install' }}
+          {{ ('changed — ' + (pkg.packages | default([]) | join(', '))) if pkg.changed
+             else 'already complete, nothing to do' }}
 
-    - name: Install the missing packages
-      # argv form, so a package name can never be re-split by a shell.
-      #
-      # `add` and nothing else. Not `upgrade`, not `--upgrade`: this must never become an
-      # unscheduled kernel or docker bump on a remote box because someone wanted lsusb.
-      # `--no-cache` refreshes the index for this transaction without leaving cache files
-      # behind — relevant on `two`, where writes land on the SD card.
-      #
-      # `command` is skipped under --check automatically, which is what makes the dry run
-      # above a genuine dry run rather than a description of something already done.
-      ansible.builtin.command:
-        argv: "{{ ['apk', 'add', '--no-cache'] + pkg_missing.stdout.split() }}"
-      when: pkg_missing.stdout | trim | length > 0
-      become: true
-      register: pkg_add
-      changed_when: pkg_add.rc == 0
-
-    - name: Confirm nothing is still missing
-      # Re-read rather than trust the installer's exit code. apk returning 0 says the
-      # transaction ran; this says the packages are actually there, which is the claim
-      # the playbook is really making.
+    - name: Re-read the installed set
+      # Not redundant with the module, and not distrust of it: the module reports that its
+      # transaction ran, this reports that the packages are present, and those are
+      # different claims. CLAUDE.md's rule is to verify from output or by re-reading state
+      # with unprivileged tools — `apk info -e` is exactly that, and needs no root.
       ansible.builtin.shell: |
         for p in {{ declared_packages | join(' ') }}; do
           apk info -e "$p" >/dev/null 2>&1 || printf '%s ' "$p"
         done
-      register: pkg_recheck
+      register: still_absent
       changed_when: false
       check_mode: false
-      when: pkg_missing.stdout | trim | length > 0
+      become: false
 
-    - name: Fail if the re-read disagrees with the install
+    - name: Fail if anything declared is still absent
+      # Skipped under --check, where the install has deliberately not happened yet and the
+      # re-read is only telling you what a real run would install.
       ansible.builtin.assert:
-        that: not (pkg_recheck.stdout | default('') | trim)
+        that: not (still_absent.stdout | trim)
         fail_msg: >-
-          {{ inventory_hostname }}: apk exited 0 but these are still absent —
-          {{ pkg_recheck.stdout | trim }}. A package name in the lists is probably wrong
+          {{ inventory_hostname }}: these are still absent after the install —
+          {{ still_absent.stdout | trim }}. A package name in the lists is probably wrong
           for this architecture; `two` is armhf and does not carry everything.
         success_msg: "{{ inventory_hostname }}: all declared packages present"
-      when: pkg_missing.stdout | trim | length > 0
+      when: not ansible_check_mode
+
+    - name: Under --check, say what a real run would install
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}: would install —
+          {{ still_absent.stdout | trim | default('nothing, already complete', true) }}
+      when: ansible_check_mode
