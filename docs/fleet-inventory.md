@@ -9,7 +9,7 @@
   here that surprises you is a real difference between the repo and the fleet.
 
   THIS FILE IS COMMITTED. Whatever the audit collects lands in git history. That is why
-  the playbook extracts seven named container fields rather than dumping inspect output:
+  the playbook extracts eight named container fields rather than dumping inspect output:
   Config.Env on the bot containers holds live tokens. If you widen what is gathered,
   widen it knowing this file is the destination.
 
@@ -17,7 +17,7 @@
   committed over a complete one.
 -->
 
-Generated 2026-08-21T23:58:22Z — from the hosts, not from this repo.
+Generated 2026-08-22T00:11:00Z — from the hosts, not from this repo.
 
 Asked this run: zero, one, two.
 
@@ -90,7 +90,7 @@ Alpine 3.24.1 · kernel 6.18.35-0-rpi
 | `mysql-ionic` | mysql:8 | restarting | always | ionic | — |
 | `bot` | ionic-bot | running | always | ionic | — |
 | `web` | ionic-web | running | always | ionic | 0.0.0.0:7777->7777/tcp |
-| `torrent` | linuxserver/qbittorrent:latest | running | always | torrents | net of `28e553afdece` |
+| `torrent` | linuxserver/qbittorrent:latest | running | always | torrents | net of `torrents-gluetun-1` |
 | `torrents-gluetun-1` | qmcgaw/gluetun:latest | running | always | torrents | 0.0.0.0:8080->8080/tcp |
 | `syncthing` | syncthing/syncthing | exited | unless-stopped | torrents | host net — see Listening |
 
@@ -148,7 +148,10 @@ literal answer for both Syncthings and for `torrent` is empty — and empty woul
 "publishes nothing" while `zero`'s Syncthing serves 8384/22000 and `torrent` answers on
 8080. Those say `host net` and `net of <container>` instead, and the ports themselves are
 in **Listening**, which reads the kernel and so covers every case. A bare `—` here means
-Docker maps nothing *and* the container owns its own stack.
+Docker maps nothing *and* the container owns its own stack. The peer is shown by **name**,
+not by the container id Docker actually reports — an id changes on every recreate, and
+recreating gluetun is routine here, so the id would put a meaningless diff in this file
+each time.
 
 **Listening is the authority when the two disagree.** Containers is what Docker was
 configured to do; Listening is what the box is doing. `one`'s Syncthing is the worked
