@@ -148,13 +148,14 @@ logs:
 login:
 	$(DOCKER) exec -it $(CONTAINER) bash /home/dev/login.sh
 
-# `abduco -A`: attach the session named `claude`, creating it if it is not there. So
-# this is the same command whether you are starting the work or coming back to it, and
-# it is the same session `ssh -t infra-dev abduco -A claude claude` reaches from the
-# phone — one session, not one per way in. Ctrl-\ detaches; the claude under it keeps
-# running, container and all.
+# `dev-claude` is in the image, and calling it here rather than spelling out the abduco
+# line is the point: the phone's ssh config calls the same program, so there is one
+# definition of what a claude session is instead of two that can drift. It attaches the
+# session if it exists and creates it if not, so this is the same command whether you are
+# starting the work or coming back to it — and it is the SAME session the phone reaches,
+# not one per way in. Ctrl-\ detaches; the claude under it keeps running.
 claude:
-	$(DOCKER) exec -it $(CONTAINER) abduco -A claude claude
+	$(DOCKER) exec -it $(CONTAINER) dev-claude
 
 shell:
 	$(DOCKER) exec -it $(CONTAINER) fish

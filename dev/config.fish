@@ -13,9 +13,9 @@
 # login shell either and this does NOT run for it. A client whose ssh config says
 # `RemoteCommand abduco -A claude claude` lands in /home/dev, and claude then asks to
 # trust a directory that is not the repo — the entrypoint seeded the trust dialog for
-# /workspace. The client has to cd itself; ansible/playbooks/dev-client.yml does, and
-# says why. Widening the guard here would fix that one case by breaking every scripted
-# `fish -c`, which is the worse trade.
+# /workspace. The answer is /usr/local/bin/dev-claude, which cds and then execs abduco,
+# so a client says `dev-claude` and knows none of this. Widening the guard here would
+# fix that one case by breaking every scripted `fish -c`, which is the worse trade.
 # Guarded on the directory too: a container brought up with the bind mount
 # missing should still hand you a shell to find that out from.
 if status is-login

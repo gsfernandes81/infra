@@ -256,17 +256,12 @@
             HostName {{ dev_hostname }}
             User dev
             RequestTTY yes
-            # The `cd` is not decoration. sshd runs a RemoteCommand as `$SHELL -c '…'`,
-            # which is NOT a login shell — so config.fish's `status is-login` guard is
-            # false and its cd to /workspace never fires. Without this you land in
-            # /home/dev, and claude then asks you to trust a directory that is not the
-            # repo, because the entrypoint seeded the trust dialog for /workspace.
-            #
-            # `;` and not `&&`: if the bind mount is missing the cd fails, and a shell
-            # that got you nothing at all is worse than one in the wrong directory —
-            # you want the session so you can see what is wrong. Reattaching an existing
-            # abduco session ignores the cd, which is correct: that session has its own.
-            RemoteCommand cd /workspace 2>/dev/null; abduco -A claude claude
+            # `dev-claude` is a program IN THE IMAGE. This line used to be
+            # `cd /workspace 2>/dev/null; abduco -A claude claude`, which worked and put
+            # the knowledge in the wrong place — every client would need the same
+            # incantation, and the container that owns the answer was not the thing
+            # giving it. `make claude` on zero runs the same program.
+            RemoteCommand dev-claude
             ProxyCommand sh -c '. {{ token_file }}; exec {{ cloudflared }} access ssh --hostname %h'
 
           # Same transport, no RemoteCommand — for when you want a shell rather than a
