@@ -13,6 +13,7 @@
 #   make shell       a fish shell in the container
 #   make logs        follow the container log (= sshd's)
 #   make boot-log    the entrypoint's start-up lines, from the top
+#   make tunnel-log  what cloudflared has been saying, if the tunnel is on
 #   make down        stop and remove the container (volumes stay)
 #   make down-volumes  also drop the volumes — logins and host key go with them
 #
@@ -46,7 +47,7 @@ COMPOSE := $(SUDO) env HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) \
 DOCKER  := $(SUDO) docker
 
 .PHONY: help dev up restart down down-volumes status verify collections logs \
-	boot-log login claude shell fleet _require-env _require-secrets _require-uid
+	boot-log tunnel-log login claude shell fleet _require-env _require-secrets _require-uid
 
 help:
 	@awk '/^#/ { sub(/^# ?/, ""); print; next } { exit }' $(MAKEFILE_LIST)
@@ -129,7 +130,7 @@ down-volumes:
 # status.sh is one script rather than several recipes because these are long, and a
 # health check spelled in Makefile line-continuations is a health check nobody will
 # correct. It reads the container and prints; it changes nothing.
-status verify collections boot-log fleet:
+status verify collections boot-log tunnel-log fleet:
 	@SUDO="$(SUDO)" CONTAINER=$(CONTAINER) bash $(CURDIR)/status.sh $@
 
 logs:

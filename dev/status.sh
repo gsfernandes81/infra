@@ -75,8 +75,35 @@ status() {
     printf 'fleet keys: %s\n' "$(d exec "$CONTAINER" sh -c '[ -s /run/infra-secrets/known_hosts.fleet ]' 2>/dev/null \
         && echo 'known_hosts.fleet present' || echo 'MISSING — ansible will fail host key checking')"
 
+    # END-TO-END, not a proxy for one, and specifically the probe recovery.md already
+    # calibrated: readyConnections from the metrics endpoint. Counting sockets on 7844
+    # and reading the log were both tried on `one` and BOTH READ DEAD against a tunnel
+    # that was serving normally. A process check would repeat that mistake here — the
+    # cloudflared process is running while it retries a tunnel that will never connect.
+    printf 'tunnel    : %s\n' "$(tunnel_line)"
     printf 'ansible   : %s\n' "$(d exec "$CONTAINER" ansible --version 2>/dev/null | head -1 || echo 'MISSING')"
     printf 'workspace : %s\n' "$(d exec "$CONTAINER" git -C /workspace log --oneline -1 2>/dev/null || echo 'no git checkout at /workspace')"
+}
+
+# ── tunnel ──────────────────────────────────────────────────────────────────
+# Three distinguishable answers, because they mean three different things and a single
+# up/down would collapse them: not configured at all (normal — the loopback port is the
+# way in), configured but not connected (the interesting failure), and serving.
+tunnel_line() {
+    local host ready
+    host="$(d exec "$CONTAINER" printenv DEV_TUNNEL_HOSTNAME 2>/dev/null || true)"
+    if [ -z "$host" ]; then
+        echo 'off (DEV_TUNNEL_HOSTNAME unset — reached on the loopback port)'
+        return
+    fi
+    ready="$(d exec "$CONTAINER" curl -fsS --max-time 3 http://127.0.0.1:20241/ready 2>/dev/null || true)"
+    if [ -z "$ready" ]; then
+        echo "$host — metrics endpoint silent, tunnel NOT up (make tunnel-log)"
+    elif printf '%s' "$ready" | grep -qE '"readyConnections": *[1-9]'; then
+        echo "$host — $(printf '%s' "$ready" | tr -d '\n' | head -c 90)"
+    else
+        echo "$host — zero ready connections, NOT serving (make tunnel-log)"
+    fi
 }
 
 # ── fleet ───────────────────────────────────────────────────────────────────
@@ -115,6 +142,7 @@ verify() {
     printf 'gh        : %s\n' "$(d exec "$CONTAINER" gh --version 2>&1 | head -1 || echo 'MISSING — the release tarball did not unpack to /usr/local/bin')"
     printf 'screen    : %s\n' "$(d exec "$CONTAINER" screen --version 2>&1 | head -1 || echo 'MISSING')"
     printf 'claude    : %s\n' "$(d exec "$CONTAINER" claude --version 2>&1 | head -1 || echo 'MISSING')"
+    printf 'cloudflared: %s\n' "$(d exec "$CONTAINER" cloudflared --version 2>&1 | head -1 || echo 'MISSING — the hash-pinned download did not land')"
     printf '\n'
     collections
     printf '\n'
@@ -163,11 +191,17 @@ boot_log() {
       | grep -v '^[[:space:]]*$' | head -n "${1:-80}"
 }
 
+tunnel_log() {
+    d exec "$CONTAINER" sh -c 'tail -n "${1:-60}" "$HOME/.local/share/tunnel.log" 2>/dev/null' \
+        -- "${1:-60}" || echo 'no tunnel log — the tunnel has never been started'
+}
+
 case "${1:-status}" in
     status)      status ;;
+    tunnel-log)  tunnel_log "${2:-60}" ;;
     verify)      verify ;;
     collections) collections ;;
     boot-log)    boot_log "${2:-80}" ;;
     fleet)       fleet ;;
-    *) printf 'status.sh: unknown readout "%s" — status | verify | collections | boot-log | fleet\n' "$1" >&2; exit 1 ;;
+    *) printf 'status.sh: unknown readout "%s" — status | verify | collections | boot-log | fleet | tunnel-log\n' "$1" >&2; exit 1 ;;
 esac

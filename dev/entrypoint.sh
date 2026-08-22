@@ -2,7 +2,7 @@
 # infra-dev PID 1 (under `init: true`, so detached sessions' orphans get reaped).
 #
 # Order matters and is not arbitrary:
-#   ssh -> claude state -> pull -> sshd host key -> sshd(fg)
+#   ssh -> claude state -> pull -> sshd host key -> [tunnel(bg)] -> sshd(fg)
 # Everything that could block on a prompt is settled first, because nothing in here
 # can answer one.
 #
@@ -195,6 +195,97 @@ mkdir -p "$HOME/.local/share"
     env | grep -vE '^(PATH|PWD|SHLVL|_|HOME|OLDPWD|HOSTNAME)='
 } > "$HOME/.ssh/environment"
 chmod 600 "$HOME/.ssh/environment"
+
+# ── the tunnel — INERT unless asked for ─────────────────────────────────────
+# Two things must both be true or nothing starts: DEV_TUNNEL_HOSTNAME is set, and a
+# credentials file exists in the read-only secrets mount. That is deliberate — the
+# container must come up and be usable over the loopback port on a box that has never
+# had a tunnel created for it, because that is every box before seed-secrets.sh step 6.
+#
+# LOCALLY-MANAGED, not token-based, and that is the whole reason this is shaped the way
+# it is. The host tunnels use `--token <secret>`, which puts a live credential in argv —
+# host-setup.md's token-in-argv leak, and management-plane.md's rule that secrets never
+# go in command_args. In a container there is no supervise-daemon writing argv to
+# syslog, but `docker inspect` shows both argv and env, and .Config.Env is exactly what
+# audit.yml refuses to read because it holds secrets. A credentials FILE, mounted
+# read-only, is the spelling that puts the secret in neither.
+#
+# The second dividend is that ingress lives in a config file rather than in the
+# Cloudflare dashboard, so what this container answers on is reviewable here.
+TUNNEL_CREDS="$SECRETS/tunnel.json"
+if [ -n "${DEV_TUNNEL_HOSTNAME:-}" ] && [ -s "$TUNNEL_CREDS" ]; then
+    mkdir -p "$HOME/.cloudflared"
+    chmod 700 "$HOME/.cloudflared"
+
+    # The tunnel UUID comes out of the credentials file rather than being a second
+    # setting. One source, so a config naming one tunnel and a credentials file for
+    # another is not a state this can be in.
+    TUNNEL_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["TunnelID"])' \
+                 "$TUNNEL_CREDS" 2>/dev/null || true)"
+
+    if [ -z "$TUNNEL_ID" ]; then
+        say "WARNING: $TUNNEL_CREDS has no TunnelID — not starting the tunnel."
+        say "         Re-run ansible/playbooks/cloudflare-dev-tunnel.yml; loopback works."
+    else
+        # metrics on 20241 to match what the host tunnels use, because that is the probe
+        # recovery.md already trusts: /ready with readyConnections >= 1 was chosen there
+        # over port-7844 socket counts and the log file, both of which read DEAD against
+        # a tunnel that was serving normally. Reusing a probe that has been calibrated
+        # against known-good state beats inventing a second one.
+        cat > "$HOME/.cloudflared/config.yml" <<EOF
+tunnel: $TUNNEL_ID
+credentials-file: $TUNNEL_CREDS
+metrics: 127.0.0.1:20241
+no-autoupdate: true
+ingress:
+  - hostname: $DEV_TUNNEL_HOSTNAME
+    service: ssh://localhost:2222
+  - service: http_status:404
+EOF
+        # Bounded retry, and the bound counts CONSECUTIVE failures rather than restarts.
+        # A transient edge or DNS failure at start must not leave the tunnel down for the
+        # life of the container; a bad credentials file must not spin forever pretending
+        # it might come good. Those want opposite treatment, and what tells them apart is
+        # whether the last run achieved anything.
+        #
+        # ANY REAL UPTIME RESETS THE COUNT — or3's fetch_payload.py arrived at the same
+        # rule for the same reason: "any forward progress resets the retry count, so a
+        # flaky link is not mistaken for a dead one". A plain counter spends its six lives
+        # on six ordinary reconnections over a fortnight and then quits on a tunnel that
+        # had been serving perfectly, at an hour nobody chose. 60s is the line: an auth or
+        # config failure is over in under a second, and anything that stayed up a minute
+        # was connected.
+        setsid bash -c '
+            fails=0
+            while [ "$fails" -lt 6 ]; do
+                started=$(date +%s)
+                echo "[tunnel] $(date -u +%FT%TZ) starting cloudflared (consecutive failures: $fails)"
+                cloudflared --no-autoupdate --config "$HOME/.cloudflared/config.yml" --loglevel info tunnel run
+                rc=$?
+                ran=$(( $(date +%s) - started ))
+                if [ "$ran" -ge 60 ]; then
+                    echo "[tunnel] exited rc=$rc after ${ran}s of uptime — that was a real"
+                    echo "[tunnel] connection, so the failure count resets to 0"
+                    fails=0
+                else
+                    fails=$(( fails + 1 ))
+                    echo "[tunnel] exited rc=$rc after only ${ran}s — failure $fails of 6"
+                fi
+                sleep $(( fails * 10 + 5 ))
+            done
+            echo "[tunnel] GAVE UP: six consecutive failures, none lasting 60s. That is a"
+            echo "[tunnel] configuration or credentials problem, not a flaky link."
+            echo "[tunnel] The container is unaffected and the loopback port still works:"
+            echo "[tunnel]   ssh zero, then ssh -p <DEV_SSH_PORT> dev@127.0.0.1"
+        ' </dev/null >>"$HOME/.local/share/tunnel.log" 2>&1 &
+        say "tunnel starting for $DEV_TUNNEL_HOSTNAME (log: ~/.local/share/tunnel.log)"
+    fi
+elif [ -n "${DEV_TUNNEL_HOSTNAME:-}" ]; then
+    say "DEV_TUNNEL_HOSTNAME is set but $TUNNEL_CREDS is missing — no tunnel."
+    say "    Run ansible/playbooks/cloudflare-dev-tunnel.yml. Loopback is unaffected."
+else
+    say "no tunnel (DEV_TUNNEL_HOSTNAME unset — see dev/README.md § Cloudflare)"
+fi
 
 # ── sshd, in the foreground ─────────────────────────────────────────────────
 # The container's payload. exec, so sshd IS this process: signals from `docker stop`

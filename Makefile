@@ -8,6 +8,7 @@
 #   make dev-fleet   prove zero, one and two answer
 #   make dev-shell   a fish shell in it
 #   make dev-claude  attach its `claude` abduco session
+#   make dev-tunnel-log  what cloudflared is saying, if the tunnel is on
 #   make dev-logs / dev-boot-log / dev-restart / dev-down
 #
 # Everything above forwards into dev/Makefile, which is where the docker commands
@@ -26,7 +27,7 @@
 # not apply implicit rules to a phony target, so a bare `dev-%:` pattern silently
 # matches nothing and prints "Nothing to be done".
 DEV_TARGETS := up restart down down-volumes status verify collections login fleet \
-	claude shell logs boot-log
+	claude shell logs boot-log tunnel-log
 
 .PHONY: help dev $(addprefix dev-,$(DEV_TARGETS))
 

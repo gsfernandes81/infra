@@ -233,6 +233,82 @@ but `cloudflared` is already on all three hosts and already the way in, and Tail
 mean standing it up on Termux for this reason alone. Not a technical verdict against
 Tailscale; a preference for not adding a second overlay.
 
+### How it is actually built — DECIDED 2026-08-22
+
+Settled with the owner, and `infra-dev` is the first and so far only one built.
+
+**Provisioning is a playbook**, `ansible/playbooks/cloudflare-dev-tunnel.yml`, creating
+four objects over the Cloudflare API: the tunnel, the CNAME, an Access service token and
+an Access application with one policy. It was written as a shell script first and that
+was the wrong instinct — the same one that put `bin/compose` in this repo, and the second
+time the owner has had to point at it. Being in the plane rather than beside it buys
+parsed JSON instead of a hand-rolled extractor, a real `--check`, `no_log` as a mechanism
+rather than as discipline, and an API token that becomes a Vault variable at Phase 4 with
+no rewrite. It is not a one-off either: three more dev containers want the same four
+objects, and rotating the host tokens below wants most of them.
+
+**One scoped API token replaces the dashboard.** A browser is needed exactly once, to
+mint it. `cloudflared tunnel login` would have been the same single visit and would cover
+only tunnels and DNS, leaving Access as clicking — which on a phone is the thing this is
+avoiding. After the token, every Cloudflare object in this fleet is reviewable code.
+
+**The Access policy is a service token, and there is no identity provider.** The
+application carries `allowed_idps: []`, `auto_redirect_to_identity: false`, and one
+`decision: non_identity` policy. No account is linked to anything. This answers the
+owner's constraint directly — Proton publishes no OIDC/SAML for personal accounts, so it
+could never be an IdP here, and the arrangement needs none. If a human path is ever
+wanted, Access's built-in one-time PIN emails a code to any address, Proton included, and
+still configures no IdP.
+
+`non_identity` is not interchangeable with `allow`. `allow` with a `service_token`
+include still expects an identity and sends a headless client to a login page it cannot
+complete, which presents as the tunnel being broken rather than as the wrong policy type.
+
+**The client binary is required with or without Access**, because an `ssh://` ingress is
+not raw TCP at the edge. Whether it runs on Termux — bionic, which refuses glibc-linked
+builds — was the real question and was measured rather than assumed on 2026-08-22:
+`cloudflared 2026.8.2 linux-arm64` is 37,404,344 B and **fully static**, no INTERP
+segment and no dynamic section. It is hash-pinned in `dev/Dockerfile` and the 35.7 MiB is
+priced in or3's `docs/data-ledger.md`.
+
+**The loopback publish stays.** Dropping `127.0.0.1:222x` once the tunnel works would
+leave `docker exec` on zero — needing sudo, on a box you may be trying to reach because
+something is wrong — as the only fallback. The two paths fail independently, which is the
+only reason neither is a single point of failure.
+
+**Three secrets, three homes, and the rules are asymmetric.** The API token goes nowhere
+— prompted, in memory, for one run — and specifically NOT into the secrets directory,
+because that directory is mounted into the container and a container able to rewrite the
+Access policy in front of itself is not protected by it. The tunnel credentials are a
+read-only file rather than `--token`, which is the containerised form of the rule
+restated below. The service token belongs to the phone and must not be in the container,
+because it authorises *reaching* the container.
+
+### Still to do: the fleet's own tunnels — PLANNED, not started
+
+`zero`'s and `one`'s tunnel tokens were world-readable in a 755 init script for months and
+`recovery.md` says both must be assumed disclosed. Rotation was deferred there to "when
+physically present", which from a ship is months away.
+
+**`infra-dev`'s tunnel is what makes that a remote operation.** It is a way into zero that
+does not traverse zero's own tunnel, and it holds the fleet key — so the two-phase
+procedure in `CLAUDE.md` § *Changing the thing you are connected through* can finally be
+satisfied for `zero`: prepare and prove inert from a session that does not cross the
+tunnel being restarted, then restart with an end-to-end probe and automatic rollback.
+
+The order, once `infra-dev` has been up long enough to be trusted:
+
+1. `zero` — rotate the token, keeping the same tunnel, with the session held inside
+   `infra-dev` rather than through `ssh-zero`. Probe `127.0.0.1:20241/ready`.
+2. `one` — same, with the session held on `zero` over the LAN, which `recovery.md`
+   already names as its second way in.
+3. `two` — check first whether the token is even still inline: `recovery.md` says
+   "check before assuming" and nobody has.
+
+Not started, and deliberately not bundled with the dev container work: it is churn on the
+boxes you are connected through, and the whole point of doing `infra-dev` first is to
+have somewhere safe to stand while doing it.
+
 **Two things travel with this decision.** A tunnel token per dev container — a secret,
 which is what the Vault path above is for. And
 [`host-setup.md`](host-setup.md)'s **token-in-argv leak**, flagged there as applied on no

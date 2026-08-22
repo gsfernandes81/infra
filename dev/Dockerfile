@@ -129,6 +129,37 @@ RUN ansible-galaxy collection install --collections-path /usr/share/ansible/coll
         'community.docker:>=5.2.2' \
     && ansible-galaxy collection list
 
+# cloudflared. Present in the image but INERT unless DEV_TUNNEL_HOSTNAME is set and a
+# credentials file exists — see entrypoint.sh. Baked in rather than downloaded at start
+# for the same reason the collections are: a start that needs the network is a start
+# that fails when the network is down.
+#
+# Hash-pinned per architecture, like abduco and unlike gh. The difference from gh is not
+# the vendor, it is what the binary does: this one holds the credentials that put an ssh
+# endpoint on the public internet, and it is the process that puts it there. A pin alone
+# says "the same version"; a hash says "the same bytes".
+#
+# Measured 2026-08-22 by downloading both and checking them: 37,404,344 B (arm64) and
+# 39,799,316 B (amd64), and BOTH ARE FULLY STATIC — `readelf -l` finds no INTERP segment
+# and there is no dynamic section at all. That fact is the one that matters off this
+# image: it is why the same binary runs under Termux, which is bionic and would refuse a
+# glibc-linked one. dev/README.md § *Reaching it from Termux* has the rest of it.
+ARG CLOUDFLARED_VERSION=2026.8.2
+ARG CLOUDFLARED_SHA256_arm64=7747d94570fb390cf47dcb4f9555c193c6355cda9793f0d878d9049e5d6a7790
+ARG CLOUDFLARED_SHA256_amd64=fcfb02b575a52ca1af2e3267af4e1517bcdeb30ac48c834c69abaed3c0576ad2
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      arm64) sha="${CLOUDFLARED_SHA256_arm64}" ;; \
+      amd64) sha="${CLOUDFLARED_SHA256_amd64}" ;; \
+      *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSLo /usr/local/bin/cloudflared \
+      "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-${arch}"; \
+    echo "${sha}  /usr/local/bin/cloudflared" | sha256sum -c -; \
+    chmod 0755 /usr/local/bin/cloudflared; \
+    cloudflared --version
+
 # Create the dev user at the HOST owner's uid/gid, passed by the Makefile as build
 # args, so the bind-mounted /workspace stays writable from both sides. Guard against a
 # uid/gid the base image already uses so the build cannot hard-fail on a collision.

@@ -101,20 +101,30 @@ what is under it keeps running, and a dropped connection costs nothing. A claude
 started *outside* a session dies with the ssh link that carried it, which on a phone
 means dies at the first lock screen.
 
-The phone reaches it the same way it reaches `or3-dev` — the port is loopback-only on
-zero, so the hop is through zero's own sshd. `~/.ssh/config` on the phone needs a block
-for it, and it must be a `ProxyCommand` rather than a `ProxyJump`, for the reason
-`or3/dev/README.md` § *`ProxyJump zero` does not work* sets out at length: zero's sshd
-sets `AllowTcpForwarding no`, which refuses the `direct-tcpip` channel `ProxyJump`
-opens, and flipping that setting would weaken the internet-facing box that runs Immich.
+**There are two ways in and you want both.** Cloudflare is the normal one; the loopback
+port through zero is break-glass. See *Cloudflare* below for why keeping the second is
+not belt-and-braces.
 
 ```
-Host infra-dev
+Host infra-dev                     # normal — no dependency on zero's sshd
+  HostName infra-dev.gsrpi.uk
+  User dev
+  IdentityFile ~/.ssh/id_ed25519
+  ProxyCommand cloudflared access ssh --hostname %h
+
+Host infra-dev-lan                 # break-glass — no dependency on Cloudflare
   HostName 127.0.0.1
   Port 2225
   User dev
+  IdentityFile ~/.ssh/id_ed25519
   ProxyCommand ssh zero nc %h %p
 ```
+
+The second must be a `ProxyCommand` rather than a `ProxyJump`, for the reason
+`or3/dev/README.md` § *`ProxyJump zero` does not work* sets out at length: zero's sshd
+sets `AllowTcpForwarding no`, which refuses the `direct-tcpip` channel `ProxyJump`
+opens, and flipping that setting would weaken the internet-facing box that runs Immich.
+The first needs no such workaround, which is one of the things the tunnel buys.
 
 The Makefile is how the container is stood up and looked at, not how it is used.
 `make claude` and `make shell` are the same two sessions reached from a terminal on
@@ -167,6 +177,120 @@ failure mode, and a floating version makes that arrive at a moment of its own ch
 The phone is on 2.21.0 and this image is on 2.21.3 — that is a real divergence, and
 closing it means bumping the phone, not floating this.
 
+## Cloudflare
+
+```sh
+cd ~/infra/ansible
+ansible-playbook playbooks/cloudflare-dev-tunnel.yml --check    # prove first
+ansible-playbook playbooks/cloudflare-dev-tunnel.yml            # apply
+# then: DEV_TUNNEL_HOSTNAME=infra-dev.gsrpi.uk in dev/.env, and `make up`
+```
+
+`cloudflared` runs **inside** this container, not on zero, which is
+[`../docs/management-plane.md`](../docs/management-plane.md) § *Addressing*'s decision
+and still the right one: the tunnel's identity travels with the container, so moving it
+to `one` changes no ingress rule anywhere. Every host-side alternative — extra rules on
+zero's existing tunnel, or a shared ingress container — breaks exactly there.
+
+**A playbook, not a script.** It was written as `dev/cf-provision.sh` first and that was
+the same instinct that put `bin/compose` in this repo. Provisioning the way in to a
+managed box is management-plane work: in the plane it gets parsed JSON instead of a
+hand-rolled extractor, a real `--check`, `no_log` as a mechanism rather than as
+discipline, and an API token that becomes a Vault variable at Phase 4 with no rewrite.
+
+### It is additive, and that is load-bearing
+
+`DEV_TUNNEL_HOSTNAME` unset means **no tunnel at all** and the container is reached over
+`127.0.0.1:2225` exactly as if none of this existed. Set but with no credentials present
+is a warning at start, not a failure to come up.
+
+**Keep the loopback publish even once the tunnel works.** It is tempting to drop it and
+be rid of the port bookkeeping, and that would leave `docker exec` on zero — needing
+sudo, on a box you may be trying to reach *because* something is wrong — as the only
+fallback. The two failure modes are independent: Cloudflare being down or the token
+being wrong does not touch `ssh zero`, and zero's sshd being wedged does not touch the
+tunnel. Having both is the only reason neither is a single point of failure.
+
+### Reaching it from Termux — measured, not assumed
+
+Two doubts here are reasonable and only one of them was ever real.
+
+**The client binary is required with or without Access.** An `ssh://` tunnel ingress is
+not raw TCP at the edge; only `cloudflared access` speaks it. So the binary is a tunnel
+requirement, not an Access one.
+
+**Whether that binary runs on Termux was the real question**, because Termux is bionic
+and would refuse a glibc-linked build. Checked on 2026-08-22 by downloading it:
+
+```
+cloudflared 2026.8.2, linux-arm64, 37,404,344 B (35.7 MiB)
+ELF 64-bit LSB executable, ARM aarch64, statically linked
+readelf -l : no INTERP segment      readelf -d : no dynamic section
+```
+
+Fully static, no loader needed. The same hash is pinned in the `Dockerfile`. **The
+35.7 MiB is metered on the phone** and is priced in or3's `docs/data-ledger.md`.
+
+**Access does not add a browser.** `cloudflared access login --help` says, in its own
+words, *"The subcommand will launch a browser. For headless systems, a url is
+provided."* — so even the human flow degrades correctly. But it never runs here, because
+the policy is a service token:
+
+```
+--service-token-id value      [$TUNNEL_SERVICE_TOKEN_ID]
+--service-token-secret value  [$TUNNEL_SERVICE_TOKEN_SECRET]
+```
+
+### No identity provider is configured, and none will be
+
+The Access application is created with `allowed_idps: []` and
+`auto_redirect_to_identity: false`. Its one policy is `decision: non_identity` naming
+the service token. **There is no IdP behind this at all** — no Google, no GitHub, no
+account linked to anything. Proton is not an option on Cloudflare (it publishes no
+OIDC/SAML for personal accounts) and it does not need to be, because the question never
+arises. If a human path is ever wanted, Access's built-in **one-time PIN** emails a code
+to any address, a Proton one included, and still configures no IdP.
+
+`decision: non_identity` is not interchangeable with `allow`. `allow` with a
+`service_token` include still expects an identity behind the request and sends a
+headless client to a login page it cannot complete — which presents as the tunnel being
+broken rather than as the wrong policy type.
+
+### Where the three secrets go, and where they must not
+
+| Secret | Lives | Must never be |
+|---|---|---|
+| Cloudflare **API token** | nowhere — `vars_prompt`, in memory for one run | in `$INFRA_SECRETS` |
+| Tunnel **credentials** | `$INFRA_SECRETS/tunnel.json`, mode 600, mounted read-only | in argv or env |
+| Access **service token** | the phone's environment, mode-600 fish conf.d | in the container, or in a `ProxyCommand` |
+
+Each of those "must never" is a specific failure, not tidiness:
+
+- **The API token cannot go in the secrets directory** because that directory is mounted
+  into the container. A container able to rewrite the Access policy in front of itself
+  is not protected by it. Nothing the running container does needs that token.
+- **The tunnel credentials are a file, not `--token`.** The host tunnels use
+  `--token <secret>`, which is `host-setup.md`'s token-in-argv leak and
+  `management-plane.md`'s *secrets never go in `command_args`*. There is no
+  `supervise-daemon` in a container, but `docker inspect` shows argv **and** env, and
+  `.Config.Env` is exactly what `audit.yml` refuses to read because it holds live
+  secrets. A read-only credentials file is the spelling that is in neither.
+- **The service token must not be in the container**, because it authorises *reaching*
+  the container — putting it inside is the same mistake in the other direction. On the
+  phone it goes in the environment rather than the `ProxyCommand`, because a secret on a
+  command line is a secret in `ps` output and in shell history.
+
+### Health
+
+`make status` reads a `tunnel` line with three distinguishable answers — off, configured
+but not connected, and serving — because a single up/down collapses the interesting
+middle case. The probe is `readyConnections` from cloudflared's own metrics endpoint on
+`127.0.0.1:20241`, which is the probe [`../docs/recovery.md`](../docs/recovery.md)
+already calibrated: counting sockets on port 7844 and reading the log were both tried on
+`one` and **both read dead against a tunnel that was serving normally**. A process check
+would repeat that mistake here in a new way — cloudflared is running the whole time it
+retries a tunnel that will never connect. `make tunnel-log` is what it points you at.
+
 ## What the container can reach, and what that is worth
 
 | | Reaches | Held as |
@@ -174,6 +298,7 @@ closing it means bumping the phone, not floating this.
 | git | `gsfernandes81/infra`, read-write | deploy key, generated on zero, never transmitted |
 | `gh` | your GitHub account, at whatever scope the token has | a login in the `infra-gh` volume |
 | the fleet | `zero`, `one`, `two` as `gavin`, no sudo without `-K` | `id_ed25519_fleet`, generated on zero |
+| the tunnel | outbound to Cloudflare's edge; publishes this sshd at one hostname | `tunnel.json`, read-only, written by the playbook |
 
 **The fleet key is the one that is new, and it is a bigger prize than anything
 `or3-dev` holds.** `or3-dev`'s deploy key touches one repo and its vessel key touches
@@ -275,6 +400,7 @@ read-only at `/run/infra-secrets`:
 | `id_ed25519_fleet` | reaches `zero`, `one`, `two` as `gavin`, generated on zero |
 | `ssh_config.fleet` | the three `Host` blocks, lifted from zero's own `~/.ssh/config` |
 | `known_hosts.fleet` | their host keys, lifted from zero's own `~/.ssh/known_hosts` |
+| `tunnel.json` | Cloudflare tunnel credentials — written by the **playbook**, not `seed-secrets.sh` |
 
 **There is no `credentials.json`, not even behind a flag.** or3-dev keeps one as a
 documented bad idea: copying the phone's Claude login in does not work — claude
@@ -327,6 +453,7 @@ make claude       # attach (or start) the `claude` abduco session
 make shell        # a fish shell in the container
 make logs         # follow the container log (= sshd's)
 make boot-log     # the entrypoint's lines, from the top, ANSI stripped
+make tunnel-log   # what cloudflared has been saying, if the tunnel is on
 ```
 
 They work with or without `sudo` — the Makefile adds one when it is not already root —

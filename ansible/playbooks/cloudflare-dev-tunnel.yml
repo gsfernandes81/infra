@@ -1,0 +1,385 @@
+---
+# Provisions the Cloudflare side of a dev container's tunnel, over the API.
+#
+#     cd ansible
+#     ansible-playbook playbooks/cloudflare-dev-tunnel.yml --check    # prove, no -K
+#     ansible-playbook playbooks/cloudflare-dev-tunnel.yml            # apply
+#
+# Four objects, and every one of them idempotent — each is looked up before it is
+# created, so a re-run after a partial failure is the intended way to finish:
+#
+#   1. a locally-managed tunnel   -> credentials written to {{ infra_secrets }}/tunnel.json on zero
+#   2. a proxied CNAME            -> {{ cf_hostname }}
+#   3. an Access service token    -> its secret printed ONCE, for the phone
+#   4. an Access application      -> with one non_identity policy naming that token
+#
+# WHY THIS IS A PLAYBOOK AND NOT A SCRIPT. It was written as dev/cf-provision.sh first
+# and that was the wrong instinct — the same one that put bin/compose in this repo.
+# Provisioning the way in to a managed box is management-plane work, and the plane is
+# here. Four things follow from being in it rather than beside it: `uri` returns parsed
+# JSON so there is no hand-rolled extractor; `--check` is a real dry run, which has
+# already caught one bad change in this repo; `no_log` is a mechanism rather than
+# discipline; and the API token becomes a Vault variable at Phase 4 with no rewrite.
+# It is also not a one-off — dd-dev, ds-dev and or3-dev want the same four objects, and
+# rotating the fleet's own tunnel tokens wants most of them.
+#
+# WHY `uri` AND NOT `community.general.cloudflare_dns`. That module exists and would do
+# task 2. It would do only task 2 — tunnel, Access application, policy and service token
+# have no module and must be `uri` regardless. One mechanism with one error-handling
+# style beats a module for a quarter of the work, and the collection's parameter names
+# could not be verified when this was written (Galaxy was unreachable). If someone
+# checks them, swapping task 2 is a small, contained change.
+#
+# THE API TOKEN IS NEVER WRITTEN ANYWHERE. vars_prompt keeps it in memory for the run.
+# It must NEVER go in {{ infra_secrets }}: that directory is mounted into the container,
+# and a container able to rewrite the Access policy in front of itself is not protected
+# by it. Nothing the running container does needs this token.
+#
+# Token scopes (Cloudflare -> My Profile -> API Tokens -> Create Token -> Custom):
+#   Zone    : Zone                        : Read     (gsrpi.uk)
+#   Zone    : DNS                         : Edit     (gsrpi.uk)
+#   Account : Cloudflare Tunnel           : Edit
+#   Account : Access: Apps and Policies   : Edit
+#   Account : Access: Service Tokens      : Edit
+
+- name: Provision a dev container's Cloudflare tunnel and Access policy
+  # zero, because the ONLY thing that lands on a host is the credentials file. Every
+  # Cloudflare call is delegated to the control node — they are HTTPS to a public API and
+  # have no business being made from the box being configured.
+  hosts: "{{ cf_target | default('zero') }}"
+  gather_facts: false
+  become: false
+
+  vars:
+    cf_api: https://api.cloudflare.com/client/v4
+    cf_zone: "{{ zone | default('gsrpi.uk') }}"
+    cf_name: "{{ name | default('infra-dev') }}"
+    cf_hostname: "{{ hostname | default(cf_name ~ '.' ~ cf_zone) }}"
+    # Where the container's read-only secrets mount points on the host. Matches
+    # INFRA_SECRETS in dev/.env; override with -e if that was changed.
+    infra_secrets: "{{ secrets_dir | default('~/.infra-dev-secrets') }}"
+    # Irrelevant to a service token, which does not expire with a session. Set explicitly
+    # so the value is chosen rather than inherited from a Cloudflare default nobody read.
+    cf_session_duration: 24h
+
+  vars_prompt:
+    - name: cf_api_token
+      prompt: "Cloudflare API token"
+      private: true
+      confirm: false
+
+  tasks:
+    # ── 0  the token, the zone and the account ─────────────────────────────
+    # `check_mode: false` on every read, the same reason audit.yml carries it: under
+    # --check a task is skipped by default, so a dry run would resolve nothing and then
+    # fail on every id it needed. A read is safe in check mode by definition. The
+    # writes below carry no such line, so --check skips exactly those.
+    - name: Resolve the zone and its account
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/zones?name={{ cf_zone }}"
+        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+      register: cf_zone_q
+      delegate_to: localhost
+      check_mode: false
+      changed_when: false
+      no_log: true
+
+    - name: Fail clearly if the token cannot see the zone
+      # Cloudflare answers 200 with success:false for an auth failure, so the status code
+      # is not the check — `.json.success` is. A play that read the status alone would
+      # carry on and fail later on an empty id, several tasks from the real cause.
+      ansible.builtin.assert:
+        that:
+          - cf_zone_q.json.success | default(false)
+          - (cf_zone_q.json.result | default([])) | length > 0
+        fail_msg: >-
+          The API token could not read zone {{ cf_zone }}. Either the token is wrong, or
+          it is missing Zone:Zone:Read on that zone. Nothing has been created.
+        success_msg: "zone {{ cf_zone }} is visible to this token"
+
+    - name: Remember the zone and account ids
+      ansible.builtin.set_fact:
+        cf_zone_id: "{{ cf_zone_q.json.result[0].id }}"
+        cf_account_id: "{{ cf_zone_q.json.result[0].account.id }}"
+
+    # ── 1  the tunnel ───────────────────────────────────────────────────────
+    # Locally-managed (config_src: local), so ingress lives in the container's own
+    # config.yml rather than in the dashboard, and what this hostname answers on is
+    # reviewable in dev/entrypoint.sh instead of being a screen someone clicked once.
+    - name: Look for an existing credentials file on the host
+      ansible.builtin.slurp:
+        src: "{{ infra_secrets }}/tunnel.json"
+      register: cf_creds_existing
+      failed_when: false
+      check_mode: false
+
+    - name: Remember the tunnel id if there already is one
+      ansible.builtin.set_fact:
+        cf_tunnel_id: "{{ (cf_creds_existing.content | b64decode | from_json).TunnelID }}"
+      when: cf_creds_existing.content is defined
+      no_log: true
+
+    - name: Confirm an existing tunnel is still live on this account
+      # A credentials file naming a deleted tunnel is the nastiest state here: the
+      # container starts, cloudflared fails, and the hostname resolves to nothing — which
+      # looks exactly like the container being down. Catch it now, not at 03:00.
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account_id }}/cfd_tunnel/{{ cf_tunnel_id }}"
+        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        status_code: [200, 404]
+      register: cf_tunnel_q
+      delegate_to: localhost
+      when: cf_tunnel_id is defined
+      check_mode: false
+      changed_when: false
+      no_log: true
+
+    - name: Refuse to continue on a credentials file naming a dead tunnel
+      ansible.builtin.assert:
+        that:
+          - cf_tunnel_q.json.success | default(false)
+          - cf_tunnel_q.json.result.deleted_at is none
+        fail_msg: >-
+          {{ infra_secrets }}/tunnel.json on {{ inventory_hostname }} names tunnel
+          {{ cf_tunnel_id }}, which this account does not have (deleted, or created on
+          another account). Move that file aside and re-run to mint a fresh one. The
+          container reads it and fails closed until you do; its loopback port still works.
+        success_msg: "tunnel {{ cf_tunnel_id }} already exists and is live"
+      when: cf_tunnel_id is defined
+
+    - name: Generate a tunnel secret
+      # 32 random bytes, base64. Generated here because Cloudflare never sends a tunnel
+      # secret back — this is the only moment it exists in the clear, which is why the
+      # credentials file is written two tasks later and not at some more convenient point.
+      ansible.builtin.set_fact:
+        cf_tunnel_secret: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') | b64encode }}"
+      when: cf_tunnel_id is not defined
+      no_log: true
+
+    - name: Create the tunnel
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account_id }}/cfd_tunnel"
+        method: POST
+        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        body_format: json
+        body:
+          name: "{{ cf_name }}"
+          tunnel_secret: "{{ cf_tunnel_secret }}"
+          config_src: local
+      register: cf_tunnel_new
+      delegate_to: localhost
+      when: cf_tunnel_id is not defined
+      no_log: true
+
+    - name: Remember the new tunnel id
+      ansible.builtin.set_fact:
+        cf_tunnel_id: "{{ cf_tunnel_new.json.result.id }}"
+      when: cf_tunnel_new is not skipped
+
+    - name: Write the credentials file
+      # 0600, and the content never reaches a log. This is the one artefact of the whole
+      # play that lands on a host, and it is what lets anything claim to be this tunnel.
+      ansible.builtin.copy:
+        content: >-
+          {{ {'AccountTag': cf_account_id,
+              'TunnelID': cf_tunnel_id,
+              'TunnelSecret': cf_tunnel_secret} | to_json }}
+        dest: "{{ infra_secrets }}/tunnel.json"
+        mode: "0600"
+      when: cf_tunnel_new is not skipped
+      no_log: true
+
+    # ── 2  the DNS record ───────────────────────────────────────────────────
+    - name: Look for an existing record for the hostname
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/zones/{{ cf_zone_id }}/dns_records?name={{ cf_hostname }}"
+        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+      register: cf_dns_q
+      delegate_to: localhost
+      check_mode: false
+      changed_when: false
+      no_log: true
+
+    - name: Point the record at this tunnel
+      # PUT when it exists rather than skipping. A record left pointing at a PREVIOUS
+      # tunnel resolves perfectly and reaches nothing — the same failure as above, wearing
+      # the same disguise. Making it match costs one call; assuming it matches is the bug.
+      ansible.builtin.uri:
+        url: >-
+          {{ cf_api }}/zones/{{ cf_zone_id }}/dns_records{{
+             '/' ~ cf_dns_q.json.result[0].id if (cf_dns_q.json.result | length) > 0 else '' }}
+        method: "{{ 'PUT' if (cf_dns_q.json.result | length) > 0 else 'POST' }}"
+        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        body_format: json
+        body:
+          type: CNAME
+          name: "{{ cf_hostname }}"
+          content: "{{ cf_tunnel_id }}.cfargotunnel.com"
+          proxied: true
+          comment: "{{ cf_name }} container tunnel — ansible/playbooks/cloudflare-dev-tunnel.yml"
+      register: cf_dns_w
+      delegate_to: localhost
+      changed_when: cf_dns_w.json.success | default(false)
+      no_log: true
+
+    # ── 3  the service token ────────────────────────────────────────────────
+    # Before the application, because the policy has to name it.
+    - name: List the account's service tokens
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/service_tokens"
+        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+      register: cf_st_q
+      delegate_to: localhost
+      check_mode: false
+      changed_when: false
+      no_log: true
+
+    - name: Remember an existing service token
+      ansible.builtin.set_fact:
+        cf_st_id: "{{ (cf_st_q.json.result | selectattr('name', 'eq', cf_name) | list | first).id }}"
+      when: (cf_st_q.json.result | default([]) | selectattr('name', 'eq', cf_name) | list) | length > 0
+
+    - name: Create the service token
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/service_tokens"
+        method: POST
+        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        body_format: json
+        body: { name: "{{ cf_name }}" }
+      register: cf_st_new
+      delegate_to: localhost
+      when: cf_st_id is not defined
+      no_log: true
+
+    - name: Remember the new service token id
+      ansible.builtin.set_fact:
+        cf_st_id: "{{ cf_st_new.json.result.id }}"
+      when: cf_st_new is not skipped
+
+    # ── 4  the Access application and its one policy ────────────────────────
+    - name: List the account's Access applications
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps"
+        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+      register: cf_app_q
+      delegate_to: localhost
+      check_mode: false
+      changed_when: false
+      no_log: true
+
+    - name: Remember an existing application for this hostname
+      ansible.builtin.set_fact:
+        cf_app_id: "{{ (cf_app_q.json.result | selectattr('domain', 'eq', cf_hostname) | list | first).id }}"
+      when: (cf_app_q.json.result | default([]) | selectattr('domain', 'eq', cf_hostname) | list) | length > 0
+
+    - name: Create or update the Access application
+      # allowed_idps is deliberately empty and auto_redirect_to_identity false: this
+      # application has no identity provider behind it at all. That is the answer to
+      # "which IdP" — none, no account is linked to anything, and the only way through is
+      # the service token below.
+      ansible.builtin.uri:
+        url: >-
+          {{ cf_api }}/accounts/{{ cf_account_id }}/access/apps{{
+             '/' ~ cf_app_id if cf_app_id is defined else '' }}
+        method: "{{ 'PUT' if cf_app_id is defined else 'POST' }}"
+        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        body_format: json
+        body:
+          name: "{{ cf_name }}"
+          domain: "{{ cf_hostname }}"
+          type: self_hosted
+          session_duration: "{{ cf_session_duration }}"
+          allowed_idps: []
+          auto_redirect_to_identity: false
+          app_launcher_visible: false
+      register: cf_app_w
+      delegate_to: localhost
+      changed_when: cf_app_w.json.success | default(false)
+      no_log: true
+
+    - name: Remember the application id
+      ansible.builtin.set_fact:
+        cf_app_id: "{{ cf_app_w.json.result.id }}"
+      when: cf_app_w is not skipped
+
+    - name: List the application's policies
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ cf_app_id }}/policies"
+        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+      register: cf_pol_q
+      delegate_to: localhost
+      when: cf_app_id is defined
+      check_mode: false
+      changed_when: false
+      no_log: true
+
+    - name: Create or update the service-token policy
+      # decision: non_identity, and that is not interchangeable with `allow`. `allow` with
+      # a service_token include still expects an identity behind the request and sends a
+      # headless client to a login page it cannot complete — which presents as the tunnel
+      # being broken rather than as the wrong policy type.
+      ansible.builtin.uri:
+        url: >-
+          {{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ cf_app_id }}/policies{{
+             '/' ~ (cf_pol_q.json.result | selectattr('name', 'eq', 'service token') | list | first).id
+             if (cf_pol_q.json.result | default([]) | selectattr('name', 'eq', 'service token') | list) | length > 0
+             else '' }}
+        method: >-
+          {{ 'PUT' if (cf_pol_q.json.result | default([]) | selectattr('name', 'eq', 'service token') | list) | length > 0
+             else 'POST' }}
+        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        body_format: json
+        body:
+          name: service token
+          decision: non_identity
+          include:
+            - service_token: { token_id: "{{ cf_st_id }}" }
+      register: cf_pol_w
+      delegate_to: localhost
+      when: cf_app_id is defined and cf_st_id is defined
+      changed_when: cf_pol_w.json.success | default(false)
+      no_log: true
+
+    # ── what to do next ─────────────────────────────────────────────────────
+    - name: What was provisioned
+      ansible.builtin.debug:
+        msg:
+          - "tunnel    {{ cf_tunnel_id | default('(not created — --check)') }}"
+          - "hostname  {{ cf_hostname }}"
+          - "creds     {{ inventory_hostname }}:{{ infra_secrets }}/tunnel.json"
+          - "access    application + one non_identity policy, no identity provider"
+          - ""
+          - "Set DEV_TUNNEL_HOSTNAME={{ cf_hostname }} in dev/.env, then `make up`"
+          - "on {{ inventory_hostname }} — NOT restart: the entrypoint reads it at start."
+
+    - name: The phone's credentials — shown once, never again
+      # The ONLY task here without no_log, and deliberately so. Cloudflare returns a
+      # service token's secret at creation and never again; a play that hid it would have
+      # created a credential nobody can use. Everything else on the wire stays masked.
+      ansible.builtin.debug:
+        msg:
+          - "──────────── PUT THESE ON THE PHONE NOW — NOT RETRIEVABLE LATER ────────────"
+          - ""
+          - "~/.config/fish/conf.d/infra-dev.fish, mode 600:"
+          - "    set -gx TUNNEL_SERVICE_TOKEN_ID     {{ cf_st_new.json.result.client_id }}"
+          - "    set -gx TUNNEL_SERVICE_TOKEN_SECRET {{ cf_st_new.json.result.client_secret }}"
+          - ""
+          - "In the ENVIRONMENT, not in the ProxyCommand: cloudflared reads both names"
+          - "natively, and a secret on a command line is a secret in ps and in history."
+          - ""
+          - "~/.ssh/config on the phone:"
+          - "    Host infra-dev"
+          - "      HostName {{ cf_hostname }}"
+          - "      User dev"
+          - "      IdentityFile ~/.ssh/id_ed25519"
+          - "      ProxyCommand cloudflared access ssh --hostname %h"
+          - "───────────────────────────────────────────────────────────────────────────"
+      when: cf_st_new is not skipped and cf_st_new.json is defined
+
+    - name: Note when no new service token was minted
+      ansible.builtin.debug:
+        msg: >-
+          A service token named "{{ cf_name }}" already existed, so no secret was printed —
+          Cloudflare cannot return one after creation. If the phone does not have it,
+          delete that token and re-run this play to mint a fresh pair.
+      when: cf_st_new is skipped
