@@ -41,6 +41,21 @@
 #   Account : Cloudflare Tunnel           : Edit
 #   Account : Access: Apps and Policies   : Edit
 #   Account : Access: Service Tokens      : Edit
+#
+# THE API TOKEN IS DISPOSABLE, AND THAT IS THE POINT OF NEVER STORING IT. Nothing keeps
+# it: not this repo, not the container, not $INFRA_SECRETS. So delete it in the dashboard
+# the moment provisioning is done and mint a fresh one the next time you provision —
+# there is no config to update and nothing to break, because nothing was ever holding it.
+# A deleted API token also costs nothing already built: the tunnel, the DNS record, the
+# Access application and the service token all keep working, since none of them
+# authenticate with it.
+#
+# WHAT THIS PLAY CANNOT MINT IS THE API TOKEN ITSELF. Cloudflare does have
+# POST /user/tokens, and it requires an existing token with User:API Tokens:Edit — so it
+# cannot bootstrap from nothing, and neither can anything else. One credential has to be
+# made by a person in a browser. That is the whole of the manual surface here, and
+# `cloudflared tunnel login` would not avoid it: it is also a browser round trip, and it
+# would cover only the tunnel and DNS, leaving Access to be clicked.
 
 - name: Provision a dev container's Cloudflare tunnel and Access policy
   # zero, because the ONLY thing that lands on a host is the credentials file. Every

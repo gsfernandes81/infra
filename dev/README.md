@@ -306,13 +306,22 @@ This cost a round of confusion, so it is worth stating flatly before anything el
 
 | | Where | What it is | Who holds it |
 |---|---|---|---|
-| **API token** | My Profile → API Tokens | authorises the *playbook* to call the Cloudflare API | nobody — prompted, in memory, one run |
+| **API token** | My Profile → API Tokens | authorises the *playbook* to call the Cloudflare API | nobody — prompted, in memory, one run; **disposable** |
 | **Access service token** | Zero Trust → Access → Service Auth | a `client_id`/`client_secret` a *machine* presents to get **through** Access | the phone, at `~/.config/infra-dev/token` |
 
 They are different objects with different lifetimes and different homes, and naming an
 API token "service_token" — which is an entirely reasonable thing to do — makes them look
 like the same thing. `-e service_token_name=` refers to the **second** one, and should be
 left unset unless you minted one by hand: the play creates it and prints its secret once.
+
+**Delete the API token when you are done provisioning.** Nothing stores it — not the
+repo, not the container, not `$INFRA_SECRETS` — so deleting it breaks nothing and there
+is no config to update. Everything already built keeps working: the tunnel, the DNS
+record, the Access application and the service token do not authenticate with it. Mint a
+fresh one next time you provision. That is one browser visit per provisioning session,
+and it is the only manual step in the whole arrangement — **the API token is the one
+thing that cannot be minted from the command line**, because Cloudflare's own
+`POST /user/tokens` needs an existing token to call it.
 
 ### No identity provider is configured, and none will be
 
