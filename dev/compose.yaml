@@ -95,6 +95,19 @@ services:
       # same way it drives docker on one — over ssh, as a host — and community.docker's
       # docker_compose_v2 needs no local socket and no SDK to do it.
 
+    # The container has to reach the host it runs on — it is a control node, and that
+    # host is in the inventory. Nothing else in the fleet needs this: `one` and `two` are
+    # ordinary LAN addresses, reachable from a bridged container with no help. Its OWN
+    # host is the awkward one, because from in here the host is the bridge gateway and
+    # not an address anybody has written down.
+    #
+    # host-gateway is Docker's own name for it, so `ssh zero` works from inside without a
+    # hardcoded 172.17.0.1 that is wrong the moment the bridge is renumbered. Aliased to
+    # the fleet name rather than to host.docker.internal so the inventory, ~/.ssh/config
+    # and this all say the same word.
+    extra_hosts:
+      - "${DEV_HOST_ALIAS:-zero}:host-gateway"
+
     ports:
       # 2222 is dd-dev, 2223 is ds-dev and 2224 is or3-dev on this same box, so this
       # one is 2225. The port is this container's identity on zero; do not renumber it

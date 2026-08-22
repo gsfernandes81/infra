@@ -179,12 +179,52 @@ closing it means bumping the phone, not floating this.
 
 ## Cloudflare
 
+### The order, and why it is this way round
+
+**Stand the container up first, with no tunnel, and provision from inside it.** The
+tunnel is not a prerequisite for the container; the container is a prerequisite for
+provisioning the tunnel comfortably, because **there is no ansible on zero and there
+should not be.** zero is the box being managed — installing a control plane on it is the
+wrong direction, and this container is what zero's control node is *for*.
+
 ```sh
-cd ~/infra/ansible
+# on zero, once — the container comes up with no tunnel and is reached on 127.0.0.1:2225
+cd ~/infra/dev && ./seed-secrets.sh
+cp .env.example .env && $EDITOR .env      # leave DEV_TUNNEL_HOSTNAME empty for now
+make dev
+
+# then from inside it — where ansible lives, and where the API calls are free
+make shell
+cd /workspace/ansible
 ansible-playbook playbooks/cloudflare-dev-tunnel.yml --check    # prove first
 ansible-playbook playbooks/cloudflare-dev-tunnel.yml            # apply
-# then: DEV_TUNNEL_HOSTNAME=infra-dev.gsrpi.uk in dev/.env, and `make up`
+
+# back on zero: set DEV_TUNNEL_HOSTNAME=infra-dev.gsrpi.uk in dev/.env
+make up                                   # NOT restart — the entrypoint reads it at start
 ```
+
+The phone works too and needs no container — it has `ansible-core` and can reach zero —
+but the Cloudflare calls are then metered, and so is the ssh to zero. From inside the
+container both are free.
+
+### The container has to reach its own host, and that needs two nudges
+
+`one` and `two` are ordinary LAN addresses a bridged container reaches unaided. **zero is
+the awkward one**, because from inside the container zero is the bridge gateway, and
+because two files that should describe it do not:
+
+- **`~/.ssh/config` on zero has no `Host zero` block** — nobody writes one for the machine
+  they are sitting on. `seed-secrets.sh` synthesises it, pointing `HostName` at the bare
+  name, and `compose.yaml` maps that name to `host-gateway`. Docker's own alias, so it
+  survives the bridge being renumbered in a way a hardcoded `172.17.0.1` would not.
+- **`~/.ssh/known_hosts` on zero has no entry for zero either**, and `ansible.cfg` sets
+  `host_key_checking = True`, which fails rather than prompts. `seed-secrets.sh` takes the
+  key from `/etc/ssh/ssh_host_ed25519_key.pub` instead — more authoritative than a
+  known_hosts line, which only records a key somebody once accepted.
+
+Both were found by trying to run the playbook rather than by reading the code. Without
+them the failure is `ansible cannot reach zero`, which sends you looking at the fleet key
+and not at a missing four-line block.
 
 `cloudflared` runs **inside** this container, not on zero, which is
 [`../docs/management-plane.md`](../docs/management-plane.md) § *Addressing*'s decision

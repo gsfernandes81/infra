@@ -104,6 +104,22 @@ else
     else
         sed -i -E 's|^([[:space:]]*)([Hh]ost[[:space:]].*)|\1\2\n  IdentityFile ~/.ssh/id_ed25519_fleet|' "$tmp"
     fi
+    # THE HOST THIS RUNS ON WILL NOT HAVE A BLOCK FOR ITSELF, and that is not an
+    # oversight in your config — nobody writes `Host zero` on zero. But the container is
+    # a control node and zero is in its inventory, so it needs one. Synthesised here
+    # rather than left to the warning below, because the failure it prevents reads as
+    # "ansible cannot reach zero" and sends you looking at the key, not at a missing
+    # four-line block. HostName is the bare name: compose's extra_hosts maps it to the
+    # bridge gateway inside the container, so this stays right if the bridge renumbers.
+    me=$(hostname -s 2>/dev/null || hostname)
+    for h in "${FLEET[@]}"; do
+        [ "$h" = "$me" ] || continue
+        if ! grep -qiE "^[[:space:]]*Host[[:space:]].*\\b$h\\b" "$tmp"; then
+            printf 'Host %s\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/id_ed25519_fleet\n\n' \
+                   "$h" "$h" "$USER" >> "$tmp"
+            ok "synthesised the block for $h — this host, which has none of its own"
+        fi
+    done
     mv "$tmp" "$DIR/ssh_config.fleet"
     chmod 600 "$DIR/ssh_config.fleet"
     found=$(grep -ciE '^[[:space:]]*Host[[:space:]]' "$DIR/ssh_config.fleet" || true)
@@ -140,6 +156,22 @@ else
         else
             warn "no known_hosts entry for $h ($real) — ssh $h once, then re-run this."
         fi
+    done
+    # Same gap, other file: ~/.ssh/known_hosts on zero has no entry for zero. Take it
+    # from the horse's mouth instead — the host key this machine's own sshd presents.
+    # More authoritative than a known_hosts line, which only records a key someone once
+    # accepted; this IS the key.
+    me=$(hostname -s 2>/dev/null || hostname)
+    for h in "${FLEET[@]}"; do
+        [ "$h" = "$me" ] || continue
+        grep -q "^$h " "$tmp" && continue
+        for kt in ed25519 rsa ecdsa; do
+            k="/etc/ssh/ssh_host_${kt}_key.pub"
+            [ -r "$k" ] || continue
+            printf '%s %s\n' "$h" "$(cut -d' ' -f1,2 "$k")" >> "$tmp"
+            ok "took $h's host key from $k — this host has no known_hosts entry for itself"
+            break
+        done
     done
     mv "$tmp" "$DIR/known_hosts.fleet"
     chmod 600 "$DIR/known_hosts.fleet"
