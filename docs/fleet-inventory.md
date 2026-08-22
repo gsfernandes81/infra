@@ -9,7 +9,7 @@
   here that surprises you is a real difference between the repo and the fleet.
 
   THIS FILE IS COMMITTED. Whatever the audit collects lands in git history. That is why
-  the playbook extracts six named container fields rather than dumping inspect output:
+  the playbook extracts seven named container fields rather than dumping inspect output:
   Config.Env on the bot containers holds live tokens. If you widen what is gathered,
   widen it knowing this file is the destination.
 
@@ -17,7 +17,7 @@
   committed over a complete one.
 -->
 
-Generated 2026-08-21T23:35:54Z — from the hosts, not from this repo.
+Generated 2026-08-21T23:58:22Z — from the hosts, not from this repo.
 
 Asked this run: zero, one, two.
 
@@ -33,7 +33,7 @@ Alpine 3.24.1 · kernel 6.18.35-0-rpi
 |---|---|---|---|---|---|
 | `or3-dev` | or3-dev | running | no | or3-dev | 127.0.0.1:2224->2222/tcp |
 | `dd-mysql` | mysql:8 | exited | no | destiny-director | — |
-| `syncthing` | syncthing/syncthing | running | unless-stopped | syncthing | — |
+| `syncthing` | syncthing/syncthing | running | unless-stopped | syncthing | host net — see Listening |
 | `immich_postgres` | ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0 | running | always | immich | — |
 | `immich_server` | ghcr.io/immich-app/immich-server:v3 | running | always | immich | 0.0.0.0:2283->2283/tcp |
 | `immich_machine_learning` | ghcr.io/immich-app/immich-machine-learning:v3 | running | always | immich | — |
@@ -90,9 +90,9 @@ Alpine 3.24.1 · kernel 6.18.35-0-rpi
 | `mysql-ionic` | mysql:8 | restarting | always | ionic | — |
 | `bot` | ionic-bot | running | always | ionic | — |
 | `web` | ionic-web | running | always | ionic | 0.0.0.0:7777->7777/tcp |
-| `torrent` | linuxserver/qbittorrent:latest | running | always | torrents | — |
+| `torrent` | linuxserver/qbittorrent:latest | running | always | torrents | net of `28e553afdece` |
 | `torrents-gluetun-1` | qmcgaw/gluetun:latest | running | always | torrents | 0.0.0.0:8080->8080/tcp |
-| `syncthing` | syncthing/syncthing | exited | unless-stopped | torrents | — |
+| `syncthing` | syncthing/syncthing | exited | unless-stopped | torrents | host net — see Listening |
 
 ### Listening
 
@@ -141,3 +141,16 @@ Not audited.
 collapsed: a failed read looks exactly like an empty result, and treating one as the other
 is how a check passes for the wrong reason. A host that answered and holds nothing says
 `None`; a host that could not be asked says `UNREADABLE`.
+
+**Published is "how is this reached", not "what did Docker map".** A container on host
+networking or inside another container's namespace has no port mappings at all, so the
+literal answer for both Syncthings and for `torrent` is empty — and empty would read as
+"publishes nothing" while `zero`'s Syncthing serves 8384/22000 and `torrent` answers on
+8080. Those say `host net` and `net of <container>` instead, and the ports themselves are
+in **Listening**, which reads the kernel and so covers every case. A bare `—` here means
+Docker maps nothing *and* the container owns its own stack.
+
+**Listening is the authority when the two disagree.** Containers is what Docker was
+configured to do; Listening is what the box is doing. `one`'s Syncthing is the worked
+example: it is defined with host networking on 8384/22000, it is `exited`, and neither
+port appears below it.
