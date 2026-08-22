@@ -61,6 +61,20 @@
     # leaving two tokens with the same purpose, of which the phone holds the secret to
     # only one. If it does not match, this play creates a token and prints its secret.
     cf_st_name: "{{ service_token_name | default(cf_name) }}"
+    # Ansible templates a task's arguments BEFORE deciding to skip it, and `uri` declares
+    # no check-mode support — so under --check every write is skipped, but its URL and
+    # body are still rendered. Any id that only a write could have produced is therefore
+    # undefined at that moment, and the render dies with "'cf_tunnel_id' is undefined".
+    #
+    # THE FILLER GOES INLINE, NOT INTO A set_fact. A set_fact was tried and was worse: it
+    # makes the id look defined to the READ tasks as well, and those carry
+    # check_mode: false because a read is safe — so `GET /access/apps/WOULD-BE.../policies`
+    # went out for real and came back 404. A `when: … is defined` guard on a read is only
+    # honest if the fact is genuinely absent. Inline defaults keep it absent.
+    #
+    # Deliberately not a plausible UUID: if it ever escapes into a real request, that
+    # request should fail obviously rather than create something against the wrong object.
+    cf_unknown_id: WOULD-BE-CREATED-BY-A-REAL-RUN
     # Where the container's read-only secrets mount points on the host. Matches
     # INFRA_SECRETS in dev/.env; override with -e if that was changed.
     infra_secrets: "{{ secrets_dir | default('~/.infra-dev-secrets') }}"
@@ -182,26 +196,6 @@
         cf_tunnel_id: "{{ cf_tunnel_new.json.result.id }}"
       when: cf_tunnel_new is not skipped
 
-    - name: A stand-in tunnel id, so --check can get past this point
-      # `uri` declares no check-mode support, so under --check the create above is
-      # SKIPPED — which is right, it is a write — and cf_tunnel_id is therefore never
-      # set. Ansible templates a task's arguments BEFORE deciding to skip it, so the
-      # very next task blew up on `{{ cf_tunnel_id }}.cfargotunnel.com` with
-      # "'cf_tunnel_id' is undefined" and the dry run could not reach the end.
-      #
-      # This is the second time the same shape has bitten: a bootstrap play cannot dry-run
-      # the half that depends on what the first half would have created. The answer is a
-      # visible stand-in, not a `when:` on everything downstream — with a `when:` the dry
-      # run silently shows nothing about DNS or Access, which is most of what you wanted
-      # to see. The value is deliberately not a plausible UUID: if it ever reaches a real
-      # request, the request should fail obviously rather than create something wrong.
-      #
-      # Guarded on ansible_check_mode as well as on definedness, so an undefined id in a
-      # REAL run stays a loud failure instead of being papered over.
-      ansible.builtin.set_fact:
-        cf_tunnel_id: WOULD-BE-CREATED-BY-A-REAL-RUN
-      when: cf_tunnel_id is not defined and ansible_check_mode
-
     - name: Write the credentials file
       # 0600, and the content never reaches a log. This is the one artefact of the whole
       # play that lands on a host, and it is what lets anything claim to be this tunnel.
@@ -217,14 +211,37 @@
 
     # ── 2  the DNS record ───────────────────────────────────────────────────
     - name: Look for an existing record for the hostname
+      # &type=CNAME, not name alone. Cloudflare's name filter returns every record type at
+      # that name, so a stale A or AAAA left over from something else would come back
+      # first and the PUT below would rewrite THAT record's id into a CNAME — converting
+      # an unrelated record instead of managing ours.
       ansible.builtin.uri:
-        url: "{{ cf_api }}/zones/{{ cf_zone_id }}/dns_records?name={{ cf_hostname }}"
+        url: "{{ cf_api }}/zones/{{ cf_zone_id }}/dns_records?type=CNAME&name={{ cf_hostname }}"
         headers: { Authorization: "Bearer {{ cf_api_token }}" }
       register: cf_dns_q
       delegate_to: localhost
       check_mode: false
       changed_when: false
       no_log: true
+
+    - name: Is the record already pointing at this tunnel
+      # So a converged run reports changed=0. That matters more here than tidiness: this
+      # repo reads the recap to tell a no-op from a real one, and a play that always says
+      # "changed" is a play whose recap nobody reads.
+      #
+      # `proxied` is compared too, not just the target. An unproxied record resolves to
+      # the tunnel's address and Cloudflare never sees the request, so Access is not in
+      # front of it at all — the same reachability with the protection quietly gone.
+      ansible.builtin.set_fact:
+        cf_dns_ok: >-
+          {{ (cf_dns_q.json.result | length) > 0
+             and cf_dns_q.json.result[0].content == ((cf_tunnel_id | default('', true)) ~ '.cfargotunnel.com')
+             and (cf_dns_q.json.result[0].proxied | default(false) | bool) }}
+
+    - name: The record is already correct
+      ansible.builtin.debug:
+        msg: "{{ cf_hostname }} already CNAMEs to this tunnel, proxied — leaving it"
+      when: cf_dns_ok
 
     - name: Point the record at this tunnel
       # PUT when it exists rather than skipping. A record left pointing at a PREVIOUS
@@ -240,11 +257,12 @@
         body:
           type: CNAME
           name: "{{ cf_hostname }}"
-          content: "{{ cf_tunnel_id }}.cfargotunnel.com"
+          content: "{{ cf_tunnel_id | default(cf_unknown_id, true) }}.cfargotunnel.com"
           proxied: true
           comment: "{{ cf_name }} container tunnel — ansible/playbooks/cloudflare-dev-tunnel.yml"
       register: cf_dns_w
       delegate_to: localhost
+      when: not cf_dns_ok
       changed_when: cf_dns_w.json.success | default(false)
       no_log: true
 
@@ -294,11 +312,6 @@
         cf_st_id: "{{ cf_st_new.json.result.id }}"
       when: cf_st_new is not skipped
 
-    - name: A stand-in service token id, for the same reason
-      ansible.builtin.set_fact:
-        cf_st_id: WOULD-BE-CREATED-BY-A-REAL-RUN
-      when: cf_st_id is not defined and ansible_check_mode
-
     # ── 4  the Access application and its one policy ────────────────────────
     - name: List the account's Access applications
       ansible.builtin.uri:
@@ -316,6 +329,13 @@
       when: (cf_app_q.json.result | default([]) | selectattr('domain', 'eq', cf_hostname) | list) | length > 0
 
     - name: Create or update the Access application
+      # THIS ONE PUTS UNCONDITIONALLY AND SO ALWAYS REPORTS CHANGED, unlike the DNS record
+      # above. Deliberate, and the reason is that Cloudflare normalises what it returns —
+      # session_duration, allowed_idps and the launcher flags come back in forms that do
+      # not compare equal to what was sent, so a field-by-field check would report a
+      # difference on every run and be worse than no check. Converging every time is
+      # cheap and correct; the cost is one `changed` in the recap.
+      #
       # allowed_idps is deliberately empty and auto_redirect_to_identity false: this
       # application has no identity provider behind it at all. That is the answer to
       # "which IdP" — none, no account is linked to anything, and the only way through is
@@ -345,11 +365,6 @@
         cf_app_id: "{{ cf_app_w.json.result.id }}"
       when: cf_app_w is not skipped
 
-    - name: A stand-in application id, for the same reason
-      ansible.builtin.set_fact:
-        cf_app_id: WOULD-BE-CREATED-BY-A-REAL-RUN
-      when: cf_app_id is not defined and ansible_check_mode
-
     - name: List the application's policies
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ cf_app_id }}/policies"
@@ -362,13 +377,15 @@
       no_log: true
 
     - name: Create or update the service-token policy
+      # Same as the application above: PUTs unconditionally, so it always reports changed.
+      #
       # decision: non_identity, and that is not interchangeable with `allow`. `allow` with
       # a service_token include still expects an identity behind the request and sends a
       # headless client to a login page it cannot complete — which presents as the tunnel
       # being broken rather than as the wrong policy type.
       ansible.builtin.uri:
         url: >-
-          {{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ cf_app_id }}/policies{{
+          {{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ cf_app_id | default(cf_unknown_id, true) }}/policies{{
              '/' ~ (cf_pol_q.json.result | selectattr('name', 'eq', 'service token') | list | first).id
              if (cf_pol_q.json.result | default([]) | selectattr('name', 'eq', 'service token') | list) | length > 0
              else '' }}
@@ -381,7 +398,7 @@
           name: service token
           decision: non_identity
           include:
-            - service_token: { token_id: "{{ cf_st_id }}" }
+            - service_token: { token_id: "{{ cf_st_id | default(cf_unknown_id, true) }}" }
       register: cf_pol_w
       delegate_to: localhost
       when: cf_app_id is defined and cf_st_id is defined
@@ -390,20 +407,20 @@
 
     # ── what to do next ─────────────────────────────────────────────────────
     - name: What a --check run can and cannot tell you
-      # Because three ids above will read WOULD-BE-CREATED-BY-A-REAL-RUN and that is
-      # alarming without an explanation.
       ansible.builtin.debug:
         msg: >-
           --check: every read ran for real and every write was skipped, so what this
-          proved is that the API token works and which objects already exist. Ids shown
-          as WOULD-BE-CREATED-BY-A-REAL-RUN are the ones that do not exist yet. Nothing
-          was created.
+          proved is that the API token works, that it can see the zone, and which of the
+          four objects already exist. Anything below showing "(not created — --check)"
+          does not exist yet. Nothing was created and nothing was changed.
       when: ansible_check_mode
 
     - name: What was provisioned
       ansible.builtin.debug:
         msg:
-          - "tunnel    {{ cf_tunnel_id | default('(not created — --check)') }}"
+          - "tunnel    {{ cf_tunnel_id | default('(not created — --check)', true) }}"
+          - "token     {{ cf_st_id | default('(not created — --check)', true) }}"
+          - "app       {{ cf_app_id | default('(not created — --check)', true) }}"
           - "hostname  {{ cf_hostname }}"
           - "creds     {{ inventory_hostname }}:{{ infra_secrets }}/tunnel.json"
           - "access    application + one non_identity policy, no identity provider"

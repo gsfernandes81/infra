@@ -44,7 +44,15 @@
     # documents that trap for remote_tmp and it is the same one here.
     deploy_pub_local: >-
       {{ lookup('env', 'HOME') }}/.cache/infra-dev/{{ inventory_hostname }}-deploy.pub
-    dev_tunnel_hostname: "{{ tunnel_hostname | default('') }}"
+    # NOT `default('')`. This play rewrites dev/.env wholesale, so a plain re-run with no
+    # -e tunnel_hostname would blank a hostname that a previous run set — silently turning
+    # the tunnel off at the next `make up`, with no task reporting anything but "changed".
+    # An explicit -e still wins; absent one, whatever is already in .env is preserved.
+    # `if … is defined`, NOT `| default(…, true)`. The truthy form treats an explicitly
+    # empty -e as absent, so `-e tunnel_hostname=` would preserve the old value instead of
+    # clearing it — leaving no way to turn the tunnel back off. Given-wins-even-if-empty,
+    # absent-preserves, is the semantics that has both directions.
+    dev_tunnel_hostname: "{{ tunnel_hostname if tunnel_hostname is defined else env_tunnel_hostname }}"
     # The key that will be allowed to ssh INTO the container. Defaults to the control
     # node's own — run this from the phone and the phone authorises itself, which beats
     # a paste. Override with -e to authorise a laptop as well; the module appends.
@@ -52,6 +60,24 @@
       {{ client_pubkey | default(lookup('file', lookup('env', 'HOME') ~ '/.ssh/id_ed25519.pub'), true) }}
 
   tasks:
+    - name: Read the existing dev/.env, if there is one
+      # So the rewrite below can preserve settings this run was not asked to change.
+      ansible.builtin.slurp:
+        src: "{{ infra_src }}/dev/.env"
+      register: env_existing
+      failed_when: false
+      check_mode: false
+
+    - name: Carry forward the tunnel hostname already set
+      # Parsed rather than pattern-matched into the template, so the value that survives
+      # is exactly the one that was there. Empty when the file is absent, which is the
+      # first-run case and is correct — no tunnel until one is provisioned.
+      ansible.builtin.set_fact:
+        env_tunnel_hostname: >-
+          {{ ((env_existing.content | default('') | b64decode).splitlines()
+              | select('match', '^DEV_TUNNEL_HOSTNAME=') | list | first
+              | default('=')).split('=', 1)[1] | trim }}
+
     - name: The secrets directory
       # 700, outside the repo. Everything the container reads at start lives here and is
       # mounted read-only, so nothing in the container can write back into it.
@@ -176,6 +202,7 @@
           - "deploy    {{ infra_secrets }}/id_ed25519_infra_deploy"
           - "authorised {{ infra_secrets }}/authorized_keys"
           - "env       {{ infra_src }}/dev/.env"
+          - "tunnel    {{ dev_tunnel_hostname | default('', true) | ternary(dev_tunnel_hostname, 'none — reached on the loopback port') }}"
           - ""
           - "TWO THINGS LEFT, and neither can be done from here:"
           - ""
