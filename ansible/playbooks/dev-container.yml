@@ -63,12 +63,41 @@
           -N '' -C infra-dev-{{ inventory_hostname }}
         creates: "{{ infra_secrets }}/id_ed25519_infra_deploy"
 
+    - name: Is the deploy key there yet
+      # Registered before the mode fixup and the authorized_keys work, because those
+      # three tasks all need files that a --check run has not created. Without this the
+      # first dry run on a fresh host dies at the mode task with "file ... is absent,
+      # cannot continue" — `file:` defaults to state: file, which requires existence.
+      ansible.builtin.stat:
+        path: "{{ infra_secrets }}/id_ed25519_infra_deploy"
+      register: deploy_key
+      check_mode: false
+
+    - name: Note that a first --check cannot go further
+      # Said out loud rather than left as three silent skips. A dry run of a bootstrap
+      # genuinely cannot show you the second half: you cannot chmod a key that a check
+      # run declined to create. What --check IS good for here is the second run onward,
+      # where everything exists and it proves nothing is about to move.
+      ansible.builtin.debug:
+        msg: >-
+          --check on a host with no deploy key yet: the mode fixup, the authorized_keys
+          append and dev/.env are skipped below, because they act on files this run has
+          not created. Nothing is wrong. Run it for real, then --check again to see a
+          clean no-change pass.
+      when: ansible_check_mode and not deploy_key.stat.exists
+
     - name: The deploy key's modes
       # ssh refuses a private key it considers group- or world-readable, and the umask
       # that ssh-keygen inherited is not something to rely on being 077.
+      #
+      # The guard reads "in a real run, always; in a dry run, only if it is already
+      # there". A real run has just created the key one task up, so the left half is
+      # always true then.
       ansible.builtin.file:
         path: "{{ infra_secrets }}/id_ed25519_infra_deploy"
         mode: "0600"
+        state: file
+      when: not ansible_check_mode or deploy_key.stat.exists
 
     - name: Read the deploy key's public half back
       ansible.builtin.slurp:
@@ -86,6 +115,7 @@
         dest: "{{ infra_secrets }}/authorized_keys"
         mode: "0600"
         force: false
+      when: not ansible_check_mode or deploy_key.stat.exists
 
     - name: Authorise the client key
       # ansible.posix.authorized_key rather than lineinfile, and requirements.yml already
@@ -99,6 +129,7 @@
         path: "{{ infra_secrets }}/authorized_keys"
         manage_dir: false
         state: present
+      when: not ansible_check_mode or deploy_key.stat.exists
 
     - name: dev/.env
       # Written rather than copied from .env.example, because .env holds host-specific
@@ -124,6 +155,7 @@
           GIT_USER_NAME={{ git_user_name | default('Gavin Fernandes') }}
           GIT_USER_EMAIL={{ git_user_email | default('gavinfernandes2012@pm.me') }}
           DEV_TUNNEL_HOSTNAME={{ dev_tunnel_hostname }}
+      when: not ansible_check_mode or deploy_key.stat.exists
 
     - name: What is set up, and what is left
       ansible.builtin.debug:
