@@ -73,13 +73,17 @@ _require-secrets:
 	[ -n "$$dir" ] || { echo "INFRA_SECRETS is not set in .env" >&2; exit 1; }; \
 	[ -d "$$dir" ] || { echo "INFRA_SECRETS=$$dir does not exist. Run ./seed-secrets.sh first." >&2; exit 1; }; \
 	missing=; \
-	for f in authorized_keys id_ed25519_infra_deploy id_ed25519_fleet ssh_config.fleet known_hosts.fleet; do \
+	for f in authorized_keys id_ed25519_infra_deploy; do \
 	  [ -s "$$dir/$$f" ] || missing="$$missing $$f"; \
 	done; \
 	[ -z "$$missing" ] || { \
 	  echo "WARNING — missing or empty in $$dir:$$missing" >&2; \
 	  echo "          The container will start; whatever needs those will not work." >&2; \
-	  echo "          ./seed-secrets.sh writes all five." >&2; }; \
+	  echo "          ./seed-secrets.sh writes both." >&2; }; \
+	[ -s "$$dir/id_ed25519_fleet" ] || \
+	  echo "note: no fleet access configured (the default) — the container has no route" >&2; \
+	[ ! -s "$$dir/id_ed25519_fleet" ] || \
+	  echo "note: fleet access IS configured — this container can reach all three hosts" >&2; \
 	mode=$$(stat -c %a "$$dir"); \
 	[ "$$mode" = 700 ] || echo "WARNING — $$dir is mode $$mode, expected 700." >&2
 

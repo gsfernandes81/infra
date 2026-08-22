@@ -284,6 +284,50 @@ read-only file rather than `--token`, which is the containerised form of the rul
 restated below. The service token belongs to the phone and must not be in the container,
 because it authorises *reaching* the container.
 
+### A control node inside the fleet — OPEN, deliberately
+
+`infra-dev` was being built as a second control node — `ansible-core` and the collections
+in the image, an ssh key reaching all three hosts — and that was stepped back from on
+2026-08-22 before it was used. **By default the container now has no route to `zero`,
+`one` or `two` at all.** It develops this repo; running playbooks against the fleet stays
+on the phone. One variable turns it on (`INFRA_DEV_FLEET=1`), off is the default, and the
+argument is here rather than in whoever next runs the script.
+
+The objection is structural, not squeamish: it puts the control plane **inside a container
+on one of the boxes the control plane controls**.
+
+- **It cannot fix the thing it lives in.** zero wedged means the control node is wedged
+  with it, and the box you most want to reach is the one you cannot. The phone has no such
+  problem, which is most of the argument for the phone staying the real control node.
+- **The blast radius is circular.** A key reaching all three hosts as an account in
+  `wheel`, in a container that runs a claude, on the box that runs Immich and the
+  Cloudflare tunnel. Compromise the container and you have the fleet, its own host
+  included.
+- **It is a third control node nobody sized for.** The section above names two — Termux
+  now, `two` at Phase 8 — and `two` was chosen on the reasoning that a control node should
+  be the box with the least on it. zero is the box with the most.
+
+The argument the other way is real and is why this is open rather than closed: **an audit
+from Termux is metered end to end to reach boxes sitting on zero's own LAN, and from
+inside the container it is free.** That saving recurs every run, and Phase 8's answer to
+it — scheduling from `two` — is blocked behind Phase 7's rootless podman.
+
+Three things would change the answer, and it is worth knowing which one you are waiting
+for rather than revisiting this on a feeling:
+
+1. **Phase 7 and 8 landing.** If `two` becomes the scheduled read-only control node, the
+   metered-audit argument mostly evaporates and this stays off for good.
+2. **A read-only split.** The audit needs no `become` on `one` and `two`. A container
+   holding a key that can only read, with the mutating half staying on the phone, answers
+   the blast-radius objection without giving up the saving. Nothing in the repo does this
+   today and `ansible.cfg`'s `become: False` default is the right half of it already.
+3. **The dev containers moving hosts** (Phase 5). A control node that follows the
+   container to whichever box has room is a different proposition from one pinned to zero,
+   and the objection about living inside what it controls stops being a constant.
+
+Until one of those, it is off, and the container is a development container that happens
+to have ansible in it for editing playbooks.
+
 ### Still to do: the fleet's own tunnels — PLANNED, not started
 
 `zero`'s and `one`'s tunnel tokens were world-readable in a 755 init script for months and

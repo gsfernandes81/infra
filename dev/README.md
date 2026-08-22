@@ -5,6 +5,9 @@ Ansible in the image so the container is also a control node for the fleet it ma
 
 ## Why this exists
 
+**To run a Claude session on `zero` instead of in the cloud.** That is the whole of it,
+and everything else here is either in service of that or is optional and off.
+
 **To stop paying the phone's radio for work that has nothing to do with the vessel.**
 
 Driving Claude from the Android app or from Remote Control means every token of every
@@ -15,13 +18,12 @@ on the map that costs anything. Working in a container on `zero` instead means t
 traffic goes out over zero's home connection, and what crosses the radio is a terminal
 session: your keystrokes and the characters that come back.
 
-The same argument applies twice over to Ansible. An `ansible-playbook` run from Termux
-reaches `zero`, `one` and `two` over the internet, so a full audit is metered from end
-to end. The identical run from inside this container reaches `one` and `two` across the
-home LAN and `zero` over its own loopback. **The audit becomes free.** That is the
-substantive reason this container is not just a second shell on zero, and it is why the
-image carries `ansible-core` and the three collections rather than expecting you to
-install them.
+`ansible-core` and the three collections are in the image as **development tools** — so
+that a playbook you are editing can be syntax-checked, linted and read against the real
+`ansible.cfg`. They are deliberately *not* wired to the fleet: by default this container
+has no route to `zero`, `one` or `two` at all, and running playbooks against them stays
+on the phone. See *The control-node question, deferred* below; it is a decision that has
+been consciously postponed rather than an omission.
 
 ## What it is not
 
@@ -35,6 +37,8 @@ install them.
   adding it here should be a decision with reasoning attached rather than a default
   nobody chose.
 - **Not a holder of the docker socket.** See *The socket line somebody will add* below.
+- **Not a control node, by default.** It ships ansible but no route to the fleet. See
+  *The control-node question, deferred*.
 
 ## Layout
 
@@ -54,16 +58,17 @@ install them.
 ## Bring-up, from nothing
 
 All of it on `zero`, in your own terminal — `gavin` is not in the docker group, so none
-of this runs from an agent session.
+of this runs from an agent session. **This is the whole of it. No fleet access, no
+Cloudflare** — both are additions, decided separately, and neither is needed for a claude
+running on zero.
 
 ```sh
 cd ~/infra/dev
-./seed-secrets.sh                      # generates both keys, lifts the ssh fragments
+./seed-secrets.sh                      # generates the deploy key, sets up the secrets dir
 
-# the two things seed-secrets.sh prints and does NOT do:
+# the one thing it prints and does NOT do:
 gh repo deploy-key add ~/.infra-dev-secrets/id_ed25519_infra_deploy.pub \
     --repo gsfernandes81/infra --title infra-dev-zero --allow-write
-for h in zero one two; do ssh-copy-id -i ~/.infra-dev-secrets/id_ed25519_fleet.pub $h; done
 
 cp .env.example .env && $EDITOR .env   # INFRA_SRC and INFRA_SECRETS are the two that matter
 make dev                               # build, start, then walk the logins
@@ -75,6 +80,15 @@ Then add the phone's public key so it can get in:
 cat >> ~/.infra-dev-secrets/authorized_keys    # paste the phone's ~/.ssh/id_ed25519.pub
 make restart
 ```
+
+That gives you `ssh infra-dev` from the phone through zero, and `make claude` on zero.
+The two optional additions, each with its own section below and each safe to skip
+indefinitely:
+
+| | What it adds | Why it is off |
+|---|---|---|
+| `INFRA_DEV_FLEET=1 ./seed-secrets.sh` | ssh to zero, one and two | makes this a control node on a box it controls — deferred |
+| `DEV_TUNNEL_HOSTNAME=…` + the playbook | reach it without `ssh zero` first | needs a Cloudflare API token and four objects |
 
 `make dev` is `make up` followed by `make login`, which is the walkthrough in
 `login.sh`: git over ssh, the three hosts, `gh auth login`, `claude auth login`. Every
@@ -331,20 +345,59 @@ already calibrated: counting sockets on port 7844 and reading the log were both 
 would repeat that mistake here in a new way — cloudflared is running the whole time it
 retries a tunnel that will never connect. `make tunnel-log` is what it points you at.
 
+## The control-node question, deferred
+
+**By default this container cannot reach `zero`, `one` or `two`.** No fleet key, no
+`ssh_config.fleet`, no `known_hosts.fleet`. It develops this repo — edit, commit, push,
+syntax-check a playbook — and running playbooks against the fleet stays on the phone.
+
+That is a step back from where this was heading, taken deliberately. The container was
+being built as a second control node, and there is a real objection to it: **it puts the
+control plane inside a container on one of the boxes the control plane controls.** Three
+things follow from that shape and none of them is imaginary.
+
+- **It cannot fix the thing it lives in.** If zero is wedged, the control node is wedged
+  with it, and the box you most want to reach is the one you cannot. The phone has no
+  such problem, which is the argument for the phone remaining the real control node.
+- **The blast radius is circular.** A key that reaches all three hosts as an account in
+  `wheel`, in a container that runs a claude, on the box that runs Immich and the
+  Cloudflare tunnel. Compromise the container and you have the fleet, including its own
+  host.
+- **It is a third control node nobody sized for.** `docs/management-plane.md` names two —
+  Termux now, `two` at Phase 8 — and picked `two` on the reasoning that a control node
+  should be the box with the least on it. zero is the box with the most.
+
+Against all of that there is one genuinely good argument, which is why this is deferred
+and not refused: **an audit from Termux is metered end to end to reach boxes that are on
+zero's own LAN, and from inside this container it is free.** That is a real, recurring
+saving, and Phase 8's answer — scheduling from `two` — is blocked on rootless podman,
+which is Phase 7.
+
+So it is left as one variable, off, with the argument written down rather than settled by
+whoever next runs the script:
+
+```sh
+INFRA_DEV_FLEET=1 ~/infra/dev/seed-secrets.sh && cd ~/infra/dev && make restart
+```
+
+Turn it on knowing which of the three objections you have decided you can live with.
+`make status` says which state it is in, and says nothing is wrong when it is off.
+
 ## What the container can reach, and what that is worth
 
 | | Reaches | Held as |
 |---|---|---|
 | git | `gsfernandes81/infra`, read-write | deploy key, generated on zero, never transmitted |
 | `gh` | your GitHub account, at whatever scope the token has | a login in the `infra-gh` volume |
-| the fleet | `zero`, `one`, `two` as `gavin`, no sudo without `-K` | `id_ed25519_fleet`, generated on zero |
+| the fleet | **nothing, by default** — see above | `id_ed25519_fleet`, opt-in, generated on zero |
 | the tunnel | outbound to Cloudflare's edge; publishes this sshd at one hostname | `tunnel.json`, read-only, written by the playbook |
 
-**The fleet key is the one that is new, and it is a bigger prize than anything
-`or3-dev` holds.** `or3-dev`'s deploy key touches one repo and its vessel key touches
-one PC; this reaches every host in the fleet as an account in `wheel`. Three things
-make that an acceptable trade rather than a quiet escalation, and all three are
-properties to preserve:
+**The fleet key is the one that would be new, and it is a bigger prize than anything
+`or3-dev` holds** — which is why it is off by default and why the section above exists.
+`or3-dev`'s deploy key touches one repo and its vessel key touches one PC; this would
+reach every host in the fleet as an account in `wheel`. If it is ever turned on, three
+properties are what keep it a trade rather than a quiet escalation, and all three are
+maintained by `seed-secrets.sh`:
 
 - **It is a separate key from the one you use by hand**, so it is revocable on its own:
   pull three `authorized_keys` lines and the container is locked out while your laptop
@@ -437,7 +490,7 @@ read-only at `/run/infra-secrets`:
 |---|---|
 | `authorized_keys` | public keys allowed to ssh **into** the container |
 | `id_ed25519_infra_deploy` | GitHub deploy key for this repo, read-write, generated on zero |
-| `id_ed25519_fleet` | reaches `zero`, `one`, `two` as `gavin`, generated on zero |
+| `id_ed25519_fleet` | **optional, off by default** — reaches all three as `gavin`, generated on zero |
 | `ssh_config.fleet` | the three `Host` blocks, lifted from zero's own `~/.ssh/config` |
 | `known_hosts.fleet` | their host keys, lifted from zero's own `~/.ssh/known_hosts` |
 | `tunnel.json` | Cloudflare tunnel credentials — written by the **playbook**, not `seed-secrets.sh` |

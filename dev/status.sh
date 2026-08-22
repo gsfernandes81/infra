@@ -70,10 +70,13 @@ status() {
     # Named separately because they fail differently: no ssh_config.fleet is "unknown
     # host zero", no known_hosts.fleet is a host key failure that reads like a refused
     # connection. Both come from seed-secrets.sh.
-    printf 'fleet cfg : %s\n' "$(d exec "$CONTAINER" sh -c '[ -s /run/infra-secrets/ssh_config.fleet ]' 2>/dev/null \
-        && echo 'ssh_config.fleet present' || echo 'MISSING — run seed-secrets.sh on zero')"
-    printf 'fleet keys: %s\n' "$(d exec "$CONTAINER" sh -c '[ -s /run/infra-secrets/known_hosts.fleet ]' 2>/dev/null \
-        && echo 'known_hosts.fleet present' || echo 'MISSING — ansible will fail host key checking')"
+    # Absent is the DEFAULT here, not a fault. Fleet access is opt-in
+    # (INFRA_DEV_FLEET=1) because it makes this a control node running on a box it
+    # controls, which is a deferred question rather than a settled one. So the line says
+    # "not configured", and only says something is wrong when the set is half-present —
+    # a key with no host keys fails on verification in a way that reads as a refused
+    # connection, which is the state worth naming.
+    printf 'fleet     : %s\n' "$(fleet_files_line)"
 
     # END-TO-END, not a proxy for one, and specifically the probe recovery.md already
     # calibrated: readyConnections from the metrics endpoint. Counting sockets on 7844
@@ -83,6 +86,19 @@ status() {
     printf 'tunnel    : %s\n' "$(tunnel_line)"
     printf 'ansible   : %s\n' "$(d exec "$CONTAINER" ansible --version 2>/dev/null | head -1 || echo 'MISSING')"
     printf 'workspace : %s\n' "$(d exec "$CONTAINER" git -C /workspace log --oneline -1 2>/dev/null || echo 'no git checkout at /workspace')"
+}
+
+fleet_files_line() {
+    local have=0 n=0 f
+    for f in id_ed25519_fleet ssh_config.fleet known_hosts.fleet; do
+        n=$((n + 1))
+        d exec "$CONTAINER" sh -c "[ -s /run/infra-secrets/$f ]" 2>/dev/null && have=$((have + 1))
+    done
+    case "$have" in
+        0) echo 'no route to zero/one/two — the default, see dev/README.md' ;;
+        3) echo 'configured — this container can reach all three hosts' ;;
+        *) echo "PARTIAL ($have of 3 files) — expect host key or identity failures" ;;
+    esac
 }
 
 # ── tunnel ──────────────────────────────────────────────────────────────────
@@ -112,6 +128,15 @@ tunnel_line() {
 # plain ssh proves the key, the config and the host key; `ansible fleet -m ping`
 # additionally proves the inventory, ansible.cfg and the Python interpreter pin.
 fleet() {
+    if ! d exec "$CONTAINER" sh -c '[ -s /run/infra-secrets/id_ed25519_fleet ]' 2>/dev/null; then
+        printf 'No fleet access configured, which is the default.\n\n'
+        printf 'This container develops the repo; it does not operate the fleet. Running\n'
+        printf 'playbooks against zero, one and two stays on the phone. To change that:\n\n'
+        printf '    INFRA_DEV_FLEET=1 ~/infra/dev/seed-secrets.sh && make restart\n\n'
+        printf 'Read docs/management-plane.md § "A control node inside the fleet" first —\n'
+        printf 'it is a deferred decision, not an oversight.\n'
+        return
+    fi
     printf '── ssh, one host at a time ──\n'
     local bad=0
     for h in zero one two; do

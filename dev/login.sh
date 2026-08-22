@@ -52,8 +52,15 @@ fi
 # rather than a footnote. Asked of each host in turn, because "ansible works" and
 # "all three answer" are different claims and the second is the useful one.
 bold "2/4  the fleet (zero, one, two)"
-if [ ! -f "$HOME/.ssh/id_ed25519_fleet" ] || [ ! -s "$HOME/.ssh/known_hosts" ]; then
-  warn "The fleet key or its known_hosts are missing — run seed-secrets.sh on zero."
+if [ ! -f "$HOME/.ssh/id_ed25519_fleet" ]; then
+  ok "not configured — the default. This container develops the repo; it does not"
+  info "operate the fleet, and running playbooks against the three hosts stays on the"
+  info "phone. That is a deferred decision rather than a missing step: putting a control"
+  info "node inside a container on a box it controls is a real question, and it is"
+  info "written up in docs/management-plane.md § \"A control node inside the fleet\"."
+  info "To add it anyway: INFRA_DEV_FLEET=1 ~/infra/dev/seed-secrets.sh, then make restart"
+elif [ ! -s "$HOME/.ssh/known_hosts" ]; then
+  warn "A fleet key is present but known_hosts is empty — re-run seed-secrets.sh."
 else
   for h in zero one two; do
     if out=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$h" hostname 2>&1); then
