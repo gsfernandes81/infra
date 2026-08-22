@@ -122,6 +122,15 @@
         cf_zone_id: "{{ cf_zone_q.json.result[0].id }}"
         cf_account_id: "{{ cf_zone_q.json.result[0].account.id }}"
 
+    - name: Which account this play is working in
+      # Printed because it is the answer to the question that actually comes up: "why
+      # can it not see the object I made?" This id is derived from whoever owns the ZONE,
+      # and Access objects live under an ACCOUNT — if you have more than one, a token
+      # made in the other one is invisible here and the play would say, correctly and
+      # uselessly, that there are none. Neither id is a secret.
+      ansible.builtin.debug:
+        msg: "zone {{ cf_zone }} = {{ cf_zone_id }} · account = {{ cf_account_id }}"
+
     # ── 1  the tunnel ───────────────────────────────────────────────────────
     # Locally-managed (config_src: local), so ingress lives in the container's own
     # config.yml rather than in the dashboard, and what this hostname answers on is
@@ -157,8 +166,13 @@
     - name: Refuse to continue on a credentials file naming a dead tunnel
       ansible.builtin.assert:
         that:
+          # `result | default({}, true)` because on the 404 this task deliberately allows,
+          # Cloudflare answers `"result": null` — and `null.deleted_at` raises a Jinja
+          # error ("object of type 'NoneType' has no attribute") INSTEAD of failing the
+          # assert. The whole point of allowing the 404 was to produce the message below;
+          # a raw templating error in its place is the opposite of that.
           - cf_tunnel_q.json.success | default(false)
-          - cf_tunnel_q.json.result.deleted_at is none
+          - (cf_tunnel_q.json.result | default({}, true)).deleted_at is none
         fail_msg: >-
           {{ infra_secrets }}/tunnel.json on {{ inventory_hostname }} names tunnel
           {{ cf_tunnel_id }}, which this account does not have (deleted, or created on
@@ -284,6 +298,17 @@
       ansible.builtin.set_fact:
         cf_st_id: "{{ (cf_st_q.json.result | selectattr('name', 'eq', cf_st_name) | list | first).id }}"
       when: (cf_st_q.json.result | default([]) | selectattr('name', 'eq', cf_st_name) | list) | length > 0
+
+    - name: The raw service-token listing
+      # -e debug_tokens=true. Off by default because it is noise on a working run, and
+      # available because the alternative — when the summary below says "none" and you
+      # believe otherwise — was for me to guess between three explanations. The listing
+      # carries ids, names, client_ids and timestamps and NO secrets: Cloudflare returns
+      # a service token's secret at creation and never again, which is the same fact that
+      # makes this play print it once and loudly.
+      ansible.builtin.debug:
+        msg: "{{ cf_st_q.json | to_nice_json }}"
+      when: debug_tokens | default(false) | bool
 
     - name: Say which service tokens this account has
       # Printed whether or not one matched. A name mismatch is otherwise invisible: the
