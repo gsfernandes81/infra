@@ -55,9 +55,14 @@
     cf_zone: "{{ zone | default('gsrpi.uk') }}"
     cf_name: "{{ name | default('infra-dev') }}"
     cf_hostname: "{{ hostname | default(cf_name ~ '.' ~ cf_zone) }}"
-    # The Access service token to put in the policy, BY NAME. Separate from the tunnel
-    # name because a token minted by hand in the dashboard is called whatever it was
-    # called that day, and a lookup that silently finds nothing would mint a SECOND one —
+    # The ACCESS SERVICE TOKEN to put in the policy, BY NAME — not the API token above,
+    # which is a different object with a colliding name and no business being named here.
+    # Leave it unset unless you minted an Access service token by hand; the default is
+    # the tunnel's own name and the play creates one under it.
+    #
+    # Separate from the tunnel name because a token minted by hand in the dashboard is
+    # called whatever it was called that day, and a lookup that silently finds nothing
+    # would mint a SECOND one —
     # leaving two tokens with the same purpose, of which the phone holds the secret to
     # only one. If it does not match, this play creates a token and prints its secret.
     cf_st_name: "{{ service_token_name | default(cf_name) }}"
@@ -83,8 +88,16 @@
     cf_session_duration: 24h
 
   vars_prompt:
+    # "API token", and the distinction is not pedantry — it has already cost a round.
+    # Cloudflare has TWO things whose names collide:
+    #   API token          — My Profile -> API Tokens. Authorises THIS PLAY to call the
+    #                        API. It is what this prompt wants.
+    #   Access service token — Zero Trust -> Access -> Service Auth. A client_id/secret
+    #                        pair a MACHINE presents to get THROUGH Access. This play
+    #                        creates one and prints it once; the phone holds it.
+    # An API token that someone named "service_token" is still an API token.
     - name: cf_api_token
-      prompt: "Cloudflare API token"
+      prompt: "Cloudflare API token (My Profile -> API Tokens, NOT an Access service token)"
       private: true
       confirm: false
 
@@ -316,7 +329,8 @@
       # and the secret to only one of them. Seeing the list is what catches it.
       ansible.builtin.debug:
         msg: >-
-          looking for "{{ cf_st_name }}" — account has:
+          ACCESS service tokens (Zero Trust -> Access -> Service Auth; not API tokens) —
+          looking for "{{ cf_st_name }}", account has:
           {{ (cf_st_q.json.result | default([]) | map(attribute='name') | list) | join(', ') | default('none', true) }}
           => {{ 'matched ' ~ cf_st_id if cf_st_id is defined else 'NO MATCH, one will be created' }}
 

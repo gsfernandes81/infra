@@ -300,6 +300,20 @@ the policy is a service token:
 --service-token-secret value  [$TUNNEL_SERVICE_TOKEN_SECRET]
 ```
 
+### Two Cloudflare things called a "token", and they are not related
+
+This cost a round of confusion, so it is worth stating flatly before anything else:
+
+| | Where | What it is | Who holds it |
+|---|---|---|---|
+| **API token** | My Profile → API Tokens | authorises the *playbook* to call the Cloudflare API | nobody — prompted, in memory, one run |
+| **Access service token** | Zero Trust → Access → Service Auth | a `client_id`/`client_secret` a *machine* presents to get **through** Access | the phone, at `~/.config/infra-dev/token` |
+
+They are different objects with different lifetimes and different homes, and naming an
+API token "service_token" — which is an entirely reasonable thing to do — makes them look
+like the same thing. `-e service_token_name=` refers to the **second** one, and should be
+left unset unless you minted one by hand: the play creates it and prints its secret once.
+
 ### No identity provider is configured, and none will be
 
 The Access application is created with `allowed_idps: []` and
