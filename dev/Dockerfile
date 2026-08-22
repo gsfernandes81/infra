@@ -210,6 +210,28 @@ ENV TZ=Etc/UTC \
     SCREENDIR=/home/dev/.screen \
     ANSIBLE_CONFIG=/workspace/ansible/ansible.cfg
 
+# ── the last ROOT-OWNED thing; everything below USER belongs to dev ─────────
+#
+# WHERE THIS CONTAINER'S WORK IS, as a program. `in-workspace <cmd>` cds and execs, so a
+# client that needs a command to run in the repo says `in-workspace …` and never names
+# the path. It wraps the directory ONLY — not abduco, not a session name: the directory
+# is the container's business, and holding a session across a dropped link is the
+# client's.
+#
+# THIS MUST STAY ABOVE `USER`, and the first version did not. Placed among the COPYs at
+# the bottom it looked right — they are all COPYs of files from this directory — but
+# every one of those lands in dev's HOME and is dev-owned, while this is a program on
+# PATH and must be root's. `chmod` then ran as dev against a root-owned file and the
+# build died with "Operation not permitted". The boundary is the `USER` line, not the
+# kind of instruction.
+#
+# COPY then RUN chmod, not `COPY --chmod=`: that flag needs BuildKit, and the `# syntax=`
+# line at the top is a plain comment to the legacy builder rather than a requirement of
+# it. Nor relying on git's executable bit, which is one `core.fileMode` away from being
+# lost on a file that has to be executable or nothing runs it.
+COPY in-workspace /usr/local/bin/in-workspace
+RUN chmod 0755 /usr/local/bin/in-workspace
+
 USER ${USERNAME}
 WORKDIR /workspace
 
@@ -239,20 +261,6 @@ COPY --chown=${USER_UID}:${USER_GID} screenrc /home/dev/.screenrc
 # /workspace rather than in the home directory. Not on a volume, so a rebuild is
 # what updates it.
 COPY --chown=${USER_UID}:${USER_GID} config.fish /home/dev/.config/fish/config.fish
-
-# WHERE THIS CONTAINER'S WORK IS, as a program. `in-workspace <cmd>` cds and execs, so a
-# client that needs a command to run in the repo says `in-workspace …` and never names the
-# path. It wraps the directory ONLY — not abduco, not a session name: the directory is the
-# container's business and holding a session across a dropped link is the client's. On
-# PATH and root-owned, unlike the files below, because it is a program rather than the dev
-# user's state.
-#
-# COPY then RUN chmod, not `COPY --chmod=`: that flag needs BuildKit, and the `# syntax=`
-# line at the top is a plain comment to the legacy builder rather than a requirement of
-# it. Nor relying on git's executable bit, which is one `core.fileMode` away from being
-# lost on a file that has to be executable or nothing runs it.
-COPY in-workspace /usr/local/bin/in-workspace
-RUN chmod 0755 /usr/local/bin/in-workspace
 
 # The interactive login walkthrough, run by `make login` from a terminal on zero.
 # It lives in the IMAGE rather than in the Makefile because every step of it needs
