@@ -33,9 +33,17 @@
     # secrets mount points. Absolute, resolved from the host's own $HOME rather than
     # written as ~ — a `~` in dev/.env is the repo rule this would otherwise break, and
     # it breaks silently because it works by hand and fails under sudo.
-    infra_src: "{{ src_dir | default(ansible_env.HOME ~ '/infra') }}"
-    infra_secrets: "{{ secrets_dir | default(ansible_env.HOME ~ '/.infra-dev-secrets') }}"
+    # ansible_facts['env'], not ansible_env. The top-level injected form is deprecated
+    # and goes away in core 2.24 — and this repo has two control nodes, so a playbook
+    # that only works on the older one is a trap rather than a warning.
+    infra_src: "{{ src_dir | default(ansible_facts['env']['HOME'] ~ '/infra') }}"
+    infra_secrets: "{{ secrets_dir | default(ansible_facts['env']['HOME'] ~ '/.infra-dev-secrets') }}"
     dev_ssh_port: "{{ ssh_port | default(2225) }}"
+    # Where the public half is fetched to on the CONTROL NODE, for the gh command below.
+    # lookup('env','HOME') because ~ does not expand on Termux — host_vars/localhost.yml
+    # documents that trap for remote_tmp and it is the same one here.
+    deploy_pub_local: >-
+      {{ lookup('env', 'HOME') }}/.cache/infra-dev/{{ inventory_hostname }}-deploy.pub
     dev_tunnel_hostname: "{{ tunnel_hostname | default('') }}"
     # The key that will be allowed to ssh INTO the container. Defaults to the control
     # node's own — run this from the phone and the phone authorises itself, which beats
@@ -99,12 +107,16 @@
         state: file
       when: not ansible_check_mode or deploy_key.stat.exists
 
-    - name: Read the deploy key's public half back
-      ansible.builtin.slurp:
+    - name: Bring the deploy key's public half to the control node
+      # So the gh command below can name a local FILE. The obvious alternative — printing
+      # the key inline and using process substitution — is bash syntax, and every shell
+      # on this fleet is fish, where `<(...)` is a syntax error. A command that cannot be
+      # pasted into the shell you are standing in is not an instruction.
+      ansible.builtin.fetch:
         src: "{{ infra_secrets }}/id_ed25519_infra_deploy.pub"
-      register: deploy_pub
-      failed_when: false
-      check_mode: false
+        dest: "{{ deploy_pub_local }}"
+        flat: true
+      when: not ansible_check_mode or deploy_key.stat.exists
 
     - name: Create authorized_keys if it is not there
       # force: false so this only ever creates. The append is the next task's job, and a
@@ -124,7 +136,7 @@
       # argument here — once the tunnel is the way in, this file is the only door.
       # exclusive is left at its default of false, so a second client is an addition.
       ansible.posix.authorized_key:
-        user: "{{ ansible_user_id }}"
+        user: "{{ ansible_facts['user_id'] }}"
         key: "{{ dev_client_pubkey }}"
         path: "{{ infra_secrets }}/authorized_keys"
         manage_dir: false
@@ -168,11 +180,10 @@
           - "TWO THINGS LEFT, and neither can be done from here:"
           - ""
           - "1. Register the deploy key on GitHub — until then the container comes up"
-          - "   and cannot push:"
-          - "     gh repo deploy-key add <(cat <<'EOF'"
-          - "{{ (deploy_pub.content | default('') | b64decode) | trim }}"
-          - "     EOF"
-          - "     ) --repo gsfernandes81/infra --title infra-dev-{{ inventory_hostname }} --allow-write"
+          - "   and cannot push. The public half has been fetched here, so this is"
+          - "   one paste, in fish or anywhere else:"
+          - "     gh repo deploy-key add {{ deploy_pub_local }} \\"
+          - "         --repo gsfernandes81/infra --title infra-dev-{{ inventory_hostname }} --allow-write"
           - ""
           - "2. Build and start it, on {{ inventory_hostname }}, in your own terminal —"
           - "   `gavin` is not in the docker group, so this is not an ansible job:"

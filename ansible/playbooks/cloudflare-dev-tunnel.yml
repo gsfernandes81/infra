@@ -182,6 +182,26 @@
         cf_tunnel_id: "{{ cf_tunnel_new.json.result.id }}"
       when: cf_tunnel_new is not skipped
 
+    - name: A stand-in tunnel id, so --check can get past this point
+      # `uri` declares no check-mode support, so under --check the create above is
+      # SKIPPED — which is right, it is a write — and cf_tunnel_id is therefore never
+      # set. Ansible templates a task's arguments BEFORE deciding to skip it, so the
+      # very next task blew up on `{{ cf_tunnel_id }}.cfargotunnel.com` with
+      # "'cf_tunnel_id' is undefined" and the dry run could not reach the end.
+      #
+      # This is the second time the same shape has bitten: a bootstrap play cannot dry-run
+      # the half that depends on what the first half would have created. The answer is a
+      # visible stand-in, not a `when:` on everything downstream — with a `when:` the dry
+      # run silently shows nothing about DNS or Access, which is most of what you wanted
+      # to see. The value is deliberately not a plausible UUID: if it ever reaches a real
+      # request, the request should fail obviously rather than create something wrong.
+      #
+      # Guarded on ansible_check_mode as well as on definedness, so an undefined id in a
+      # REAL run stays a loud failure instead of being papered over.
+      ansible.builtin.set_fact:
+        cf_tunnel_id: WOULD-BE-CREATED-BY-A-REAL-RUN
+      when: cf_tunnel_id is not defined and ansible_check_mode
+
     - name: Write the credentials file
       # 0600, and the content never reaches a log. This is the one artefact of the whole
       # play that lands on a host, and it is what lets anything claim to be this tunnel.
@@ -274,6 +294,11 @@
         cf_st_id: "{{ cf_st_new.json.result.id }}"
       when: cf_st_new is not skipped
 
+    - name: A stand-in service token id, for the same reason
+      ansible.builtin.set_fact:
+        cf_st_id: WOULD-BE-CREATED-BY-A-REAL-RUN
+      when: cf_st_id is not defined and ansible_check_mode
+
     # ── 4  the Access application and its one policy ────────────────────────
     - name: List the account's Access applications
       ansible.builtin.uri:
@@ -320,6 +345,11 @@
         cf_app_id: "{{ cf_app_w.json.result.id }}"
       when: cf_app_w is not skipped
 
+    - name: A stand-in application id, for the same reason
+      ansible.builtin.set_fact:
+        cf_app_id: WOULD-BE-CREATED-BY-A-REAL-RUN
+      when: cf_app_id is not defined and ansible_check_mode
+
     - name: List the application's policies
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ cf_app_id }}/policies"
@@ -359,6 +389,17 @@
       no_log: true
 
     # ── what to do next ─────────────────────────────────────────────────────
+    - name: What a --check run can and cannot tell you
+      # Because three ids above will read WOULD-BE-CREATED-BY-A-REAL-RUN and that is
+      # alarming without an explanation.
+      ansible.builtin.debug:
+        msg: >-
+          --check: every read ran for real and every write was skipped, so what this
+          proved is that the API token works and which objects already exist. Ids shown
+          as WOULD-BE-CREATED-BY-A-REAL-RUN are the ones that do not exist yet. Nothing
+          was created.
+      when: ansible_check_mode
+
     - name: What was provisioned
       ansible.builtin.debug:
         msg:
