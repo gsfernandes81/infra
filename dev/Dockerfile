@@ -240,16 +240,19 @@ COPY --chown=${USER_UID}:${USER_GID} screenrc /home/dev/.screenrc
 # what updates it.
 COPY --chown=${USER_UID}:${USER_GID} config.fish /home/dev/.config/fish/config.fish
 
-# What a claude session IS, in one place: the workspace it starts in, the session name,
-# and the abduco invocation. On PATH so every client — ssh RemoteCommand, `make claude`,
-# a laptop — names it and knows nothing else. Root-owned and world-executable, unlike the
-# files below: it is a program on PATH, not the dev user's state.
-# COPY then RUN chmod, not `COPY --chmod=`: that flag needs BuildKit, and the
-# `# syntax=` line at the top is a plain comment to the legacy builder rather than a
-# requirement of it. Nor relying on git's executable bit, which is one `core.fileMode`
-# away from being lost. This is on PATH and has to be executable or nothing runs it.
-COPY dev-claude /usr/local/bin/dev-claude
-RUN chmod 0755 /usr/local/bin/dev-claude
+# WHERE THIS CONTAINER'S WORK IS, as a program. `in-workspace <cmd>` cds and execs, so a
+# client that needs a command to run in the repo says `in-workspace …` and never names the
+# path. It wraps the directory ONLY — not abduco, not a session name: the directory is the
+# container's business and holding a session across a dropped link is the client's. On
+# PATH and root-owned, unlike the files below, because it is a program rather than the dev
+# user's state.
+#
+# COPY then RUN chmod, not `COPY --chmod=`: that flag needs BuildKit, and the `# syntax=`
+# line at the top is a plain comment to the legacy builder rather than a requirement of
+# it. Nor relying on git's executable bit, which is one `core.fileMode` away from being
+# lost on a file that has to be executable or nothing runs it.
+COPY in-workspace /usr/local/bin/in-workspace
+RUN chmod 0755 /usr/local/bin/in-workspace
 
 # The interactive login walkthrough, run by `make login` from a terminal on zero.
 # It lives in the IMAGE rather than in the Makefile because every step of it needs

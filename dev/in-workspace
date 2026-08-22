@@ -1,0 +1,42 @@
+#!/bin/sh
+# Run something where this container's work is.
+#
+#     in-workspace abduco -A claude claude
+#     in-workspace git status
+#     in-workspace                          (no args: a login shell)
+#
+# WHY THIS EXISTS. sshd runs a remote command as `$SHELL -c '…'`, which is NOT a login
+# shell — so config.fish's `status is-login` guard is false and its cd to /workspace
+# never fires. A plain `ssh` with no command DOES get a login shell and lands correctly,
+# which is what makes the symptom baffling: one alias works and the other does not, for
+# a reason neither of them mentions. `docker exec` is fine too, because it honours the
+# image's WORKDIR. It is only the remote-command path that needs help.
+#
+# It is not cosmetic: the entrypoint seeds Claude Code's trust dialog for /workspace, so
+# a session started in /home/dev asks you to trust a directory that is not the repo.
+#
+# WHY IT WRAPS ONLY THE DIRECTORY. A first version of this was `dev-claude`, which also
+# baked in abduco and the session name. That was one concern too many. WHERE THE WORK IS
+# belongs to the container — it is the container's bind mount and nothing outside knows
+# the path. WHETHER TO HOLD THE SESSION ACROSS A DROPPED LINK belongs to the client: the
+# phone wants abduco because ssh dies at the lock screen, and a laptop running
+# `ssh … 'git log'`, a cron, or a one-shot `claude -p` all want no such thing. Wrapping
+# both meant a client could not have the second without the first.
+#
+# Rejected: an sshd ForceCommand that cds every session whatever the client asked for.
+# More complete, and not worth it — it has to special-case sftp and $SSH_ORIGINAL_COMMAND,
+# it is boot-path-ish config on the only way in, and CLAUDE.md is explicit about care with
+# the thing you are connected through. This is inert until something runs it.
+set -u
+
+if ! cd /workspace 2>/dev/null; then
+    # Warn and carry on rather than refuse. If the bind mount is missing you want the
+    # command anyway — most likely you are running one to find out why.
+    echo "in-workspace: /workspace is not there — the bind mount is missing." >&2
+    echo "in-workspace: running in $(pwd) instead. Check INFRA_SRC in dev/.env." >&2
+fi
+
+# No arguments is a login shell, so `in-workspace` alone is useful rather than a no-op.
+[ "$#" -gt 0 ] || set -- "${SHELL:-/bin/sh}" -l
+
+exec "$@"

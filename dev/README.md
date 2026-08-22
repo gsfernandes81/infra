@@ -50,7 +50,7 @@ been consciously postponed rather than an omission.
 | `entrypoint.sh` | ssh material → Claude config → `git pull` → **sshd(fg)** |
 | `login.sh` | in the image: the interactive logins, idempotent — `make login` |
 | `status.sh` | on the host: the readouts — `make status`, `verify`, `fleet`, `collections` |
-| `dev-claude` | in the image, on PATH: what a claude session *is* — one definition, every client |
+| `in-workspace` | in the image, on PATH: run a command where the work is, so no client names the path |
 | *(no setup script)* | the host side is `ansible/playbooks/dev-container.yml`, run from a control node |
 | `sshd_config` / `ssh_config` | the in-container daemon, and the baked half of how it reaches out |
 | `config.fish` | fish's config, baked in — puts every login shell in `/workspace` |
@@ -113,19 +113,23 @@ ssh -t infra-dev abduco -A claude claude       # a claude that survives the link
 abduco                                         # (inside) list sessions
 ```
 
-`dev-claude` is a program **in the image**, and that is deliberate. It cds to
-`/workspace` and execs `abduco -A claude claude`, so the client says one word and knows
-nothing about where the workspace is or what the session is called. `make claude` on zero
-runs the same program, so there is one definition rather than two that can drift, and
-`dev-claude review` gives a second session alongside the first.
+**`in-workspace` is a program in the image**, and the split is deliberate. It cds to
+`/workspace` and execs whatever it was handed — the directory and nothing else. *Where the
+work is* is the container's business: it is the container's bind mount, and no client
+should have to name the path. *Whether to hold the session across a dropped link* is the
+client's: the phone wants `abduco` because ssh dies at the lock screen, and a laptop
+running `ssh infra-dev-sh 'git log'`, a cron, or a one-shot `claude -p` want the workspace
+and no abduco at all. So the phone's config reads `RemoteCommand in-workspace abduco -A
+claude claude`, with each half owned by whoever knows the answer.
 
-The `cd` is not cosmetic and the reason is worth knowing, because the symptom is
-confusing: sshd runs a remote command as `$SHELL -c '…'`, which is **not a login shell**,
-so `config.fish`'s `status is-login` guard is false and its cd never fires. A plain `ssh`
-with no command *does* get a login shell and lands correctly — so one alias worked and
-the other did not, for a reason neither mentioned. And it matters because the entrypoint
-seeds Claude Code's trust dialog for `/workspace`: a session started in `/home/dev` asks
-you to trust a directory that is not the repo.
+The `cd` is needed for a reason worth knowing, because the symptom is baffling: sshd runs
+a remote command as `$SHELL -c '…'`, which is **not a login shell**, so `config.fish`'s
+`status is-login` guard is false and its cd never fires. A plain `ssh` with no command
+*does* get a login shell and lands correctly, and `docker exec` is fine too because it
+honours the image's `WORKDIR` — so `make claude` needs no wrapper. Only the remote-command
+path is affected, which is why one alias worked and the other did not. And it matters
+because the entrypoint seeds Claude Code's trust dialog for `/workspace`: a session started
+in `/home/dev` asks you to trust a directory that is not the repo.
 
 `abduco -A NAME CMD` attaches the session called `NAME`, creating it if it is not
 there — so the same command starts the work and comes back to it. **Ctrl-\\** detaches;

@@ -256,12 +256,14 @@
             HostName {{ dev_hostname }}
             User dev
             RequestTTY yes
-            # `dev-claude` is a program IN THE IMAGE. This line used to be
-            # `cd /workspace 2>/dev/null; abduco -A claude claude`, which worked and put
-            # the knowledge in the wrong place — every client would need the same
-            # incantation, and the container that owns the answer was not the thing
-            # giving it. `make claude` on zero runs the same program.
-            RemoteCommand dev-claude
+            # Two concerns, each where it belongs. `in-workspace` is a program in the
+            # IMAGE and holds the one thing the container owns — where its work is, so no
+            # client names the path. `abduco` is here because it is a property of THIS
+            # LINK: an ssh session from a phone dies at the lock screen, so the session
+            # has to outlive it. A laptop on ethernet running `ssh … 'git log'`, or a
+            # one-shot `claude -p`, wants the workspace and no abduco at all — which a
+            # wrapper owning both would have made impossible.
+            RemoteCommand in-workspace abduco -A claude claude
             ProxyCommand sh -c '. {{ token_file }}; exec {{ cloudflared }} access ssh --hostname %h'
 
           # Same transport, no RemoteCommand — for when you want a shell rather than a
