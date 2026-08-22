@@ -45,6 +45,7 @@
     token_file: "{{ home }}/.config/infra-dev/token"
     ssh_config: "{{ home }}/.ssh/config"
     ssh_key: "{{ identity | default('~/.ssh/id_ed25519') }}"
+    cloudflared: "{{ cfd_path.stdout | default('cloudflared', true) | trim }}"
 
   tasks:
     # ── refuse a secret that arrived on the command line ────────────────────
@@ -76,6 +77,17 @@
     - name: Is cloudflared installed
       ansible.builtin.command: cloudflared --version
       register: cfd
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Where cloudflared is
+      # An absolute path in the ProxyCommand rather than a bare name. ssh runs it through
+      # /bin/sh, which inherits ssh's environment — and ssh is not always started from a
+      # shell that has $PREFIX/bin on PATH. Discovered rather than hardcoded, so this
+      # works on a laptop as well as in Termux.
+      ansible.builtin.command: command -v cloudflared
+      register: cfd_path
       changed_when: false
       failed_when: false
       check_mode: false
@@ -234,31 +246,60 @@
         insertbefore: BOF
         marker: "# {mark} infra-dev (ansible/playbooks/dev-client.yml)"
         block: |
+          # Three ways to the same container. RemoteCommand on the first is the whole
+          # point: `ssh {{ dev_alias }}` IS the claude session, reattaching if one is
+          # already running, so the habit is one word rather than a remembered incantation.
+          # One caveat that comes with RemoteCommand: `ssh {{ dev_alias }} <command>` is then
+          # an error ("cannot execute command-line and remote command"), and scp/sftp to
+          # this alias will not work. Use {{ dev_alias }}-sh for either.
           Host {{ dev_alias }}
             HostName {{ dev_hostname }}
             User dev
-            IdentityFile {{ ssh_key }}
-            IdentitiesOnly yes
-            ProxyCommand sh -c '. {{ token_file }}; exec cloudflared access ssh --hostname %h'
-            ServerAliveInterval 30
-            ServerAliveCountMax 3
+            RequestTTY yes
+            RemoteCommand abduco -A claude claude
+            ProxyCommand sh -c '. {{ token_file }}; exec {{ cloudflared }} access ssh --hostname %h'
 
+          # Same transport, no RemoteCommand — for when you want a shell rather than a
+          # claude. Worth having as its own alias because the alternative is
+          # `ssh -o RemoteCommand=none {{ dev_alias }}`, which nobody remembers under pressure.
+          Host {{ dev_alias }}-sh
+            HostName {{ dev_hostname }}
+            User dev
+            ProxyCommand sh -c '. {{ token_file }}; exec {{ cloudflared }} access ssh --hostname %h'
+
+          # Break-glass: through zero's own sshd, touching no Cloudflare at all. The two
+          # paths fail independently, which is the only reason neither is a single point
+          # of failure — Cloudflare down or a bad token does not touch this one, and a
+          # wedged zero sshd does not touch the other.
+          #
+          # NOT ProxyJump: zero's sshd sets AllowTcpForwarding no, which refuses the
+          # direct-tcpip channel ProxyJump opens. A session channel running nc is not
+          # covered by that setting.
           Host {{ dev_alias }}-lan
             HostName 127.0.0.1
             Port {{ lan_port | default(2225) }}
             User dev
+            ProxyCommand ssh zero nc %h %p
+
+          # ONE HOST KEY PER CONTAINER, NOT PER PATH — the same rule this config already
+          # applies to the Pis. The container's key lives in a docker volume and survives
+          # rebuilds, so all three routes meet the same key. Without a shared alias the
+          # rarely-used path has no stored entry and simply prompts you to accept whatever
+          # it is handed, during a rescue, which is when you are least likely to look.
+          # To clear it later: ssh-keygen -R {{ dev_alias }}
+          Host {{ dev_alias }} {{ dev_alias }}-sh {{ dev_alias }}-lan
+            HostKeyAlias {{ dev_alias }}
             IdentityFile {{ ssh_key }}
             IdentitiesOnly yes
-            ProxyCommand ssh zero nc %h %p
             ServerAliveInterval 30
             ServerAliveCountMax 3
 
     - name: How to use it
       ansible.builtin.debug:
         msg:
-          - "ssh {{ dev_alias }}                                 a shell, over Cloudflare"
-          - "ssh -t {{ dev_alias }} abduco -A claude claude      a claude that survives the link"
-          - "ssh {{ dev_alias }}-lan                             break-glass, through zero"
+          - "ssh {{ dev_alias }}         the claude session itself, over Cloudflare"
+          - "ssh {{ dev_alias }}-sh      a shell instead, same route"
+          - "ssh {{ dev_alias }}-lan     break-glass, through zero, no Cloudflare"
           - ""
           - "The token is at {{ token_file }} (0600) and is sourced by the ProxyCommand,"
           - "so it reaches one cloudflared process and is in no other environment."
