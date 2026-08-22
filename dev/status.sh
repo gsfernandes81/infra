@@ -168,6 +168,12 @@ verify() {
     printf 'screen    : %s\n' "$(d exec "$CONTAINER" screen --version 2>&1 | head -1 || echo 'MISSING')"
     printf 'claude    : %s\n' "$(d exec "$CONTAINER" claude --version 2>&1 | head -1 || echo 'MISSING')"
     printf 'cloudflared: %s\n' "$(d exec "$CONTAINER" cloudflared --version 2>&1 | head -1 || echo 'MISSING — the hash-pinned download did not land')"
+    # The one the phone's RemoteCommand names. Absent here and `ssh infra-dev` fails with
+    # "Unknown command: in-workspace" from the container's fish — which reads like a
+    # broken ssh config and is in fact an image that was never rebuilt. Cheap to check,
+    # and it is the check that would have said so.
+    printf 'in-workspace: %s\n' "$(d exec "$CONTAINER" sh -c 'command -v in-workspace' 2>/dev/null \
+        || echo 'MISSING — this image predates it. Rebuild: make up')"
     printf '\n'
     collections
     printf '\n'
