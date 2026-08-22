@@ -50,7 +50,7 @@ been consciously postponed rather than an omission.
 | `entrypoint.sh` | ssh material → Claude config → `git pull` → **sshd(fg)** |
 | `login.sh` | in the image: the interactive logins, idempotent — `make login` |
 | `status.sh` | on the host: the readouts — `make status`, `verify`, `fleet`, `collections` |
-| `seed-secrets.sh` | **run on zero**; generates the keys and lifts the ssh fragments |
+| *(no setup script)* | the host side is `ansible/playbooks/dev-container.yml`, run from a control node |
 | `sshd_config` / `ssh_config` | the in-container daemon, and the baked half of how it reaches out |
 | `config.fish` | fish's config, baked in — puts every login shell in `/workspace` |
 | `.env.example` | copy to `.env` on zero and edit |
@@ -62,23 +62,24 @@ of this runs from an agent session. **This is the whole of it. No fleet access, 
 Cloudflare** — both are additions, decided separately, and neither is needed for a claude
 running on zero.
 
+**Two commands, from two places.** The host side is a playbook, run from a control node
+— the phone — because that is where ansible is and because the setup is not something
+zero should have a script for:
+
 ```sh
-cd ~/infra/dev
-./seed-secrets.sh                      # generates the deploy key, sets up the secrets dir
-
-# the one thing it prints and does NOT do:
-gh repo deploy-key add ~/.infra-dev-secrets/id_ed25519_infra_deploy.pub \
-    --repo gsfernandes81/infra --title infra-dev-zero --allow-write
-
-cp .env.example .env && $EDITOR .env   # INFRA_SRC and INFRA_SECRETS are the two that matter
-make dev                               # build, start, then walk the logins
+# on the phone
+cd ~/infra/ansible
+ansible-playbook playbooks/dev-container.yml --check --diff    # prove first
+ansible-playbook playbooks/dev-container.yml
 ```
 
-Then add the phone's public key so it can get in:
+That creates the secrets directory, generates the GitHub deploy key, authorises **this
+control node's own public key** so the phone can ssh in, and writes `dev/.env`. It prints
+the one `gh repo deploy-key add …` command it cannot run itself. Then, on zero, in your
+own terminal — `gavin` is not in the docker group, so this half is never an ansible job:
 
 ```sh
-cat >> ~/.infra-dev-secrets/authorized_keys    # paste the phone's ~/.ssh/id_ed25519.pub
-make restart
+cd ~/infra/dev && make dev             # build, start, then walk the two logins
 ```
 
 That gives you `ssh infra-dev` from the phone through zero, and `make claude` on zero.
@@ -87,7 +88,7 @@ indefinitely:
 
 | | What it adds | Why it is off |
 |---|---|---|
-| `INFRA_DEV_FLEET=1 ./seed-secrets.sh` | ssh to zero, one and two | makes this a control node on a box it controls — deferred |
+| *(not built)* | ssh to zero, one and two | makes this a control node on a box it controls — deferred |
 | `DEV_TUNNEL_HOSTNAME=…` + the playbook | reach it without `ssh zero` first | needs a Cloudflare API token and four objects |
 
 `make dev` is `make up` followed by `make login`, which is the walkthrough in
@@ -201,44 +202,26 @@ provisioning the tunnel comfortably, because **there is no ansible on zero and t
 should not be.** zero is the box being managed — installing a control plane on it is the
 wrong direction, and this container is what zero's control node is *for*.
 
+All three playbooks run from the phone. **One per side**, because the three sides hold
+different state, need different credentials and change at different rates:
+
 ```sh
-# on zero, once — the container comes up with no tunnel and is reached on 127.0.0.1:2225
-cd ~/infra/dev && ./seed-secrets.sh
-cp .env.example .env && $EDITOR .env      # leave DEV_TUNNEL_HOSTNAME empty for now
-make dev
+cd ~/infra/ansible
 
-# then from inside it — where ansible lives, and where the API calls are free
-make shell
-cd /workspace/ansible
-ansible-playbook playbooks/cloudflare-dev-tunnel.yml --check    # prove first
-ansible-playbook playbooks/cloudflare-dev-tunnel.yml            # apply
+# 1. the EDGE — tunnel, DNS, Access application and its policy.
+#    Prompts for a Cloudflare API token, which it never writes anywhere.
+ansible-playbook playbooks/cloudflare-dev-tunnel.yml --check
+ansible-playbook playbooks/cloudflare-dev-tunnel.yml
 
-# back on zero: set DEV_TUNNEL_HOSTNAME=infra-dev.gsrpi.uk in dev/.env
-make up                                   # NOT restart — the entrypoint reads it at start
+# 2. the HOST — re-run with the hostname, which rewrites dev/.env
+ansible-playbook playbooks/dev-container.yml -e tunnel_hostname=infra-dev.gsrpi.uk
+
+# 3. the CLIENT — this phone. Prompts for the service token, once.
+ansible-playbook playbooks/dev-client.yml
 ```
 
-The phone works too and needs no container — it has `ansible-core` and can reach zero —
-but the Cloudflare calls are then metered, and so is the ssh to zero. From inside the
-container both are free.
-
-### The container has to reach its own host, and that needs two nudges
-
-`one` and `two` are ordinary LAN addresses a bridged container reaches unaided. **zero is
-the awkward one**, because from inside the container zero is the bridge gateway, and
-because two files that should describe it do not:
-
-- **`~/.ssh/config` on zero has no `Host zero` block** — nobody writes one for the machine
-  they are sitting on. `seed-secrets.sh` synthesises it, pointing `HostName` at the bare
-  name, and `compose.yaml` maps that name to `host-gateway`. Docker's own alias, so it
-  survives the bridge being renumbered in a way a hardcoded `172.17.0.1` would not.
-- **`~/.ssh/known_hosts` on zero has no entry for zero either**, and `ansible.cfg` sets
-  `host_key_checking = True`, which fails rather than prompts. `seed-secrets.sh` takes the
-  key from `/etc/ssh/ssh_host_ed25519_key.pub` instead — more authoritative than a
-  known_hosts line, which only records a key somebody once accepted.
-
-Both were found by trying to run the playbook rather than by reading the code. Without
-them the failure is `ansible cannot reach zero`, which sends you looking at the fleet key
-and not at a missing four-line block.
+Then on zero: `cd ~/infra/dev && make up` — **not** `restart`, which does not re-read
+`compose.yaml`. After that `ssh infra-dev` works from the phone with no `ssh zero` hop.
 
 `cloudflared` runs **inside** this container, not on zero, which is
 [`../docs/management-plane.md`](../docs/management-plane.md) § *Addressing*'s decision
@@ -376,12 +359,26 @@ which is Phase 7.
 So it is left as one variable, off, with the argument written down rather than settled by
 whoever next runs the script:
 
-```sh
-INFRA_DEV_FLEET=1 ~/infra/dev/seed-secrets.sh && cd ~/infra/dev && make restart
-```
+**Nothing in the repo builds it.** The three files the container would need —
+`id_ed25519_fleet`, `ssh_config.fleet`, `known_hosts.fleet` — are read by the entrypoint
+if present and are written by nothing. That is deliberate: a switch that turns this on is
+a switch someone flips without reading the argument. When it is decided, it becomes a
+fourth playbook, and two things it will have to solve are already known and easy to miss:
 
-Turn it on knowing which of the three objections you have decided you can live with.
-`make status` says which state it is in, and says nothing is wrong when it is off.
+- **`~/.ssh/config` on zero has no `Host zero` block** — nobody writes one for the machine
+  they are sitting on. `compose.yaml` already carries the other half of the fix, mapping
+  the bare name to `host-gateway` (Docker's own alias for the bridge gateway, which
+  survives a renumbering that a hardcoded `172.17.0.1` would not).
+- **`~/.ssh/known_hosts` on zero has no entry for zero either**, and `ansible.cfg` sets
+  `host_key_checking = True`, which fails rather than prompts. The answer is
+  `/etc/ssh/ssh_host_ed25519_key.pub` — more authoritative than a known_hosts line, which
+  only records a key somebody once accepted.
+
+Both were found by trying it, not by reading it. Without them the failure is `ansible
+cannot reach zero`, which sends you looking at the key rather than at a missing block.
+
+`make status` and `make fleet` say which state it is in, and say nothing is wrong when it
+is off.
 
 ## What the container can reach, and what that is worth
 
@@ -396,14 +393,14 @@ Turn it on knowing which of the three objections you have decided you can live w
 `or3-dev` holds** — which is why it is off by default and why the section above exists.
 `or3-dev`'s deploy key touches one repo and its vessel key touches one PC; this would
 reach every host in the fleet as an account in `wheel`. If it is ever turned on, three
-properties are what keep it a trade rather than a quiet escalation, and all three are
-maintained by `seed-secrets.sh`:
+properties are what would keep it a trade rather than a quiet escalation, and whatever
+builds it has to maintain all three:
 
-- **It is a separate key from the one you use by hand**, so it is revocable on its own:
-  pull three `authorized_keys` lines and the container is locked out while your laptop
-  still works.
-- **It never leaves zero.** `seed-secrets.sh` generates it there. There is no copy of
-  it on the phone, in the repo, or in transit, so there is nothing to lose.
+- **It has to be a separate key from the one you use by hand**, so it is revocable on its
+  own: pull three `authorized_keys` lines and the container is locked out while your
+  laptop still works.
+- **It never leaves zero.** It would be generated there. No copy on the phone, in the
+  repo, or in transit, so there is nothing to lose.
 - **It cannot escalate unattended.** sudo wants a password on all three hosts and this
   repo refuses NOPASSWD. Read the fleet freely; change it only with someone present.
 
@@ -490,10 +487,10 @@ read-only at `/run/infra-secrets`:
 |---|---|
 | `authorized_keys` | public keys allowed to ssh **into** the container |
 | `id_ed25519_infra_deploy` | GitHub deploy key for this repo, read-write, generated on zero |
-| `id_ed25519_fleet` | **optional, off by default** — reaches all three as `gavin`, generated on zero |
-| `ssh_config.fleet` | the three `Host` blocks, lifted from zero's own `~/.ssh/config` |
-| `known_hosts.fleet` | their host keys, lifted from zero's own `~/.ssh/known_hosts` |
-| `tunnel.json` | Cloudflare tunnel credentials — written by the **playbook**, not `seed-secrets.sh` |
+| `id_ed25519_fleet` | **not built** — would reach all three as `gavin`; see the deferred question above |
+| `ssh_config.fleet` | **not built** — the three `Host` blocks |
+| `known_hosts.fleet` | **not built** — their host keys |
+| `tunnel.json` | Cloudflare tunnel credentials — written by `cloudflare-dev-tunnel.yml` |
 
 **There is no `credentials.json`, not even behind a flag.** or3-dev keeps one as a
 documented bad idea: copying the phone's Claude login in does not work — claude
@@ -503,12 +500,16 @@ not initiate. An OAuth login is bound to the device that performed it. Repeating
 documented bad idea in a second container is how it stops reading as one, so the only
 path here is `make login`, once, persisted in the `infra-claude` volume.
 
-**The last two files are why `seed-secrets.sh` runs on zero and not on the phone.**
-or3's version has to run on the phone because the material lives there. Everything here
-is either generated on zero or lifted from zero's own working ssh setup — which is also
-why it is *right*: the container reaches `one` exactly the way zero does, rather than
-through a second description of the hop that is free to disagree. Nothing crosses the
-radio at all.
+**Everything here is written by a playbook run from the phone, and nothing crosses the
+radio that matters.** The deploy key is generated on zero by `ssh-keygen` over ssh, so
+the private half never leaves that disk. `authorized_keys` gets the control node's *own*
+public key, which is not a secret. `tunnel.json` is assembled on zero from a secret
+generated during the API call. The one genuinely metered thing in the whole arrangement
+is the 35.7 MiB `cloudflared` download on the phone, and it is priced in or3's ledger.
+
+This is where or3-dev differs and the difference is structural: its `seed-secrets.sh`
+*has* to run on the phone, because the or3ecr key and the Claude credentials live there.
+Nothing infra-dev needs originates on the phone except one public key.
 
 ## The three things that are load-bearing
 

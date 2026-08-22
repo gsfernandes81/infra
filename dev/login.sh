@@ -38,11 +38,11 @@ if ssh -o BatchMode=yes -T git@github.com 2>&1 | grep -q 'successfully authentic
 elif [ ! -f "$HOME/.ssh/id_ed25519_infra_deploy" ]; then
   warn "No deploy key in this container."
   info "It comes from \$INFRA_SECRETS/id_ed25519_infra_deploy on zero, which"
-  info "seed-secrets.sh generates there. Add it and restart:"
+  info "ansible/playbooks/dev-container.yml generates there. Add it and restart:"
   info "    cd ~/infra/dev && make restart"
 else
   warn "The deploy key is present but github.com does not accept it."
-  info "Add its public half to the repo as a deploy key. seed-secrets.sh printed"
+  info "Add its public half to the repo as a deploy key. The playbook printed"
   info "the command; it is also:"
   info "    gh repo deploy-key add <pubkey-file> --repo gsfernandes81/infra --allow-write"
 fi
@@ -58,9 +58,9 @@ if [ ! -f "$HOME/.ssh/id_ed25519_fleet" ]; then
   info "phone. That is a deferred decision rather than a missing step: putting a control"
   info "node inside a container on a box it controls is a real question, and it is"
   info "written up in docs/management-plane.md § \"A control node inside the fleet\"."
-  info "To add it anyway: INFRA_DEV_FLEET=1 ~/infra/dev/seed-secrets.sh, then make restart"
+  info "It is not built: see that section for what would have to be decided first."
 elif [ ! -s "$HOME/.ssh/known_hosts" ]; then
-  warn "A fleet key is present but known_hosts is empty — re-run seed-secrets.sh."
+  warn "A fleet key is present but known_hosts is empty — it was added by hand."
 else
   for h in zero one two; do
     if out=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$h" hostname 2>&1); then

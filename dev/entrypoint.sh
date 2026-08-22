@@ -43,10 +43,10 @@ done
 # each keyword, so a wildcard placed above a Host block silently wins over it.
 #
 # The fleet blocks are not in the image because they carry addresses — this repo's own
-# invariant puts those in a gitignored file — and because seed-secrets.sh lifts them
-# out of zero's working ~/.ssh/config rather than composing new ones. The container
-# then reaches `one` exactly the way zero does, instead of via a second description of
-# the same hop that is free to be wrong.
+# invariant puts those in a gitignored file. Nothing in the repo writes them today:
+# fleet access is the deferred control-node question, so in practice this file is absent
+# and the container has no route to zero, one or two. That is the default and the
+# warning below says so rather than treating it as a fault.
 {
     if [ -f "$SECRETS/ssh_config.fleet" ]; then
         cat "$SECRETS/ssh_config.fleet"
@@ -58,7 +58,7 @@ chmod 600 "$HOME/.ssh/config"
 
 if [ ! -f "$SECRETS/ssh_config.fleet" ]; then
     say "WARNING: no ssh_config.fleet in $SECRETS — zero, one and two are unreachable."
-    say "         Run dev/seed-secrets.sh on zero. Everything else still works."
+    say "         That is the DEFAULT — see docs/management-plane.md. Everything else works."
 fi
 
 # authorized_keys is what lets you in at all. Without it the container comes up and
@@ -200,7 +200,7 @@ chmod 600 "$HOME/.ssh/environment"
 # Two things must both be true or nothing starts: DEV_TUNNEL_HOSTNAME is set, and a
 # credentials file exists in the read-only secrets mount. That is deliberate — the
 # container must come up and be usable over the loopback port on a box that has never
-# had a tunnel created for it, because that is every box before seed-secrets.sh step 6.
+# had a tunnel created for it, which is every box before the tunnel playbook is run.
 #
 # LOCALLY-MANAGED, not token-based, and that is the whole reason this is shaped the way
 # it is. The host tunnels use `--token <secret>`, which puts a live credential in argv —

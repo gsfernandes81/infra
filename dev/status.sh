@@ -69,7 +69,7 @@ status() {
     # The two files that decide whether this container can reach the fleet at all.
     # Named separately because they fail differently: no ssh_config.fleet is "unknown
     # host zero", no known_hosts.fleet is a host key failure that reads like a refused
-    # connection. Both come from seed-secrets.sh.
+    # connection. Neither is written by anything in the repo today.
     # Absent is the DEFAULT here, not a fault. Fleet access is opt-in
     # (INFRA_DEV_FLEET=1) because it makes this a control node running on a box it
     # controls, which is a deferred question rather than a settled one. So the line says
@@ -132,7 +132,7 @@ fleet() {
         printf 'No fleet access configured, which is the default.\n\n'
         printf 'This container develops the repo; it does not operate the fleet. Running\n'
         printf 'playbooks against zero, one and two stays on the phone. To change that:\n\n'
-        printf '    INFRA_DEV_FLEET=1 ~/infra/dev/seed-secrets.sh && make restart\n\n'
+        printf '    (not built — see the doc for what would have to be decided first)\n\n'
         printf 'Read docs/management-plane.md § "A control node inside the fleet" first —\n'
         printf 'it is a deferred decision, not an oversight.\n'
         return

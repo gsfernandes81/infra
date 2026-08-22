@@ -1,0 +1,149 @@
+---
+# The HOST half of infra-dev's setup: everything on `zero` that has to exist before
+# `make up` can work. Run from Termux, or from any control node.
+#
+#     cd ansible
+#     ansible-playbook playbooks/dev-container.yml --check --diff   # prove, no -K needed
+#     ansible-playbook playbooks/dev-container.yml
+#
+# This REPLACES dev/seed-secrets.sh, which is deleted. Three of that script's five steps
+# were the fleet key and its ssh fragments, and those went with the control-node question
+# being deferred — see docs/management-plane.md § "A control node inside the fleet". What
+# is left is small enough that a shell script was never the right shape for it, and the
+# owner has now twice said the same thing about bin/compose and about cf-provision.sh:
+# prefer the tool everyone already knows over a bespoke one this repo has to maintain.
+#
+# IT SETS UP AND DOES NOT START. That split is this repo's own, from CLAUDE.md:
+# "check-system-drift reports and never writes; install-system-file writes and never
+# restarts". dev/Makefile is the container's lifecycle interface and stays the only one —
+# a playbook that also ran `up` would be a second way to do it, free to disagree with the
+# first about what state the container is in. It prints the make command instead.
+#
+# NO NEW COLLECTIONS. builtin throughout, plus ansible.posix.authorized_key, which is
+# already in requirements.yml and is there for exactly this: appending a key to an
+# authorized_keys file without rewriting it.
+
+- name: Prepare the host for the infra-dev container
+  hosts: "{{ dev_host | default('zero') }}"
+  gather_facts: true
+  become: false
+
+  vars:
+    # Where the repo is checked out on the host, and where the container's read-only
+    # secrets mount points. Absolute, resolved from the host's own $HOME rather than
+    # written as ~ — a `~` in dev/.env is the repo rule this would otherwise break, and
+    # it breaks silently because it works by hand and fails under sudo.
+    infra_src: "{{ src_dir | default(ansible_env.HOME ~ '/infra') }}"
+    infra_secrets: "{{ secrets_dir | default(ansible_env.HOME ~ '/.infra-dev-secrets') }}"
+    dev_ssh_port: "{{ ssh_port | default(2225) }}"
+    dev_tunnel_hostname: "{{ tunnel_hostname | default('') }}"
+    # The key that will be allowed to ssh INTO the container. Defaults to the control
+    # node's own — run this from the phone and the phone authorises itself, which beats
+    # a paste. Override with -e to authorise a laptop as well; the module appends.
+    dev_client_pubkey: >-
+      {{ client_pubkey | default(lookup('file', lookup('env', 'HOME') ~ '/.ssh/id_ed25519.pub'), true) }}
+
+  tasks:
+    - name: The secrets directory
+      # 700, outside the repo. Everything the container reads at start lives here and is
+      # mounted read-only, so nothing in the container can write back into it.
+      ansible.builtin.file:
+        path: "{{ infra_secrets }}"
+        state: directory
+        mode: "0700"
+
+    - name: The GitHub deploy key
+      # `creates:` is what makes this idempotent, and it must never be dropped: a second
+      # run without it silently mints a new key, the old public half stays registered on
+      # GitHub, and pushes start failing for a reason that looks like GitHub's fault.
+      # Generated on the host, so the private half has never been anywhere but its disk.
+      ansible.builtin.command:
+        cmd: >-
+          ssh-keygen -t ed25519 -f {{ infra_secrets }}/id_ed25519_infra_deploy
+          -N '' -C infra-dev-{{ inventory_hostname }}
+        creates: "{{ infra_secrets }}/id_ed25519_infra_deploy"
+
+    - name: The deploy key's modes
+      # ssh refuses a private key it considers group- or world-readable, and the umask
+      # that ssh-keygen inherited is not something to rely on being 077.
+      ansible.builtin.file:
+        path: "{{ infra_secrets }}/id_ed25519_infra_deploy"
+        mode: "0600"
+
+    - name: Read the deploy key's public half back
+      ansible.builtin.slurp:
+        src: "{{ infra_secrets }}/id_ed25519_infra_deploy.pub"
+      register: deploy_pub
+      failed_when: false
+      check_mode: false
+
+    - name: Create authorized_keys if it is not there
+      # force: false so this only ever creates. The append is the next task's job, and a
+      # `copy` that could overwrite would be one bad re-run away from locking every
+      # client out of the container at once.
+      ansible.builtin.copy:
+        content: ""
+        dest: "{{ infra_secrets }}/authorized_keys"
+        mode: "0600"
+        force: false
+
+    - name: Authorise the client key
+      # ansible.posix.authorized_key rather than lineinfile, and requirements.yml already
+      # says why in its own words: "append-never-rewrite for authorized_keys (which is
+      # right, because a botched rewrite on a tunnel-only box is unrecoverable)". Same
+      # argument here — once the tunnel is the way in, this file is the only door.
+      # exclusive is left at its default of false, so a second client is an addition.
+      ansible.posix.authorized_key:
+        user: "{{ ansible_user_id }}"
+        key: "{{ dev_client_pubkey }}"
+        path: "{{ infra_secrets }}/authorized_keys"
+        manage_dir: false
+        state: present
+
+    - name: dev/.env
+      # Written rather than copied from .env.example, because .env holds host-specific
+      # absolute paths and .env.example holds the explanation of them. Two files, two
+      # jobs. The example stays as the documentation; this is the instance.
+      #
+      # DEV_TUNNEL_HOSTNAME is empty unless -e tunnel_hostname=... is given, which is the
+      # switch that turns the Cloudflare tunnel on. Empty means the container is reached
+      # over the loopback port, which is the default and works with none of that set up.
+      ansible.builtin.copy:
+        dest: "{{ infra_src }}/dev/.env"
+        mode: "0600"
+        content: |
+          # Written by ansible/playbooks/dev-container.yml. Gitignored.
+          # Re-run that playbook rather than hand-editing, or the next run overwrites you.
+          INFRA_SRC={{ infra_src }}
+          INFRA_SECRETS={{ infra_secrets }}
+          DEV_SSH_PORT={{ dev_ssh_port }}
+          DEV_SSH_BIND=127.0.0.1
+          DEV_HOSTNAME=infra-dev
+          DEV_MEM_LIMIT=1024m
+          DEV_MEMSWAP_LIMIT=1536m
+          GIT_USER_NAME={{ git_user_name | default('Gavin Fernandes') }}
+          GIT_USER_EMAIL={{ git_user_email | default('gavinfernandes2012@pm.me') }}
+          DEV_TUNNEL_HOSTNAME={{ dev_tunnel_hostname }}
+
+    - name: What is set up, and what is left
+      ansible.builtin.debug:
+        msg:
+          - "secrets   {{ infra_secrets }} (0700)"
+          - "deploy    {{ infra_secrets }}/id_ed25519_infra_deploy"
+          - "authorised {{ infra_secrets }}/authorized_keys"
+          - "env       {{ infra_src }}/dev/.env"
+          - ""
+          - "TWO THINGS LEFT, and neither can be done from here:"
+          - ""
+          - "1. Register the deploy key on GitHub — until then the container comes up"
+          - "   and cannot push:"
+          - "     gh repo deploy-key add <(cat <<'EOF'"
+          - "{{ (deploy_pub.content | default('') | b64decode) | trim }}"
+          - "     EOF"
+          - "     ) --repo gsfernandes81/infra --title infra-dev-{{ inventory_hostname }} --allow-write"
+          - ""
+          - "2. Build and start it, on {{ inventory_hostname }}, in your own terminal —"
+          - "   `gavin` is not in the docker group, so this is not an ansible job:"
+          - "     cd {{ infra_src }}/dev && make dev"
+          - ""
+          - "`make dev` walks the two interactive logins (claude, gh) that need a tty."

@@ -11,11 +11,10 @@
 #
 # WHY THE FLEET BLOCKS ARE NOT IN THIS FILE. They carry addresses, and this repo's
 # own invariant is that host-specific values live in a gitignored file and never in
-# tracked content. They are also a COPY OF SOMETHING ALREADY PROVEN — seed-secrets.sh
-# lifts the working blocks out of zero's own ~/.ssh/config rather than composing new
-# ones, so the container reaches `one` exactly the way zero does. A block written
-# fresh here would be a second description of how to reach a box, free to disagree
-# with the one that works, which is the failure this whole repo is about.
+# tracked content. NOTHING WRITES THEM TODAY: fleet access is the deferred
+# control-node question — docs/management-plane.md § "A control node inside the fleet" —
+# so this file is, in practice, the whole of the container's ~/.ssh/config. The prepend
+# is kept because it costs nothing and is the shape the answer would take.
 
 # ── GitHub ──────────────────────────────────────────────────────────────────
 # A deploy key on gsfernandes81/infra, generated on zero and never transmitted.

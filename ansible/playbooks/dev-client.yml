@@ -1,0 +1,183 @@
+---
+# The CLIENT half: configures the machine you ssh FROM — the phone, or a laptop — to
+# reach infra-dev through its Cloudflare tunnel. Targets the control node itself.
+#
+#     cd ansible
+#     ansible-playbook playbooks/dev-client.yml --check --diff
+#     ansible-playbook playbooks/dev-client.yml
+#
+# It answers "how does the service token get used automatically when I ssh in", and the
+# answer is deliberately not "export it in your shell profile". See below.
+#
+# Run it once per client. On a second machine, run it there — the token file and the ssh
+# block are per-client, and nothing about this is shared state.
+#
+# NO NEW COLLECTIONS: ansible.builtin throughout.
+
+- name: Configure this control node to reach infra-dev over Cloudflare
+  hosts: control
+  gather_facts: false
+
+  vars:
+    dev_alias: "{{ alias | default('infra-dev') }}"
+    dev_hostname: "{{ hostname | default('infra-dev.gsrpi.uk') }}"
+    # lookup('env','HOME'), never ~. On Termux the passwd entry reports /data, which is
+    # not writable — the same trap host_vars/localhost.yml already documents for
+    # remote_tmp, and it fails here in exactly the same unhelpful way.
+    home: "{{ lookup('env', 'HOME') }}"
+    token_file: "{{ home }}/.config/infra-dev/token"
+    ssh_config: "{{ home }}/.ssh/config"
+    ssh_key: "{{ identity | default('~/.ssh/id_ed25519') }}"
+
+  vars_prompt:
+    - name: st_client_id
+      prompt: "Access service token Client ID (blank to leave the existing token alone)"
+      private: false
+      default: ""
+    - name: st_client_secret
+      prompt: "Access service token Client Secret"
+      private: true
+      default: ""
+
+  tasks:
+    # ── cloudflared has to be here, and it is the one thing this cannot install ──
+    - name: Is cloudflared installed
+      ansible.builtin.command: cloudflared --version
+      register: cfd
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Fail early and usefully if it is not
+      # Before anything is written, so a client without the binary is not left holding a
+      # token file and an ssh block that cannot work. Not installed by this play on
+      # purpose: on the phone it is 35.7 MiB of METERED data, which is a spend the owner
+      # approves rather than a side effect of running a playbook. or3's
+      # docs/data-ledger.md carries the figure.
+      ansible.builtin.assert:
+        that: cfd.rc == 0
+        fail_msg: |
+          cloudflared is not on this machine, and it is required — an ssh:// tunnel
+          ingress is not raw TCP at the edge, so only `cloudflared access ssh` can
+          speak to it. There is no client-less path.
+
+          It is a single static binary, 35.7 MiB, and on the phone that is METERED.
+          Approve the spend, then:
+
+            curl -fsSLo $PREFIX/bin/cloudflared \
+              https://github.com/cloudflare/cloudflared/releases/download/2026.8.2/cloudflared-linux-arm64
+            echo '7747d94570fb390cf47dcb4f9555c193c6355cda9793f0d878d9049e5d6a7790  '$PREFIX/bin/cloudflared | sha256sum -c -
+            chmod +x $PREFIX/bin/cloudflared
+
+          The hash is the one pinned in dev/Dockerfile, checked on 2026-08-22.
+        success_msg: "{{ cfd.stdout_lines[0] | default('cloudflared present') }}"
+
+    # ── the service token ────────────────────────────────────────────────────
+    - name: Does a token file already exist
+      ansible.builtin.stat:
+        path: "{{ token_file }}"
+      register: tf
+      check_mode: false
+
+    - name: Refuse to write an empty token
+      # A blank answer at the prompt means "leave what is there alone", which is the right
+      # behaviour for a re-run. It must not mean "write an empty file" — that produces a
+      # client that fails Access with no clue why, and the failure looks like the tunnel.
+      ansible.builtin.assert:
+        that: tf.stat.exists
+        fail_msg: >-
+          No service token given and none stored at {{ token_file }}. Re-run and paste
+          the Client ID and Secret from the Access service token. Cloudflare shows the
+          secret only at creation; if it is lost, mint a new token and re-run.
+        success_msg: "keeping the token already at {{ token_file }}"
+      when: st_client_id | length == 0
+
+    - name: The directory for it
+      ansible.builtin.file:
+        path: "{{ token_file | dirname }}"
+        state: directory
+        mode: "0700"
+      when: st_client_id | length > 0
+
+    - name: Write the token, mode 600
+      # A SOURCEABLE FILE, not a shell profile and not the ssh config, and the choice is
+      # the point of this play:
+      #
+      #   - not `set -gx` in fish's conf.d: that puts a live credential in the
+      #     environment of EVERY process this account starts, for the sake of one command
+      #     that runs when you ssh.
+      #   - not in the ProxyCommand: a secret on a command line is a secret in ps output
+      #     and in shell history. This repo has a rule about that — CLAUDE.md, secrets
+      #     never in command_args — and it does not stop applying on the client side.
+      #   - not in ~/.ssh/config: that file is routinely pasted, diffed and shared when
+      #     something is wrong with it.
+      #
+      # Sourced by the ProxyCommand below, so the secret is in the environment of exactly
+      # one short-lived cloudflared process and nothing else. POSIX sh syntax, because
+      # ProxyCommand runs under /bin/sh whatever your login shell is — fish syntax here
+      # would fail with a message about `set` that names neither this file nor ssh.
+      ansible.builtin.copy:
+        dest: "{{ token_file }}"
+        mode: "0600"
+        content: |
+          # Cloudflare Access service token for {{ dev_hostname }}.
+          # Written by ansible/playbooks/dev-client.yml. Sourced by ~/.ssh/config's
+          # ProxyCommand for host `{{ dev_alias }}`. POSIX sh — not fish.
+          TUNNEL_SERVICE_TOKEN_ID={{ st_client_id }}
+          TUNNEL_SERVICE_TOKEN_SECRET={{ st_client_secret }}
+          export TUNNEL_SERVICE_TOKEN_ID TUNNEL_SERVICE_TOKEN_SECRET
+      when: st_client_id | length > 0
+      no_log: true
+
+    # ── the ssh config block ─────────────────────────────────────────────────
+    - name: Make sure ~/.ssh exists
+      ansible.builtin.file:
+        path: "{{ home }}/.ssh"
+        state: directory
+        mode: "0700"
+
+    - name: The infra-dev block in ~/.ssh/config
+      # blockinfile, so re-running edits the block in place instead of appending a second
+      # copy — which ssh would not error on, it would just silently use the first.
+      #
+      # insertbefore BOF matters: ssh takes the FIRST value it obtains for each keyword,
+      # so a `Host *` block already in this file would win over anything appended after
+      # it. Top of the file is the only safe place to add a specific host.
+      ansible.builtin.blockinfile:
+        path: "{{ ssh_config }}"
+        mode: "0600"
+        create: true
+        insertbefore: BOF
+        marker: "# {mark} infra-dev (ansible/playbooks/dev-client.yml)"
+        block: |
+          Host {{ dev_alias }}
+            HostName {{ dev_hostname }}
+            User dev
+            IdentityFile {{ ssh_key }}
+            IdentitiesOnly yes
+            ProxyCommand sh -c '. {{ token_file }}; exec cloudflared access ssh --hostname %h'
+            ServerAliveInterval 30
+            ServerAliveCountMax 3
+
+          Host {{ dev_alias }}-lan
+            HostName 127.0.0.1
+            Port {{ lan_port | default(2225) }}
+            User dev
+            IdentityFile {{ ssh_key }}
+            IdentitiesOnly yes
+            ProxyCommand ssh zero nc %h %p
+            ServerAliveInterval 30
+            ServerAliveCountMax 3
+
+    - name: How to use it
+      ansible.builtin.debug:
+        msg:
+          - "ssh {{ dev_alias }}                                 a shell, over Cloudflare"
+          - "ssh -t {{ dev_alias }} abduco -A claude claude      a claude that survives the link"
+          - "ssh {{ dev_alias }}-lan                             break-glass, through zero"
+          - ""
+          - "The token is at {{ token_file }} (0600) and is sourced by the ProxyCommand,"
+          - "so it reaches one cloudflared process and is in no other environment."
+          - ""
+          - "Both blocks are written. -lan works today; the Cloudflare one works once the"
+          - "tunnel is provisioned and DEV_TUNNEL_HOSTNAME is set on the container."

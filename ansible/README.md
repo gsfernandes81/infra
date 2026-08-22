@@ -10,6 +10,34 @@ ansible fleet -m ping                       # transport works
 ansible-playbook playbooks/audit.yml -K     # what runs where -> docs/fleet-inventory.md
 ```
 
+## The playbooks
+
+| | |
+|---|---|
+| `audit.yml` | read-only; what runs where → `docs/fleet-inventory.md` |
+| `packages.yml` | the declared package set on all three hosts |
+| `dev-container.yml` | the **host** side of `infra-dev` on zero — secrets dir, deploy key, authorized_keys, `dev/.env` |
+| `cloudflare-dev-tunnel.yml` | the **edge** side — tunnel, DNS, Access application and policy |
+| `dev-client.yml` | the **client** side — this control node's service token and `~/.ssh/config` block |
+
+**The last three are one job split three ways, and the split is not arbitrary.** They
+hold state in three different places, need three different credentials — sudo on zero, a
+Cloudflare API token, an Access service token — and change at three different rates. A
+single play would demand all three credentials to do any of it, and re-running it to add
+a second client would put an API token back on the command line for no reason.
+
+**None of them starts anything.** `dev/Makefile` is the container's lifecycle interface
+and stays the only one, which is this repo's own split from `../CLAUDE.md`:
+*check-system-drift reports and never writes; install-system-file writes and never
+restarts.* A playbook that also ran `up` would be a second opinion about what state the
+container is in.
+
+**`dev-container.yml` replaced `dev/seed-secrets.sh`, which is deleted.** Three of that
+script's five steps were fleet access, which went with the control-node question being
+deferred; what was left did not justify a bespoke script. That is the third time this
+repo has traded hand-rolled shell for stock tooling — after `bin/compose` and after a
+`cf-provision.sh` that lasted twenty minutes.
+
 ## Layout
 
 | | |
@@ -19,7 +47,7 @@ ansible-playbook playbooks/audit.yml -K     # what runs where -> docs/fleet-inve
 | `group_vars/all.yml` | where the report goes; applies to `localhost` too |
 | `group_vars/fleet.yml` | the container CLI |
 | `host_vars/` | empty, on purpose — see below |
-| `playbooks/audit.yml` | the audit |
+| `playbooks/` | the five above |
 | `templates/` | the report |
 
 ## `-K`, and why it is not a wart

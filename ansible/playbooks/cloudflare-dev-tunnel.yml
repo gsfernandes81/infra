@@ -55,6 +55,12 @@
     cf_zone: "{{ zone | default('gsrpi.uk') }}"
     cf_name: "{{ name | default('infra-dev') }}"
     cf_hostname: "{{ hostname | default(cf_name ~ '.' ~ cf_zone) }}"
+    # The Access service token to put in the policy, BY NAME. Separate from the tunnel
+    # name because a token minted by hand in the dashboard is called whatever it was
+    # called that day, and a lookup that silently finds nothing would mint a SECOND one —
+    # leaving two tokens with the same purpose, of which the phone holds the secret to
+    # only one. If it does not match, this play creates a token and prints its secret.
+    cf_st_name: "{{ service_token_name | default(cf_name) }}"
     # Where the container's read-only secrets mount points on the host. Matches
     # INFRA_SECRETS in dev/.env; override with -e if that was changed.
     infra_secrets: "{{ secrets_dir | default('~/.infra-dev-secrets') }}"
@@ -223,7 +229,9 @@
       no_log: true
 
     # ── 3  the service token ────────────────────────────────────────────────
-    # Before the application, because the policy has to name it.
+    # Before the application, because the policy has to name it. If you minted one by
+    # hand already, pass its name: -e service_token_name=whatever-you-called-it. Its
+    # SECRET is not needed here and cannot be read back — only its id goes in the policy.
     - name: List the account's service tokens
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/service_tokens"
@@ -236,8 +244,18 @@
 
     - name: Remember an existing service token
       ansible.builtin.set_fact:
-        cf_st_id: "{{ (cf_st_q.json.result | selectattr('name', 'eq', cf_name) | list | first).id }}"
-      when: (cf_st_q.json.result | default([]) | selectattr('name', 'eq', cf_name) | list) | length > 0
+        cf_st_id: "{{ (cf_st_q.json.result | selectattr('name', 'eq', cf_st_name) | list | first).id }}"
+      when: (cf_st_q.json.result | default([]) | selectattr('name', 'eq', cf_st_name) | list) | length > 0
+
+    - name: Say which service tokens this account has
+      # Printed whether or not one matched. A name mismatch is otherwise invisible: the
+      # play happily mints a second token, and you are left with two of the same purpose
+      # and the secret to only one of them. Seeing the list is what catches it.
+      ansible.builtin.debug:
+        msg: >-
+          looking for "{{ cf_st_name }}" — account has:
+          {{ (cf_st_q.json.result | default([]) | map(attribute='name') | list) | join(', ') | default('none', true) }}
+          => {{ 'matched ' ~ cf_st_id if cf_st_id is defined else 'NO MATCH, one will be created' }}
 
     - name: Create the service token
       ansible.builtin.uri:
@@ -245,7 +263,7 @@
         method: POST
         headers: { Authorization: "Bearer {{ cf_api_token }}" }
         body_format: json
-        body: { name: "{{ cf_name }}" }
+        body: { name: "{{ cf_st_name }}" }
       register: cf_st_new
       delegate_to: localhost
       when: cf_st_id is not defined
@@ -379,7 +397,7 @@
     - name: Note when no new service token was minted
       ansible.builtin.debug:
         msg: >-
-          A service token named "{{ cf_name }}" already existed, so no secret was printed —
+          A service token named "{{ cf_st_name }}" already existed, so no secret was printed —
           Cloudflare cannot return one after creation. If the phone does not have it,
           delete that token and re-run this play to mint a fresh pair.
       when: cf_st_new is skipped
