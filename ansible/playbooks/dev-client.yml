@@ -301,6 +301,18 @@
             ServerAliveInterval 30
             ServerAliveCountMax 3
 
+            # Metering, not comfort — or3's ssh_config makes the same call for the same
+            # reason. This is the end of the session that holds its plaintext: claude's
+            # output is text and compresses hard, and it is compressed here before it is
+            # encrypted, so what crosses the phone's radio is the smaller thing.
+            #
+            # THE CLIENT IS THE HALF THAT TURNS IT ON. sshd already permits it by default
+            # and dev/sshd_config now says so out loud, but ssh's own default is `no` and
+            # nothing is negotiated unless both ends offer it. On -lan it costs a little
+            # CPU on a Pi for no metered link, which is not worth a second Host block to
+            # avoid; a rescue session is not where you tune throughput.
+            Compression yes
+
     - name: How to use it
       ansible.builtin.debug:
         msg:

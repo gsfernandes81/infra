@@ -36,6 +36,21 @@ GatewayPorts no
 # directory in an ssh session rather than only from /workspace/ansible.
 PermitUserEnvironment yes
 
+# Compression, stated rather than inherited. `sshd -T` already reports `compression yes`
+# on OpenSSH 9.2 — this changes no behaviour and is here because the behaviour is worth
+# being able to see. It is also only half the switch: compression is negotiated, the ssh
+# CLIENT defaults to `no`, and both ends have to offer it. The half that turns it on is
+# in ansible/playbooks/dev-client.yml, on the aliases the phone uses.
+#
+# It is worth having on THIS session, which is not true of every sshd. or3's ssh_config
+# has the argument: compression belongs on the session whose plaintext it is, because it
+# happens before encryption, and ciphertext does not compress. Here the phone's ssh client
+# terminates on this sshd — cloudflared is transport underneath, not another ssh session —
+# so this IS that session, and what it compresses is claude's output on its way to a
+# metered radio. or3's own sshd is the other case: it carries an inner session that is
+# already ciphertext, and setting it there would buy nothing.
+Compression yes
+
 # Drop a wedged session rather than leaving one that accepts input and never answers:
 # 3 x 30s of silence and it is gone. abduco is what makes that free — the work is not
 # in the ssh session, so losing the session loses nothing.
