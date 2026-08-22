@@ -217,8 +217,30 @@ ansible-playbook playbooks/cloudflare-dev-tunnel.yml
 ansible-playbook playbooks/dev-container.yml -e tunnel_hostname=infra-dev.gsrpi.uk
 
 # 3. the CLIENT — this phone. Prompts for the service token, once.
+#    The secret CANNOT be passed with -e; the play refuses it. See below.
 ansible-playbook playbooks/dev-client.yml
 ```
+
+### The service token cannot be given on the command line
+
+`dev-client.yml` reads it with `ansible.builtin.pause`, and a first task asserts that
+`st_client_secret` is undefined — which it can only be if somebody passed it.
+
+That is not belt-and-braces, it replaces something that did not work. The obvious spelling
+is `vars_prompt` with `private: true`, and it has a hole: **`-e st_client_secret=…` does
+not collide with the prompt, it silently replaces it.** Extra vars are the
+highest-precedence source in Ansible, so the prompt never appears, the run looks entirely
+normal, and a live credential is now in fish's history and was in the process list for the
+length of the run. A safeguard bypassed by the shortest thing somebody might type is not
+one. `pause` is a *task*: it always runs, and there is no variable name for `-e` to
+pre-empt.
+
+The Client ID is treated differently on purpose — it is the username half and is not
+secret, so `-e st_client_id=…` is accepted and the prompt for it is skipped.
+
+Re-running does not ask again: a token already at `~/.config/infra-dev/token` is left
+alone unless you pass `-e replace_token=true`, which is the rotation path. A play that
+demands a credential on every run teaches you to keep it somewhere pasteable.
 
 Then on zero: `cd ~/infra/dev && make up` — **not** `restart`, which does not re-read
 `compose.yaml`. After that `ssh infra-dev` works from the phone with no `ssh zero` hop.

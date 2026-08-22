@@ -12,14 +12,22 @@
 # Run it once per client. On a second machine, run it there — the token file and the ssh
 # block are per-client, and nothing about this is shared state.
 #
-# DO NOT PASS THE SECRET WITH -e. `-e st_client_secret=...` works and is the wrong way to
-# do it: it puts a live credential in your shell history and in the process list. The
-# prompt below is `private: true`, so typing it there puts it in neither. There is no
-# convenience being given up — the prompt is one paste either way.
+# THE SECRET CANNOT BE PASSED ON THE COMMAND LINE. Not "should not" — the play refuses.
 #
-# If it is already in fish's history: `history delete --contains TUNNEL_SERVICE_TOKEN`,
-# and close your other fish sessions first, because each holds its own in-memory copy and
-# writes it back on exit.
+# This started as vars_prompt with private: true, which is the obvious spelling and has a
+# hole in it: `-e st_client_secret=...` does not collide with the prompt, it SILENTLY
+# REPLACES it. Extra vars are the highest-precedence source in Ansible, so the prompt
+# never appears, the run looks completely normal, and a live credential is now in fish's
+# history and in the process list. A safeguard that is bypassed by the shortest path
+# somebody might type is not a safeguard.
+#
+# So the secret is read by `ansible.builtin.pause` — a TASK, which always runs and has no
+# variable name for -e to override — and a first task asserts that `st_client_secret` is
+# undefined, which it can only be if somebody passed it. Between them there is no command
+# line that gets a secret into this play.
+#
+# The client ID is a different thing and is treated differently: it is not secret (it is
+# the username half), so -e is fine for it and it is prompted for only when absent.
 #
 # NO NEW COLLECTIONS: ansible.builtin throughout.
 
@@ -38,17 +46,32 @@
     ssh_config: "{{ home }}/.ssh/config"
     ssh_key: "{{ identity | default('~/.ssh/id_ed25519') }}"
 
-  vars_prompt:
-    - name: st_client_id
-      prompt: "Access service token Client ID (blank to leave the existing token alone)"
-      private: false
-      default: ""
-    - name: st_client_secret
-      prompt: "Access service token Client Secret"
-      private: true
-      default: ""
-
   tasks:
+    # ── refuse a secret that arrived on the command line ────────────────────
+    # FIRST, before anything is read or written. `st_client_secret` is never defined by
+    # this play, so if it is defined at all it came from -e (or, less likely, from
+    # inventory) — and either way it has already been through a shell. Failing here is
+    # the only moment at which saying so is still useful.
+    - name: Refuse a secret supplied on the command line
+      ansible.builtin.assert:
+        that: st_client_secret is not defined
+        fail_msg: |
+          The service token secret was passed as a variable. This play will not accept it
+          that way, and the reason is not style: an -e value has already been through
+          your shell, so it is in fish's history and was visible in the process list for
+          the life of the run.
+
+          Re-run with no -e for it. The play prompts, with echo off, and reads from the
+          terminal — nothing about that reaches history or argv.
+
+          Since it has now been typed once: close your other fish sessions (each holds
+          its own in-memory history and writes it back on exit), then
+              history delete --contains TUNNEL_SERVICE_TOKEN
+          and grep the value itself out of ~/.local/share/fish/fish_history to confirm.
+          If you would rather be certain than tidy, mint a new service token — it costs
+          two playbook runs and nothing on zero or in the container ever held this one.
+        success_msg: "no secret on the command line"
+
     # ── cloudflared has to be here, and it is the one thing this cannot install ──
     - name: Is cloudflared installed
       ansible.builtin.command: cloudflared --version
@@ -88,25 +111,77 @@
       register: tf
       check_mode: false
 
-    - name: Refuse to write an empty token
-      # A blank answer at the prompt means "leave what is there alone", which is the right
-      # behaviour for a re-run. It must not mean "write an empty file" — that produces a
-      # client that fails Access with no clue why, and the failure looks like the tunnel.
+    - name: Decide whether a token is being set this run
+      # Set one when there is none. Otherwise leave it alone, so re-running to fix the
+      # ssh block does not demand the secret again — which matters, because a play that
+      # asks for a credential every time trains you to keep it somewhere pasteable.
+      # -e replace_token=true is the deliberate override, for a rotation.
+      ansible.builtin.set_fact:
+        setting_token: "{{ (not tf.stat.exists) or (replace_token | default(false) | bool) }}"
+
+    - name: Nothing to do for the token
+      ansible.builtin.debug:
+        msg: >-
+          keeping the token already at {{ token_file }} — pass -e replace_token=true to
+          replace it after a rotation.
+      when: not setting_token
+
+    - name: What is about to be asked for
+      # Printed separately because the two prompts below carry no_log, and a suppressed
+      # prompt is a cursor sitting there with no explanation. This task says what is
+      # wanted; the prompts just take it.
+      ansible.builtin.debug:
+        msg:
+          - "Paste the Access service token, from the Cloudflare Zero Trust dashboard."
+          - "The ID is not secret and will echo. The secret will not echo."
+          - "Neither reaches your shell history: these are read from the terminal, not"
+          - "from the command line."
+      when: setting_token and not ansible_check_mode
+
+    - name: Read the Client ID
+      # echo on — the ID is the username half and is not a credential. It can also come
+      # from -e st_client_id=..., which is why this is skipped when it is already set.
+      ansible.builtin.pause:
+        prompt: "  Client ID"
+        echo: true
+      register: id_in
+      when: setting_token and not ansible_check_mode and st_client_id is not defined
+
+    - name: Read the Client Secret
+      # THE ONE THAT CANNOT COME FROM THE COMMAND LINE. `pause` is a task, so it always
+      # runs and there is no variable name for -e to pre-empt — which is exactly what
+      # vars_prompt could not promise. echo: false so it is not on screen either.
+      #
+      # no_log because the registered result holds user_input verbatim, and `-v` would
+      # otherwise print it. That is the same leak in a different costume.
+      ansible.builtin.pause:
+        prompt: "  Client Secret (not echoed)"
+        echo: false
+      register: secret_in
+      no_log: true
+      when: setting_token and not ansible_check_mode
+
+    - name: Both halves have to be non-empty
+      # An empty secret writes a file that fails Access with no clue why, and the failure
+      # presents as the tunnel being broken. Catch it here, where the cause is on screen.
       ansible.builtin.assert:
-        that: tf.stat.exists
+        that:
+          - (st_client_id | default(id_in.user_input, true) | trim) | length > 0
+          - (secret_in.user_input | default('') | trim) | length > 0
         fail_msg: >-
-          No service token given and none stored at {{ token_file }}. Re-run and paste
-          the Client ID and Secret from the Access service token. Cloudflare shows the
-          secret only at creation; if it is lost, mint a new token and re-run.
-        success_msg: "keeping the token already at {{ token_file }}"
-      when: st_client_id | length == 0
+          Both the Client ID and the Client Secret are required and one was blank. Nothing
+          has been written. Cloudflare shows a service token's secret only at creation; if
+          it is lost, mint a new token rather than guessing.
+        success_msg: "both halves present"
+      when: setting_token and not ansible_check_mode
+      no_log: true
 
     - name: The directory for it
       ansible.builtin.file:
         path: "{{ token_file | dirname }}"
         state: directory
         mode: "0700"
-      when: st_client_id | length > 0
+      when: setting_token
 
     - name: Write the token, mode 600
       # A SOURCEABLE FILE, not a shell profile and not the ssh config, and the choice is
@@ -132,10 +207,10 @@
           # Cloudflare Access service token for {{ dev_hostname }}.
           # Written by ansible/playbooks/dev-client.yml. Sourced by ~/.ssh/config's
           # ProxyCommand for host `{{ dev_alias }}`. POSIX sh — not fish.
-          TUNNEL_SERVICE_TOKEN_ID={{ st_client_id }}
-          TUNNEL_SERVICE_TOKEN_SECRET={{ st_client_secret }}
+          TUNNEL_SERVICE_TOKEN_ID={{ st_client_id | default(id_in.user_input, true) | trim }}
+          TUNNEL_SERVICE_TOKEN_SECRET={{ secret_in.user_input | trim }}
           export TUNNEL_SERVICE_TOKEN_ID TUNNEL_SERVICE_TOKEN_SECRET
-      when: st_client_id | length > 0
+      when: setting_token and not ansible_check_mode
       no_log: true
 
     # ── the ssh config block ─────────────────────────────────────────────────
