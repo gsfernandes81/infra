@@ -194,13 +194,23 @@
     - name: Refuse to continue on a credentials file naming a dead tunnel
       ansible.builtin.assert:
         that:
-          # `result | default({}, true)` because on the 404 this task deliberately allows,
-          # Cloudflare answers `"result": null` — and `null.deleted_at` raises a Jinja
-          # error ("object of type 'NoneType' has no attribute") INSTEAD of failing the
-          # assert. The whole point of allowing the 404 was to produce the message below;
-          # a raw templating error in its place is the opposite of that.
+          # Three conditions, in this order, because `result` arrives in four shapes and
+          # only one of them has a `deleted_at` to read. The whole point of allowing the
+          # 404 on this task was to produce the message below, and a raw Jinja error in
+          # its place is the opposite of that — which is what happened twice while
+          # getting this right:
+          #
+          #   200, object with deleted_at: null   the live tunnel — the only pass
+          #   200, object with a timestamp        deleted; caught by the third condition
+          #   404, "result": null                 caught by the first
+          #   anything else                       caught by `is mapping`
+          #
+          # `.get()` rather than `.deleted_at`, because attribute access on a dict that
+          # lacks the key yields Undefined and `Undefined is none` RAISES here rather
+          # than answering false.
           - cf_tunnel_q.json.success | default(false)
-          - (cf_tunnel_q.json.result | default({}, true)).deleted_at is none
+          - cf_tunnel_q.json.result is mapping
+          - cf_tunnel_q.json.result.get('deleted_at') is none
         fail_msg: >-
           {{ infra_secrets }}/tunnel.json on {{ inventory_hostname }} names tunnel
           {{ cf_tunnel_id }}, which this account does not have (deleted, or created on
@@ -222,6 +232,12 @@
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account_id }}/cfd_tunnel"
         method: POST
+        # Cloudflare answers 201 Created on some creates and 200 on others, with no
+        # pattern worth memorising. `uri` defaults to accepting 200 ALONE, so a 201
+        # is a task failure on a call that SUCCEEDED — which on the service token
+        # meant the object was made and the response carrying its one-and-only
+        # secret was censored by no_log and thrown away. Accept both, everywhere.
+        status_code: [200, 201]
         headers: { Authorization: "Bearer {{ cf_api_token }}" }
         body_format: json
         body:
@@ -294,6 +310,7 @@
           {{ cf_api }}/zones/{{ cf_zone_id }}/dns_records{{
              '/' ~ cf_dns_q.json.result[0].id if (cf_dns_q.json.result | length) > 0 else '' }}
         method: "{{ 'PUT' if (cf_dns_q.json.result | length) > 0 else 'POST' }}"
+        status_code: [200, 201]
         headers: { Authorization: "Bearer {{ cf_api_token }}" }
         body_format: json
         body:
@@ -349,22 +366,83 @@
           {{ (cf_st_q.json.result | default([]) | map(attribute='name') | list) | join(', ') | default('none', true) }}
           => {{ 'matched ' ~ cf_st_id if cf_st_id is defined else 'NO MATCH, one will be created' }}
 
+    - name: Delete the existing service token, so a fresh secret can be minted
+      # -e replace_service_token=true. For the case that has already happened once: the
+      # token exists in Cloudflare and NOBODY HAS ITS SECRET, because Cloudflare returns
+      # it at creation and never again. The only cure is delete-and-recreate, and doing
+      # it here beats a dashboard trip — this play knows the id and you do not.
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/service_tokens/{{ cf_st_id }}"
+        method: DELETE
+        status_code: [200, 201, 202]
+        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+      register: cf_st_del
+      delegate_to: localhost
+      when: cf_st_id is defined and (replace_service_token | default(false) | bool)
+      no_log: true
+
+    - name: Forget the deleted token
+      ansible.builtin.set_fact:
+        cf_st_id: !!null
+      when: cf_st_del is not skipped
+
     - name: Create the service token
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/service_tokens"
         method: POST
+        status_code: [200, 201]
         headers: { Authorization: "Bearer {{ cf_api_token }}" }
         body_format: json
         body: { name: "{{ cf_st_name }}" }
       register: cf_st_new
       delegate_to: localhost
-      when: cf_st_id is not defined
+      # `is not defined` FIRST so the or short-circuits — `is none` on an undefined
+      # variable is not a question Jinja should be asked. None is the deleted case.
+      when: cf_st_id is not defined or cf_st_id is none
       no_log: true
 
     - name: Remember the new service token id
       ansible.builtin.set_fact:
         cf_st_id: "{{ cf_st_new.json.result.id }}"
       when: cf_st_new is not skipped
+
+    - name: The phone's credentials — shown once, never again
+      # The ONLY task here without no_log, and deliberately so. Cloudflare returns a
+      # service token's secret at creation and never again; a play that hid it would have
+      # created a credential nobody can use. Everything else on the wire stays masked.
+      ansible.builtin.debug:
+        msg:
+          - "─────────── COPY THESE NOW — CLOUDFLARE WILL NOT SHOW THEM AGAIN ───────────"
+          - ""
+          - "  Client ID      {{ cf_st_new.json.result.client_id }}"
+          - "  Client Secret  {{ cf_st_new.json.result.client_secret }}"
+          - ""
+          - "Hand them to the client play, which is the only thing that should store them:"
+          - ""
+          - "    ansible-playbook playbooks/dev-client.yml"
+          - ""
+          - "It prompts for both — the secret is read from the terminal and CANNOT be"
+          - "passed with -e, so it reaches neither your shell history nor the process"
+          - "list. It writes them to ~/.config/infra-dev/token at mode 600 and adds the"
+          - "ssh config block whose ProxyCommand sources that file."
+          - ""
+          - "Do not put them in fish conf.d. That would place a live credential in the"
+          - "environment of every process this account starts, for the sake of one"
+          - "command that runs when you ssh."
+          - ""
+          - "Lost them? -e replace_service_token=true deletes this token and mints a"
+          - "fresh pair. There is no way to read a secret back."
+          - "─────────────────────────────────────────────────────────────────────────────"
+      when: cf_st_new is not skipped and cf_st_new.json is defined
+
+    - name: Note when no new service token was minted here
+      ansible.builtin.debug:
+        msg: >-
+          An ACCESS service token named "{{ cf_st_name }}" already existed, so no secret
+          was printed — Cloudflare cannot return one after creation. If the phone does not
+          have it, re-run with -e replace_service_token=true, which deletes that token and
+          mints a fresh pair.
+      when: cf_st_new is skipped
 
     # ── 4  the Access application and its one policy ────────────────────────
     - name: List the account's Access applications
@@ -399,6 +477,7 @@
           {{ cf_api }}/accounts/{{ cf_account_id }}/access/apps{{
              '/' ~ cf_app_id if cf_app_id is defined else '' }}
         method: "{{ 'PUT' if cf_app_id is defined else 'POST' }}"
+        status_code: [200, 201]
         headers: { Authorization: "Bearer {{ cf_api_token }}" }
         body_format: json
         body:
@@ -446,6 +525,7 @@
         method: >-
           {{ 'PUT' if (cf_pol_q.json.result | default([]) | selectattr('name', 'eq', 'service token') | list) | length > 0
              else 'POST' }}
+        status_code: [200, 201]
         headers: { Authorization: "Bearer {{ cf_api_token }}" }
         body_format: json
         body:
@@ -482,34 +562,3 @@
           - "Set DEV_TUNNEL_HOSTNAME={{ cf_hostname }} in dev/.env, then `make up`"
           - "on {{ inventory_hostname }} — NOT restart: the entrypoint reads it at start."
 
-    - name: The phone's credentials — shown once, never again
-      # The ONLY task here without no_log, and deliberately so. Cloudflare returns a
-      # service token's secret at creation and never again; a play that hid it would have
-      # created a credential nobody can use. Everything else on the wire stays masked.
-      ansible.builtin.debug:
-        msg:
-          - "──────────── PUT THESE ON THE PHONE NOW — NOT RETRIEVABLE LATER ────────────"
-          - ""
-          - "~/.config/fish/conf.d/infra-dev.fish, mode 600:"
-          - "    set -gx TUNNEL_SERVICE_TOKEN_ID     {{ cf_st_new.json.result.client_id }}"
-          - "    set -gx TUNNEL_SERVICE_TOKEN_SECRET {{ cf_st_new.json.result.client_secret }}"
-          - ""
-          - "In the ENVIRONMENT, not in the ProxyCommand: cloudflared reads both names"
-          - "natively, and a secret on a command line is a secret in ps and in history."
-          - ""
-          - "~/.ssh/config on the phone:"
-          - "    Host infra-dev"
-          - "      HostName {{ cf_hostname }}"
-          - "      User dev"
-          - "      IdentityFile ~/.ssh/id_ed25519"
-          - "      ProxyCommand cloudflared access ssh --hostname %h"
-          - "───────────────────────────────────────────────────────────────────────────"
-      when: cf_st_new is not skipped and cf_st_new.json is defined
-
-    - name: Note when no new service token was minted
-      ansible.builtin.debug:
-        msg: >-
-          A service token named "{{ cf_st_name }}" already existed, so no secret was printed —
-          Cloudflare cannot return one after creation. If the phone does not have it,
-          delete that token and re-run this play to mint a fresh pair.
-      when: cf_st_new is skipped
