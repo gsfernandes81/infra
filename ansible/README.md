@@ -1,14 +1,26 @@
 # Ansible
 
-The management plane, Phase 1. **Read-only — nothing here writes to a host.** The design
-and the reasoning are in [`../docs/management-plane.md`](../docs/management-plane.md);
-this file is how to run it.
+## RUN THESE FROM THE CONTROL NODE, WHICH IS THE PHONE
+
+**There is no `ansible` on `zero`, `one` or `two`, and there should not be** — they are
+the boxes being managed. Every command in this file is typed in Termux. `fish: Unknown
+command: ansible-playbook` on a Pi means you are on the wrong machine, not that something
+is missing from it.
+
+The design and the reasoning are in
+[`../docs/management-plane.md`](../docs/management-plane.md); this file is how to run it.
 
 ```sh
-cd ansible
+# in Termux
+cd ~/infra/ansible
 ansible fleet -m ping                       # transport works
 ansible-playbook playbooks/audit.yml -K     # what runs where -> docs/fleet-inventory.md
 ```
+
+**Not everything here is read-only any more.** `audit.yml` still is. `packages.yml`
+installs, and the three `dev-*` plays write keys, an `.env` and an ssh config. Every one
+of them takes `--check`, and running that first is the habit: it is what caught the `docs`
+metapackage before it landed on a 1 GB Pi.
 
 ## The playbooks
 
