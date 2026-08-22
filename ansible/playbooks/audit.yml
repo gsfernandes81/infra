@@ -63,7 +63,7 @@
       # `.Name` as an Ansible variable and the task dies before docker ever sees it.
       #
       # NEVER WIDEN THIS FORMAT STRING TO `{{json .}}`, AND NEVER ADD `.Config.Env`.
-      # Seven named fields are extracted on purpose. `ionic-traces` and `destiny-director`
+      # Eight named fields are extracted on purpose. `ionic-traces` and `destiny-director`
       # pass their secrets with `env_file:`, so those containers' Config.Env holds a live
       # Discord token and a MySQL root password — and this task's output is rendered into
       # docs/fleet-inventory.md, which is COMMITTED. A dump-everything format would put
@@ -78,10 +78,17 @@
       # `torrent` is reachable on 8080 through gluetun's namespace. That is this repo's
       # recurring failure shape — an empty result and a different answer collapsing into
       # one cell — so the template distinguishes them and this field is what lets it.
+      #
+      # `.Id` is last and is NOT rendered. It exists so the template can turn NetworkMode's
+      # `container:<64 hex>` back into the peer's name. A container id changes on every
+      # recreate, and recreating gluetun is a routine, expected act here (port-forwarding.md
+      # — it is how you get a new forwarded port), so rendering the raw id would put a
+      # meaningless one-line diff in a COMMITTED file every time. A generated file whose
+      # diffs are usually noise stops being read, which costs more than the id ever bought.
       ansible.builtin.shell: >-
         set -o pipefail;
         {{ container_cli }} ps -aq | xargs -r {{ container_cli }} inspect --format
-        '{% raw %}{{.Name}}|{{.Config.Image}}|{{.State.Status}}|{{.HostConfig.RestartPolicy.Name}}|{{index .Config.Labels "com.docker.compose.project"}}|{{.HostConfig.NetworkMode}}|{{range $p, $c := .NetworkSettings.Ports}}{{if $c}}{{(index $c 0).HostIp}}:{{(index $c 0).HostPort}}->{{$p}} {{end}}{{end}}{% endraw %}'
+        '{% raw %}{{.Name}}|{{.Config.Image}}|{{.State.Status}}|{{.HostConfig.RestartPolicy.Name}}|{{index .Config.Labels "com.docker.compose.project"}}|{{.HostConfig.NetworkMode}}|{{range $p, $c := .NetworkSettings.Ports}}{{if $c}}{{(index $c 0).HostIp}}:{{(index $c 0).HostPort}}->{{$p}} {{end}}{{end}}|{{.Id}}{% endraw %}'
         | sed 's|^/||'
       args:
         executable: /bin/sh

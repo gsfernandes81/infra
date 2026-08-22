@@ -9,7 +9,7 @@
   here that surprises you is a real difference between the repo and the fleet.
 
   THIS FILE IS COMMITTED. Whatever the audit collects lands in git history. That is why
-  the playbook extracts seven named container fields rather than dumping inspect output:
+  the playbook extracts eight named container fields rather than dumping inspect output:
   Config.Env on the bot containers holds live tokens. If you widen what is gathered,
   widen it knowing this file is the destination.
 
@@ -48,6 +48,15 @@ Not audited for containers by design — see `ansible/inventory`.
 {% elif not h.audit_containers.stdout | trim %}
 None.
 {% else %}
+{# NetworkMode names a peer by container ID, and an ID is not a name and not stable —
+   it changes on every recreate. So build the host's own id -> name map first and render
+   the name, or this file gains a meaningless one-line diff every time gluetun is
+   recreated, which port-forwarding.md says is routine. #}
+{% set id2name = {} %}
+{% for line in h.audit_containers.stdout_lines %}
+{% set g = line.split('|') %}
+{% set _ = id2name.update({(g[7] | default('') | trim): g[0]}) %}
+{% endfor %}
 | Container | Image | State | Restart | Compose project | Published |
 |---|---|---|---|---|---|
 {% for line in h.audit_containers.stdout_lines %}
@@ -59,9 +68,13 @@ None.
    what tells the two apart, so the cell answers "how is this reached" instead. #}
 {% set net = f[5] | default('') | trim %}
 {% set pub = f[6] | default('') | trim %}
+{% set peer = net.split(':', 1)[1] if ':' in net else '' %}
+{# Falls back to the truncated id when the peer is not in this host's list — a namespace
+   can be shared with a container that has since been removed, and saying so honestly
+   beats rendering a blank. `service:<name>` from Compose passes through unchanged. #}
 {% set reach = pub if pub
    else ('host net — see Listening' if net == 'host'
-   else (('net of `' ~ net.split(':', 1)[1][:12] ~ '`') if ':' in net
+   else (('net of `' ~ id2name.get(peer, peer[:12]) ~ '`') if peer
    else '—')) %}
 | `{{ f[0] }}` | {{ f[1] | default('') }} | {{ f[2] | default('') }} | {{ f[3] | default('') or '—' }} | {{ f[4] | default('') or '—' }} | {{ reach }} |
 {% endfor %}
@@ -107,7 +120,10 @@ literal answer for both Syncthings and for `torrent` is empty — and empty woul
 "publishes nothing" while `zero`'s Syncthing serves 8384/22000 and `torrent` answers on
 8080. Those say `host net` and `net of <container>` instead, and the ports themselves are
 in **Listening**, which reads the kernel and so covers every case. A bare `—` here means
-Docker maps nothing *and* the container owns its own stack.
+Docker maps nothing *and* the container owns its own stack. The peer is shown by **name**,
+not by the container id Docker actually reports — an id changes on every recreate, and
+recreating gluetun is routine here, so the id would put a meaningless diff in this file
+each time.
 
 **Listening is the authority when the two disagree.** Containers is what Docker was
 configured to do; Listening is what the box is doing. `one`'s Syncthing is the worked

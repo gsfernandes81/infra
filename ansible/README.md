@@ -84,7 +84,7 @@ possible — it costs `py3-docker-py` plus `py3-requests`, `py3-urllib3`,
 Two things make the hand-roll the better answer here anyway:
 
 - **The narrow format string is a safety property, not a style.** `docs/fleet-inventory.md`
-  is committed to git. The format string extracts seven named fields, so `Config.Env` — which
+  is committed to git. The format string extracts eight named fields, so `Config.Env` — which
   holds a live Discord token and a MySQL root password on the bot containers — is never in
   the data at all. `docker_container_info` returns the entire inspect dict, Env included,
   and one careless `to_nice_json` in the template would put those in git history. The
@@ -94,7 +94,9 @@ Two things make the hand-roll the better answer here anyway:
   host-networked or namespace-sharing container has no port mappings, so both Syncthings
   and `torrent` rendered a bare `—` under Published, which reads as "publishes nothing"
   and is false for all three. The bar is that a field is named, chosen, and known not to
-  carry a secret; it is not that the list never grows.
+  carry a secret; it is not that the list never grows. The eighth, `.Id`, is gathered and
+  never rendered — it exists only so the template can turn NetworkMode's `container:<hex>`
+  back into a name, because an id changes on every recreate and this file is committed.
 - **The cost lands on the critical box.** Five Python packages on `zero` to replace four
   lines of shell that work is not what "more to type" meant.
 
