@@ -165,6 +165,24 @@ git config --global --add safe.directory /workspace 2>/dev/null || true
 git config --global user.name  "${GIT_USER_NAME:-Gavin Fernandes}"
 git config --global user.email "${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}"
 
+# The host's clone has an https `origin`, and the only git credential in here is the
+# deploy key copied out of the secrets mount above — an ssh credential. Rewrite the
+# TRANSPORT rather than the remote: --global is /home/dev/.gitconfig, which is neither
+# the bind mount nor one of the four named volumes, so the host's .git/config is left
+# exactly as it is and gavin's own git on zero keeps working the way it does today.
+#
+# THE TWO SIBLING REPOS DIVERGE HERE and this follows destiny-director, not or3.
+# or3 needs no rewrite because its clone is made over ssh to begin with
+# (or3/dev/seed-secrets.sh) — a fix that lives on the host and cannot be shipped in an
+# image. destiny-director/docker-entrypoint.dev.sh does this, for the same reason it
+# applies here: the host stays on https and nothing outside the container has to change.
+# It is also a no-op if that clone is ever re-made over ssh — insteadOf rewrites https
+# URLs and leaves git@ ones alone — so the two approaches do not fight.
+#
+# Without this, the --ff-only pull below has never once run: it fails on "could not read
+# Username", and the message in its failure branch names neither cause.
+git config --global url."git@github.com:".insteadOf "https://github.com/"
+
 # Pull on start. --ff-only, and never fatal: a container that will not come up because
 # the network is down, or because the tree has local work, is worse than one running a
 # slightly old checkout — and /workspace is the HOST's clone, so a merge started here
