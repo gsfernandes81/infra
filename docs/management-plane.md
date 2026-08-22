@@ -328,7 +328,7 @@ for rather than revisiting this on a feeling:
 Until one of those, it is off, and the container is a development container that happens
 to have ansible in it for editing playbooks.
 
-### Still to do: the fleet's own tunnels — PLANNED, not started
+### Still to do: the fleet's own tunnels — PLANNED, Phase 2e
 
 `zero`'s and `one`'s tunnel tokens were world-readable in a 755 init script for months and
 `recovery.md` says both must be assumed disclosed. Rotation was deferred there to "when
@@ -465,12 +465,40 @@ ones that answer the question this document started from.
 | 1 | Read-only audit playbook | nothing | 0 | **done** 2026-08-21 — run against all three; `docs/fleet-inventory.md` is generated and committed |
 | 1b | Fleet package standardisation — `playbooks/packages.yml` | all three | 1 | **done** 2026-08-21 |
 | 2 | `README.md` + `recovery.md` cite the generated inventory | docs only | 1 | **done** 2026-08-21 |
+| 2b | `infra-dev` container, and the Cloudflare edge in front of it | `zero`, edge | 2 | **done** 2026-08-22 |
+| 2c | Repair `one`'s two broken services — `mysql-ionic` crash loop, Syncthing `exited` | two containers on `one` | — | **next** |
+| 2d | One base image for the four dev containers — `dev/README.md` § *Four copies of this* | `zero`'s dev containers | 2b | |
+| 2e | Rotate the fleet's own tunnel tokens — *Still to do: the fleet's own tunnels* above | `zero`, `one`, edge | 2b | |
 | 3 | First stack adopted: `send2ereader` on `one` | one stack, non-critical box | 2 | |
 | 4 | Vault: `send2ereader`, then `ionic-traces` | secrets for two stacks | 3 | |
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | |
 | 6 | `dd` off `two` | `two`, `one` | arm64 CI, upstream | |
 | 7 | **Rootless podman on `one`** — roadmap §2 | `one` | 3 | |
 | 8 | `two` as the scheduled read-only control node | `two` | 6, 7 | |
+
+**2b–2e were off this list until 2026-08-22.** They come out of the `infra-dev` handoff,
+and two of them outrank Phase 3. `one`'s broken services are the only things on the fleet
+that are *failing* rather than merely unbuilt, and they have been failing since the audit
+that found them — Phase 3 adopts a stack that currently works, which ranks below fixing
+two that do not. The rotation outranks it because the reason it was deferred, "when
+physically present", stopped being true the day `infra-dev` came up. 2d is maintenance
+cost rather than risk and can wait for whichever of the four images next needs a change.
+
+**2e carries a check that belongs before it, not during it.** The order in *Still to do:
+the fleet's own tunnels* holds `zero` first precisely because a session inside `infra-dev`
+does not cross zero's own tunnel. That claim is the entire safety argument, and it is not
+self-evident from inside the container: `infra-dev`'s connector and zero's host
+`cloudflared` are two processes on the same box. `CLAUDE.md` § *Changing the thing you are
+connected through* says to establish this from the owner's shell — `echo $SSH_CONNECTION`
+— and never from a long-lived agent process, whose value is a fossil of the SSH session
+that started it. Prove which connector carries the session before either token is touched.
+
+**The Cloudflare API token is closed, not deferred.** The owner deleted the
+dashboard-minted token on 2026-08-22. Nothing stored it, so nothing breaks; the next
+provisioning run mints a new one, which is what *How it is actually built* above already
+assumed. What is worth carrying forward is the scoping: that token was *All accounts / All
+zones* against the five permissions it actually needed, and the place to fix that is at
+mint time, not by deleting it again afterwards.
 
 **Phase 7 moved.** Rootless podman was going to be a follow-on; it is a **precondition of
 Phase 8**, because `podman ps` as the connecting user needs no sudo. The audit playbook

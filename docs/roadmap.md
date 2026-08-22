@@ -2,7 +2,8 @@
 
 All three hosts are in this repo now: `hosts/<host>/` carries each one's stacks as
 symlinks into `deployments/`, plus its tracked `/etc` copies. None of what follows is
-urgent; none of it should be started remotely.
+urgent; none of it should be started remotely — **except §6**, which is now specifically a
+remote operation, because `infra-dev` is the safe place to stand that it was waiting for.
 
 ## 1. Onboard `zero` into this repo — done
 
@@ -235,9 +236,18 @@ All three sit in one stack, so the console and power-cycle roles are viable — 
 UART run and one smart plug. (That same colocation is what breaks the tang plan; see
 above.)
 
-## 6. Cloudflare token — in person only
+## 6. Cloudflare tunnel tokens — no longer in person only
 
-See [recovery.md](recovery.md#dont-break-remote-access).
+`zero`'s and `one`'s tokens were world-readable for months and
+[recovery.md](recovery.md#dont-break-remote-access) says both must be assumed disclosed.
+Rotation was deferred here to "when physically present", which from a ship is months.
+
+**Reversed 2026-08-22.** `infra-dev` is a way into `zero` that does not traverse zero's
+own tunnel, which is exactly what the two-phase procedure in `CLAUDE.md` needs to stand
+on. It is **Phase 2e** in
+[management-plane.md](management-plane.md#sequencing-and-where-podman-fits), with the
+order, the probe, and the one check that has to happen first — proving which connector
+actually carries the session, from the owner's shell rather than from an agent process.
 
 ## Not doing
 
