@@ -12,6 +12,15 @@
 # Run it once per client. On a second machine, run it there — the token file and the ssh
 # block are per-client, and nothing about this is shared state.
 #
+# DO NOT PASS THE SECRET WITH -e. `-e st_client_secret=...` works and is the wrong way to
+# do it: it puts a live credential in your shell history and in the process list. The
+# prompt below is `private: true`, so typing it there puts it in neither. There is no
+# convenience being given up — the prompt is one paste either way.
+#
+# If it is already in fish's history: `history delete --contains TUNNEL_SERVICE_TOKEN`,
+# and close your other fish sessions first, because each holds its own in-memory copy and
+# writes it back on exit.
+#
 # NO NEW COLLECTIONS: ansible.builtin throughout.
 
 - name: Configure this control node to reach infra-dev over Cloudflare
