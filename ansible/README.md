@@ -38,11 +38,28 @@ Cloudflare API token, an Access service token — and change at three different 
 single play would demand all three credentials to do any of it, and re-running it to add
 a second client would put an API token back on the command line for no reason.
 
-**None of them starts anything.** `dev/Makefile` is the container's lifecycle interface
-and stays the only one, which is this repo's own split from `../CLAUDE.md`:
-*check-system-drift reports and never writes; install-system-file writes and never
-restarts.* A playbook that also ran `up` would be a second opinion about what state the
-container is in.
+**None of them starts anything, and there is no flag that makes them.** `dev/Makefile` is
+the container's lifecycle interface and stays the only one — this repo's own split from
+`../CLAUDE.md`: *check-system-drift reports and never writes; install-system-file writes
+and never restarts.*
+
+The principle is not the whole reason. `community.docker.docker_compose_v2` is installed
+and an `up` task here would work, but **the Makefile does not merely run `docker compose
+up`**: it passes `HOST_UID`/`HOST_GID` as build args read from the *owner of the checkout*
+with `stat -c %u`, not from `id -u`, because under sudo `id -u` is 0 and a dev user built
+at uid 0 writes root-owned files into the bind-mounted repo. It refuses to build at 0 at
+all. A second copy of that guard is a guard that can be subtly wrong, and the way it would
+be wrong is by corrupting ownership in a working tree.
+
+So there is one interface, and the control node reaches it in one line instead of being
+told to go somewhere else:
+
+```sh
+ssh -t zero 'cd ~/infra/dev && make up'      # or dev, restart, status, verify, logs
+```
+
+`-t` because `make` sudos and sudo wants a tty. `dev-container.yml` prints exactly this
+line, filled in, when it finishes.
 
 **`dev-container.yml` replaced `dev/seed-secrets.sh`, which is deleted.** Three of that
 script's five steps were fleet access, which went with the control-node question being

@@ -15,6 +15,16 @@
 # live. Nothing here is runnable from an agent session: `gavin` is not in the docker
 # group and sudo wants a password.
 #
+# THESE RUN LOCALLY, so they only work ON the host running the container — zero. From
+# the phone there is nothing to forward to and docker is simply absent; reach them over
+# ssh instead, which is the documented way and needs nothing new:
+#
+#     ssh -t zero 'cd ~/infra/dev && make up'
+#
+# Not wrapped in an ssh-if-not-zero rule here on purpose: a Makefile that silently does
+# something different depending on which machine you are on is worse than one that fails
+# with "docker: not found".
+#
 # The bin/ programs are deliberately NOT wrapped here yet. Wrapping them is wanted —
 # `make` is the management interface everywhere else in this fleet's repos — but
 # check-sources, check-system-drift, install-system-file and check-mount-guards take

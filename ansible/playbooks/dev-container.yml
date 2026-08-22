@@ -13,11 +13,27 @@
 # owner has now twice said the same thing about bin/compose and about cf-provision.sh:
 # prefer the tool everyone already knows over a bespoke one this repo has to maintain.
 #
-# IT SETS UP AND DOES NOT START. That split is this repo's own, from CLAUDE.md:
-# "check-system-drift reports and never writes; install-system-file writes and never
-# restarts". dev/Makefile is the container's lifecycle interface and stays the only one —
-# a playbook that also ran `up` would be a second way to do it, free to disagree with the
-# first about what state the container is in. It prints the make command instead.
+# IT SETS UP AND DOES NOT START, and there is deliberately no `-e build=true` either.
+# The split is this repo's own, from CLAUDE.md: "check-system-drift reports and never
+# writes; install-system-file writes and never restarts". dev/Makefile is the container's
+# lifecycle interface and stays the only one.
+#
+# THE CONCRETE REASON, not just the principle. community.docker.docker_compose_v2 is
+# installed and adding an `up` task here would work — but the Makefile does not merely
+# run `docker compose up`. It passes HOST_UID/HOST_GID as build args, read from the OWNER
+# of the checkout with `stat -c %u` rather than from `id -u`, because under sudo `id -u`
+# is 0 and a dev user built at uid 0 writes root-owned files into the bind-mounted repo.
+# It refuses outright at 0. An ansible task would have to reimplement that guard, and a
+# second copy of a guard is a guard that can be subtly wrong — here, by silently building
+# a container that corrupts ownership in the working tree.
+#
+# So the interface stays one, and the phone reaches it in one line rather than being
+# asked to go somewhere else:
+#
+#     ssh -t zero 'cd ~/infra/dev && make up'
+#
+# -t because `make` sudos and sudo wants a tty. The same shape reaches every other
+# target: status, verify, restart, logs, boot-log.
 #
 # NO NEW COLLECTIONS. builtin throughout, plus ansible.posix.authorized_key, which is
 # already in requirements.yml and is there for exactly this: appending a key to an
@@ -212,8 +228,11 @@
           - "     gh repo deploy-key add {{ deploy_pub_local }} \\"
           - "         --repo gsfernandes81/infra --title infra-dev-{{ inventory_hostname }} --allow-write"
           - ""
-          - "2. Build and start it, on {{ inventory_hostname }}, in your own terminal —"
-          - "   `gavin` is not in the docker group, so this is not an ansible job:"
-          - "     cd {{ infra_src }}/dev && make dev"
+          - "2. Build and start it. NOT an ansible job — see the header for why — but"
+          - "   it is one line from here, and -t because sudo and the logins want a tty:"
           - ""
-          - "`make dev` walks the two interactive logins (claude, gh) that need a tty."
+          - "     ssh -t {{ inventory_hostname }} 'cd {{ infra_src }}/dev && make dev'"
+          - ""
+          - "   Every other lifecycle target reaches the same way: make up, restart,"
+          - "   status, verify, logs, boot-log. `make dev` is up + the two interactive"
+          - "   logins (claude, gh), which need that tty."
