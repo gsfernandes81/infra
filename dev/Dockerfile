@@ -1,0 +1,218 @@
+# syntax=docker/dockerfile:1
+
+# infra-dev — the development container for THIS repo on `zero` (Pi 5, arm64).
+#
+# The repo is NOT copied in: compose bind-mounts the host clone at /workspace, so a
+# `git pull` inside the container and one on the host are the same pull. Only the
+# toolchain is baked here.
+#
+# EVERY EXPENSIVE LAYER BELOW IS BYTE-IDENTICAL TO or3/dev/Dockerfile, ON PURPOSE.
+# zero already built that image, so the apt layer, the Node + Claude Code layer and
+# the gh tarball are cache hits and this image costs the ansible layer plus a few
+# COPYs. Keep them identical when either file is edited — the moment a package is
+# added to one list and not the other, both images pay full price for every build
+# from that line down. If they must genuinely diverge, put the divergence AFTER the
+# shared block rather than editing inside it. dev/README.md § *Sharing or3-dev's
+# layers* says what to do about this properly.
+
+# ── abduco, built from source ───────────────────────────────────────────────
+# Built rather than installed because abduco is NOT in bookworm: Debian has it in
+# trixie and sid only, so `apt-get install abduco` fails this build outright. The
+# trixie .deb is not a way round that — it is linked against a newer glibc than
+# this base carries. It is one C file with no dependency beyond libc, so a
+# throwaway stage holding a compiler costs the final image nothing.
+FROM python:3.13-slim-bookworm AS abduco-build
+ARG ABDUCO_VERSION=0.6
+# Upstream's own release tarball, pinned by hash. The mismatch must FAIL the build
+# rather than be retried: this stage compiles what it downloads and the result is
+# then run, as the dev user, in a container holding ssh keys to all three hosts.
+ARG ABDUCO_SHA256=c90909e13fa95770b5afc3b59f311b3d3d2fdfae23f9569fa4f96a3e192a35f4
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc libc6-dev make curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSLo /tmp/abduco.tar.gz \
+        "https://www.brain-dump.org/projects/abduco/abduco-${ABDUCO_VERSION}.tar.gz" \
+    && echo "${ABDUCO_SHA256}  /tmp/abduco.tar.gz" | sha256sum -c - \
+    && tar xzf /tmp/abduco.tar.gz -C /tmp \
+    && make -C "/tmp/abduco-${ABDUCO_VERSION}" \
+    && install -m 0755 "/tmp/abduco-${ABDUCO_VERSION}/abduco" /usr/local/bin/abduco
+
+# ── the container itself ────────────────────────────────────────────────────
+FROM python:3.13-slim-bookworm
+
+ARG USERNAME=dev
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+# screen and abduco are what the sessions you start over ssh live in — and since
+# ssh IS the way this container is used, abduco is not an accessory here: a claude
+# started outside one dies with the ssh session that carried it. It is the one to
+# reach for whenever the session is a full-screen program, claude included:
+# it is a detach/attach and nothing else — no key handling of its own beyond
+# Ctrl-\ , no status line, no window management — so the TUI underneath keeps
+# every key it expects. screen stays because its scrollback and its status line
+# are worth having for ordinary shell work. abduco comes from the stage above.
+# openssh-server is the in-container sshd, which here is simply the door — nothing
+# tunnels back through it, unlike or3-dev's. openssh-client is what carries every
+# ansible connection to zero, one and two, and is also what git needs for
+# git@github.com (Debian's git does not pull an ssh client under
+# --no-install-recommends). fish matches the shell on the phone and on zero,
+# and is the dev user's login shell here — the /etc/shells line is added rather
+# than assumed, because that is what `chsh` and anything else consulting it read.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git make screen fish openssh-client openssh-server \
+        curl gnupg ca-certificates tzdata less iproute2 \
+    && rm -rf /var/lib/apt/lists/* \
+    && if ! grep -qx /usr/bin/fish /etc/shells; then echo /usr/bin/fish >> /etc/shells; fi
+
+COPY --from=abduco-build /usr/local/bin/abduco /usr/local/bin/abduco
+
+# Node 22 LTS + Claude Code.
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g @anthropic-ai/claude-code \
+    && npm cache clean --force
+
+# GitHub CLI, from the release tarball rather than GitHub's apt repository — the
+# same shape destiny-director's Dockerfile.dev uses, and one fewer signing key and
+# sources.list entry in an image that already carries NodeSource's. GitHub's asset
+# names use exactly the strings `dpkg --print-architecture` prints, so no arch
+# remapping is needed. Bump GH_VERSION to upgrade; the pin matches dd's, so the two
+# containers answer `gh --version` the same way.
+#
+# Not hash-pinned, unlike abduco above, and the difference is deliberate: that
+# stage COMPILES what it downloads, this unpacks a signed release from the vendor's
+# own host over TLS. What guards this one is the pin — an unpinned `latest` is a
+# different binary on every rebuild with nothing to compare against.
+ARG GH_VERSION=2.96.0
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      arm64|amd64) : ;; \
+      *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${arch}.tar.gz" \
+      | tar -xz -C /usr/local/bin --strip-components=2 "gh_${GH_VERSION}_linux_${arch}/bin/gh"; \
+    gh --version
+
+# ── everything below this line is what makes this image not or3-dev ─────────
+
+# Ansible. THIS CONTAINER IS A CONTROL NODE, which is the substantive reason it
+# exists rather than being a second shell on zero: an ansible run from Termux
+# crosses the phone's metered radio to reach boxes that are on zero's own LAN, and
+# the same run from in here crosses nothing that costs anything.
+#
+# ansible-core, never the `ansible` metapackage — the same rule as the phone, and
+# ansible/README.md has the sizes. PINNED EXACTLY, unlike Claude Code above, and
+# for a reason specific to there being two control nodes: a playbook that works on
+# one and not the other is the failure mode, and a floating version makes that
+# arrive at a moment of its own choosing. The phone is on 2.21.0 as of 2026-08-22;
+# that is a divergence and closing it means bumping the phone, not floating this.
+ARG ANSIBLE_CORE_VERSION=2.21.3
+RUN pip install --no-cache-dir "ansible-core==${ANSIBLE_CORE_VERSION}" \
+    && ansible --version
+
+# The collections, with the SAME version specs ansible/requirements.yml states.
+# Installed system-wide so they are found from any directory and survive a rebuild
+# without a volume. They are baked rather than installed at start because a start
+# that reaches Galaxy is a start that fails when the network is down.
+#
+# THESE TWO LISTS MUST AGREE. They are in two places for a dull reason — the build
+# context is dev/ and requirements.yml is a directory up, and widening the context
+# to the repo root to read one file is worse. `make verify` compares what is
+# installed against what requirements.yml asks for, so the drift is caught rather
+# than assumed away.
+RUN ansible-galaxy collection install --collections-path /usr/share/ansible/collections \
+        'ansible.posix:>=2.2.2' \
+        'community.general:>=13.3.0' \
+        'community.docker:>=5.2.2' \
+    && ansible-galaxy collection list
+
+# Create the dev user at the HOST owner's uid/gid, passed by the Makefile as build
+# args, so the bind-mounted /workspace stays writable from both sides. Guard against a
+# uid/gid the base image already uses so the build cannot hard-fail on a collision.
+# The login shell is fish, and that is the setting that makes it the default for
+# `ssh infra-dev`: sshd runs the shell out of /etc/passwd and consults nothing else,
+# so setting $SHELL or aliasing anything would not reach an ssh session. It is
+# set with usermod as well as at useradd, so the collision branch — where the uid
+# already exists and useradd is skipped — does not quietly keep /bin/sh.
+RUN if ! getent group "${USER_GID}" >/dev/null; then \
+        groupadd --gid "${USER_GID}" "${USERNAME}"; \
+    fi \
+    && if ! getent passwd "${USER_UID}" >/dev/null; then \
+        useradd --uid "${USER_UID}" --gid "${USER_GID}" --shell /usr/bin/fish -m "${USERNAME}"; \
+    fi \
+    && usermod --shell /usr/bin/fish "$(getent passwd "${USER_UID}" | cut -d: -f1)" \
+    && mkdir -p /workspace && chown "${USER_UID}:${USER_GID}" /workspace
+
+# CLAUDE_CONFIG_DIR moves ~/.claude.json INTO the .claude directory, so the single
+# infra-claude volume carries both halves of the login and survives a rebuild.
+# Without it, ~/.claude.json sits on the container filesystem and every rebuild
+# re-runs onboarding on a container that has no one to answer it.
+# GH_CONFIG_DIR does the same for `gh auth login`: with no keyring in a slim image
+# the token goes in hosts.yml, so that directory must sit on a volume.
+# HISTFILE points bash history at the persisted volume for the same reason; fish's
+# own history lands in ~/.local/share/fish, which is that same volume already.
+# SCREENDIR: screen keeps its sockets in /run/screen, which a container image does
+# not have and a non-root user cannot create, so an interactive `screen` over ssh
+# would die with "Directory '/run/screen' must have mode 777". Deliberately NOT on
+# a volume — a socket that outlived its container is a stale session `screen -r`
+# would try, and fail, to attach to.
+# ABDUCO_CMD: abduco's compiled-in default command is `dvtm`, which is not
+# installed here, so `abduco -c work` with no command would fail rather than give
+# you a shell. It names fish for the same reason the passwd entry does.
+#
+# ANSIBLE_CONFIG is the one that is not in or3-dev. ansible.cfg is read from the
+# CWD, which is why the phone needs `cd ~/infra/ansible` before every run and why
+# forgetting it produces "No inventory was parsed" — a real half-hour, already
+# spent once. Naming the file absolutely makes `ansible fleet -m ping` work from
+# anywhere in the container, including from a claude that has cd'd somewhere else.
+# It points into /workspace, so it is the REPO's config that is in force and there
+# is no second copy in the image to drift from it.
+ENV TZ=Etc/UTC \
+    ABDUCO_CMD=/usr/bin/fish \
+    CLAUDE_CONFIG_DIR=/home/dev/.claude \
+    GH_CONFIG_DIR=/home/dev/.config/gh \
+    HISTFILE=/home/dev/.local/share/.bash_history \
+    SCREENRC=/home/dev/.screenrc \
+    SCREENDIR=/home/dev/.screen \
+    ANSIBLE_CONFIG=/workspace/ansible/ansible.cfg
+
+USER ${USERNAME}
+WORKDIR /workspace
+
+# Pre-create every directory compose mounts a named volume onto, AS the dev user.
+# A volume that is empty on first use inherits the ownership of the directory it
+# covers; created by root here, claude and ssh could not write to their own state.
+# .screen and .abduco are not volumes — they are here so the 700 both daemons
+# insist on is set once, rather than left to the umask of whoever runs one first.
+# .ssh/cp is ansible.cfg's ControlPath directory: ssh does NOT create it, and every
+# task fails with "unix_listener: cannot bind" if it is missing.
+RUN mkdir -p /home/dev/.claude /home/dev/.config/gh /home/dev/.config/fish \
+        /home/dev/.ssh-host /home/dev/.ssh/cp /home/dev/.local/share \
+        /home/dev/.screen /home/dev/.abduco \
+    && chmod 700 /home/dev/.ssh-host /home/dev/.ssh /home/dev/.ssh/cp \
+        /home/dev/.screen /home/dev/.abduco
+
+# The in-container sshd: port 2222, non-root, key-only, no forwarding.
+COPY --chown=${USER_UID}:${USER_GID} sshd_config /home/dev/sshd_config
+EXPOSE 2222
+
+# The baked half of ~/.ssh/config — github.com and the wildcard. The fleet blocks
+# are prepended at start from the read-only secrets mount; see entrypoint.sh.
+COPY --chown=${USER_UID}:${USER_GID} ssh_config /home/dev/ssh_config
+COPY --chown=${USER_UID}:${USER_GID} screenrc /home/dev/.screenrc
+
+# fish is the login shell, and this is the half of that which puts every shell in
+# /workspace rather than in the home directory. Not on a volume, so a rebuild is
+# what updates it.
+COPY --chown=${USER_UID}:${USER_GID} config.fish /home/dev/.config/fish/config.fish
+
+# The interactive login walkthrough, run by `make login` from a terminal on zero.
+# It lives in the IMAGE rather than in the Makefile because every step of it needs
+# a tty and the credential stores it fills are all in here.
+COPY --chown=${USER_UID}:${USER_GID} login.sh /home/dev/login.sh
+COPY --chown=${USER_UID}:${USER_GID} entrypoint.sh /home/dev/entrypoint.sh
+
+CMD ["bash", "/home/dev/entrypoint.sh"]

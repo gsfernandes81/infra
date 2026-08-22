@@ -1,0 +1,19 @@
+# screen inside infra-dev. Same file as or3-dev's but for the status line, and for
+# the same reason: the sessions in here are detached and re-attached, so what
+# matters is surviving a detach, not looks.
+
+startup_message off
+defscrollback 10000        # claude prints long output; the default 100 lines loses it
+altscreen on               # restore the shell's screen after a full-screen program exits
+vbell off
+term xterm-256color
+
+# Detach rather than die if the terminal that was attached goes away — an ssh drop
+# from the phone must not take the session with it.
+autodetach on
+
+# A status line, because a detached-and-reattached session with no chrome is easy to
+# mistake for a plain shell, and then you start a SECOND claude in it. It names the
+# container, which matters more here than on or3-dev: zero now runs four of these and
+# they all look alike once you are inside one.
+hardstatus alwayslastline '%{= kG}[ infra-dev ] %{= kw}%-w%{=b kR}[%n %t]%{-}%+w %=%{= kG}%c'

@@ -1,0 +1,46 @@
+# In-container sshd. Runs as the unprivileged `dev` user on port 2222, which
+# compose publishes on 127.0.0.1:2225 of zero.
+#
+# What it is FOR is different from or3-dev's, and the difference is the whole point
+# of this container. or3-dev's sshd is also a tunnel endpoint — the phone terminates
+# a reverse forward on it to reach the vessel LAN. This one is a DOOR AND NOTHING
+# ELSE: you ssh in from the phone or a PC and work in an abduco session, and the
+# model traffic that used to cross the phone's metered radio goes out over zero's
+# home connection instead. Nothing tunnels back through here.
+Port 2222
+ListenAddress 0.0.0.0
+
+# Persisted in the infra-ssh-host volume so a client's known_hosts entry survives a
+# rebuild. Regenerating it every build would train you to accept a changed host key,
+# which is the one habit that makes the check worthless.
+HostKey /home/dev/.ssh-host/ssh_host_ed25519_key
+PidFile /home/dev/.ssh-host/sshd.pid
+
+# Key-only, `dev` only. A non-root sshd can only ever serve its own account.
+AuthorizedKeysFile /home/dev/.ssh/authorized_keys
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+UsePAM no                 # PAM needs root; a non-root sshd must disable it
+
+# NO forwarding. or3-dev sets `AllowTcpForwarding yes` because a reverse forward is
+# its reason to exist; nothing here needs one, and this container holds ssh keys that
+# reach all three hosts as an account in `wheel`. Off is the smaller thing to defend,
+# and turning it on should be a deliberate edit with a reason written next to it.
+AllowTcpForwarding no
+GatewayPorts no
+
+# Let ssh sessions inherit the env the entrypoint writes to ~/.ssh/environment —
+# ANSIBLE_CONFIG among it, which is what makes `ansible fleet -m ping` work from any
+# directory in an ssh session rather than only from /workspace/ansible.
+PermitUserEnvironment yes
+
+# Drop a wedged session rather than leaving one that accepts input and never answers:
+# 3 x 30s of silence and it is gone. abduco is what makes that free — the work is not
+# in the ssh session, so losing the session loses nothing.
+ClientAliveInterval 30
+ClientAliveCountMax 3
+
+Subsystem sftp internal-sftp
+StrictModes yes

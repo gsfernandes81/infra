@@ -36,10 +36,10 @@ netstat -tln | grep -E '2283|8384|22000'            # expect all three
 ```
 
 **Neither grep covers the dev containers, deliberately** — nothing here starts them, so
-their ports (2222, 2223, `127.0.0.1:2224`) are *expected* to be absent after a reboot.
-An earlier version of the `zero` line grepped for `2222`; it never matched, because the
-only dev container usually up is `or3-dev` and it binds `127.0.0.1:2224`. A check that
-can only fail teaches you to ignore it.
+their ports (2222, 2223, `127.0.0.1:2224`, `127.0.0.1:2225`) are *expected* to be absent
+after a reboot. An earlier version of the `zero` line grepped for `2222`; it never
+matched, because the only dev container usually up is `or3-dev` and it binds
+`127.0.0.1:2224`. A check that can only fail teaches you to ignore it.
 
 **8384/22000 are Syncthing on host networking**, on both boxes. They will not appear in
 `docker ps --format '{{.Ports}}'` at all — only in `netstat`. On `one` that Syncthing is
@@ -58,15 +58,23 @@ not array loss. Take one off-array before anything invasive.
 
 The Claude dev containers on `zero` are **`restart=no`** and do not come back on their
 own. That is deliberate — they hold live sessions and uncommitted worktrees. There are
-three, each started by `make dev` in its **own** repo, never casually and never from here:
+four, each started by `make dev` in its **own** repo, never casually and never from here:
 
 | Container | Start it from |
 |---|---|
-| `or3-dev` | `~/or3` |
 | `dd-dev` (+ its `dd-mysql`) | `~/destiny-director` |
 | `ds-dev` | `~/dossier` |
+| `or3-dev` | `~/or3` |
+| `infra-dev` | `~/infra` |
 
 `dd-mysql` is not a dev container — it is `dd-dev`'s database, and it comes up with it.
+
+**`infra-dev` is the one to bring up first when the thing that is broken is the fleet
+itself.** It holds ansible, the inventory and ssh to all three hosts, so it is where the
+audit and the playbooks run from — and it comes up without needing anything else on zero
+to be healthy. `cd ~/infra && make dev`. It cannot fix zero from inside zero if zero is
+down, so the phone stays the fallback control node; see
+[`../dev/README.md`](../dev/README.md).
 
 **Their volumes are the part that cannot be recreated.** `<project>_*-claude` holds the
 Claude Code login *and* the session history — 22 MB of it for `or3-dev` — so a container

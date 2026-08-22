@@ -1,0 +1,113 @@
+# infra-dev — see dev/README.md. Bring it up with `make up` in this directory
+# (gavin is not in the docker group, so nothing here runs from an agent session).
+#
+# The three invariants in ../README.md apply to this file as much as to anything in
+# deployments/, and this is the repo that states them:
+#   - no `..` in a path
+#   - `name:` is declared, so Compose never invents a project name from the dir
+#     (this dir is `dev`, which is exactly the collision that rule exists for —
+#     or3's dev/ would otherwise claim the same project name on the same host)
+#   - host-specific paths come from the gitignored .env, never from $HOME
+name: infra-dev
+
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # The bind-mounted /workspace is the host's clone. Build the container's
+        # `dev` user at the host owner's uid/gid or every write from in here lands
+        # as the wrong owner in the host repo. The Makefile passes the OWNER of the
+        # checkout, which is right whether or not it was invoked through sudo.
+        USER_UID: ${HOST_UID:-1000}
+        USER_GID: ${HOST_GID:-1000}
+    image: infra-dev
+    container_name: infra-dev
+    hostname: ${DEV_HOSTNAME:-infra-dev}  # Claude Code shows this as the machine title
+    init: true                            # reap the background processes the entrypoint leaves
+
+    # No tty/stdin_open. sshd is the foreground process and wants neither: every
+    # interactive thing in here gets its pty from the ssh session or from the
+    # `docker exec -it` that carried it. `docker attach` would show sshd's log and
+    # no prompt, which is the point.
+
+    # A cap, not a reservation. Confines an OOM kill to this container's own cgroup
+    # so a runaway in here cannot reap Immich or one of the other dev containers on
+    # the same 4 GB Pi.
+    #
+    # LOWER THAN or3-dev's 1536m, deliberately. That container does Python work with
+    # C extensions; this one runs ansible, which is a few hundred processes' worth of
+    # nothing, and a claude. If a run is OOM-killed the fix is to raise this on
+    # purpose — `make status` prints oom=true — not to have started high enough that
+    # zero's own services are what gets reaped instead.
+    mem_limit: ${DEV_MEM_LIMIT:-1024m}
+    memswap_limit: ${DEV_MEMSWAP_LIMIT:-1536m}
+
+    # restart: no, matching every other dev container on zero. This holds a live
+    # claude session; an unattended restart at 03:00 would resurrect it with no one
+    # watching and no idea what it was mid-way through. It also means a reboot leaves
+    # it down, which recovery.md now says is the expected resting state.
+    restart: "no"
+
+    # .env is read by Compose for INTERPOLATION only — a name in it does not reach
+    # the container unless it is named here too.
+    environment:
+      GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
+      GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
+
+      # NO remote-control switch, unlike or3-dev. This container exists to replace
+      # driving Claude from the phone; shipping a disabled daemon for the thing it
+      # replaces is hedging against its own reason to exist. or3/dev/rc-supervisor.sh
+      # is there if the need comes back, and adding it here would be a decision with
+      # its own reasoning rather than a default nobody chose.
+
+    volumes:
+      # The host clone. `git pull` in the container and on the host are the same
+      # pull — there is one working tree, not two that can drift.
+      - ${INFRA_SRC:?set INFRA_SRC in dev/.env to the absolute path of the infra clone on this host}:/workspace
+
+      # Mode-700 directory outside the repo holding the GitHub deploy key, the key
+      # that reaches the fleet, the authorized_keys this sshd serves, and the two
+      # host-specific ssh fragments. Read-only — the entrypoint copies out of it and
+      # never writes back.
+      - ${INFRA_SECRETS:?set INFRA_SECRETS in dev/.env to the absolute path of the secrets dir}:/run/infra-secrets:ro
+
+      - infra-claude:/home/dev/.claude           # login + config (CLAUDE_CONFIG_DIR points here)
+      - infra-gh:/home/dev/.config/gh            # `gh auth login` (GH_CONFIG_DIR points here)
+      - infra-ssh-host:/home/dev/.ssh-host       # sshd host key -> stable known_hosts across rebuilds
+      - infra-local-share:/home/dev/.local/share # shell history
+
+      # NO /var/run/docker.sock, and this is the one line most likely to be added by
+      # someone in a hurry. decisions.md: the docker group is root-equivalent, because
+      # anyone holding the socket can bind-mount / into a container. Handing it to a
+      # container that also runs a claude and holds ssh keys to all three hosts is that
+      # same grant with two more ways to reach it. Ansible drives docker on zero the
+      # same way it drives docker on one — over ssh, as a host — and community.docker's
+      # docker_compose_v2 needs no local socket and no SDK to do it.
+
+    ports:
+      # 2222 is dd-dev, 2223 is ds-dev and 2224 is or3-dev on this same box, so this
+      # one is 2225. The port is this container's identity on zero; do not renumber it
+      # casually — README.md's port table and recovery.md both name it.
+      #
+      # DEV_SSH_BIND is the ADDRESS it is published on, and it defaults to 127.0.0.1
+      # because that default is the whole of this port's protection. sshd behind it is
+      # key-only, but what a key gets you here is a shell in a container holding a
+      # read-write GitHub deploy key and an ssh key that reaches zero, one and two as
+      # an account in `wheel`. That is a larger prize than or3-dev's, so the default
+      # matters more, not less. The phone arrives through zero's own sshd, which is
+      # already an authenticated hop, and a cloudflared running on zero ITSELF reaches
+      # 127.0.0.1:2225 with no change here.
+      #
+      # Widen it only for a cloudflared that cannot — one in a container of its own,
+      # which needs the docker bridge gateway address — and not to 0.0.0.0, which also
+      # puts it on the home LAN. Publishing is create-time: it lands on `make up`,
+      # never on `make restart`.
+      - "${DEV_SSH_BIND:-127.0.0.1}:${DEV_SSH_PORT:-2225}:2222"
+
+volumes:
+  infra-claude:
+  infra-gh:
+  infra-ssh-host:
+  infra-local-share:

@@ -48,6 +48,8 @@ deployments/<stack>/   what a stack is — compose.yaml, .env (ignored), SOURCE
 hosts/<host>/          where it runs — symlinks into deployments/, tracked /etc copies
 hosts/two/setup/       how `two` was built — one reviewed root script, not on any PATH
 bin/                   the scripts above (_infra.py is their shared header parser)
+ansible/               the management plane — inventory, playbooks, the audit
+dev/                   the infra-dev container on zero: work on this repo, from a phone
 docs/                  read these
 ```
 
@@ -77,7 +79,7 @@ exists, and the first run of it found exactly that on `one`.
 | Host | |
 |---|---|
 | `one` | **8080** qBittorrent (via gluetun) · **7777** ionic-traces · **3001** send2ereader · **8384/22000** syncthing |
-| `zero` | **2283** Immich · **8384/22000** syncthing · **127.0.0.1:2224** the `or3-dev` container |
+| `zero` | **2283** Immich · **8384/22000** syncthing · **127.0.0.1:2224-2225** the `or3-dev` and `infra-dev` containers |
 | `two` | **none published** — the bot's web UI (8080) and break-glass sshd (2222) exist inside the container and are deliberately not mapped. See the commented `ports:` block in `deployments/destiny-director/compose.yaml` |
 
 Both Syncthings and `torrent` are on **host or shared networking**, so `docker ps` shows
@@ -86,18 +88,29 @@ which case each is, and its Listening section is the answer that covers all of t
 
 ### Dev containers on `zero`
 
-Three, in their own application repos and **deliberately not in this one** — they are
-driven by `make dev` there, are `restart=no`, and hold live sessions and uncommitted
-worktrees. See [decisions.md](docs/decisions.md).
+Four. Each is driven by `make dev` **in the repo it belongs to**, each is `restart=no`,
+and each holds live sessions and uncommitted worktrees. See
+[decisions.md](docs/decisions.md).
 
-| Container | Repo | SSH |
-|---|---|---|
-| `or3-dev` | `or3` | `127.0.0.1:2224` |
-| `dd-dev` (+ `dd-mysql`) | `destiny-director` | 2222 |
-| `ds-dev` | `dossier` | 2223 |
+| Container | Repo | SSH | Defined in |
+|---|---|---|---|
+| `dd-dev` (+ `dd-mysql`) | `destiny-director` | 2222 | that repo |
+| `ds-dev` | `dossier` | 2223 | that repo |
+| `or3-dev` | `or3` | `127.0.0.1:2224` | that repo |
+| `infra-dev` | **this one** | `127.0.0.1:2225` | [`dev/`](dev/README.md) |
 
-**Only `or3-dev` was up at the last audit**, and only its port was listening. The other
-two being down is the normal resting state, not a fault: nothing starts them but a person.
+**`infra-dev` is the exception to "dev containers stay in their own repo", and it is not
+one.** That rule says a dev container belongs to the repo it develops; this one develops
+*this* repo, so `dev/` is exactly where it belongs. What it is not is a host service —
+nothing in `deployments/` or `hosts/` refers to it, and `bin/compose` cannot drive it.
+
+It also carries `ansible-core` and the collections, which makes it a **second control
+node** and a cheaper one than the phone: an audit run from Termux crosses metered mobile
+data to reach boxes that are on zero's own LAN, and the same run from inside the
+container crosses nothing that costs anything. [`dev/README.md`](dev/README.md).
+
+**Only `or3-dev` was up at the last audit**, and only its port was listening. The others
+being down is the normal resting state, not a fault: nothing starts them but a person.
 Their named volumes survive regardless, and those volumes are the thing that matters —
 `or3-dev_or3-claude` is 22 MB of login and session history, and a dev container that
 moves hosts without its volume arrives logged out and empty. The inventory lists every
@@ -129,6 +142,8 @@ None are in git. `.gitignore` covers `.env`, `*.key`, `qBittorrent.conf`, `*.sql
 | [port-forwarding.md](docs/port-forwarding.md) | The fragile bit. Read before touching the torrents stack. |
 | [roadmap.md](docs/roadmap.md) | What's next, and the traps waiting in it. |
 | [decisions.md](docs/decisions.md) | Why it looks like this. Don't relitigate. |
+| [dev/README.md](dev/README.md) | The `infra-dev` container — working on this repo without paying for it. |
+| [ansible/README.md](ansible/README.md) | Running the management plane. |
 
 ## Three rules
 

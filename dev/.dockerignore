@@ -1,0 +1,14 @@
+# The build context is this directory, so .env — which names the path to live key
+# material — would otherwise be uploaded to the docker daemon on every build.
+# Nothing here COPYs it, but it should not be in the context at all.
+.env
+.env.*
+!.env.example
+
+# Not part of the image: the container gets its clone through the /workspace bind
+# mount, and these run on the host. login.sh is deliberately NOT here — it is the
+# one script that belongs in the image, because it runs inside it.
+README.md
+Makefile
+status.sh
+seed-secrets.sh
