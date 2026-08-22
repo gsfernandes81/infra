@@ -57,10 +57,8 @@ been consciously postponed rather than an omission.
 
 ## Bring-up, from nothing
 
-All of it on `zero`, in your own terminal — `gavin` is not in the docker group, so none
-of this runs from an agent session. **This is the whole of it. No fleet access, no
-Cloudflare** — both are additions, decided separately, and neither is needed for a claude
-running on zero.
+**This is the whole of it. No fleet access, no Cloudflare** — both are additions, decided
+separately, and neither is needed for a claude running on zero.
 
 **Two commands, from two places.** The host side is a playbook, run from a control node
 — the phone — because that is where ansible is and because the setup is not something
@@ -82,9 +80,9 @@ own terminal — `gavin` is not in the docker group, so this half is never an an
 cd ~/infra/dev && make dev             # build, start, then walk the two logins
 ```
 
-That gives you `ssh infra-dev` from the phone through zero, and `make claude` on zero.
-The two optional additions, each with its own section below and each safe to skip
-indefinitely:
+That gives you `ssh infra-dev-lan` from the phone — through zero's own sshd — and
+`make claude` from a terminal on zero. The two optional additions, each with its own
+section below and each safe to skip indefinitely:
 
 | | What it adds | Why it is off |
 |---|---|---|
@@ -92,12 +90,16 @@ indefinitely:
 | `DEV_TUNNEL_HOSTNAME=…` + the playbook | reach it without `ssh zero` first | needs a Cloudflare API token and four objects |
 
 `make dev` is `make up` followed by `make login`, which is the walkthrough in
-`login.sh`: git over ssh, the three hosts, `gh auth login`, `claude auth login`. Every
-step reads the current state first and only prompts for what is not done, so re-running
-it is safe and usually silent.
+`login.sh`: the deploy key, the fleet (reported as not configured, which is the default),
+`gh auth login`, `claude auth login`. Every step reads the current state first and only
+prompts for what is not done, so re-running it is safe and usually silent. Only the last
+two are interactive, and both need a tty — which is why they are in the image rather than
+in a playbook.
 
 Then `make verify` should read `sshd: running in the foreground`, `auth: claude logged
-in`, `colls: all of requirements.yml is installed`, and three hosts answering.
+in`, `colls: all of requirements.yml is installed`, and `fleet: no route to zero/one/two`
+— that last one is the default, not a fault. With the tunnel provisioned, `make status`
+also shows `tunnel:` with a `readyConnections` count.
 
 ## How this container is used
 
