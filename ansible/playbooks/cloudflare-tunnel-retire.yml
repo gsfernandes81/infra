@@ -33,6 +33,10 @@
     # Hostnames knowingly left behind, comma-separated. They point at the old tunnel and
     # will stop resolving to anything when it goes. Naming them is the acknowledgement.
     abandon: ""
+    # Delete the doomed tunnel's WARP private-network routes rather than refusing.
+    # Opt-in, and it should stay that way: dropping a route someone relies on is not
+    # recoverable by re-running anything.
+    drop_routes: false
 
   tasks:
     - name: Read the tunnel we are on now, and the one we left
@@ -146,6 +150,33 @@
              if (routes.json.result | default([])) | length > 0
              else 'no private network routes on ' ~ doomed_tunnel }}
 
+    # DROPPED, NOT MOVED. Confirmed 2026-08-23 that WARP is not used here — these are
+    # left over from an experiment with WARP VPN to zero and/or WARP-based Access auth.
+    # Moving them onto the new tunnel would carry an unused experiment forward; deleting
+    # them ends it. If WARP is ever wanted, a route is one API call to recreate.
+    - name: Drop the private network routes
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account }}/teamnet/routes/{{ item.id }}"
+        method: DELETE
+        headers: "{{ api_hdr }}"
+        status_code: [200, 202, 204]
+      loop: "{{ routes.json.result | default([]) }}"
+      loop_control:
+        label: "{{ item.network }}"
+      delegate_to: localhost
+      no_log: true
+      when: drop_routes | bool
+
+    - name: Re-read the routes after dropping them
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account }}/teamnet/routes?tunnel_id={{ doomed_tunnel }}&is_deleted=false"
+        headers: "{{ api_hdr }}"
+      register: routes
+      failed_when: false
+      delegate_to: localhost
+      no_log: true
+      when: drop_routes | bool
+
     - name: Refuse while private network routes still point here
       ansible.builtin.assert:
         that: (routes.json.result | default([])) | length == 0
@@ -155,8 +186,8 @@
           {{ (routes.json.result | default([])) | map(attribute='network') | list | join(', ') }}.
           These are WARP routes, not public hostnames — the cutover did not move them, and
           they have had no connector since it ran. Decide whether they should follow the
-          host onto {{ live_tunnel }} or be dropped, then re-run. Nothing here is deleted
-          in the meantime.
+          host onto {{ live_tunnel }} or be dropped. To drop them, re-run with
+          -e drop_routes=true. Nothing here is deleted in the meantime.
 
     # ── delete ───────────────────────────────────────────────────────────────
     # Clean up connection records first. Cloudflare refuses to delete a tunnel that still
