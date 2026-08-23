@@ -87,14 +87,23 @@
           - "NOT moved : anything in the old tunnel but absent above — retired on purpose"
 
     # ── baseline every hostname, while the old tunnel still serves ───────────
+    # failed_when: false, NOT status_code. Any status is a valid baseline — what matters
+    # is that it is the SAME afterwards. `status_code: -1` looks like "accept anything"
+    # and is not: the module compares the real status against that literal list.
+    #
+    # Expect a spread. On `one`: 200 for ssh-one and bookit, and 302 for torrents and
+    # syncthing-torrents, which sit behind Cloudflare Access and are redirected to a
+    # login before the origin is ever reached. Access binds to the HOSTNAME, not to the
+    # tunnel, so it should survive this unchanged — and comparing to baseline is what
+    # will show whether it did.
     - name: Baseline each hostname through the edge
       ansible.builtin.uri:
         url: "https://{{ item }}"
         method: HEAD
-        status_code: -1
         timeout: 20
         follow_redirects: none
       register: baseline
+      failed_when: false
       loop: "{{ move_hosts }}"
       delegate_to: localhost
 
@@ -233,10 +242,10 @@
       ansible.builtin.uri:
         url: "https://{{ item }}"
         method: HEAD
-        status_code: -1
         timeout: 20
         follow_redirects: none
       register: after
+      failed_when: false
       until: after.status == baseline_status[item]
       retries: 10
       delay: 6

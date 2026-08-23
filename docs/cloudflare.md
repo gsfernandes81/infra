@@ -114,9 +114,17 @@ take effect reads as authoritative and is worse than none.
 
 ## Open
 
-- **Is `ssh-zero.gsrpi.uk` behind an Access policy?** It maps to zero's sshd. If nothing
-  fronts it, that sshd is reachable from the internet — key-only, so not urgent, but it
-  should be a decision. Same for the three `ssh-zero-dev-*` hostnames.
+- **`ssh-zero.gsrpi.uk` IS behind Access** — confirmed 2026-08-23 when a stale JWT made
+  `ssh zero` fail from the phone with `websocket: bad handshake`. Refresh with
+  `cloudflared access login https://ssh-zero.gsrpi.uk`. The recurring-expiry problem is
+  what the infra-dev block solves with a service token; the fleet ssh hostnames do not
+  have one, and whether they should is open.
+- **On `one`, `torrents.gsrpi.uk` and `syncthing-torrents.gsrpi.uk` are behind Access**
+  — both 302 to `gszt.cloudflareaccess.com`, seen 2026-08-23. `ssh-one.gsrpi.uk` and
+  `bookit.gsrpi.uk` answer 200 and are not. Access binds to the HOSTNAME rather than the
+  tunnel, so it survives a tunnel migration; 2g's cutover checks that by comparing each
+  hostname against its own baseline rather than against "healthy".
+- **The three `ssh-zero-dev-*` hostnames** have not been checked.
 - **Immich has no Access policy** — verified indirectly, an unauthenticated fetch
   returns 200. Probably intentional, since Immich has its own login. Worth confirming
   rather than inheriting.
