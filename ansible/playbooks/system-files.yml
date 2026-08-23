@@ -82,14 +82,37 @@
     # ── the delivery vehicle: the host clone, pinned to the anchor ───────────
     # --ff-only: a diverged host clone is a situation to look at, not merge through.
     # check_mode false so --check also pulls; a dry run against a stale checkout would
-    # diff the wrong bytes.
+    # diff the wrong bytes. No -q: changed_when matches "Already up to date" in stdout,
+    # and -q suppresses exactly that line, so every no-op pull would report changed.
     - name: Pull the host's clone, fast-forward only
       ansible.builtin.command:
-        cmd: git pull --ff-only -q
+        cmd: git pull --ff-only
         chdir: "{{ repo }}"
       register: pull
       changed_when: "'Already up to date' not in pull.stdout"
       check_mode: false
+
+    # The HEAD assert below proves the host is on the reviewed COMMIT, but
+    # `pull --ff-only` succeeds straight over local edits it does not touch — a dirty
+    # working tree deploys modified bytes under a green assert. Same hole the
+    # control-node dirty check closes, on the side that actually feeds the tool.
+    - name: The host clone's uncommitted changes, if any
+      ansible.builtin.command:
+        cmd: git status --porcelain -- hosts/ bin/
+        chdir: "{{ repo }}"
+      register: host_dirty
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse if the host clone has uncommitted changes
+      ansible.builtin.assert:
+        that: host_dirty.stdout | length == 0
+        fail_msg: >-
+          {{ inventory_hostname }}'s clone at {{ repo }} has local edits under hosts/
+          or bin/: {{ host_dirty.stdout_lines | join('; ') }}. The commit assert would
+          still pass over these — pull --ff-only never touches them — so the tool
+          would install bytes nobody reviewed. Commit, push and re-pull, or discard
+          them on the host. Nothing was installed.
 
     - name: The host's HEAD
       ansible.builtin.command:
