@@ -479,7 +479,7 @@ ones that answer the question this document started from.
 | 2e | Rotate the fleet's own tunnel tokens | `zero`, `one`, `two`, edge | 2b | **`zero` and `one` done 2026-08-23** — one's by retiring its tunnel under 2g. `two`'s token is out of the 755 file and in a credentials file; its rotation waits for 2g |
 | 2f | `cloudflared`'s init script logs nowhere | `zero`, `one`, `two` | — | **done on all three, 2026-08-23** |
 | 2g | All three tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, `two`, DNS | 2f | `one` and `zero` **done 2026-08-23**; `two` deferred ~a week |
-| 2h | cloudflared: `--no-autoupdate` applied, and the right architecture on `zero` and `one` | all three | — | committed, **not applied** |
+| 2h | cloudflared: apply `--no-autoupdate` fleet-wide | all three | — | committed, **not applied** |
 | 3 | First stack adopted: `send2ereader` on `one` | one stack, non-critical box | 2 | |
 | 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two stacks | 3 | |
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | |
@@ -552,18 +552,24 @@ argument is *weaker*. Now `--no-autoupdate` in all three tracked init scripts, c
 but not yet installed.
 
 **All three run the 32-bit `arm` build, and two of them are `aarch64`.** Identical SHA256
-across hosts, and `two` is `armv6l`, so nothing else executes on all three. `host-setup.md`
-documented a per-architecture install that could not work — the asset name it gave does
-not exist, and `curl -L` without `-f` writes GitHub's 404 page over the binary — which is
-the likeliest reason one binary was copied everywhere instead.
+across hosts, and `two` is `armv6l`, so nothing else executes on all three. It arrived by
+accident — `host-setup.md` documented a per-architecture install using an asset name that
+does not exist, so `curl -L` without `-f` would have written GitHub's 404 over the binary,
+and one working copy was evidently distributed to all three instead.
 
-Autoupdate could never have fixed it: cloudflared fetches a build matching *its own*
-architecture, so the mistake was self-perpetuating. Only an explicit install breaks the
-loop, and `playbooks/cloudflared-update.yml` is that: right asset from `uname -m`,
-SHA256 supplied on the command line, one host at a time in the order `one → two → zero`,
-each stage refusing while an earlier one is unhealthy. **That gate is the point** — a
-calendar gap between stages only helps if somebody notices a failure inside it, and
-nothing on this fleet alerts.
+**It is now a decision rather than a defect**, and the reasoning is in
+[`decisions.md`](decisions.md) § *One cloudflared build on all three*. Briefly: the
+rollout order only tests what later hosts will actually run, so per-architecture builds
+would leave `two` as the first and only host ever to run the `arm` binary — the lifeboat
+as canary for its own architecture. Uniform means every host runs something an earlier
+host already survived. The cost is a dependency on the kernel's AArch32 support on `zero`
+and `one`, recorded there as the thing to watch.
+
+So 2h is only the autoupdate half. `playbooks/cloudflared-update.yml` installs a named
+version, hash-verified, one host at a time in the order `one → two → zero`, **each stage
+refusing while an earlier one is unhealthy**. That gate is the point: a calendar gap
+between stages only helps if somebody notices a failure inside it, and nothing on this
+fleet alerts.
 
 **2g: `one` and `zero` are done, 2026-08-23.** Both run new tunnels created with
 `config_src: local`, with their routes in `hosts/<host>/system/cloudflared-config.yml`

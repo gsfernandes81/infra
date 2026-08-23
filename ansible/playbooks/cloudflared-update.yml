@@ -39,6 +39,14 @@
       two: ["one"]
       zero: ["one", "two"]
 
+    # ONE BUILD FLEET-WIDE, and it is chosen rather than derived. See
+    # docs/decisions.md § "One cloudflared build on all three". Deriving from `uname -m`
+    # would give `two` the only copy of its own architecture — making the lifeboat the
+    # canary for a binary no earlier stage has run, which is exactly what the rollout
+    # order exists to avoid. Override per host with -e asset=arm64 if that is ever
+    # revisited; the host's real architecture is reported either way.
+    fleet_asset: arm
+
     state_dir: "{{ lookup('env', 'HOME') }}/.infra-cfd"
     probe: "http://127.0.0.1:20241"
     bin: /usr/bin/cloudflared
@@ -118,16 +126,29 @@
           bin/install-system-file cloudflared --commit --allow-content-change
 
     # ── what is there now ────────────────────────────────────────────────────
-    - name: The architecture of THIS host, not of the binary on it
+    - name: What this host actually is
       ansible.builtin.command: uname -m
       register: uname_m
       changed_when: false
 
-    - name: Map it to a cloudflared asset
+    - name: Which asset to install, and what would have been native
       ansible.builtin.set_fact:
-        cfd_arch: >-
+        cfd_arch: "{{ asset | default(fleet_asset) }}"
+        native_arch: >-
           {{ {'aarch64': 'arm64', 'armv6l': 'arm', 'armv7l': 'arm',
-              'x86_64': 'amd64'}[uname_m.stdout | trim] }}
+              'x86_64': 'amd64'}[uname_m.stdout | trim] | default('?') }}
+
+    # Said out loud rather than hidden. Running a 32-bit build on aarch64 depends on the
+    # kernel's AArch32 support — a dependency nobody chose and arm64 distributions have
+    # been drifting away from. If it ever goes, cloudflared stops starting at the next
+    # reboot, on the box everything is reached through.
+    - name: Note where the asset differs from the machine
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} is {{ uname_m.stdout | trim }} (native asset
+          {{ native_arch }}) and is being given {{ cfd_arch }} — deliberate, see
+          docs/decisions.md. It runs via the kernel's 32-bit compat layer.
+      when: cfd_arch != native_arch
 
     - name: Record what is installed before we touch it
       ansible.builtin.stat:

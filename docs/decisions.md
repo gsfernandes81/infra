@@ -293,6 +293,38 @@ should be amended when that repo is next touched.
 > keys; what was missing was a *path*. Those are different things, and the fix for one
 > is not the fix for the other.
 
+## One cloudflared build on all three, including the two that are `aarch64`
+
+**All three hosts run the 32-bit `arm` build.** `two` is `armv6l` and needs it; `zero`
+and `one` are `aarch64` and could run `arm64`. They do not, on purpose.
+
+**Because the staggered rollout only tests what later hosts will actually run.** Updates
+go `one → two → zero`, each stage refusing while an earlier one is unhealthy
+(`playbooks/cloudflared-update.yml`). With per-architecture builds, `two` would be the
+first and only host ever to run the `arm` binary — so the **lifeboat becomes the canary
+for its own architecture**, and `one` being healthy would say nothing about it. Uniform
+means every host runs something an earlier host already survived, which is the entire
+value of the ordering. It is also one hash per release rather than two.
+
+**Three costs, accepted rather than overlooked:**
+
+- **The AArch32 compat layer is now a dependency.** A 32-bit binary on `aarch64` runs
+  through kernel support that arm64 distributions have been drifting away from. If a
+  future Alpine or Pi kernel drops it, `zero` and `one` lose cloudflared **at their next
+  reboot**, with no warning, on the boxes everything is reached through. This is the
+  strongest argument against and it is the one to watch.
+- **A single point of failure the other way.** If Cloudflare stops publishing the `arm`
+  build, all three break at once rather than one.
+- **Performance, unmeasured.** No ARMv8 crypto extensions, so AES is software and QUIC
+  leans on ChaCha20. On a Pi 5 the bottleneck is almost certainly the uplink rather than
+  the CPU, but nobody has measured it, and "probably fine" is what it is.
+
+**It arrived by accident and is kept by choice**, which is worth separating. Until
+2026-08-23 `host-setup.md` documented a per-architecture install using an asset name that
+does not exist (`cloudflared-linux-aarch64`), so `curl -L` without `-f` would have written
+GitHub's 404 page over the binary. One working copy was evidently distributed to all three
+instead. The uniformity was nobody's decision; it is now.
+
 ## `zero`'s encrypted volume
 
 **Immich serves by default; a security concern keeps it down.** That veto is the design

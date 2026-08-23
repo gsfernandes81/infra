@@ -212,17 +212,19 @@ The reasons are below and they are not theoretical.
 > `/usr/bin/cloudflared`. So the documented install was never usable as written, which
 > is the likeliest reason one working binary ended up copied to all three hosts instead.
 
-> ⚠ **All three hosts run the 32-bit `arm` build, including the two arm64 ones.**
-> Established 2026-08-23: identical SHA256 on `zero`, `one` and `two`, and `two` is
-> `armv6l` — nothing but a 32-bit ARM binary executes on all three. `zero` and `one` are
-> `aarch64` and have been running it for about six months.
->
-> **Autoupdate could never have corrected it.** cloudflared updates itself with a build
-> matching *its own* architecture, not the machine's, so the original mistake was
-> self-perpetuating. Autoupdate was also demonstrably live — all three binaries were
-> rewritten on 14–15 August, the day `2026.8.2` released — which meant a boot-path binary
-> on the internet-facing box was being replaced with unverified bytes on a 24-hour cycle.
-> It is now `--no-autoupdate` on all three.
+**All three hosts run the 32-bit `arm` build, including the two that are `aarch64`** —
+established 2026-08-23 by identical SHA256 across hosts, and `two` being `armv6l`. It
+began as an accident of the broken command above and is **now a decision**: see
+[`decisions.md`](decisions.md) § *One cloudflared build on all three*. The short version
+is that the staggered rollout only tests what later hosts will run, and per-architecture
+builds would make the lifeboat the sole canary for its own binary.
+
+> ⚠ **Autoupdate is off, and was previously on and live.** All three binaries were
+> rewritten on 14–15 August, the day `2026.8.2` released, six months after a manual
+> install — so a boot-path binary on the internet-facing box was being replaced with
+> unverified bytes on a 24-hour cycle. It could also never have corrected the
+> architecture, since cloudflared fetches a build matching *its own*, which made the
+> original state self-perpetuating either way.
 
 The init script is tracked at `hosts/<host>/system/cloudflared` — install it with
 `bin/install-system-file cloudflared`. Not reproduced here, because a pasted copy drifts
@@ -247,7 +249,7 @@ network namespace or port forwarding breaks silently.
 
 | | `one` (Pi 4) | `two` (Pi 1 B+, armv6) | `zero` (Pi 5) |
 |---|---|---|---|
-| cloudflared build | **`arm` — wrong**, should be `arm64` | `arm` ✅ | **`arm` — wrong**, should be `arm64` |
+| cloudflared build | `arm` (uniform by decision) | `arm` (native) | `arm` (uniform by decision) |
 | zram | intended, **unverified** | **no swap at all** (verified Aug 2026) | no |
 | container runtime | docker | rootless podman + podman-compose | docker |
 | bcache-tools | no | no | yes |
