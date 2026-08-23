@@ -4,29 +4,40 @@
 # infra-name: config.yml
 # infra-mode: 0644
 #
-# Credentials and metrics for `one`'s host tunnel. NOT its ingress.
+# GENERATED INTO THE REPO by ansible/playbooks/cloudflare-tunnel-new.yml, from the
+# ingress the connector was actually serving — not from the dashboard and not from
+# anyone's transcription. Read the diff before committing it: from here on this file IS
+# the routing, and a hostname missing from it is a hostname serving 404.
 #
-# WHY. `command_args` carried `--token <secret>`, and supervise-daemon logs its child's
-# full command line to syslog — the token-in-argv leak docs/host-setup.md flags. The
-# secret now lives in /etc/cloudflared/one.json at 0600 instead.
+# Generating into the repo is not the thing CLAUDE.md rejects. What is rejected is
+# generating boot-path content into /etc; these bytes go through a diff, a commit and
+# bin/install-system-file like every other tracked file.
 #
-# NO INGRESS HERE, DELIBERATELY. This tunnel is remotely-managed, which is certain
-# rather than assumed: it has always run with `--token` and no `--config`, so it has
-# never read a local file and its routes can only have come from Cloudflare. cloudflared
-# ignores local ingress whenever a remote configuration exists — established on zero
-# 2026-08-23 by clearing the remote copy and watching the connector drop to one rule.
-# A copy here would be inert and would read as authoritative. docs/cloudflare.md holds
-# a dated snapshot of the five hostnames.
+# THIS TUNNEL IS LOCALLY-MANAGED, so unlike the old one the rules below are in force.
+# cloudflared prefers a REMOTE configuration whenever one exists and ignores local
+# ingress silently — which is why the previous config.yml on zero carried rules that had
+# never taken effect and looked exactly like rules that had. This tunnel was created with
+# `config_src: local` and has no remote configuration, so there is nothing to lose to.
 #
-# Moving the routes into this file is phase 2g and needs a NEW tunnel: `config_src` is
-# create-time only.
+# ORDER IS BEHAVIOUR: cloudflared matches first-rule-wins. This preserves the order the
+# edge served. Do not sort it.
 
-tunnel: 96635122-2ceb-4fe2-8ae0-966a343bd124
+tunnel: 1e7fde2e-ac2f-4a5e-8ad4-591208c1e2a6
 credentials-file: /etc/cloudflared/one.json
 
 # Pinned so the probe in docs/recovery.md has a fixed target. THE PIN MAKES THE RESTART
 # METHOD LOAD-BEARING: `rc-service restart` does not wait, cloudflared's grace period is
 # 30s, and the outgoing process still holds this port when the incoming one binds it —
-# which killed six respawns on zero and took its tunnel down. Cycle with
-# stop -> poll until 20241 is free -> start. Never `restart`.
+# six respawns died that way on zero. Cycle with stop, poll until 20241 clears, start.
 metrics: 127.0.0.1:20241
+
+ingress:
+  - hostname: ssh-one.gsrpi.uk
+    service: ssh://127.0.0.1:22
+  - hostname: bookit.gsrpi.uk
+    service: http://127.0.0.1:3001
+  - hostname: syncthing-torrents.gsrpi.uk
+    service: http://127.0.0.1:8384
+  - hostname: torrents.gsrpi.uk
+    service: http://127.0.0.1:8080
+  - service: http_status:404
