@@ -61,6 +61,11 @@
     # fault. On for POSIX clients, off for the Windows render.
     multiplex: true
 
+    # cloudflared AS THE PHONE SEES IT. The -s24 aliases have the phone run it, so this
+    # is a Termux path and is never executed on the client writing this file. Absolute,
+    # because a non-interactive ssh session's PATH is not Termux's interactive one.
+    phone_cloudflared: "/data/data/com.termux/files/usr/bin/cloudflared"
+
   tasks:
     # BEST EFFORT ONLY — the assertion below is on the RESULT, not on this succeeding.
     #

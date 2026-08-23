@@ -89,17 +89,32 @@ Host zero one two zero-dev-dd zero-dev-or3
 Match host s24 exec "adb forward tcp:8022 tcp:8022"
   ConnectTimeout 10
 
+# THE TARGETS ARE TUNNEL HOSTNAMES, NOT LAN ADDRESSES, and that is the whole point.
+# This path exists for the ship: the laptop has no internet, the phone does, and they are
+# joined by a USB cable. So every byte of network egress happens ON THE PHONE — the LAN
+# addresses would mean nothing to it from out there.
+#
+# NOT ProxyJump. That would have the phone open a raw TCP connection to
+# ssh-zero.gsrpi.uk:22, where nothing is listening: an ssh:// ingress is not raw TCP at
+# the edge, and only `cloudflared access ssh` can speak to it. So the phone RUNS
+# cloudflared, exactly as the -zero and -one rules have their jump host run `nc`.
+#
+# Absolute path, not the bare name: this runs in a non-interactive ssh session on the
+# phone, whose PATH is not the one you get when you open Termux.
+#
+# When everything is on the same network these are not the aliases you want —
+# <host>-local is direct, and <host>-zero|-one|-two go over the LAN.
 Host zero-s24
-  HostName {{ ip_zero }}
+  HostName ssh-zero.gsrpi.uk
 
 Host one-s24
-  HostName {{ ip_one }}
+  HostName ssh-one.gsrpi.uk
 
 Host two-s24
-  HostName {{ ip_two }}
+  HostName ssh-two.gsrpi.uk
 
 Host *-s24
-  ProxyJump s24
+  ProxyCommand ssh s24 {{ phone_cloudflared }} access ssh --hostname %h
 
 {% endif %}
 Host s24
