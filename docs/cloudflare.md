@@ -59,10 +59,27 @@ tidying, it is an outage.
 a `GET` first makes the whole thing byte-exactly reversible — that structure is why the
 attempt cost fifteen seconds rather than an evening. But there is no reason to run it.
 
-Making the tunnel genuinely locally-managed is a different question and is not solved by
-emptying the remote config, since an empty remote config still wins over a local one.
-Nobody has established whether an existing dashboard-created tunnel can be converted at
-all.
+## Making it locally-managed
+
+Not available in place, tried 2026-08-23. A connector fetches remote config only when the
+tunnel's `config_src` is `cloudflare`, so that field is the whole switch — but
+`PATCH .../cfd_tunnel/{id}` with `{"config_src":"local"}` is rejected. The error is
+`1002 Tunnel not found`, which is misleading rather than informative: a `GET` on that URL
+works, and a `PATCH` to it with `tunnel_secret` succeeded an hour earlier with the same
+token. Only the body differs. Read it as "not an accepted PATCH field", not as proof.
+
+Emptying the remote configuration does not achieve it either — an empty remote config
+still wins over a local one, which is what took the tunnel down for fifteen seconds
+earlier the same day.
+
+**So the only known route is a new tunnel**, created with `config_src: local`, followed
+by repointing all eight CNAMEs and retiring the old one. That is real work with real
+downtime per hostname, and it has not been started. What it would buy: the routes under
+review in git, which is where everything else here is going.
+
+A `config.yml` carrying the full ingress was written for the attempt and removed again
+when it failed. It is in git history rather than in `HEAD`, because a copy that cannot
+take effect reads as authoritative and is worse than none.
 
 ## Landmines
 

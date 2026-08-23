@@ -24,9 +24,12 @@
 # do nothing at all while looking like it had.
 #
 # The ingress rules are therefore NOT reproduced here. A second copy that cannot take
-# effect is the drift this repo exists to end, and it is worse than no copy because it
-# reads as authoritative. docs/cloudflare.md holds a dated snapshot for humans, with the
-# command to regenerate it.
+# effect is worse than no copy: it reads as authoritative. docs/cloudflare.md holds a
+# dated snapshot for humans, with the command to regenerate it.
+#
+# A version of this file WITH the rules exists in git history, written 2026-08-23 for a
+# conversion that is not available — see docs/cloudflare.md § Making it locally-managed.
+# Recover it from there if that ever happens; do not re-add it speculatively.
 #
 # `--autoupdate-freq 24h0m0s` stays in command_args and no-autoupdate is deliberately
 # NOT set here: infra-dev disables autoupdate, this host does not.
@@ -48,4 +51,3 @@ credentials-file: /etc/cloudflared/zero.json
 #
 # So this file may only be cycled with stop -> poll until 20241 is free -> start.
 metrics: 127.0.0.1:20241
-
