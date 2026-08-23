@@ -29,8 +29,8 @@ checker inferred `/etc/<filename>`, so it looked for `/etc/bcache-register` and
 files; it passed on `one` only because `one` tracks nothing but `fstab`.
 
 `check-system-drift` is Python, so a host with tracked files needs `python3`.
-`zero` has it. **`one` has not been verified** — check before relying on the result
-there. `two` tracks no `/etc` files yet; when it does, it needs an interpreter or an
+`zero` has it, and **`one` was verified 2026-08-23** — it runs there and reports
+correctly. `two` tracks no `/etc` files yet; when it does, it needs an interpreter or an
 exemption, which is a real cost on a 512 MB armv6 box running diskless.
 
 | File | Live path | Why it's tracked |

@@ -5,15 +5,54 @@
 # infra-name: cloudflared
 # infra-mode: 0755
   
+#
+# HAND-WRITTEN, AND IT HAS TO BE. Alpine packages no init script for cloudflared —
+# docs/host-setup.md installs the binary straight from GitHub — so this was assembled
+# from the Alpine package source and other references. Whatever preceded it DID NOT
+# START ON REBOOT: the generated version from `cloudflared service install` looks
+# correct, starts when started, and is missing the next time the box comes up. Do not
+# replace this file with it.
+#
+# LOGGING, FIXED 2026-08-23. This previously declared stdout_log and stderr_log, which
+# supervise-daemon does not act on. /var/log/cloudflared.err was last written on
+# 2026-01-04 and cloudflared.log had been 0 bytes since 2025-12-24 — so when six
+# consecutive restarts crashed on 2026-08-23 they produced no output whatsoever, and
+# the cause had to be found by reproducing it in the foreground instead.
+#
+# The names below are copied from /etc/init.d/docker: stock Alpine, same supervisor, in
+# the default runlevel, demonstrably writing its log. `output_logger` takes a COMMAND
+# rather than a path, which is why the old declaration was inert rather than wrong.
+# Verified on `one` first, 2026-08-23, before being applied here.
+
 cfgfile="/etc/$RC_SVCNAME/$RC_SVCNAME.conf"
 supervisor=supervise-daemon
 command="/usr/bin/cloudflared"
 command_args="--autoupdate-freq 24h0m0s --config /etc/cloudflared/config.yml tunnel run"
 command_user="root"
 pidfile="/var/run/$RC_SVCNAME.pid"
-stdout_log="/var/log/$RC_SVCNAME.log"
-stderr_log="/var/log/$RC_SVCNAME.err"
 command_background="yes"
+
+# `cfgfile` and `command_background` both look vestigial — nothing references either and
+# docker's script sets neither. Left alone rather than removed alongside a logging fix.
+
+# ONE file, not two. The split produced a 397 KB .err and a .log empty for eight months,
+# because cloudflared writes essentially everything to stderr. `-m` merges them.
+CF_LOGFILE="${CF_LOGFILE:-/var/log/${RC_SVCNAME}.log}"
+LOGPROXY_OPTS="$LOGPROXY_OPTS -m"
+
+# 0640 rather than docker's 0644 — a deliberate deviation. This service has twice left a
+# world-readable file containing its own credential on this fleet; its log does not get
+# world-read by default either.
+export \
+	LOGPROXY_CHMOD="${LOGPROXY_CHMOD:-0640}" \
+	LOGPROXY_LOG_DIRECTORY="${LOGPROXY_LOG_DIRECTORY:-/var/log}" \
+	LOGPROXY_ROTATION_SIZE="${LOGPROXY_ROTATION_SIZE:-104857600}" \
+	LOGPROXY_ROTATION_TIME="${LOGPROXY_ROTATION_TIME:-86400}" \
+	LOGPROXY_ROTATION_SUFFIX="${LOGPROXY_ROTATION_SUFFIX:-.%Y%m%d%H%M%S}" \
+	LOGPROXY_ROTATED_FILES="${LOGPROXY_ROTATED_FILES:-5}"
+
+output_logger="log_proxy $LOGPROXY_OPTS $CF_LOGFILE"
+error_logger="log_proxy $LOGPROXY_OPTS $CF_LOGFILE"
 
 depend() {
         need net
