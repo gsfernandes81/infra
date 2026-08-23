@@ -103,7 +103,11 @@ Host *-s24
 
 {% endif %}
 Host s24
-  HostName localhost
+  # 127.0.0.1, NOT localhost. ssh resolves `localhost` to ::1 first and `adb forward`
+  # binds IPv4 only, so the name gives `kex_exchange_identification: Connection refused`
+  # while the forward is demonstrably up in `adb forward --list`. Same IPv6-first
+  # resolution that produced zero's `dial tcp [::1]:8384` cloudflared errors in January.
+  HostName 127.0.0.1
   Port 8022
   User {{ s24_user }}
 
@@ -126,14 +130,20 @@ Host two two-local two-zero two-one two-s24
   Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
 
 # ── shared: the account, and multiplexing ─────────────────────────────────────
-# ControlMaster is the real latency win — the first connection stays open and later ones
-# reuse it, so a run of commands pays TCP and auth setup once.
-#
-# KEYED BY ALIAS (%n), not by host. %C and the usual %r@%h:%p both hash the RESOLVED
-# address, so `zero-one` and `zero-local` would share one socket — and a rescue path
-# that silently reuses a working direct connection is not a test of anything.
 Host zero* one* two*
   User gavin
+{% if multiplex %}
+  # ControlMaster is the real latency win — the first connection stays open and later
+  # ones reuse it, so a run of commands pays TCP and auth setup once.
+  #
+  # KEYED BY ALIAS (%n), not by host. %C and the usual %r@%h:%p both hash the RESOLVED
+  # address, so `zero-one` and `zero-local` would share one socket — and a rescue path
+  # that silently reuses a working direct connection is not a test of anything.
+  #
+  # OMITTED ON WINDOWS. Win32-OpenSSH has never implemented multiplexing, and setting it
+  # there fails with `getsockname failed: Not a socket` — which reads like a network
+  # fault and is not one.
   ControlMaster auto
   ControlPath ~/.ssh/cm/%n-%r
   ControlPersist 10m
+{% endif %}

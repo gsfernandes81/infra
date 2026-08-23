@@ -56,6 +56,11 @@
     # nothing to forward. Set per-render below, never globally.
     adb_jump: false
 
+    # Connection multiplexing. Win32-OpenSSH has never implemented it — ControlMaster
+    # there fails with `getsockname failed: Not a socket`, which reads like a network
+    # fault. On for POSIX clients, off for the Windows render.
+    multiplex: true
+
   tasks:
     # BEST EFFORT ONLY — the assertion below is on the RESULT, not on this succeeding.
     #
@@ -180,6 +185,7 @@
       vars:
         cloudflared: "{{ windows_cloudflared }}"
         adb_jump: true
+        multiplex: false
       when: win_cfg.stat.exists | default(false)
 
     # Fallback for a control node that cannot see the laptop — Termux. Only written when
@@ -202,6 +208,7 @@
       vars:
         cloudflared: "{{ windows_cloudflared }}"
         adb_jump: true
+        multiplex: false
       when: not (win_cfg.stat.exists | default(false))
 
     - name: Say what happened
