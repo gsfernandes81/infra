@@ -531,10 +531,9 @@ and repointing it is one more CNAME in a batch that is already being repointed.
 init script at all — `grep -c eyJ /etc/init.d/cloudflared` returns 1, confirmed
 2026-08-23 — so it is a live disclosed credential in a world-readable file, and retiring
 that tunnel is the cleanest remediation available. It is also the smallest job, one
-hostname. But `two` is **diskless, running from RAM with the SD card read-only**, so
-anything written to `/etc` evaporates at the next reboot unless committed with `lbu
-commit`, and the test that it held is a reboot rather than a restart. On the lifeboat.
-Do it last, and not on the same evening as either of the others.
+hostname. `two` is in `sys` mode — an ordinary writable install — so there is no `lbu
+commit` complication today, whatever the planned diskless switch would later add. It is
+still the lifeboat, so: do it last, and not on the same evening as either of the others.
 
 Estimated 1.5–2.5 hours per host, most of it verification. **`one` is smaller than first
 thought** — five hostnames, not eight, and one of those (`torrents.gsrpi.uk`) may need no

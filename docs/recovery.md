@@ -298,10 +298,15 @@ Only `/` and `/boot` are fsck'd, both on the SD card. The guards matter for the
 systemd migration, and for the `restart: always` containers that would otherwise
 populate an empty mountpoint today.
 
-**`two`:** diskless, running from RAM with the SD card read-only. It has no `/media/*`
-data mounts to guard, so `nofail` and `chattr +i` do not apply — but check rather than
-assume, since the fix is only meaningful where a container bind-mounts a path that
-could fail to mount.
+**`two`:** `sys` mode — root on `/dev/mmcblk0p2`, a normal writable install.
+[`host-setup.md`](host-setup.md) has the verified figures and states that **diskless is
+planned, not done**. This file claimed the opposite until 2026-08-23, which is worth a
+line of its own: two tracked documents disagreed about the boot mode of a host, and the
+wrong one is the file you read under pressure.
+
+It has no `/media/*` data mounts to guard, so `nofail` and `chattr +i` do not apply —
+but check rather than assume, since the fix is only meaningful where a container
+bind-mounts a path that could fail to mount.
 
 **Per-host status, at a glance:**
 
@@ -309,7 +314,7 @@ could fail to mount.
 |---|---|---|---|
 | `zero` | ✅ Aug 2026 | ✅ Aug 2026 | ✅ **rotated 2026-08-23**, and out of argv — credentials file |
 | `one` | ✅ Aug 2026 | ✅ Aug 2026 | moved out of the init script Aug 2026, **still `--token` in argv, NOT rotated** |
-| `two` | n/a (diskless) | n/a | **still INLINE in the 755 init script**, confirmed 2026-08-23 — never moved, never rotated |
+| `two` | n/a (no data mounts) | n/a | **still INLINE in the 755 init script**, confirmed 2026-08-23 — never moved, never rotated |
 
 **`zero` is done; `one` is not.** Both tokens were world-readable in a 755 init script
 for months, so both had to be assumed disclosed. Zero's was rotated on 2026-08-23 and
@@ -424,11 +429,10 @@ world-readable file. Zero and one at least moved theirs to a 600 file in August;
 never done, so its credential has been readable by any account on the box for as long as
 the tunnel has existed, and it has never been rotated.
 
-**Two's fix is NOT the same operation as zero's, and the difference will bite.** `two`
-runs **diskless, from RAM, with the SD card read-only**. Anything written to `/etc` lives
-in tmpfs: it will apply, verify, pass every check, and then be gone at the next reboot —
-on the one box whose entire purpose is still working when the others do not. Any change
-there needs `lbu commit`, and the check that it worked is a reboot, not a restart.
+**`two` is in `sys` mode**, so an `/etc` change persists normally — there is no `lbu
+commit` step today. That changes if the planned diskless switch ever happens, after which
+every `/etc` change is lost on reboot unless committed; `host-setup.md` says so and is
+the file to trust on it.
 
 Re-confirm before acting, since this is the state everything else assumes:
 

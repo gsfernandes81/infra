@@ -152,5 +152,6 @@ was ever looked at.
 ## Open
 
 - **`two`'s token is still inline** in `/etc/init.d/cloudflared` at mode 755, confirmed
-  2026-08-23. Never moved, never rotated — worse than either other host. Its remediation
-  is complicated by `two` being diskless: see `recovery.md`.
+  2026-08-23. Never moved, never rotated — worse than either other host. Retiring that
+  tunnel under 2g is the cleanest remediation, and it is the smallest of the three: one
+  hostname.
