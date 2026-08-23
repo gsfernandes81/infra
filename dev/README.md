@@ -532,9 +532,22 @@ The shape the generalisation should take, when it is done:
 - **`compose.yaml` and `.env` stay per-repo.** They are the six values that genuinely
   differ, and they are already the only place those values live.
 
-Two things make it worth doing rather than tidy-minded: the layer-sharing above becomes
-guaranteed instead of a convention nobody can check, and a fix to the entrypoint —
-which has already been made three times — gets made once. Two things make it work to
+Three things make it worth doing rather than tidy-minded. The layer-sharing above
+becomes guaranteed instead of a convention nobody can check. A fix to the entrypoint —
+which has already been made three times — gets made once.
+
+And the third is the one with a clock on it: **cloudflared is hash-pinned in four
+Dockerfiles.** Bumping it means a version and two SHA256s, four times, and Cloudflare
+deprecates old client versions — the edge eventually refuses them, and it presents as a
+broken tunnel rather than as "your client is old". So there is a slow deadline on four
+separate files and no single place to wind it.
+
+That is also the answer to "is the pin too conservative". It is not: a container's update
+path is a rebuild, and a hash is what makes the rebuild reproducible — the argument in
+`dev/Dockerfile` holds, and applies more strongly to the hosts, which is why they stopped
+autoupdating on 2026-08-23. What is too conservative is having *four copies of the pin*.
+Under a base image it is one `ARG` in one place, and the friction that stops anyone
+bumping it disappears. Two things make it work to
 schedule rather than now: there is no registry on this fleet, so "the base image" means
 a build-order dependency between repos that has to be made obvious rather than
 discovered, and it is a change to the thing you are working *inside*, which is the
