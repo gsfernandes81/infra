@@ -144,12 +144,56 @@ def validate_fstab(path):
     return problems
 
 
+def validate_sshd_config(path):
+    """`sshd -t -f <candidate>` -- the daemon's own parser, on the file itself.
+
+    This is the one tracked file where being wrong means no NEW logins on a remote
+    box. Existing sessions survive a bad config (sshd only re-reads on restart, and a
+    restart that fails leaves the running daemon alone), so it is not instantly fatal
+    -- but it is discovered at the worst possible moment, and `sshd -t` costs nothing.
+
+    CALIBRATION, per CLAUDE.md: this check is only meaningful because it reads the
+    LIVE config as healthy first. If `sshd -t` cannot validate what is already
+    running, the checker is wrong rather than the candidate, and refusing on that
+    basis would block a good change -- the exact failure the mount-guard socket count
+    produced. So the live file is tested first and a failure there is reported as a
+    broken checker, not a broken candidate.
+
+    Runs under sudo: sshd reads host keys, and as a normal user it fails for a reason
+    that has nothing to do with the file being checked.
+    """
+    problems = []
+    sshd = "/usr/sbin/sshd"
+    if not Path(sshd).exists():
+        return [f"{sshd} not found -- cannot validate an sshd_config on this host"]
+
+    live = Path("/etc/ssh/sshd_config")
+    if live.exists():
+        base = run(["sudo", sshd, "-t", "-f", str(live)])
+        if base.returncode != 0:
+            return [
+                "the LIVE /etc/ssh/sshd_config does not pass `sshd -t`, so this check "
+                "cannot be trusted as a verdict on the candidate. Fix or investigate "
+                "that first: " + (base.stderr or base.stdout).strip()
+            ]
+
+    r = run(["sudo", sshd, "-t", "-f", str(path)])
+    if r.returncode != 0:
+        for line in (r.stderr or r.stdout).splitlines():
+            problems.append(f"sshd -t: {line}")
+        if not problems:
+            problems.append(f"sshd -t exited {r.returncode} with no message")
+    return problems
+
+
 def validators_for(live):
     v = []
     if live.parent == Path("/etc/init.d"):
         v.append(validate_openrc_script)
     if live.name == "fstab":
         v.append(validate_fstab)
+    if live.name == "sshd_config":
+        v.append(validate_sshd_config)
     return v
 
 
