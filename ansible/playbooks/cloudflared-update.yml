@@ -4,7 +4,18 @@
 #   ansible-playbook playbooks/cloudflared-update.yml \
 #       -e target=one -e version=2026.9.1 -e sha256=<hash for that host's arch> -K
 #
-# WHY NOT AUTOUPDATE. It was on, and it was live — all three binaries were rewritten on
+# NOT IN USE, decided 2026-08-23. The hosts autoupdate, staggered by check frequency
+# (one 6h, two 72h, zero 240h — see hosts/*/system/cloudflared). This play is the gated
+# alternative: explicit version, hash on the command line, each stage refusing while an
+# earlier one is unhealthy. It needs a human free to run it, and the reason updates were
+# not happening was exactly that nobody was. It becomes worth using once uptime
+# monitoring exists and the gate can be driven by something other than a person.
+#
+# It also refuses to run while the target's connector carries --autoupdate-freq, which
+# means today it refuses everywhere. That is correct: anything it installed would be
+# replaced within one check interval.
+#
+# WHY AUTOUPDATE WAS BRIEFLY OFF. It was on, and it was live — all three binaries were rewritten on
 # 14 August 2026, the day 2026.8.2 released, on a fleet where cloudflared was installed
 # by hand half a year earlier. It replaced a boot-path binary with unverified bytes on a
 # 24-hour cycle, on the box that terminates every tunnel into this fleet.

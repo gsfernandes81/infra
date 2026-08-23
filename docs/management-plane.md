@@ -479,7 +479,7 @@ ones that answer the question this document started from.
 | 2e | Rotate the fleet's own tunnel tokens | `zero`, `one`, `two`, edge | 2b | **`zero` and `one` done 2026-08-23** — one's by retiring its tunnel under 2g. `two`'s token is out of the 755 file and in a credentials file; its rotation waits for 2g |
 | 2f | `cloudflared`'s init script logs nowhere | `zero`, `one`, `two` | — | **done on all three, 2026-08-23** |
 | 2g | All three tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, `two`, DNS | 2f | `one` and `zero` **done 2026-08-23**; `two` deferred ~a week |
-| 2h | cloudflared: apply `--no-autoupdate` fleet-wide | all three | — | committed, **not applied** |
+| 2h | cloudflared: staggered autoupdate, `one` 6h → `two` 72h → `zero` 240h | all three | — | committed, **not applied** |
 | 3 | First stack adopted: `send2ereader` on `one` | one stack, non-critical box | 2 | |
 | 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two stacks | 3 | |
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | |
@@ -565,11 +565,21 @@ as canary for its own architecture. Uniform means every host runs something an e
 host already survived. The cost is a dependency on the kernel's AArch32 support on `zero`
 and `one`, recorded there as the thing to watch.
 
-So 2h is only the autoupdate half. `playbooks/cloudflared-update.yml` installs a named
-version, hash-verified, one host at a time in the order `one → two → zero`, **each stage
-refusing while an earlier one is unhealthy**. That gate is the point: a calendar gap
-between stages only helps if somebody notices a failure inside it, and nothing on this
-fleet alerts.
+So 2h is only the autoupdate half — and it reversed once the same day, which is worth
+recording. Autoupdate was turned off on the grounds that it replaces a boot-path binary
+with unverified bytes. Then the owner's point: the reason updates were not happening was
+that nobody was free to ssh in, and a fleet that drifts out of Cloudflare's support
+window goes down all at once. **Autoupdate is justified here; what it lacked was a
+stagger.**
+
+So it stays on, at different check frequencies: `one` 6h, `two` 72h, `zero` 240h. A
+host that checks rarely is simply behind, so a release that breaks `one` has days before
+it reaches `zero`. What this does not give: guaranteed order (zero's check can land just
+after a release, a few percent per release) or a health gate (a bad version reaches all
+three eventually). `playbooks/cloudflared-update.yml` — explicit, hash-verified, each
+stage refusing while an earlier one is unhealthy — exists and is not used; **revisit once
+uptime monitoring exists**, e.g. `ping.<host>.gsrpi.uk`, because a gate is only worth
+building when something can tell you a host is down, and today nothing can.
 
 **2g: `one` and `zero` are done, 2026-08-23.** Both run new tunnels created with
 `config_src: local`, with their routes in `hosts/<host>/system/cloudflared-config.yml`
