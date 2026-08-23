@@ -477,6 +477,7 @@ ones that answer the question this document started from.
 | 2c | `one`'s array — both "broken services" are the SP900 in bay 0. `ionic-traces` stays down by decision; Syncthing is blocked on the disk | `one`'s enclosure | **physical access** | **blocked** |
 | 2d | One base image for the four dev containers — `dev/README.md` § *Four copies of this* | `zero`'s dev containers | 2b | |
 | 2e | Rotate the fleet's own tunnel tokens | `zero`, `one`, edge | 2b | `zero` **done 2026-08-23** (rotated, and off `--token`); `one` and `two` outstanding |
+| 2f | `cloudflared`'s init script logs nowhere — fix it, and record why the generated service was rejected | `zero`, `one` | — | before `one`'s half of 2e |
 | 3 | First stack adopted: `send2ereader` on `one` | one stack, non-critical box | 2 | |
 | 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two stacks | 3 | |
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | |
@@ -494,6 +495,26 @@ being true the day `infra-dev` came up. 2d is maintenance cost rather than risk 
 wait for whichever of the four images next needs a change.
 
 **Which leaves 2e and Phase 3 as the next actionable work**, in that order.
+
+**2f, filed 2026-08-23.** `/etc/init.d/cloudflared` declares `stdout_log` and
+`stderr_log`, which `supervise-daemon` does not act on. `/var/log/cloudflared.err` was
+last written 2026-01-04 and `cloudflared.log` has been 0 bytes since 2025-12-24, through
+a service that has restarted many times since — so the tunnel on the mission-critical box
+has been logging into nothing for eight months, and the tracked file asserts otherwise.
+It cost real time on 2026-08-23: six consecutive crashes produced no output, and the
+cause was only found by reproducing it in the foreground.
+
+**The script is hand-written, and that is the part to investigate rather than assume.**
+`host-setup.md` installs the binary straight from GitHub, so Alpine packages no init
+script — this one was written by hand after the generated service (`cloudflared service
+install`) *would not work*, per the owner. **Why it would not work is not recorded
+anywhere**, which is the actual risk: the obvious future "fix" is to throw away the
+custom script for the generated one, and whoever does that will meet the same wall with
+nothing to read. Establish and write down the original failure before changing the
+script — then fix the log directives, on both hosts.
+
+It belongs **before `one`'s half of 2e**: that rotation will be as blind as this one was
+otherwise.
 
 **2c narrowed on 2026-08-23, and then turned out to be one fault rather than two.** The
 owner's call on the first half: `ionic-traces` **stays down**. Very few users, and only

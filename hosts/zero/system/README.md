@@ -37,7 +37,8 @@ exemption, which is a real cost on a 512 MB armv6 box running diskless.
 |---|---|---|
 | `fstab` | `/etc/fstab` | All three `/media/*` entries carry `nofail`, so a missing array can never stall boot. |
 | `bcache-register` | `/etc/init.d/bcache-register` | The array is btrfs RAID1 across **two** bcache devices; both must assemble before it can mount rw. This registers them and waits, bounded to 30s, then **always exits 0** — a failure here must never stop the boot. |
-| `cloudflared` | `/etc/init.d/cloudflared` | The tunnel — the remote way in. Only trackable since Aug 2026: it previously carried the tunnel token inline, so committing it would have committed a secret. The token now lives in `/etc/conf.d/cloudflared` (mode 600, **not** tracked) and this file references `${CF_TUNNEL_TOKEN}`. |
+| `cloudflared` | `/etc/init.d/cloudflared` | The tunnel — the remote way in. Only trackable since Aug 2026: it previously carried the tunnel token inline, so committing it would have committed a secret. **Since 2026-08-23 it carries no secret at all** — `command_args` is `--autoupdate-freq 24h0m0s --config /etc/cloudflared/config.yml tunnel run`, and the credentials are a 0600 file. It is hand-written, not packaged: `docs/host-setup.md` installs the binary from GitHub, so Alpine ships no init script for it. Its `stdout_log`/`stderr_log` lines do nothing — see phase 2f. |
+| `cloudflared-config.yml` | `/etc/cloudflared/config.yml` | The tunnel's ingress, moved off Cloudflare on 2026-08-23. Eight hostnames, and **the order is behaviour** — cloudflared matches first-rule-wins. This file is now the authoritative record of what zero serves; the dashboard's copy is ignored. See [`../../../docs/cloudflare.md`](../../../docs/cloudflare.md). |
 
 **The mountpoints are `chattr +i`.** That is the actual protection against a failed
 mount silently destroying the Immich library, and it is not visible in any file here.
