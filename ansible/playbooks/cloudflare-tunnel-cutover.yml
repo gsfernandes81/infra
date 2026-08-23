@@ -49,6 +49,29 @@
       Authorization: "Bearer {{ cf_api_token }}"
 
   tasks:
+    # ── are we standing on the thing we are about to stop? ───────────────────
+    # This play cycles the target's cloudflared. If Ansible reached the target THROUGH
+    # that tunnel, the first thing it does is sever its own connection — which is
+    # exactly what happened on 2026-08-23, leaving the host half-cut-over.
+    #
+    # A session arriving via the local connector shows a LOOPBACK client address,
+    # because cloudflared connects to sshd on localhost. Anything else — a LAN address
+    # from a jump host — is safe.
+    - name: Establish how Ansible is reaching this host
+      ansible.builtin.shell: echo "$SSH_CONNECTION"
+      register: sshconn
+      changed_when: false
+
+    - name: Refuse to cycle the tunnel we are connected through
+      ansible.builtin.assert:
+        that: sshconn.stdout.split()[0] not in ['127.0.0.1', '::1']
+        fail_msg: >-
+          Ansible reached {{ inventory_hostname }} from
+          {{ sshconn.stdout.split()[0] | default('?') }}, which is loopback — so this
+          session arrives through {{ inventory_hostname }}'s own cloudflared, and this
+          play would stop it mid-run. Come in over the mesh instead and tell Ansible so:
+          -e ansible_host={{ inventory_hostname }}-zero   (or -one / -two)
+
     # ── what we are moving from, and to ──────────────────────────────────────
     - name: Read both credentials files
       ansible.builtin.slurp:
@@ -58,19 +81,35 @@
       become: true
       no_log: true
 
-    - name: Identify the old and new tunnels
+    # The REPO CONFIG is what we are cutting over to — it is the reviewed artefact, and
+    # the only thing here that survives a half-finished run unambiguously.
+    - name: Identify the tunnels
       ansible.builtin.set_fact:
-        old_tunnel: "{{ (creds.results[0].content | b64decode | from_json).TunnelID }}"
+        live_tunnel: "{{ (creds.results[0].content | b64decode | from_json).TunnelID }}"
         new_tunnel: "{{ (creds.results[1].content | b64decode | from_json).TunnelID }}"
         cf_account: "{{ (creds.results[0].content | b64decode | from_json).AccountTag }}"
+        target_tunnel: "{{ (lookup('file', repo_cfg) | from_yaml).tunnel }}"
 
-    - name: Refuse if phase 1 was never run, or was run twice
+    - name: The new credentials and the reviewed config must name the same tunnel
       ansible.builtin.assert:
-        that: old_tunnel != new_tunnel
+        that: new_tunnel == target_tunnel
         fail_msg: >-
-          {{ cred_file }} and {{ new_cred_file }} name the same tunnel
-          ({{ old_tunnel }}). Either phase 1 has already been applied here, or the
-          credentials have been swapped by hand. Stopping rather than guessing.
+          {{ new_cred_file }} is tunnel {{ new_tunnel }} but the reviewed config says
+          {{ target_tunnel }}. One of them is from a different run of phase 1.
+
+    # RESUMABLE. If the live credentials already name the target, the host half is done
+    # — installed, swapped, cycled — and re-running it would achieve nothing while the
+    # backup step actively destroyed the rollback. That is not hypothetical: the run on
+    # 2026-08-23 lost its connection between the swap and the cycle.
+    - name: Has the host already been swapped over?
+      ansible.builtin.set_fact:
+        swap_done: "{{ live_tunnel == target_tunnel }}"
+
+    - name: Say which half is left
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'host already on ' ~ target_tunnel ~ ' — skipping to DNS'
+             if swap_done else 'full cutover: host then DNS' }}
 
     # The hostnames come from the REPO config, not from the old tunnel's ingress. That
     # is the point of the review step: ionic-traces was removed there deliberately, and
@@ -85,8 +124,8 @@
       ansible.builtin.debug:
         msg:
           - "host      : {{ inventory_hostname }}"
-          - "from      : {{ old_tunnel }}"
-          - "to        : {{ new_tunnel }}"
+          - "from      : {{ live_tunnel }}"
+          - "to        : {{ target_tunnel }}"
           - "hostnames : {{ move_hosts | join(', ') }}"
           - "NOT moved : anything in the old tunnel but absent above — retired on purpose"
 
@@ -173,16 +212,23 @@
       register: inst
       become: true
       changed_when: true
+      when: not swap_done
 
+    # `-f` on the backup: NEVER overwrite an existing .pre-2g. On a second run the live
+    # file already holds the NEW credentials, so copying it over the backup would erase
+    # the only local copy of the old ones — a rollback destroyed by the act of retrying.
     - name: Back up the old credentials, then put the new ones in place
       ansible.builtin.shell: |
         set -e
-        cp -a {{ cred_file }} {{ cred_file }}.pre-2g
-        chmod 600 {{ cred_file }}.pre-2g
+        [ -f {{ cred_file }}.pre-2g ] || {
+          cp -a {{ cred_file }} {{ cred_file }}.pre-2g
+          chmod 600 {{ cred_file }}.pre-2g
+        }
         cp -a {{ new_cred_file }} {{ cred_file }}
         chmod 600 {{ cred_file }}
       become: true
       changed_when: true
+      when: not swap_done
 
     # stop, poll until the metrics port clears, start. `rc-service restart` does not
     # wait and cloudflared's grace period is 30s — that killed six respawns on zero.
@@ -198,6 +244,7 @@
         rc-service cloudflared start >/dev/null 2>&1
       become: true
       changed_when: true
+      when: not swap_done
 
     - name: Wait for the NEW connector to register
       ansible.builtin.uri:
