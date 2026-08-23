@@ -263,10 +263,15 @@
 
     - name: The rules in force must match the file we reviewed
       ansible.builtin.assert:
+        # reject the EMPTY hostname, not just undefined ones. The connector reports the
+        # catch-all as `"hostname": ""` — a defined key — while the YAML omits the key
+        # altogether, so `selectattr('hostname', 'defined')` counts five against four
+        # and fails on a config that is perfectly correct.
         that: >-
-          (now_cfg.content | from_json).config.ingress
-          | selectattr('hostname', 'defined') | map(attribute='hostname') | list
-          | sort == move_hosts | sort
+          ((now_cfg.content | from_json).config.ingress
+           | selectattr('hostname', 'defined') | map(attribute='hostname')
+           | reject('equalto', '') | list | sort)
+          == (move_hosts | sort)
         fail_msg: >-
           The connector came up but is serving a different set of hostnames than the
           reviewed config. DNS has NOT been touched — restore
