@@ -1,0 +1,87 @@
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /etc/cloudflared
+# infra-name: config.yml
+# infra-mode: 0644
+#
+# Local ingress for `zero`'s host tunnel.
+#
+# WHY THIS FILE EXISTS. The tunnel was remotely-managed: `cloudflared tunnel run
+# --token <secret>` with the ingress rules held in Cloudflare. That put a live
+# credential in argv, and `supervise-daemon` logs its child's command line to syslog —
+# the token-in-argv leak docs/host-setup.md flags. Moving to a credentials file takes
+# the secret out of argv entirely, which is the rule CLAUDE.md states and the shape
+# infra-dev's own connector already uses on this same box.
+#
+# THE COST, STATED. The ingress rules now live here instead of in the dashboard. That
+# is better — they are reviewable and versioned, which is the whole argument of
+# docs/management-plane.md — but it means THIS FILE IS NOW LOAD-BEARING. A hostname
+# missing here is a hostname serving 404, and the connector will look perfectly
+# healthy while it does: /ready reports the connector's registration with the edge and
+# knows nothing about ingress. Verify with `cloudflared tunnel ingress validate` and by
+# diffing 127.0.0.1:20241/config against a baseline, never with /ready alone.
+#
+# THE ORDER IS SIGNIFICANT. cloudflared matches first-rule-wins, and this reproduces
+# the exact order the remote config served on 2026-08-23. Do not sort it.
+#
+# `--autoupdate-freq 24h0m0s` stays in command_args and no-autoupdate is deliberately
+# NOT set here: infra-dev disables autoupdate, this host does not, and changing that
+# alongside the credentials move would be a second change smuggled in as a default.
+
+tunnel: 9456fbcd-95f6-48a8-9bcd-d6e85bfbfc01
+credentials-file: /etc/cloudflared/zero.json
+
+# Pinned rather than left to the default: cloudflared happens to choose 20241 first, but
+# the probe in docs/recovery.md depends on it and a probe that silently moves is worse
+# than no probe.
+#
+# THE PIN MAKES THE RESTART METHOD LOAD-BEARING. `rc-service restart` does not wait, and
+# cloudflared's default grace period is 30s, so the outgoing process still holds this
+# port when the incoming one tries to bind it — the bind fails and cloudflared exits 1.
+# On 2026-08-23 that killed six respawns in 20 seconds and supervise-daemon gave up,
+# taking the tunnel down until the change was rolled back. Nothing was wrong with the
+# credentials or the ingress; both were later proven good by running them in the
+# foreground on a different metrics port.
+#
+# So this file may only be cycled with stop -> poll until 20241 is free -> start.
+metrics: 127.0.0.1:20241
+
+ingress:
+  - hostname: ssh-zero.gsrpi.uk
+    service: ssh://localhost:22
+
+  - hostname: syncthing.gsrpi.uk
+    service: http://localhost:8384
+
+  - hostname: syncthing-server.gsrpi.uk
+    service: tcp://localhost:22000
+
+  - hostname: immich.gsrpi.uk
+    service: http://localhost:2283
+
+  # NOT a service on zero. This proxies over the LAN to `one`'s qBittorrent behind
+  # gluetun, so zero's tunnel is a dependency of one's torrent UI. Nothing in this repo
+  # recorded that until 2026-08-23.
+  #
+  # DECIDED 2026-08-23: this should be served by `one`'s OWN tunnel, direct, with zero
+  # not involved. It stays here for now because the move is Cloudflare-side and ordered:
+  # add the rule to one's tunnel and repoint the CNAME FIRST, then delete these two lines.
+  # Removing it before that breaks the torrent UI, and doing it in the same restart as the
+  # credentials-file change would bundle a routing change into a mechanism change.
+  - hostname: torrents.gsrpi.uk
+    service: http://192.168.86.101:8080
+
+  # The three older dev containers, reached through their loopback ports on zero.
+  # infra-dev is deliberately absent: it runs its own connector on its own tunnel, which
+  # is the pattern management-plane.md § Addressing chose. These three are the old shape
+  # and moving them is Phase 5, not this change.
+  - hostname: ssh-zero-dev-dd.gsrpi.uk
+    service: ssh://localhost:2222
+
+  - hostname: ssh-zero-dev-ds.gsrpi.uk
+    service: ssh://localhost:2223
+
+  - hostname: ssh-zero-dev-or3.gsrpi.uk
+    service: ssh://localhost:2224
+
+  - service: http_status:404
