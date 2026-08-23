@@ -15,13 +15,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # No USER_UID/USER_GID here any more: the dev user is built in the BASE image
+      # (Dockerfile.base), which `make base` builds at the checkout owner's uid/gid —
+      # the same guard as before, one layer down. This child only adds ansible on top
+      # and never touches accounts. `make up` depends on `make base`, so the tag below
+      # exists whenever compose builds this.
       args:
-        # The bind-mounted /workspace is the host's clone. Build the container's
-        # `dev` user at the host owner's uid/gid or every write from in here lands
-        # as the wrong owner in the host repo. The Makefile passes the OWNER of the
-        # checkout, which is right whether or not it was invoked through sudo.
-        USER_UID: ${HOST_UID:-1000}
-        USER_GID: ${HOST_GID:-1000}
+        BASE_TAG: ${BASE_TAG:-2026.08.24}
     image: infra-dev
     container_name: infra-dev
     hostname: ${DEV_HOSTNAME:-infra-dev}  # Claude Code shows this as the machine title

@@ -475,7 +475,7 @@ ones that answer the question this document started from.
 | 2 | `README.md` + `recovery.md` cite the generated inventory | docs only | 1 | **done** 2026-08-21 |
 | 2b | `infra-dev` container, and the Cloudflare edge in front of it | `zero`, edge | 2 | **done** 2026-08-22 |
 | 2c | `one`'s array — both "broken services" were the SP900 in bay 0 | `one`'s enclosure | — | **done 2026-08-24** — disk pulled, unattended boot proven |
-| 2d | One base image for the four dev containers — `dev/README.md` § *Four copies of this* | `zero`'s dev containers | 2b | |
+| 2d | One base image for the four dev containers — `dev/README.md` § *Four copies of this* | `zero`'s dev containers | 2b | infra side **built 2026-08-24**, rebuild pending; or3/dd/ds convert in their repos |
 | 2e | Rotate the fleet's own tunnel tokens | `zero`, `one`, `two`, edge | 2b | **`zero` and `one` done 2026-08-23** — one's by retiring its tunnel under 2g. `two`'s token is out of the 755 file and in a credentials file; its rotation waits for 2g |
 | 2f | `cloudflared`'s init script logs nowhere | `zero`, `one`, `two` | — | **done on all three, 2026-08-23** |
 | 2g | All three tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, `two`, DNS | 2f | `one` and `zero` **done 2026-08-23**; `two` deferred ~a week |

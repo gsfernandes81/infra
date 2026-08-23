@@ -42,11 +42,19 @@ HOST_GID := $(shell stat -c '%g' $(CURDIR))
 # `sudo env VAR=…`, not `VAR=… sudo`: sudo resets the environment, so an assignment in
 # front of it never reaches docker and compose would silently build at the defaults in
 # compose.yaml. env is inside the sudo, so it survives.
-COMPOSE := $(SUDO) env HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) \
+COMPOSE := $(SUDO) env HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) BASE_TAG=$(BASE_TAG) \
 	docker compose --project-directory $(CURDIR) -f $(CURDIR)/compose.yaml
 DOCKER  := $(SUDO) docker
 
-.PHONY: help dev up restart down down-volumes status verify collections logs \
+# The base image tag (2d). Bump it HERE when Dockerfile.base changes, then move the
+# ARG BASE_TAG default in each repo's child Dockerfile as that repo is ready — children
+# pin a tag, never latest, so a base rebuild cannot change a container behind its
+# repo's back. THIS is the single source: COMPOSE passes it through the environment,
+# compose.yaml forwards it as a build arg, and the defaults in compose.yaml and
+# dev/Dockerfile are fallbacks that only matter outside `make`.
+BASE_TAG := 2026.08.24
+
+.PHONY: help dev base up restart down down-volumes status verify collections logs \
 	boot-log tunnel-log login claude shell fleet _require-env _require-secrets _require-uid
 
 help:
@@ -89,7 +97,16 @@ _require-secrets:
 	[ "$$mode" = 700 ] || echo "WARNING — $$dir is mode $$mode, expected 700." >&2
 
 # ── lifecycle ───────────────────────────────────────────────────────────────
-up: _require-env _require-uid _require-secrets
+# The base first, always. There is no registry on this fleet, so gsrpi-dev-base is a
+# local tag that has to EXIST before compose can build the child FROM it — this
+# dependency is the build order dev/README.md said must be obvious rather than
+# discovered. Docker's cache makes it free when nothing in Dockerfile.base changed.
+base: _require-uid
+	$(DOCKER) build -f $(CURDIR)/Dockerfile.base \
+	  --build-arg USER_UID=$(HOST_UID) --build-arg USER_GID=$(HOST_GID) \
+	  -t gsrpi-dev-base:$(BASE_TAG) $(CURDIR)
+
+up: _require-env _require-uid _require-secrets base
 	$(COMPOSE) up -d --build
 	@printf '\n'
 	@$(MAKE) --no-print-directory status

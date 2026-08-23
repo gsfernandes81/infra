@@ -519,7 +519,25 @@ to be a fourth pattern**: everything or3-specific in `or3/dev` is already a vari
 here, and the two files that carry host-specific values (`ssh_config.fleet`,
 `known_hosts.fleet`) are read from the secrets mount rather than baked.
 
-The shape the generalisation should take, when it is done:
+**Built on 2026-08-24, on the infra side**: `Dockerfile.base` is the shared ~700 lines,
+`make base` builds it as `gsrpi-dev-base:<BASE_TAG>` (tag set in the Makefile, single
+source), and this repo's `Dockerfile` is now a thin child — `FROM` plus the ansible
+layer. `make up` depends on `make base`, which is the no-registry build order made a
+dependency instead of a discovery. **The other three repos are not converted yet**;
+each conversion is, in that repo:
+
+1. delete everything shared from its `dev/Dockerfile`, leaving
+   `ARG BASE_TAG=<tag>` + `FROM gsrpi-dev-base:${BASE_TAG}` + its own extras
+   (or3: nothing; dd/ds: whatever they carry);
+2. drop `USER_UID`/`USER_GID` from its compose build args — the dev user is built in
+   the base, same guard one layer down;
+3. note in its Makefile that infra's `make base` must have run on that host first.
+
+Children pin a tag, never `latest`, so a base rebuild cannot change a container behind
+its repo's back. Bumping the base is: edit `BASE_TAG` in infra's Makefile, `make base`,
+then move each child's pin when that repo is ready.
+
+The shape as originally designed, kept for the reasoning:
 
 - **`infra` owns a base image.** One `Dockerfile` here, built on the host as
   `gsrpi-dev-base:<tag>` — Debian slim, Node, Claude Code, gh, screen/abduco, sshd,
@@ -553,8 +571,10 @@ a build-order dependency between repos that has to be made obvious rather than
 discovered, and it is a change to the thing you are working *inside*, which is the
 category this repo's `CLAUDE.md` is most careful about.
 
-Until then, `or3/dev` and this are the two copies to keep in step, and the *Sharing
-or3-dev's layers* note above is the reason.
+Until the other three convert, `or3/dev`'s Dockerfile and `Dockerfile.base` here are
+the two copies to keep in step — the byte-identical-layers discipline moves from
+"between two Dockerfiles" to "between or3's and the base", and ends entirely when or3
+converts.
 
 ## Secrets
 
