@@ -36,7 +36,7 @@ curl -s 127.0.0.1:20241/config
 | `syncthing.gsrpi.uk` | `http://localhost:8384` | |
 | `syncthing-server.gsrpi.uk` | `tcp://localhost:22000` | the sync protocol, not the UI |
 | `immich.gsrpi.uk` | `http://localhost:2283` | no Access — 200 unauthenticated |
-| `torrents.gsrpi.uk` | `http://192.168.86.101:8080` | **crosses to `one`** — moving, see below |
+| `torrents.gsrpi.uk` | `http://192.168.86.101:8080` | **dead rule** — the CNAME points at one's tunnel |
 | `ssh-zero-dev-dd.gsrpi.uk` | `ssh://localhost:2222` | |
 | `ssh-zero-dev-ds.gsrpi.uk` | `ssh://localhost:2223` | |
 | `ssh-zero-dev-or3.gsrpi.uk` | `ssh://localhost:2224` | |
@@ -120,10 +120,12 @@ take effect reads as authoritative and is worse than none.
 - **Immich has no Access policy** — verified indirectly, an unauthenticated fetch
   returns 200. Probably intentional, since Immich has its own login. Worth confirming
   rather than inheriting.
-- **`torrents.gsrpi.uk` moves to `one`'s own tunnel.** Decided 2026-08-23: one's torrent
-  UI should not depend on zero. Entirely a Cloudflare-side change, since the ingress is
-  not on the host — add the rule to one's tunnel, repoint the CNAME, then delete the
-  Public Hostname from zero's tunnel. No repo edit and no restart on zero.
+- ~~**`torrents.gsrpi.uk` moves to `one`'s own tunnel.**~~ **Resolved 2026-08-23: there
+  was nothing to move.** Its CNAME targets `96635122-…`, which is one's tunnel. One's
+  torrent UI never depended on zero. Zero's ingress rule for it is dead config and can be
+  deleted whenever zero's Public Hostnames are next touched — it routes nothing today.
+  Struck rather than removed because this repo asserted the dependency in four files
+  before anyone read one's ingress.
 - **Can this tunnel be made locally-managed at all?** Unknown. It would put the routes
   under review in git, which is the direction everything else here is going.
 ## One's tunnel
@@ -136,18 +138,21 @@ Captured 2026-08-23. Five hostnames, of which this repo recorded one.
 | `ionic-traces.gsrpi.uk` | `http://localhost:7777` | **502s** — the stack is down by decision |
 | `bookit.gsrpi.uk` | `http://localhost:3001` | this is `send2ereader`'s public name |
 | `syncthing-torrents.gsrpi.uk` | `http://localhost:8384` | the only one the repo knew |
-| `torrents.gsrpi.uk` | `http://localhost:8080` | **also claimed by zero's tunnel** |
+| `torrents.gsrpi.uk` | `http://localhost:8080` | **this is the live one** — CNAME points here |
 | *(catch-all)* | `http_status:404` | |
 
-**`torrents.gsrpi.uk` is in both tunnels' ingress.** A CNAME targets exactly one tunnel,
-so one of those two rules has always been dead. Which one is unresolved: the records are
-proxied, so DNS resolves to Cloudflare anycast either way and cannot answer it. Read the
-CNAME target from the dashboard's DNS page, or with a `Zone:DNS:Read` token, and compare
-against zero's `9456fbcd-…`.
+**`torrents.gsrpi.uk` is in both tunnels' ingress, and this one is the live half.** Its
+CNAME targets `96635122-2ceb-4fe2-8ae0-966a343bd124` — one's tunnel. Zero's rule for the
+same hostname has never routed anything.
 
-Until that is settled, **do not assume one's torrent UI depends on zero.** This document
-and several commits said it did, on the strength of zero's ingress alone, before one's
-was ever looked at.
+This document and several commits claimed one's torrent UI depended on zero, on the
+strength of having read zero's ingress and never one's. It did not. The records are
+proxied, so DNS resolves to Cloudflare anycast and cannot settle it — the CNAME target has
+to be read from the dashboard or with a `Zone:DNS:Read` token, which is why it stayed
+open for several hours after being asserted as fact.
+
+**One's tunnel UUID is `96635122-2ceb-4fe2-8ae0-966a343bd124`**, zero's is
+`9456fbcd-95f6-48a8-9bcd-d6e85bfbfc01`.
 
 ## Open
 

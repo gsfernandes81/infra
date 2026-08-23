@@ -524,8 +524,8 @@ scripted version is reversible the same way.
 **`one` goes first, as a rehearsal.** It is the non-critical box, it needs tunnel work
 regardless, and it has far fewer hostnames — capture them with
 `curl -s 127.0.0.1:20241/config`, which nobody has done. It also picks up
-`torrents.gsrpi.uk` in the same operation, since that hostname is moving to `one` anyway
-and repointing it is one more CNAME in a batch that is already being repointed.
+`torrents.gsrpi.uk` already: its CNAME was found on 2026-08-23 to point at one's tunnel
+all along, so there is nothing to move and one less DNS change than planned.
 
 **`two` is in scope and is the special case.** Its token was never moved out of the
 init script at all — `grep -c eyJ /etc/init.d/cloudflared` returns 1, confirmed
@@ -536,8 +536,7 @@ commit` complication today, whatever the planned diskless switch would later add
 still the lifeboat, so: do it last, and not on the same evening as either of the others.
 
 Estimated 1.5–2.5 hours per host, most of it verification. **`one` is smaller than first
-thought** — five hostnames, not eight, and one of those (`torrents.gsrpi.uk`) may need no
-DNS change at all, so closer to an hour. Two unknowns that could
+thought** — five hostnames, not eight, so closer to an hour. Two unknowns that could
 stretch it: whether those CNAMEs are freely editable or tunnel-managed, and whether Access
 applications follow hostnames cleanly across a tunnel change — they bind to hostnames
 rather than tunnels, so they should, but that is unverified.

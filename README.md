@@ -77,10 +77,10 @@ snapshot — the authoritative record is Cloudflare's own, because that tunnel i
 remotely-managed and local ingress is ignored. Regenerate the snapshot on the host with
 `curl -s 127.0.0.1:20241/config`.
 
-Worth knowing without opening either: `torrents.gsrpi.uk` is served by **zero**'s tunnel
-but proxies across the LAN to **one** — so one's torrent UI depends on zero being up.
-That is being undone. And `ssh-zero.gsrpi.uk` reaches zero's sshd, which is why
-restarting that tunnel from a session that arrived through it would strand you.
+Worth knowing without opening either: `ssh-zero.gsrpi.uk` reaches zero's sshd, which is
+why restarting that tunnel from a session that arrived through it would strand you. And
+zero's ingress carries a rule for `torrents.gsrpi.uk` that has never served anything —
+that hostname's CNAME points at **one**'s tunnel, and always has.
 
 ### Ports
 
