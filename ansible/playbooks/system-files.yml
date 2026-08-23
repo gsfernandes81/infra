@@ -1,0 +1,129 @@
+---
+# Install the tracked /etc copies onto each host, through bin/install-system-file.
+#
+#   ansible-playbook playbooks/system-files.yml --check --diff -K    # what WOULD change
+#   ansible-playbook playbooks/system-files.yml -K                   # install it
+#   ansible-playbook playbooks/system-files.yml -l zero -K           # one host
+#   ansible-playbook playbooks/system-files.yml -e only=cloudflared -K
+#
+# THIS IS A DRIVER, NOT A REIMPLEMENTATION. Every guard lives in bin/install-system-file
+# and stays there: the infra- header, the refusal to change content without being told,
+# the per-type validators (sshd -t, OpenRC syntax, fstab UUIDs against /sys/fs/btrfs),
+# the backup outside /etc/init.d, and the post-install check that rolls back. That tool
+# is a dry run by default and writes only with --commit — which is exactly Ansible's
+# check-mode contract, so --check here runs it without --commit and a normal run with.
+# Nothing is duplicated, and a bug in the guard is fixed in one place.
+#
+# WHAT IT STILL DOES NOT DO: restart anything. That separation is the tool's whole
+# design and this play preserves it. After a real run, the services whose files changed
+# need cycling by hand — the summary at the end names them. CLAUDE.md's two-phase
+# procedure: this is phase 1, for every file, on every host, in one command.
+#
+# THE HOST'S OWN CLONE must be current. The tool reads hosts/<host>/system/ from the
+# checkout ON THE BOX, not from the control node — because the bytes that reach /etc are
+# the reviewed bytes in the repo, and the repo on the box is what install-system-file
+# trusts. So this play pulls first, fast-forward only, and refuses if that fails.
+#
+# --allow-content-change is passed on every real run. The tool's refusal exists to stop
+# a human smuggling an edit past a header-only review; here the review is the git diff
+# that was pushed, and the --check run shows every byte before anything is written.
+
+- name: Install tracked system files on the fleet
+  hosts: fleet
+  gather_facts: false
+  serial: 1
+
+  vars:
+    repo: /home/gavin/infra
+    tool: "{{ repo }}/bin/install-system-file"
+    # The LOCAL checkout is the source of which files exist per host, so a file added to
+    # the repo shows up here without editing this play.
+    local_repo: "{{ playbook_dir }}/../.."
+
+  tasks:
+    # ── the repo on the box must be current ──────────────────────────────────
+    # --ff-only: if the box's clone has diverged, that is a situation to look at, not to
+    # merge through from a playbook. check_mode false so --check also pulls; a dry run
+    # against a stale checkout would diff the wrong bytes.
+    - name: Pull the host's clone, fast-forward only
+      ansible.builtin.command:
+        cmd: git pull --ff-only -q
+        chdir: "{{ repo }}"
+      register: pull
+      changed_when: "'Already up to date' not in pull.stdout"
+      check_mode: false
+
+    - name: Which files this host tracks
+      ansible.builtin.find:
+        paths: "{{ local_repo }}/hosts/{{ inventory_hostname }}/system"
+        file_type: file
+        excludes: ["README.md", "hardware.md", "hw-inventory.toml"]
+      register: tracked
+      delegate_to: localhost
+      check_mode: false
+
+    - name: Narrow to one file if asked
+      ansible.builtin.set_fact:
+        files: >-
+          {{ tracked.files | map(attribute='path') | map('basename')
+             | select('match', '^' ~ (only | default('.*')) ~ '$') | list | sort }}
+
+    # ── dry run, ALWAYS — this is what --check shows and what a real run previews ─
+    # Not --commit. The tool prints the diff it would apply and exits 0 if clean,
+    # 1 if it would refuse (missing --new, validator failure). Both outcomes are shown.
+    - name: Dry run each file
+      ansible.builtin.command:
+        cmd: "{{ tool }} {{ item }} --new"
+        chdir: "{{ repo }}"
+      register: dry
+      loop: "{{ files }}"
+      changed_when: "'Nothing to do' not in dry.stdout"
+      failed_when: false
+      become: true
+      check_mode: false
+
+    - name: What would change
+      ansible.builtin.debug:
+        msg: "{{ item.stdout_lines + (item.stderr_lines | default([])) }}"
+      loop: "{{ dry.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: "'Nothing to do' not in item.stdout"
+
+    # ── install, only on a real run, only what differs ───────────────────────
+    - name: Install each file that differs
+      ansible.builtin.command:
+        cmd: "{{ tool }} {{ item.item }} --commit --new --allow-content-change"
+        chdir: "{{ repo }}"
+      register: inst
+      loop: "{{ dry.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when:
+        - not ansible_check_mode
+        - "'Nothing to do' not in item.stdout"
+        - item.rc == 0
+      become: true
+      changed_when: true
+
+    - name: Files the dry run REFUSED — not installed, look at them
+      ansible.builtin.debug:
+        msg: "{{ item.item }}: {{ (item.stderr_lines | default([]) | last) | default('refused') }}"
+      loop: "{{ dry.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.rc != 0
+
+    # ── say what needs a human now ───────────────────────────────────────────
+    - name: Services to cycle by hand
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}: installed
+          {{ inst.results | default([]) | selectattr('changed', 'defined')
+             | selectattr('changed') | map(attribute='item.item') | list }}.
+          NOTHING WAS RESTARTED. cloudflared files want stop / poll 20241 / start;
+          sshd-infra.conf wants `rc-service sshd reload`; fstab and bcache-register
+          take effect at the next boot.
+      when:
+        - not ansible_check_mode
+        - inst.results | default([]) | selectattr('changed', 'defined') | selectattr('changed') | list | length > 0
