@@ -606,6 +606,19 @@ Three things the rehearsal was worth, none of which were the plan:
 `two` is deferred about a week, deliberately. Two hostnames, the smallest job, on the box
 with the least margin and no bastion of its own.
 
+**When it happens, phase 1 run for real IS the rehearsal.** All three plays were
+substantially rewritten in the 2026-08-24 review (block/rescue rollbacks, the
+originRequest assert, the re-run guard) and have not run since. A `--check` of phase 1
+cannot rehearse them — the `uri` create is skipped in check mode and everything after it
+dies on undefined, the exact bootstrap trap `cloudflare-dev-tunnel.yml`'s header
+documents. But phase 1 for real is inherently consequence-free: it creates a tunnel
+nothing points at, abandoned by one delete. Running it against `two` exercises the new
+guards — and the originRequest assert is checking the one tunnel nobody has ever
+inspected, so if it fires, it fired before anything moved. Read the generated config at
+leisure; phase 2 (`./2g cut two`, which picks the `two-zero` mesh path) is a separate
+decision on a separate day if wanted. **Reach `two` over the mesh for phase 2** — its
+tunnel is the thing being cycled, which is how it went dark once already.
+
 **2f, filed 2026-08-23.** `/etc/init.d/cloudflared` declares `stdout_log` and
 `stderr_log`, which `supervise-daemon` does not act on. `/var/log/cloudflared.err` was
 last written 2026-01-04 and `cloudflared.log` has been 0 bytes since 2025-12-24, through
