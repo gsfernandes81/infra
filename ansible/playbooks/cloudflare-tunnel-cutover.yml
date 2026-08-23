@@ -63,12 +63,18 @@
       register: sshconn
       changed_when: false
 
+    # Two conditions, and the first is not decoration: an EMPTY SSH_CONNECTION means the
+    # standing position cannot be established at all, and '?' passing a not-in-loopback
+    # test would read as safe. Unknown refuses, the same as loopback — flagged by the
+    # batch-1 review agent, 2026-08-24.
     - name: Refuse to cycle the tunnel we are connected through
       ansible.builtin.assert:
-        that: sshconn.stdout.split()[0] not in ['127.0.0.1', '::1']
+        that:
+          - sshconn.stdout | trim | length > 0
+          - (sshconn.stdout.split() | first | default('?')) not in ['127.0.0.1', '::1']
         fail_msg: >-
           Ansible reached {{ inventory_hostname }} from
-          {{ sshconn.stdout.split()[0] | default('?') }}, which is loopback — so this
+          {{ sshconn.stdout.split() | first | default('?') }}, which is loopback — so this
           session arrives through {{ inventory_hostname }}'s own cloudflared, and this
           play would stop it mid-run. Come in over the mesh instead and tell Ansible so:
           -e ansible_host={{ inventory_hostname }}-zero   (or -one / -two)
@@ -169,6 +175,18 @@
           {{ (lookup('file', baseline_file) | from_json) if bl_saved.stat.exists
              else dict(move_hosts | zip(baseline.results | map(attribute='status') | list)) }}
 
+    # A hostname added to the reviewed config after phase 1 saved the baseline has no
+    # entry here, and the final wait would only discover that as a missing-key error —
+    # mid-cutover, after DNS had already moved. Refuse now, while nothing has changed.
+    - name: Every hostname that moves must have a baseline entry
+      ansible.builtin.assert:
+        that: move_hosts | difference(baseline_status.keys() | list) | length == 0
+        fail_msg: >-
+          {{ move_hosts | difference(baseline_status.keys() | list) | join(', ') }} —
+          these hostnames were added to the reviewed config after the baseline was
+          saved. Delete {{ baseline_file }} and re-run phase 1, or remove them from
+          the config.
+
     - name: Warn if the baseline is this run's own
       ansible.builtin.debug:
         msg: >-
@@ -249,52 +267,140 @@
         label: "{{ item.item }}"
 
     # ── the host: config, credentials, cycle ─────────────────────────────────
-    # become: true, because install-system-file shells out to sudo for the backup and the
-    # write — and inside a command task there is no tty for sudo to prompt on. Run as
-    # root, those calls are no-ops. Without it the tool fails safe ("backup failed,
-    # nothing written") but it fails, which is a task away from where the work is.
-    - name: Install the reviewed config
-      ansible.builtin.command:
-        cmd: bin/install-system-file cloudflared-config.yml --commit --allow-content-change
-        chdir: "{{ host_repo }}"
-      register: inst
-      become: true
-      changed_when: true
+    # ONE BLOCK, ROLLED BACK AS ONE. The wait below retries and then FAILS if the new
+    # connector never registers — AFTER the credentials were swapped — and in the old
+    # layout the play simply died there: the restore instructions lived in the NEXT
+    # task's fail_msg and never rendered. The rescue performs the restore instead of
+    # describing it. The DNS tasks stay outside the block, so a rescued run has moved
+    # nothing at the edge.
+    - name: Swap the host onto the new tunnel — rescued as one unit
       when: not swap_done
+      block:
+        # become: true, because install-system-file shells out to sudo for the backup
+        # and the write — and inside a command task there is no tty for sudo to prompt
+        # on. Run as root, those calls are no-ops. Without it the tool fails safe
+        # ("backup failed, nothing written") but it fails, which is a task away from
+        # where the work is.
+        - name: Install the reviewed config
+          ansible.builtin.command:
+            cmd: bin/install-system-file cloudflared-config.yml --commit --allow-content-change
+            chdir: "{{ host_repo }}"
+          register: inst
+          become: true
+          changed_when: true
 
-    # `-f` on the backup: NEVER overwrite an existing .pre-2g. On a second run the live
-    # file already holds the NEW credentials, so copying it over the backup would erase
-    # the only local copy of the old ones — a rollback destroyed by the act of retrying.
-    - name: Back up the old credentials, then put the new ones in place
-      ansible.builtin.shell: |
-        set -e
-        [ -f {{ cred_file }}.pre-2g ] || {
-          cp -a {{ cred_file }} {{ cred_file }}.pre-2g
-          chmod 600 {{ cred_file }}.pre-2g
-        }
-        cp -a {{ new_cred_file }} {{ cred_file }}
-        chmod 600 {{ cred_file }}
-      become: true
-      changed_when: true
-      when: not swap_done
+        # `-f` on the backup: NEVER overwrite an existing .pre-2g. On a second run the
+        # live file already holds the NEW credentials, so copying it over the backup
+        # would erase the only local copy of the old ones — a rollback destroyed by the
+        # act of retrying.
+        - name: Back up the old credentials, then put the new ones in place
+          ansible.builtin.shell: |
+            set -e
+            [ -f {{ cred_file }}.pre-2g ] || {
+              cp -a {{ cred_file }} {{ cred_file }}.pre-2g
+              chmod 600 {{ cred_file }}.pre-2g
+            }
+            cp -a {{ new_cred_file }} {{ cred_file }}
+            chmod 600 {{ cred_file }}
+          become: true
+          changed_when: true
 
-    # stop, poll until the metrics port clears, start. `rc-service restart` does not
-    # wait and cloudflared's grace period is 30s — that killed six respawns on zero.
-    - name: Cycle the connector onto the new tunnel
-      ansible.builtin.shell: |
-        rc-service cloudflared stop >/dev/null 2>&1
-        i=0
-        while [ $i -lt 45 ]; do
-          netstat -tln 2>/dev/null | grep -q '127\.0\.0\.1:20241 ' || break
-          i=$((i+2)); sleep 2
-        done
-        netstat -tln 2>/dev/null | grep -q '127\.0\.0\.1:20241 ' && exit 1
-        rc-service cloudflared start >/dev/null 2>&1
-      become: true
-      changed_when: true
-      when: not swap_done
+        # stop, poll until the metrics port clears, start. `rc-service restart` does
+        # not wait and cloudflared's grace period is 30s — that killed six respawns on
+        # zero.
+        - name: Cycle the connector onto the new tunnel
+          ansible.builtin.shell: |
+            rc-service cloudflared stop >/dev/null 2>&1
+            i=0
+            while [ $i -lt 45 ]; do
+              netstat -tln 2>/dev/null | grep -q '127\.0\.0\.1:20241 ' || break
+              i=$((i+2)); sleep 2
+            done
+            netstat -tln 2>/dev/null | grep -q '127\.0\.0\.1:20241 ' && exit 1
+            rc-service cloudflared start >/dev/null 2>&1
+          become: true
+          changed_when: true
 
-    - name: Wait for the NEW connector to register
+        - name: Wait for the NEW connector to register
+          ansible.builtin.uri:
+            url: "{{ probe }}/ready"
+            return_content: true
+          register: ready
+          until: (ready.content | default('{}') | from_json).readyConnections | default(0) > 0
+          retries: 12
+          delay: 5
+
+        - name: Check it is serving the reviewed rules, not the old ones
+          ansible.builtin.uri:
+            url: "{{ probe }}/config"
+            return_content: true
+          register: now_cfg
+
+        - name: The rules in force must match the file we reviewed
+          ansible.builtin.assert:
+            # reject the EMPTY hostname, not just undefined ones. The connector reports
+            # the catch-all as `"hostname": ""` — a defined key — while the YAML omits
+            # the key altogether, so `selectattr('hostname', 'defined')` counts five
+            # against four and fails on a config that is perfectly correct.
+            that: >-
+              ((now_cfg.content | from_json).config.ingress
+               | selectattr('hostname', 'defined') | map(attribute='hostname')
+               | reject('equalto', '') | list | sort)
+              == (move_hosts | sort)
+            fail_msg: >-
+              The connector came up but is serving a different set of hostnames than
+              the reviewed config. The rescue below puts the old credentials back and
+              cycles; DNS has NOT been touched.
+
+      rescue:
+        # The .pre-2g backup only exists once the swap task has run. A failure before
+        # that — install-system-file refusing the diff, say — leaves the live
+        # credentials untouched, and an unconditional cp would turn that clean abort
+        # into a broken rescue.
+        - name: Restore the pre-2g credentials
+          ansible.builtin.shell: |
+            set -e
+            if [ -f {{ cred_file }}.pre-2g ]; then
+              cp -a {{ cred_file }}.pre-2g {{ cred_file }}
+              chmod 600 {{ cred_file }}
+              touch /tmp/.cutover-restored
+            fi
+          become: true
+          changed_when: true
+
+        # Only when something was actually restored. A failure at the install step —
+        # before any swap — fires this rescue too, and cycling there is a pointless
+        # outage on a clean abort. The marker file is written by the restore above.
+        - name: Cycle the connector back onto the old tunnel
+          ansible.builtin.shell: |
+            [ -f /tmp/.cutover-restored ] || exit 0
+            rm -f /tmp/.cutover-restored
+            rc-service cloudflared stop >/dev/null 2>&1
+            i=0
+            while [ $i -lt 45 ]; do
+              netstat -tln 2>/dev/null | grep -q '127\.0\.0\.1:20241 ' || break
+              i=$((i+2)); sleep 2
+            done
+            netstat -tln 2>/dev/null | grep -q '127\.0\.0\.1:20241 ' && exit 1
+            rc-service cloudflared start >/dev/null 2>&1
+          become: true
+          changed_when: true
+
+        - name: Stop here — rolled back, DNS never touched
+          ansible.builtin.fail:
+            msg: >-
+              The new connector never came up serving the reviewed rules, so
+              {{ cred_file }}.pre-2g was restored over {{ cred_file }} and the
+              connector was cycled back onto {{ live_tunnel }}. No DNS record was
+              touched — every hostname still points where it did. Fix the tunnel and
+              re-run; the .pre-2g backup is still in place.
+
+    # A RESUMED run skips the whole block, but the connector still has to be up and
+    # serving the reviewed rules before any DNS record moves — the same wait and
+    # verify, re-run as a sanity check. No rescue here: this run changed nothing on
+    # the host, so there is nothing to roll back, and the fail_msg says what to do
+    # by hand.
+    - name: Wait for the connector to register (resumed run)
       ansible.builtin.uri:
         url: "{{ probe }}/ready"
         return_content: true
@@ -302,19 +408,17 @@
       until: (ready.content | default('{}') | from_json).readyConnections | default(0) > 0
       retries: 12
       delay: 5
+      when: swap_done
 
-    - name: Check it is serving the reviewed rules, not the old ones
+    - name: Check it is serving the reviewed rules, not the old ones (resumed run)
       ansible.builtin.uri:
         url: "{{ probe }}/config"
         return_content: true
       register: now_cfg
+      when: swap_done
 
-    - name: The rules in force must match the file we reviewed
+    - name: The rules in force must match the file we reviewed (resumed run)
       ansible.builtin.assert:
-        # reject the EMPTY hostname, not just undefined ones. The connector reports the
-        # catch-all as `"hostname": ""` — a defined key — while the YAML omits the key
-        # altogether, so `selectattr('hostname', 'defined')` counts five against four
-        # and fails on a config that is perfectly correct.
         that: >-
           ((now_cfg.content | from_json).config.ingress
            | selectattr('hostname', 'defined') | map(attribute='hostname')
@@ -324,6 +428,7 @@
           The connector came up but is serving a different set of hostnames than the
           reviewed config. DNS has NOT been touched — restore
           {{ cred_file }}.pre-2g over {{ cred_file }} and cycle to go back.
+      when: swap_done
 
     - name: The new tunnel is live and no DNS has moved yet
       ansible.builtin.debug:
