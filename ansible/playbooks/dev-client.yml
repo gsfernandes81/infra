@@ -45,7 +45,10 @@
     token_file: "{{ home }}/.config/infra-dev/token"
     ssh_config: "{{ home }}/.ssh/config"
     ssh_key: "{{ identity | default('~/.ssh/id_ed25519') }}"
-    cloudflared: "{{ cfd_path.stdout | default('cloudflared', true) | trim }}"
+    # The verified path, set by the tasks below. No bare-name fallback: a bare
+    # `cloudflared` resolves in your shell and then fails inside ssh's /bin/sh, which
+    # presents as the tunnel being down.
+    cloudflared: "{{ cfd_resolved }}"
 
   tasks:
     # ── refuse a secret that arrived on the command line ────────────────────
@@ -86,7 +89,11 @@
       # /bin/sh, which inherits ssh's environment — and ssh is not always started from a
       # shell that has $PREFIX/bin on PATH. Discovered rather than hardcoded, so this
       # works on a laptop as well as in Termux.
-      ansible.builtin.command: command -v cloudflared
+      #
+      # `shell`, not `command`: `command -v` is a SHELL BUILTIN, so the command module
+      # has nothing to exec and reports cloudflared missing even where it is plainly on
+      # PATH — the same bug fixed in ssh-client.yml on 2026-08-23.
+      ansible.builtin.shell: command -v cloudflared
       register: cfd_path
       changed_when: false
       failed_when: false
@@ -115,6 +122,35 @@
 
           The hash is the one pinned in dev/Dockerfile, checked on 2026-08-22.
         success_msg: "{{ cfd.stdout_lines[0] | default('cloudflared present') }}"
+
+    - name: Settle on a path — an override wins, discovery is the fallback
+      # Mirrors ssh-client.yml. -e cloudflared_path=... beats detection, and the assert
+      # below is on the RESULT either way, so a wrong override cannot slip through.
+      ansible.builtin.set_fact:
+        cfd_resolved: >-
+          {{ cloudflared_path | default(cfd_path.stdout | trim, true) }}
+
+    - name: Check the path we are about to write
+      ansible.builtin.stat:
+        path: "{{ cfd_resolved }}"
+      register: cfd_stat
+      when: cfd_resolved | length > 0
+
+    - name: Refuse to write a block naming a cloudflared that is not there
+      # Asserting that detection succeeded proves nothing about the string it produced;
+      # asserting the file is there and executable proves the thing the ProxyCommand
+      # actually needs.
+      ansible.builtin.assert:
+        that:
+          - cfd_resolved | length > 0
+          - cfd_stat.stat.exists | default(false)
+          - cfd_stat.stat.executable | default(false)
+        fail_msg: >-
+          Could not establish an executable cloudflared on this client (resolved to
+          '{{ cfd_resolved | default('') }}'). The ssh block's ProxyCommand runs it, and
+          a block naming a missing binary looks exactly like the tunnel being down.
+          Install it, or pass the path explicitly:
+          -e cloudflared_path=/data/data/com.termux/files/usr/bin/cloudflared
 
     # ── the service token ────────────────────────────────────────────────────
     - name: Does a token file already exist
