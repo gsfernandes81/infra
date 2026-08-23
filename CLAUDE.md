@@ -1,22 +1,126 @@
-# Working conventions for agents
+# infra — Project Rules
 
-Human docs live in `docs/` — keep them short, specific, and free of anything inferable.
-Put process detail here instead.
+Container and system config for three Raspberry Pis — `zero` (Pi 5, Immich + Syncthing,
+**critical and remote**), `one` (Pi 4, torrents + send2ereader) and `two` (Pi 1 B+,
+armv6, the `destiny-director` test bot on rootless podman). **Config only — no source,
+no secrets, no data.** Alpine + OpenRC on all three today; `one` and `zero` are headed
+for openSUSE MicroOS. Docker Compose on `one`/`zero`, `podman-compose` on `two`, Ansible
+as the management plane, and a handful of Python tools in `bin/`.
 
-## Privileged commands
+> **Two places this repo is worked on, and neither can touch the fleet from an agent
+> session.** The owner's **phone (Termux)** is the control node — the only machine with a
+> route to every box, and the only one on a metered connection. **`infra-dev`**, a
+> container on `zero`, is where Claude usually runs: free data, `git`/`gh`/`ansible`
+> present, **no route to `zero`, `one` or `two` by decision** (`docs/management-plane.md`
+> § *A control node inside the fleet*). In both, `gavin` is not in the `docker` group and
+> `sudo` wants a password. Anything that changes a box is **handed over**, not run — see
+> *Privileged commands*.
 
-`gavin` does not use `!` in-session and is not in the `docker` group. Anything needing
-`sudo` or the Docker socket is **handed over as a copy-paste block or a reviewable
-script**, run in a separate terminal, with the output pasted back.
+## Layout map — read before changing anything
 
-Never assume a privileged command ran. Verify from its output, or by re-reading state
-with unprivileged tools. Prefer writing results to a file the agent can read over
-asking for a large paste — but `docker compose config` interpolates `.env`, so those
-files contain live secrets: `chmod 600`, keep them outside the repo, delete after.
+Full orientation is `README.md`; the reasoning is `docs/decisions.md`. Quick map:
 
-## Before committing
+- **`deployments/<stack>/`** — what a stack *is*: `compose.yaml`, `.env` (gitignored,
+  host-specific values live there and never `$HOME`), `SOURCE` (the upstream URL and the
+  deployed sha — **it records, it never pulls**; a URL-only `SOURCE` means
+  registry-deployed, see `destiny-director/SOURCE`). Canonical; hosts symlink in.
+- **`hosts/<host>/`** — where it runs: symlinks into `deployments/`, plus `system/` —
+  tracked copies of `/etc` files, each carrying an `infra-` header that says where it
+  installs (`hosts/zero/system/README.md`). `hosts/two/setup/` is the whole build of
+  `two`, one reviewed root script, on no PATH.
+- **`bin/`** — `compose` (docker stacks only; refuses `destiny-director` by name),
+  `check-sources`, `check-system-drift` (reports, never writes), `install-system-file`
+  (writes, never restarts), `check-boot-layout`, `check-mount-guards`, `hw-inventory`.
+  `_infra.py` is their shared header parser. **Not wrapped in the Makefile yet, on
+  purpose** — the Makefile header says why; do it as its own change or not at all.
+- **`ansible/`** — inventory, playbooks, the audit. **Runs from the phone, never from a
+  Pi**: there is no `ansible` on the boxes and there must not be. `infra-dev` carries it
+  as a *development* tool (syntax-check, `--check` against stubs), not a control plane.
+- **`dev/`** — the `infra-dev` container. Lifecycle is `dev/Makefile` only (it computes
+  `HOST_UID` from the checkout's owner; a second copy of that guard is how root-owned
+  files end up in the bind mount). The top-level `Makefile` forwards `dev-*` to it.
+- **`docs/`, `plans/`, `docs/handoff/`** — see the next section. **`docs/history/`** holds
+  one finished plan, kept as a record of how the design was arrived at and marked *do
+  not follow*; it is not a destination.
 
-Two-way secret scan. The name-based one alone is not sufficient:
+## Docs, plans and handoffs — the three-folder regime
+
+**`docs/` is for humans. This file is for process.** A doc is short, specific, and free of
+anything inferable from the repo; a rule about *how to work* goes here, not there.
+
+- **`docs/decisions.md`** is where a decision lands the moment it is made — a row with
+  the *because*, in the same commit as the change it explains. Rows are never deleted:
+  mark a reversed one ⚠︎SUPERSEDED and say what replaced it. Argue with the reason there,
+  never from scratch.
+- **`docs/roadmap.md`** and the phase table in `docs/management-plane.md` are the index of
+  what is next. **Findings get filed into the phase table; they do not start work.**
+- **Where a doc and a generated artefact disagree, the artefact wins** —
+  `docs/fleet-inventory.md` over the README's port table, `curl 127.0.0.1:20241/config`
+  over `docs/cloudflare.md`. That disagreement is the signal those artefacts exist to
+  give; fix the doc, do not argue with the box.
+- **Docs change in the same commit as the thing they describe.** A commit that changes a
+  playbook, a compose file or a `bin/` tool and leaves its README or doc describing the
+  old behaviour is incomplete, and does not merge (see *Git & workflow*).
+
+**`plans/`** stores deferred and in-progress plans, one `plans/<topic>.md` each. A plan is
+a proposal, not a decision: when it is *taken*, its reasoning moves to `decisions.md`.
+**When a plan is executed completely, ALWAYS remove it from `plans/`.** If it was only
+partly executed, ask the owner whether to keep, trim, or delete it — never silently leave
+a plan that reads as open when it is mostly done. Finished plans are deleted, not archived
+(`docs/history/` is the one exception, kept for how it shows the reasoning, and stays
+at one file).
+
+**`docs/handoff/`** holds session handoff notes, `YYYY-MM-DD-<topic>.md`, written at the
+end of a session for the next one. Two rules, both of which have bitten:
+
+- **A handoff's opening instructions are the next session's first orders.** If it says
+  *read this, report, and stop*, then the first reply states where things stand and waits
+  — no edits, no commits, no playbook runs until the owner picks something. Findings go
+  into the phase table, not into work.
+- **A note is deleted once its open items are all closed *and* nothing in it is the only
+  record of a decision.** Move the durable reasoning to `decisions.md` or the relevant doc
+  first, then delete. A handoff that outlives its items becomes a second, stale source of
+  truth.
+
+## Git & workflow
+
+- **`main` is the only long-lived branch, and it is what the boxes run.** The checkouts
+  on the hosts (`~gavin/infra` on `zero`, `/srv/infra` on `two`) track `main`; a bad
+  `main` is a bad fleet.
+- **Merge to `main` as soon as the work is complete and non-breaking. This is strongly
+  encouraged, not merely allowed.** Small, frequent, finished commits straight to `main`,
+  pushed, are the default. Work sitting on a branch is work the next session (or the
+  owner, from the phone) cannot see.
+  - *Complete* means: the change, its doc, its `decisions.md` row if it decided
+    something, and its plan removed from `plans/` if it finished one — all in the commit.
+  - *Non-breaking* means: every tracked `/etc` copy still carries a valid `infra-` header
+    and installs cleanly in a dry run; every compose file still parses identically
+    (`docker compose config` diff, not a file diff); nothing on `main` describes a state
+    the fleet is not in without saying so.
+- **Worktrees are the exception, not the workflow.** Use one only when the work will
+  *span sessions in a breaking state*, when several agents are editing in parallel, or
+  when it is an experiment the owner may reject outright. When you do:
+  - Name the branch for the work (`cloudflared-update-staging`, `two-podman-iptables`),
+    never an opaque harness hash. If you land on a `worktree-…` or hash-named branch,
+    `git branch -m <name>` before the first commit.
+  - Merge it into `main` the moment it is complete and non-breaking, then delete the
+    branch and the worktree. A worktree that outlives its work is the same stale-truth
+    problem as a handoff that does.
+  - **Never run `git worktree prune` from a host** on a repo bind-mounted into a
+    container. Worktrees registered as `/workspace/...` do not resolve host-side, so all
+    of them read `prunable` and would be unregistered — live sessions included.
+- **Commit messages are one lowercase sentence saying what changed and why**, with an
+  area or phase prefix when there is one (`2g phase 3: retire the old tunnel, with the
+  guard that matters`, `cutover: refuse to cycle the tunnel we came in through`,
+  `zero: routes into the repo`). Not conventional commits; the *why* is the point, and
+  `type(scope):` has no room for it.
+- **Never rewrite `main` history, never force-push.** The hosts pull it.
+- **Read `git diff --stat` before every commit** and revert any file the change has no
+  business touching.
+
+### Before committing — the two-way secret scan
+
+The name-based scan alone is not sufficient:
 
 ```sh
 git ls-files -z | xargs -0 grep -nEI \
@@ -25,26 +129,56 @@ git status --porcelain --ignored | grep '\.env$'      # expect: ignored
 ```
 
 Then value-based: take each live value out of the gitignored `.env` files and grep
-every tracked file for it. That catches what a name pattern can't.
+every tracked file for it. That catches what a name pattern can't. **Never commit a
+`docker compose config` dump** — it interpolates `.env`, so it *is* the secrets.
+
+## Privileged commands
+
+`gavin` does not use `!` in-session and is not in the `docker` group. Anything needing
+`sudo` or the Docker socket is **handed over as a copy-paste block or a reviewable
+script**, run in a separate terminal, with the output pasted back.
+
+- **Write handover blocks for fish and a TTY.** `ssh host 'sudo …'` hangs — no TTY, so
+  `sudo` cannot prompt. Give the owner `ssh host` first, then a block to paste *inside*
+  that shell. From the phone, `ssh -t zero 'cd ~/infra/dev && make up'` is the documented
+  shape for the dev container, and the `-t` is why it works.
+- **Never assume a privileged command ran.** Verify from its output, or by re-reading
+  state with unprivileged tools.
+- Prefer writing results to a file the agent can read over asking for a large paste —
+  but `docker compose config` interpolates `.env`, so those files contain live secrets:
+  `chmod 600`, keep them outside the repo, delete after.
+- **Never deploy, restart, or cut over anything on the fleet on your own initiative.**
+  Deploys are the owner's to drive. A playbook that changes a box runs only when the
+  owner has been asked in that exchange and said yes; `--check` is not a substitute,
+  and a bootstrap play cannot even dry-run the half that depends on what the first half
+  would create (Ansible templates a *skipped* task's arguments, so ids only a write could
+  produce are undefined — the fix is an inline filler in the write, never a `set_fact`,
+  which makes the id look defined to the reads too).
 
 ## Verifying changes
 
-- Moving a file that must not change: md5 before and after.
-- Changing a compose file: diff `docker compose config` output, not the files. Only
-  that proves Compose *parses* them identically.
-- A check must exclude values it could trivially match. See the `Session\Port` /
-  `TORRENTING_PORT` case in `docs/port-forwarding.md` — a bare "did it change" test
-  passed on a restart artefact and stopped watching.
 - **Calibrate a check against known-good state before you trust its verdict.** On
   `zero`, a tunnel health check counting sockets on port 7844 read **0 while the tunnel
   was serving normally** — it would have rolled back a good change and then reported
   that the rollback failed too. Run the check against the working system *first*; if it
   does not read healthy, the check is wrong, not the system.
+- A check must exclude values it could trivially match. See the `Session\Port` /
+  `TORRENTING_PORT` case in `docs/port-forwarding.md` — a bare "did it change" test
+  passed on a restart artefact and stopped watching.
+- Moving a file that must not change: md5 before and after.
+- Changing a compose file: diff `docker compose config` output, not the files. Only
+  that proves Compose *parses* them identically.
 - **Proving a container was not recreated:** compare container **IDs**, not `StartedAt`.
   `StartedAt` necessarily changes across a legitimate `stop`/`start`, and "is it
   running" passes for a recreated container too — the exact wrong-reason pass above.
 - Use `stop`/`start`, never `up -d`, when the intent is only to cycle a container. `up`
   re-evaluates config and may recreate.
+- **Verify which commit is deployed, not that a deploy reported success.**
+  `bin/check-sources` for the pinned stacks; `podman inspect dd-beacon --format
+  '{{.Image}}'` on `two`, where the deploy follows a moving branch tag by design.
+- **Anything whose response cannot be fetched again is printed the moment it is
+  created** — a Cloudflare service token's secret was lost to `no_log` on a task that
+  failed only because the API answered 201 and `uri` accepts 200 by default.
 - One-shot migration scripts get deleted once run. Leaving an executable in `bin/`
   that tears down live stacks is a foot-gun, and git history keeps it.
 
@@ -58,9 +192,9 @@ every tracked file for it. That catches what a name pattern can't.
   A guard built on the wrong answer silently skips the work it was meant to do.
 - **`a | b || c`** tests `b`'s exit status, not `a`'s. A fallback after a pipeline
   never fires; `grep -c` returning `0` also exits 1 and breaks `&&` chains.
-- **Do not run `git worktree prune` from the host** on a repo bind-mounted into a
-  container. Worktrees registered as `/workspace/...` do not resolve host-side, so all
-  of them read `prunable` and would be unregistered.
+- **An Ansible `register` is overwritten by a skipped task.** The guard that read it
+  afterwards was disarmed — the `retire` playbook's history has the commit. Register
+  into a different name, or `when:` the consumer on the producer's own condition.
 
 ## Changing the thing you are connected through
 
@@ -68,7 +202,8 @@ Restarting a tunnel, sshd, or networking is only safe when your session does not
 traverse it. Establish that from **your** shell — `echo $SSH_CONNECTION` — not from a
 long-lived agent process, whose value is a fossil of the SSH session that started it
 and never changes. Getting this wrong once produced an entire detached self-healing
-worker to solve a problem that did not exist.
+worker to solve a problem that did not exist. `ssh-zero.gsrpi.uk` *is* zero's tunnel:
+a session that arrived that way cannot restart it.
 
 Safe positions: a second path in (bastion, LAN), and a `screen`/`tmux` session whose
 parent chain reaches `init` with no sshd in it (`cat /proc/<pid>/stat` up the tree).
@@ -82,6 +217,8 @@ Procedure, in two phases, with the risky half separated from the reversible half
    differ, revert and stop; nothing has restarted.
 2. **Restart, watching, with automatic rollback.** Poll an *end-to-end* probe, not a
    proxy for one. After a bounded wait, restore the backup and restart again.
+
+`bin/install-system-file` is phase 1 and refuses to be phase 2 — see *Repo invariants*.
 
 ## Mount guards (`zero` and `one` — both applied)
 
@@ -139,8 +276,8 @@ Then grep the *directory*, not the file, before declaring it done:
 token inline — more than a month after the move it was a backup of, and after this
 section was written describing exactly that outcome. Recording a lesson is not applying
 it: the cleanup happened on whichever host the problem was noticed, and nothing swept the
-others. `zero` was clean. When a rule here is about a class of file, check every host
-that has one.
+others. `zero` was clean. **When a rule here is about a class of file, check every host
+that has one.**
 
 ## Landmines
 
@@ -183,16 +320,25 @@ that has one.
   showed the forward plainly up. Both times the service was fine and the message pointed
   away from the cause. This applies to `HostName` in ssh_config, to `service:` in a
   cloudflared ingress, and to anything else where a literal costs nothing.
+- **Zero's tunnel is remotely managed; its ingress lives in the Cloudflare dashboard and
+  the local config is ignored.** Do not clear or "fix" the remote config from a playbook
+  because the repo's copy looks more correct — the repo's copy is a dated snapshot
+  (`docs/cloudflare.md`), and the box is the authority.
 - **"Exited" is not "absent".** A stack with an exited container, a registered compose
   project, or surviving named volumes must be torn down properly. Deleting its files
   first orphans them permanently.
 - **Measure before deleting.** A subvolume flagged as a dead remnant turned out to hold
   ~340 GiB. It was still the right call, but the size should have been in the ask.
+- **Never call an improvising agent against infrastructure.** The Railway connector's
+  `railway-agent` is the worked example (it restarted a live bot when told to remove a
+  deployment); the rule is general. Direct tools, one named action each.
 
 ## Repo invariants
 
 No `..` in compose files · every compose file declares `name:` · host-specific values
-in gitignored `.env` (never `$HOME`).
+in gitignored `.env` (never `$HOME`) · `${VAR:?message}`, never `:-`, for anything whose
+absence should stop Compose · the deployed image is a literal in `compose.yaml`, not a
+variable · nothing boot-path is generated from a template.
 
 `/etc` copies under `hosts/<host>/system/` each declare where they install, in an
 `infra-` header carried by **both** the repo copy and the live file — see
@@ -206,7 +352,7 @@ its backup in `/etc/init.d/`, where OpenRC picked the backup up as a service.
 
 `install-system-file` does the **reversible half only**. It writes a file, sets its
 mode, validates, and rolls back a failure. It cannot start, stop or restart anything,
-so it cannot be used to skip the two-phase procedure below. It also does not
+so it cannot be used to skip the two-phase procedure above. It also does not
 *generate*: the bytes that reach `/etc` are the reviewed bytes in the repo. Generating
 boot-path content from templates is still rejected.
 
@@ -229,3 +375,13 @@ passed a typo'd root UUID, because every entry on a running box is mounted.
 `/sys/fs/btrfs/<fs-uuid>/` is the registry that answers this correctly, unprivileged.
 `blkid -U` cannot: without root it exits 0 with no output for real and nonsense UUIDs
 alike.
+
+## Conventions
+
+- Match the surrounding style: prose comments that say *why*, file headers that say what
+  the file is for and what not to do to it, `make help` that is the Makefile's own header.
+- A script that refuses is better than one that guesses — `bin/compose` refusing
+  `destiny-director` by name, the Makefile failing with `docker: not found` off-host
+  rather than silently ssh-ing. Keep that shape.
+- Secrets live in gitignored `.env` files and on the boxes — never in git, never in a
+  `.bak` beside the original, never in a handover block that will sit in scrollback.

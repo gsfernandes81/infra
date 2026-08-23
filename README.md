@@ -155,6 +155,7 @@ None are in git. `.gitignore` covers `.env`, `*.key`, `qBittorrent.conf`, `*.sql
 | [port-forwarding.md](docs/port-forwarding.md) | The fragile bit. Read before touching the torrents stack. |
 | [roadmap.md](docs/roadmap.md) | What's next, and the traps waiting in it. |
 | [decisions.md](docs/decisions.md) | Why it looks like this. Don't relitigate. |
+| [plans/](plans/) | Deferred plans, one per topic. Deleted once executed. |
 | [docs/handoff/](docs/handoff/) | Session handoff notes. Deleted once their open items close. |
 | [dev/README.md](dev/README.md) | The `infra-dev` container — working on this repo without paying for it. |
 | [ansible/README.md](ansible/README.md) | Running the management plane. |
