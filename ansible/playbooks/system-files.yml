@@ -155,9 +155,15 @@
     # ── dry run, ALWAYS — this is what --check shows and what a real run previews ─
     # Not --commit. The tool prints the diff it would apply and exits 0 if clean,
     # 1 if it would refuse (missing --new, validator failure). Both outcomes are shown.
+    # --allow-content-change HERE TOO, not only on the install. Without it the tool
+    # refuses a content diff (rc 1), and the install below only takes rc-0 items — so
+    # the play could never deploy a content change at all. Found on its first real run,
+    # 2026-08-24: the cloudflared init script sat undeployed with a green recap. The
+    # human-review purpose of the flag is served by the pushed git diff and by the
+    # preview below; the tool's refusal exists for interactive use, not this path.
     - name: Dry run each file
       ansible.builtin.command:
-        cmd: "{{ tool }} {{ item }} --new"
+        cmd: "{{ tool }} {{ item }} --new --allow-content-change"
         chdir: "{{ repo }}"
       register: dry
       loop: "{{ files }}"
@@ -166,9 +172,14 @@
       become: true
       check_mode: false
 
+    # changed_when: true is a display decision, not a lie about state: ansible.cfg sets
+    # display_ok_hosts = False, and a debug task reports ok — so without this, the
+    # play's entire preview is invisible, which on 2026-08-24 hid both a pending diff
+    # and a refusal behind a quiet recap. These two debugs ARE the play's output.
     - name: What would change
       ansible.builtin.debug:
         msg: "{{ item.stdout_lines + (item.stderr_lines | default([])) }}"
+      changed_when: true
       loop: "{{ dry.results }}"
       loop_control:
         label: "{{ item.item }}"
@@ -193,6 +204,7 @@
     - name: Files the dry run REFUSED — not installed, look at them
       ansible.builtin.debug:
         msg: "{{ item.item }}: {{ (item.stderr_lines | default([]) | last) | default('refused') }}"
+      changed_when: true
       loop: "{{ dry.results }}"
       loop_control:
         label: "{{ item.item }}"
