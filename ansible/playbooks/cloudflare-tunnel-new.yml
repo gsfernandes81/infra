@@ -1,0 +1,156 @@
+---
+# 2g, phase 1 of 3: create a LOCALLY-MANAGED tunnel alongside the existing one.
+#
+#   1. cloudflare-tunnel-new.yml      <- you are here. Nothing serves differently.
+#   2. cloudflare-tunnel-cutover.yml     repoints DNS and swaps the service.
+#   3. cloudflare-tunnel-retire.yml      deletes the old tunnel.
+#
+# WHY A NEW TUNNEL AT ALL. `config_src` is create-time only: PATCHing it on an existing
+# tunnel is rejected (tried 2026-08-23, `1002 Tunnel not found`, on a URL where GET works
+# and where PATCH with tunnel_secret had succeeded an hour earlier). So a tunnel whose
+# routes live in this repo has to be a new one, and its CNAMEs have to be repointed.
+#
+# NOTHING HERE SERVES TRAFFIC. The new tunnel has no DNS aimed at it, so it can be
+# created, inspected and deleted with no effect on anything. That is the whole point of
+# splitting it out: the irreversible-feeling step is phase 2, and this is not it.
+#
+#   ansible-playbook playbooks/cloudflare-tunnel-new.yml -e target=one
+#
+# THE API TOKEN IS PROMPTED AND NEVER STORED, and every `uri` task is delegated to the
+# control node so it is never sent to a Pi. management-plane.md: "The API token goes
+# nowhere — prompted, in memory, for one run."
+
+- name: Create a locally-managed tunnel for one host
+  hosts: "{{ target | default('one') }}"
+  gather_facts: false
+
+  vars_prompt:
+    - name: cf_api_token
+      prompt: |
+        Cloudflare API token (My Profile -> API Tokens, NOT an Access service token).
+        Needs Account -> Cloudflare Tunnel -> Edit, and nothing else for this phase
+      private: true
+
+  vars:
+    cf_api: "https://api.cloudflare.com/client/v4"
+    repo_root: "{{ playbook_dir }}/../.."
+    cred_file: "/etc/cloudflared/{{ inventory_hostname }}.json"
+    new_cred_file: "/etc/cloudflared/{{ inventory_hostname }}-new.json"
+    metrics_probe: "http://127.0.0.1:20241"
+
+  tasks:
+    # ── read where we are, from the box rather than from anyone's memory ──────
+    - name: Read the existing credentials
+      ansible.builtin.slurp:
+        src: "{{ cred_file }}"
+      register: cred_raw
+      become: true
+
+    - name: Pull out the account and the OLD tunnel id
+      ansible.builtin.set_fact:
+        cf_account: "{{ (cred_raw.content | b64decode | from_json).AccountTag }}"
+        old_tunnel: "{{ (cred_raw.content | b64decode | from_json).TunnelID }}"
+
+    - name: Show what we are working from
+      ansible.builtin.debug:
+        msg: "account {{ cf_account }}, existing tunnel {{ old_tunnel }}"
+
+    # ── capture the ingress the edge is serving RIGHT NOW ─────────────────────
+    # From the connector, not from the dashboard and not from this repo. On zero the
+    # repo's idea of the ingress was wrong for most of a day and nothing caught it,
+    # because a local copy that is ignored looks identical to one that is in force.
+    - name: Capture the live ingress from the running connector
+      ansible.builtin.uri:
+        url: "{{ metrics_probe }}/config"
+        return_content: true
+      register: live_cfg
+
+    - name: Refuse to proceed on a connector that is not serving rules
+      ansible.builtin.assert:
+        that: live_cfg.json.config.ingress | length > 1
+        fail_msg: >-
+          {{ inventory_hostname }}'s connector reports
+          {{ live_cfg.json.config.ingress | default([]) | length }} ingress rules. That is
+          the catch-all alone or nothing at all — there is no configuration here worth
+          copying, and something is wrong that this play should not paper over.
+
+    - name: Say what will be carried across
+      ansible.builtin.debug:
+        msg: >-
+          {{ live_cfg.json.config.ingress | rejectattr('hostname', 'equalto', '')
+             | map(attribute='hostname') | list }}
+
+    # ── create the new tunnel ─────────────────────────────────────────────────
+    # 32 random bytes, base64, generated HERE. The secret never has to survive a
+    # copy-paste out of a browser, and if any later step fails we still hold it.
+    - name: Generate the new tunnel secret
+      ansible.builtin.set_fact:
+        new_secret: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') | b64encode }}"
+      no_log: true
+
+    # status 200 AND 201: Cloudflare answers 201 on some creates, `uri` accepts 200 by
+    # default, and that combination once failed a task that had actually succeeded — with
+    # the response no_log'd, so the secret it carried was censored and lost.
+    - name: Create the tunnel, locally-managed
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account }}/cfd_tunnel"
+        method: POST
+        status_code: [200, 201]
+        headers:
+          Authorization: "Bearer {{ cf_api_token }}"
+        body_format: json
+        body:
+          name: "{{ inventory_hostname }}-local"
+          tunnel_secret: "{{ new_secret }}"
+          config_src: "local"
+      register: created
+      delegate_to: localhost
+      no_log: true
+
+    - name: Keep the new tunnel id where the rest of the play can see it
+      ansible.builtin.set_fact:
+        new_tunnel: "{{ created.json.result.id }}"
+
+    - name: The new tunnel exists and nothing points at it yet
+      ansible.builtin.debug:
+        msg:
+          - "new tunnel: {{ new_tunnel }}  (name: {{ inventory_hostname }}-local)"
+          - "old tunnel: {{ old_tunnel }}  — still serving every hostname"
+          - "no DNS record references the new one, so this is reversible by deleting it"
+
+    # ── write the credentials, under a NEW name ───────────────────────────────
+    # Not over the live one. The running connector reads that file, and phase 2 is where
+    # the swap happens under a watched cycle — not as a side effect of a preparation step.
+    - name: Write the new credentials file
+      ansible.builtin.copy:
+        dest: "{{ new_cred_file }}"
+        content: |
+          {"AccountTag":"{{ cf_account }}","TunnelID":"{{ new_tunnel }}","TunnelSecret":"{{ new_secret }}"}
+        owner: root
+        group: root
+        mode: "0600"
+      become: true
+      no_log: true
+
+    # ── render the config for review, into the REPO ───────────────────────────
+    # Into the repo, never into /etc. The rule is that the bytes reaching /etc are bytes
+    # someone read in a diff; generating them into the repo for review is a different act
+    # from generating them onto the boot path, which stays rejected.
+    - name: Render the candidate config.yml into the repo, for review
+      ansible.builtin.template:
+        src: ../templates/cloudflared-local-config.yml.j2
+        dest: "{{ repo_root }}/hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
+        mode: "0644"
+      delegate_to: localhost
+      vars:
+        tunnel_id: "{{ new_tunnel }}"
+        ingress: "{{ live_cfg.json.config.ingress }}"
+
+    - name: What to do next
+      ansible.builtin.debug:
+        msg:
+          - "1. read the diff: git -C {{ repo_root }} diff hosts/{{ inventory_hostname }}/system/"
+          - "   the ingress is now LOAD-BEARING — a hostname missing there is a 404"
+          - "2. commit it, and pull on {{ inventory_hostname }}"
+          - "3. then: cloudflare-tunnel-cutover.yml"
+          - "to abandon instead: delete tunnel {{ new_tunnel }} and rm {{ new_cred_file }}"

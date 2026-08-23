@@ -1,0 +1,45 @@
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /etc/cloudflared
+# infra-name: config.yml
+# infra-mode: 0644
+#
+# GENERATED INTO THE REPO by ansible/playbooks/cloudflare-tunnel-new.yml, from the
+# ingress the connector was actually serving — not from the dashboard and not from
+# anyone's transcription. Read the diff before committing it: from here on this file IS
+# the routing, and a hostname missing from it is a hostname serving 404.
+#
+# Generating into the repo is not the thing CLAUDE.md rejects. What is rejected is
+# generating boot-path content into /etc; these bytes go through a diff, a commit and
+# bin/install-system-file like every other tracked file.
+#
+# THIS TUNNEL IS LOCALLY-MANAGED, so unlike the old one the rules below are in force.
+# cloudflared prefers a REMOTE configuration whenever one exists and ignores local
+# ingress silently — which is why the previous config.yml on zero carried rules that had
+# never taken effect and looked exactly like rules that had. This tunnel was created with
+# `config_src: local` and has no remote configuration, so there is nothing to lose to.
+#
+# ORDER IS BEHAVIOUR: cloudflared matches first-rule-wins. This preserves the order the
+# edge served. Do not sort it.
+
+tunnel: {{ tunnel_id }}
+credentials-file: /etc/cloudflared/{{ inventory_hostname }}.json
+
+# Pinned so the probe in docs/recovery.md has a fixed target. THE PIN MAKES THE RESTART
+# METHOD LOAD-BEARING: `rc-service restart` does not wait, cloudflared's grace period is
+# 30s, and the outgoing process still holds this port when the incoming one binds it —
+# six respawns died that way on zero. Cycle with stop, poll until 20241 clears, start.
+metrics: 127.0.0.1:20241
+
+ingress:
+{% for rule in ingress %}
+{% if rule.hostname %}
+  - hostname: {{ rule.hostname }}
+{% if rule.path %}
+    path: {{ rule.path }}
+{% endif %}
+    service: {{ rule.service }}
+{% else %}
+  - service: {{ rule.service }}
+{% endif %}
+{% endfor %}
