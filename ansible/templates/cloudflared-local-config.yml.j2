@@ -21,6 +21,12 @@
 #
 # ORDER IS BEHAVIOUR: cloudflared matches first-rule-wins. This preserves the order the
 # edge served. Do not sort it.
+#
+# `localhost` IS REWRITTEN TO 127.0.0.1 on the way through, deliberately, and it is the
+# one thing here that is not a faithful copy of the edge. ssh resolves localhost to ::1
+# first and much of this fleet binds IPv4 only — zero's cloudflared logged
+# `dial tcp [::1]:8384: connect: connection refused` for months against a Syncthing that
+# was running. CLAUDE.md § Landmines carries the rule. A literal costs nothing.
 
 tunnel: {{ tunnel_id }}
 credentials-file: /etc/cloudflared/{{ inventory_hostname }}.json
@@ -38,8 +44,8 @@ ingress:
 {% if rule.path %}
     path: {{ rule.path }}
 {% endif %}
-    service: {{ rule.service }}
+    service: {{ rule.service | replace('//localhost:', '//127.0.0.1:') }}
 {% else %}
-  - service: {{ rule.service }}
+  - service: {{ rule.service | replace('//localhost:', '//127.0.0.1:') }}
 {% endif %}
 {% endfor %}
