@@ -52,6 +52,29 @@
       register: cred_raw
       become: true
 
+    # ── refuse to run twice ────────────────────────────────────────────────────
+    # The new credentials file existing means phase 1 already ran on this host. A re-run
+    # creates a second orphan tunnel, overwrites the reviewed repo config, and — worst —
+    # overwrites ~/.infra-2g-baseline-<host>.json with CURRENT state, which after a
+    # cutover records the outage as the baseline: the exact corruption the baseline
+    # exists to prevent.
+    - name: Check whether phase 1 already left credentials here
+      ansible.builtin.stat:
+        path: "{{ new_cred_file }}"
+      register: new_cred_stat
+      become: true
+
+    - name: Refuse a re-run unless it was asked for by name
+      ansible.builtin.assert:
+        that: force | default(false) | bool
+        fail_msg: >-
+          {{ new_cred_file }} exists — phase 1 already ran here. A re-run creates a
+          second orphan tunnel, overwrites the reviewed repo config, and overwrites the
+          saved baseline at ~/.infra-2g-baseline-{{ inventory_hostname }}.json with
+          current state — after a cutover, that records the outage as the baseline.
+          Override with -e force=true.
+      when: new_cred_stat.stat.exists
+
     - name: Pull out the account and the OLD tunnel id
       ansible.builtin.set_fact:
         cf_account: "{{ (cred_raw.content | b64decode | from_json).AccountTag }}"
@@ -85,6 +108,42 @@
           {{ inventory_hostname }}'s connector reports {{ live_ingress | length }} ingress
           rules. That is the catch-all alone or nothing at all — there is no configuration
           here worth copying, and something is wrong that this play should not paper over.
+
+    # The template drops originRequest entirely. That was safe on zero and one only
+    # because every rule happened to carry the default, and two's tunnel is the one
+    # nobody has ever inspected — a silently dropped noTLSVerify or httpHostHeader
+    # breaks the service after cutover with nothing in the diff to show why. The
+    # catch-all's originRequest IS the tunnel default, so any rule differing from it
+    # carries per-rule settings the rendered config cannot represent.
+    - name: Compare each rule's originRequest against the catch-all's
+      ansible.builtin.set_fact:
+        origin_mismatches: >-
+          {%- set ns = namespace(base={}, bad=[]) -%}
+          {%- for r in live_ingress if (r.hostname | default('')) == '' -%}
+            {%- set ns.base = r.originRequest | default({}) -%}
+          {%- endfor -%}
+          {%- for r in live_ingress if (r.hostname | default('')) != '' -%}
+            {%- set this = r.originRequest | default({}) -%}
+            {%- if this != ns.base -%}
+              {%- set keys = ((this.keys() | list) + (ns.base.keys() | list)) | unique | list -%}
+              {%- set diff = [] -%}
+              {%- for k in keys if this.get(k) != ns.base.get(k) -%}
+                {%- set _ = diff.append(k) -%}
+              {%- endfor -%}
+              {%- set _ = ns.bad.append(r.hostname ~ ' [' ~ (diff | join(', ')) ~ ']') -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ ns.bad | join('; ') }}
+
+    - name: Refuse an ingress the template cannot represent
+      ansible.builtin.assert:
+        that: origin_mismatches | length == 0
+        fail_msg: >-
+          These rules carry originRequest settings that differ from the tunnel default
+          (the catch-all's), listed as hostname [keys whose values differ]:
+          {{ origin_mismatches }}. The rendered config drops per-rule originRequest, so
+          cutting over would silently change how these are served. Extend the template
+          to carry them before proceeding.
 
     - name: Say what will be carried across
       ansible.builtin.debug:
