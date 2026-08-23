@@ -1,0 +1,54 @@
+#!/sbin/openrc-run
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /etc/init.d
+# infra-name: cloudflared
+# infra-mode: 0755
+#
+# HAND-WRITTEN, AND IT HAS TO BE. Alpine packages no init script for cloudflared —
+# docs/host-setup.md installs the binary from GitHub — so this was assembled by hand.
+# Whatever preceded it DID NOT START ON REBOOT: `cloudflared service install` produces
+# something that looks correct, starts when started, and is missing the next time the
+# box comes up. Do not replace this file with it.
+#
+# FIRST TRACKED /etc FILE ON `two`. It only became trackable on 2026-08-23, when the
+# token moved out of it — before that, committing this file would have committed a
+# secret, which is why zero and one were tracked in August and this was not.
+#
+# NO log_proxy ON THIS HOST. zero and one pipe through it for rotation, but it arrived
+# there with docker and two runs neither docker nor containerd. So this uses OpenRC's
+# plain file variables: output_log and error_log map to --stdout and --stderr, per
+# /usr/libexec/rc/sh/supervise-daemon.sh on this box. `stdout_log`/`stderr_log`, which
+# this file used to declare, are read by nothing — /var/log/cloudflared.err was frozen
+# at 1 MB since 16 July and cloudflared.log empty since 26 December.
+#
+# The cost of no log_proxy is no rotation. 1 MB in seven months, on 27 GB free, is slow
+# enough to leave; if it ever matters, logrotate is a smaller change than a package.
+
+cfgfile="/etc/$RC_SVCNAME/$RC_SVCNAME.conf"
+supervisor=supervise-daemon
+command="/usr/bin/cloudflared"
+command_args="--autoupdate-freq 24h0m0s --config /etc/cloudflared/config.yml tunnel run"
+command_user="root"
+pidfile="/var/run/$RC_SVCNAME.pid"
+command_background="yes"
+
+# `cfgfile` and `command_background` both look vestigial — nothing references either.
+# Left alone rather than removed alongside the changes that had to happen here.
+
+# Both streams to one file: cloudflared writes essentially everything to stderr, which
+# is why the old split left .log empty for eight months and .err at 1 MB.
+output_log="/var/log/$RC_SVCNAME.log"
+error_log="/var/log/$RC_SVCNAME.log"
+
+# 0640, matching zero and one. Without log_proxy there is no LOGPROXY_CHMOD, so the file
+# is pre-created at the right mode instead — the pattern /etc/init.d/containerd uses on
+# the other boxes. This service has twice left a world-readable file containing its own
+# credential on this fleet; its log does not get world-read by default either.
+start_pre() {
+	checkpath -f -m 0640 -o root:root "/var/log/$RC_SVCNAME.log"
+}
+
+depend() {
+	need net
+}

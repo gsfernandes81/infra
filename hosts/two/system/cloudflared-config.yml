@@ -1,0 +1,28 @@
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /etc/cloudflared
+# infra-name: config.yml
+# infra-mode: 0644
+#
+# Credentials and metrics for `two`'s host tunnel. NOT its ingress.
+#
+# WHY. Until 2026-08-23 two's token was INLINE in /etc/init.d/cloudflared, a mode-755
+# world-readable file — the only host where the August move to /etc/conf.d never
+# happened. It went straight to a credentials file rather than via conf.d, because that
+# is one fewer place a secret lives and one fewer step to undo later.
+#
+# NO INGRESS HERE. This tunnel is remotely-managed, which is certain rather than
+# assumed: it has only ever run with `--token` and no `--config`, so it has never read a
+# local file and its routes can only have come from Cloudflare. cloudflared ignores
+# local ingress whenever a remote configuration exists — proven on zero by clearing the
+# remote copy and watching the connector drop to one rule. Moving the routes here is 2g,
+# and it needs a NEW tunnel because `config_src` is create-time only.
+
+tunnel: bdb4a988-7c8b-4f5f-a2bf-e42464309d64
+credentials-file: /etc/cloudflared/two.json
+
+# Pinned so the probe has a fixed target. THE PIN MAKES THE RESTART METHOD LOAD-BEARING:
+# `rc-service restart` does not wait, cloudflared's grace period is 30s, and the outgoing
+# process still holds this port when the incoming one binds it — which killed six
+# respawns on zero. Cycle with stop -> poll until 20241 is free -> start, never restart.
+metrics: 127.0.0.1:20241
