@@ -72,10 +72,10 @@ containerd are removed from it. See [decisions.md](docs/decisions.md).
 ### Public hostnames
 
 Zero's tunnel serves eight, and **only one of them was recorded anywhere in this repo
-before 2026-08-23**. The authoritative list is now
-[`hosts/zero/system/cloudflared-config.yml`](hosts/zero/system/cloudflared-config.yml),
-because that file *is* the tunnel's ingress — see [cloudflare.md](docs/cloudflare.md)
-for what is safe to change and what is load-bearing.
+before 2026-08-23**. They are listed in [cloudflare.md](docs/cloudflare.md) as a dated
+snapshot — the authoritative record is Cloudflare's own, because that tunnel is
+remotely-managed and local ingress is ignored. Regenerate the snapshot on the host with
+`curl -s 127.0.0.1:20241/config`.
 
 Worth knowing without opening either: `torrents.gsrpi.uk` is served by **zero**'s tunnel
 but proxies across the LAN to **one** — so one's torrent UI depends on zero being up.

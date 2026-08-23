@@ -375,9 +375,10 @@ it does not control it.
 Both hosts run `cloudflared` from `/etc/init.d/cloudflared`. It's your way back in.
 
 **`zero` — done, 2026-08-23.** No token anywhere. `/etc/cloudflared/zero.json` (0600
-root) holds the credentials and `/etc/cloudflared/config.yml` holds the ingress, both
-tracked under `hosts/zero/system/`. The secret was rotated at the same sitting, so the
-disclosed one is dead.
+root) holds the credentials; `/etc/cloudflared/config.yml` (tracked) holds the tunnel id,
+that path, and the metrics port. **The ingress is not on the host** — this tunnel is
+remotely-managed and cloudflared ignores local ingress whenever a remote config exists,
+silently. The secret was rotated at the same sitting, so the disclosed one is dead.
 
 **Rebuilding zero's tunnel therefore needs two files, not a token**, which is the thing
 to know here at 3am: `config.yml` is in the repo and installs with
@@ -393,10 +394,12 @@ port the outgoing one still holds, exits 1, and `supervise-daemon` gives up afte
 respawns. That took the tunnel down on 2026-08-23. Always: `stop`, poll until
 `127.0.0.1:20241` is free, then `start`.
 
-**`/ready` is not sufficient on its own any more.** It reports the connector's
-registration with the edge and knows nothing about ingress, so a broken `config.yml`
-gives a perfectly healthy-looking tunnel serving 404. Diff `127.0.0.1:20241/config`
-against a known-good capture, and fetch one real hostname end to end.
+**`/ready` is not sufficient on its own.** It reports the connector's registration with
+the edge and knows nothing about routing, so a tunnel serving 404 for everything still
+reports healthy. `127.0.0.1:20241/config` is what shows the rules actually in force —
+which is also the only way to tell where those rules came from, since a local copy that
+is being ignored looks identical to one that is not. Diff it against a known-good
+capture, and fetch a real hostname end to end.
 
 **`one` — NOT done. Still `--token` in argv, still the disclosed value.** Layout as
 `zero`'s was before 2026-08-23, tracked under `hosts/one/system/`. It gets the same two

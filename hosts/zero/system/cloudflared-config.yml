@@ -4,29 +4,32 @@
 # infra-name: config.yml
 # infra-mode: 0644
 #
-# Local ingress for `zero`'s host tunnel.
+# Credentials and metrics for `zero`'s host tunnel. NOT its ingress.
 #
-# WHY THIS FILE EXISTS. The tunnel was remotely-managed: `cloudflared tunnel run
-# --token <secret>` with the ingress rules held in Cloudflare. That put a live
-# credential in argv, and `supervise-daemon` logs its child's command line to syslog —
-# the token-in-argv leak docs/host-setup.md flags. Moving to a credentials file takes
-# the secret out of argv entirely, which is the rule CLAUDE.md states and the shape
-# infra-dev's own connector already uses on this same box.
+# WHY THIS FILE EXISTS. `command_args` carried `--token <secret>`, and supervise-daemon
+# logs its child's full command line to syslog — the token-in-argv leak
+# docs/host-setup.md flags. The secret now lives in a 0600 credentials file instead.
+# That is the whole of what this file achieves, and it does achieve it.
 #
-# THE COST, STATED. The ingress rules now live here instead of in the dashboard. That
-# is better — they are reviewable and versioned, which is the whole argument of
-# docs/management-plane.md — but it means THIS FILE IS NOW LOAD-BEARING. A hostname
-# missing here is a hostname serving 404, and the connector will look perfectly
-# healthy while it does: /ready reports the connector's registration with the edge and
-# knows nothing about ingress. Verify with `cloudflared tunnel ingress validate` and by
-# diffing 127.0.0.1:20241/config against a baseline, never with /ready alone.
+# WHAT IT DOES NOT DO, ESTABLISHED THE HARD WAY 2026-08-23. An earlier version of this
+# file carried the eight ingress rules and claimed to be authoritative. It was not.
+# **cloudflared prefers the tunnel's REMOTE configuration whenever one exists, and
+# ignores local ingress silently** — no error, no warning that reached any log we had.
+# The two were byte-identical in effect, so nothing distinguished them: /config reported
+# the same eight rules either way.
 #
-# THE ORDER IS SIGNIFICANT. cloudflared matches first-rule-wins, and this reproduces
-# the exact order the remote config served on 2026-08-23. Do not sort it.
+# It was only proven by clearing the remote copy, at which point the connector dropped
+# from nine rules to one within fifteen seconds. So the ingress lives in Cloudflare, the
+# dashboard's Public Hostnames page is the real record, and changing a route here would
+# do nothing at all while looking like it had.
+#
+# The ingress rules are therefore NOT reproduced here. A second copy that cannot take
+# effect is the drift this repo exists to end, and it is worse than no copy because it
+# reads as authoritative. docs/cloudflare.md holds a dated snapshot for humans, with the
+# command to regenerate it.
 #
 # `--autoupdate-freq 24h0m0s` stays in command_args and no-autoupdate is deliberately
-# NOT set here: infra-dev disables autoupdate, this host does not, and changing that
-# alongside the credentials move would be a second change smuggled in as a default.
+# NOT set here: infra-dev disables autoupdate, this host does not.
 
 tunnel: 9456fbcd-95f6-48a8-9bcd-d6e85bfbfc01
 credentials-file: /etc/cloudflared/zero.json
@@ -46,42 +49,3 @@ credentials-file: /etc/cloudflared/zero.json
 # So this file may only be cycled with stop -> poll until 20241 is free -> start.
 metrics: 127.0.0.1:20241
 
-ingress:
-  - hostname: ssh-zero.gsrpi.uk
-    service: ssh://localhost:22
-
-  - hostname: syncthing.gsrpi.uk
-    service: http://localhost:8384
-
-  - hostname: syncthing-server.gsrpi.uk
-    service: tcp://localhost:22000
-
-  - hostname: immich.gsrpi.uk
-    service: http://localhost:2283
-
-  # NOT a service on zero. This proxies over the LAN to `one`'s qBittorrent behind
-  # gluetun, so zero's tunnel is a dependency of one's torrent UI. Nothing in this repo
-  # recorded that until 2026-08-23.
-  #
-  # DECIDED 2026-08-23: this should be served by `one`'s OWN tunnel, direct, with zero
-  # not involved. It stays here for now because the move is Cloudflare-side and ordered:
-  # add the rule to one's tunnel and repoint the CNAME FIRST, then delete these two lines.
-  # Removing it before that breaks the torrent UI, and doing it in the same restart as the
-  # credentials-file change would bundle a routing change into a mechanism change.
-  - hostname: torrents.gsrpi.uk
-    service: http://192.168.86.101:8080
-
-  # The three older dev containers, reached through their loopback ports on zero.
-  # infra-dev is deliberately absent: it runs its own connector on its own tunnel, which
-  # is the pattern management-plane.md § Addressing chose. These three are the old shape
-  # and moving them is Phase 5, not this change.
-  - hostname: ssh-zero-dev-dd.gsrpi.uk
-    service: ssh://localhost:2222
-
-  - hostname: ssh-zero-dev-ds.gsrpi.uk
-    service: ssh://localhost:2223
-
-  - hostname: ssh-zero-dev-or3.gsrpi.uk
-    service: ssh://localhost:2224
-
-  - service: http_status:404

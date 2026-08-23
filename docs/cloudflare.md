@@ -6,10 +6,29 @@ hostnames and nothing at all about which Cloudflare objects a service depends on
 
 ## Zero's tunnel — `9456fbcd-95f6-48a8-9bcd-d6e85bfbfc01`
 
-Since 2026-08-23 it runs **locally-managed**: `/etc/cloudflared/config.yml` holds the
-ingress, `/etc/cloudflared/zero.json` (0600) holds the credentials, and there is no
-token in argv. `config.yml` is tracked at `hosts/zero/system/cloudflared-config.yml`
-and is the authoritative record of what this tunnel serves.
+**It is remotely-managed, and that cannot currently be changed.** The ingress lives in
+Cloudflare; the dashboard's Public Hostnames page is the authoritative record of what
+this tunnel serves. `cloudflared` prefers a tunnel's remote configuration whenever one
+exists and **ignores local ingress silently** — no error, nothing in any log.
+
+Since 2026-08-23 the credentials are a 0600 file at `/etc/cloudflared/zero.json` and
+there is no token in argv. `/etc/cloudflared/config.yml` (tracked at
+`hosts/zero/system/cloudflared-config.yml`) carries the tunnel id, the credentials path
+and the metrics port — **not** the ingress.
+
+An earlier version of this file said the opposite, because an earlier version of
+`config.yml` carried the ingress and appeared to work. Nothing distinguished the two:
+they were identical in content, so `/config` reported the same eight rules either way.
+It was settled by clearing the remote copy, at which point the connector dropped from
+nine rules to one in fifteen seconds and was restored automatically. Recorded because
+the wrong version was believable for most of a day.
+
+The table below is a **dated snapshot for humans, not a source of truth.** Regenerate it
+on the host with:
+
+```sh
+curl -s 127.0.0.1:20241/config
+```
 
 | Hostname | Origin | Note |
 |---|---|---|
@@ -30,16 +49,20 @@ the container, which is the pattern *management-plane.md* § *Addressing* chose.
 three older dev containers are still on the host tunnel — the fleet is mid-migration
 between the two designs, and finishing it is Phase 5.
 
-## The dashboard is now stale, and that is not a fault
+## Do not clear the remote configuration
 
-Zero's tunnel still has a remote configuration listing the same hostnames. **The
-connector ignores it.** Editing Public Hostnames in the dashboard changes nothing.
+It was tried on 2026-08-23, reversibly, and it takes the tunnel down: the connector
+follows it, dropping to the bare catch-all and 404ing every hostname. Clearing it is not
+tidying, it is an outage.
 
-It is deliberately left in place as a fallback: if anyone ever drops `--config` from
-`command_args`, the connector falls back to remote config and keeps serving. Clearing it
-would turn that slip into 404s for everything. `PUT .../cfd_tunnel/{id}/configurations`
-with an empty ingress would clear it without touching DNS, if that trade is ever
-wanted — it has not been taken.
+`PUT .../cfd_tunnel/{id}/configurations` is the endpoint, it does **not** touch DNS, and
+a `GET` first makes the whole thing byte-exactly reversible — that structure is why the
+attempt cost fifteen seconds rather than an evening. But there is no reason to run it.
+
+Making the tunnel genuinely locally-managed is a different question and is not solved by
+emptying the remote config, since an empty remote config still wins over a local one.
+Nobody has established whether an existing dashboard-created tunnel can be converted at
+all.
 
 ## Landmines
 
@@ -77,7 +100,10 @@ wanted — it has not been taken.
   returns 200. Probably intentional, since Immich has its own login. Worth confirming
   rather than inheriting.
 - **`torrents.gsrpi.uk` moves to `one`'s own tunnel.** Decided 2026-08-23: one's torrent
-  UI should not depend on zero. Ordered — add the rule to one's tunnel and repoint the
-  CNAME first, *then* remove the two lines from zero's `config.yml` and cycle.
+  UI should not depend on zero. Entirely a Cloudflare-side change, since the ingress is
+  not on the host — add the rule to one's tunnel, repoint the CNAME, then delete the
+  Public Hostname from zero's tunnel. No repo edit and no restart on zero.
+- **Can this tunnel be made locally-managed at all?** Unknown. It would put the routes
+  under review in git, which is the direction everything else here is going.
 - **`one` and `two`.** One is unrotated, still `--token` in argv. Two has never been
   checked to see whether its token is even inline.
