@@ -1,0 +1,249 @@
+---
+# Update cloudflared on ONE host, deliberately, in a staggered rollout.
+#
+#   ansible-playbook playbooks/cloudflared-update.yml \
+#       -e target=one -e version=2026.9.1 -e sha256=<hash for that host's arch> -K
+#
+# WHY NOT AUTOUPDATE. It was on, and it was live — all three binaries were rewritten on
+# 14 August 2026, the day 2026.8.2 released, on a fleet where cloudflared was installed
+# by hand half a year earlier. It replaced a boot-path binary with unverified bytes on a
+# 24-hour cycle, on the box that terminates every tunnel into this fleet.
+#
+# And it could not fix what was wrong. cloudflared updates itself with a build matching
+# ITS OWN architecture, not the machine's, so a fleet that started with one 32-bit binary
+# copied to all three hosts stays 32-bit forever — including on two arm64 boxes. Only an
+# explicit install breaks that loop.
+#
+# THE ROLLOUT ORDER IS one -> two -> zero, and each stage REFUSES while an earlier one is
+# unhealthy. That is what makes the stagger worth anything: a calendar gap only helps if
+# somebody notices a failure inside it, and nothing on this fleet alerts. Making the next
+# stage check its predecessors turns the gap into a test rather than a hope.
+#
+# THE HASH IS REQUIRED, per arch, and that is deliberate friction. dev/Dockerfile makes
+# the argument: "A pin alone says 'the same version'; a hash says 'the same bytes'."
+# Download it once, check it, and put the value on the command line where it is reviewed.
+
+- name: Update cloudflared on one host
+  hosts: "{{ target }}"
+  gather_facts: false
+
+  vars:
+    # Days that must pass after a predecessor was updated. 0 to skip the wait — the
+    # health gate below still applies, and it is the half that actually verifies.
+    soak_days: 3
+
+    # one first: non-critical. two second: the lifeboat. zero last: Immich, the tunnel
+    # everyone comes in through, and the box whose failure is worst to discover late.
+    predecessors:
+      one: []
+      two: ["one"]
+      zero: ["one", "two"]
+
+    state_dir: "{{ lookup('env', 'HOME') }}/.infra-cfd"
+    probe: "http://127.0.0.1:20241"
+    bin: /usr/bin/cloudflared
+
+  tasks:
+    - name: Require a version and a hash
+      ansible.builtin.assert:
+        that:
+          - version is defined and version | length > 0
+          - sha256 is defined and sha256 | length == 64
+        fail_msg: >-
+          Needs -e version=<tag> and -e sha256=<sha256 of the asset for THIS host's
+          architecture>. One hash per arch per release; the fleet spans two arches, so a
+          full rollout uses two different hashes. That is the point — the value is read
+          by a person before it is installed.
+
+    # ── the gate ─────────────────────────────────────────────────────────────
+    - name: Check every predecessor is still serving
+      ansible.builtin.uri:
+        url: "{{ probe }}/ready"
+        return_content: true
+      register: pred
+      loop: "{{ predecessors[inventory_hostname] }}"
+      delegate_to: "{{ item }}"
+
+    - name: Refuse while an earlier stage is unhealthy
+      ansible.builtin.assert:
+        that: (item.content | from_json).readyConnections | default(0) > 0
+        fail_msg: >-
+          {{ item.item }} was updated before {{ inventory_hostname }} in this rollout and
+          is not serving. Fix that first — carrying a bad version forward to the next box
+          is exactly what the ordering exists to prevent.
+      loop: "{{ pred.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: When each predecessor was last updated
+      ansible.builtin.stat:
+        path: "{{ state_dir }}/{{ item }}"
+      register: pred_state
+      loop: "{{ predecessors[inventory_hostname] }}"
+      delegate_to: localhost
+
+    - name: Refuse until each predecessor has soaked
+      ansible.builtin.assert:
+        that: >-
+          (now(utc=true).strftime('%s') | int - item.stat.mtime | int)
+          > (soak_days | int * 86400)
+        fail_msg: >-
+          {{ item.item }} was updated
+          {{ ((now(utc=true).strftime('%s') | int - item.stat.mtime | int) / 86400)
+             | round(1) }} days ago and the soak is {{ soak_days }}. A version that
+          breaks something slowly has not had time to show it yet. Override with
+          -e soak_days=0 if you have a reason.
+      loop: "{{ pred_state.results | selectattr('stat.exists') | list }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    # ── refuse to fight autoupdate ───────────────────────────────────────────
+    # If the running process still has --autoupdate-freq, whatever we install here gets
+    # replaced within a day and the rollout means nothing.
+    - name: Is autoupdate still enabled
+      ansible.builtin.shell: |
+        pid=$(cat /var/run/cloudflared.pid)
+        xargs -0 -n1 echo < /proc/$pid/cmdline | grep -c autoupdate-freq || true
+      register: au
+      changed_when: false
+      become: true
+
+    - name: Refuse while autoupdate would overwrite this
+      ansible.builtin.assert:
+        that: au.stdout | trim | int == 0
+        fail_msg: >-
+          {{ inventory_hostname }}'s connector is running with --autoupdate-freq, so
+          anything installed here is replaced within 24 hours. Install the tracked init
+          script first — it sets --no-autoupdate — and cycle:
+          bin/install-system-file cloudflared --commit --allow-content-change
+
+    # ── what is there now ────────────────────────────────────────────────────
+    - name: The architecture of THIS host, not of the binary on it
+      ansible.builtin.command: uname -m
+      register: uname_m
+      changed_when: false
+
+    - name: Map it to a cloudflared asset
+      ansible.builtin.set_fact:
+        cfd_arch: >-
+          {{ {'aarch64': 'arm64', 'armv6l': 'arm', 'armv7l': 'arm',
+              'x86_64': 'amd64'}[uname_m.stdout | trim] }}
+
+    - name: Record what is installed before we touch it
+      ansible.builtin.stat:
+        path: "{{ bin }}"
+        checksum_algorithm: sha256
+      register: before
+      become: true
+
+    - name: Say what is about to change
+      ansible.builtin.debug:
+        msg:
+          - "host {{ inventory_hostname }} is {{ uname_m.stdout | trim }} -> asset {{ cfd_arch }}"
+          - "installed now: {{ before.stat.checksum | default('nothing') }}"
+          - "installing:    {{ sha256 }}  ({{ version }})"
+
+    - name: Nothing to do if it is already that binary
+      ansible.builtin.meta: end_host
+      when: before.stat.checksum | default('') == sha256
+
+    # ── download, verify, prove it runs, then install ────────────────────────
+    # get_url verifies the checksum itself and refuses to write a mismatch. Downloaded
+    # ON THE HOST: the control node is a phone on a metered radio, and 36 MiB there is a
+    # spend or3's data-ledger.md tracks. The Pis are on the house connection.
+    - name: Fetch the new binary beside the old one
+      ansible.builtin.get_url:
+        url: "https://github.com/cloudflare/cloudflared/releases/download/{{ version }}/cloudflared-linux-{{ cfd_arch }}"
+        dest: "{{ bin }}.new"
+        checksum: "sha256:{{ sha256 }}"
+        mode: "0755"
+        owner: root
+        group: root
+      become: true
+
+    # A binary of the right arch that still cannot execute here is the failure this
+    # catches — and the one the fleet has been living with, in reverse, for six months.
+    - name: Prove it actually runs on this machine
+      ansible.builtin.command: "{{ bin }}.new --version"
+      register: newver
+      changed_when: false
+      become: true
+
+    - name: Back up the running one, then swap
+      ansible.builtin.shell: |
+        set -e
+        cp -a {{ bin }} {{ bin }}.pre-{{ version }}
+        mv {{ bin }}.new {{ bin }}
+        chmod 0755 {{ bin }}
+      become: true
+      changed_when: true
+
+    # ── cycle and verify, with rollback ──────────────────────────────────────
+    - name: Cycle the connector
+      ansible.builtin.shell: |
+        rc-service cloudflared stop >/dev/null 2>&1
+        i=0
+        while [ $i -lt 45 ]; do
+          netstat -tln 2>/dev/null | grep -q '127\.0\.0\.1:20241 ' || break
+          i=$((i+2)); sleep 2
+        done
+        netstat -tln 2>/dev/null | grep -q '127\.0\.0\.1:20241 ' && exit 1
+        rc-service cloudflared start >/dev/null 2>&1
+      become: true
+      changed_when: true
+
+    - name: Wait for it to register
+      ansible.builtin.uri:
+        url: "{{ probe }}/ready"
+        return_content: true
+      register: ready
+      until: (ready.content | default('{}') | from_json).readyConnections | default(0) > 0
+      retries: 12
+      delay: 5
+      failed_when: false
+
+    - name: Put the old binary back if it did not come up
+      ansible.builtin.shell: |
+        set -e
+        mv {{ bin }}.pre-{{ version }} {{ bin }}
+        chmod 0755 {{ bin }}
+        rc-service cloudflared stop >/dev/null 2>&1
+        i=0
+        while [ $i -lt 45 ]; do
+          netstat -tln 2>/dev/null | grep -q '127\.0\.0\.1:20241 ' || break
+          i=$((i+2)); sleep 2
+        done
+        rc-service cloudflared start >/dev/null 2>&1
+      become: true
+      when: (ready.content | default('{}') | from_json).readyConnections | default(0) < 1
+
+    - name: Report the rollback and stop
+      ansible.builtin.assert:
+        that: (ready.content | default('{}') | from_json).readyConnections | default(0) > 0
+        fail_msg: >-
+          {{ version }} did not come up on {{ inventory_hostname }}. The previous binary
+          has been restored and the connector cycled back — check it is serving before
+          doing anything else. Do NOT run the next stage: the gate would have caught this
+          anyway, which is the point of it.
+
+    # ── record, for the next stage's soak ────────────────────────────────────
+    - name: Make sure the state directory exists
+      ansible.builtin.file:
+        path: "{{ state_dir }}"
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+
+    - name: Note when this host was updated
+      ansible.builtin.file:
+        path: "{{ state_dir }}/{{ inventory_hostname }}"
+        state: touch
+        mode: "0644"
+      delegate_to: localhost
+
+    - name: Done
+      ansible.builtin.debug:
+        msg:
+          - "{{ inventory_hostname }} now runs {{ newver.stdout | trim }} ({{ cfd_arch }})"
+          - "previous binary kept at {{ bin }}.pre-{{ version }} — remove it once you are happy"
+          - "next stage will refuse for {{ soak_days }} days, and while this host is unhealthy"
