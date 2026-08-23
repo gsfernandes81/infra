@@ -47,6 +47,15 @@
 
     windows_out: "{{ home }}/ssh-fleet-block-windows.txt"
 
+    # The phone's Termux sshd, reached over `adb forward`. The uid is Android's for the
+    # Termux app and CHANGES if the app is reinstalled — Termux's own config carried a
+    # stale u0a593 for some time. If `ssh s24` starts refusing, check this first.
+    s24_user: "u0_a414"
+
+    # The adb hop is a laptop thing: from the phone itself, s24 is localhost and there is
+    # nothing to forward. Set per-render below, never globally.
+    adb_jump: false
+
   tasks:
     # BEST EFFORT ONLY — the assertion below is on the RESULT, not on this succeeding.
     #
@@ -170,6 +179,7 @@
         block: "{{ lookup('template', '../templates/ssh-fleet-block.j2') }}"
       vars:
         cloudflared: "{{ windows_cloudflared }}"
+        adb_jump: true
       when: win_cfg.stat.exists | default(false)
 
     # Fallback for a control node that cannot see the laptop — Termux. Only written when
@@ -191,6 +201,7 @@
           # END infra-fleet
       vars:
         cloudflared: "{{ windows_cloudflared }}"
+        adb_jump: true
       when: not (win_cfg.stat.exists | default(false))
 
     - name: Say what happened

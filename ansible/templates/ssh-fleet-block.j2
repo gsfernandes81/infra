@@ -77,21 +77,51 @@ Host two
 Host zero one two zero-dev-dd zero-dev-or3
   ProxyCommand {{ cloudflared }} access ssh --hostname %h
 
+{% if adb_jump %}
+# ── the phone as a jump host ──────────────────────────────────────────────────
+# `adb forward` runs as a SIDE EFFECT of this Match. ssh evaluates `Match exec` while
+# parsing config — including when resolving a jump host — so the forward exists before
+# s24 is dialled, and `ssh zero-s24` is one command rather than two.
+#
+# If the phone is not attached, adb exits non-zero, the block does not apply, and you get
+# a plain connection refused on localhost:8022. That is the right error: it names the
+# thing that is missing rather than failing somewhere further along.
+Match host s24 exec "adb forward tcp:8022 tcp:8022"
+  ConnectTimeout 10
+
+Host zero-s24
+  HostName {{ ip_zero }}
+
+Host one-s24
+  HostName {{ ip_one }}
+
+Host two-s24
+  HostName {{ ip_two }}
+
+Host *-s24
+  ProxyJump s24
+
+{% endif %}
+Host s24
+  HostName localhost
+  Port 8022
+  User {{ s24_user }}
+
 # ── one host key per BOX, not per path ────────────────────────────────────────
 # Without this each path keeps its own known_hosts entry, so a rarely-used route has no
 # stored key and simply prompts you to accept whatever it is handed — during a rescue,
 # which is exactly when you are least likely to check.
 # To clear one later: ssh-keygen -R zero
-Host zero zero-local zero-one zero-two
+Host zero zero-local zero-one zero-two zero-s24
   HostKeyAlias zero
 
-Host one one-local one-zero one-two
+Host one one-local one-zero one-two one-s24
   HostKeyAlias one
 
 # ChaCha20 first: `two` is an ARM1176 with no AES acceleration, where software AES is
 # both slower AND exposed to cache-timing side channels. Ordered, not pinned — AES-GCM
 # stays available so this rescue path cannot fail closed.
-Host two two-local two-zero two-one
+Host two two-local two-zero two-one two-s24
   HostKeyAlias two
   Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
 
