@@ -6,7 +6,7 @@ secrets, no data.
 ## Run a stack
 
 ```sh
-bin/compose torrents up -d          # one:  torrents | ionic-traces | send2ereader
+bin/compose torrents up -d          # one:  torrents | send2ereader  (ionic-traces stopped)
 bin/compose immich   up -d          # zero: immich | syncthing
 bin/check-sources                   # is the deployed sha still the pinned one?
 bin/check-system-drift              # do tracked /etc copies still match live?
@@ -57,7 +57,7 @@ docs/                  read these
 
 | Host | Hardware | Runs | In repo |
 |---|---|---|---|
-| `one` | Pi 4 | torrents, ionic-traces, send2ereader | yes |
+| `one` | Pi 4 | torrents, send2ereader; ionic-traces **stopped by decision** | yes |
 | `zero` | Pi 5 | Immich (+ db, ml, redis), Syncthing — **all critical, remote** | yes |
 | `two` | Pi 1 B+, armv6, ~475 MB | destiny-director (**test** bot + its Postgres); lifeboat duties **planned, not built** | stays on Alpine |
 
@@ -78,7 +78,7 @@ exists, and the first run of it found exactly that on `one`.
 
 | Host | |
 |---|---|
-| `one` | **8080** qBittorrent (via gluetun) · **7777** ionic-traces · **3001** send2ereader · **8384/22000** syncthing |
+| `one` | **8080** qBittorrent (via gluetun) · ~~**7777** ionic-traces~~ — **stopped**, see [2c](docs/management-plane.md#sequencing-and-where-podman-fits) · **3001** send2ereader · **8384/22000** syncthing |
 | `zero` | **2283** Immich · **8384/22000** syncthing · **127.0.0.1:2224-2225** the `or3-dev` and `infra-dev` containers |
 | `two` | **none published** — the bot's web UI (8080) and break-glass sshd (2222) exist inside the container and are deliberately not mapped. See the commented `ports:` block in `deployments/destiny-director/compose.yaml` |
 

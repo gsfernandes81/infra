@@ -368,7 +368,7 @@ instances of it, so it stops being deferrable. **Rule, restated: secrets never g
 | Immich (+ db, ml, redis) | `zero` | no | the bcache-fronted btrfs array |
 | Syncthing | `zero`, `one` | no | the data it syncs |
 | torrents (gluetun + qBittorrent) | `one` | no | `/dev/net/tun`, shared network namespace |
-| ionic-traces | `one` | **yes** | habit |
+| ionic-traces (**stopped** — see 2c) | `one` | **yes** | habit |
 | send2ereader | `one` | **yes** | habit |
 | destiny-director (test bot + pg) | `two` | **yes**, and must | armv6 images today — see OPEN |
 | `dd-dev` + `dd-mysql` | `zero` | **yes** | habit |
@@ -384,7 +384,7 @@ be made knowingly, in or3, not implied by a placement decision made here.
 **Ports stop being a registry problem** once addressing is by tunnel hostname: nothing is
 published on a host, so nothing collides. Until then, and for the pinned stacks, the
 allocation is: `zero` — 2283 Immich, 8384/22000 Syncthing, **2222 `dd-dev`, 2223 `ds-dev`,
-2224 `or3-dev`**; `one` — 8080 qBittorrent, 7777 ionic-traces, 3001 send2ereader,
+2224 `or3-dev`**; `one` — 8080 qBittorrent, ~~7777 ionic-traces~~ (stopped, 2c), 3001 send2ereader,
 8384/22000 Syncthing; `two` — none published.
 
 ## Dev containers: what the credential experiment established
@@ -466,23 +466,70 @@ ones that answer the question this document started from.
 | 1b | Fleet package standardisation — `playbooks/packages.yml` | all three | 1 | **done** 2026-08-21 |
 | 2 | `README.md` + `recovery.md` cite the generated inventory | docs only | 1 | **done** 2026-08-21 |
 | 2b | `infra-dev` container, and the Cloudflare edge in front of it | `zero`, edge | 2 | **done** 2026-08-22 |
-| 2c | Repair `one`'s two broken services — `mysql-ionic` crash loop, Syncthing `exited` | two containers on `one` | — | **next** |
+| 2c | `one`'s array — both "broken services" are the SP900 in bay 0. `ionic-traces` stays down by decision; Syncthing is blocked on the disk | `one`'s enclosure | **physical access** | **blocked** |
 | 2d | One base image for the four dev containers — `dev/README.md` § *Four copies of this* | `zero`'s dev containers | 2b | |
 | 2e | Rotate the fleet's own tunnel tokens — *Still to do: the fleet's own tunnels* above | `zero`, `one`, edge | 2b | |
 | 3 | First stack adopted: `send2ereader` on `one` | one stack, non-critical box | 2 | |
-| 4 | Vault: `send2ereader`, then `ionic-traces` | secrets for two stacks | 3 | |
+| 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two stacks | 3 | |
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | |
 | 6 | `dd` off `two` | `two`, `one` | arm64 CI, upstream | |
 | 7 | **Rootless podman on `one`** — roadmap §2 | `one` | 3 | |
 | 8 | `two` as the scheduled read-only control node | `two` | 6, 7 | |
 
-**2b–2e were off this list until 2026-08-22.** They come out of the `infra-dev` handoff,
-and two of them outrank Phase 3. `one`'s broken services are the only things on the fleet
-that are *failing* rather than merely unbuilt, and they have been failing since the audit
-that found them — Phase 3 adopts a stack that currently works, which ranks below fixing
-two that do not. The rotation outranks it because the reason it was deferred, "when
-physically present", stopped being true the day `infra-dev` came up. 2d is maintenance
-cost rather than risk and can wait for whichever of the four images next needs a change.
+**2b–2e were off this list until 2026-08-22.** They come out of the `infra-dev` handoff.
+As filed, two of them outranked Phase 3: `one`'s broken services were the only things on
+the fleet *failing* rather than merely unbuilt, and Phase 3 adopts a stack that currently
+works. **2c has since gone the other way** — it was diagnosed on 2026-08-23 and is blocked
+on physical access, so it can no longer be ranked at all; see below. The rotation still
+outranks Phase 3, because the reason it was deferred, "when physically present", stopped
+being true the day `infra-dev` came up. 2d is maintenance cost rather than risk and can
+wait for whichever of the four images next needs a change.
+
+**Which leaves 2e and Phase 3 as the next actionable work**, in that order.
+
+**2c narrowed on 2026-08-23, and then turned out to be one fault rather than two.** The
+owner's call on the first half: `ionic-traces` **stays down**. Very few users, and only
+its database is worth anything, so repair is deferred indefinitely rather than scheduled.
+Nothing is deleted — the compose file, the `SOURCE` pin and the `.env` all stay. The three
+containers were stopped and taken off `restart: always` the same day.
+
+**Both symptoms are the SP900.** `one`'s array has been unmounted for days. `mysql-ionic`
+was not crash-looping because MySQL was broken, and Syncthing was not `exited` for a
+reason of its own — both bind-mount subvolumes on `/dev/sdb1`, and `sdb` has not
+enumerated since the bridge died. What the first audit recorded as *two broken services on
+`one`* is one failing disk in bay 0, which [`recovery.md`](recovery.md) has described since
+2026-08-04. The audit was right about the symptoms and had no way to see they shared a
+cause; that is an argument for the inventory, not against it.
+
+**The mount guard did its job, and this is the first time it has been observed doing it.**
+`mysql-ionic` restarted into the bare `/media/ionic-mysql` once a minute for days under
+`restart: always`, and `chattr +i` refused every attempt — `chown: changing ownership of
+'/var/lib/mysql': Operation not permitted`. The database on the unmounted `sdb1` was never
+touched, the bare mountpoint stayed empty, and the SD card had not moved off 37%. All four
+guards on `one` report `chattr +i effective`. `CLAUDE.md` described them as *due* on `one`;
+they were applied, and that heading is corrected.
+
+An earlier draft of this entry, written before the diagnosis, argued that the crash loop
+endangered the database and that ending it was the urgent part. **That was wrong, and
+wrong in the direction of alarm.** It is recorded rather than quietly replaced because the
+guard is the reason it was wrong: `+i` is what made a crash loop harmless, which is
+exactly the outcome it was installed for. What looked like a service destroying its own
+data was a service being prevented from doing so.
+
+**There will be no backup of `/media/ionic-mysql`**, decided 2026-08-23 — `sdb1` is
+healthy and `sda` holds nothing, so a second copy answers a risk that is not the one in
+play.
+
+**Syncthing is still a repair, and it is blocked on the disk**, not on anything in its own
+configuration. It cannot start until `/media/torrents` and `/media/syncthing-config` are
+mounted; starting it before then writes a blank config into a guarded mountpoint and fails
+the same way MySQL did.
+
+**So 2c no longer outranks Phase 3 — it is blocked on physical access.** The remote levers
+were worked through on 2026-08-23 and are recorded in *Recovery*; none of them reattached
+`sdb`. Nothing degrades while it waits: the array is clean-but-absent, the guards hold, and
+the database has had no writer since this began. **Phase 3 and 2e are what remain
+actionable.**
 
 **2e carries a check that belongs before it, not during it.** The order in *Still to do:
 the fleet's own tunnels* holds `zero` first precisely because a session inside `infra-dev`

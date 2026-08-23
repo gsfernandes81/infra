@@ -21,10 +21,17 @@ sudo bin/check-mount-guards      # zero only — are the data guards still intac
 ```sh
 cd ~/infra
 bin/compose torrents      up -d
-bin/compose ionic-traces  up -d
 bin/compose send2ereader  up -d
-netstat -tln | grep -E '8080|3001|7777|8384|22000'   # expect all five
+netstat -tln | grep -E '8080|3001|8384|22000'        # expect all four
 ```
+
+**`ionic-traces` is deliberately absent here, and must stay absent.** It is stopped by
+decision — see [management-plane.md](management-plane.md) § *Sequencing*, 2c: very few
+users, and only its database is worth anything. Starting it from a recovery would restart
+the crash loop that stopping it existed to end, on the one copy of that database.
+**7777 is expected to be absent** for the same reason, which is why the grep above no
+longer looks for it. Its compose file, `SOURCE` pin and `.env` all remain, so repairing it
+later is something a person decides, not something a reboot decides for them.
 
 `zero`:
 
@@ -108,15 +115,72 @@ scsi 0:0:0:0: Device offlined - not ready after error recovery
 **It does not self-heal.** Measured once: 433 seconds after the final disconnect, zero
 re-enumeration attempts. The kernel gives up and the port stays dead.
 
-Recover without physical access — this re-runs enumeration and usually succeeds:
+Recover without physical access — this re-runs enumeration:
 
 ```sh
 sudo sh -c 'echo 0000:01:00.0 > /sys/bus/pci/drivers/xhci_hcd/unbind'
 sleep 5
 sudo sh -c 'echo 0000:01:00.0 > /sys/bus/pci/drivers/xhci_hcd/bind'
 sleep 20
-lsblk                                    # expect sda AND sdb
+cat /proc/partitions                     # expect sda AND sdb
 ```
+
+**Check with `/proc/partitions`, not `lsblk`.** It answers the same question purely from
+kernel state, where `lsblk` opens block devices to read topology. Whether that is enough
+to poke `sda` was never established, but on a bridge this fragile it is not worth
+establishing the hard way.
+
+**It said "and usually succeeds" until 2026-08-23. It does not.** On that date the
+re-bind was run four times and `sdb` never attached once. Every attempt died the same
+way, and the sequence is worth having in full because it says which layer is at fault:
+
+```
+usb 2-1: Product: Dual SATA Bridge          <- the bridge DOES re-enumerate
+scsi host0: uas
+scsi 0:0:0:0: tag#28 ... CDB: opcode=0x12   <- INQUIRY to LUN 0 = sda
+xhci_hcd 0000:01:00.0: WARNING: Host System Error
+xhci_hcd 0000:01:00.0: xHCI host controller not responding, assume dead
+xhci_hcd 0000:01:00.0: HC died; cleaning up
+```
+
+The bridge is not the problem and the cable is not the problem — both re-enumerate
+cleanly. `sda` hangs on INQUIRY, UAS error recovery escalates to a host reset, and the
+whole controller dies before the scan ever reaches LUN 1.
+
+**The UAS quirk works, and is now measured rather than proposed.** Setting it before a
+re-bind stops the host controller dying:
+
+```sh
+sudo sh -c 'echo 174c:55aa:u > /sys/module/usb_storage/parameters/quirks'
+```
+
+after which the bridge binds as `usb-storage` instead of `uas` — `UAS is ignored for this
+device, using usb-storage instead` — and **no `HC died` follows**. That is a real
+improvement and it is runtime-only, so it costs nothing to set before any re-bind attempt.
+
+**It is not sufficient.** With UAS off the scan reaches `scsi host0: usb-storage` and
+stops there: no `Direct-Access` line, no timeout, no LUN 1 probe, nothing further in
+`dmesg` at all. `sda` hangs without even failing, so the scan never moves on. BOT survives
+what UAS could not, and still cannot get past bay 0.
+
+**One remote lever remains untried: `scsi_mod.scan=manual`.** It stops the SCSI layer
+auto-probing, after which only LUN 1 is added by hand and `sda` is never addressed:
+
+```sh
+sudo sh -c 'echo "0 0 1" > /sys/class/scsi_host/host0/scan'
+```
+
+It cannot be set at runtime — the parameter file is writable but the kernel rejects the
+value with `ENOSPC` — so it means `scsi_mod.scan=manual` on the kernel command line and a
+reboot. **The cost is that the array then never comes up by itself on any future boot**,
+including boots where the disk would have been fine, until someone runs that scan by
+hand. It was judged not worth it on 2026-08-23 while `one` is non-critical. If it is ever
+used, it is strictly temporary and comes back off when the SP900 does.
+
+**The enclosure cannot be power-cycled remotely** — it is externally powered and the smart
+plug covers only the Pis. A Pi reboot does not cut USB power, and a kernel-issued port
+reset was already tried by UAS error recovery and the device came back still hung. So
+nothing in software returns `sda` to a cold state.
 
 **This is safe to do over SSH.** `eth0` is `bcmgenet` on the platform bus, not USB, so
 resetting the USB controller cannot cut your session. A missing array is an outage, never
@@ -126,7 +190,10 @@ Then mount and verify. Check the source device, not just that *something* mounte
 `by-id` names collide on this enclosure, so a wrong-disk mount is the failure to exclude:
 
 ```sh
-for m in ionic-mysql torrents torrents-config syncthing-config; do sudo mount /media/$m; done
+sudo mount /media/ionic-mysql
+sudo mount /media/torrents
+sudo mount /media/torrents-config
+sudo mount /media/syncthing-config
 awk '$2 ~ /^\/media\// {print $1, $2, $3}' /proc/mounts    # expect 4x /dev/sdb1 ... btrfs
 sudo bin/check-mount-guards                                # guards still intact?
 ```
@@ -136,15 +203,19 @@ Then cycle only the containers holding `/media` bind mounts, so they re-resolve 
 `gluetun` reconnects the VPN and gets you a new forwarded port:
 
 ```sh
-sudo docker restart mysql-ionic && sleep 30
-sudo docker restart bot web                # they hold dead connections to mysql
 sudo docker restart torrent syncthing
 sudo docker exec torrent ls /downloads | head   # proves it sees the ARRAY, not the
-sudo docker exec mysql-ionic ls /var/lib/mysql  # empty mountpoint underneath it
+                                                # empty mountpoint underneath it
 ```
 
-That last pair is the check that matters. A container still holding the bare mountpoint
+That last check is the one that matters. A container still holding the bare mountpoint
 is running and looks healthy; only reading the path tells them apart.
+
+**Nothing cycles `mysql-ionic`, `bot` or `web` any more** — the `ionic` stack is stopped
+by decision, above. So `/media/ionic-mysql` has no container holding it, and the
+`docker exec` probe that used to cover that subvolume is gone with them: the `awk` over
+`/proc/mounts` above is now the only thing confirming it mounted. Restore the probe along
+with the stack if it is ever repaired.
 
 Three things worth knowing before you touch it:
 

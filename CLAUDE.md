@@ -83,7 +83,7 @@ Procedure, in two phases, with the risky half separated from the reversible half
 2. **Restart, watching, with automatic rollback.** Poll an *end-to-end* probe, not a
    proxy for one. After a bounded wait, restore the backup and restart again.
 
-## Mount guards (`zero`, and due on `one`)
+## Mount guards (`zero` and `one` — both applied)
 
 Docker's init declares only `need sysfs cgroups net` — it starts whether or not
 `/media/*` mounted, so a container with `restart: always` will populate an empty
@@ -104,6 +104,14 @@ An OpenRC guard service was tried and rejected: new boot-path code, a new way fo
 box to come up with no containers, and a false-failure mode (renaming a Syncthing share
 would have stopped Docker on the next reboot). `chattr +i` makes the bad write
 impossible rather than detected. On MicroOS, `RequiresMountsFor=` replaces it.
+
+**Both layers are live on `one` as well, verified 2026-08-23**, and this is no longer
+theory: `one`'s array went missing, `mysql-ionic` restarted into the bare
+`/media/ionic-mysql` under `restart: always`, and `chattr +i` refused it — the container
+logs read `chown: changing ownership of '/var/lib/mysql': Operation not permitted`, once
+a minute, for days. The database on the unmounted `sdb1` was untouched and the bare
+mountpoint stayed empty. Worth knowing what the guard *looks like* when it fires: not an
+alert, but a service in a crash loop for a reason that reads like the service's own bug.
 
 `sudo bin/check-mount-guards` verifies both. It bind-mounts `/` to see the real
 mountpoints — `lsattr -d` on a *mounted* path reports the mounted filesystem's root,
