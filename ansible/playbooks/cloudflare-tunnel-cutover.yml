@@ -212,6 +212,32 @@
           {{ dict(move_hosts | zip(recs.results
              | map(attribute='json.result.0.content') | list)) }}
 
+    # EVERY RECORD MUST CURRENTLY POINT AT THE SAME TUNNEL, and it must not already be
+    # the target. A hostname in this host's ingress whose DNS aims somewhere else is a
+    # DEAD RULE — it has never routed here — and repointing it would take a working
+    # service away from whichever tunnel actually serves it.
+    #
+    # This is not hypothetical. zero's ingress carries torrents.gsrpi.uk, whose CNAME has
+    # always pointed at ONE's tunnel; copied blindly into zero's new config it would have
+    # moved one's torrent UI onto zero to fix a rule that had never done anything.
+    - name: Where the records point today
+      ansible.builtin.set_fact:
+        current_targets: >-
+          {{ recs.results | map(attribute='json.result.0.content') | list | unique }}
+
+    - name: Refuse if they do not all point at one tunnel that is not the target
+      ansible.builtin.assert:
+        that:
+          - current_targets | length == 1
+          - current_targets[0] != target_tunnel ~ '.cfargotunnel.com'
+        fail_msg: >-
+          These hostnames do not share a single current target:
+          {{ dict(move_hosts | zip(recs.results | map(attribute='json.result.0.content') | list)) }}.
+          A hostname in this host's ingress whose DNS points elsewhere has never routed
+          here — it is a dead rule, and repointing it would move a working service.
+          Remove it from the reviewed config rather than carrying it across.
+      when: not swap_done
+
     - name: Refuse if any hostname has no record, or more than one
       ansible.builtin.assert:
         that: item.json.result | length == 1
