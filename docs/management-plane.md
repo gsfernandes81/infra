@@ -476,9 +476,9 @@ ones that answer the question this document started from.
 | 2b | `infra-dev` container, and the Cloudflare edge in front of it | `zero`, edge | 2 | **done** 2026-08-22 |
 | 2c | `one`'s array — both "broken services" are the SP900 in bay 0. `ionic-traces` stays down by decision; Syncthing is blocked on the disk | `one`'s enclosure | **physical access** | **blocked** |
 | 2d | One base image for the four dev containers — `dev/README.md` § *Four copies of this* | `zero`'s dev containers | 2b | |
-| 2e | Rotate the fleet's own tunnel tokens | `zero`, `one`, edge | 2b | `zero` **done 2026-08-23**; **`one`'s half is absorbed into 2g** — see below; `two` unchecked |
+| 2e | Rotate the fleet's own tunnel tokens | `zero`, `one`, `two`, edge | 2b | `zero` **done 2026-08-23**; `one` and `two` **absorbed into 2g** — see below. `two`'s token is still **inline in a 755 file** |
 | 2f | `cloudflared`'s init script logs nowhere — fix it, and record why the generated service was rejected | `zero`, `one` | — | before `one`'s half of 2e |
-| 2g | Both host tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, DNS | 2f | `one` first, as rehearsal |
+| 2g | All three tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, `two`, DNS | 2f | `one` first, as rehearsal |
 | 3 | First stack adopted: `send2ereader` on `one` | one stack, non-critical box | 2 | |
 | 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two stacks | 3 | |
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | |
@@ -527,7 +527,18 @@ regardless, and it has far fewer hostnames — capture them with
 `torrents.gsrpi.uk` in the same operation, since that hostname is moving to `one` anyway
 and repointing it is one more CNAME in a batch that is already being repointed.
 
-Estimated 1.5–2.5 hours per host, most of it verification. Two unknowns that could
+**`two` is in scope and is the special case.** Its token was never moved out of the
+init script at all — `grep -c eyJ /etc/init.d/cloudflared` returns 1, confirmed
+2026-08-23 — so it is a live disclosed credential in a world-readable file, and retiring
+that tunnel is the cleanest remediation available. It is also the smallest job, one
+hostname. But `two` is **diskless, running from RAM with the SD card read-only**, so
+anything written to `/etc` evaporates at the next reboot unless committed with `lbu
+commit`, and the test that it held is a reboot rather than a restart. On the lifeboat.
+Do it last, and not on the same evening as either of the others.
+
+Estimated 1.5–2.5 hours per host, most of it verification. **`one` is smaller than first
+thought** — five hostnames, not eight, and one of those (`torrents.gsrpi.uk`) may need no
+DNS change at all, so closer to an hour. Two unknowns that could
 stretch it: whether those CNAMEs are freely editable or tunnel-managed, and whether Access
 applications follow hostnames cleanly across a tunnel change — they bind to hostnames
 rather than tunnels, so they should, but that is unverified.

@@ -126,5 +126,31 @@ take effect reads as authoritative and is worse than none.
   Public Hostname from zero's tunnel. No repo edit and no restart on zero.
 - **Can this tunnel be made locally-managed at all?** Unknown. It would put the routes
   under review in git, which is the direction everything else here is going.
-- **`one` and `two`.** One is unrotated, still `--token` in argv. Two has never been
-  checked to see whether its token is even inline.
+## One's tunnel
+
+Captured 2026-08-23. Five hostnames, of which this repo recorded one.
+
+| Hostname | Origin | |
+|---|---|---|
+| `ssh-one.gsrpi.uk` | `ssh://localhost:22` | |
+| `ionic-traces.gsrpi.uk` | `http://localhost:7777` | **502s** — the stack is down by decision |
+| `bookit.gsrpi.uk` | `http://localhost:3001` | this is `send2ereader`'s public name |
+| `syncthing-torrents.gsrpi.uk` | `http://localhost:8384` | the only one the repo knew |
+| `torrents.gsrpi.uk` | `http://localhost:8080` | **also claimed by zero's tunnel** |
+| *(catch-all)* | `http_status:404` | |
+
+**`torrents.gsrpi.uk` is in both tunnels' ingress.** A CNAME targets exactly one tunnel,
+so one of those two rules has always been dead. Which one is unresolved: the records are
+proxied, so DNS resolves to Cloudflare anycast either way and cannot answer it. Read the
+CNAME target from the dashboard's DNS page, or with a `Zone:DNS:Read` token, and compare
+against zero's `9456fbcd-…`.
+
+Until that is settled, **do not assume one's torrent UI depends on zero.** This document
+and several commits said it did, on the strength of zero's ingress alone, before one's
+was ever looked at.
+
+## Open
+
+- **`two`'s token is still inline** in `/etc/init.d/cloudflared` at mode 755, confirmed
+  2026-08-23. Never moved, never rotated — worse than either other host. Its remediation
+  is complicated by `two` being diskless: see `recovery.md`.

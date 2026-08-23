@@ -309,13 +309,16 @@ could fail to mount.
 |---|---|---|---|
 | `zero` | ✅ Aug 2026 | ✅ Aug 2026 | ✅ **rotated 2026-08-23**, and out of argv — credentials file |
 | `one` | ✅ Aug 2026 | ✅ Aug 2026 | moved out of the init script Aug 2026, **still `--token` in argv, NOT rotated** |
-| `two` | n/a (diskless) | n/a | check — nobody has |
+| `two` | n/a (diskless) | n/a | **still INLINE in the 755 init script**, confirmed 2026-08-23 — never moved, never rotated |
 
 **`zero` is done; `one` is not.** Both tokens were world-readable in a 755 init script
 for months, so both had to be assumed disclosed. Zero's was rotated on 2026-08-23 and
 that old value is now dead at Cloudflare — anyone holding a copy has nothing. **One's is
 still live and still disclosed**, and it is still passed as `--token` in `command_args`,
 so `supervise-daemon` logs it to syslog on every start.
+
+**`two` is worse than either** — see below: its token was never even moved out of the
+init script.
 
 It did not need physical presence, which is what this file used to say. It needed a
 session that does not cross the tunnel being restarted — the `two` bastion — and that
@@ -415,9 +418,19 @@ Port-7844 socket counts and the log file were both tried and rejected: on `one` 
 read dead while the tunnel was serving normally, and either would have rolled back a
 good change.
 
-**`two` — check before assuming.** If the token is still inline in the world-readable
-init script, the same fix applies: move it to `/etc/conf.d/cloudflared` (mode 600),
-reference `${CF_TUNNEL_TOKEN}`, verify, then rotate. Confirm with:
+**`two` — checked 2026-08-23, and it is the worst of the three.** `grep -c eyJ
+/etc/init.d/cloudflared` returns **1**: the token is still inline in a mode-755
+world-readable file. Zero and one at least moved theirs to a 600 file in August; two was
+never done, so its credential has been readable by any account on the box for as long as
+the tunnel has existed, and it has never been rotated.
+
+**Two's fix is NOT the same operation as zero's, and the difference will bite.** `two`
+runs **diskless, from RAM, with the SD card read-only**. Anything written to `/etc` lives
+in tmpfs: it will apply, verify, pass every check, and then be gone at the next reboot —
+on the one box whose entire purpose is still working when the others do not. Any change
+there needs `lbu commit`, and the check that it worked is a reboot, not a restart.
+
+Re-confirm before acting, since this is the state everything else assumes:
 
 ```sh
 grep -c 'eyJ' /etc/init.d/cloudflared      # 0 = already moved
