@@ -178,7 +178,11 @@
     # and a refusal behind a quiet recap. These two debugs ARE the play's output.
     - name: What would change
       ansible.builtin.debug:
-        msg: "{{ item.stdout_lines + (item.stderr_lines | default([])) }}"
+        # Joined into ONE string, deliberately: a list of lines renders under
+        # result_format=yaml as quoted, escaped list items — unreadable on a phone,
+        # which is where this play is reviewed. A multiline string renders as a block
+        # scalar: real newlines, no quoting, the diff as the tool printed it.
+        msg: "{{ (item.stdout_lines + (item.stderr_lines | default([]))) | join('\n') }}"
       changed_when: true
       loop: "{{ dry.results }}"
       loop_control:
