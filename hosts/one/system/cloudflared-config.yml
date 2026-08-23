@@ -1,0 +1,32 @@
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /etc/cloudflared
+# infra-name: config.yml
+# infra-mode: 0644
+#
+# Credentials and metrics for `one`'s host tunnel. NOT its ingress.
+#
+# WHY. `command_args` carried `--token <secret>`, and supervise-daemon logs its child's
+# full command line to syslog — the token-in-argv leak docs/host-setup.md flags. The
+# secret now lives in /etc/cloudflared/one.json at 0600 instead.
+#
+# NO INGRESS HERE, DELIBERATELY. This tunnel is remotely-managed, which is certain
+# rather than assumed: it has always run with `--token` and no `--config`, so it has
+# never read a local file and its routes can only have come from Cloudflare. cloudflared
+# ignores local ingress whenever a remote configuration exists — established on zero
+# 2026-08-23 by clearing the remote copy and watching the connector drop to one rule.
+# A copy here would be inert and would read as authoritative. docs/cloudflare.md holds
+# a dated snapshot of the five hostnames.
+#
+# Moving the routes into this file is phase 2g and needs a NEW tunnel: `config_src` is
+# create-time only.
+
+tunnel: 96635122-2ceb-4fe2-8ae0-966a343bd124
+credentials-file: /etc/cloudflared/one.json
+
+# Pinned so the probe in docs/recovery.md has a fixed target. THE PIN MAKES THE RESTART
+# METHOD LOAD-BEARING: `rc-service restart` does not wait, cloudflared's grace period is
+# 30s, and the outgoing process still holds this port when the incoming one binds it —
+# which killed six respawns on zero and took its tunnel down. Cycle with
+# stop -> poll until 20241 is free -> start. Never `restart`.
+metrics: 127.0.0.1:20241

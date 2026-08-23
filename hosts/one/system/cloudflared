@@ -29,11 +29,15 @@
 cfgfile="/etc/$RC_SVCNAME/$RC_SVCNAME.conf"
 supervisor=supervise-daemon
 command="/usr/bin/cloudflared"
-command_args="--autoupdate-freq 24h0m0s tunnel run --token ${CF_TUNNEL_TOKEN}"
+command_args="--autoupdate-freq 24h0m0s --config /etc/cloudflared/config.yml tunnel run"
 command_user="root"
 pidfile="/var/run/$RC_SVCNAME.pid"
 command_background="yes"
 
+# NO --token. The secret is /etc/cloudflared/one.json at 0600, referenced by config.yml,
+# so it is no longer in argv and no longer reaches syslog on every start. Changed
+# 2026-08-23, after the same change on zero.
+#
 # `cfgfile` and `command_background` both appear vestigial — nothing here references
 # either, and docker's script sets neither. Left alone rather than removed in the same
 # change as the logging fix; one thing at a time on a boot-path file.
