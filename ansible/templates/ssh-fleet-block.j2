@@ -1,0 +1,109 @@
+# The fleet: three named paths to each Pi, plus a mesh through both of the others.
+#
+#   <host>                    via that box's own cloudflared tunnel
+#   <host>-local              direct on the LAN
+#   <host>-zero|-one|-two     through another box, over the LAN
+#
+# WHY THE MESH EXISTS. On 2026-08-23 `two`'s tunnel was stopped while it was the only
+# configured route to it — there was no `two-zero` to fall back to, and no key on zero
+# or one that reaches it, so the box was unreachable until a ProxyCommand was assembled
+# by hand under pressure. Every box is now reachable through both of the others.
+#
+# ORDERING: ssh takes the FIRST value it obtains for each keyword, so this block must sit
+# ABOVE `Host *`. The playbook inserts it there rather than appending.
+
+# ── LAN ───────────────────────────────────────────────────────────────────────
+Host zero-local
+  HostName {{ ip_zero }}
+
+Host one-local
+  HostName {{ ip_one }}
+
+Host two-local
+  HostName {{ ip_two }}
+
+# ── through another box, over the LAN ─────────────────────────────────────────
+# HostName is resolved ON the jump host, so these are LAN addresses as it sees them.
+Host zero-one zero-two
+  HostName {{ ip_zero }}
+
+Host one-zero one-two
+  HostName {{ ip_one }}
+
+Host two-zero two-one
+  HostName {{ ip_two }}
+
+# ── the jump rules ────────────────────────────────────────────────────────────
+# `nc`, not ProxyJump. zero and one set AllowTcpForwarding no, which refuses the
+# direct-tcpip channel ProxyJump opens; a session channel running nc is not covered by
+# that setting. So the mesh needs no change on any host. `nc host port` is the one form
+# busybox and openbsd-nc agree on, and %h is the target's LAN address.
+#
+# If AllowTcpForwarding is ever enabled fleet-wide these become `ProxyJump <host>`,
+# which is tidier and spawns no login shell on the jump host — but it is a change to
+# the sshd you are connected through, and this works without it.
+Host *-zero
+  ProxyCommand ssh zero nc %h %p
+
+Host *-one
+  ProxyCommand ssh one nc %h %p
+
+Host *-two
+  ProxyCommand ssh two nc %h %p
+
+# ── the dev containers on zero — User dev, so they must precede the shared block
+Host zero-dev-dd
+  HostName ssh-zero-dev-dd.gsrpi.uk
+  User dev
+
+Host zero-dev-or3
+  HostName ssh-zero-dev-or3.gsrpi.uk
+  User dev
+  RequestTTY yes
+  RemoteCommand abduco -A claude claude
+
+# ── through each box's own cloudflared tunnel ─────────────────────────────────
+Host zero
+  HostName ssh-zero.gsrpi.uk
+
+Host one
+  HostName ssh-one.gsrpi.uk
+
+Host two
+  HostName ssh-two.gsrpi.uk
+
+# One copy of the path rather than five. Listed explicitly, not `zero*`: that would also
+# catch zero-local and zero-two, which must NOT go through the edge.
+Host zero one two zero-dev-dd zero-dev-or3
+  ProxyCommand {{ cloudflared }} access ssh --hostname %h
+
+# ── one host key per BOX, not per path ────────────────────────────────────────
+# Without this each path keeps its own known_hosts entry, so a rarely-used route has no
+# stored key and simply prompts you to accept whatever it is handed — during a rescue,
+# which is exactly when you are least likely to check.
+# To clear one later: ssh-keygen -R zero
+Host zero zero-local zero-one zero-two
+  HostKeyAlias zero
+
+Host one one-local one-zero one-two
+  HostKeyAlias one
+
+# ChaCha20 first: `two` is an ARM1176 with no AES acceleration, where software AES is
+# both slower AND exposed to cache-timing side channels. Ordered, not pinned — AES-GCM
+# stays available so this rescue path cannot fail closed.
+Host two two-local two-zero two-one
+  HostKeyAlias two
+  Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
+
+# ── shared: the account, and multiplexing ─────────────────────────────────────
+# ControlMaster is the real latency win — the first connection stays open and later ones
+# reuse it, so a run of commands pays TCP and auth setup once.
+#
+# KEYED BY ALIAS (%n), not by host. %C and the usual %r@%h:%p both hash the RESOLVED
+# address, so `zero-one` and `zero-local` would share one socket — and a rescue path
+# that silently reuses a working direct connection is not a test of anything.
+Host zero* one* two*
+  User gavin
+  ControlMaster auto
+  ControlPath ~/.ssh/cm/%n-%r
+  ControlPersist 10m
