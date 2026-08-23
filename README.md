@@ -69,6 +69,19 @@ monitoring — are the [roadmap's §5](docs/roadmap.md#5-two--keep-it-as-the-lif
 `sshd`, and now this stack. It is also the only host on **rootless podman**; docker and
 containerd are removed from it. See [decisions.md](docs/decisions.md).
 
+### Public hostnames
+
+Zero's tunnel serves eight, and **only one of them was recorded anywhere in this repo
+before 2026-08-23**. The authoritative list is now
+[`hosts/zero/system/cloudflared-config.yml`](hosts/zero/system/cloudflared-config.yml),
+because that file *is* the tunnel's ingress — see [cloudflare.md](docs/cloudflare.md)
+for what is safe to change and what is load-bearing.
+
+Worth knowing without opening either: `torrents.gsrpi.uk` is served by **zero**'s tunnel
+but proxies across the LAN to **one** — so one's torrent UI depends on zero being up.
+That is being undone. And `ssh-zero.gsrpi.uk` reaches zero's sshd, which is why
+restarting that tunnel from a session that arrived through it would strand you.
+
 ### Ports
 
 **These are what the compose files ask for. What is actually listening is

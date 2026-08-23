@@ -305,16 +305,21 @@ could fail to mount.
 
 **Per-host status, at a glance:**
 
-| | `nofail` | `chattr +i` | token moved out of the init script |
+| | `nofail` | `chattr +i` | tunnel credential |
 |---|---|---|---|
-| `zero` | ✅ Aug 2026 | ✅ Aug 2026 | ✅ Aug 2026 — **not rotated** |
-| `one` | ✅ Aug 2026 | ✅ Aug 2026 | ✅ Aug 2026 — **not rotated** |
-| `two` | n/a (diskless) | n/a | check |
+| `zero` | ✅ Aug 2026 | ✅ Aug 2026 | ✅ **rotated 2026-08-23**, and out of argv — credentials file |
+| `one` | ✅ Aug 2026 | ✅ Aug 2026 | moved out of the init script Aug 2026, **still `--token` in argv, NOT rotated** |
+| `two` | n/a (diskless) | n/a | check — nobody has |
 
-**Neither token has been rotated.** Both were world-readable in a 755 init script for
-months, so both must be assumed disclosed — anyone who copied one can still run a
-connector for that tunnel. Moving them shrank future exposure and did nothing about
-past exposure. Regenerate both in the Zero Trust dashboard when physically present.
+**`zero` is done; `one` is not.** Both tokens were world-readable in a 755 init script
+for months, so both had to be assumed disclosed. Zero's was rotated on 2026-08-23 and
+that old value is now dead at Cloudflare — anyone holding a copy has nothing. **One's is
+still live and still disclosed**, and it is still passed as `--token` in `command_args`,
+so `supervise-daemon` logs it to syslog on every start.
+
+It did not need physical presence, which is what this file used to say. It needed a
+session that does not cross the tunnel being restarted — the `two` bastion — and that
+has always existed.
 
 **`zero`:** all three `/media/*` entries now carry `nofail`. Its array is btrfs **RAID1
 across two bcache devices**, so *both* must assemble before it can mount read-write —
@@ -369,16 +374,33 @@ it does not control it.
 
 Both hosts run `cloudflared` from `/etc/init.d/cloudflared`. It's your way back in.
 
-**`zero` — token moved, NOT yet rotated (Aug 2026).** The token now lives in
-`/etc/conf.d/cloudflared` at mode 600, sourced automatically by OpenRC; the init script
-references `${CF_TUNNEL_TOKEN}` and is tracked under `hosts/zero/system/`. **The old
-value was world-readable for months and must be assumed disclosed** — anyone who copied
-it can still run a connector for this tunnel until it is regenerated in the Zero Trust
-dashboard. Moving it shrank future exposure; it did not undo past exposure. Rotate when
-physically present.
+**`zero` — done, 2026-08-23.** No token anywhere. `/etc/cloudflared/zero.json` (0600
+root) holds the credentials and `/etc/cloudflared/config.yml` holds the ingress, both
+tracked under `hosts/zero/system/`. The secret was rotated at the same sitting, so the
+disclosed one is dead.
 
-**`one` — same, done Aug 2026, also NOT rotated.** Identical layout to `zero`, tracked
-under `hosts/one/system/`. The move was proven inert before restarting: the new config
+**Rebuilding zero's tunnel therefore needs two files, not a token**, which is the thing
+to know here at 3am: `config.yml` is in the repo and installs with
+`bin/install-system-file cloudflared-config.yml`, but `zero.json` is a secret and is
+NOT — it has to be regenerated from a tunnel token, which is base64 of
+`{"a":AccountTag,"t":TunnelID,"s":Secret}` and maps to
+`{"AccountTag":…,"TunnelID":…,"TunnelSecret":…}`. Get a token from Zero Trust and
+convert it; no other Cloudflare access is required.
+
+**Cycling it is not `rc-service restart`.** `config.yml` pins the metrics port, cloudflared's
+grace period is 30s, and `restart` does not wait — the incoming process fails to bind a
+port the outgoing one still holds, exits 1, and `supervise-daemon` gives up after five
+respawns. That took the tunnel down on 2026-08-23. Always: `stop`, poll until
+`127.0.0.1:20241` is free, then `start`.
+
+**`/ready` is not sufficient on its own any more.** It reports the connector's
+registration with the edge and knows nothing about ingress, so a broken `config.yml`
+gives a perfectly healthy-looking tunnel serving 404. Diff `127.0.0.1:20241/config`
+against a known-good capture, and fetch one real hostname end to end.
+
+**`one` — NOT done. Still `--token` in argv, still the disclosed value.** Layout as
+`zero`'s was before 2026-08-23, tracked under `hosts/one/system/`. It gets the same two
+phases, standing on a jump from `two`. The move was proven inert before restarting: the new config
 was sourced, `command_args` expanded, and its SHA-256 compared against the running
 command line — identical, so the daemon restarted with a byte-identical invocation. It
 recovered in 5s and the `connectorId` changed, which is what proves it actually

@@ -342,10 +342,18 @@ tunnel being restarted, then restart with an end-to-end probe and automatic roll
 
 The order, once `infra-dev` has been up long enough to be trusted:
 
-1. `zero` — rotate the token, keeping the same tunnel, with the session held inside
-   `infra-dev` rather than through `ssh-zero`. Probe `127.0.0.1:20241/ready`.
-2. `one` — same, with the session held on `zero` over the LAN, which `recovery.md`
-   already names as its second way in.
+1. ~~`zero`~~ — **done 2026-08-23**, but not the way this said. The session was held on
+   the **`two` bastion**, not inside `infra-dev`: that container has no route to zero at
+   all (no fleet key, no `ssh_config.fleet`, `INFRA_DEV_FLEET` unset), so it is a safe
+   place to stand and a useless place to work from. The claim above that it "holds the
+   fleet key" was wrong. `/ready` also turned out to be insufficient alone — see
+   `recovery.md`.
+2. `one` — same, with the session held on **`one` reached by a jump from `two`**.
+   An earlier draft said "held on `zero` over the LAN", which cannot be done:
+   `recovery.md` documents that LAN path in the other direction (`one` → `zero`), and
+   `decisions.md` refuses a key on `zero` authorising it to reach `one` at all. `two` is
+   the bastion for both boxes — the lifeboat direction, which is the one that entry
+   blesses. Confirmed reachable 2026-08-23.
 3. `two` — check first whether the token is even still inline: `recovery.md` says
    "check before assuming" and nobody has.
 
@@ -468,7 +476,7 @@ ones that answer the question this document started from.
 | 2b | `infra-dev` container, and the Cloudflare edge in front of it | `zero`, edge | 2 | **done** 2026-08-22 |
 | 2c | `one`'s array — both "broken services" are the SP900 in bay 0. `ionic-traces` stays down by decision; Syncthing is blocked on the disk | `one`'s enclosure | **physical access** | **blocked** |
 | 2d | One base image for the four dev containers — `dev/README.md` § *Four copies of this* | `zero`'s dev containers | 2b | |
-| 2e | Rotate the fleet's own tunnel tokens — *Still to do: the fleet's own tunnels* above | `zero`, `one`, edge | 2b | |
+| 2e | Rotate the fleet's own tunnel tokens | `zero`, `one`, edge | 2b | `zero` **done 2026-08-23** (rotated, and off `--token`); `one` and `two` outstanding |
 | 3 | First stack adopted: `send2ereader` on `one` | one stack, non-critical box | 2 | |
 | 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two stacks | 3 | |
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | |
