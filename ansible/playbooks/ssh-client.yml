@@ -37,8 +37,11 @@
     windows_out: "{{ home }}/ssh-fleet-block-windows.txt"
 
   tasks:
+    # `shell`, not `command`, and deliberately: `command -v` is a SHELL BUILTIN, so the
+    # command module has nothing to exec and reports cloudflared missing on a host where
+    # it is plainly on PATH. Hit exactly that on Termux, 2026-08-23.
     - name: Find cloudflared on this control node
-      ansible.builtin.command: command -v cloudflared
+      ansible.builtin.shell: command -v cloudflared
       register: cfd_path
       changed_when: false
       failed_when: false
