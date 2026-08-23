@@ -157,23 +157,17 @@ that has one.
   needs `iptables` while **not** depending on it — so it must be installed explicitly
   *before* the removal or rootless podman networking breaks days later, for a reason
   nobody would connect back to a docker cleanup.
-- **Install `smartmontools`; never add `smartd` to a runlevel on `one`.** The two are
-  not the same act. `bin/hw-inventory` polls once, when a person runs it, and honours
-  `smart_skip` in that host's `hw-inventory.toml` — which is why `one`'s failing bay-0
-  SP900 is named there and never touched. `smartd` is a daemon, knows nothing about that
-  file, and polls **every** disk on a schedule. On `one` that means periodically issuing
-  the INQUIRY that stalls the Sabrent bridge, which takes `sdb` and therefore the array
-  with it: a ten-minute outage, on a timer, for a reason nobody would connect to a
-  package installed months earlier. Alpine does not add it to a runlevel on install, so
-  the package is safe; the trap is the obvious next step, someone seeing `smartd` and
-  thinking "monitoring, good".
-  **`smartmontools` is now fleet-wide** — it is in `base_packages` in
-  `ansible/group_vars/fleet.yml`, so `ansible/playbooks/packages.yml` puts it on all
-  three, and the comment there says why installing a tool is not enabling it. That makes
-  this landmine *more* live, not less: the tool is now present on `one` by policy, so the
-  only thing standing between the fleet and a ten-minute array outage is nobody running
-  `rc-update add smartd`. If `rc-status --all | grep smartd` ever returns a line on `one`,
-  that is the incident, and the fix is `rc-update del smartd` before anything else.
+- **`smartd` on `one` — a landmine DEFUSED on 2026-08-24, kept as the type specimen.**
+  From Aug 2026 until then, adding `smartd` to a runlevel on `one` would have taken the
+  array down on a timer: the failing SP900 in bay 0 stalled the USB bridge on the exact
+  INQUIRY a SMART poll issues, and `smartd` polls every disk on a schedule, knowing
+  nothing about the `smart_skip` list that kept `bin/hw-inventory` safe. The disk has
+  been pulled and the hazard is gone — `rc-update add smartd` is now merely a choice,
+  not an incident. The entry stays because it is the cleanest example of two rules this
+  file keeps re-learning: **installing a tool is not enabling it** (smartmontools went
+  fleet-wide as a package precisely while its daemon was a loaded gun on one host), and
+  a landmine's trigger can be an innocuous act — someone seeing `smartd` and thinking
+  "monitoring, good" — months after and miles away from the thing that armed it.
 - **Write the address, not the name.** `localhost` resolves to `::1` before `127.0.0.1`,
   and a great deal on this fleet binds IPv4 only — so the name reaches a listener that
   is not there and the error names something else entirely. It has cost time twice:

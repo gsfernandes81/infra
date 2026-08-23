@@ -474,7 +474,7 @@ ones that answer the question this document started from.
 | 1b | Fleet package standardisation — `playbooks/packages.yml` | all three | 1 | **done** 2026-08-21 |
 | 2 | `README.md` + `recovery.md` cite the generated inventory | docs only | 1 | **done** 2026-08-21 |
 | 2b | `infra-dev` container, and the Cloudflare edge in front of it | `zero`, edge | 2 | **done** 2026-08-22 |
-| 2c | `one`'s array — both "broken services" are the SP900 in bay 0. `ionic-traces` stays down by decision; Syncthing is blocked on the disk | `one`'s enclosure | **physical access** | **blocked** |
+| 2c | `one`'s array — both "broken services" were the SP900 in bay 0 | `one`'s enclosure | — | **done 2026-08-24** — disk pulled, unattended boot proven |
 | 2d | One base image for the four dev containers — `dev/README.md` § *Four copies of this* | `zero`'s dev containers | 2b | |
 | 2e | Rotate the fleet's own tunnel tokens | `zero`, `one`, `two`, edge | 2b | **`zero` and `one` done 2026-08-23** — one's by retiring its tunnel under 2g. `two`'s token is out of the 755 file and in a credentials file; its rotation waits for 2g |
 | 2f | `cloudflared`'s init script logs nowhere | `zero`, `one`, `two` | — | **done on all three, 2026-08-23** |
@@ -691,11 +691,15 @@ configuration. It cannot start until `/media/torrents` and `/media/syncthing-con
 mounted; starting it before then writes a blank config into a guarded mountpoint and fails
 the same way MySQL did.
 
-**So 2c no longer outranks Phase 3 — it is blocked on physical access.** The remote levers
-were worked through on 2026-08-23 and are recorded in *Recovery*; none of them reattached
-`sdb`. Nothing degrades while it waits: the array is clean-but-absent, the guards hold, and
-the database has had no writer since this began. **Phase 3 and 2e are what remain
-actionable.**
+**Closed 2026-08-24: the SP900 was pulled**, with help at the enclosure — whose power
+cycle, the one lever software could never reach, is also what un-wedged the bridge.
+The MX500 enumerates as `sda` now (only disk); everything mounts by UUID so the rename
+cost nothing. The close-out was demonstrated, not declared: an unattended reboot brought
+back all four mounts, every container, healthy Syncthing reading its real config, and
+four tunnel connections, with no hands. The array survived eleven days unmounted and a
+crash loop against its guarded mountpoint without losing a byte — the `chattr +i` layer's
+first live firing, and its full vindication. `ionic-traces` stays down by decision, as
+before; that was never the disk's question.
 
 **2e carries a check that belongs before it, not during it.** The order in *Still to do:
 the fleet's own tunnels* holds `zero` first precisely because a session inside `infra-dev`
