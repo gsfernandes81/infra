@@ -45,7 +45,13 @@
 - name: Install tracked system files on the fleet
   hosts: fleet
   gather_facts: false
-  serial: 1
+  # NO serial. Lockstep (the linear strategy's default) is better here twice over: the
+  # output reads as one banner with a row per host instead of the whole play repeated
+  # three times, and the HEAD/dirty-tree asserts check the ENTIRE fleet before anything
+  # installs anywhere — with serial: 1, a push landing mid-run could pass on the first
+  # host and fail on the second, leaving the fleet deployed from two different commits.
+  # The cutover play keeps its serial: 1; migrating one tunnel at a time is the point
+  # there, and this reasoning is about a play that should behave as one fleet-wide step.
 
   vars:
     repo: /home/gavin/infra
