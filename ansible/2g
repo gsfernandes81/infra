@@ -1,0 +1,49 @@
+#!/bin/sh
+# Short wrapper for the three tunnel-migration playbooks.
+#
+# `ansible-playbook playbooks/cloudflare-tunnel-cutover.yml -e target=zero
+#  -e ansible_host=zero-two -K` is 93 characters, and 93 characters is how a paste gets
+# broken in half on a phone. These are all under 40.
+#
+#   ./2g new    <host>
+#   ./2g cut    <host>                     picks the mesh alias for you
+#   ./2g retire <host> [drop] [<hostname>] drop = delete WARP routes
+#                                          a bare hostname = abandon it
+# Examples:
+#   ./2g cut zero
+#   ./2g retire zero drop
+#   ./2g retire one ionic-traces.gsrpi.uk
+#
+# DELETE THIS once 2g is finished on all three. It is scaffolding for one migration,
+# and CLAUDE.md is clear that one-shots do not get left in the tree.
+set -eu
+
+[ $# -ge 2 ] || { echo "usage: 2g new|cut|retire <host> [drop] [<hostname-to-abandon>]"; exit 1; }
+act=$1; host=$2; shift 2
+
+# The cutover cycles the target's connector, so it must NOT arrive through that tunnel.
+# `two` cannot jump through itself.
+case $host in
+    two) jump=two-zero ;;
+    *)   jump=$host-two ;;
+esac
+
+extra=""
+for a in "$@"; do
+    case $a in
+        drop)       extra="$extra -e drop_routes=true" ;;
+        abandon=*)  extra="$extra -e $a" ;;
+        *.*)        extra="$extra -e abandon=$a" ;;
+        *)          extra="$extra $a" ;;
+    esac
+done
+
+case $act in
+    new)    pb=cloudflare-tunnel-new.yml;     via="" ;;
+    cut)    pb=cloudflare-tunnel-cutover.yml; via="-e ansible_host=$jump" ;;
+    retire) pb=cloudflare-tunnel-retire.yml;  via="" ;;
+    *) echo "unknown action: $act"; exit 1 ;;
+esac
+
+set -x
+exec ansible-playbook "playbooks/$pb" -e "target=$host" $via $extra -K
