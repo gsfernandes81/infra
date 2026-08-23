@@ -3,168 +3,138 @@
 What exists, which parts are load-bearing, and what is safe to delete. Written
 2026-08-23, when it turned out the repo recorded **one** of zero's eight public
 hostnames and nothing at all about which Cloudflare objects a service depends on.
+Rewritten the same day, twice, because most of what it first said stopped being true.
 
-## Zero's tunnel — `9456fbcd-95f6-48a8-9bcd-d6e85bfbfc01`
+## Where routing lives, per host
 
-**It is remotely-managed, and that cannot currently be changed.** The ingress lives in
-Cloudflare; the dashboard's Public Hostnames page is the authoritative record of what
-this tunnel serves. `cloudflared` prefers a tunnel's remote configuration whenever one
-exists and **ignores local ingress silently** — no error, nothing in any log.
+| Host | Tunnel | Managed | Routes are in |
+|---|---|---|---|
+| `zero` | `ce28c17c-a722-4ba1-8e46-21985337f13f` | **locally** | `hosts/zero/system/cloudflared-config.yml` |
+| `one` | `1e7fde2e-ac2f-4a5e-8ad4-591208c1e2a6` | **locally** | `hosts/one/system/cloudflared-config.yml` |
+| `two` | `bdb4a988-7c8b-4f5f-a2bf-e42464309d64` | remotely | **Cloudflare** — the dashboard is the record |
+| `infra-dev` | separate, in the container | locally | `dev/entrypoint.sh` writes it |
 
-Since 2026-08-23 the credentials are a 0600 file at `/etc/cloudflared/zero.json` and
-there is no token in argv. `/etc/cloudflared/config.yml` (tracked at
-`hosts/zero/system/cloudflared-config.yml`) carries the tunnel id, the credentials path
-and the metrics port — **not** the ingress.
+For zero and one the tracked file **is** the routing: edit it, commit it,
+`bin/install-system-file cloudflared-config.yml`, and cycle. For `two` the file carries
+only the tunnel id, credentials path and metrics port — its ingress is at Cloudflare and
+a local copy would be ignored.
 
-An earlier version of this file said the opposite, because an earlier version of
-`config.yml` carried the ingress and appeared to work. Nothing distinguished the two:
-they were identical in content, so `/config` reported the same eight rules either way.
-It was settled by clearing the remote copy, at which point the connector dropped from
-nine rules to one in fifteen seconds and was restored automatically. Recorded because
-the wrong version was believable for most of a day.
+## The rule that makes that distinction matter
 
-The table below is a **dated snapshot for humans, not a source of truth.** Regenerate it
-on the host with:
+**cloudflared prefers a tunnel's REMOTE configuration whenever one exists, and ignores
+local ingress silently** — no error, nothing in any log. Established on zero on
+2026-08-23 by clearing the remote copy and watching the connector drop from nine rules to
+one within fifteen seconds.
 
-```sh
-curl -s 127.0.0.1:20241/config
+Nothing distinguishes an ignored local config from one in force: both report the same
+rules at `127.0.0.1:20241/config`. That claim survived a day of work, three documents and
+two commit messages before anyone tested it.
+
+**On `two`, therefore: do not clear the remote configuration.** It is not stale, it is
+what serves. `PUT .../cfd_tunnel/{id}/configurations` does not touch DNS, and a `GET`
+first makes it byte-exactly reversible — but there is no reason to run it.
+
+## Getting routes into git — how it was actually done
+
+`config_src` is **create-time only**. `PATCH .../cfd_tunnel/{id}` with
+`{"config_src":"local"}` is rejected (`1002 Tunnel not found`, on a URL where `GET` works
+and where `PATCH` with `tunnel_secret` had succeeded an hour earlier). Emptying the remote
+config does not work either — an empty remote config still wins over a local one.
+
+So each host gets a **new** tunnel created with `config_src: local`, and its CNAMEs
+repointed. Three playbooks, by blast radius:
+
+```
+ansible-playbook playbooks/cloudflare-tunnel-new.yml     -e target=<host> -K
+ansible-playbook playbooks/cloudflare-tunnel-cutover.yml -e target=<host> -e ansible_host=<host>-two -K
+ansible-playbook playbooks/cloudflare-tunnel-retire.yml  -e target=<host> -K
 ```
 
-| Hostname | Origin | Note |
+**`ansible_host` is not optional on the cutover.** It cycles the target's connector, so a
+session arriving through that tunnel severs itself mid-run — which happened on `one`. The
+play now refuses when the client address is loopback and names the fix.
+
+Between phase 1 and phase 2 there is a **review step, and it is not a formality.** The
+generated config is copied from what the edge serves, which includes rules that should
+not survive: `ionic-traces.gsrpi.uk` on one (retired), and on zero a `torrents.gsrpi.uk`
+rule that had never routed anything. Carrying that one across would have moved one's
+torrent UI onto zero.
+
+**The cutover has an outage in it**, deliberately: roughly two minutes on one, three or
+four on zero, almost all of it DNS propagation. Avoiding it means two connectors at once,
+which is either a second OpenRC service — the phantom-service trap in CLAUDE.md — or a
+detached process Ansible has to babysit.
+
+## Zero's hostnames
+
+Snapshot; the file above is the source of truth. Regenerate with
+`curl -s 127.0.0.1:20241/config` on the host.
+
+| Hostname | Origin | |
 |---|---|---|
-| `ssh-zero.gsrpi.uk` | `ssh://localhost:22` | check whether Access fronts this |
-| `syncthing.gsrpi.uk` | `http://localhost:8384` | |
-| `syncthing-server.gsrpi.uk` | `tcp://localhost:22000` | the sync protocol, not the UI |
-| `immich.gsrpi.uk` | `http://localhost:2283` | no Access — 200 unauthenticated |
-| `torrents.gsrpi.uk` | `http://192.168.86.101:8080` | **dead rule** — the CNAME points at one's tunnel |
-| `ssh-zero-dev-dd.gsrpi.uk` | `ssh://localhost:2222` | |
-| `ssh-zero-dev-ds.gsrpi.uk` | `ssh://localhost:2223` | |
-| `ssh-zero-dev-or3.gsrpi.uk` | `ssh://localhost:2224` | |
+| `ssh-zero.gsrpi.uk` | `ssh://127.0.0.1:22` | **behind Access** |
+| `syncthing.gsrpi.uk` | `http://127.0.0.1:8384` | **behind Access** |
+| `syncthing-server.gsrpi.uk` | `tcp://127.0.0.1:22000` | the sync protocol, not the UI |
+| `immich.gsrpi.uk` | `http://127.0.0.1:2283` | no Access — 200 unauthenticated |
+| `ssh-zero-dev-dd.gsrpi.uk` | `ssh://127.0.0.1:2222` | 502 normally; that container is usually down |
+| `ssh-zero-dev-ds.gsrpi.uk` | `ssh://127.0.0.1:2223` | 502 normally, same |
+| `ssh-zero-dev-or3.gsrpi.uk` | `ssh://127.0.0.1:2224` | the one dev container usually up |
 | *(catch-all)* | `http_status:404` | |
 
-Order is behaviour: cloudflared matches first-rule-wins.
+`infra-dev.gsrpi.uk` is **not** here — it has its own tunnel, run by a connector inside
+the container, which is the pattern *management-plane.md* § *Addressing* chose. The three
+older dev containers are still on the host tunnel; finishing that is Phase 5.
 
-`infra-dev.gsrpi.uk` is **not** here. It has its own tunnel, run by a connector inside
-the container, which is the pattern *management-plane.md* § *Addressing* chose. The
-three older dev containers are still on the host tunnel — the fleet is mid-migration
-between the two designs, and finishing it is Phase 5.
+## One's hostnames
 
-## Do not clear the remote configuration
+| Hostname | Origin | |
+|---|---|---|
+| `ssh-one.gsrpi.uk` | `ssh://127.0.0.1:22` | |
+| `bookit.gsrpi.uk` | `http://127.0.0.1:3001` | this is `send2ereader`'s public name |
+| `syncthing-torrents.gsrpi.uk` | `http://127.0.0.1:8384` | **behind Access**; origin down, 2c |
+| `torrents.gsrpi.uk` | `http://127.0.0.1:8080` | **behind Access** |
+| *(catch-all)* | `http_status:404` | |
 
-It was tried on 2026-08-23, reversibly, and it takes the tunnel down: the connector
-follows it, dropping to the bare catch-all and 404ing every hostname. Clearing it is not
-tidying, it is an outage.
-
-`PUT .../cfd_tunnel/{id}/configurations` is the endpoint, it does **not** touch DNS, and
-a `GET` first makes the whole thing byte-exactly reversible — that structure is why the
-attempt cost fifteen seconds rather than an evening. But there is no reason to run it.
-
-## Making it locally-managed
-
-Not available in place, tried 2026-08-23. A connector fetches remote config only when the
-tunnel's `config_src` is `cloudflare`, so that field is the whole switch — but
-`PATCH .../cfd_tunnel/{id}` with `{"config_src":"local"}` is rejected. The error is
-`1002 Tunnel not found`, which is misleading rather than informative: a `GET` on that URL
-works, and a `PATCH` to it with `tunnel_secret` succeeded an hour earlier with the same
-token. Only the body differs. Read it as "not an accepted PATCH field", not as proof.
-
-Emptying the remote configuration does not achieve it either — an empty remote config
-still wins over a local one, which is what took the tunnel down for fifteen seconds
-earlier the same day.
-
-**So the only known route is a new tunnel**, created with `config_src: local`, followed
-by repointing all eight CNAMEs and retiring the old one.
-
-**Decided 2026-08-23 that this happens** — filed as phase 2g in
-[`management-plane.md`](management-plane.md), `one` first as a rehearsal. The reason is
-not a fault being fixed but a preference that matches everything else here: no more
-configuration in a web dashboard than strictly necessary. Method, estimates and the two
-open unknowns are in that entry.
-
-A `config.yml` carrying the full ingress was written for the attempt and removed again
-when it failed. It is in git history rather than in `HEAD`, because a copy that cannot
-take effect reads as authoritative and is worse than none.
+`ionic-traces.gsrpi.uk` was retired 2026-08-23. Its DNS record still exists and points at
+a deleted tunnel, so it resolves and fails; delete the record if you want the name gone.
 
 ## Landmines
 
-- **Deleting a Public Hostname deletes its DNS record.** The CNAMEs are load-bearing;
-  the dashboard ingress entries are not. All eight point at
-  `9456fbcd-…cfargotunnel.com`, and the local config is useless without them. Clearing
-  the dashboard "tidily" takes down every service on zero and presents as a broken
+- **Deleting a Public Hostname in the UI deletes its DNS record.** The CNAMEs are
+  load-bearing; the dashboard's ingress entries are not, for the two locally-managed
+  hosts. Clearing the dashboard "tidily" takes services down and presents as a broken
   tunnel.
-- **Never delete the tunnel.** Its UUID is in all eight CNAMEs and in `config.yml`.
-  Recreating mints a new one.
-- **Never delete a tunnel with a CNAME still aimed at it.** Check DNS first.
+- **A deleted tunnel cannot be recreated with the same UUID.** A DNS record aimed at one
+  does not degrade, it breaks permanently. The retire play refuses unless every straggler
+  is named with `-e abandon=`.
+- **Never delete a tunnel that still has a CNAME aimed at it.** Check DNS first; the play
+  does.
 - **Leave infra-dev's Access application, policy and service token alone.** They are the
-  way into the container. Different tunnel; confirm which one you are looking at.
+  way into the container. Different tunnel; confirm which you are looking at.
 - **An Access service token is not an API token is not a tunnel token.** Three unrelated
-  credentials sharing a word. `ansible/playbooks/cloudflare-dev-tunnel.yml` prompts for
-  the right one by saying which it is not.
+  credentials sharing a word. `cloudflare-dev-tunnel.yml` prompts for the right one by
+  saying which it is not.
+- **`no_log` on a `uri` task hides the response as well as the headers.** It cost the only
+  copy of a service token secret in August, and hid a `400` from the retire play in
+  the same way. Register the result, let the task not fail, and print the API's own
+  error list separately.
 
 ## Safe to delete
 
-- **API tokens after use.** Rotation needs `Account -> Cloudflare Tunnel -> Edit` and
-  nothing else; mint it, use it, delete it. The 2026-08-22 one was All accounts / All
-  zones, which is the mistake to not repeat.
-- **Orphaned Access service tokens.** At least one is expected: a token created
-  2026-08-22 whose secret was censored by `no_log` before it was printed and is
-  unrecoverable. Identify the live one by the `client_id` in the phone's
-  `~/.config/infra-dev/token`; anything else is dead weight.
+- **API tokens after use.** Rotation and migration need `Account -> Cloudflare Tunnel ->
+  Edit` and `Zone -> DNS -> Edit` on `gsrpi.uk`, and nothing else.
+- **Orphaned Access service tokens.** At least one is expected: created 2026-08-22, its
+  secret censored by `no_log` before it was printed and unrecoverable. Identify the live
+  one by the `client_id` in the phone's `~/.config/infra-dev/token`.
 - **Duplicate Access applications** from the same failed runs.
 
 ## Open
 
-- **`ssh-zero.gsrpi.uk` IS behind Access** — confirmed 2026-08-23 when a stale JWT made
-  `ssh zero` fail from the phone with `websocket: bad handshake`. Refresh with
-  `cloudflared access login https://ssh-zero.gsrpi.uk`. The recurring-expiry problem is
-  what the infra-dev block solves with a service token; the fleet ssh hostnames do not
-  have one, and whether they should is open.
-- **On `one`, `torrents.gsrpi.uk` and `syncthing-torrents.gsrpi.uk` are behind Access**
-  — both 302 to `gszt.cloudflareaccess.com`, seen 2026-08-23. `ssh-one.gsrpi.uk` and
-  `bookit.gsrpi.uk` answer 200 and are not. Access binds to the HOSTNAME rather than the
-  tunnel, so it survives a tunnel migration; 2g's cutover checks that by comparing each
-  hostname against its own baseline rather than against "healthy".
-- **The three `ssh-zero-dev-*` hostnames** have not been checked.
-- **Immich has no Access policy** — verified indirectly, an unauthenticated fetch
-  returns 200. Probably intentional, since Immich has its own login. Worth confirming
-  rather than inheriting.
-- ~~**`torrents.gsrpi.uk` moves to `one`'s own tunnel.**~~ **Resolved 2026-08-23: there
-  was nothing to move.** Its CNAME targets `96635122-…`, which is one's tunnel. One's
-  torrent UI never depended on zero. Zero's ingress rule for it is dead config and can be
-  deleted whenever zero's Public Hostnames are next touched — it routes nothing today.
-  Struck rather than removed because this repo asserted the dependency in four files
-  before anyone read one's ingress.
-- **Can this tunnel be made locally-managed at all?** Unknown. It would put the routes
-  under review in git, which is the direction everything else here is going.
-## One's tunnel
-
-Captured 2026-08-23. Five hostnames, of which this repo recorded one.
-
-| Hostname | Origin | |
-|---|---|---|
-| `ssh-one.gsrpi.uk` | `ssh://localhost:22` | |
-| `ionic-traces.gsrpi.uk` | `http://localhost:7777` | **502s** — the stack is down by decision |
-| `bookit.gsrpi.uk` | `http://localhost:3001` | this is `send2ereader`'s public name |
-| `syncthing-torrents.gsrpi.uk` | `http://localhost:8384` | the only one the repo knew |
-| `torrents.gsrpi.uk` | `http://localhost:8080` | **this is the live one** — CNAME points here |
-| *(catch-all)* | `http_status:404` | |
-
-**`torrents.gsrpi.uk` is in both tunnels' ingress, and this one is the live half.** Its
-CNAME targets `96635122-2ceb-4fe2-8ae0-966a343bd124` — one's tunnel. Zero's rule for the
-same hostname has never routed anything.
-
-This document and several commits claimed one's torrent UI depended on zero, on the
-strength of having read zero's ingress and never one's. It did not. The records are
-proxied, so DNS resolves to Cloudflare anycast and cannot settle it — the CNAME target has
-to be read from the dashboard or with a `Zone:DNS:Read` token, which is why it stayed
-open for several hours after being asserted as fact.
-
-**One's tunnel UUID is `96635122-2ceb-4fe2-8ae0-966a343bd124`**, zero's is
-`9456fbcd-95f6-48a8-9bcd-d6e85bfbfc01`.
-
-## Open
-
-- **`two`'s token is still inline** in `/etc/init.d/cloudflared` at mode 755, confirmed
-  2026-08-23. Never moved, never rotated — worse than either other host. Retiring that
-  tunnel under 2g is the cleanest remediation, and it is the smallest of the three: one
-  hostname.
+- **`two` has not been migrated** — deferred deliberately, a week or so out. It is the
+  smallest job (two hostnames) on the box with the least margin, and it is the lifeboat.
+- **The fleet ssh hostnames have no service token.** `ssh-zero.gsrpi.uk` is behind Access
+  and relies on a browser-obtained JWT that expires — it broke `ssh zero` from the phone
+  on 2026-08-23 with `websocket: bad handshake`. Refresh with
+  `cloudflared access login https://ssh-zero.gsrpi.uk`. A service token would end the
+  recurrence, at the cost of a policy change per hostname.
+- **The three `ssh-zero-dev-*` hostnames** have not been checked for Access.

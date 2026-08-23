@@ -120,6 +120,44 @@
           if you want the names gone too.
       when: abandon | length > 0
 
+    # ── guard 3: private network routes ──────────────────────────────────────
+    # A tunnel carries more than public hostnames. WARP private-network routes are a
+    # separate object entirely, they are NOT visible under Public Hostnames, and
+    # Cloudflare refuses to delete a tunnel that still has any (error 1023).
+    #
+    # Found the hard way on zero, 2026-08-23: the cutover moved every hostname and left
+    # these behind pointing at a tunnel with no connector, so WARP access to the LAN was
+    # silently broken and no probe we had would have noticed. They are listed here
+    # because listing them is the only way anyone finds out.
+    - name: List private network routes on the doomed tunnel
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account }}/teamnet/routes?tunnel_id={{ doomed_tunnel }}&is_deleted=false"
+        headers: "{{ api_hdr }}"
+      register: routes
+      failed_when: false
+      delegate_to: localhost
+      no_log: true
+
+    - name: Show the private network routes
+      ansible.builtin.debug:
+        msg: >-
+          {{ (routes.json.result | default([]))
+             | map(attribute='network') | list | default([], true)
+             if (routes.json.result | default([])) | length > 0
+             else 'no private network routes on ' ~ doomed_tunnel }}
+
+    - name: Refuse while private network routes still point here
+      ansible.builtin.assert:
+        that: (routes.json.result | default([])) | length == 0
+        fail_msg: >-
+          {{ (routes.json.result | default([])) | length }} private network route(s) still
+          point at {{ doomed_tunnel }}:
+          {{ (routes.json.result | default([])) | map(attribute='network') | list | join(', ') }}.
+          These are WARP routes, not public hostnames — the cutover did not move them, and
+          they have had no connector since it ran. Decide whether they should follow the
+          host onto {{ live_tunnel }} or be dropped, then re-run. Nothing here is deleted
+          in the meantime.
+
     # ── delete ───────────────────────────────────────────────────────────────
     # Clean up connection records first. Cloudflare refuses to delete a tunnel that still
     # has them, and they outlive the connector — stopping cloudflared does not clear them
