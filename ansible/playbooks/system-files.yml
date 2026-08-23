@@ -19,10 +19,24 @@
 # need cycling by hand — the summary at the end names them. CLAUDE.md's two-phase
 # procedure: this is phase 1, for every file, on every host, in one command.
 #
-# THE HOST'S OWN CLONE must be current. The tool reads hosts/<host>/system/ from the
-# checkout ON THE BOX, not from the control node — because the bytes that reach /etc are
-# the reviewed bytes in the repo, and the repo on the box is what install-system-file
-# trusts. So this play pulls first, fast-forward only, and refuses if that fails.
+# WHERE THE BYTES COME FROM, decided 2026-08-24 after a challenge and a second opinion.
+# The control node's HEAD is the review anchor; the host clone is the delivery vehicle
+# and the drift checker's frame of reference; EQUALITY BETWEEN THEM IS ASSERTED, not
+# assumed. The host pulls --ff-only, then must be on exactly the commit the control node
+# is on, or the play refuses — which also closes the race where origin moves between
+# --check and the real run, so check and run can never see different bytes.
+#
+# Bytes deliberately do NOT travel over the Ansible connection, although that is how
+# Ansible normally works, for three reasons: a working tree can be dirty where a commit
+# cannot, so copying from the phone's checkout can ship unreviewed bytes; check-system-
+# drift runs on the host against the host clone and must read ok immediately after a
+# correct deploy, which a control-node-ahead copy breaks by design; and the tool's
+# provenance guard IS the tracked path — a --source bypass would let any file with a
+# plausible header onto the boot path.
+#
+# GitHub stays in the deploy path. Acceptable: every clone already syncs through it,
+# there is deliberately no host-to-host git, and the manual scp-plus-tool path still
+# exists for an outage.
 #
 # --allow-content-change is passed on every real run. The tool's refusal exists to stop
 # a human smuggling an edit past a header-only review; here the review is the git diff
@@ -41,10 +55,34 @@
     local_repo: "{{ playbook_dir }}/../.."
 
   tasks:
-    # ── the repo on the box must be current ──────────────────────────────────
-    # --ff-only: if the box's clone has diverged, that is a situation to look at, not to
-    # merge through from a playbook. check_mode false so --check also pulls; a dry run
-    # against a stale checkout would diff the wrong bytes.
+    # ── the review anchor: what the person running this actually has ─────────
+    - name: The control node's HEAD
+      ansible.builtin.command:
+        cmd: git rev-parse HEAD
+        chdir: "{{ local_repo }}"
+      register: ctl_head
+      delegate_to: localhost
+      changed_when: false
+      check_mode: false
+      run_once: true
+
+    # A dirty hosts/ tree means the files reviewed locally are not the files the commit
+    # contains — the diff on screen and the diff that deploys would differ.
+    - name: Refuse if hosts/ has uncommitted changes on the control node
+      ansible.builtin.command:
+        cmd: git status --porcelain -- hosts/
+        chdir: "{{ local_repo }}"
+      register: dirty
+      delegate_to: localhost
+      changed_when: false
+      check_mode: false
+      run_once: true
+      failed_when: dirty.stdout | length > 0
+
+    # ── the delivery vehicle: the host clone, pinned to the anchor ───────────
+    # --ff-only: a diverged host clone is a situation to look at, not merge through.
+    # check_mode false so --check also pulls; a dry run against a stale checkout would
+    # diff the wrong bytes.
     - name: Pull the host's clone, fast-forward only
       ansible.builtin.command:
         cmd: git pull --ff-only -q
@@ -52,6 +90,23 @@
       register: pull
       changed_when: "'Already up to date' not in pull.stdout"
       check_mode: false
+
+    - name: The host's HEAD
+      ansible.builtin.command:
+        cmd: git rev-parse HEAD
+        chdir: "{{ repo }}"
+      register: host_head
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse unless the host is on exactly the reviewed commit
+      ansible.builtin.assert:
+        that: host_head.stdout | trim == ctl_head.stdout | trim
+        fail_msg: >-
+          {{ inventory_hostname }} is on {{ host_head.stdout | trim | truncate(12, true, '') }}
+          and this control node reviewed {{ ctl_head.stdout | trim | truncate(12, true, '') }}.
+          If origin moved past your review: `git pull` here, re-read the diff, re-run.
+          If you have unpushed commits: `git push`. Nothing was installed.
 
     - name: Which files this host tracks
       ansible.builtin.find:
