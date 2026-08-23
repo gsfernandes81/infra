@@ -145,44 +145,57 @@ def validate_fstab(path):
 
 
 def validate_sshd_config(path):
-    """`sshd -t -f <candidate>` -- the daemon's own parser, on the file itself.
+    """`sshd -t` on the file, and on the combined config it becomes part of.
 
-    This is the one tracked file where being wrong means no NEW logins on a remote
-    box. Existing sessions survive a bad config (sshd only re-reads on restart, and a
-    restart that fails leaves the running daemon alone), so it is not instantly fatal
-    -- but it is discovered at the worst possible moment, and `sshd -t` costs nothing.
+    This is the tracked file where being wrong costs most: a bad one means no NEW
+    logins on a remote box. Existing sessions survive it -- sshd only re-reads on
+    restart, and a restart that fails leaves the running daemon alone -- so it is not
+    instantly fatal, but it is discovered at the worst possible moment.
 
-    CALIBRATION, per CLAUDE.md: this check is only meaningful because it reads the
-    LIVE config as healthy first. If `sshd -t` cannot validate what is already
-    running, the checker is wrong rather than the candidate, and refusing on that
-    basis would block a good change -- the exact failure the mount-guard socket count
-    produced. So the live file is tested first and a failure there is reported as a
-    broken checker, not a broken candidate.
+    TWO CHECKS, because a drop-in can be valid alone and wrong in place.
+    /etc/ssh/sshd_config carries `Include sshd_config.d/*.conf`, so testing the main
+    file tests the combination. Pre-install that is a CALIBRATION -- if the config
+    already running cannot pass `sshd -t`, this checker is not a verdict on anything,
+    and refusing on that basis would block a good change (the mount-guard socket count
+    did exactly that once, and then reported its own rollback as failed). Post-install
+    the same command tests the candidate for real, because by then it is included.
 
-    Runs under sudo: sshd reads host keys, and as a normal user it fails for a reason
-    that has nothing to do with the file being checked.
+    The two are told apart by where the file is: under /etc it is live.
+
+    Runs under sudo -- sshd reads host keys, and as a normal user it fails for reasons
+    that have nothing to do with the file being checked.
     """
     problems = []
     sshd = "/usr/sbin/sshd"
     if not Path(sshd).exists():
-        return [f"{sshd} not found -- cannot validate an sshd_config on this host"]
+        return [f"{sshd} not found -- cannot validate an sshd config on this host"]
 
-    live = Path("/etc/ssh/sshd_config")
-    if live.exists():
-        base = run(["sudo", sshd, "-t", "-f", str(live)])
-        if base.returncode != 0:
-            return [
-                "the LIVE /etc/ssh/sshd_config does not pass `sshd -t`, so this check "
-                "cannot be trusted as a verdict on the candidate. Fix or investigate "
-                "that first: " + (base.stderr or base.stdout).strip()
-            ]
+    installed = str(path).startswith("/etc/ssh/")
 
     r = run(["sudo", sshd, "-t", "-f", str(path)])
     if r.returncode != 0:
         for line in (r.stderr or r.stdout).splitlines():
-            problems.append(f"sshd -t: {line}")
+            problems.append(f"sshd -t on this file: {line}")
         if not problems:
             problems.append(f"sshd -t exited {r.returncode} with no message")
+
+    main = Path("/etc/ssh/sshd_config")
+    if main.exists():
+        c = run(["sudo", sshd, "-t", "-f", str(main)])
+        if c.returncode != 0:
+            detail = (c.stderr or c.stdout).strip()
+            if installed:
+                problems.append(
+                    "the COMBINED config now fails `sshd -t`, so this file is valid "
+                    "alone but wrong in place: " + detail
+                )
+            else:
+                problems.append(
+                    "the LIVE /etc/ssh/sshd_config does not pass `sshd -t` already, so "
+                    "this check cannot be a verdict on the candidate. Investigate that "
+                    "first, and do not read this as the new file being at fault: "
+                    + detail
+                )
     return problems
 
 
@@ -192,7 +205,8 @@ def validators_for(live):
         v.append(validate_openrc_script)
     if live.name == "fstab":
         v.append(validate_fstab)
-    if live.name == "sshd_config":
+    # The main file, and any drop-in the Include pulls in.
+    if live.name == "sshd_config" or live.parent == Path("/etc/ssh/sshd_config.d"):
         v.append(validate_sshd_config)
     return v
 
