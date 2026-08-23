@@ -1,0 +1,252 @@
+---
+# 2g, phase 2 of 3: swap the host onto the new tunnel and move DNS to follow.
+#
+#   ansible-playbook playbooks/cloudflare-tunnel-cutover.yml -e target=one -K
+#
+# Needs a token with BOTH Account -> Cloudflare Tunnel -> Edit and Zone -> DNS -> Edit
+# on gsrpi.uk. Prompted, never stored, and every API call is delegated to the control
+# node so it never reaches a Pi.
+#
+# THIS IS THE PHASE WITH AN OUTAGE IN IT, and it is deliberate rather than overlooked.
+# Running both connectors at once would avoid it, but that means either a second OpenRC
+# service — the phantom-service trap CLAUDE.md warns about — or a detached process
+# Ansible has to babysit and reliably kill. On `one`, whose services are recoverable,
+# a couple of minutes is the cheaper trade. `zero` is a separate decision.
+#
+# ORDER: service first, THEN dns. The reverse would repoint hostnames at a tunnel with
+# no connector and only reveal whether the new tunnel works after everything had moved.
+# This way the new connector has to register and serve the right rules BEFORE any DNS
+# record is touched, and aborting before that point costs nothing at all.
+#
+# EVERY HOSTNAME IS CHECKED AGAINST ITS OWN BASELINE, not against "healthy". `one`'s
+# syncthing-torrents 502s today because its origin is down (2c, blocked on the SP900),
+# and it must 502 identically afterwards. A check that demanded 200 would fail on a
+# thing this change did not touch, and a rollback on that basis would be the wrong
+# reason twice over.
+
+- name: Cut a host over to its locally-managed tunnel
+  hosts: "{{ target | default('one') }}"
+  gather_facts: false
+  serial: 1
+
+  vars_prompt:
+    - name: cf_api_token
+      prompt: "Cloudflare API token (Tunnel:Edit AND Zone:DNS:Edit on gsrpi.uk)"
+      private: true
+
+  vars:
+    cf_api: "https://api.cloudflare.com/client/v4"
+    zone_name: "gsrpi.uk"
+    cred_file: "/etc/cloudflared/{{ inventory_hostname }}.json"
+    new_cred_file: "/etc/cloudflared/{{ inventory_hostname }}-new.json"
+    repo_cfg: "{{ playbook_dir }}/../../hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
+    probe: "http://127.0.0.1:20241"
+    api_hdr:
+      Authorization: "Bearer {{ cf_api_token }}"
+
+  tasks:
+    # ── what we are moving from, and to ──────────────────────────────────────
+    - name: Read both credentials files
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      register: creds
+      loop: [ "{{ cred_file }}", "{{ new_cred_file }}" ]
+      become: true
+      no_log: true
+
+    - name: Identify the old and new tunnels
+      ansible.builtin.set_fact:
+        old_tunnel: "{{ (creds.results[0].content | b64decode | from_json).TunnelID }}"
+        new_tunnel: "{{ (creds.results[1].content | b64decode | from_json).TunnelID }}"
+        cf_account: "{{ (creds.results[0].content | b64decode | from_json).AccountTag }}"
+
+    - name: Refuse if phase 1 was never run, or was run twice
+      ansible.builtin.assert:
+        that: old_tunnel != new_tunnel
+        fail_msg: >-
+          {{ cred_file }} and {{ new_cred_file }} name the same tunnel
+          ({{ old_tunnel }}). Either phase 1 has already been applied here, or the
+          credentials have been swapped by hand. Stopping rather than guessing.
+
+    # The hostnames come from the REPO config, not from the old tunnel's ingress. That
+    # is the point of the review step: ionic-traces was removed there deliberately, and
+    # taking the list from the edge would quietly resurrect it.
+    - name: Read the reviewed config to learn which hostnames move
+      ansible.builtin.set_fact:
+        move_hosts: >-
+          {{ (lookup('file', repo_cfg) | from_yaml).ingress
+             | selectattr('hostname', 'defined') | map(attribute='hostname') | list }}
+
+    - name: Confirm the plan
+      ansible.builtin.debug:
+        msg:
+          - "host      : {{ inventory_hostname }}"
+          - "from      : {{ old_tunnel }}"
+          - "to        : {{ new_tunnel }}"
+          - "hostnames : {{ move_hosts | join(', ') }}"
+          - "NOT moved : anything in the old tunnel but absent above — retired on purpose"
+
+    # ── baseline every hostname, while the old tunnel still serves ───────────
+    - name: Baseline each hostname through the edge
+      ansible.builtin.uri:
+        url: "https://{{ item }}"
+        method: HEAD
+        status_code: -1
+        timeout: 20
+        follow_redirects: none
+      register: baseline
+      loop: "{{ move_hosts }}"
+      delegate_to: localhost
+
+    - name: Remember what each one answered
+      ansible.builtin.set_fact:
+        baseline_status: >-
+          {{ dict(move_hosts | zip(baseline.results | map(attribute='status') | list)) }}
+
+    - name: Baseline
+      ansible.builtin.debug:
+        var: baseline_status
+
+    # ── find the DNS records, and record where they point ────────────────────
+    - name: Find the zone
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/zones?name={{ zone_name }}"
+        headers: "{{ api_hdr }}"
+      register: zone
+      delegate_to: localhost
+      no_log: true
+
+    - name: Keep the zone id
+      ansible.builtin.set_fact:
+        zone_id: "{{ zone.json.result[0].id }}"
+
+    - name: Find each hostname's DNS record
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/zones/{{ zone_id }}/dns_records?name={{ item }}"
+        headers: "{{ api_hdr }}"
+      register: recs
+      loop: "{{ move_hosts }}"
+      delegate_to: localhost
+      no_log: true
+
+    # Recorded BEFORE anything changes, so a rollback restores the exact previous target
+    # rather than assuming it was the old tunnel. Printed, because if this play dies
+    # mid-loop the only copy of it is in a register that dies with it.
+    - name: Record where each one points now — WRITE THIS DOWN
+      ansible.builtin.debug:
+        msg: >-
+          {{ dict(move_hosts | zip(recs.results
+             | map(attribute='json.result.0.content') | list)) }}
+
+    - name: Refuse if any hostname has no record, or more than one
+      ansible.builtin.assert:
+        that: item.json.result | length == 1
+        fail_msg: >-
+          {{ item.item }} resolved to {{ item.json.result | length }} DNS records. One is
+          expected; anything else means this play would repoint the wrong thing.
+      loop: "{{ recs.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    # ── the host: config, credentials, cycle ─────────────────────────────────
+    - name: Install the reviewed config
+      ansible.builtin.command:
+        cmd: bin/install-system-file cloudflared-config.yml --commit --allow-content-change
+        chdir: "~/infra"
+      register: inst
+      changed_when: true
+
+    - name: Back up the old credentials, then put the new ones in place
+      ansible.builtin.shell: |
+        set -e
+        cp -a {{ cred_file }} {{ cred_file }}.pre-2g
+        chmod 600 {{ cred_file }}.pre-2g
+        cp -a {{ new_cred_file }} {{ cred_file }}
+        chmod 600 {{ cred_file }}
+      become: true
+      changed_when: true
+
+    # stop, poll until the metrics port clears, start. `rc-service restart` does not
+    # wait and cloudflared's grace period is 30s — that killed six respawns on zero.
+    - name: Cycle the connector onto the new tunnel
+      ansible.builtin.shell: |
+        rc-service cloudflared stop >/dev/null 2>&1
+        i=0
+        while [ $i -lt 45 ]; do
+          netstat -tln 2>/dev/null | grep -q '127\.0\.0\.1:20241 ' || break
+          i=$((i+2)); sleep 2
+        done
+        netstat -tln 2>/dev/null | grep -q '127\.0\.0\.1:20241 ' && exit 1
+        rc-service cloudflared start >/dev/null 2>&1
+      become: true
+      changed_when: true
+
+    - name: Wait for the NEW connector to register
+      ansible.builtin.uri:
+        url: "{{ probe }}/ready"
+        return_content: true
+      register: ready
+      until: (ready.content | default('{}') | from_json).readyConnections | default(0) > 0
+      retries: 12
+      delay: 5
+
+    - name: Check it is serving the reviewed rules, not the old ones
+      ansible.builtin.uri:
+        url: "{{ probe }}/config"
+        return_content: true
+      register: now_cfg
+
+    - name: The rules in force must match the file we reviewed
+      ansible.builtin.assert:
+        that: >-
+          (now_cfg.content | from_json).config.ingress
+          | selectattr('hostname', 'defined') | map(attribute='hostname') | list
+          | sort == move_hosts | sort
+        fail_msg: >-
+          The connector came up but is serving a different set of hostnames than the
+          reviewed config. DNS has NOT been touched — restore
+          {{ cred_file }}.pre-2g over {{ cred_file }} and cycle to go back.
+
+    - name: The new tunnel is live and no DNS has moved yet
+      ansible.builtin.debug:
+        msg: >-
+          connector on {{ new_tunnel }} is serving {{ move_hosts | length }} rules.
+          Every hostname is DOWN from here until its record is repointed, below.
+
+    # ── move DNS, one record at a time ───────────────────────────────────────
+    - name: Repoint each hostname at the new tunnel
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/zones/{{ zone_id }}/dns_records/{{ item.json.result[0].id }}"
+        method: PATCH
+        headers: "{{ api_hdr }}"
+        body_format: json
+        body:
+          content: "{{ new_tunnel }}.cfargotunnel.com"
+        status_code: [200, 201]
+      loop: "{{ recs.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      delegate_to: localhost
+      no_log: true
+
+    - name: Wait for each hostname to answer as it did before
+      ansible.builtin.uri:
+        url: "https://{{ item }}"
+        method: HEAD
+        status_code: -1
+        timeout: 20
+        follow_redirects: none
+      register: after
+      until: after.status == baseline_status[item]
+      retries: 10
+      delay: 6
+      loop: "{{ move_hosts }}"
+      delegate_to: localhost
+
+    - name: Done
+      ansible.builtin.debug:
+        msg:
+          - "every hostname answers as it did before the cutover"
+          - "old tunnel {{ old_tunnel }} now has no DNS pointing at it, and no connector"
+          - "next: cloudflare-tunnel-retire.yml, once you are happy to lose it"
+          - "cleanup here: rm {{ new_cred_file }} and {{ cred_file }}.pre-2g"
