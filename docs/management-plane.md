@@ -477,7 +477,7 @@ ones that answer the question this document started from.
 | 2c | `one`'s array — both "broken services" are the SP900 in bay 0. `ionic-traces` stays down by decision; Syncthing is blocked on the disk | `one`'s enclosure | **physical access** | **blocked** |
 | 2d | One base image for the four dev containers — `dev/README.md` § *Four copies of this* | `zero`'s dev containers | 2b | |
 | 2e | Rotate the fleet's own tunnel tokens | `zero`, `one`, `two`, edge | 2b | `zero` **done 2026-08-23**; `one` and `two` **absorbed into 2g** — see below. `two`'s token is still **inline in a 755 file** |
-| 2f | `cloudflared`'s init script logs nowhere — fix it, and record why the generated service was rejected | `zero`, `one` | — | before `one`'s half of 2e |
+| 2f | `cloudflared`'s init script logs nowhere | `zero`, `one`, `two` | — | `one` and `zero` **done 2026-08-23**; `two` outstanding, before its 2g |
 | 2g | All three tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, `two`, DNS | 2f | `one` first, as rehearsal |
 | 3 | First stack adopted: `send2ereader` on `one` | one stack, non-critical box | 2 | |
 | 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two stacks | 3 | |
@@ -559,8 +559,22 @@ custom script for the generated one, and whoever does that will meet the same wa
 nothing to read. Establish and write down the original failure before changing the
 script — then fix the log directives, on both hosts.
 
-It belongs **before `one`'s half of 2e**: that rotation will be as blind as this one was
-otherwise.
+**Done on `one` and `zero`, 2026-08-23.** The names are `output_logger` / `error_logger`,
+which take a *command* rather than a path — copied from `/etc/init.d/docker`, a stock
+Alpine script using the same supervisor, in the default runlevel, demonstrably writing its
+log. `containerd` was the other candidate and was passed over because CLAUDE.md records
+that service as unused, and a script that may never have run is not known-good state.
+
+**`two` still needs it, and it needs it more.** An earlier version of this entry said two
+could be skipped because 2g replaces its tunnel wholesale. That is the same reasoning that
+would have skipped `one` — where doing it first is what made zero's diagnosis possible an
+hour later. Two's 2g is last of the three, so skipping means the lifeboat logs nothing for
+however long that takes.
+
+Two is not a copy-paste of the other two: it runs no docker, so
+`/etc/init.d/docker` is not there to model on, and whether `log_proxy` exists at all needs
+checking before assuming the same block works. It also tracks no `/etc` files yet, so this
+would be the first — which pulls in the `python3`-for-`check-system-drift` question.
 
 **2c narrowed on 2026-08-23, and then turned out to be one fault rather than two.** The
 owner's call on the first half: `ionic-traces` **stays down**. Very few users, and only
