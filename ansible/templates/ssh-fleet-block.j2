@@ -116,7 +116,6 @@ Host two-s24
 Host *-s24
   ProxyCommand ssh s24 {{ phone_cloudflared }} access ssh --hostname %h
 
-{% endif %}
 Host s24
   # 127.0.0.1, NOT localhost. ssh resolves `localhost` to ::1 first and `adb forward`
   # binds IPv4 only, so the name gives `kex_exchange_identification: Connection refused`
@@ -125,6 +124,17 @@ Host s24
   HostName 127.0.0.1
   Port 8022
   User {{ s24_user }}
+
+# WHY THIS WHOLE SECTION IS WINDOWS-ONLY, and not an oversight to be fixed later:
+#
+#   - From WSL it CANNOT work. WSL2 has its own network namespace, so the `adb forward`
+#     that Windows creates binds a loopback WSL cannot see — and `adb` is a Windows
+#     binary regardless. Rendering these aliases there would give WSL four addresses
+#     that resolve and never connect.
+#   - From the phone it is pointless: s24 would be its own sshd over loopback.
+#
+# So the phone-tethered path belongs to the laptop's Windows ssh, and only there.
+{% endif %}
 
 # ── one host key per BOX, not per path ────────────────────────────────────────
 # Without this each path keeps its own known_hosts entry, so a rarely-used route has no
