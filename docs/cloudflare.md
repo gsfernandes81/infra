@@ -98,8 +98,37 @@ older dev containers are still on the host tunnel; finishing that is Phase 5.
 `ionic-traces.gsrpi.uk` was retired 2026-08-23. Its DNS record still exists and points at
 a deleted tunnel, so it resolves and fails; delete the record if you want the name gone.
 
+## A tunnel is more objects than the dashboard's front page shows
+
+This cost the most and was found by accident. Deleting zero's old tunnel returned
+`1023: This tunnel has private network routes` — **WARP private-network routes**, a
+separate object from public hostnames, invisible under Public Hostnames, and something
+the migration knew nothing about.
+
+Zero's old tunnel carried `192.168.86.20/32`. The cutover moved every hostname and left
+that behind pointing at a tunnel with no connector, so WARP access to that address was
+broken from the moment of the cycle — and **no check we had would ever have shown it**,
+because everything we verified asked about hostnames.
+
+It was only found because we tried to *delete* the tunnel, which is not a step a
+migration necessarily takes. Had we left the old tunnel in place as harmless, the break
+would still be there and unexplained.
+
+WARP is not used on this fleet — that route was left from an experiment with WARP VPN to
+zero and/or WARP-based Access auth — so it was dropped rather than moved. If WARP is ever
+wanted, a route is one API call.
+
+**The general form, which is the part worth keeping: enumerate a tunnel's objects before
+believing a migration is complete.** At minimum the public hostnames
+(`/cfd_tunnel/{id}/configurations`), the DNS records aimed at it, and the private network
+routes (`/teamnet/routes?tunnel_id=`). The retire play now checks all three and refuses
+on any of them.
+
 ## Landmines
 
+- **A tunnel with private network routes cannot be deleted** (`1023`), and those routes
+  are not shown anywhere you would look. `./2g retire <host> drop` deletes them; it is
+  opt-in because dropping a route someone relies on is not undone by re-running.
 - **Deleting a Public Hostname in the UI deletes its DNS record.** The CNAMEs are
   load-bearing; the dashboard's ingress entries are not, for the two locally-managed
   hosts. Clearing the dashboard "tidily" takes services down and presents as a broken

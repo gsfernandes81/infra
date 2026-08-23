@@ -476,9 +476,9 @@ ones that answer the question this document started from.
 | 2b | `infra-dev` container, and the Cloudflare edge in front of it | `zero`, edge | 2 | **done** 2026-08-22 |
 | 2c | `one`'s array — both "broken services" are the SP900 in bay 0. `ionic-traces` stays down by decision; Syncthing is blocked on the disk | `one`'s enclosure | **physical access** | **blocked** |
 | 2d | One base image for the four dev containers — `dev/README.md` § *Four copies of this* | `zero`'s dev containers | 2b | |
-| 2e | Rotate the fleet's own tunnel tokens | `zero`, `one`, `two`, edge | 2b | `zero` **done 2026-08-23**; `one` and `two` **absorbed into 2g** — see below. `two`'s token is still **inline in a 755 file** |
-| 2f | `cloudflared`'s init script logs nowhere | `zero`, `one`, `two` | — | `one` and `zero` **done 2026-08-23**; `two` outstanding, before its 2g |
-| 2g | All three tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, `two`, DNS | 2f | `one` first, as rehearsal |
+| 2e | Rotate the fleet's own tunnel tokens | `zero`, `one`, `two`, edge | 2b | **`zero` and `one` done 2026-08-23** — one's by retiring its tunnel under 2g. `two`'s token is out of the 755 file and in a credentials file; its rotation waits for 2g |
+| 2f | `cloudflared`'s init script logs nowhere | `zero`, `one`, `two` | — | **done on all three, 2026-08-23** |
+| 2g | All three tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, `two`, DNS | 2f | `one` and `zero` **done 2026-08-23**; `two` deferred ~a week |
 | 3 | First stack adopted: `send2ereader` on `one` | one stack, non-critical box | 2 | |
 | 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two stacks | 3 | |
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | |
@@ -540,6 +540,31 @@ thought** — five hostnames, not eight, so closer to an hour. Two unknowns that
 stretch it: whether those CNAMEs are freely editable or tunnel-managed, and whether Access
 applications follow hostnames cleanly across a tunnel change — they bind to hostnames
 rather than tunnels, so they should, but that is unverified.
+
+**2g: `one` and `zero` are done, 2026-08-23.** Both run new tunnels created with
+`config_src: local`, with their routes in `hosts/<host>/system/cloudflared-config.yml`
+and their old tunnels deleted. Retiring `one`'s old tunnel is what finally voided its
+disclosed credential, so 2e closed for that host as a side effect rather than as a
+rotation.
+
+Three things the rehearsal was worth, none of which were the plan:
+
+- **A tunnel carries objects the dashboard does not show.** Zero's old tunnel had a WARP
+  private-network route, which the cutover left pointing at a connector-less tunnel and
+  which no check would have caught. It surfaced only because deleting the tunnel failed.
+  See [`cloudflare.md`](cloudflare.md).
+- **The review step earns its place.** Both hosts' generated configs contained a rule
+  that had to come out: `ionic-traces.gsrpi.uk` on one, retired; and on zero a
+  `torrents.gsrpi.uk` rule that had never routed, which carried across would have moved
+  one's torrent UI onto zero. The cutover now refuses to repoint a record that points
+  somewhere else already.
+- **The cutover must not arrive through the tunnel it cycles.** It severed its own
+  connection on `one` and left the host half-migrated. It now refuses on a loopback
+  client address and names the mesh alias to use — which is the same standing-position
+  rule as `CLAUDE.md` § *Changing the thing you are connected through*, learned again.
+
+`two` is deferred about a week, deliberately. Two hostnames, the smallest job, on the box
+with the least margin and no bastion of its own.
 
 **2f, filed 2026-08-23.** `/etc/init.d/cloudflared` declares `stdout_log` and
 `stderr_log`, which `supervise-daemon` does not act on. `/var/log/cloudflared.err` was
