@@ -1,0 +1,139 @@
+---
+# 2g, phase 3 of 3: delete the old tunnel.
+#
+#   ansible-playbook playbooks/cloudflare-tunnel-retire.yml -e target=one -K
+#
+# WHY THIS MATTERS BEYOND TIDINESS. Deleting the tunnel kills its credential outright.
+# `one`'s token has been assumed disclosed since it sat world-readable in a 755 init
+# script, and a copy of it survived in /etc/init.d/cloudflared.bak-token for a month.
+# Rotating would have superseded it; deleting the tunnel makes every copy worthless.
+# That is 2e for this host, arriving as a side effect of 2g.
+#
+# IT IS THE ONE IRREVERSIBLE STEP. A deleted tunnel cannot be recreated with the same
+# UUID, so anything still pointing at it is broken permanently rather than for a minute.
+# Hence the two guards below, and hence its own file.
+
+- name: Retire a host's old tunnel
+  hosts: "{{ target | default('one') }}"
+  gather_facts: false
+
+  vars_prompt:
+    - name: cf_api_token
+      prompt: "Cloudflare API token (Tunnel:Edit AND Zone:DNS:Edit on gsrpi.uk)"
+      private: true
+
+  vars:
+    cf_api: "https://api.cloudflare.com/client/v4"
+    zone_name: "gsrpi.uk"
+    cred_file: "/etc/cloudflared/{{ inventory_hostname }}.json"
+    old_cred_file: "/etc/cloudflared/{{ inventory_hostname }}.json.pre-2g"
+    probe: "http://127.0.0.1:20241"
+    api_hdr:
+      Authorization: "Bearer {{ cf_api_token }}"
+    # Hostnames knowingly left behind, comma-separated. They point at the old tunnel and
+    # will stop resolving to anything when it goes. Naming them is the acknowledgement.
+    abandon: ""
+
+  tasks:
+    - name: Read the tunnel we are on now, and the one we left
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      register: creds
+      loop: [ "{{ cred_file }}", "{{ old_cred_file }}" ]
+      become: true
+      no_log: true
+
+    - name: Name them
+      ansible.builtin.set_fact:
+        live_tunnel: "{{ (creds.results[0].content | b64decode | from_json).TunnelID }}"
+        doomed_tunnel: "{{ (creds.results[1].content | b64decode | from_json).TunnelID }}"
+        cf_account: "{{ (creds.results[0].content | b64decode | from_json).AccountTag }}"
+
+    - name: Refuse to delete the tunnel we are currently running
+      ansible.builtin.assert:
+        that: live_tunnel != doomed_tunnel
+        fail_msg: >-
+          {{ cred_file }} and {{ old_cred_file }} name the same tunnel. Either the
+          cutover never happened or the backup was overwritten — either way this play
+          would delete the tunnel {{ inventory_hostname }} is serving from.
+
+    # ── guard 1: the connector we are keeping must be healthy ────────────────
+    - name: The live connector must be serving
+      ansible.builtin.uri:
+        url: "{{ probe }}/ready"
+        return_content: true
+      register: ready
+
+    - name: Refuse if the replacement is not actually up
+      ansible.builtin.assert:
+        that: (ready.content | from_json).readyConnections | default(0) > 0
+        fail_msg: >-
+          {{ inventory_hostname }}'s connector reports no ready connections. Deleting the
+          old tunnel now would remove the thing you would fall back to.
+
+    # ── guard 2: nothing may still point at the doomed tunnel ────────────────
+    # THIS IS THE ONE THAT MATTERS. A DNS record aimed at a deleted tunnel does not
+    # degrade, it stops working permanently — the UUID cannot be recreated.
+    - name: Find the zone
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/zones?name={{ zone_name }}"
+        headers: "{{ api_hdr }}"
+      register: zone
+      delegate_to: localhost
+      no_log: true
+
+    - name: List every record in the zone
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/zones/{{ zone.json.result[0].id }}/dns_records?per_page=500"
+        headers: "{{ api_hdr }}"
+      register: allrecs
+      delegate_to: localhost
+      no_log: true
+
+    - name: Which records still aim at the doomed tunnel
+      ansible.builtin.set_fact:
+        stragglers: >-
+          {{ allrecs.json.result
+             | selectattr('content', 'equalto', doomed_tunnel ~ '.cfargotunnel.com')
+             | map(attribute='name') | list }}
+
+    - name: Show them
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'still pointing at ' ~ doomed_tunnel ~ ': ' ~ (stragglers | join(', '))
+             if stragglers else 'nothing points at ' ~ doomed_tunnel ~ ' any more' }}
+
+    - name: Refuse unless every straggler was named as abandoned
+      ansible.builtin.assert:
+        that: stragglers | difference(abandon.split(',') | map('trim') | reject('equalto', '') | list) | length == 0
+        fail_msg: >-
+          These still point at the tunnel about to be deleted, and were not listed as
+          abandoned: {{ stragglers | difference(abandon.split(',') | map('trim') | list) | join(', ') }}.
+          Either repoint them, or acknowledge losing them with
+          -e abandon="{{ stragglers | join(',') }}"
+
+    - name: Note what is being given up
+      ansible.builtin.debug:
+        msg: >-
+          ABANDONING {{ abandon }} — these will stop resolving to anything once the
+          tunnel is gone. Their DNS records are left in place; delete them separately
+          if you want the names gone too.
+      when: abandon | length > 0
+
+    # ── delete ───────────────────────────────────────────────────────────────
+    - name: Delete the old tunnel
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account }}/cfd_tunnel/{{ doomed_tunnel }}"
+        method: DELETE
+        headers: "{{ api_hdr }}"
+        status_code: [200, 202, 204]
+      delegate_to: localhost
+      no_log: true
+
+    - name: Done
+      ansible.builtin.debug:
+        msg:
+          - "tunnel {{ doomed_tunnel }} is gone, and every credential for it is now worthless"
+          - "{{ inventory_hostname }} serves from {{ live_tunnel }}, routes in hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
+          - "cleanup: rm {{ old_cred_file }} and /etc/cloudflared/{{ inventory_hostname }}-new.json"
+          - "and the baseline: rm ~/.infra-2g-baseline-{{ inventory_hostname }}.json"
