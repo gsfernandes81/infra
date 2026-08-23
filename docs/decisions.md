@@ -236,10 +236,15 @@ switch. A 512 MB board cannot hold its OS image in RAM *and* Postgres's buffers,
 unsynced diskless system loses the data directory on power loss. Diskless and this stack
 are not obviously compatible, and that has not been resolved.
 
-## SSH between hosts: `two` is a jump host, and that is all
+## SSH between hosts: any box can be a jump host; none holds a key to another
 
-**`two` exists as an SSH jump host and an out-of-band console. Nothing else in this
-repo runs over SSH between boxes.** Fleet work is done *on* the box it concerns.
+> **Amended 2026-08-23.** This section used to read "`two` is a jump host, and that is
+> all". All three are now, and the entry below is unchanged in the part that matters:
+> **no box holds a key to another.** The two are separate facts and conflating them cost
+> an outage — see the box at the end.
+
+**Nothing in this repo runs over SSH between boxes on its own behalf.** Fleet work is
+done *on* the box it concerns.
 
 So there is no key on `zero` authorising it to reach `one` or `two`, and none should be
 added for convenience. `zero` is the internet-facing box — it runs the tunnel and
@@ -257,6 +262,36 @@ including the record of its failing disk, with `zero`'s hardware.
 The cost is real and accepted: facts about `one` and `two` cannot be verified from
 `zero`, so anything unconfirmed is marked unverified in the docs rather than guessed —
 zram on both hosts, and `one`'s file modes, are the current examples.
+
+### The mesh, and why it does not breach any of the above — 2026-08-23
+
+All three hosts now set `AllowTcpForwarding yes` with `PermitOpen` scoped to exactly the
+three fleet addresses on port 22 (`hosts/*/system/sshd-infra.conf`), so a client can
+reach any box through either of the others.
+
+**This grants no box access to another.** With `ProxyJump` the *client's* key
+authenticates end to end; the intermediate only forwards TCP and never authenticates to
+the target. The rule above is about keys, and no key was added anywhere.
+
+It reverses a "don't" written elsewhere, which is why it is recorded rather than merely
+done. or3's `dev/README.md` § *"`ProxyJump zero` does not work, and must not be made
+to"* argues against enabling forwarding on zero. The objection is about **arbitrary**
+forwarding from the internet-facing box; `PermitOpen` makes the reachable set three
+addresses the client can already reach directly. That document also concedes the setting
+"was never a boundary against an authenticated user", since anyone with a shell can run
+`nc` — which is exactly what the fleet did instead, for months, through
+`ProxyCommand ssh zero nc %h %p`. **or3's README is now out of date on this point** and
+should be amended when that repo is next touched.
+
+`or3-dev` keeps the `nc` form deliberately: it targets `127.0.0.1:2224`, which
+`PermitOpen` does not include, so a jump to it is refused. Verified.
+
+> **Why the mesh exists at all.** On 2026-08-23 `two`'s tunnel was stopped while it was
+> the only configured route to it. There was no `two-zero`, and — correctly — no key
+> from zero or one that reaches it, so the box was unreachable until a `ProxyCommand`
+> was assembled by hand mid-incident. The reasoning that left it unreachable was about
+> keys; what was missing was a *path*. Those are different things, and the fix for one
+> is not the fix for the other.
 
 ## `zero`'s encrypted volume
 

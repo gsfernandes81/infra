@@ -34,22 +34,26 @@ Host two-zero two-one
   HostName {{ ip_two }}
 
 # ── the jump rules ────────────────────────────────────────────────────────────
-# `nc`, not ProxyJump. zero and one set AllowTcpForwarding no, which refuses the
-# direct-tcpip channel ProxyJump opens; a session channel running nc is not covered by
-# that setting. So the mesh needs no change on any host. `nc host port` is the one form
-# busybox and openbsd-nc agree on, and %h is the target's LAN address.
+# ProxyJump, since 2026-08-23: all three hosts now set AllowTcpForwarding yes with
+# PermitOpen scoped to exactly these three addresses on port 22
+# (hosts/*/system/sshd-infra.conf). Verified live in both directions on all three, and
+# with a negative test that a destination outside the list is refused.
 #
-# If AllowTcpForwarding is ever enabled fleet-wide these become `ProxyJump <host>`,
-# which is tidier and spawns no login shell on the jump host — but it is a change to
-# the sshd you are connected through, and this works without it.
+# THESE RULES DEPEND ON THAT DROP-IN. If it is ever removed, ProxyJump fails with
+# "administratively prohibited" and these revert to `ProxyCommand ssh <host> nc %h %p`,
+# which uses a session channel that AllowTcpForwarding does not govern. That is what
+# they were until today, and it works with no server-side change at all.
+#
+# or3-dev is NOT converted and must not be: it targets 127.0.0.1:2224, which PermitOpen
+# deliberately does not include, so a jump to it is refused. It keeps the nc form.
 Host *-zero
-  ProxyCommand ssh zero nc %h %p
+  ProxyJump zero
 
 Host *-one
-  ProxyCommand ssh one nc %h %p
+  ProxyJump one
 
 Host *-two
-  ProxyCommand ssh two nc %h %p
+  ProxyJump two
 
 # ── the dev containers on zero — User dev, so they must precede the shared block
 Host zero-dev-dd
