@@ -158,6 +158,32 @@
         tunnel_id: "{{ new_tunnel }}"
         ingress: "{{ live_ingress }}"
 
+    # SAVED FOR PHASE 2, and this is the point of doing it here. Phase 2 may resume into
+    # a half-finished cutover where the hostnames are already down; a baseline taken
+    # then captures the outage, and the check that compares against it proves nothing.
+    # Taken here, while the OLD tunnel is still serving, it is the real thing.
+    - name: Baseline every hostname while the old tunnel still serves
+      ansible.builtin.uri:
+        url: "https://{{ item }}"
+        method: HEAD
+        timeout: 20
+        follow_redirects: none
+      register: bl
+      failed_when: false
+      loop: >-
+        {{ live_ingress | selectattr('hostname', 'defined')
+           | map(attribute='hostname') | reject('equalto', '') | list }}
+      delegate_to: localhost
+
+    - name: Save it for the cutover
+      ansible.builtin.copy:
+        dest: "{{ lookup('env', 'HOME') }}/.infra-2g-baseline-{{ inventory_hostname }}.json"
+        content: >-
+          {{ dict(bl.results | map(attribute='item') | list
+             | zip(bl.results | map(attribute='status') | list)) | to_nice_json }}
+        mode: "0644"
+      delegate_to: localhost
+
     - name: What to do next
       ansible.builtin.debug:
         msg:

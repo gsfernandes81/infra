@@ -45,6 +45,7 @@
     # where `~` is root's home and `~/infra` does not exist there.
     host_repo: "/home/gavin/infra"
     probe: "http://127.0.0.1:20241"
+    baseline_file: "{{ lookup('env', 'HOME') }}/.infra-2g-baseline-{{ inventory_hostname }}.json"
     api_hdr:
       Authorization: "Bearer {{ cf_api_token }}"
 
@@ -130,6 +131,17 @@
           - "NOT moved : anything in the old tunnel but absent above — retired on purpose"
 
     # ── baseline every hostname, while the old tunnel still serves ───────────
+    # PREFER THE BASELINE PHASE 1 SAVED. Re-taking it here is wrong on a resumed run:
+    # the host may already be cut over with DNS still pointing at a dead tunnel, in
+    # which case "baseline" captures the OUTAGE and the final check then confirms the
+    # hostnames still match it. That happened on 2026-08-23 — the cutover succeeded and
+    # the check that said so proved nothing.
+    - name: Look for the baseline phase 1 saved
+      ansible.builtin.stat:
+        path: "{{ baseline_file }}"
+      register: bl_saved
+      delegate_to: localhost
+
     # failed_when: false, NOT status_code. Any status is a valid baseline — what matters
     # is that it is the SAME afterwards. `status_code: -1` looks like "accept anything"
     # and is not: the module compares the real status against that literal list.
@@ -149,11 +161,21 @@
       failed_when: false
       loop: "{{ move_hosts }}"
       delegate_to: localhost
+      when: not bl_saved.stat.exists
 
-    - name: Remember what each one answered
+    - name: Use the saved baseline, or the one just taken
       ansible.builtin.set_fact:
         baseline_status: >-
-          {{ dict(move_hosts | zip(baseline.results | map(attribute='status') | list)) }}
+          {{ (lookup('file', baseline_file) | from_json) if bl_saved.stat.exists
+             else dict(move_hosts | zip(baseline.results | map(attribute='status') | list)) }}
+
+    - name: Warn if the baseline is this run's own
+      ansible.builtin.debug:
+        msg: >-
+          No saved baseline at {{ baseline_file }} — using one taken just now. If this is
+          a RESUMED run the hostnames may already be down, in which case the final check
+          confirms nothing. Verify by hand afterwards.
+      when: not bl_saved.stat.exists
 
     - name: Baseline
       ansible.builtin.debug:
@@ -317,6 +339,6 @@
       ansible.builtin.debug:
         msg:
           - "every hostname answers as it did before the cutover"
-          - "old tunnel {{ old_tunnel }} now has no DNS pointing at it, and no connector"
+          - "the previous tunnel now has no DNS pointing at it, and no connector"
           - "next: cloudflare-tunnel-retire.yml, once you are happy to lose it"
           - "cleanup here: rm {{ new_cred_file }} and {{ cred_file }}.pre-2g"
