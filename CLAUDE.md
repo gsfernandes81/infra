@@ -134,6 +134,14 @@ Two rules:
 Then grep the *directory*, not the file, before declaring it done:
 `grep -rlE '\-\-token [A-Za-z0-9_=-]{40,}' /etc/init.d/`
 
+**This recurred, and the check above was what found it.** On 2026-08-23,
+`/etc/init.d/cloudflared.bak-token` was still present on `one` — 755, dated 20 July, the
+token inline — more than a month after the move it was a backup of, and after this
+section was written describing exactly that outcome. Recording a lesson is not applying
+it: the cleanup happened on whichever host the problem was noticed, and nothing swept the
+others. `zero` was clean. When a rule here is about a class of file, check every host
+that has one.
+
 ## Landmines
 
 - **Never `apk del containerd` on its own.** `docker-engine` hard-depends on it, and so

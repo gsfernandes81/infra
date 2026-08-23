@@ -313,7 +313,7 @@ bind-mounts a path that could fail to mount.
 | | `nofail` | `chattr +i` | tunnel credential |
 |---|---|---|---|
 | `zero` | ✅ Aug 2026 | ✅ Aug 2026 | ✅ **rotated 2026-08-23**, and out of argv — credentials file |
-| `one` | ✅ Aug 2026 | ✅ Aug 2026 | moved out of the init script Aug 2026, **still `--token` in argv, NOT rotated** |
+| `one` | ✅ Aug 2026 | ✅ Aug 2026 | moved out of the init script Aug 2026 but **a 755 copy of the old one survived until 2026-08-23**; still `--token` in argv, NOT rotated |
 | `two` | n/a (no data mounts) | n/a | **still INLINE in the 755 init script**, confirmed 2026-08-23 — never moved, never rotated |
 
 **`zero` is done; `one` is not.** Both tokens were world-readable in a 755 init script
@@ -410,8 +410,23 @@ is being ignored looks identical to one that is not. Diff it against a known-goo
 capture, and fetch a real hostname end to end.
 
 **`one` — NOT done. Still `--token` in argv, still the disclosed value.** Layout as
-`zero`'s was before 2026-08-23, tracked under `hosts/one/system/`. It gets the same two
-phases, standing on a jump from `two`. The move was proven inert before restarting: the new config
+`zero`'s was before 2026-08-23, tracked under `hosts/one/system/`. Its remediation is
+absorbed into 2g rather than repeated as 2e.
+
+**And the August move here was never finished.** It left
+`/etc/init.d/cloudflared.bak-token` — 755, root:root, dated 20 July, a complete copy of
+the init script with the token still inline. So the credential the move existed to
+protect stayed world-readable for over a month afterwards, on the same box, in the same
+directory. Removed 2026-08-23. `zero` was checked and is clean; `two` never had the move
+so has no backup to leave.
+
+This is the failure CLAUDE.md § *Backups of secret-bearing files* describes — and it was
+written up after this file was created, prescribing a check that was then never run here.
+Run it on any host after touching that directory:
+
+```sh
+sudo grep -rl eyJ /etc/init.d/
+``` The move was proven inert before restarting: the new config
 was sourced, `command_args` expanded, and its SHA-256 compared against the running
 command line — identical, so the daemon restarted with a byte-identical invocation. It
 recovered in 5s and the `connectorId` changed, which is what proves it actually
