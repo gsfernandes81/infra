@@ -174,6 +174,15 @@ that has one.
   only thing standing between the fleet and a ten-minute array outage is nobody running
   `rc-update add smartd`. If `rc-status --all | grep smartd` ever returns a line on `one`,
   that is the incident, and the fix is `rc-update del smartd` before anything else.
+- **Write the address, not the name.** `localhost` resolves to `::1` before `127.0.0.1`,
+  and a great deal on this fleet binds IPv4 only — so the name reaches a listener that
+  is not there and the error names something else entirely. It has cost time twice:
+  zero's cloudflared spent months logging `dial tcp [::1]:8384: connect: connection
+  refused` for a Syncthing that was running, and the laptop's `adb forward` hop failed
+  with `kex_exchange_identification: Connection refused` while `adb forward --list`
+  showed the forward plainly up. Both times the service was fine and the message pointed
+  away from the cause. This applies to `HostName` in ssh_config, to `service:` in a
+  cloudflared ingress, and to anything else where a literal costs nothing.
 - **"Exited" is not "absent".** A stack with an exited container, a registered compose
   project, or surviving named volumes must be torn down properly. Deleting its files
   first orphans them permanently.
