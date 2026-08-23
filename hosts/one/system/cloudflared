@@ -4,16 +4,61 @@
 # infra-path: /etc/init.d
 # infra-name: cloudflared
 # infra-mode: 0755
-  
+#
+# HAND-WRITTEN, AND IT HAS TO BE. Alpine packages no init script for cloudflared —
+# docs/host-setup.md installs the binary straight from GitHub — so this was assembled
+# from the Alpine package source and other references. Whatever preceded it DID NOT
+# START ON REBOOT.
+#
+# That is the warning worth carrying, and it is not "the generated service errors".
+# `cloudflared service install` produces something that looks correct, starts when you
+# start it, and then does not come back after a reboot — on a remote box, discovered
+# whenever the box next restarts. Do not replace this file with it.
+#
+# LOGGING, FIXED 2026-08-23. This previously declared stdout_log and stderr_log, which
+# supervise-daemon does not act on. /var/log/cloudflared.err was last written on
+# 2026-01-04 and cloudflared.log had been 0 bytes since 2025-12-24, through a service
+# that restarts regularly. On `zero` six consecutive crashes produced no output at all
+# and had to be diagnosed by reproducing them in the foreground.
+#
+# The names below are copied from /etc/init.d/docker ON THIS HOST: a stock Alpine
+# script, same supervisor, in the default runlevel, that demonstrably writes its log.
+# `output_logger` takes a COMMAND rather than a path, which is why the old declaration
+# was silently inert rather than wrong-looking.
+
 cfgfile="/etc/$RC_SVCNAME/$RC_SVCNAME.conf"
 supervisor=supervise-daemon
 command="/usr/bin/cloudflared"
 command_args="--autoupdate-freq 24h0m0s tunnel run --token ${CF_TUNNEL_TOKEN}"
 command_user="root"
 pidfile="/var/run/$RC_SVCNAME.pid"
-stdout_log="/var/log/$RC_SVCNAME.log"
-stderr_log="/var/log/$RC_SVCNAME.err"
 command_background="yes"
+
+# `cfgfile` and `command_background` both appear vestigial — nothing here references
+# either, and docker's script sets neither. Left alone rather than removed in the same
+# change as the logging fix; one thing at a time on a boot-path file.
+
+# ONE file, not two. The old split produced a 397 KB .err and a .log that had been
+# empty for eight months, because cloudflared writes essentially everything to stderr.
+# `-m` merges the streams, which is what docker does when both point at one place.
+CF_LOGFILE="${CF_LOGFILE:-/var/log/${RC_SVCNAME}.log}"
+LOGPROXY_OPTS="$LOGPROXY_OPTS -m"
+
+# 0640 rather than docker's 0644. A deliberate tightening, not a copying error: this
+# service has now twice left a world-readable file containing its own credential on
+# this fleet, so its log does not get world-read by default either. It should contain
+# no secret — cloudflared never prints its token — but that was also true of the init
+# script, right up until it wasn't.
+export \
+	LOGPROXY_CHMOD="${LOGPROXY_CHMOD:-0640}" \
+	LOGPROXY_LOG_DIRECTORY="${LOGPROXY_LOG_DIRECTORY:-/var/log}" \
+	LOGPROXY_ROTATION_SIZE="${LOGPROXY_ROTATION_SIZE:-104857600}" \
+	LOGPROXY_ROTATION_TIME="${LOGPROXY_ROTATION_TIME:-86400}" \
+	LOGPROXY_ROTATION_SUFFIX="${LOGPROXY_ROTATION_SUFFIX:-.%Y%m%d%H%M%S}" \
+	LOGPROXY_ROTATED_FILES="${LOGPROXY_ROTATED_FILES:-5}"
+
+output_logger="log_proxy $LOGPROXY_OPTS $CF_LOGFILE"
+error_logger="log_proxy $LOGPROXY_OPTS $CF_LOGFILE"
 
 depend() {
 	need net
