@@ -37,25 +37,49 @@
     windows_out: "{{ home }}/ssh-fleet-block-windows.txt"
 
   tasks:
-    # `shell`, not `command`, and deliberately: `command -v` is a SHELL BUILTIN, so the
-    # command module has nothing to exec and reports cloudflared missing on a host where
-    # it is plainly on PATH. Hit exactly that on Termux, 2026-08-23.
-    - name: Find cloudflared on this control node
+    # BEST EFFORT ONLY — the assertion below is on the RESULT, not on this succeeding.
+    #
+    # `shell`, not `command`: `command -v` is a SHELL BUILTIN, so the command module has
+    # nothing to exec and reports cloudflared missing on a host where it is plainly on
+    # PATH. That is what failed on Termux, 2026-08-23. dev-client.yml has the same task
+    # and hides the failure behind `| default('cloudflared', true)`, which writes the
+    # bare name its own comment warns against — so detection is not to be trusted here.
+    - name: Try to find cloudflared on this control node
       ansible.builtin.shell: command -v cloudflared
       register: cfd_path
       changed_when: false
       failed_when: false
+      check_mode: false
 
-    # An absolute path, not the bare name. ssh runs ProxyCommand through /bin/sh, whose
-    # PATH is not the interactive one — a bare `cloudflared` resolves in your shell and
-    # then fails inside ssh, which presents as the tunnel being down.
-    - name: Refuse to write a block that names a cloudflared we cannot find
+    - name: Settle on a path — an override wins, discovery is the fallback
+      ansible.builtin.set_fact:
+        cfd_resolved: >-
+          {{ cloudflared_path | default(cfd_path.stdout | trim, true) }}
+
+    # THE ACTUAL GUARD. Whatever path we are about to write into every tunnel alias, it
+    # has to exist and be executable HERE. Asserting that detection succeeded proves
+    # nothing about the string it produced; asserting the file is there proves the thing
+    # that matters. An absolute path, not a bare name: ssh runs ProxyCommand through
+    # /bin/sh, whose PATH is not your interactive one, so a bare name resolves in your
+    # shell and then fails inside ssh — which presents as the tunnel being down.
+    - name: Check the path we are about to write
+      ansible.builtin.stat:
+        path: "{{ cfd_resolved }}"
+      register: cfd_stat
+      when: cfd_resolved | length > 0
+
+    - name: Refuse to write a block naming a cloudflared that is not there
       ansible.builtin.assert:
-        that: cfd_path.rc == 0 and cfd_path.stdout | trim | length > 0
+        that:
+          - cfd_resolved | length > 0
+          - cfd_stat.stat.exists | default(false)
+          - cfd_stat.stat.executable | default(false)
         fail_msg: >-
-          cloudflared is not on PATH here. Install it first — every tunnel alias in this
+          Could not establish an executable cloudflared on this control node
+          (resolved to '{{ cfd_resolved | default('') }}'). Every tunnel alias in this
           block runs it as a ProxyCommand, and a block naming a missing binary looks
-          exactly like a fleet-wide outage.
+          exactly like a fleet-wide outage. Install it, or pass the path explicitly:
+          -e cloudflared_path=/data/data/com.termux/files/usr/bin/cloudflared
 
     - name: Ensure ~/.ssh exists
       ansible.builtin.file:
@@ -91,10 +115,13 @@
         block: "{{ lookup('template', '../templates/ssh-fleet-block.j2') }}"
         mode: "0600"
       vars:
-        cloudflared: "{{ cfd_path.stdout | trim }}"
+        cloudflared: "{{ cfd_resolved }}"
 
     # Same block, Windows cloudflared path, to a file rather than into a config. The
     # laptop's ssh_config is hand-maintained; this keeps the host list from diverging.
+    #
+    # NOT path-checked, and cannot be: that path is on another operating system. It is
+    # the one string here nobody has proven, so check it by hand on the laptop.
     - name: Render the same block for the Windows laptop, to paste
       ansible.builtin.copy:
         dest: "{{ windows_out }}"
