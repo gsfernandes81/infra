@@ -200,24 +200,38 @@ Two things `/boot` — the red line — needs by hand, not by script:
 
 ## cloudflared
 
-```sh
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-aarch64 \
-     -o /usr/bin/cloudflared && chmod +x /usr/bin/cloudflared
-```
+**Do not install it by hand any more.** Use
+`ansible/playbooks/cloudflared-update.yml`, which picks the asset from the host's own
+`uname -m`, verifies a SHA256 you supply, cycles the connector and rolls back a failure.
+The reasons are below and they are not theoretical.
 
-`aarch64` for `one` and `zero`; **`arm`** for `two`, which is armv6.
+> ⚠ **What this section used to say could not work.** It gave
+> `.../releases/latest/download/cloudflared-linux-aarch64`. **There is no `aarch64`
+> asset** — Cloudflare publishes `arm64`, `arm`, `amd64`, `386`, `armhf`. With `-L` and
+> no `-f`, curl follows GitHub's 404 and writes the error page over
+> `/usr/bin/cloudflared`. So the documented install was never usable as written, which
+> is the likeliest reason one working binary ended up copied to all three hosts instead.
+
+> ⚠ **All three hosts run the 32-bit `arm` build, including the two arm64 ones.**
+> Established 2026-08-23: identical SHA256 on `zero`, `one` and `two`, and `two` is
+> `armv6l` — nothing but a 32-bit ARM binary executes on all three. `zero` and `one` are
+> `aarch64` and have been running it for about six months.
+>
+> **Autoupdate could never have corrected it.** cloudflared updates itself with a build
+> matching *its own* architecture, not the machine's, so the original mistake was
+> self-perpetuating. Autoupdate was also demonstrably live — all three binaries were
+> rewritten on 14–15 August, the day `2026.8.2` released — which meant a boot-path binary
+> on the internet-facing box was being replaced with unverified bytes on a 24-hour cycle.
+> It is now `--no-autoupdate` on all three.
 
 The init script is tracked at `hosts/<host>/system/cloudflared` — install it with
 `bin/install-system-file cloudflared`. Not reproduced here, because a pasted copy drifts
 from the real one.
 
-> ⚠ **The token is in `command_args`, and that leaks it.** `supervise-daemon` logs its
-> child's full command line to syslog at every boot, so the live token sits in
-> `/var/log/messages` (mode 640 `root:wheel`) and its rotations, readable by anyone in
-> `wheel`. Moving it to `/etc/conf.d/cloudflared` at mode 600 protected the file but not
-> the argv. Fix is `TUNNEL_TOKEN` in the environment with `--token` dropped, bundled
-> with a rotation in one restart. **Not applied on any host yet.** Rule for all three:
-> secrets never go in `command_args`.
+The token used to be in `command_args`, where `supervise-daemon` logged it to syslog at
+every boot. **Fixed on all three, 2026-08-23**: there is no `--token` anywhere now. Each
+host reads `/etc/cloudflared/<host>.json` at mode 600, named by a `--config` file that is
+tracked. The rule that came out of it stands: **secrets never go in `command_args`.**
 
 ## Stacks
 
@@ -233,7 +247,7 @@ network namespace or port forwarding breaks silently.
 
 | | `one` (Pi 4) | `two` (Pi 1 B+, armv6) | `zero` (Pi 5) |
 |---|---|---|---|
-| cloudflared build | `aarch64` | `arm` | `aarch64` |
+| cloudflared build | **`arm` — wrong**, should be `arm64` | `arm` ✅ | **`arm` — wrong**, should be `arm64` |
 | zram | intended, **unverified** | **no swap at all** (verified Aug 2026) | no |
 | container runtime | docker | rootless podman + podman-compose | docker |
 | bcache-tools | no | no | yes |

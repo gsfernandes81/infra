@@ -479,6 +479,7 @@ ones that answer the question this document started from.
 | 2e | Rotate the fleet's own tunnel tokens | `zero`, `one`, `two`, edge | 2b | **`zero` and `one` done 2026-08-23** — one's by retiring its tunnel under 2g. `two`'s token is out of the 755 file and in a credentials file; its rotation waits for 2g |
 | 2f | `cloudflared`'s init script logs nowhere | `zero`, `one`, `two` | — | **done on all three, 2026-08-23** |
 | 2g | All three tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, `two`, DNS | 2f | `one` and `zero` **done 2026-08-23**; `two` deferred ~a week |
+| 2h | cloudflared: `--no-autoupdate` applied, and the right architecture on `zero` and `one` | all three | — | committed, **not applied** |
 | 3 | First stack adopted: `send2ereader` on `one` | one stack, non-critical box | 2 | |
 | 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two stacks | 3 | |
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | |
@@ -540,6 +541,29 @@ thought** — five hostnames, not eight, so closer to an hour. Two unknowns that
 stretch it: whether those CNAMEs are freely editable or tunnel-managed, and whether Access
 applications follow hostnames cleanly across a tunnel change — they bind to hostnames
 rather than tunnels, so they should, but that is unverified.
+
+**2h, filed 2026-08-23, and it is two findings rather than a plan.**
+
+**Autoupdate was on and live.** All three cloudflared binaries were rewritten on 14–15
+August, the day `2026.8.2` released, on a fleet where it was installed by hand six months
+earlier. A boot-path binary on the internet-facing box, replaced with unverified bytes on
+a 24-hour cycle — the same thing `dev/Dockerfile` refuses inside a container, where the
+argument is *weaker*. Now `--no-autoupdate` in all three tracked init scripts, committed
+but not yet installed.
+
+**All three run the 32-bit `arm` build, and two of them are `aarch64`.** Identical SHA256
+across hosts, and `two` is `armv6l`, so nothing else executes on all three. `host-setup.md`
+documented a per-architecture install that could not work — the asset name it gave does
+not exist, and `curl -L` without `-f` writes GitHub's 404 page over the binary — which is
+the likeliest reason one binary was copied everywhere instead.
+
+Autoupdate could never have fixed it: cloudflared fetches a build matching *its own*
+architecture, so the mistake was self-perpetuating. Only an explicit install breaks the
+loop, and `playbooks/cloudflared-update.yml` is that: right asset from `uname -m`,
+SHA256 supplied on the command line, one host at a time in the order `one → two → zero`,
+each stage refusing while an earlier one is unhealthy. **That gate is the point** — a
+calendar gap between stages only helps if somebody notices a failure inside it, and
+nothing on this fleet alerts.
 
 **2g: `one` and `zero` are done, 2026-08-23.** Both run new tunnels created with
 `config_src: local`, with their routes in `hosts/<host>/system/cloudflared-config.yml`
