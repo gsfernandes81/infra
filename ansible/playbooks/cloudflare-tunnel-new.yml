@@ -14,7 +14,13 @@
 # created, inspected and deleted with no effect on anything. That is the whole point of
 # splitting it out: the irreversible-feeling step is phase 2, and this is not it.
 #
-#   ansible-playbook playbooks/cloudflare-tunnel-new.yml -e target=one
+#   ansible-playbook playbooks/cloudflare-tunnel-new.yml -e target=one -K
+#
+# -K IS REQUIRED. ansible.cfg sets become_ask_pass = False on purpose — `gavin` has no
+# NOPASSWD sudo and roadmap.md's "Not doing" list keeps it that way — so a play needing
+# root asks for it explicitly. Two tasks here do: reading the existing credentials (0600
+# root) and writing the new ones. You will be asked for the sudo password AND the API
+# token, in that order.
 #
 # THE API TOKEN IS PROMPTED AND NEVER STORED, and every `uri` task is delegated to the
 # control node so it is never sent to a Pi. management-plane.md: "The API token goes
