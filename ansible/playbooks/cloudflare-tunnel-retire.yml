@@ -167,23 +167,36 @@
       no_log: true
       when: drop_routes | bool
 
+    # ITS OWN REGISTER, not `routes` again. A SKIPPED task still overwrites the variable
+    # it registers, with a skipped result — so re-using `routes` here erased the real
+    # listing whenever drop_routes was false, `routes.json` became undefined,
+    # `| default([])` turned that into an empty list, and the guard below passed with a
+    # route plainly present. It only refused at all because Cloudflare refused.
+    #
+    # A guard that disarms itself when its opt-in is absent is worse than no guard: it
+    # reports "All assertions passed" over exactly the condition it exists to catch.
     - name: Re-read the routes after dropping them
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account }}/teamnet/routes?tunnel_id={{ doomed_tunnel }}&is_deleted=false"
         headers: "{{ api_hdr }}"
-      register: routes
+      register: routes_after
       failed_when: false
       delegate_to: localhost
       no_log: true
       when: drop_routes | bool
 
+    - name: What is left, from whichever listing is the real one
+      ansible.builtin.set_fact:
+        routes_left: >-
+          {{ ((routes_after.json.result if (drop_routes | bool) else routes.json.result)
+              | default([])) }}
+
     - name: Refuse while private network routes still point here
       ansible.builtin.assert:
-        that: (routes.json.result | default([])) | length == 0
+        that: routes_left | length == 0
         fail_msg: >-
-          {{ (routes.json.result | default([])) | length }} private network route(s) still
-          point at {{ doomed_tunnel }}:
-          {{ (routes.json.result | default([])) | map(attribute='network') | list | join(', ') }}.
+          {{ routes_left | length }} private network route(s) still point at
+          {{ doomed_tunnel }}: {{ routes_left | map(attribute='network') | list | join(', ') }}.
           These are WARP routes, not public hostnames — the cutover did not move them, and
           they have had no connector since it ran. Decide whether they should follow the
           host onto {{ live_tunnel }} or be dropped. To drop them, re-run with
