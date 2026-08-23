@@ -71,19 +71,25 @@
         return_content: true
       register: live_cfg
 
+    # `.content | from_json`, NOT `.json`. The uri module only populates `.json` when the
+    # response carries a JSON content-type, and cloudflared's metrics endpoint does not
+    # set one — so `.json` is simply absent and the error names the wrong thing.
+    - name: Parse what the connector is serving
+      ansible.builtin.set_fact:
+        live_ingress: "{{ (live_cfg.content | from_json).config.ingress }}"
+
     - name: Refuse to proceed on a connector that is not serving rules
       ansible.builtin.assert:
-        that: live_cfg.json.config.ingress | length > 1
+        that: live_ingress | length > 1
         fail_msg: >-
-          {{ inventory_hostname }}'s connector reports
-          {{ live_cfg.json.config.ingress | default([]) | length }} ingress rules. That is
-          the catch-all alone or nothing at all — there is no configuration here worth
-          copying, and something is wrong that this play should not paper over.
+          {{ inventory_hostname }}'s connector reports {{ live_ingress | length }} ingress
+          rules. That is the catch-all alone or nothing at all — there is no configuration
+          here worth copying, and something is wrong that this play should not paper over.
 
     - name: Say what will be carried across
       ansible.builtin.debug:
         msg: >-
-          {{ live_cfg.json.config.ingress | rejectattr('hostname', 'equalto', '')
+          {{ live_ingress | rejectattr('hostname', 'equalto', '')
              | map(attribute='hostname') | list }}
 
     # ── create the new tunnel ─────────────────────────────────────────────────
@@ -150,7 +156,7 @@
       delegate_to: localhost
       vars:
         tunnel_id: "{{ new_tunnel }}"
-        ingress: "{{ live_cfg.json.config.ingress }}"
+        ingress: "{{ live_ingress }}"
 
     - name: What to do next
       ansible.builtin.debug:
