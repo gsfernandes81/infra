@@ -73,9 +73,13 @@ still wins over a local one, which is what took the tunnel down for fifteen seco
 earlier the same day.
 
 **So the only known route is a new tunnel**, created with `config_src: local`, followed
-by repointing all eight CNAMEs and retiring the old one. That is real work with real
-downtime per hostname, and it has not been started. What it would buy: the routes under
-review in git, which is where everything else here is going.
+by repointing all eight CNAMEs and retiring the old one.
+
+**Decided 2026-08-23 that this happens** — filed as phase 2g in
+[`management-plane.md`](management-plane.md), `one` first as a rehearsal. The reason is
+not a fault being fixed but a preference that matches everything else here: no more
+configuration in a web dashboard than strictly necessary. Method, estimates and the two
+open unknowns are in that entry.
 
 A `config.yml` carrying the full ingress was written for the attempt and removed again
 when it failed. It is in git history rather than in `HEAD`, because a copy that cannot

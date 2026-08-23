@@ -476,8 +476,9 @@ ones that answer the question this document started from.
 | 2b | `infra-dev` container, and the Cloudflare edge in front of it | `zero`, edge | 2 | **done** 2026-08-22 |
 | 2c | `one`'s array — both "broken services" are the SP900 in bay 0. `ionic-traces` stays down by decision; Syncthing is blocked on the disk | `one`'s enclosure | **physical access** | **blocked** |
 | 2d | One base image for the four dev containers — `dev/README.md` § *Four copies of this* | `zero`'s dev containers | 2b | |
-| 2e | Rotate the fleet's own tunnel tokens | `zero`, `one`, edge | 2b | `zero` **done 2026-08-23** (rotated, and off `--token`); `one` and `two` outstanding |
+| 2e | Rotate the fleet's own tunnel tokens | `zero`, `one`, edge | 2b | `zero` **done 2026-08-23**; **`one`'s half is absorbed into 2g** — see below; `two` unchecked |
 | 2f | `cloudflared`'s init script logs nowhere — fix it, and record why the generated service was rejected | `zero`, `one` | — | before `one`'s half of 2e |
+| 2g | Both host tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, DNS | 2f | `one` first, as rehearsal |
 | 3 | First stack adopted: `send2ereader` on `one` | one stack, non-critical box | 2 | |
 | 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two stacks | 3 | |
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | |
@@ -495,6 +496,41 @@ being true the day `infra-dev` came up. 2d is maintenance cost rather than risk 
 wait for whichever of the four images next needs a change.
 
 **Which leaves 2e and Phase 3 as the next actionable work**, in that order.
+
+**2g, filed 2026-08-23 — DECIDED, not optional-but-nice.** The owner's reason, and it is
+the deciding one: *"I'm not interested in leaving more config than I have to in a web
+dashboard."* That is the same argument as everything else in this document — routes that
+can be reviewed, diffed and recovered from git rather than clicked into a UI nobody can
+audit. It is not fixing a fault; zero's actual security problem was closed by 2e.
+
+**It cannot be done in place.** `config_src` is create-time only (see
+[`cloudflare.md`](cloudflare.md)), so each host gets a **new** tunnel created with
+`config_src: local`, and its CNAMEs are repointed to the new UUID.
+
+**For `one`, this absorbs 2e entirely.** A new tunnel arrives with fresh credentials in a
+credentials file and no token in argv, so both phases are satisfied by construction — and
+retiring the old tunnel is *stronger* than rotating its secret, because deleting a tunnel
+kills the disclosed credential outright rather than superseding it. Do not run 2e's two
+phases on `one` first; that work would be thrown away.
+
+**Method, which is what keeps it cheap.** Both tunnels run at once — the new connector
+comes up alongside the old one, on its own metrics port, serving nothing until DNS points
+at it. Then repoint **one hostname at a time**, verifying between each, each independently
+reversible by pointing the CNAME back. There is no cutover moment and no window where
+everything is down together. Repoint by API with a `Zone:DNS:Edit` token rather than by
+hand: eight records is twenty minutes of clicking and about a minute scripted, and the
+scripted version is reversible the same way.
+
+**`one` goes first, as a rehearsal.** It is the non-critical box, it needs tunnel work
+regardless, and it has far fewer hostnames — capture them with
+`curl -s 127.0.0.1:20241/config`, which nobody has done. It also picks up
+`torrents.gsrpi.uk` in the same operation, since that hostname is moving to `one` anyway
+and repointing it is one more CNAME in a batch that is already being repointed.
+
+Estimated 1.5–2.5 hours per host, most of it verification. Two unknowns that could
+stretch it: whether those CNAMEs are freely editable or tunnel-managed, and whether Access
+applications follow hostnames cleanly across a tunnel change — they bind to hostnames
+rather than tunnels, so they should, but that is unverified.
 
 **2f, filed 2026-08-23.** `/etc/init.d/cloudflared` declares `stdout_log` and
 `stderr_log`, which `supervise-daemon` does not act on. `/var/log/cloudflared.err` was
