@@ -40,6 +40,10 @@
     cred_file: "/etc/cloudflared/{{ inventory_hostname }}.json"
     new_cred_file: "/etc/cloudflared/{{ inventory_hostname }}-new.json"
     repo_cfg: "{{ playbook_dir }}/../../hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
+
+    # The clone ON THE HOST. Absolute, and not `~`: the install task runs with become,
+    # where `~` is root's home and `~/infra` does not exist there.
+    host_repo: "/home/gavin/infra"
     probe: "http://127.0.0.1:20241"
     api_hdr:
       Authorization: "Bearer {{ cf_api_token }}"
@@ -158,11 +162,16 @@
         label: "{{ item.item }}"
 
     # ── the host: config, credentials, cycle ─────────────────────────────────
+    # become: true, because install-system-file shells out to sudo for the backup and the
+    # write — and inside a command task there is no tty for sudo to prompt on. Run as
+    # root, those calls are no-ops. Without it the tool fails safe ("backup failed,
+    # nothing written") but it fails, which is a task away from where the work is.
     - name: Install the reviewed config
       ansible.builtin.command:
         cmd: bin/install-system-file cloudflared-config.yml --commit --allow-content-change
-        chdir: "~/infra"
+        chdir: "{{ host_repo }}"
       register: inst
+      become: true
       changed_when: true
 
     - name: Back up the old credentials, then put the new ones in place
