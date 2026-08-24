@@ -8,21 +8,25 @@ until then. Handoff notes are deleted once their open items close; nothing here 
 only record of anything — the phase table in
 [`../management-plane.md`](../management-plane.md) § *Sequencing* is the durable one.
 
-## You may be the first session on the new base image
+## The base image, and what is verified about it
 
-2d's rebuild (`make up` in `dev/`) recreates infra-dev from
-`ghcr.io/gsfernandes81/gsrpi-dev-base:2026.08.24` — public, CI-built from
-`dev/Dockerfile.base` in this repo. If that has happened, you are running on it and
-nobody has verified it: **`make verify` from the host is the first thing worth asking
-the owner to run**, and from in here, check that ansible, the collections, gh, claude
-and cloudflared all answer. If the rebuild has NOT happened yet, do not suggest ways
-around it — it drops the live session and is the owner's to fire.
+The rebuild happened on 2026-08-24 and `infra-dev` runs
+`ghcr.io/gsfernandes81/gsrpi-dev-base:2026.08.24`. Checked from inside that session:
+abduco, gh, screen, claude, cloudflared and `in-workspace` all answer, and the three
+collections match `ansible/requirements.yml`. **`make verify` from the host is still
+worth running** — it covers the docker-side state and the fleet hop, which cannot be
+seen from in here.
+
+**The pin has since moved to `2026.08.24.1` and nothing is running it yet.** That tag
+does not exist in ghcr until `gh workflow run dev-base.yml`; `make up` in either repo
+fails on the pull until then, which is the visible direction. Both steps drop the
+containers' sessions and are the owner's to fire.
 
 ## The status board is a live artifact
 
 https://claude.ai/code/artifact/0133f388-9fd7-4392-8d2c-0e1b18610784
 
-Seventeen phases, grouped done / in flight / queued / gated. Update it IN PLACE by
+Eighteen phases, grouped done / in flight / open / gated, each appearing exactly once. Update it IN PLACE by
 passing that URL as `url` to the Artifact tool — publishing without `url` creates a
 second artifact and orphans this one. It was current as of 2d's CI landing; if the
 phase table has moved since, the board is what drifted.
@@ -57,8 +61,10 @@ the reviewed-commit assert, and a 16-finding adversarial review of all of it app
    task; raise it when tunnels come up anyway.
 4. **Phase 3** — `send2ereader` adopted, `bin/compose` retired. The front of the
    original queue. Its public name is `bookit.gsrpi.uk`.
-5. Parked: or3/dd/ds base-image conversions (each drops that repo's sessions; or3-dev
-   explicitly left alone while it works); the workflow's Node-20 action bumps
+5. **or3-dev's conversion is done and merged** (2026-08-24, `cca66fd`) — but the image
+   is not built and no container runs it yet: `dev-base.yml` is dispatch-only. See 2d.
+   Still parked: `dd`/`ds` conversions (each drops that repo's sessions); the
+   workflow's Node-20 action bumps
    (cosmetic until GitHub hard-cuts); uptime monitoring (`ping.<host>.gsrpi.uk` was
    floated — it would let the gated cloudflared-update play replace the stagger).
 
