@@ -24,28 +24,36 @@
 # rather than a path, which is why the old declaration was inert rather than wrong.
 # Verified on `one` first, 2026-08-23, before being applied here.
 
-# NO AUTOUPDATE, since 2026-08-23. It was `--autoupdate-freq 24h0m0s` and it was live:
-# all three binaries were rewritten on 14-15 August, the day 2026.8.2 was released, on a
-# fleet where cloudflared was installed by hand half a year earlier.
+# AUTOUPDATE IS ON, AND STAGGERED. `--autoupdate-freq` is how often this host CHECKS;
+# it always takes the newest, so a host that checks rarely is simply behind. The fleet
+# is one -> two -> zero:
 #
-# Two reasons it is off. First, it replaced a boot-path binary with unverified bytes on a
-# 24-hour cycle — the same thing dev/Dockerfile refuses to permit inside a container, on
-# the grounds that this binary "holds the credentials that put an ssh endpoint on the
-# public internet", and the argument is stronger here, not weaker.
+#     one    6h      the non-critical box, sees a release within hours
+#     two   72h      the lifeboat, ~1.5 days behind
+#     zero 240h      Immich and everyone's way in, ~5 days behind
 #
-# Second, it could never fix what is wrong: cloudflared updates itself with a build
-# matching ITS OWN architecture, not the machine's. All three hosts carry byte-identical
-# binaries though `two` is armv6 and the others arm64 — so the fleet has been running one
-# 32-bit build everywhere since install, and autoupdate perpetuated that indefinitely.
+# This host: 240h0m0s (~5 days). Change it in step with the other two or the order is gone.
 #
-# Updates now come from ansible/playbooks/cloudflared-update.yml: right arch per host,
-# hash-verified, one host at a time, one -> two -> zero, each stage refusing while an
-# earlier one is unhealthy.
+# WHAT THIS BUYS AND WHAT IT DOES NOT. It buys time: a release that breaks `one` has
+# days to be noticed before it reaches `zero`. It does NOT guarantee order — zero's check
+# can land just after a release, a few percent per release at these numbers — and there is
+# no health gate: a bad version reaches all three eventually. A gated rollout exists in
+# ansible/playbooks/cloudflared-update.yml and is not used, decided 2026-08-23: it needs
+# a human free to run it, and the reason updates were not happening was exactly that
+# nobody was. Revisit once uptime monitoring exists and can be the gate.
+#
+# Autoupdate was briefly turned off the same day, on the grounds that it replaces a
+# boot-path binary with unverified bytes. True, and accepted: HTTPS to the vendor's
+# release URL is what the updater does, hash-pinning defends against a compromised
+# release, and the threat actually in play is an unreachable fleet because nobody had
+# time to ssh in. cloudflared's own updater is also vendor code that already runs,
+# which CLAUDE.md prefers over new unattended code whose failure is the tunnel not
+# coming back.
 
 cfgfile="/etc/$RC_SVCNAME/$RC_SVCNAME.conf"
 supervisor=supervise-daemon
 command="/usr/bin/cloudflared"
-command_args="--no-autoupdate --config /etc/cloudflared/config.yml tunnel run"
+command_args="--autoupdate-freq 240h0m0s --config /etc/cloudflared/config.yml tunnel run"
 command_user="root"
 pidfile="/var/run/$RC_SVCNAME.pid"
 command_background="yes"

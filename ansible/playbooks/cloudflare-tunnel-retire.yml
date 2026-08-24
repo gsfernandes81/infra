@@ -94,10 +94,13 @@
       delegate_to: localhost
       no_log: true
 
+    # `| default([], true)` on every Cloudflare result list here and below: a 403 comes
+    # back as `result: null`, which is DEFINED, so the plain `default([])` never applies
+    # and selectattr/length raise on none with an error that points away from the token.
     - name: Which records still aim at the doomed tunnel
       ansible.builtin.set_fact:
         stragglers: >-
-          {{ allrecs.json.result
+          {{ allrecs.json.result | default([], true)
              | selectattr('content', 'equalto', doomed_tunnel ~ '.cfargotunnel.com')
              | map(attribute='name') | list }}
 
@@ -145,9 +148,9 @@
     - name: Show the private network routes
       ansible.builtin.debug:
         msg: >-
-          {{ (routes.json.result | default([]))
+          {{ (routes.json.result | default([], true))
              | map(attribute='network') | list | default([], true)
-             if (routes.json.result | default([])) | length > 0
+             if (routes.json.result | default([], true)) | length > 0
              else 'no private network routes on ' ~ doomed_tunnel }}
 
     # DROPPED, NOT MOVED. Confirmed 2026-08-23 that WARP is not used here — these are
@@ -160,7 +163,7 @@
         method: DELETE
         headers: "{{ api_hdr }}"
         status_code: [200, 202, 204]
-      loop: "{{ routes.json.result | default([]) }}"
+      loop: "{{ routes.json.result | default([], true) }}"
       loop_control:
         label: "{{ item.network }}"
       delegate_to: localhost
@@ -189,7 +192,7 @@
       ansible.builtin.set_fact:
         routes_left: >-
           {{ ((routes_after.json.result if (drop_routes | bool) else routes.json.result)
-              | default([])) }}
+              | default([], true)) }}
 
     - name: Refuse while private network routes still point here
       ansible.builtin.assert:

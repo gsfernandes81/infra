@@ -274,24 +274,37 @@ def main():
             )
 
         live_bytes = read_bytes(live)
-        if live_bytes == repo_bytes:
+        if live_bytes == repo_bytes and current_mode == want_mode:
             print("\nalready identical, including the header. Nothing to do.")
             return 0
 
-        header_only = strip_header(repo_bytes) == live_bytes
-        print(f"\nchange:  {'header only' if header_only else 'CONTENT CHANGE'}")
+        if live_bytes == repo_bytes:
+            # Bytes match but the mode does not: fall through to the install, which
+            # applies the header's mode without changing a byte. Before 2026-08-24
+            # this path returned early on bytes alone -- the tool warned about the
+            # mode above and then declared nothing to do, so a 0755
+            # credential-adjacent file (the cloudflared.bak-token incident class)
+            # could never be fixed by the tool that exists to fix exactly that. This
+            # branch must never print "Nothing to do." -- the Ansible play
+            # string-matches it to decide what to skip.
+            print("\nchange:  MODE ONLY -- bytes are identical")
+        else:
+            header_only = strip_header(repo_bytes) == live_bytes
+            print(f"\nchange:  {'header only' if header_only else 'CONTENT CHANGE'}")
 
-        diff = run(["diff", "-u", "--label", str(live), "--label", str(entry),
-                    "/dev/stdin", str(entry)], input=live_bytes.decode(errors="replace"))
-        print("".join(f"    {ln}\n" for ln in diff.stdout.splitlines()))
+            diff = run(["diff", "-u", "--label", str(live), "--label", str(entry),
+                        "/dev/stdin", str(entry)],
+                       input=live_bytes.decode(errors="replace"))
+            print("".join(f"    {ln}\n" for ln in diff.stdout.splitlines()))
 
-        if not header_only and not args.allow_content_change:
-            print(
-                "refusing: this changes more than the infra- header. Re-read the diff "
-                "above, then pass --allow-content-change if it is what you intend.",
-                file=sys.stderr,
-            )
-            return 1
+            if not header_only and not args.allow_content_change:
+                print(
+                    "refusing: this changes more than the infra- header. Re-read the "
+                    "diff above, then pass --allow-content-change if it is what you "
+                    "intend.",
+                    file=sys.stderr,
+                )
+                return 1
     else:
         print("\nchange:  CREATING a new file")
 

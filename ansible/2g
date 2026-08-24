@@ -28,15 +28,22 @@ case $host in
     *)   jump=$host-two ;;
 esac
 
+# Abandoned hostnames ACCUMULATE. Emitting one -e per hostname would have the last
+# silently win — ansible-playbook keeps only the final value of a repeated -e — so
+# `./2g retire one a.gsrpi.uk b.gsrpi.uk` would abandon b and delete a's route.
 extra=""
+abandons=""
 for a in "$@"; do
     case $a in
         drop)       extra="$extra -e drop_routes=true" ;;
-        abandon=*)  extra="$extra -e $a" ;;
-        *.*)        extra="$extra -e abandon=$a" ;;
+        abandon=*)  abandons="$abandons${abandons:+,}${a#abandon=}" ;;
+        *.*)        abandons="$abandons${abandons:+,}$a" ;;
         *)          extra="$extra $a" ;;
     esac
 done
+if [ -n "$abandons" ]; then
+    extra="$extra -e abandon=$abandons"
+fi
 
 case $act in
     new)    pb=cloudflare-tunnel-new.yml;     via="" ;;

@@ -91,151 +91,27 @@ against before removing anything.
 
 ---
 
-## `one`: the array is missing and `lsblk` shows no `sda`/`sdb` at all
+## `one`: the SP900 is gone, and with it a whole failure class
 
-> **Added 2026-08-04 — delete this section once the SP900 is out of bay 0.**
-> After that it describes a fault that no longer exists, in the document you read while
-> something *else* is wrong, and it resembles a generic USB fault closely enough to send
-> you down the wrong path. Deleting it costs nothing: the evidence, measurements and
-> ruled-out hypotheses are in commit `0213a03` and stay searchable via `git log`.
+A section describing the failing ADATA SP900 in bay 0 — which hung the USB bridge on
+INQUIRY and took the array with it — lived here from 2026-08-04 until 2026-08-24, when
+the disk was physically pulled. It is deleted per its own instruction: after the pull it
+described a fault that no longer exists, closely enough shaped like a generic USB fault
+to send you down the wrong path. The evidence, the measurements and the remote levers
+that were tried (xhci re-bind, the UAS quirk, `scsi_mod.scan=manual` costed and
+declined) are in git history — search this file's log for "SP900".
 
-**A failing disk in bay 0 of the Sabrent enclosure hangs the whole USB bridge, so the
-data disk never enumerates.** The array is on `sdb`; bay 0 holds an ADATA SP900 that is
-confirmed bad (Aug 2026: 1681 `Reported_Uncorrect`, self-test "completed: read failure",
-offline collection "aborted by the device with a fatal error"). It holds nothing.
+Two things learned then that outlive the disk:
 
-Recognise it in `dmesg` — the abort is always on **LUN 0**, and `sdb` never appears:
+- **A wedged USB-SATA bridge is fixed by cutting the ENCLOSURE's power**, not by
+  anything software can reach. Kernel-side resets were tried exhaustively; the cold
+  start of the bridge is what worked, confirmed 2026-08-24.
+- **Check enumeration with `cat /proc/partitions`, not `lsblk`** — it answers from
+  kernel state without opening block devices, which matters on fragile hardware.
 
-```
-scsi 0:0:0:0: uas_eh_abort_handler ... CDB: opcode=0x12     <- INQUIRY, on sda
-usb usb2-port1: Cannot enable. Maybe the USB cable is bad?  <- x10, link won't retrain
-scsi 0:0:0:0: Device offlined - not ready after error recovery
-```
-
-**It does not self-heal.** Measured once: 433 seconds after the final disconnect, zero
-re-enumeration attempts. The kernel gives up and the port stays dead.
-
-Recover without physical access — this re-runs enumeration:
-
-```sh
-sudo sh -c 'echo 0000:01:00.0 > /sys/bus/pci/drivers/xhci_hcd/unbind'
-sleep 5
-sudo sh -c 'echo 0000:01:00.0 > /sys/bus/pci/drivers/xhci_hcd/bind'
-sleep 20
-cat /proc/partitions                     # expect sda AND sdb
-```
-
-**Check with `/proc/partitions`, not `lsblk`.** It answers the same question purely from
-kernel state, where `lsblk` opens block devices to read topology. Whether that is enough
-to poke `sda` was never established, but on a bridge this fragile it is not worth
-establishing the hard way.
-
-**It said "and usually succeeds" until 2026-08-23. It does not.** On that date the
-re-bind was run four times and `sdb` never attached once. Every attempt died the same
-way, and the sequence is worth having in full because it says which layer is at fault:
-
-```
-usb 2-1: Product: Dual SATA Bridge          <- the bridge DOES re-enumerate
-scsi host0: uas
-scsi 0:0:0:0: tag#28 ... CDB: opcode=0x12   <- INQUIRY to LUN 0 = sda
-xhci_hcd 0000:01:00.0: WARNING: Host System Error
-xhci_hcd 0000:01:00.0: xHCI host controller not responding, assume dead
-xhci_hcd 0000:01:00.0: HC died; cleaning up
-```
-
-The bridge is not the problem and the cable is not the problem — both re-enumerate
-cleanly. `sda` hangs on INQUIRY, UAS error recovery escalates to a host reset, and the
-whole controller dies before the scan ever reaches LUN 1.
-
-**The UAS quirk works, and is now measured rather than proposed.** Setting it before a
-re-bind stops the host controller dying:
-
-```sh
-sudo sh -c 'echo 174c:55aa:u > /sys/module/usb_storage/parameters/quirks'
-```
-
-after which the bridge binds as `usb-storage` instead of `uas` — `UAS is ignored for this
-device, using usb-storage instead` — and **no `HC died` follows**. That is a real
-improvement and it is runtime-only, so it costs nothing to set before any re-bind attempt.
-
-**It is not sufficient.** With UAS off the scan reaches `scsi host0: usb-storage` and
-stops there: no `Direct-Access` line, no timeout, no LUN 1 probe, nothing further in
-`dmesg` at all. `sda` hangs without even failing, so the scan never moves on. BOT survives
-what UAS could not, and still cannot get past bay 0.
-
-**One remote lever remains untried: `scsi_mod.scan=manual`.** It stops the SCSI layer
-auto-probing, after which only LUN 1 is added by hand and `sda` is never addressed:
-
-```sh
-sudo sh -c 'echo "0 0 1" > /sys/class/scsi_host/host0/scan'
-```
-
-It cannot be set at runtime — the parameter file is writable but the kernel rejects the
-value with `ENOSPC` — so it means `scsi_mod.scan=manual` on the kernel command line and a
-reboot. **The cost is that the array then never comes up by itself on any future boot**,
-including boots where the disk would have been fine, until someone runs that scan by
-hand. It was judged not worth it on 2026-08-23 while `one` is non-critical. If it is ever
-used, it is strictly temporary and comes back off when the SP900 does.
-
-**The enclosure cannot be power-cycled remotely** — it is externally powered and the smart
-plug covers only the Pis. A Pi reboot does not cut USB power, and a kernel-issued port
-reset was already tried by UAS error recovery and the device came back still hung. So
-nothing in software returns `sda` to a cold state.
-
-**This is safe to do over SSH.** `eth0` is `bcmgenet` on the platform bus, not USB, so
-resetting the USB controller cannot cut your session. A missing array is an outage, never
-a stranding.
-
-Then mount and verify. Check the source device, not just that *something* mounted —
-`by-id` names collide on this enclosure, so a wrong-disk mount is the failure to exclude:
-
-```sh
-sudo mount /media/ionic-mysql
-sudo mount /media/torrents
-sudo mount /media/torrents-config
-sudo mount /media/syncthing-config
-awk '$2 ~ /^\/media\// {print $1, $2, $3}' /proc/mounts    # expect 4x /dev/sdb1 ... btrfs
-sudo bin/check-mount-guards                                # guards still intact?
-```
-
-Then cycle only the containers holding `/media` bind mounts, so they re-resolve them.
-**Leave `gluetun` alone** — `torrent` shares its network namespace, and restarting
-`gluetun` reconnects the VPN and gets you a new forwarded port:
-
-```sh
-sudo docker restart torrent syncthing
-sudo docker exec torrent ls /downloads | head   # proves it sees the ARRAY, not the
-                                                # empty mountpoint underneath it
-```
-
-That last check is the one that matters. A container still holding the bare mountpoint
-is running and looks healthy; only reading the path tells them apart.
-
-**Nothing cycles `mysql-ionic`, `bot` or `web` any more** — the `ionic` stack is stopped
-by decision, above. So `/media/ionic-mysql` has no container holding it, and the
-`docker exec` probe that used to cover that subvolume is gone with them: the `awk` over
-`/proc/mounts` above is now the only thing confirming it mounted. Restore the probe along
-with the stack if it is ever repaired.
-
-Three things worth knowing before you touch it:
-
-- **Never run `smartctl` against `/dev/sda`.** A bare SMART read is enough to hang it —
-  it did so on 2026-08-03, provoking a bridge-wide reset. That reset happened to succeed;
-  the identical one at boot failed and cost ten minutes. The `sda` entry in
-  `hosts/one/system/hw-inventory.toml` is on `smart_skip` for exactly this reason, and
-  its model and serial are pinned there by hand because they can no longer be read.
-- **Enumeration is a coin flip, not a certainty.** The same re-bind that fails at boot
-  succeeds on retry. Reboots are the hazard; steady-state running is not, because
-  nothing on this box reads `sda`.
-- **`stop`/`start` the containers, never `up -d`.** They hold the bare mountpoints and
-  only need a fresh mount namespace. Recreating gluetun costs you the forwarded port.
-
-The real fix is pulling the SP900, which needs hands on the box. Until then the interim
-mitigation is the UAS quirk `174c:55aa:u`, writable at runtime via
-`/sys/module/usb_storage/parameters/quirks`. Note `usb-storage` is **built into this
-kernel**, so `/etc/modprobe.d/` does nothing — persisting it means `/boot/cmdline.txt`.
-
----
+The array is now the single MX500 (`sda`, since there is one disk), mounted by UUID so
+the name change costs nothing. The unattended boot path was tested the same day: reboot
+with no hands, all four subvolumes mounted, every container up, guards intact.
 
 ## ⚠ The trap that silently eats data — and the flag that stops it
 
@@ -289,7 +165,7 @@ replaced by `RequiresMountsFor=`.
 
 ## Why a missing USB disk doesn't stop boot
 
-**`one`:** all four `/media/*` mounts are on `/dev/sdb1`. They now carry `nofail`, and
+**`one`:** all four `/media/*` mounts are on `/dev/sda1` (the MX500 — the only disk, since the SP900 was pulled 2026-08-24). They now carry `nofail`, and
 all four bare mountpoints are `chattr +i` (Aug 2026) — all four were confirmed empty
 first, so the trap had never fired here. Independently of that, OpenRC would have
 survived a missing array anyway: `critical_mounts` is empty in `/etc/conf.d/localmount`
@@ -359,9 +235,11 @@ RequiresMountsFor=/media/immich-data
 ## Name mounts by filesystem UUID — never `by-id`
 
 The Sabrent dual-bay USB enclosure reports an **identical serial (all zeros) and WWN
-for both drives**, so `/dev/disk/by-id/` names collide. On `one` they already resolve
-wrongly: the base link points at `sda` while its `-part1`/`-part2` links point into
-`sdb` — a different disk. `sda`/`sdb` can also swap across reboots.
+for both drives**, so `/dev/disk/by-id/` names collide. When both bays were occupied
+(until 2026-08-24) the links resolved wrongly on `one`: the base link pointed at one
+disk while its `-part1`/`-part2` links pointed into the other, and names could swap
+across reboots. One bay is empty now, but the rule stands — the moment a second disk
+goes in, the collision returns.
 
 The usual advice is "use `by-id` instead of `/dev/sdX` for stability". **Here that
 advice is actively wrong.** Use filesystem UUIDs, which are stored inside the

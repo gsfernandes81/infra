@@ -59,12 +59,19 @@ Host *-two
 Host zero-dev-dd
   HostName ssh-zero-dev-dd.gsrpi.uk
   User dev
+  # Same rule as or3-dev below: one known_hosts identity for the container, so any
+  # future second path to it meets the same stored key instead of prompting.
+  HostKeyAlias dd-dev
 
 Host zero-dev-or3
   HostName ssh-zero-dev-or3.gsrpi.uk
   User dev
   RequestTTY yes
   RemoteCommand abduco -A claude claude
+  # This tunnel path and the nc path — `Host or3-dev` in the hand-kept section — reach
+  # the same container sshd, so they must share one known_hosts identity, per this
+  # file's own one-host-key-per-box rule below.
+  HostKeyAlias or3-dev
 
 # ── through each box's own cloudflared tunnel ─────────────────────────────────
 Host zero

@@ -4,7 +4,18 @@
 #   ansible-playbook playbooks/cloudflared-update.yml \
 #       -e target=one -e version=2026.9.1 -e sha256=<hash for that host's arch> -K
 #
-# WHY NOT AUTOUPDATE. It was on, and it was live — all three binaries were rewritten on
+# NOT IN USE, decided 2026-08-23. The hosts autoupdate, staggered by check frequency
+# (one 6h, two 72h, zero 240h — see hosts/*/system/cloudflared). This play is the gated
+# alternative: explicit version, hash on the command line, each stage refusing while an
+# earlier one is unhealthy. It needs a human free to run it, and the reason updates were
+# not happening was exactly that nobody was. It becomes worth using once uptime
+# monitoring exists and the gate can be driven by something other than a person.
+#
+# It also refuses to run while the target's connector carries --autoupdate-freq, which
+# means today it refuses everywhere. That is correct: anything it installed would be
+# replaced within one check interval.
+#
+# WHY AUTOUPDATE WAS BRIEFLY OFF. It was on, and it was live — all three binaries were rewritten on
 # 14 August 2026, the day 2026.8.2 released, on a fleet where cloudflared was installed
 # by hand half a year earlier. It replaced a boot-path binary with unverified bytes on a
 # 24-hour cycle, on the box that terminates every tunnel into this fleet.
@@ -90,6 +101,27 @@
       loop: "{{ predecessors[inventory_hostname] }}"
       delegate_to: localhost
 
+    # Soak state is per control node — there are three (Termux, WSL, the container),
+    # each with its own ~/.infra-cfd — so a missing file does not mean "never updated":
+    # it may mean the predecessor was updated from a DIFFERENT control node, and its
+    # soak time simply is not known here. The assert below silently skips missing files
+    # (selectattr on stat.exists), so without this gate an unknown soak passes as if it
+    # had elapsed.
+    - name: Refuse while any predecessor's soak time is unknown here
+      ansible.builtin.assert:
+        that: >-
+          (pred_state.results | selectattr('stat.exists') | list | length)
+          == (predecessors[inventory_hostname] | length)
+        fail_msg: >-
+          Only {{ pred_state.results | selectattr('stat.exists') | list | length }} of
+          {{ predecessors[inventory_hostname] | length }} predecessors have a state file
+          under {{ state_dir }}. There are three control nodes (Termux, WSL, the
+          container), each with its own ~/.infra-cfd, so a missing file may mean that
+          predecessor was updated from a DIFFERENT control node and its soak time is
+          unknown here. If you know it has soaked, override with
+          -e accept_unknown_soak=true.
+      when: not (accept_unknown_soak | default(false) | bool)
+
     - name: Refuse until each predecessor has soaked
       ansible.builtin.assert:
         that: >-
@@ -164,9 +196,64 @@
           - "installed now: {{ before.stat.checksum | default('nothing') }}"
           - "installing:    {{ sha256 }}  ({{ version }})"
 
-    - name: Nothing to do if it is already that binary
+    # The disk checksum alone is not enough to end here: an interrupted run can leave
+    # the swap done and the cycle not, so the file matches while the RUNNING process is
+    # still the old binary — mv replaced the path, but the process keeps its old inode.
+    # {{ bin }} --version would answer for the new file, not the process, which is
+    # exactly the case this exists to catch; /proc/<pid>/exe IS that inode, so ask it.
+    # Empty output (no pidfile, dead pid) counts as needing a cycle.
+    - name: What version the running process actually is
+      ansible.builtin.shell: |
+        pid=$(cat /var/run/cloudflared.pid 2>/dev/null) || exit 0
+        [ -n "$pid" ] && [ -d "/proc/$pid" ] || exit 0
+        /proc/$pid/exe --version 2>/dev/null || true
+      register: runver
+      changed_when: false
+      become: true
+
+    # Two separate questions: does the FILE need replacing, does the PROCESS need
+    # cycling. After an interrupted run the answers differ.
+    - name: Decide what this run still has to do
+      ansible.builtin.set_fact:
+        needs_install: "{{ (before.stat.checksum | default('')) != sha256 }}"
+        needs_cycle: "{{ version not in (runver.stdout | default('')) }}"
+
+    # Confirmed on target on disk AND in the running process: record it before ending,
+    # because the next stage's soak gate reads this file and a rollout finished from
+    # another angle (or re-run) would otherwise never write it.
+    - name: Make sure the state directory exists (already on target)
+      ansible.builtin.file:
+        path: "{{ state_dir }}"
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+      when: not needs_install and not needs_cycle
+
+    # modification_time: preserve — create the file if missing, but NEVER bump the
+    # mtime of one that exists. The mtime IS the soak clock, and a no-op re-run that
+    # touched it would restart the next stage's soak for no reason. (Flagged by the
+    # batch-2 agent as a literal-instruction artefact, fixed in review.)
+    - name: Note this host is confirmed on target
+      ansible.builtin.file:
+        path: "{{ state_dir }}/{{ inventory_hostname }}"
+        state: touch
+        mode: "0644"
+        modification_time: preserve
+        access_time: preserve
+      delegate_to: localhost
+      when: not needs_install and not needs_cycle
+
+    - name: Nothing to do if disk and running process are both already that version
       ansible.builtin.meta: end_host
-      when: before.stat.checksum | default('') == sha256
+      when: not needs_install and not needs_cycle
+
+    - name: Warn when the disk is on target but the process is not
+      ansible.builtin.debug:
+        msg: >-
+          {{ bin }} on disk already matches {{ sha256 }} but the running process is not
+          {{ version }} — an earlier run swapped the binary and was interrupted before
+          the cycle. Skipping download/backup/swap; cycling and verifying only.
+      when: not needs_install and needs_cycle
 
     # ── download, verify, prove it runs, then install ────────────────────────
     # get_url verifies the checksum itself and refuses to write a mismatch. Downloaded
@@ -181,6 +268,7 @@
         owner: root
         group: root
       become: true
+      when: needs_install | bool
 
     # A binary of the right arch that still cannot execute here is the failure this
     # catches — and the one the fleet has been living with, in reverse, for six months.
@@ -189,63 +277,87 @@
       register: newver
       changed_when: false
       become: true
+      when: needs_install | bool
 
-    - name: Back up the running one, then swap
-      ansible.builtin.shell: |
-        set -e
-        cp -a {{ bin }} {{ bin }}.pre-{{ version }}
-        mv {{ bin }}.new {{ bin }}
-        chmod 0755 {{ bin }}
-      become: true
-      changed_when: true
+    # ── swap, cycle and verify, with rollback ────────────────────────────────
+    # block/rescue rather than until + failed_when:false + a conditional rollback task:
+    # whether a retries-exhausted task counts as failed varies across ansible-core
+    # versions, and on the versions where it does, the old conditional "Put the old
+    # binary back" never ran — the play just stopped with the new, dead binary in
+    # place. rescue runs on a failure however it is signalled.
+    - name: Swap and cycle, rolling back if the new version does not serve
+      block:
+        - name: Back up the running one, then swap
+          ansible.builtin.shell: |
+            set -e
+            cp -a {{ bin }} {{ bin }}.pre-{{ version }}
+            mv {{ bin }}.new {{ bin }}
+            chmod 0755 {{ bin }}
+          become: true
+          changed_when: true
+          when: needs_install | bool
 
-    # ── cycle and verify, with rollback ──────────────────────────────────────
-    - name: Cycle the connector
-      ansible.builtin.shell: |
-        rc-service cloudflared stop >/dev/null 2>&1
-        i=0
-        while [ $i -lt 45 ]; do
-          netstat -tln 2>/dev/null | grep -q '127\.0\.0\.1:20241 ' || break
-          i=$((i+2)); sleep 2
-        done
-        netstat -tln 2>/dev/null | grep -q '127\.0\.0\.1:20241 ' && exit 1
-        rc-service cloudflared start >/dev/null 2>&1
-      become: true
-      changed_when: true
+        - name: Cycle the connector
+          ansible.builtin.shell: |
+            rc-service cloudflared stop >/dev/null 2>&1
+            i=0
+            while [ $i -lt 45 ]; do
+              netstat -tln 2>/dev/null | grep -q '127\.0\.0\.1:20241 ' || break
+              i=$((i+2)); sleep 2
+            done
+            netstat -tln 2>/dev/null | grep -q '127\.0\.0\.1:20241 ' && exit 1
+            rc-service cloudflared start >/dev/null 2>&1
+          become: true
+          changed_when: true
 
-    - name: Wait for it to register
-      ansible.builtin.uri:
-        url: "{{ probe }}/ready"
-        return_content: true
-      register: ready
-      until: (ready.content | default('{}') | from_json).readyConnections | default(0) > 0
-      retries: 12
-      delay: 5
-      failed_when: false
+        - name: Wait for it to register
+          ansible.builtin.uri:
+            url: "{{ probe }}/ready"
+            return_content: true
+          register: ready
+          until: (ready.content | default('{}') | from_json).readyConnections | default(0) > 0
+          retries: 12
+          delay: 5
+          failed_when: false
 
-    - name: Put the old binary back if it did not come up
-      ansible.builtin.shell: |
-        set -e
-        mv {{ bin }}.pre-{{ version }} {{ bin }}
-        chmod 0755 {{ bin }}
-        rc-service cloudflared stop >/dev/null 2>&1
-        i=0
-        while [ $i -lt 45 ]; do
-          netstat -tln 2>/dev/null | grep -q '127\.0\.0\.1:20241 ' || break
-          i=$((i+2)); sleep 2
-        done
-        rc-service cloudflared start >/dev/null 2>&1
-      become: true
-      when: (ready.content | default('{}') | from_json).readyConnections | default(0) < 1
+        # The assert is the real gate: if the exhausted retries above were swallowed by
+        # failed_when:false, this still fails into the rescue; if they were not, the
+        # rescue already has it. Either way the rollback runs.
+        - name: Require the new version to be serving
+          ansible.builtin.assert:
+            that: (ready.content | default('{}') | from_json).readyConnections | default(0) > 0
+            fail_msg: >-
+              {{ version }} is not serving on {{ inventory_hostname }} — rolling back.
 
-    - name: Report the rollback and stop
-      ansible.builtin.assert:
-        that: (ready.content | default('{}') | from_json).readyConnections | default(0) > 0
-        fail_msg: >-
-          {{ version }} did not come up on {{ inventory_hostname }}. The previous binary
-          has been restored and the connector cycled back — check it is serving before
-          doing anything else. Do NOT run the next stage: the gate would have caught this
-          anyway, which is the point of it.
+      rescue:
+        # The pre-{{ version }} backup may be absent on the cycle-only path if the
+        # earlier interrupted run's backup was already cleaned up; then restoring is
+        # impossible and cycling back is all that can be done — the fail below still
+        # says what state the host is in.
+        - name: Put the old binary back
+          ansible.builtin.shell: |
+            set -e
+            if [ -f {{ bin }}.pre-{{ version }} ]; then
+              mv {{ bin }}.pre-{{ version }} {{ bin }}
+              chmod 0755 {{ bin }}
+            fi
+            rc-service cloudflared stop >/dev/null 2>&1
+            i=0
+            while [ $i -lt 45 ]; do
+              netstat -tln 2>/dev/null | grep -q '127\.0\.0\.1:20241 ' || break
+              i=$((i+2)); sleep 2
+            done
+            rc-service cloudflared start >/dev/null 2>&1
+          become: true
+          changed_when: true
+
+        - name: Report the rollback and stop
+          ansible.builtin.fail:
+            msg: >-
+              {{ version }} did not come up on {{ inventory_hostname }}. The previous
+              binary has been restored and the connector cycled back — check it is
+              serving before doing anything else. Do NOT run the next stage: the gate
+              would have caught this anyway, which is the point of it.
 
     # ── record, for the next stage's soak ────────────────────────────────────
     - name: Make sure the state directory exists
@@ -265,6 +377,8 @@
     - name: Done
       ansible.builtin.debug:
         msg:
-          - "{{ inventory_hostname }} now runs {{ newver.stdout | trim }} ({{ cfd_arch }})"
+          # newver is skipped on the cycle-only path (no download happened); the cycle
+          # + verify above is what proves the host is on {{ version }} either way.
+          - "{{ inventory_hostname }} now runs {{ newver.stdout | default(version) | trim }} ({{ cfd_arch }})"
           - "previous binary kept at {{ bin }}.pre-{{ version }} — remove it once you are happy"
           - "next stage will refuse for {{ soak_days }} days, and while this host is unhealthy"

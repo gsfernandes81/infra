@@ -71,9 +71,10 @@
     #
     # `shell`, not `command`: `command -v` is a SHELL BUILTIN, so the command module has
     # nothing to exec and reports cloudflared missing on a host where it is plainly on
-    # PATH. That is what failed on Termux, 2026-08-23. dev-client.yml has the same task
-    # and hides the failure behind `| default('cloudflared', true)`, which writes the
-    # bare name its own comment warns against — so detection is not to be trusted here.
+    # PATH. That is what failed on Termux, 2026-08-23. dev-client.yml had the same task
+    # with the failure hidden behind `| default('cloudflared', true)` until 2026-08-24,
+    # when it was fixed to this same resolve-then-stat pattern — detection is still not
+    # to be trusted anywhere; the stat on the result is the guard.
     - name: Try to find cloudflared on this control node
       ansible.builtin.shell: command -v cloudflared
       register: cfd_path
@@ -214,7 +215,12 @@
         cloudflared: "{{ windows_cloudflared }}"
         adb_jump: true
         multiplex: false
-      when: not (win_cfg.stat.exists | default(false))
+      # Both conditions. -e windows_ssh_config="" means "skip the Windows half entirely",
+      # as the vars comment promises — but with it empty the stat above is skipped, its
+      # `exists` defaults false, and this fallback would write the paste file anyway.
+      when:
+        - windows_ssh_config | length > 0
+        - not (win_cfg.stat.exists | default(false))
 
     - name: Say what happened
       ansible.builtin.debug:
@@ -223,5 +229,7 @@
           - >-
             windows: {{ 'managed directly at ' ~ windows_ssh_config
             if win_cfg.stat.exists | default(false)
-            else 'not reachable from here — paste from ' ~ windows_out }}
+            else ('skipped — windows_ssh_config is empty'
+                  if windows_ssh_config | length == 0
+                  else 'not reachable from here — paste from ' ~ windows_out) }}
           - "verify with: ssh -G two-zero | grep -E 'proxycommand|hostname|user'"

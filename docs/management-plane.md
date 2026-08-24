@@ -474,12 +474,12 @@ ones that answer the question this document started from.
 | 1b | Fleet package standardisation — `playbooks/packages.yml` | all three | 1 | **done** 2026-08-21 |
 | 2 | `README.md` + `recovery.md` cite the generated inventory | docs only | 1 | **done** 2026-08-21 |
 | 2b | `infra-dev` container, and the Cloudflare edge in front of it | `zero`, edge | 2 | **done** 2026-08-22 |
-| 2c | `one`'s array — both "broken services" are the SP900 in bay 0. `ionic-traces` stays down by decision; Syncthing is blocked on the disk | `one`'s enclosure | **physical access** | **blocked** |
-| 2d | One base image for the four dev containers — `dev/README.md` § *Four copies of this* | `zero`'s dev containers | 2b | |
+| 2c | `one`'s array — both "broken services" were the SP900 in bay 0 | `one`'s enclosure | — | **done 2026-08-24** — disk pulled, unattended boot proven |
+| 2d | One base image for the four dev containers — `dev/README.md` § *Four copies of this* | `zero`'s dev containers | 2b | infra side **built 2026-08-24**, rebuild pending; or3/dd/ds convert in their repos |
 | 2e | Rotate the fleet's own tunnel tokens | `zero`, `one`, `two`, edge | 2b | **`zero` and `one` done 2026-08-23** — one's by retiring its tunnel under 2g. `two`'s token is out of the 755 file and in a credentials file; its rotation waits for 2g |
 | 2f | `cloudflared`'s init script logs nowhere | `zero`, `one`, `two` | — | **done on all three, 2026-08-23** |
 | 2g | All three tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, `two`, DNS | 2f | `one` and `zero` **done 2026-08-23**; `two` deferred ~a week |
-| 2h | cloudflared: apply `--no-autoupdate` fleet-wide | all three | — | committed, **not applied** |
+| 2h | cloudflared: staggered autoupdate, `one` 6h → `two` 72h → `zero` 240h | all three | — | committed, **not applied** |
 | 3 | First stack adopted: `send2ereader` on `one` | one stack, non-critical box | 2 | |
 | 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two stacks | 3 | |
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | |
@@ -565,11 +565,21 @@ as canary for its own architecture. Uniform means every host runs something an e
 host already survived. The cost is a dependency on the kernel's AArch32 support on `zero`
 and `one`, recorded there as the thing to watch.
 
-So 2h is only the autoupdate half. `playbooks/cloudflared-update.yml` installs a named
-version, hash-verified, one host at a time in the order `one → two → zero`, **each stage
-refusing while an earlier one is unhealthy**. That gate is the point: a calendar gap
-between stages only helps if somebody notices a failure inside it, and nothing on this
-fleet alerts.
+So 2h is only the autoupdate half — and it reversed once the same day, which is worth
+recording. Autoupdate was turned off on the grounds that it replaces a boot-path binary
+with unverified bytes. Then the owner's point: the reason updates were not happening was
+that nobody was free to ssh in, and a fleet that drifts out of Cloudflare's support
+window goes down all at once. **Autoupdate is justified here; what it lacked was a
+stagger.**
+
+So it stays on, at different check frequencies: `one` 6h, `two` 72h, `zero` 240h. A
+host that checks rarely is simply behind, so a release that breaks `one` has days before
+it reaches `zero`. What this does not give: guaranteed order (zero's check can land just
+after a release, a few percent per release) or a health gate (a bad version reaches all
+three eventually). `playbooks/cloudflared-update.yml` — explicit, hash-verified, each
+stage refusing while an earlier one is unhealthy — exists and is not used; **revisit once
+uptime monitoring exists**, e.g. `ping.<host>.gsrpi.uk`, because a gate is only worth
+building when something can tell you a host is down, and today nothing can.
 
 **2g: `one` and `zero` are done, 2026-08-23.** Both run new tunnels created with
 `config_src: local`, with their routes in `hosts/<host>/system/cloudflared-config.yml`
@@ -595,6 +605,19 @@ Three things the rehearsal was worth, none of which were the plan:
 
 `two` is deferred about a week, deliberately. Two hostnames, the smallest job, on the box
 with the least margin and no bastion of its own.
+
+**When it happens, phase 1 run for real IS the rehearsal.** All three plays were
+substantially rewritten in the 2026-08-24 review (block/rescue rollbacks, the
+originRequest assert, the re-run guard) and have not run since. A `--check` of phase 1
+cannot rehearse them — the `uri` create is skipped in check mode and everything after it
+dies on undefined, the exact bootstrap trap `cloudflare-dev-tunnel.yml`'s header
+documents. But phase 1 for real is inherently consequence-free: it creates a tunnel
+nothing points at, abandoned by one delete. Running it against `two` exercises the new
+guards — and the originRequest assert is checking the one tunnel nobody has ever
+inspected, so if it fires, it fired before anything moved. Read the generated config at
+leisure; phase 2 (`./2g cut two`, which picks the `two-zero` mesh path) is a separate
+decision on a separate day if wanted. **Reach `two` over the mesh for phase 2** — its
+tunnel is the thing being cycled, which is how it went dark once already.
 
 **2f, filed 2026-08-23.** `/etc/init.d/cloudflared` declares `stdout_log` and
 `stderr_log`, which `supervise-daemon` does not act on. `/var/log/cloudflared.err` was
@@ -668,11 +691,15 @@ configuration. It cannot start until `/media/torrents` and `/media/syncthing-con
 mounted; starting it before then writes a blank config into a guarded mountpoint and fails
 the same way MySQL did.
 
-**So 2c no longer outranks Phase 3 — it is blocked on physical access.** The remote levers
-were worked through on 2026-08-23 and are recorded in *Recovery*; none of them reattached
-`sdb`. Nothing degrades while it waits: the array is clean-but-absent, the guards hold, and
-the database has had no writer since this began. **Phase 3 and 2e are what remain
-actionable.**
+**Closed 2026-08-24: the SP900 was pulled**, with help at the enclosure — whose power
+cycle, the one lever software could never reach, is also what un-wedged the bridge.
+The MX500 enumerates as `sda` now (only disk); everything mounts by UUID so the rename
+cost nothing. The close-out was demonstrated, not declared: an unattended reboot brought
+back all four mounts, every container, healthy Syncthing reading its real config, and
+four tunnel connections, with no hands. The array survived eleven days unmounted and a
+crash loop against its guarded mountpoint without losing a byte — the `chattr +i` layer's
+first live firing, and its full vindication. `ionic-traces` stays down by decision, as
+before; that was never the disk's question.
 
 **2e carries a check that belongs before it, not during it.** The order in *Still to do:
 the fleet's own tunnels* holds `zero` first precisely because a session inside `infra-dev`

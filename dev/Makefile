@@ -42,11 +42,19 @@ HOST_GID := $(shell stat -c '%g' $(CURDIR))
 # `sudo env VAR=…`, not `VAR=… sudo`: sudo resets the environment, so an assignment in
 # front of it never reaches docker and compose would silently build at the defaults in
 # compose.yaml. env is inside the sudo, so it survives.
-COMPOSE := $(SUDO) env HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) \
+COMPOSE := $(SUDO) env HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) BASE_TAG=$(BASE_TAG) \
 	docker compose --project-directory $(CURDIR) -f $(CURDIR)/compose.yaml
 DOCKER  := $(SUDO) docker
 
-.PHONY: help dev up restart down down-volumes status verify collections logs \
+# The base image tag (2d). Bump it HERE when Dockerfile.base changes, then move the
+# ARG BASE_TAG default in each repo's child Dockerfile as that repo is ready — children
+# pin a tag, never latest, so a base rebuild cannot change a container behind its
+# repo's back. THIS is the single source: COMPOSE passes it through the environment,
+# compose.yaml forwards it as a build arg, and the defaults in compose.yaml and
+# dev/Dockerfile are fallbacks that only matter outside `make`.
+BASE_TAG := 2026.08.24
+
+.PHONY: help dev base up restart down down-volumes status verify collections logs \
 	boot-log tunnel-log login claude shell fleet _require-env _require-secrets _require-uid
 
 help:
@@ -89,6 +97,20 @@ _require-secrets:
 	[ "$$mode" = 700 ] || echo "WARNING — $$dir is mode $$mode, expected 700." >&2
 
 # ── lifecycle ───────────────────────────────────────────────────────────────
+# The OFFLINE FALLBACK for the base image. The normal path is a pull: the child's
+# FROM names ghcr.io/gsfernandes81/gsrpi-dev-base, public, built by
+# .github/workflows/dev-base.yml. This target builds the identical image locally UNDER
+# THE GHCR NAME — docker prefers a local image over a pull, so after `make base` the
+# child builds with no network and no GitHub. Use it when GitHub is down, the month is
+# metered, or this host's uid differs from the 1001 the CI image bakes.
+base: _require-uid
+	$(DOCKER) build -f $(CURDIR)/Dockerfile.base \
+	  --build-arg USER_UID=$(HOST_UID) --build-arg USER_GID=$(HOST_GID) \
+	  -t ghcr.io/gsfernandes81/gsrpi-dev-base:$(BASE_TAG) $(CURDIR)
+
+# No `base` dependency: the FROM pulls from ghcr when the tag is absent locally, so
+# the cross-repo build order 2d started with is gone — that was the point of the
+# registry. `make base` above exists for the days the registry does not.
 up: _require-env _require-uid _require-secrets
 	$(COMPOSE) up -d --build
 	@printf '\n'

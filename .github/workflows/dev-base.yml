@@ -1,0 +1,94 @@
+name: dev-base
+
+# Build gsrpi-dev-base (2d) and push it to ghcr, so the dev containers' base is a
+# registry pull instead of a local tag with a cross-repo build order. The source of
+# truth stays in THIS repo — dev/Dockerfile.base — and this workflow is deliberately
+# manual: a base rebuild changes every dev container that later bumps its pin, so it
+# happens when a person decides, not when a push happens to touch a path.
+#
+#   gh workflow run dev-base.yml            # build + push, tag read from dev/Makefile
+#   gh workflow run dev-base.yml -f force=true   # allow overwriting an existing tag
+#
+# PLATFORMS: linux/arm64 (zero and one) and linux/amd64 (laptop/WSL). Deliberately NO
+# armv6: `two` runs no dev containers and cannot — Claude Code ships arm64/x64 only,
+# and two has no docker at all. arm64 builds under QEMU on the free runners; expect
+# 20-40 minutes, which is fine for an image that rebuilds a few times a year.
+#
+# THE PACKAGE IS PUBLIC (one manual visibility flip after the first push). Decided
+# 2026-08-24: the base is pure toolchain, the same information as the Dockerfile, and
+# public means the Pis pull with no credential — no new token class on the boxes, in
+# the year spent hunting stray tokens. If it ever carries anything private, that
+# decision reopens before the layer lands.
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "overwrite an existing tag (a pinned tag should be immutable)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/gsrpi-dev-base
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Makefile is the tag's single source everywhere else, so it is here too —
+      # a tag typed into a dispatch box can typo; this one is reviewed in a diff.
+      - name: Read BASE_TAG from dev/Makefile
+        id: tag
+        run: |
+          tag=$(sed -n 's/^BASE_TAG := //p' dev/Makefile)
+          [ -n "$tag" ] || { echo "no BASE_TAG in dev/Makefile" >&2; exit 1; }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to ghcr
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # A pinned tag is a contract — children trust that the same tag is the same
+      # bytes, which is the whole argument for pinning over latest. So overwriting one
+      # is refused unless asked for by name.
+      - name: Refuse to overwrite an existing tag
+        if: ${{ !inputs.force }}
+        run: |
+          if docker manifest inspect "$IMAGE:${{ steps.tag.outputs.tag }}" >/dev/null 2>&1; then
+            echo "$IMAGE:${{ steps.tag.outputs.tag }} already exists." >&2
+            echo "Bump BASE_TAG in dev/Makefile, or re-run with force=true." >&2
+            exit 1
+          fi
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # USER_UID/GID 1001: the dev user must match the OWNER OF THE CHECKOUT on the
+      # host that bind-mounts it, or every file written from a container lands
+      # wrong-owner in the repo. That is gavin on zero, who is 1001:1001 (verified
+      # 2026-08-24 from inside infra-dev). Local `make base` reads the real owner per
+      # host; this build serves zero and one, where it is 1001. If a host with a
+      # different uid ever runs these containers, that host builds locally.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: dev
+          file: dev/Dockerfile.base
+          platforms: linux/arm64,linux/amd64
+          push: true
+          build-args: |
+            USER_UID=1001
+            USER_GID=1001
+          tags: ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
+
+      - name: Where it landed
+        run: echo "pushed $IMAGE:${{ steps.tag.outputs.tag }} (arm64, amd64)"

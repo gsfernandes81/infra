@@ -6,40 +6,21 @@
 #
 # Anything under [overrides.<dev>] wins over what the script detects.
 
-# /dev/sda is FAILING and must never be polled. A bare `smartctl` read of it stalls
-# for ~60s and provokes a bridge-wide USB reset; that reset succeeded once and failed
-# once, and the failure cost a ten-minute array outage. See docs/recovery.md.
-smart_skip = ["sda"]
+# No smart_skip any more. The SP900 that must never be polled was pulled on
+# 2026-08-24; its entry — the hand-pinned model/serial that could no longer be read
+# safely, the FAILING note, the skip itself — is in git history. The one disk left is
+# the MX500, healthy and safe to poll. If a disk ever goes back into bay 0, think
+# about this file BEFORE the first poll, not after: the empty list below is a
+# statement that every present disk is pollable, and a new disk makes it a claim
+# nobody has checked.
+smart_skip = []
 
 
+# The MX500 enumerates as sda now that it is the only disk (it was sdb while the
+# SP900 held bay 0). Everything mounts by UUID, so the rename cost nothing.
 [overrides.sda]
-bay = "0"
-role = "expendable - holds nothing"
-
-# Recorded by hand because they can no longer be read safely. Captured 2026-08-03,
-# from the last SMART dump taken before polling was disabled.
-model = "ADATA SP900"
-serial = "03B30043000200000002"
-kind = "SSD"
-form_factor = "2.5in"
-
-# Left blank deliberately. Manufacture date is not a standard SMART field and this
-# drive's serial carries no decodable convention — a guessed date would send someone
-# to unplug the wrong disk, which is worse than an absent one.
-manufactured = ""
-
-note = """
-FAILING, and the reason the array does not come back after some reboots: it stalls \
-the bridge during INQUIRY to LUN 0, so sdb never enumerates. Confirmed bad 2026-08: \
-1681 Reported_Uncorrect, extended self-test "completed: read failure" at LBA 4652832, \
-offline data collection "aborted by the device with a fatal error", 16 retired blocks, \
-lifetime max temperature 89 C. Holds nothing. Pull it when physically present, and do \
-not replace it with anything that matters."""
-
-
-[overrides.sdb]
 bay = "1"
-role = "btrfs array (sdb1) + swap (sdb2, currently off)"
+role = "btrfs array (sda1) + swap (sda2, currently off)"
 # Model, serial, form factor and manufacture date are read from SMART — this disk is
 # healthy and safe to poll. Its Micron serial encodes YYWW, which the script decodes.
 

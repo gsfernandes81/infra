@@ -1,0 +1,229 @@
+---
+# Install the tracked /etc copies onto each host, through bin/install-system-file.
+#
+#   ansible-playbook playbooks/system-files.yml --check --diff -K    # what WOULD change
+#   ansible-playbook playbooks/system-files.yml -K                   # install it
+#   ansible-playbook playbooks/system-files.yml -l zero -K           # one host
+#   ansible-playbook playbooks/system-files.yml -e only=cloudflared -K
+#
+# THIS IS A DRIVER, NOT A REIMPLEMENTATION. Every guard lives in bin/install-system-file
+# and stays there: the infra- header, the refusal to change content without being told,
+# the per-type validators (sshd -t, OpenRC syntax, fstab UUIDs against /sys/fs/btrfs),
+# the backup outside /etc/init.d, and the post-install check that rolls back. That tool
+# is a dry run by default and writes only with --commit — which is exactly Ansible's
+# check-mode contract, so --check here runs it without --commit and a normal run with.
+# Nothing is duplicated, and a bug in the guard is fixed in one place.
+#
+# WHAT IT STILL DOES NOT DO: restart anything. That separation is the tool's whole
+# design and this play preserves it. After a real run, the services whose files changed
+# need cycling by hand — the summary at the end names them. CLAUDE.md's two-phase
+# procedure: this is phase 1, for every file, on every host, in one command.
+#
+# WHERE THE BYTES COME FROM, decided 2026-08-24 after a challenge and a second opinion.
+# The control node's HEAD is the review anchor; the host clone is the delivery vehicle
+# and the drift checker's frame of reference; EQUALITY BETWEEN THEM IS ASSERTED, not
+# assumed. The host pulls --ff-only, then must be on exactly the commit the control node
+# is on, or the play refuses — which also closes the race where origin moves between
+# --check and the real run, so check and run can never see different bytes.
+#
+# Bytes deliberately do NOT travel over the Ansible connection, although that is how
+# Ansible normally works, for three reasons: a working tree can be dirty where a commit
+# cannot, so copying from the phone's checkout can ship unreviewed bytes; check-system-
+# drift runs on the host against the host clone and must read ok immediately after a
+# correct deploy, which a control-node-ahead copy breaks by design; and the tool's
+# provenance guard IS the tracked path — a --source bypass would let any file with a
+# plausible header onto the boot path.
+#
+# GitHub stays in the deploy path. Acceptable: every clone already syncs through it,
+# there is deliberately no host-to-host git, and the manual scp-plus-tool path still
+# exists for an outage.
+#
+# --allow-content-change is passed on every real run. The tool's refusal exists to stop
+# a human smuggling an edit past a header-only review; here the review is the git diff
+# that was pushed, and the --check run shows every byte before anything is written.
+
+- name: Install tracked system files on the fleet
+  hosts: fleet
+  gather_facts: false
+  # NO serial. Lockstep (the linear strategy's default) is better here twice over: the
+  # output reads as one banner with a row per host instead of the whole play repeated
+  # three times, and the HEAD/dirty-tree asserts check the ENTIRE fleet before anything
+  # installs anywhere — with serial: 1, a push landing mid-run could pass on the first
+  # host and fail on the second, leaving the fleet deployed from two different commits.
+  # The cutover play keeps its serial: 1; migrating one tunnel at a time is the point
+  # there, and this reasoning is about a play that should behave as one fleet-wide step.
+
+  vars:
+    repo: /home/gavin/infra
+    tool: "{{ repo }}/bin/install-system-file"
+    # The LOCAL checkout is the source of which files exist per host, so a file added to
+    # the repo shows up here without editing this play.
+    local_repo: "{{ playbook_dir }}/../.."
+
+  tasks:
+    # ── the review anchor: what the person running this actually has ─────────
+    - name: The control node's HEAD
+      ansible.builtin.command:
+        cmd: git rev-parse HEAD
+        chdir: "{{ local_repo }}"
+      register: ctl_head
+      delegate_to: localhost
+      changed_when: false
+      check_mode: false
+      run_once: true
+
+    # A dirty hosts/ tree means the files reviewed locally are not the files the commit
+    # contains — the diff on screen and the diff that deploys would differ.
+    - name: Refuse if hosts/ has uncommitted changes on the control node
+      ansible.builtin.command:
+        cmd: git status --porcelain -- hosts/
+        chdir: "{{ local_repo }}"
+      register: dirty
+      delegate_to: localhost
+      changed_when: false
+      check_mode: false
+      run_once: true
+      failed_when: dirty.stdout | length > 0
+
+    # ── the delivery vehicle: the host clone, pinned to the anchor ───────────
+    # --ff-only: a diverged host clone is a situation to look at, not merge through.
+    # check_mode false so --check also pulls; a dry run against a stale checkout would
+    # diff the wrong bytes. No -q: changed_when matches "Already up to date" in stdout,
+    # and -q suppresses exactly that line, so every no-op pull would report changed.
+    - name: Pull the host's clone, fast-forward only
+      ansible.builtin.command:
+        cmd: git pull --ff-only
+        chdir: "{{ repo }}"
+      register: pull
+      changed_when: "'Already up to date' not in pull.stdout"
+      check_mode: false
+
+    # The HEAD assert below proves the host is on the reviewed COMMIT, but
+    # `pull --ff-only` succeeds straight over local edits it does not touch — a dirty
+    # working tree deploys modified bytes under a green assert. Same hole the
+    # control-node dirty check closes, on the side that actually feeds the tool.
+    - name: The host clone's uncommitted changes, if any
+      ansible.builtin.command:
+        cmd: git status --porcelain -- hosts/ bin/
+        chdir: "{{ repo }}"
+      register: host_dirty
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse if the host clone has uncommitted changes
+      ansible.builtin.assert:
+        that: host_dirty.stdout | length == 0
+        fail_msg: >-
+          {{ inventory_hostname }}'s clone at {{ repo }} has local edits under hosts/
+          or bin/: {{ host_dirty.stdout_lines | join('; ') }}. The commit assert would
+          still pass over these — pull --ff-only never touches them — so the tool
+          would install bytes nobody reviewed. Commit, push and re-pull, or discard
+          them on the host. Nothing was installed.
+
+    - name: The host's HEAD
+      ansible.builtin.command:
+        cmd: git rev-parse HEAD
+        chdir: "{{ repo }}"
+      register: host_head
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse unless the host is on exactly the reviewed commit
+      ansible.builtin.assert:
+        that: host_head.stdout | trim == ctl_head.stdout | trim
+        fail_msg: >-
+          {{ inventory_hostname }} is on {{ host_head.stdout | trim | truncate(12, true, '') }}
+          and this control node reviewed {{ ctl_head.stdout | trim | truncate(12, true, '') }}.
+          If origin moved past your review: `git pull` here, re-read the diff, re-run.
+          If you have unpushed commits: `git push`. Nothing was installed.
+
+    - name: Which files this host tracks
+      ansible.builtin.find:
+        paths: "{{ local_repo }}/hosts/{{ inventory_hostname }}/system"
+        file_type: file
+        excludes: ["README.md", "hardware.md", "hw-inventory.toml"]
+      register: tracked
+      delegate_to: localhost
+      check_mode: false
+
+    - name: Narrow to one file if asked
+      ansible.builtin.set_fact:
+        files: >-
+          {{ tracked.files | map(attribute='path') | map('basename')
+             | select('match', '^' ~ (only | default('.*')) ~ '$') | list | sort }}
+
+    # ── dry run, ALWAYS — this is what --check shows and what a real run previews ─
+    # Not --commit. The tool prints the diff it would apply and exits 0 if clean,
+    # 1 if it would refuse (missing --new, validator failure). Both outcomes are shown.
+    # --allow-content-change HERE TOO, not only on the install. Without it the tool
+    # refuses a content diff (rc 1), and the install below only takes rc-0 items — so
+    # the play could never deploy a content change at all. Found on its first real run,
+    # 2026-08-24: the cloudflared init script sat undeployed with a green recap. The
+    # human-review purpose of the flag is served by the pushed git diff and by the
+    # preview below; the tool's refusal exists for interactive use, not this path.
+    - name: Dry run each file
+      ansible.builtin.command:
+        cmd: "{{ tool }} {{ item }} --new --allow-content-change"
+        chdir: "{{ repo }}"
+      register: dry
+      loop: "{{ files }}"
+      changed_when: "'Nothing to do' not in dry.stdout"
+      failed_when: false
+      become: true
+      check_mode: false
+
+    # changed_when: true is a display decision, not a lie about state: ansible.cfg sets
+    # display_ok_hosts = False, and a debug task reports ok — so without this, the
+    # play's entire preview is invisible, which on 2026-08-24 hid both a pending diff
+    # and a refusal behind a quiet recap. These two debugs ARE the play's output.
+    - name: What would change
+      ansible.builtin.debug:
+        # Joined into ONE string, deliberately: a list of lines renders under
+        # result_format=yaml as quoted, escaped list items — unreadable on a phone,
+        # which is where this play is reviewed. A multiline string renders as a block
+        # scalar: real newlines, no quoting, the diff as the tool printed it.
+        msg: "{{ (item.stdout_lines + (item.stderr_lines | default([]))) | join('\n') }}"
+      changed_when: true
+      loop: "{{ dry.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: "'Nothing to do' not in item.stdout"
+
+    # ── install, only on a real run, only what differs ───────────────────────
+    - name: Install each file that differs
+      ansible.builtin.command:
+        cmd: "{{ tool }} {{ item.item }} --commit --new --allow-content-change"
+        chdir: "{{ repo }}"
+      register: inst
+      loop: "{{ dry.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when:
+        - not ansible_check_mode
+        - "'Nothing to do' not in item.stdout"
+        - item.rc == 0
+      become: true
+      changed_when: true
+
+    - name: Files the dry run REFUSED — not installed, look at them
+      ansible.builtin.debug:
+        msg: "{{ item.item }}: {{ (item.stderr_lines | default([]) | last) | default('refused') }}"
+      changed_when: true
+      loop: "{{ dry.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.rc != 0
+
+    # ── say what needs a human now ───────────────────────────────────────────
+    - name: Services to cycle by hand
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}: installed
+          {{ inst.results | default([]) | selectattr('changed', 'defined')
+             | selectattr('changed') | map(attribute='item.item') | list }}.
+          NOTHING WAS RESTARTED. cloudflared files want stop / poll 20241 / start;
+          sshd-infra.conf wants `rc-service sshd reload`; fstab and bcache-register
+          take effect at the next boot.
+      when:
+        - not ansible_check_mode
+        - inst.results | default([]) | selectattr('changed', 'defined') | selectattr('changed') | list | length > 0
