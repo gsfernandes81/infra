@@ -480,6 +480,7 @@ ones that answer the question this document started from.
 | 2f | `cloudflared`'s init script logs nowhere | `zero`, `one`, `two` | — | **done on all three, 2026-08-23** |
 | 2g | All three tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, `two`, DNS | 2f | `one` and `zero` **done 2026-08-23**; **`two` deferred ~a week, and on `two` it is one job with 2e and the dashboard sweep** |
 | 2h | cloudflared: staggered autoupdate, `one` 6h → `two` 72h → `zero` 240h | all three | — | **done 2026-08-24** — the staggered frequencies are installed and live on all three |
+| 2i | Retire `ssh-zero-dev-or3.gsrpi.uk` — or3-dev's second, unprotected door | `zero`'s host tunnel, DNS | or3-dev's own tunnel being live | queued, and it opens an exposure window the moment or3-dev's tunnel does |
 | 3 | First stack adopted: `send2ereader` on `one`, **with its connector in the stack** | one stack, non-critical box, `one`'s ingress | 2 | |
 | 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two stacks | 3 | |
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | Phase 3 now tests the mechanism first, on a disposable stack |
@@ -583,6 +584,33 @@ three eventually). `playbooks/cloudflared-update.yml` — explicit, hash-verifie
 stage refusing while an earlier one is unhealthy — exists and is not used; **revisit once
 uptime monitoring exists**, e.g. `ping.<host>.gsrpi.uk`, because a gate is only worth
 building when something can tell you a host is down, and today nothing can.
+
+**2i, filed 2026-08-24, and it is a consequence of 2d rather than a plan of its own.**
+It was found by the or3 session while converting `or3-dev`, and written into
+[`cloudflare.md`](cloudflare.md) rather than left implied — which is the only reason it
+is here at all.
+
+**The fault is two doors, not a stale rule.** `or3-dev` is reached today through a rule on
+**zero's host tunnel**, `ssh-zero-dev-or3.gsrpi.uk` → `ssh://127.0.0.1:2224`. Once it has
+its own in-container connector on its own hostname, the old rule does not stop working —
+it becomes a *second* public route to the same container, and only the new one is behind
+Access. Retiring it is therefore not cleanup, and calling it cleanup is how it would sit
+there for months.
+
+**The window is real and it opens on a merge.** It starts when or3-dev's own tunnel comes
+up and closes when the rule and its DNS record are gone. Nothing about the conversion
+closes it automatically, and the container is more exposed after the improvement than
+before it until someone acts.
+
+**It cannot be done from `or3-dev`, and the reason is the standing-position rule.** The
+work is an edit to [`hosts/zero/system/cloudflared-config.yml`](../hosts/zero/system/cloudflared-config.yml),
+`bin/install-system-file cloudflared-config.yml`, then **cycling zero's cloudflared** —
+stop, poll until 20241 is free, start; never `rc-service restart`. `ssh-zero.gsrpi.uk`
+*is* that tunnel, and so is every dev-container hostname riding on it. **The owner will
+run it over a mesh route** (`zero-one` or `zero-two`), which does not traverse the tunnel
+being cycled and is the position `CLAUDE.md` § *Changing the thing you are connected
+through* asks for. Delete the CNAME as well as the ingress rule: the rule alone leaves a
+record pointing at a tunnel that answers it with the catch-all 404.
 
 **2g: `one` and `zero` are done, 2026-08-23.** Both run new tunnels created with
 `config_src: local`, with their routes in `hosts/<host>/system/cloudflared-config.yml`
