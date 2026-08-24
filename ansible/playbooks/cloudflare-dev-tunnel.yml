@@ -158,6 +158,7 @@
       # uselessly, that there are none. Neither id is a secret.
       ansible.builtin.debug:
         msg: "zone {{ cf_zone }} = {{ cf_zone_id }} · account = {{ cf_account_id }}"
+      changed_when: true
 
     # ── 1  the tunnel ───────────────────────────────────────────────────────
     # Locally-managed (config_src: local), so ingress lives in the container's own
@@ -299,6 +300,7 @@
     - name: The record is already correct
       ansible.builtin.debug:
         msg: "{{ cf_hostname }} already CNAMEs to this tunnel, proxied — leaving it"
+      changed_when: true
       when: cf_dns_ok
 
     - name: Point the record at this tunnel
@@ -353,6 +355,7 @@
       # makes this play print it once and loudly.
       ansible.builtin.debug:
         msg: "{{ cf_st_q.json | to_nice_json }}"
+      changed_when: true
       when: debug_tokens | default(false) | bool
 
     - name: Say which service tokens this account has
@@ -365,6 +368,7 @@
           looking for "{{ cf_st_name }}", account has:
           {{ (cf_st_q.json.result | default([]) | map(attribute='name') | list) | join(', ') | default('none', true) }}
           => {{ 'matched ' ~ cf_st_id if cf_st_id is defined else 'NO MATCH, one will be created' }}
+      changed_when: true
 
     - name: Delete the existing service token, so a fresh secret can be minted
       # -e replace_service_token=true. For the case that has already happened once: the
@@ -410,29 +414,39 @@
       # The ONLY task here without no_log, and deliberately so. Cloudflare returns a
       # service token's secret at creation and never again; a play that hid it would have
       # created a credential nobody can use. Everything else on the wire stays masked.
+      #
+      # changed_when: true is a display decision and not a lie about state — the same one
+      # system-files.yml documents. ansible.cfg sets display_ok_hosts = False and a debug
+      # task reports ok, so without it THIS BANNER DOES NOT PRINT: the play mints a
+      # credential Cloudflare will never show again and says nothing. Found 2026-08-24.
       ansible.builtin.debug:
-        msg:
-          - "─────────── COPY THESE NOW — CLOUDFLARE WILL NOT SHOW THEM AGAIN ───────────"
-          - ""
-          - "  Client ID      {{ cf_st_new.json.result.client_id }}"
-          - "  Client Secret  {{ cf_st_new.json.result.client_secret }}"
-          - ""
-          - "Hand them to the client play, which is the only thing that should store them:"
-          - ""
-          - "    ansible-playbook playbooks/dev-client.yml"
-          - ""
-          - "It prompts for both — the secret is read from the terminal and CANNOT be"
-          - "passed with -e, so it reaches neither your shell history nor the process"
-          - "list. It writes them to ~/.config/{{ cf_name }}/token at mode 600 and adds the"
-          - "ssh config block whose ProxyCommand sources that file."
-          - ""
-          - "Do not put them in fish conf.d. That would place a live credential in the"
-          - "environment of every process this account starts, for the sake of one"
-          - "command that runs when you ssh."
-          - ""
-          - "Lost them? -e replace_service_token=true deletes this token and mints a"
-          - "fresh pair. There is no way to read a secret back."
-          - "─────────────────────────────────────────────────────────────────────────────"
+        # ONE string, not a list of lines. Under callback_result_format = yaml a list
+        # renders as quoted, escaped items, and the two lines that have to be transcribed
+        # by hand are exactly the ones a leading space forces into quotes. A multiline
+        # string renders as a block scalar: real newlines, nothing around the values.
+        msg: |
+          ─────────── COPY THESE NOW — CLOUDFLARE WILL NOT SHOW THEM AGAIN ───────────
+
+            Client ID      {{ cf_st_new.json.result.client_id }}
+            Client Secret  {{ cf_st_new.json.result.client_secret }}
+
+          Hand them to the client play, which is the only thing that should store them:
+
+              ansible-playbook playbooks/dev-client.yml
+
+          It prompts for both — the secret is read from the terminal and CANNOT be
+          passed with -e, so it reaches neither your shell history nor the process
+          list. It writes them to ~/.config/{{ cf_name }}/token at mode 600 and adds the
+          ssh config block whose ProxyCommand sources that file.
+
+          Do not put them in fish conf.d. That would place a live credential in the
+          environment of every process this account starts, for the sake of one
+          command that runs when you ssh.
+
+          Lost them? -e replace_service_token=true deletes this token and mints a
+          fresh pair. There is no way to read a secret back.
+          ─────────────────────────────────────────────────────────────────────────────
+      changed_when: true
       when: cf_st_new is not skipped and cf_st_new.json is defined
 
     - name: Note when no new service token was minted here
@@ -442,6 +456,7 @@
           was printed — Cloudflare cannot return one after creation. If the phone does not
           have it, re-run with -e replace_service_token=true, which deletes that token and
           mints a fresh pair.
+      changed_when: true
       when: cf_st_new is skipped
 
     # ── 4  the Access application and its one policy ────────────────────────
@@ -547,6 +562,7 @@
           proved is that the API token works, that it can see the zone, and which of the
           four objects already exist. Anything below showing "(not created — --check)"
           does not exist yet. Nothing was created and nothing was changed.
+      changed_when: true
       when: ansible_check_mode
 
     - name: What was provisioned
@@ -561,4 +577,5 @@
           - ""
           - "Set DEV_TUNNEL_HOSTNAME={{ cf_hostname }} in dev/.env, then `make up`"
           - "on {{ inventory_hostname }} — NOT restart: the entrypoint reads it at start."
+      changed_when: true
 

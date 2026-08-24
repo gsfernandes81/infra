@@ -184,6 +184,7 @@
         msg: >-
           keeping the token already at {{ token_file }} — pass -e replace_token=true to
           replace it after a rotation.
+      changed_when: true
       when: not setting_token
 
     - name: What is about to be asked for
@@ -196,6 +197,7 @@
           - "The ID is not secret and will echo. The secret will not echo."
           - "Neither reaches your shell history: these are read from the terminal, not"
           - "from the command line."
+      changed_when: true
       when: setting_token and not ansible_check_mode
 
     - name: Read the Client ID
@@ -373,3 +375,4 @@
           - ""
           - "Both blocks are written. -lan works today; the Cloudflare one works once the"
           - "tunnel is provisioned and DEV_TUNNEL_HOSTNAME is set on the container."
+      changed_when: true

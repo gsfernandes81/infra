@@ -83,6 +83,7 @@
     - name: Show what we are working from
       ansible.builtin.debug:
         msg: "account {{ cf_account }}, existing tunnel {{ old_tunnel }}"
+      changed_when: true
 
     # ── capture the ingress the edge is serving RIGHT NOW ─────────────────────
     # From the connector, not from the dashboard and not from this repo. On zero the
@@ -150,6 +151,7 @@
         msg: >-
           {{ live_ingress | rejectattr('hostname', 'equalto', '')
              | map(attribute='hostname') | list }}
+      changed_when: true
 
     # ── create the new tunnel ─────────────────────────────────────────────────
     # 32 random bytes, base64, generated HERE. The secret never has to survive a
@@ -188,6 +190,7 @@
           - "new tunnel: {{ new_tunnel }}  (name: {{ inventory_hostname }}-local)"
           - "old tunnel: {{ old_tunnel }}  — still serving every hostname"
           - "no DNS record references the new one, so this is reversible by deleting it"
+      changed_when: true
 
     # ── write the credentials, under a NEW name ───────────────────────────────
     # Not over the live one. The running connector reads that file, and phase 2 is where
@@ -251,3 +254,4 @@
           - "2. commit it, and pull on {{ inventory_hostname }}"
           - "3. then: cloudflare-tunnel-cutover.yml"
           - "to abandon instead: delete tunnel {{ new_tunnel }} and rm {{ new_cred_file }}"
+      changed_when: true

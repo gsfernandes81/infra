@@ -233,3 +233,4 @@
                   if windows_ssh_config | length == 0
                   else 'not reachable from here — paste from ' ~ windows_out) }}
           - "verify with: ssh -G two-zero | grep -E 'proxycommand|hostname|user'"
+      changed_when: true

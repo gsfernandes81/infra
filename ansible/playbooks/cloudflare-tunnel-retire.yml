@@ -109,6 +109,7 @@
         msg: >-
           {{ 'still pointing at ' ~ doomed_tunnel ~ ': ' ~ (stragglers | join(', '))
              if stragglers else 'nothing points at ' ~ doomed_tunnel ~ ' any more' }}
+      changed_when: true
 
     - name: Refuse unless every straggler was named as abandoned
       ansible.builtin.assert:
@@ -125,6 +126,7 @@
           ABANDONING {{ abandon }} — these will stop resolving to anything once the
           tunnel is gone. Their DNS records are left in place; delete them separately
           if you want the names gone too.
+      changed_when: true
       when: abandon | length > 0
 
     # ── guard 3: private network routes ──────────────────────────────────────
@@ -152,6 +154,7 @@
              | map(attribute='network') | list | default([], true)
              if (routes.json.result | default([], true)) | length > 0
              else 'no private network routes on ' ~ doomed_tunnel }}
+      changed_when: true
 
     # DROPPED, NOT MOVED. Confirmed 2026-08-23 that WARP is not used here — these are
     # left over from an experiment with WARP VPN to zero and/or WARP-based Access auth.
@@ -239,6 +242,7 @@
         msg: >-
           DELETE returned {{ deleted.status | default('?') }}:
           {{ deleted.json.errors | default(deleted.msg) | default('no detail') }}
+      changed_when: true
       when: deleted.status | default(0) not in [200, 202, 204]
 
     - name: Fail if the tunnel is still there
@@ -256,3 +260,4 @@
           - "{{ inventory_hostname }} serves from {{ live_tunnel }}, routes in hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
           - "cleanup: rm {{ old_cred_file }} and /etc/cloudflared/{{ inventory_hostname }}-new.json"
           - "and the baseline: rm ~/.infra-2g-baseline-{{ inventory_hostname }}.json"
+      changed_when: true

@@ -134,6 +134,7 @@
           append and dev/.env are skipped below, because they act on files this run has
           not created. Nothing is wrong. Run it for real, then --check again to see a
           clean no-change pass.
+      changed_when: true
       when: ansible_check_mode and not deploy_key.stat.exists
 
     - name: The deploy key's modes
@@ -236,3 +237,4 @@
           - "   Every other lifecycle target reaches the same way: make up, restart,"
           - "   status, verify, logs, boot-log. `make dev` is up + the two interactive"
           - "   logins (claude, gh), which need that tty."
+      changed_when: true

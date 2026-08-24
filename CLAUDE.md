@@ -208,6 +208,12 @@ script**, run in a separate terminal, with the output pasted back.
 - **An Ansible `register` is overwritten by a skipped task.** The guard that read it
   afterwards was disarmed — the `retire` playbook's history has the commit. Register
   into a different name, or `when:` the consumer on the producer's own condition.
+- **An Ansible `debug` task reports `ok`, and `ansible.cfg` sets `display_ok_hosts =
+  False`** — so a message a playbook exists to print does not print at all. It silently
+  swallowed the Access service token banner, the one thing on this fleet that cannot be
+  fetched again. Every `debug` whose output is the point carries `changed_when: true`;
+  the reason is in `ansible.cfg` beside the setting. Prove a new one displays by running
+  it, not by reading it.
 
 ## Changing the thing you are connected through
 

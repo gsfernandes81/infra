@@ -72,6 +72,7 @@
           {{ inventory_hostname }}:
           {{ ('changed — ' + (pkg.packages | default([]) | join(', '))) if pkg.changed
              else 'already complete, nothing to do' }}
+      changed_when: true
 
     - name: Re-read the installed set
       # Not redundant with the module, and not distrust of it: the module reports that its
@@ -104,4 +105,5 @@
         msg: >-
           {{ inventory_hostname }}: would install —
           {{ still_absent.stdout | trim | default('nothing, already complete', true) }}
+      changed_when: true
       when: ansible_check_mode

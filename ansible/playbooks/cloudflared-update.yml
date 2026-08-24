@@ -180,6 +180,7 @@
           {{ inventory_hostname }} is {{ uname_m.stdout | trim }} (native asset
           {{ native_arch }}) and is being given {{ cfd_arch }} — deliberate, see
           docs/decisions.md. It runs via the kernel's 32-bit compat layer.
+      changed_when: true
       when: cfd_arch != native_arch
 
     - name: Record what is installed before we touch it
@@ -195,6 +196,7 @@
           - "host {{ inventory_hostname }} is {{ uname_m.stdout | trim }} -> asset {{ cfd_arch }}"
           - "installed now: {{ before.stat.checksum | default('nothing') }}"
           - "installing:    {{ sha256 }}  ({{ version }})"
+      changed_when: true
 
     # The disk checksum alone is not enough to end here: an interrupted run can leave
     # the swap done and the cycle not, so the file matches while the RUNNING process is
@@ -253,6 +255,7 @@
           {{ bin }} on disk already matches {{ sha256 }} but the running process is not
           {{ version }} — an earlier run swapped the binary and was interrupted before
           the cycle. Skipping download/backup/swap; cycling and verifying only.
+      changed_when: true
       when: not needs_install and needs_cycle
 
     # ── download, verify, prove it runs, then install ────────────────────────
@@ -382,3 +385,4 @@
           - "{{ inventory_hostname }} now runs {{ newver.stdout | default(version) | trim }} ({{ cfd_arch }})"
           - "previous binary kept at {{ bin }}.pre-{{ version }} — remove it once you are happy"
           - "next stage will refuse for {{ soak_days }} days, and while this host is unhealthy"
+      changed_when: true

@@ -122,6 +122,7 @@
           {{ 'sockets ' if audit_sockets.rc | default(1) != 0 else '' }}
           {{ 'containers ' if (audit_containers.rc | default(0)) not in [0] else '' }}
           — the report will show this as UNREADABLE, not as empty.
+      changed_when: true
       when: >-
         audit_sockets.rc | default(1) != 0
         or (audit_containers.rc | default(0)) not in [0]

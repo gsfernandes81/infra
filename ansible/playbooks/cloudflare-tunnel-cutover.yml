@@ -117,6 +117,7 @@
         msg: >-
           {{ 'host already on ' ~ target_tunnel ~ ' — skipping to DNS'
              if swap_done else 'full cutover: host then DNS' }}
+      changed_when: true
 
     # The hostnames come from the REPO config, not from the old tunnel's ingress. That
     # is the point of the review step: ionic-traces was removed there deliberately, and
@@ -135,6 +136,7 @@
           - "to        : {{ target_tunnel }}"
           - "hostnames : {{ move_hosts | join(', ') }}"
           - "NOT moved : anything in the old tunnel but absent above — retired on purpose"
+      changed_when: true
 
     # ── baseline every hostname, while the old tunnel still serves ───────────
     # PREFER THE BASELINE PHASE 1 SAVED. Re-taking it here is wrong on a resumed run:
@@ -193,11 +195,13 @@
           No saved baseline at {{ baseline_file }} — using one taken just now. If this is
           a RESUMED run the hostnames may already be down, in which case the final check
           confirms nothing. Verify by hand afterwards.
+      changed_when: true
       when: not bl_saved.stat.exists
 
     - name: Baseline
       ansible.builtin.debug:
         var: baseline_status
+      changed_when: true
 
     # ── find the DNS records, and record where they point ────────────────────
     - name: Find the zone
@@ -229,6 +233,7 @@
         msg: >-
           {{ dict(move_hosts | zip(recs.results
              | map(attribute='json.result.0.content') | list)) }}
+      changed_when: true
 
     # EVERY RECORD MUST CURRENTLY POINT AT THE SAME TUNNEL, and it must not already be
     # the target. A hostname in this host's ingress whose DNS aims somewhere else is a
@@ -435,6 +440,7 @@
         msg: >-
           connector on {{ new_tunnel }} is serving {{ move_hosts | length }} rules.
           Every hostname is DOWN from here until its record is repointed, below.
+      changed_when: true
 
     # ── move DNS, one record at a time ───────────────────────────────────────
     - name: Repoint each hostname at the new tunnel
@@ -473,3 +479,4 @@
           - "the previous tunnel now has no DNS pointing at it, and no connector"
           - "next: cloudflare-tunnel-retire.yml, once you are happy to lose it"
           - "cleanup here: rm {{ new_cred_file }} and {{ cred_file }}.pre-2g"
+      changed_when: true

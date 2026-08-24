@@ -224,6 +224,7 @@
           NOTHING WAS RESTARTED. cloudflared files want stop / poll 20241 / start;
           sshd-infra.conf wants `rc-service sshd reload`; fstab and bcache-register
           take effect at the next boot.
+      changed_when: true
       when:
         - not ansible_check_mode
         - inst.results | default([]) | selectattr('changed', 'defined') | selectattr('changed') | list | length > 0
