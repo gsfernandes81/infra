@@ -109,6 +109,19 @@ end of a session for the next one. Two rules, both of which have bitten:
   - **Never run `git worktree prune` from a host** on a repo bind-mounted into a
     container. Worktrees registered as `/workspace/...` do not resolve host-side, so all
     of them read `prunable` and would be unregistered — live sessions included.
+    **And not from the container either, blanket.** The same asymmetry runs both ways: a
+    worktree created host-side is registered under a path that does not resolve *in* the
+    container, so a prune in here unregisters it. Prune only entries whose path is under
+    `/workspace` and is actually gone. Found live in a dev-container supervisor on
+    2026-08-24, where it would have run on every daemon start.
+- **`git checkout origin/main -- <file>` does not "drop a file from your branch".** It
+  adopts whatever `origin/main` is *at that instant*, diffed against your commit's own
+  parent — so if `main` has moved since you branched, you silently author someone else's
+  newer work into your commit. It happened on PR #1: twenty-eight lines of the reviewer's
+  own edit landed inside the contributor's commit, in the file they had just agreed was
+  the reviewer's. Use `git rebase origin/main`, and when the superseded text is the
+  plausible-looking one, confirm with `cmp` rather than by reading hunks. Cross-repo
+  conversions (`dd`, `ds`) will meet this again.
 - **Commit messages are one lowercase sentence saying what changed and why**, with an
   area or phase prefix when there is one (`2g phase 3: retire the old tunnel, with the
   guard that matters`, `cutover: refuse to cycle the tunnel we came in through`,
