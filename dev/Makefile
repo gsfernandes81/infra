@@ -97,16 +97,21 @@ _require-secrets:
 	[ "$$mode" = 700 ] || echo "WARNING — $$dir is mode $$mode, expected 700." >&2
 
 # ── lifecycle ───────────────────────────────────────────────────────────────
-# The base first, always. There is no registry on this fleet, so gsrpi-dev-base is a
-# local tag that has to EXIST before compose can build the child FROM it — this
-# dependency is the build order dev/README.md said must be obvious rather than
-# discovered. Docker's cache makes it free when nothing in Dockerfile.base changed.
+# The OFFLINE FALLBACK for the base image. The normal path is a pull: the child's
+# FROM names ghcr.io/gsfernandes81/gsrpi-dev-base, public, built by
+# .github/workflows/dev-base.yml. This target builds the identical image locally UNDER
+# THE GHCR NAME — docker prefers a local image over a pull, so after `make base` the
+# child builds with no network and no GitHub. Use it when GitHub is down, the month is
+# metered, or this host's uid differs from the 1001 the CI image bakes.
 base: _require-uid
 	$(DOCKER) build -f $(CURDIR)/Dockerfile.base \
 	  --build-arg USER_UID=$(HOST_UID) --build-arg USER_GID=$(HOST_GID) \
-	  -t gsrpi-dev-base:$(BASE_TAG) $(CURDIR)
+	  -t ghcr.io/gsfernandes81/gsrpi-dev-base:$(BASE_TAG) $(CURDIR)
 
-up: _require-env _require-uid _require-secrets base
+# No `base` dependency: the FROM pulls from ghcr when the tag is absent locally, so
+# the cross-repo build order 2d started with is gone — that was the point of the
+# registry. `make base` above exists for the days the registry does not.
+up: _require-env _require-uid _require-secrets
 	$(COMPOSE) up -d --build
 	@printf '\n'
 	@$(MAKE) --no-print-directory status

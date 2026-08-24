@@ -520,18 +520,20 @@ here, and the two files that carry host-specific values (`ssh_config.fleet`,
 `known_hosts.fleet`) are read from the secrets mount rather than baked.
 
 **Built on 2026-08-24, on the infra side**: `Dockerfile.base` is the shared ~700 lines,
-`make base` builds it as `gsrpi-dev-base:<BASE_TAG>` (tag set in the Makefile, single
-source), and this repo's `Dockerfile` is now a thin child — `FROM` plus the ansible
-layer. `make up` depends on `make base`, which is the no-registry build order made a
-dependency instead of a discovery. **The other three repos are not converted yet**;
-each conversion is, in that repo:
+built by CI to `ghcr.io/gsfernandes81/gsrpi-dev-base:<BASE_TAG>` (public; tag set in
+the Makefile, single source; `.github/workflows/dev-base.yml`, manual dispatch), and
+this repo's `Dockerfile` is now a thin child — `FROM` the ghcr name plus the ansible
+layer. There is no build order: the FROM pulls. `make base` builds the identical image
+locally under the same name as the offline fallback — docker prefers local over pull,
+so a GitHub outage means building on the host, children none the wiser. **The other
+three repos are not converted yet**; each conversion is, in that repo:
 
 1. delete everything shared from its `dev/Dockerfile`, leaving
    `ARG BASE_TAG=<tag>` + `FROM gsrpi-dev-base:${BASE_TAG}` + its own extras
    (or3: nothing; dd/ds: whatever they carry);
 2. drop `USER_UID`/`USER_GID` from its compose build args — the dev user is built in
    the base, same guard one layer down;
-3. note in its Makefile that infra's `make base` must have run on that host first.
+3. nothing else — the FROM pulls from ghcr, so no other repo needs infra present.
 
 Children pin a tag, never `latest`, so a base rebuild cannot change a container behind
 its repo's back. Bumping the base is: edit `BASE_TAG` in infra's Makefile, `make base`,

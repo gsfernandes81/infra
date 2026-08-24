@@ -8,11 +8,12 @@
 # dotfile. A repo's own dev/Dockerfile becomes a FROM line plus whatever that repo
 # needs on top — see dev/Dockerfile here for the shape (ansible), or3 needs nothing.
 #
-# Build it with `make base` in this directory. THERE IS NO REGISTRY ON THIS FLEET, so
-# "the base image" is a local tag on zero and a build-order dependency between repos:
-# infra's `make base` must have run before any repo's `make up` can FROM it. That
-# dependency is deliberate and visible rather than discovered — infra owns the base
-# because infra is where fleet-wide decisions live.
+# Built and pushed to ghcr.io/gsfernandes81/gsrpi-dev-base (PUBLIC — pure toolchain,
+# the same information as this file) by .github/workflows/dev-base.yml, on manual
+# dispatch. Children FROM the ghcr name, so there is no cross-repo build order: no
+# host needs this repo checked out to run a dev container. `make base` builds the
+# identical image locally under the same name, as the offline fallback. infra owns
+# the source because infra is where fleet-wide decisions live.
 #
 # THE TAG IS THE CONTRACT. bump BASE_TAG in dev/Makefile, rebuild, then move each
 # child's ARG BASE_TAG when that repo is ready — children pin a tag, never `latest`,
