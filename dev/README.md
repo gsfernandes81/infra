@@ -580,7 +580,11 @@ not mounted then, and must happen before anything can arrive. So the entrypoint 
 `/home/dev/child-init.sh` if the image bakes one: after the pull, so a lockfile that
 just moved is the one it installs from, and before the supervisor and sshd, so no
 session meets a half-installed venv. Non-fatal, like the pull — a container you can ssh
-into and fix beats one that refused to start over its own dependencies.
+into and fix beats one that refused to start over its own dependencies — and *bounded*,
+because non-fatal only covers the half of that which exits. It runs ahead of the door,
+so a `uv sync` blocked on a lock in the mount or retrying at a dead network costs the
+door as completely as a crash would. `timeout -k 10 600`, and the kill lands in the
+same warning branch as a failure; `DEV_CHILD_INIT_TIMEOUT` moves it.
 
 The shape as originally designed, kept for the reasoning:
 

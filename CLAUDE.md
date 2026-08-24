@@ -211,6 +211,11 @@ script**, run in a separate terminal, with the output pasted back.
   A guard built on the wrong answer silently skips the work it was meant to do.
 - **`a | b || c`** tests `b`'s exit status, not `a`'s. A fallback after a pipeline
   never fires; `grep -c` returning `0` also exits 1 and breaks `&&` chains.
+  **`set -o pipefail` is the wrong fix when you meant `a`.** It answers "did anything in
+  the pipeline fail", so the branch now also fires when `a` SUCCEEDED and `b` died — in
+  `dev/entrypoint.sh` that meant a good `git pull` reporting "the checkout is unchanged",
+  a false statement about the tree from the fix for a false statement about the tree.
+  `${PIPESTATUS[0]}`, read on the very next line, asks the question actually being asked.
 - **An Ansible `register` is overwritten by a skipped task.** The guard that read it
   afterwards was disarmed — the `retire` playbook's history has the commit. Register
   into a different name, or `when:` the consumer on the producer's own condition.

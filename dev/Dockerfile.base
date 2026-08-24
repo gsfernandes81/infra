@@ -9,7 +9,7 @@
 # plus whatever that repo needs on top — see dev/Dockerfile here for the shape
 # (ansible), or or3's for the other one (uv, and its own ssh identity).
 #
-# WHAT A CHILD IS EXPECTED TO CHANGE, and how. Four seams, none of which is a fork of a
+# WHAT A CHILD IS EXPECTED TO CHANGE, and how. Five seams, none of which is a fork of a
 # file in here:
 #
 #   environment    DEV_NAME, DEV_SECRETS_DIR, DEV_REMOTE_CONTROL, DEV_TUNNEL_HOSTNAME —
@@ -40,7 +40,9 @@
 #                  above all PLACE something, and dd-dev and ds-dev needed something
 #                  DONE — `uv sync` against the lockfile in the mount, which cannot
 #                  happen at build time because /workspace is not there yet. Non-fatal
-#                  by design; entrypoint.sh has the reasoning.
+#                  AND time-bounded — it runs ahead of the door, so a hang costs the
+#                  door exactly as a crash would. Run with `bash`, so a child's own
+#                  shebang is not honoured; entrypoint.sh has the reasoning.
 #
 # Anything a child cannot express through those five is a change to THIS file, made
 # once, followed by a BASE_TAG bump. That is the trade the base image exists to make.

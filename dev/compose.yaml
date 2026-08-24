@@ -18,8 +18,10 @@ services:
       # No USER_UID/USER_GID here any more: the dev user is built in the BASE image
       # (Dockerfile.base), which `make base` builds at the checkout owner's uid/gid —
       # the same guard as before, one layer down. This child only adds ansible on top
-      # and never touches accounts. `make up` depends on `make base`, so the tag below
-      # exists whenever compose builds this.
+      # and never touches accounts. The tag below is a FALLBACK: `make up` passes
+      # BASE_TAG from the Makefile, which is the single source. `up` does NOT depend on
+      # `base` — the FROM pulls the tag from ghcr — so a tag bumped here and not yet
+      # built by dev-base.yml fails on the pull until `make base` builds it locally.
       args:
         BASE_TAG: ${BASE_TAG:-2026.08.24.2}
     image: infra-dev

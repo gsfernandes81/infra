@@ -22,6 +22,7 @@ set -u
 #   DEV_SECRETS_DIR      where the read-only secrets mount lands        (/run/infra-secrets)
 #   DEV_REMOTE_CONTROL   1 starts the Claude Remote Control supervisor  (0)
 #   DEV_TUNNEL_HOSTNAME  cloudflared's ingress hostname                 (unset = no tunnel)
+#   DEV_CHILD_INIT_TIMEOUT  seconds child-init.sh gets before it is killed        (600)
 #
 # and two files a child BAKES rather than sets, because their content is tracked and
 # reviewable rather than host-specific:
@@ -29,6 +30,10 @@ set -u
 #   /home/dev/ssh_config          its own ~/.ssh/config — infra-dev's names the fleet,
 #                                 or3-dev's names or3ecr through the phone's tunnel
 #   /home/dev/known_hosts.extra   host keys pinned in the child's own repo
+#   /home/dev/child-init.sh       run at start, below — RUN WITH `bash`, so a child's own
+#                                 shebang is not honoured and a script written for another
+#                                 interpreter is parsed as bash. It is a hook in a bash
+#                                 entrypoint, not a program the image execs.
 SECRETS="${DEV_SECRETS_DIR:-/run/infra-secrets}"
 DEV_NAME="${DEV_NAME:-$(hostname)}"
 CFG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
@@ -125,10 +130,29 @@ fi
 # The test is the drop-in's own text rather than an environment variable, for the reason
 # `sshd -t` runs before the exec: the artefact is the authority on what sshd will do, and
 # a flag is a second place for that to be stated wrongly.
+#
+# `*.conf` AND NOT THE WHOLE DIRECTORY. That glob is what the Include globs, so a
+# `10-authorized-keys.conf.bak` or a README in there is not something sshd reads — and a
+# stale `.bak` beside the original is the artefact CLAUDE.md § *Backups of secret-bearing
+# files* has now found on this fleet twice. Testing the directory recursively would let
+# exactly that file silence the one warning that says the door is shut. The glob is
+# unquoted, and the no-match case stays literal and fails the grep, which is the answer
+# wanted anyway.
+if grep -qiE '^[[:space:]]*AuthorizedKeysFile' /home/dev/sshd_config.d/*.conf 2>/dev/null; then
+    authkeys_dropin=1
+else
+    authkeys_dropin=
+fi
+
 if [ -f "$SECRETS/authorized_keys" ]; then
     cp -f "$SECRETS/authorized_keys" "$HOME/.ssh/authorized_keys"
     chmod 600 "$HOME/.ssh/authorized_keys"
-elif grep -rqiE '^[[:space:]]*AuthorizedKeysFile' /home/dev/sshd_config.d/ 2>/dev/null; then
+    # BOTH present is the quietly wrong case, and the mirror of the one above: the copy
+    # just made lands in a file the door does not read, so a key added to the mount has
+    # no effect and nothing says so. First-match-wins cuts this way too.
+    [ -z "$authkeys_dropin" ] || \
+        say "NOTE: a drop-in sets AuthorizedKeysFile — the copy from $SECRETS is NOT what sshd reads."
+elif [ -n "$authkeys_dropin" ]; then
     say "authorized_keys comes from a drop-in in sshd_config.d, not from $SECRETS."
 else
     say "WARNING: no authorized_keys in $SECRETS — NOTHING can ssh in. Use: make shell"
@@ -264,16 +288,21 @@ git config --global url."git@github.com:".insteadOf "https://github.com/"
 # slightly old checkout — and /workspace is the HOST's clone, so a merge started here
 # would be left half-done in the host's working tree.
 #
-# `set -o pipefail` around it, and that is not decoration: without it the `if` tests
-# SED's status and not git's, so the branch below has never once been taken — a failed
-# pull printed git's own error and then nothing, which reads as a pull that worked. It is
-# the trap CLAUDE.md § *Shell traps* states in the abstract, sitting in this file.
+# ${PIPESTATUS[0]}, AND NOT THE PIPELINE'S OWN STATUS. `if git … | sed …` tests SED, so
+# the branch below had never once been taken — a failed pull printed git's error and then
+# nothing, which reads as a pull that worked. That is the trap CLAUDE.md § *Shell traps*
+# states in the abstract, sitting in this file.
+#
+# `set -o pipefail` was the first fix and is not the right one: it answers "did anything
+# in the pipeline fail", so a `sed` that dies on a full stdout would make a pull that
+# SUCCEEDED print "the checkout is unchanged" — a false statement about the tree, from
+# the fix for a false statement about the tree. PIPESTATUS[0] asks the question actually
+# being asked. It must be read before anything else runs; the assignment is that read.
 if [ -d /workspace/.git ]; then
-    set -o pipefail
-    if git -C /workspace pull --ff-only 2>&1 | sed 's/^/[entrypoint] git: /'; then :; else
+    git -C /workspace pull --ff-only 2>&1 | sed 's/^/[entrypoint] git: /'
+    pull_rc=${PIPESTATUS[0]}
+    [ "$pull_rc" = 0 ] || \
         say "pull skipped (not fast-forward, or offline) — the checkout is unchanged"
-    fi
-    set +o pipefail
 fi
 
 # ── the child's own start-up, if it ships one ───────────────────────────────
@@ -293,15 +322,28 @@ fi
 # must come up. A child whose venv did not sync is a container you can ssh into and fix;
 # a container that refused to start over it is one nobody on this fleet has a route to.
 # The failure is loud, and it is the child's own output that says what broke.
+#
+# AND BOUNDED, because non-fatal only covers the half of that which EXITS. This runs
+# ahead of sshd, so a child-init that hangs — `uv sync` blocked on a lock in the bind
+# mount another container holds, or retrying against a network that is down rather than
+# refusing — costs the door just as completely as a fatal one would, and on a
+# `restart: no` container nobody in an agent session has a route to. `timeout` makes the
+# hang land in the same warning branch as the failure. -k because timeout signals only
+# the process it started, and uv's children would otherwise outlive it.
+CHILD_INIT_TIMEOUT="${DEV_CHILD_INIT_TIMEOUT:-600}"
 if [ -f /home/dev/child-init.sh ]; then
-    say "child-init.sh — this image's own start-up"
-    set -o pipefail
-    if bash /home/dev/child-init.sh 2>&1 | sed 's/^/[child-init] /'; then
+    say "child-init.sh — this image's own start-up (up to ${CHILD_INIT_TIMEOUT}s)"
+    timeout -k 10 "$CHILD_INIT_TIMEOUT" bash /home/dev/child-init.sh 2>&1 \
+        | sed 's/^/[child-init] /'
+    rc=${PIPESTATUS[0]}
+    if [ "$rc" = 0 ]; then
         say "child-init.sh finished"
+    elif [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
+        say "WARNING: child-init.sh still running after ${CHILD_INIT_TIMEOUT}s — killed so"
+        say "         sshd can start. Whatever it sets up is INCOMPLETE. Its output is above."
     else
-        say "WARNING: child-init.sh exited non-zero — starting anyway. Its output is above."
+        say "WARNING: child-init.sh exited $rc — starting anyway. Its output is above."
     fi
-    set +o pipefail
 fi
 
 # ── sshd host key ───────────────────────────────────────────────────────────
@@ -491,6 +533,16 @@ if ! sshd_err="$(/usr/sbin/sshd -t -f "$SSHD_CONF" 2>&1)"; then
         say "STARTING WITHOUT THE DROP-INS in /home/dev/sshd_config.d — the container is"
         say "    up and reachable, and whatever they set is NOT in force. Fix the .conf"
         say "    in the repo's dev/ and rebuild."
+        # "up and reachable" is the one claim above that a stripped drop-in can falsify,
+        # and the line that said authorized_keys comes from a drop-in was printed
+        # hundreds of lines ago, before this preflight had decided anything. Say it
+        # again, here, where it is now true: the base config's AuthorizedKeysFile is
+        # ~/.ssh/authorized_keys, and in that branch nothing ever wrote one.
+        if [ -n "$authkeys_dropin" ] && [ ! -s "$HOME/.ssh/authorized_keys" ]; then
+            say "    AND ONE OF THEM SET AuthorizedKeysFile: sshd now reads"
+            say "    $HOME/.ssh/authorized_keys, which is empty, so NOTHING can ssh in."
+            say "    A docker exec from the host is the only way in until it is fixed."
+        fi
     else
         say "could not fall back — either that copy could not be written, or the base"
         say "    config alone does not parse either. Starting on the original anyway,"
