@@ -192,6 +192,12 @@ script**, run in a separate terminal, with the output pasted back.
 - **Anything whose response cannot be fetched again is printed the moment it is
   created** — a Cloudflare service token's secret was lost to `no_log` on a task that
   failed only because the API answered 201 and `uri` accepts 200 by default.
+  The same `no_log` also censors the *failure*: a refused write reports a status code
+  and nothing else, while the API put the reason in the response body. So a `no_log`
+  write that can be refused carries `failed_when: false`, then a task that prints the
+  body's error list (never the invocation — that is where the Authorization header is),
+  then an `assert` that stops the play. Accept every 2xx the operation could answer
+  with, and prove the outcome with a check, not with the status code.
 - One-shot migration scripts get deleted once run. Leaving an executable in `bin/`
   that tears down live stacks is a foot-gun, and git history keeps it.
 

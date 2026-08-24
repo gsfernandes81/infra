@@ -378,12 +378,51 @@
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/service_tokens/{{ cf_st_id }}"
         method: DELETE
-        status_code: [200, 201, 202]
+        # 204 as well, and not because Cloudflare was seen to send it. Guessing which
+        # success code this API answers with is the exact mistake that lost a secret
+        # here once — `uri` defaults to 200, Cloudflare said 201, the task "failed"
+        # after doing the work. The whole 2xx family that can mean "deleted" is
+        # accepted; the check that it really is gone is the assert below, not the code.
+        status_code: [200, 201, 202, 204]
         headers: { Authorization: "Bearer {{ cf_api_token }}" }
       register: cf_st_del
       delegate_to: localhost
       when: cf_st_id is defined and (replace_service_token | default(false) | bool)
+      # THE FAILURE HAS TO SURVIVE `no_log`. Every call here carries no_log for one
+      # reason — the Authorization header is in the module's own invocation, and a
+      # failed task prints that — and the price is that it censors the response too, so
+      # a refusal arrives as "Status code was 403" and nothing else. Cloudflare puts the
+      # reason in the body. Not failing here lets the two tasks below print that body
+      # (which holds no credential) and then stop the play deliberately.
+      failed_when: false
       no_log: true
+
+    - name: What Cloudflare said, if it refused to delete the token
+      ansible.builtin.debug:
+        msg: >-
+          DELETE service_tokens/{{ cf_st_id }} returned
+          {{ cf_st_del.status | default('?') }}:
+          {{ cf_st_del.json.errors | default(cf_st_del.msg) | default('no detail') }}
+      changed_when: true
+      when:
+        - cf_st_del is not skipped
+        - cf_st_del.status | default(0) not in [200, 201, 202, 204]
+
+    - name: Stop if the old token is still there
+      # Before the create, so a refused delete cannot end with two tokens of the same
+      # name — the state this play's own comments call out as the one where the phone
+      # holds the secret to only one of them and nothing says which.
+      ansible.builtin.assert:
+        that: cf_st_del.status | default(0) in [200, 201, 202, 204]
+        fail_msg: >-
+          The existing service token "{{ cf_st_name }}" was NOT deleted, so nothing was
+          minted to replace it and NOTHING HAS CHANGED — the old token still works if
+          you have its secret. A 403 here means the API token can list service tokens
+          but not edit them: it wants Account : Access: Service Tokens : Edit, which is
+          in the scope list at the top of this file. Mint a token with that scope and
+          re-run; this one is disposable by design.
+        success_msg: "{{ cf_st_name }} deleted, a fresh pair will be minted below"
+      when: cf_st_del is not skipped
 
     - name: Forget the deleted token
       ansible.builtin.set_fact:
@@ -403,7 +442,42 @@
       # `is not defined` FIRST so the or short-circuits — `is none` on an undefined
       # variable is not a question Jinja should be asked. None is the deleted case.
       when: cf_st_id is not defined or cf_st_id is none
+      # Same reason as the delete above: no_log would otherwise censor Cloudflare's
+      # explanation of a refusal. It stays on, because the response of a SUCCESSFUL
+      # create is the secret itself and that is printed by exactly one task.
+      failed_when: false
       no_log: true
+
+    - name: What Cloudflare said, if it refused to create the token
+      ansible.builtin.debug:
+        msg: >-
+          POST service_tokens (name "{{ cf_st_name }}") returned
+          {{ cf_st_new.status | default('?') }}:
+          {{ cf_st_new.json.errors | default(cf_st_new.msg) | default('no detail') }}
+      changed_when: true
+      when:
+        - cf_st_new is not skipped
+        - cf_st_new.status | default(0) not in [200, 201]
+
+    - name: Stop if no token was minted, and say what state the account is in
+      # The one failure this play must never report as a bare "failed": between the
+      # delete above and this create there is a window in which the account has NO
+      # token of this name, and the phone's old secret is already dead. Which side of
+      # that window you are on decides what you do next, so it is said here.
+      ansible.builtin.assert:
+        that: cf_st_new.status | default(0) in [200, 201]
+        fail_msg: >-
+          No service token was created.
+          {{ 'THE OLD ONE IS ALREADY DELETED — this account now has no token named "'
+          ~ cf_st_name ~ '" and the secret the phone holds is dead. Re-run WITHOUT -e
+          replace_service_token: there is nothing left to replace, so the play will
+          simply mint one and print it.'
+          if cf_st_del is not skipped
+          else 'Nothing was deleted, so nothing has changed.' }}
+          A 403 means the API token can read service tokens but not edit them — see the
+          scope list at the top of this file.
+        success_msg: "a new service token exists; its secret is printed below, once"
+      when: cf_st_new is not skipped
 
     - name: Remember the new service token id
       ansible.builtin.set_fact:
