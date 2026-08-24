@@ -145,6 +145,11 @@ on any of them.
 - **An Access service token is not an API token is not a tunnel token.** Three unrelated
   credentials sharing a word. `cloudflare-dev-tunnel.yml` prompts for the right one by
   saying which it is not.
+- **A service token in a policy cannot be deleted — rotate it.** `400`, code `12139`,
+  `service_token_in_use`. Every token this fleet uses is named by an Access policy, so
+  this is the normal case, not an edge one. `POST …/service_tokens/{id}/rotate` keeps the
+  id and the policy, returns a fresh `client_id`/`client_secret`, and invalidates every
+  client holding the old pair. Deleting is only for a token nothing references.
 - **`no_log` on a `uri` task hides the response as well as the headers.** It cost the only
   copy of a service token secret in August, and hid a `400` from the retire play in
   the same way. Register the result, let the task not fail, and print the API's own

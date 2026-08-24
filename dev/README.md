@@ -339,6 +339,14 @@ API token "service_token" — which is an entirely reasonable thing to do — ma
 like the same thing. `-e service_token_name=` refers to the **second** one, and should be
 left unset unless you minted one by hand: the play creates it and prints its secret once.
 
+**If the phone does not have that secret, rotate — do not delete.**
+`-e rotate_service_token=true` mints a fresh secret for the *same* token, prints it, and
+kills the old pair on the spot; hand it to the client play with `-e replace_token=true`,
+which is the flag that lets it overwrite a token file it already has. Delete-and-recreate
+is not an option Cloudflare offers here: it refuses to delete a service token an Access
+policy references (`400`, `service_token_in_use`), and the policy this play writes *is*
+that reference.
+
 **Delete the API token when you are done provisioning.** Nothing stores it — not the
 repo, not the container, not `$INFRA_SECRETS` — so deleting it breaks nothing and there
 is no config to update. Everything already built keeps working: the tunnel, the DNS

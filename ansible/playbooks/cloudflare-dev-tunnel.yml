@@ -117,6 +117,24 @@
       confirm: false
 
   tasks:
+    # ── the flag that used to mean delete-and-recreate ──────────────────────
+    # It named an operation Cloudflare will not perform on a provisioned container: a
+    # service token an Access policy references cannot be deleted (400 / 12139), and
+    # this play's own policy is that reference. Rotation does what it was reached for,
+    # so the flag is renamed rather than quietly redefined — someone typing the old one
+    # from a note or from scrollback should be told what changed, not silently handed a
+    # different operation than the word they used.
+    - name: Refuse the old flag name
+      ansible.builtin.assert:
+        that: replace_service_token is not defined
+        fail_msg: >-
+          -e replace_service_token=true is gone. It deleted the token and minted a new
+          one, and Cloudflare refuses that while an Access policy references it — which
+          it always does here. Use -e rotate_service_token=true: same intent, one call,
+          the token id and the policy untouched, the old secret dead the moment the new
+          one is printed.
+        success_msg: "no retired flags"
+
     # ── 0  the token, the zone and the account ─────────────────────────────
     # `check_mode: false` on every read, the same reason audit.yml carries it: under
     # --check a task is skipped by default, so a dry run would resolve nothing and then
@@ -370,64 +388,72 @@
           => {{ 'matched ' ~ cf_st_id if cf_st_id is defined else 'NO MATCH, one will be created' }}
       changed_when: true
 
-    - name: Delete the existing service token, so a fresh secret can be minted
-      # -e replace_service_token=true. For the case that has already happened once: the
+    - name: Rotate the existing service token, so the phone gets a fresh secret
+      # -e rotate_service_token=true. For the case that has already happened here: the
       # token exists in Cloudflare and NOBODY HAS ITS SECRET, because Cloudflare returns
-      # it at creation and never again. The only cure is delete-and-recreate, and doing
-      # it here beats a dashboard trip — this play knows the id and you do not.
+      # it at creation and never again.
+      #
+      # THIS WAS delete-and-recreate AND CLOUDFLARE REFUSES THAT. A token an Access
+      # policy references cannot be deleted — 400, code 12139, `service_token_in_use`,
+      # "remove all references to it and try again, or rotate the service token to
+      # invalidate existing clients". This play's own policy is that reference, so the
+      # delete could never have worked on a container this play had finished
+      # provisioning; it could only work on a half-built one. Seen 2026-08-24.
+      #
+      # Rotate is the operation the error message itself names, and it is better than
+      # what it replaces on every count: the token id does not change, so the policy is
+      # untouched and no window exists in which the application has nothing to admit;
+      # the old secret stops working the instant this returns; and one call replaces
+      # three. The response carries client_id and client_secret exactly as a create
+      # does, which is why the banner below can take either.
       ansible.builtin.uri:
-        url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/service_tokens/{{ cf_st_id }}"
-        method: DELETE
-        # 204 as well, and not because Cloudflare was seen to send it. Guessing which
-        # success code this API answers with is the exact mistake that lost a secret
-        # here once — `uri` defaults to 200, Cloudflare said 201, the task "failed"
-        # after doing the work. The whole 2xx family that can mean "deleted" is
-        # accepted; the check that it really is gone is the assert below, not the code.
-        status_code: [200, 201, 202, 204]
+        url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/service_tokens/{{ cf_st_id }}/rotate"
+        method: POST
+        # 200 and 201 both, because guessing which one this API answers with is exactly
+        # how the only copy of a secret was lost here in August — `uri` defaults to 200,
+        # Cloudflare said 201, and the task "failed" after doing the work.
+        status_code: [200, 201]
         headers: { Authorization: "Bearer {{ cf_api_token }}" }
-      register: cf_st_del
+      register: cf_st_rot
       delegate_to: localhost
-      when: cf_st_id is defined and (replace_service_token | default(false) | bool)
+      when: cf_st_id is defined and (rotate_service_token | default(false) | bool)
       # THE FAILURE HAS TO SURVIVE `no_log`. Every call here carries no_log for one
       # reason — the Authorization header is in the module's own invocation, and a
       # failed task prints that — and the price is that it censors the response too, so
-      # a refusal arrives as "Status code was 403" and nothing else. Cloudflare puts the
-      # reason in the body. Not failing here lets the two tasks below print that body
-      # (which holds no credential) and then stop the play deliberately.
+      # a refusal arrives as "Status code was 400" and nothing else. Cloudflare puts the
+      # reason in the body, and in this play's case the body was the whole diagnosis.
+      # Not failing here lets the two tasks below print that body (which holds no
+      # credential on an error) and then stop the play deliberately.
       failed_when: false
       no_log: true
 
-    - name: What Cloudflare said, if it refused to delete the token
+    - name: What Cloudflare said, if it refused to rotate the token
       ansible.builtin.debug:
         msg: >-
-          DELETE service_tokens/{{ cf_st_id }} returned
-          {{ cf_st_del.status | default('?') }}:
-          {{ cf_st_del.json.errors | default(cf_st_del.msg) | default('no detail') }}
+          POST service_tokens/{{ cf_st_id }}/rotate returned
+          {{ cf_st_rot.status | default('?') }}:
+          {{ cf_st_rot.json.errors | default(cf_st_rot.msg) | default('no detail') }}
       changed_when: true
       when:
-        - cf_st_del is not skipped
-        - cf_st_del.status | default(0) not in [200, 201, 202, 204]
+        - cf_st_rot is not skipped
+        - cf_st_rot.status | default(0) not in [200, 201]
 
-    - name: Stop if the old token is still there
-      # Before the create, so a refused delete cannot end with two tokens of the same
-      # name — the state this play's own comments call out as the one where the phone
-      # holds the secret to only one of them and nothing says which.
+    - name: Stop if the rotation was refused
+      # NOTHING IS HALF-DONE WHEN THIS FIRES, which is the other reason rotate replaced
+      # delete-and-recreate: a refusal here leaves the old secret working. If the phone
+      # has it, nothing needs doing; if it does not, the account is exactly as stuck as
+      # it was a moment ago, and no new object was created to clean up.
       ansible.builtin.assert:
-        that: cf_st_del.status | default(0) in [200, 201, 202, 204]
+        that: cf_st_rot.status | default(0) in [200, 201]
         fail_msg: >-
-          The existing service token "{{ cf_st_name }}" was NOT deleted, so nothing was
-          minted to replace it and NOTHING HAS CHANGED — the old token still works if
-          you have its secret. A 403 here means the API token can list service tokens
-          but not edit them: it wants Account : Access: Service Tokens : Edit, which is
-          in the scope list at the top of this file. Mint a token with that scope and
-          re-run; this one is disposable by design.
-        success_msg: "{{ cf_st_name }} deleted, a fresh pair will be minted below"
-      when: cf_st_del is not skipped
-
-    - name: Forget the deleted token
-      ansible.builtin.set_fact:
-        cf_st_id: !!null
-      when: cf_st_del is not skipped
+          The service token "{{ cf_st_name }}" was NOT rotated, so its old secret still
+          works and nothing has changed. A 403 means the API token can list service
+          tokens but not edit them — it wants Account : Access: Service Tokens : Edit,
+          in the scope list at the top of this file, and it is disposable, so mint one
+          with that scope and re-run. Anything else is above; Cloudflare's own message
+          is the one to read.
+        success_msg: "{{ cf_st_name }} rotated — every client holding the old secret is now out"
+      when: cf_st_rot is not skipped
 
     - name: Create the service token
       ansible.builtin.uri:
@@ -439,10 +465,10 @@
         body: { name: "{{ cf_st_name }}" }
       register: cf_st_new
       delegate_to: localhost
-      # `is not defined` FIRST so the or short-circuits — `is none` on an undefined
-      # variable is not a question Jinja should be asked. None is the deleted case.
-      when: cf_st_id is not defined or cf_st_id is none
-      # Same reason as the delete above: no_log would otherwise censor Cloudflare's
+      # Only when there is nothing to rotate. A token that exists is never recreated —
+      # that is what the rotate above is for.
+      when: cf_st_id is not defined
+      # Same reason as the rotate above: no_log would otherwise censor Cloudflare's
       # explanation of a refusal. It stays on, because the response of a SUCCESSFUL
       # create is the secret itself and that is printed by exactly one task.
       failed_when: false
@@ -459,23 +485,14 @@
         - cf_st_new is not skipped
         - cf_st_new.status | default(0) not in [200, 201]
 
-    - name: Stop if no token was minted, and say what state the account is in
-      # The one failure this play must never report as a bare "failed": between the
-      # delete above and this create there is a window in which the account has NO
-      # token of this name, and the phone's old secret is already dead. Which side of
-      # that window you are on decides what you do next, so it is said here.
+    - name: Stop if no token was minted
       ansible.builtin.assert:
         that: cf_st_new.status | default(0) in [200, 201]
         fail_msg: >-
-          No service token was created.
-          {{ 'THE OLD ONE IS ALREADY DELETED — this account now has no token named "'
-          ~ cf_st_name ~ '" and the secret the phone holds is dead. Re-run WITHOUT -e
-          replace_service_token: there is nothing left to replace, so the play will
-          simply mint one and print it.'
-          if cf_st_del is not skipped
-          else 'Nothing was deleted, so nothing has changed.' }}
-          A 403 means the API token can read service tokens but not edit them — see the
-          scope list at the top of this file.
+          No service token was created, so the Access policy below would have nothing to
+          admit and the container would be unreachable. Nothing was deleted or changed —
+          re-run once the reason above is dealt with. A 403 means the API token can read
+          service tokens but not edit them; see the scope list at the top of this file.
         success_msg: "a new service token exists; its secret is printed below, once"
       when: cf_st_new is not skipped
 
@@ -483,6 +500,24 @@
       ansible.builtin.set_fact:
         cf_st_id: "{{ cf_st_new.json.result.id }}"
       when: cf_st_new is not skipped
+
+    - name: The pair to hand over, from whichever call produced it
+      # ONE FACT, so there is ONE banner. A create and a rotate return the same shape,
+      # and a play with two nearly-identical printings of a credential is a play where
+      # one of them drifts. no_log because the fact IS the secret and set_fact echoes
+      # its arguments.
+      ansible.builtin.set_fact:
+        cf_st_creds: "{{ (cf_st_new if cf_st_new is not skipped else cf_st_rot).json.result }}"
+        cf_st_verb: "{{ 'minted' if cf_st_new is not skipped else 'rotated' }}"
+        # Said in both cases, because "was minted" followed by nothing reads as a
+        # sentence that lost its second half — and a rotation's second half is the part
+        # that matters: the old pair is dead, not merely superseded.
+        cf_st_note: >-
+          {{ 'Every client holding the previous secret is refused from now on.'
+             if cf_st_new is skipped
+             else 'It is new, so nothing was holding an earlier secret.' }}
+      when: (cf_st_new is not skipped) or (cf_st_rot is not skipped)
+      no_log: true
 
     - name: The phone's credentials — shown once, never again
       # The ONLY task here without no_log, and deliberately so. Cloudflare returns a
@@ -501,12 +536,14 @@
         msg: |
           ─────────── COPY THESE NOW — CLOUDFLARE WILL NOT SHOW THEM AGAIN ───────────
 
-            Client ID      {{ cf_st_new.json.result.client_id }}
-            Client Secret  {{ cf_st_new.json.result.client_secret }}
+            Client ID      {{ cf_st_creds.client_id }}
+            Client Secret  {{ cf_st_creds.client_secret }}
+
+          Service token "{{ cf_st_name }}" was {{ cf_st_verb }}. {{ cf_st_note }}
 
           Hand them to the client play, which is the only thing that should store them:
 
-              ansible-playbook playbooks/dev-client.yml
+              ansible-playbook playbooks/dev-client.yml{{ ' -e replace_token=true' if cf_st_verb == 'rotated' else '' }}
 
           It prompts for both — the secret is read from the terminal and CANNOT be
           passed with -e, so it reaches neither your shell history nor the process
@@ -517,21 +554,23 @@
           environment of every process this account starts, for the sake of one
           command that runs when you ssh.
 
-          Lost them? -e replace_service_token=true deletes this token and mints a
-          fresh pair. There is no way to read a secret back.
+          Lost them? -e rotate_service_token=true mints a fresh secret for this same
+          token. There is no way to read an existing one back.
           ─────────────────────────────────────────────────────────────────────────────
       changed_when: true
-      when: cf_st_new is not skipped and cf_st_new.json is defined
+      when: cf_st_creds is defined
 
-    - name: Note when no new service token was minted here
+    - name: Note when no secret was produced this run
       ansible.builtin.debug:
         msg: >-
-          An ACCESS service token named "{{ cf_st_name }}" already existed, so no secret
-          was printed — Cloudflare cannot return one after creation. If the phone does not
-          have it, re-run with -e replace_service_token=true, which deletes that token and
-          mints a fresh pair.
+          An ACCESS service token named "{{ cf_st_name }}" already existed and was left
+          alone, so no secret was printed — Cloudflare cannot return one after creation.
+          If the phone does not have it, re-run with -e rotate_service_token=true, which
+          mints a fresh secret for this same token and invalidates the old one. It does
+          NOT delete anything: Cloudflare refuses to delete a token an Access policy
+          references, and this play's policy is that reference.
       changed_when: true
-      when: cf_st_new is skipped
+      when: cf_st_creds is not defined
 
     # ── 4  the Access application and its one policy ────────────────────────
     - name: List the account's Access applications
