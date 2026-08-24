@@ -21,7 +21,7 @@ services:
       # and never touches accounts. `make up` depends on `make base`, so the tag below
       # exists whenever compose builds this.
       args:
-        BASE_TAG: ${BASE_TAG:-2026.08.24}
+        BASE_TAG: ${BASE_TAG:-2026.08.24.1}
     image: infra-dev
     container_name: infra-dev
     hostname: ${DEV_HOSTNAME:-infra-dev}  # Claude Code shows this as the machine title
@@ -67,9 +67,12 @@ services:
 
       # NO remote-control switch, unlike or3-dev. This container exists to replace
       # driving Claude from the phone; shipping a disabled daemon for the thing it
-      # replaces is hedging against its own reason to exist. or3/dev/rc-supervisor.sh
-      # is there if the need comes back, and adding it here would be a decision with
-      # its own reasoning rather than a default nobody chose.
+      # replaces is hedging against its own reason to exist.
+      #
+      # DEV_REMOTE_CONTROL would be inert here even if it were set: the base carries the
+      # hook, not the daemon, and this image bakes no /home/dev/rc-supervisor.sh. The
+      # entrypoint says so in those words at start. Adding one is a Dockerfile change
+      # with its own reasoning, not a line in a .env.
 
     volumes:
       # The host clone. `git pull` in the container and on the host are the same

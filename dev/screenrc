@@ -1,6 +1,5 @@
-# screen inside infra-dev. Same file as or3-dev's but for the status line, and for
-# the same reason: the sessions in here are detached and re-attached, so what
-# matters is surviving a detach, not looks.
+# screen inside any container built on gsrpi-dev-base. The sessions in here are
+# detached and re-attached, so what matters is surviving a detach, not looks.
 
 startup_message off
 defscrollback 10000        # claude prints long output; the default 100 lines loses it
@@ -14,6 +13,10 @@ autodetach on
 
 # A status line, because a detached-and-reattached session with no chrome is easy to
 # mistake for a plain shell, and then you start a SECOND claude in it. It names the
-# container, which matters more here than on or3-dev: zero now runs four of these and
-# they all look alike once you are inside one.
-hardstatus alwayslastline '%{= kG}[ infra-dev ] %{= kw}%-w%{=b kR}[%n %t]%{-}%+w %=%{= kG}%c'
+# container, which matters a great deal now: zero runs several of these and they all
+# look alike once you are inside one.
+#
+# `%H` and not a baked name — this file is in the SHARED base, so a literal would have
+# every container calling itself infra-dev. screen expands %H to the hostname, which
+# each repo's compose sets to that container's own name.
+hardstatus alwayslastline '%{= kG}[ %H ] %{= kw}%-w%{=b kR}[%n %t]%{-}%+w %=%{= kG}%c'

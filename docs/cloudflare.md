@@ -13,6 +13,7 @@ Rewritten the same day, twice, because most of what it first said stopped being 
 | `one` | `1e7fde2e-ac2f-4a5e-8ad4-591208c1e2a6` | **locally** | `hosts/one/system/cloudflared-config.yml` |
 | `two` | `bdb4a988-7c8b-4f5f-a2bf-e42464309d64` | remotely | **Cloudflare** — the dashboard is the record |
 | `infra-dev` | separate, in the container | locally | `dev/entrypoint.sh` writes it |
+| `or3-dev` | separate, in the container | locally | the same `dev/entrypoint.sh`, from the base image |
 
 For zero and one the tracked file **is** the routing: edit it, commit it,
 `bin/install-system-file cloudflared-config.yml`, and cycle. For `two` the file carries
@@ -78,12 +79,13 @@ Snapshot; the file above is the source of truth. Regenerate with
 | `immich.gsrpi.uk` | `http://127.0.0.1:2283` | no Access — 200 unauthenticated |
 | `ssh-zero-dev-dd.gsrpi.uk` | `ssh://127.0.0.1:2222` | 502 normally; that container is usually down |
 | `ssh-zero-dev-ds.gsrpi.uk` | `ssh://127.0.0.1:2223` | 502 normally, same |
-| `ssh-zero-dev-or3.gsrpi.uk` | `ssh://127.0.0.1:2224` | the one dev container usually up |
+| `ssh-zero-dev-or3.gsrpi.uk` | `ssh://127.0.0.1:2224` | **being retired** — or3-dev has its own tunnel and its own name, `or3-dev.gsrpi.uk`. Drop this rule and its DNS record once that is proven, or the container has two public doors and only the new one is behind Access |
 | *(catch-all)* | `http_status:404` | |
 
 `infra-dev.gsrpi.uk` is **not** here — it has its own tunnel, run by a connector inside
-the container, which is the pattern *management-plane.md* § *Addressing* chose. The three
-older dev containers are still on the host tunnel; finishing that is Phase 5.
+the container, which is the pattern *management-plane.md* § *Addressing* chose.
+`or3-dev.gsrpi.uk` joined it on 2026-08-24. `dd-dev` and `ds-dev` are still on the host
+tunnel; finishing that is Phase 5.
 
 ## One's hostnames
 

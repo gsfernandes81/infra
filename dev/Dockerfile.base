@@ -5,8 +5,39 @@
 # This is dev/README.md § *Four copies of this* built: the ~700 lines that dd-dev,
 # ds-dev, or3-dev and infra-dev agreed on, in one place. Debian slim, Node + Claude
 # Code, gh, abduco, sshd, fish, the dev user, cloudflared, the entrypoint and every
-# dotfile. A repo's own dev/Dockerfile becomes a FROM line plus whatever that repo
-# needs on top — see dev/Dockerfile here for the shape (ansible), or3 needs nothing.
+# dotfile. A repo's own dev/Dockerfile becomes a FROM line
+# plus whatever that repo needs on top — see dev/Dockerfile here for the shape
+# (ansible), or or3's for the other one (uv, and its own ssh identity).
+#
+# WHAT A CHILD IS EXPECTED TO CHANGE, and how. Four seams, none of which is a fork of a
+# file in here:
+#
+#   environment    DEV_NAME, DEV_SECRETS_DIR, DEV_REMOTE_CONTROL, DEV_TUNNEL_HOSTNAME —
+#                  entrypoint.sh lists what each does. Set in the repo's compose.yaml.
+#   ssh_config     COPY its own over /home/dev/ssh_config. The entrypoint reads that
+#                  path, so a child's identities and hosts are its own business.
+#   known_hosts.extra   COPY one in to pin a host key in ITS repo's tracked content
+#                  (or3-dev pins or3ecr this way). Absent here, and absent is fine.
+#   sshd_config.d/ COPY a .conf in to widen an sshd default — see sshd_config, where
+#                  the Include is first precisely so a child's value wins. A drop-in
+#                  can only OVERRIDE, never remove: the base it falls back to is
+#                  key-only with no forwarding and no passwords, so nothing here can
+#                  widen by being absent.
+#                  What a bad drop-in costs is the drop-in and NOT the container:
+#                  entrypoint.sh runs `sshd -t` first and, if the config is refused,
+#                  starts without the drop-ins and says so. Quieter than a crash — for
+#                  or3-dev it means its reverse tunnel is silently refused until
+#                  somebody reads `make boot-log` — so this is worth more care, not
+#                  less. sshd's own message names the offending file and line, which is
+#                  what that log carries.
+#   rc-supervisor.sh  COPY one in to /home/dev and set DEV_REMOTE_CONTROL=1, and the
+#                  entrypoint starts it. NOT carried here: only an RC-enabled child
+#                  uses it, dd-dev's is a different design, and its permission mode is
+#                  a decision that belongs to the container making it. or3-dev ships
+#                  the one this arrangement was written around.
+#
+# Anything a child cannot express through those four is a change to THIS file, made
+# once, followed by a BASE_TAG bump. That is the trade the base image exists to make.
 #
 # Built and pushed to ghcr.io/gsfernandes81/gsrpi-dev-base (PUBLIC — pure toolchain,
 # the same information as this file) by .github/workflows/dev-base.yml, on manual
@@ -176,21 +207,19 @@ RUN if ! getent group "${USER_GID}" >/dev/null; then \
 # installed here, so `abduco -c work` with no command would fail rather than give
 # you a shell. It names fish for the same reason the passwd entry does.
 #
-# ANSIBLE_CONFIG is the one that is not in or3-dev. ansible.cfg is read from the
-# CWD, which is why the phone needs `cd ~/infra/ansible` before every run and why
-# forgetting it produces "No inventory was parsed" — a real half-hour, already
-# spent once. Naming the file absolutely makes `ansible fleet -m ping` work from
-# anywhere in the container, including from a claude that has cd'd somewhere else.
-# It points into /workspace, so it is the REPO's config that is in force and there
-# is no second copy in the image to drift from it.
+# ANSIBLE_CONFIG WAS HERE AND IS NOT ANY MORE — it moved to dev/Dockerfile, this
+# repo's own child, on 2026-08-24. It names a path inside /workspace, and /workspace is
+# a different repo in every container built on this base: in or3-dev it would point at
+# a file that does not exist, and the entrypoint publishes the whole environment into
+# ~/.ssh/environment, so it would have travelled into every ssh session there too. A
+# setting that is only true for one child belongs in that child.
 ENV TZ=Etc/UTC \
     ABDUCO_CMD=/usr/bin/fish \
     CLAUDE_CONFIG_DIR=/home/dev/.claude \
     GH_CONFIG_DIR=/home/dev/.config/gh \
     HISTFILE=/home/dev/.local/share/.bash_history \
     SCREENRC=/home/dev/.screenrc \
-    SCREENDIR=/home/dev/.screen \
-    ANSIBLE_CONFIG=/workspace/ansible/ansible.cfg
+    SCREENDIR=/home/dev/.screen
 
 # ── the last ROOT-OWNED thing; everything below USER belongs to dev ─────────
 #
@@ -224,9 +253,14 @@ WORKDIR /workspace
 # insist on is set once, rather than left to the umask of whoever runs one first.
 # .ssh/cp is ansible.cfg's ControlPath directory: ssh does NOT create it, and every
 # task fails with "unix_listener: cannot bind" if it is missing.
+#
+# sshd_config.d is not a volume either: it is where a CHILD drops a .conf to widen an
+# sshd default, and it is created here so the `Include` at the top of sshd_config
+# always resolves — a glob that matches nothing is fine, a directory that is not there
+# is a line nobody can see failing.
 RUN mkdir -p /home/dev/.claude /home/dev/.config/gh /home/dev/.config/fish \
         /home/dev/.ssh-host /home/dev/.ssh/cp /home/dev/.local/share \
-        /home/dev/.screen /home/dev/.abduco \
+        /home/dev/.screen /home/dev/.abduco /home/dev/sshd_config.d \
     && chmod 700 /home/dev/.ssh-host /home/dev/.ssh /home/dev/.ssh/cp \
         /home/dev/.screen /home/dev/.abduco
 

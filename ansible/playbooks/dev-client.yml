@@ -1,10 +1,20 @@
 ---
 # The CLIENT half: configures the machine you ssh FROM — the phone, or a laptop — to
-# reach infra-dev through its Cloudflare tunnel. Targets the control node itself.
+# reach a dev container through its Cloudflare tunnel. Targets the control node itself.
 #
 #     cd ansible
 #     ansible-playbook playbooks/dev-client.yml --check --diff
 #     ansible-playbook playbooks/dev-client.yml
+#
+# ONE RUN PER CONTAINER, and the defaults are infra-dev's. For a second one, name it:
+#
+#     ansible-playbook playbooks/dev-client.yml \
+#       -e alias=or3-dev -e hostname=or3-dev.gsrpi.uk -e lan_port=2224
+#
+# Everything a run writes is keyed on `alias` — the token file, the ssh block's marker —
+# so two containers do not overwrite each other. They did before 2026-08-24: the token
+# path and the marker were the literal string `infra-dev`, which is invisible until the
+# second container exists and then loses the first one's token to the second run.
 #
 # It answers "how does the service token get used automatically when I ssh in", and the
 # answer is deliberately not "export it in your shell profile". See below.
@@ -31,7 +41,7 @@
 #
 # NO NEW COLLECTIONS: ansible.builtin throughout.
 
-- name: Configure this control node to reach infra-dev over Cloudflare
+- name: Configure this control node to reach a dev container over Cloudflare
   hosts: control
   gather_facts: false
 
@@ -42,7 +52,9 @@
     # not writable — the same trap host_vars/localhost.yml already documents for
     # remote_tmp, and it fails here in exactly the same unhelpful way.
     home: "{{ lookup('env', 'HOME') }}"
-    token_file: "{{ home }}/.config/infra-dev/token"
+    # Keyed on the alias, NOT a literal — one directory per container, so provisioning
+    # or3-dev does not overwrite the token that reaches infra-dev.
+    token_file: "{{ home }}/.config/{{ dev_alias }}/token"
     ssh_config: "{{ home }}/.ssh/config"
     ssh_key: "{{ identity | default('~/.ssh/id_ed25519') }}"
     # The verified path, set by the tasks below. No bare-name fallback: a bare
@@ -268,7 +280,7 @@
         state: directory
         mode: "0700"
 
-    - name: The infra-dev block in ~/.ssh/config
+    - name: The {{ dev_alias }} block in ~/.ssh/config
       # blockinfile, so re-running edits the block in place instead of appending a second
       # copy — which ssh would not error on, it would just silently use the first.
       #
@@ -280,7 +292,7 @@
         mode: "0600"
         create: true
         insertbefore: BOF
-        marker: "# {mark} infra-dev (ansible/playbooks/dev-client.yml)"
+        marker: "# {mark} {{ dev_alias }} (ansible/playbooks/dev-client.yml)"
         block: |
           # Three ways to the same container. RemoteCommand on the first is the whole
           # point: `ssh {{ dev_alias }}` IS the claude session, reattaching if one is

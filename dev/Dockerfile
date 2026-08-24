@@ -10,7 +10,7 @@
 # identical image locally UNDER THE SAME NAME, and docker prefers a local image over a
 # pull, so a GitHub outage or a metered month means building on the host with children
 # none the wiser.
-ARG BASE_TAG=2026.08.24
+ARG BASE_TAG=2026.08.24.1
 FROM ghcr.io/gsfernandes81/gsrpi-dev-base:${BASE_TAG}
 
 # The base ends as the dev user; the installs below write system paths.
@@ -46,6 +46,19 @@ RUN ansible-galaxy collection install --collections-path /usr/share/ansible/coll
         'community.general:>=13.3.0' \
         'community.docker:>=5.2.2' \
     && ansible-galaxy collection list
+
+# ansible.cfg is read from the CWD, which is why the phone needs `cd ~/infra/ansible`
+# before every run and why forgetting it produces "No inventory was parsed" — a real
+# half-hour, already spent once. Naming the file absolutely makes `ansible fleet -m ping`
+# work from anywhere in the container, including from a claude that has cd'd elsewhere.
+# It points into /workspace, so it is the REPO's config in force and there is no second
+# copy in the image to drift from it.
+#
+# HERE AND NOT IN THE BASE, since 2026-08-24: /workspace is a different repo in every
+# container built on that base, and the entrypoint publishes the environment into
+# ~/.ssh/environment, so a path that is only right here would have reached every ssh
+# session in or3-dev as well.
+ENV ANSIBLE_CONFIG=/workspace/ansible/ansible.cfg
 
 # Back to the account every session runs as. WORKDIR and CMD are inherited.
 USER dev

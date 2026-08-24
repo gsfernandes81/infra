@@ -30,12 +30,16 @@ been consciously postponed rather than an omission.
 - **Not a tunnel endpoint.** `or3-dev` publishes an sshd that the phone terminates a
   reverse forward on, to reach the vessel LAN. Nothing tunnels back through this one,
   and its `sshd_config` sets `AllowTcpForwarding no` to keep it that way.
-- **Not a Remote Control host.** `or3-dev` ships `rc-supervisor.sh`, disabled by
-  default. This one ships nothing of the kind: the container exists to replace driving
-  Claude from the phone, and shipping a disabled daemon for the thing it replaces is
-  hedging against its own reason to exist. or3's copy is there if the need returns, and
-  adding it here should be a decision with reasoning attached rather than a default
-  nobody chose.
+- **Not a Remote Control host.** The container exists to replace driving Claude from
+  the phone, and shipping a disabled daemon for the thing it replaces is hedging against
+  its own reason to exist. So this image ships **no `rc-supervisor.sh`** and its compose
+  sets no `DEV_REMOTE_CONTROL`.
+  Note what that means precisely, because the base image blurs it if you skim: the base
+  carries the *hook* — it starts `/home/dev/rc-supervisor.sh` when a child bakes one and
+  sets the switch — and it carries **no supervisor**. `or3-dev` ships the file, and the
+  entrypoint here says "no remote control in this image" rather than "off", because the
+  two have different fixes. Adding one should be a decision with reasoning attached
+  rather than a default nobody chose.
 - **Not a holder of the docker socket.** See *The socket line somebody will add* below.
 - **Not a control node, by default.** It ships ansible but no route to the fleet. See
   *The control-node question, deferred*.
@@ -495,19 +499,15 @@ dedicated account, not this line.
 
 ## Sharing or3-dev's layers
 
-**Every expensive layer in the `Dockerfile` is byte-identical to `or3/dev/Dockerfile`,
-on purpose.** zero has already built that image, so the apt layer, the Node + Claude
-Code layer and the `gh` tarball are cache hits, and this image costs the ansible layer
-plus a few small `COPY`s. On a Pi 5 that is the difference between a rebuild of about a
-minute and one of about fifteen.
+**This section described a discipline that no longer exists, and that is the point.**
+Until 2026-08-24 every expensive layer in this `Dockerfile` was byte-identical to
+`or3/dev/Dockerfile` by hand: add a package to one list and not the other and *both*
+images paid full price for every build from that line down, silently — nothing failed,
+it just got slow, and the reason was two directories away.
 
-It is also fragile in a specific way: add a package to one list and not the other and
-**both** images pay full price for every build from that line down, silently — nothing
-fails, it just gets slow, and the reason is two directories away. So when either file
-is edited, edit both, and put any genuine divergence *after* the shared block rather
-than inside it.
-
-That fragility is the argument for the next section.
+Both files are now thin children of `Dockerfile.base`, so the layers below the `FROM`
+are the same layers, not two builds that happen to agree. Layer sharing stopped being a
+convention nobody could check and became the pull.
 
 ## Four copies of this, and what to do about it
 
@@ -535,9 +535,34 @@ three repos are not converted yet**; each conversion is, in that repo:
    the base, same guard one layer down;
 3. nothing else — the FROM pulls from ghcr, so no other repo needs infra present.
 
+**or3-dev converted on 2026-08-24**, and it is the conversion that proves the shape:
+it is the child that differs most, and none of its differences needed a fork. What it
+needed instead became the base's four seams —
+
+| or3-dev needs | It gets it from |
+|---|---|
+| its secrets at `/run/or3-secrets`, holding `id_ed25519_or3ecr_m` and `id_ed25519_or3_deploy` | `DEV_SECRETS_DIR`, and the entrypoint copying **every** `id_*` rather than a list of names |
+| or3ecr's host key pinned in tracked content | `/home/dev/known_hosts.extra`, baked by the child |
+| `AllowTcpForwarding yes` — the phone's reverse forward is its reason to exist | `/home/dev/sshd_config.d/10-forwarding.conf`, and the `Include` at the *top* of `sshd_config` so a child's value wins |
+| the Claude Remote Control supervisor | `DEV_REMOTE_CONTROL=1`, plus its own `rc-supervisor.sh` baked at `/home/dev`. The base carries the **hook and not the daemon** — it starts that path when a child ships one — because only an RC-enabled child uses it, dd-dev's is a different design, and its permission mode is a decision belonging to the container making it |
+| `uv`, pinned to the version or3ecr runs | its own layer, above `USER dev`. Deliberately **not** in the base: that pin is a contract with `work/bootstrap/requirements-or3ecr.txt`, so it belongs to the repo holding the other half |
+
+That last row is the general rule: a thing goes in the base when the containers agree
+about it, and stays in a child when it is that repo's business. `ANSIBLE_CONFIG` moved
+the other way for the same reason on the same day — it names a path inside `/workspace`,
+which is a different repo in every container, so it now lives in this repo's child.
+
 Children pin a tag, never `latest`, so a base rebuild cannot change a container behind
 its repo's back. Bumping the base is: edit `BASE_TAG` in infra's Makefile, `make base`,
 then move each child's pin when that repo is ready.
+
+**The tag is `2026.08.24.1` as of the or3 conversion** — a suffix rather than a new
+date, because `2026.08.24` is already pushed and a pinned tag is a contract that the
+same tag is the same bytes. `dev-base.yml` refuses to overwrite one without `force`,
+which is the check working. That build is the first one two repos depend on. A change to the base is now a change to both containers, so the
+question before editing `Dockerfile.base` is which of the four seams the change belongs
+in — a setting that is true for one child is a child's setting, however tempting it is
+to put it where it will be inherited.
 
 The shape as originally designed, kept for the reasoning:
 
@@ -573,10 +598,10 @@ a build-order dependency between repos that has to be made obvious rather than
 discovered, and it is a change to the thing you are working *inside*, which is the
 category this repo's `CLAUDE.md` is most careful about.
 
-Until the other three convert, `or3/dev`'s Dockerfile and `Dockerfile.base` here are
-the two copies to keep in step — the byte-identical-layers discipline moves from
-"between two Dockerfiles" to "between or3's and the base", and ends entirely when or3
-converts.
+**dd-dev and ds-dev are still unconverted**, and each is the same three steps its
+repo can take whenever it likes: the `FROM`, dropping `USER_UID`/`USER_GID` from its
+compose build args, and whatever it carries on top. Neither needs this repo checked
+out — the `FROM` pulls.
 
 ## Secrets
 
