@@ -1,12 +1,33 @@
-# In-container sshd. Runs as the unprivileged `dev` user on port 2222, which
-# compose publishes on 127.0.0.1:2225 of zero.
+# In-container sshd, baked into gsrpi-dev-base and shared by every container built on
+# it. Runs as the unprivileged `dev` user on port 2222, which each repo's compose
+# publishes on a loopback port of its host — 2225 for infra-dev, 2224 for or3-dev.
 #
-# What it is FOR is different from or3-dev's, and the difference is the whole point
-# of this container. or3-dev's sshd is also a tunnel endpoint — the phone terminates
-# a reverse forward on it to reach the vessel LAN. This one is a DOOR AND NOTHING
-# ELSE: you ssh in from the phone or a PC and work in an abduco session, and the
-# model traffic that used to cross the phone's metered radio goes out over zero's
-# home connection instead. Nothing tunnels back through here.
+# What it is FOR differs between those two, and the difference is the whole point of
+# each. or3-dev's sshd is also a tunnel endpoint — the phone terminates a reverse
+# forward on it to reach the vessel LAN. infra-dev's is a DOOR AND NOTHING ELSE: you
+# ssh in from the phone or a PC and work in an abduco session, and the model traffic
+# that used to cross the phone's metered radio goes out over zero's home connection
+# instead. Nothing tunnels back through infra-dev.
+#
+# THE DEFAULTS HERE ARE THE SMALLER THING, and a child widens them in its own file.
+# sshd takes the FIRST value it obtains for each keyword, so the Include below — at the
+# top, before anything else is set — is what lets a child override rather than merely
+# append. `AllowTcpForwarding yes` in a child's drop-in wins; the same line at the
+# bottom of this file would not have.
+#
+# A glob that matches nothing is not an error, so a container with no drop-in gets
+# exactly this file. The directory is created in the base image so that stays true.
+#
+# A `Match` block inside a drop-in is CONFINED TO THAT FILE and does not leak back into
+# this one — measured on OpenSSH 9.2, not inferred: a drop-in ending in a `Match`
+# leaves `Port` and `HostKey` below valid here, and `sshd -t` accepts the pair. (The
+# same two lines *after* a `Match` in a single file are rejected outright with
+# "Directive 'Port' is not allowed within a Match block", which is the behaviour that
+# makes the leak sound plausible.) So a drop-in cannot break this file by structure;
+# it breaks it by being wrong on its own terms, which `sshd -t` catches in entrypoint.sh
+# before anything is exec'd.
+Include /home/dev/sshd_config.d/*.conf
+
 Port 2222
 ListenAddress 0.0.0.0
 
@@ -24,10 +45,11 @@ KbdInteractiveAuthentication no
 PermitRootLogin no
 UsePAM no                 # PAM needs root; a non-root sshd must disable it
 
-# NO forwarding. or3-dev sets `AllowTcpForwarding yes` because a reverse forward is
-# its reason to exist; nothing here needs one, and this container holds ssh keys that
-# reach all three hosts as an account in `wheel`. Off is the smaller thing to defend,
-# and turning it on should be a deliberate edit with a reason written next to it.
+# NO forwarding, as the base default. or3-dev turns it back on in
+# sshd_config.d/10-forwarding.conf because a reverse forward is its reason to exist;
+# nothing infra-dev does needs one, and this container holds ssh keys that reach all
+# three hosts as an account in `wheel`. Off is the smaller thing to defend, and turning
+# it on should be a deliberate drop-in with a reason written next to it.
 AllowTcpForwarding no
 GatewayPorts no
 

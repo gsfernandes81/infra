@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# infra-dev PID 1 (under `init: true`, so detached sessions' orphans get reaped).
+# PID 1 for every container built on this base (under `init: true`, so detached
+# sessions' orphans get reaped).
 #
 # Order matters and is not arbitrary:
-#   ssh -> claude state -> pull -> sshd host key -> [tunnel(bg)] -> sshd(fg)
+#   ssh -> claude state -> pull -> sshd host key -> [rc(bg)] -> [tunnel(bg)] -> sshd(fg)
 # Everything that could block on a prompt is settled first, because nothing in here
 # can answer one.
 #
@@ -13,7 +14,23 @@
 # `exit` closes an ssh session, `/exit` closes a claude, and PID 1 has not moved.
 set -u
 
-SECRETS=/run/infra-secrets
+# WHAT THIS IS PARAMETERISED BY, because it serves more than one container now.
+# Every default below is infra-dev's own behaviour, so a child that sets none of these
+# gets exactly what this file did when it was infra-dev's alone:
+#
+#   DEV_NAME             the container's name in the lines this prints  (default: hostname)
+#   DEV_SECRETS_DIR      where the read-only secrets mount lands        (/run/infra-secrets)
+#   DEV_REMOTE_CONTROL   1 starts the Claude Remote Control supervisor  (0)
+#   DEV_TUNNEL_HOSTNAME  cloudflared's ingress hostname                 (unset = no tunnel)
+#
+# and two files a child BAKES rather than sets, because their content is tracked and
+# reviewable rather than host-specific:
+#
+#   /home/dev/ssh_config          its own ~/.ssh/config — infra-dev's names the fleet,
+#                                 or3-dev's names or3ecr through the phone's tunnel
+#   /home/dev/known_hosts.extra   host keys pinned in the child's own repo
+SECRETS="${DEV_SECRETS_DIR:-/run/infra-secrets}"
+DEV_NAME="${DEV_NAME:-$(hostname)}"
 CFG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
 say() { printf '[entrypoint] %s\n' "$*"; }
@@ -29,14 +46,36 @@ say() { printf '[entrypoint] %s\n' "$*"; }
 mkdir -p "$HOME/.ssh/cp"
 chmod 700 "$HOME/.ssh" "$HOME/.ssh/cp"
 
-for key in id_ed25519_infra_deploy id_ed25519_fleet; do
-    if [ -f "$SECRETS/$key" ]; then
-        cp -f "$SECRETS/$key" "$HOME/.ssh/$key"
-        chmod 600 "$HOME/.ssh/$key"
-    else
-        say "WARNING: $SECRETS/$key is missing — whatever uses it will be refused."
-    fi
+# EVERY private key in the mount, rather than a list of names. The names are precisely
+# what differs per container — infra-dev has id_ed25519_infra_deploy and
+# id_ed25519_fleet, or3-dev has id_ed25519_or3_deploy and id_ed25519_or3ecr_m — and a
+# list baked here is a list the base has to know about its children.
+#
+# `.pub` halves are skipped: ssh does not need them, and a 600 on a public key reads as
+# a secret to whoever finds it later.
+#
+# The old spelling named each missing key, and what replaces that is deliberate rather
+# than lost. WHICH keys a container should have is stated in its own ~/.ssh/config, and
+# an IdentityFile that is not there fails at the moment it is used, naming the file. A
+# list here could only ever repeat that statement, one image layer further from it.
+#
+# The test is the file's own first line, not its name. A name test would take
+# `id_ed25519_fleet.bak` — and stale key backups beside the original are a thing that
+# has recurred on this fleet twice, which CLAUDE.md § *Backups of secret-bearing files*
+# is about. IdentitiesOnly makes an extra key harmless rather than dangerous, but a
+# mode-600 copy of a rotated-out key in ~/.ssh is exactly the artefact that rule exists
+# to stop being left lying around.
+copied=0
+for key in "$SECRETS"/id_*; do
+    [ -f "$key" ] || continue          # also the no-match case: the glob stays literal
+    head -1 "$key" 2>/dev/null | grep -q -- '-----BEGIN .*PRIVATE KEY-----' || continue
+    cp -f "$key" "$HOME/.ssh/${key##*/}"
+    chmod 600 "$HOME/.ssh/${key##*/}"
+    copied=$((copied + 1))
 done
+if [ "$copied" = 0 ]; then
+    say "WARNING: no id_* keys in $SECRETS — git push, and every ssh out of here, will be refused."
+fi
 
 # ~/.ssh/config = the host-specific fleet blocks, THEN the baked github.com block and
 # the wildcard. That order is load-bearing: ssh takes the FIRST value it obtains for
@@ -78,10 +117,15 @@ fi
 # than prompting — there is no tty on an ansible connection to prompt on — so the fleet
 # half is not optional, it is what makes ansible work at all.
 #
-# github.com's two keys are literal here for the same reason or3-dev pins them: a
-# changed key should be an edit to this file that someone reads, never a first-contact
-# `yes` that nobody sees.
+# github.com's two keys are literal here for the same reason or3-dev pins or3ecr's: a
+# changed key should be an edit to a tracked file that someone reads, never a
+# first-contact `yes` that nobody sees.
+#
+# known_hosts.extra is that same rule for a CHILD's hosts. It is a baked file and not a
+# secrets-mount one, and the difference is the point: or3ecr's key is not a secret and
+# not host-specific, it is a pin, and a pin belongs where a diff shows it changing.
 {
+    [ -f /home/dev/known_hosts.extra ] && cat /home/dev/known_hosts.extra
     [ -f "$SECRETS/known_hosts.fleet" ] && cat "$SECRETS/known_hosts.fleet"
     cat <<'EOF'
 github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
@@ -124,13 +168,18 @@ fi
 #   projects["/workspace"].hasTrustDialogAccepted — workspace trust. /workspace is not
 #       $HOME, so unlike home-directory trust this has to be persisted.
 #   theme, hasCompletedOnboarding — the first-run walkthrough.
-# remoteDialogSeen is NOT seeded here, unlike or3-dev: nothing in this container starts
-# remote-control, so the prompt it suppresses is one that never appears. Seeding it
-# would be pre-consenting to a thing this container deliberately does not do.
-python3 - "$CFG/.claude.json" /workspace <<'PY' || say "could not pre-seed .claude.json"
+#   remoteDialogSeen — the one-time "Enable Remote Control? [y/N]" consent. When falsy,
+#       remote-control opens a readline prompt on stdin; with no interactive stdin the
+#       supervisor's daemon can never answer it and re-prompts on every restart.
+#
+# THE LAST ONE IS SEEDED ONLY UNDER DEV_REMOTE_CONTROL=1, and that condition is the
+# whole of its meaning. Seeding it in a container that never starts remote-control
+# suppresses a prompt that never appears, which is pre-consenting to a thing that
+# container deliberately does not do. infra-dev is that container and passes 0.
+python3 - "$CFG/.claude.json" /workspace "${DEV_REMOTE_CONTROL:-0}" <<'PY' || say "could not pre-seed .claude.json"
 import json, os, sys
 
-path, project = sys.argv[1], sys.argv[2]
+path, project, seed_remote = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
 try:
     with open(path) as f:
         cfg = json.load(f)
@@ -149,6 +198,9 @@ if not cfg.get("theme"):
     dirty = True
 if cfg.get("hasCompletedOnboarding") is not True:
     cfg["hasCompletedOnboarding"] = True
+    dirty = True
+if seed_remote and cfg.get("remoteDialogSeen") is not True:
+    cfg["remoteDialogSeen"] = True
     dirty = True
 
 if dirty:
@@ -197,7 +249,7 @@ fi
 mkdir -p "$HOME/.ssh-host"
 chmod 700 "$HOME/.ssh-host"
 [ -f "$HOME/.ssh-host/ssh_host_ed25519_key" ] || \
-    ssh-keygen -t ed25519 -f "$HOME/.ssh-host/ssh_host_ed25519_key" -N "" -C infra-dev >/dev/null
+    ssh-keygen -t ed25519 -f "$HOME/.ssh-host/ssh_host_ed25519_key" -N "" -C "$DEV_NAME" >/dev/null
 
 # ssh sessions do not inherit this process's env, so publish it for sshd to read via
 # PermitUserEnvironment. ANSIBLE_CONFIG is the one that matters: without it an ssh
@@ -213,6 +265,37 @@ mkdir -p "$HOME/.local/share"
     env | grep -vE '^(PATH|PWD|SHLVL|_|HOME|OLDPWD|HOSTNAME)='
 } > "$HOME/.ssh/environment"
 chmod 600 "$HOME/.ssh/environment"
+
+# ── Claude Remote Control — a CHILD's daemon, started here ──────────────────
+# `claude remote-control` makes the container drivable from claude.ai/code and the
+# mobile app. TWO things must both be true before anything starts: the child baked a
+# /home/dev/rc-supervisor.sh, and DEV_REMOTE_CONTROL is 1.
+#
+# THE SUPERVISOR IS NOT IN THIS IMAGE, deliberately. Only an RC-enabled child uses it,
+# dd-dev's is a different design, and its permission mode is a decision belonging to the
+# container that makes it — this file's own header says a setting true for one child is
+# a child's setting. What the base owns is the hook: when to start it, and not to.
+#
+# The switch is opt-in for the same reason the tunnel below is: the default way in is an
+# ssh session with abduco holding it, and a remote-control daemon nobody is driving is a
+# live claude with a permission classifier for company.
+#
+# The two "off" cases are reported apart, because they have different fixes and a single
+# message would send you to edit a .env in a container that could not act on it either
+# way. infra-dev is the second case and always will be.
+if [ ! -f /home/dev/rc-supervisor.sh ]; then
+    if [ "${DEV_REMOTE_CONTROL:-0}" = "1" ]; then
+        say "DEV_REMOTE_CONTROL=1 but this image ships no rc-supervisor.sh — nothing started."
+        say "    That is a change to the repo's dev/Dockerfile, not to its .env."
+    else
+        say "no remote control in this image (it ships no rc-supervisor.sh)"
+    fi
+elif [ "${DEV_REMOTE_CONTROL:-0}" = "1" ]; then
+    setsid bash /home/dev/rc-supervisor.sh </dev/null >/dev/null 2>&1 &
+    say "remote-control supervisor started (log: ~/.local/share/remote-control.log)"
+else
+    say "remote control off (DEV_REMOTE_CONTROL=1 in dev/.env, then make up)"
+fi
 
 # ── the tunnel — INERT unless asked for ─────────────────────────────────────
 # Two things must both be true or nothing starts: DEV_TUNNEL_HOSTNAME is set, and a
@@ -314,7 +397,49 @@ fi
 #
 # Nothing beyond this line runs. A start-up failure is in the log above it, which is
 # what `make boot-log` prints.
+# A DROP-IN THAT DOES NOT PARSE MUST NOT COST THE CONTAINER. sshd is exec'd as PID 1
+# under `restart: "no"`, so a config it refuses means the container exits and stays
+# exited — and no agent session on this fleet has a route to a box to fix it from. The
+# door is the one thing that must come up.
+#
+# So: test first, and on failure come up WITHOUT the child's drop-ins rather than not at
+# all. The stripped config is the base's own file minus the Include line, which is the
+# only thing a child can have broken. Loud, because a container that is up and quietly
+# ignoring its drop-in is how `AllowTcpForwarding yes` goes missing for a fortnight.
+#
+# The subtle failure this catches: a `Match` block in a drop-in. Include is processed
+# inline and first, so everything after it in the main file falls inside that Match
+# context, where Port and HostKey are illegal — and the error names those lines rather
+# than the drop-in that caused them.
+# The error text is captured into a VARIABLE and not a file. `2>/tmp/sshd-t.err` was
+# the first spelling and it has a failure of its own: an unwritable /tmp makes the
+# redirection fail before sshd -t ever runs, so a perfectly good config takes the
+# failure branch and a child loses its drop-ins for no reason. A variable depends on
+# nothing.
+SSHD_CONF=/home/dev/sshd_config
+NODROP=/home/dev/sshd_config.nodrop
+if ! sshd_err="$(/usr/sbin/sshd -t -f "$SSHD_CONF" 2>&1)"; then
+    say "WARNING: sshd refused $SSHD_CONF —"
+    printf '%s\n' "$sshd_err" | sed 's/^/[entrypoint] sshd: /'
+    # Removed before it is written, and the write is CHAINED to the test that promotes
+    # it. Otherwise a stale copy from an earlier boot survives a failed write — and the
+    # second `sshd -t` would validate that file and promote it, which is the one way
+    # this preflight could serve a config nobody in this container wrote.
+    rm -f "$NODROP"
+    if grep -v '^Include /home/dev/sshd_config.d/' "$SSHD_CONF" > "$NODROP" \
+       && /usr/sbin/sshd -t -f "$NODROP" 2>/dev/null; then
+        SSHD_CONF="$NODROP"
+        say "STARTING WITHOUT THE DROP-INS in /home/dev/sshd_config.d — the container is"
+        say "    up and reachable, and whatever they set is NOT in force. Fix the .conf"
+        say "    in the repo's dev/ and rebuild."
+    else
+        say "could not fall back — either that copy could not be written, or the base"
+        say "    config alone does not parse either. Starting on the original anyway,"
+        say "    so the failure is sshd's own message rather than this script's guess."
+    fi
+fi
+
 say "sshd on :2222 in the foreground — ssh in and work in an abduco session"
-say "    ssh infra-dev                              a shell"
-say "    ssh -t infra-dev abduco -A claude claude   a claude that survives the link"
-exec /usr/sbin/sshd -D -e -f /home/dev/sshd_config
+say "    ssh $DEV_NAME                              a shell"
+say "    ssh -t $DEV_NAME abduco -A claude claude   a claude that survives the link"
+exec /usr/sbin/sshd -D -e -f "$SSHD_CONF"

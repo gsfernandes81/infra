@@ -423,7 +423,7 @@
           - ""
           - "It prompts for both — the secret is read from the terminal and CANNOT be"
           - "passed with -e, so it reaches neither your shell history nor the process"
-          - "list. It writes them to ~/.config/infra-dev/token at mode 600 and adds the"
+          - "list. It writes them to ~/.config/{{ cf_name }}/token at mode 600 and adds the"
           - "ssh config block whose ProxyCommand sources that file."
           - ""
           - "Do not put them in fish conf.d. That would place a live credential in the"
