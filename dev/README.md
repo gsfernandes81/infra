@@ -533,12 +533,13 @@ the Makefile, single source; `.github/workflows/dev-base.yml`, manual dispatch),
 this repo's `Dockerfile` is now a thin child — `FROM` the ghcr name plus the ansible
 layer. There is no build order: the FROM pulls. `make base` builds the identical image
 locally under the same name as the offline fallback — docker prefers local over pull,
-so a GitHub outage means building on the host, children none the wiser. **The other
-three repos are not converted yet**; each conversion is, in that repo:
+so a GitHub outage means building on the host, children none the wiser. **All four are
+converted as of 2026-08-24**; each conversion was, in that repo:
 
-1. delete everything shared from its `dev/Dockerfile`, leaving
+1. delete everything shared from its dev Dockerfile, leaving
    `ARG BASE_TAG=<tag>` + `FROM gsrpi-dev-base:${BASE_TAG}` + its own extras
-   (or3: nothing; dd/ds: whatever they carry);
+   (or3: uv and its ssh identity; dd: railway, the database clients and its venv;
+   ds: its venv);
 2. drop `USER_UID`/`USER_GID` from its compose build args — the dev user is built in
    the base, same guard one layer down;
 3. nothing else — the FROM pulls from ghcr, so no other repo needs infra present.
@@ -564,13 +565,22 @@ Children pin a tag, never `latest`, so a base rebuild cannot change a container 
 its repo's back. Bumping the base is: edit `BASE_TAG` in infra's Makefile, `make base`,
 then move each child's pin when that repo is ready.
 
-**The tag is `2026.08.24.1` as of the or3 conversion** — a suffix rather than a new
-date, because `2026.08.24` is already pushed and a pinned tag is a contract that the
-same tag is the same bytes. `dev-base.yml` refuses to overwrite one without `force`,
-which is the check working. That build is the first one two repos depend on. A change to the base is now a change to both containers, so the
-question before editing `Dockerfile.base` is which of the four seams the change belongs
-in — a setting that is true for one child is a child's setting, however tempting it is
-to put it where it will be inherited.
+**The tag is `2026.08.24.2` as of the dd/ds conversion**, `.1` having been the or3 one
+— suffixes rather than new dates, because each earlier tag is already pushed and a
+pinned tag is a contract that the same tag is the same bytes. `dev-base.yml` refuses to
+overwrite one without `force`, which is the check working. A change to the base is now a
+change to four containers, so the question before editing `Dockerfile.base` is which of
+the five seams the change belongs in — a setting that is true for one child is a child's
+setting, however tempting it is to put it where it will be inherited.
+
+**The fifth seam is `child-init.sh`**, and dd/ds are why it exists. The other four all
+place a file; those two needed something *done* — `uv sync --frozen` against the
+lockfile in the bind mount, which cannot happen at build time because `/workspace` is
+not mounted then, and must happen before anything can arrive. So the entrypoint runs
+`/home/dev/child-init.sh` if the image bakes one: after the pull, so a lockfile that
+just moved is the one it installs from, and before the supervisor and sshd, so no
+session meets a half-installed venv. Non-fatal, like the pull — a container you can ssh
+into and fix beats one that refused to start over its own dependencies.
 
 The shape as originally designed, kept for the reasoning:
 
@@ -606,10 +616,19 @@ a build-order dependency between repos that has to be made obvious rather than
 discovered, and it is a change to the thing you are working *inside*, which is the
 category this repo's `CLAUDE.md` is most careful about.
 
-**dd-dev and ds-dev are still unconverted**, and each is the same three steps its
-repo can take whenever it likes: the `FROM`, dropping `USER_UID`/`USER_GID` from its
-compose build args, and whatever it carries on top. Neither needs this repo checked
-out — the `FROM` pulls.
+**dd-dev and ds-dev converted on 2026-08-24**, in their own repos, and between them
+they used every seam: `child-init.sh` for the venv sync and the `.dev-ssh` git
+identities, `DEV_SECRETS_DIR` pointed at that same `.dev-ssh` inside the mount,
+`DEV_REMOTE_CONTROL=1` with the supervisor each already had, and an
+`sshd_config.d/10-authorized-keys.conf` naming the host account's `authorized_keys` —
+which is how both were reached before the base existed and is not a thing to re-key.
+Neither repo needs this one checked out: the `FROM` pulls.
+
+Two start-up warnings were fixed in the same change rather than inherited by two more
+containers. The fleet sentence — *zero, one and two are unreachable* — now prints only
+for a container that did **not** name its own `DEV_SECRETS_DIR`, because it means
+nothing in the other three; and *NOTHING can ssh in* is not said when a drop-in names
+its own `AuthorizedKeysFile`, which is the case where it would be false and believed.
 
 ## Secrets
 

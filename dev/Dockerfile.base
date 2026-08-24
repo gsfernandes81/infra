@@ -35,8 +35,14 @@
 #                  uses it, dd-dev's is a different design, and its permission mode is
 #                  a decision that belongs to the container making it. or3-dev ships
 #                  the one this arrangement was written around.
+#   child-init.sh  COPY one in to /home/dev and the entrypoint RUNS it at start, after
+#                  the pull and before sshd. The fifth seam, added 2026-08-24: the four
+#                  above all PLACE something, and dd-dev and ds-dev needed something
+#                  DONE — `uv sync` against the lockfile in the mount, which cannot
+#                  happen at build time because /workspace is not there yet. Non-fatal
+#                  by design; entrypoint.sh has the reasoning.
 #
-# Anything a child cannot express through those four is a change to THIS file, made
+# Anything a child cannot express through those five is a change to THIS file, made
 # once, followed by a BASE_TAG bump. That is the trade the base image exists to make.
 #
 # Built and pushed to ghcr.io/gsfernandes81/gsrpi-dev-base (PUBLIC — pure toolchain,

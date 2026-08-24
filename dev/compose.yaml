@@ -21,7 +21,7 @@ services:
       # and never touches accounts. `make up` depends on `make base`, so the tag below
       # exists whenever compose builds this.
       args:
-        BASE_TAG: ${BASE_TAG:-2026.08.24.1}
+        BASE_TAG: ${BASE_TAG:-2026.08.24.2}
     image: infra-dev
     container_name: infra-dev
     hostname: ${DEV_HOSTNAME:-infra-dev}  # Claude Code shows this as the machine title

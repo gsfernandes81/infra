@@ -52,7 +52,7 @@ DOCKER  := $(SUDO) docker
 # repo's back. THIS is the single source: COMPOSE passes it through the environment,
 # compose.yaml forwards it as a build arg, and the defaults in compose.yaml and
 # dev/Dockerfile are fallbacks that only matter outside `make`.
-BASE_TAG := 2026.08.24.1
+BASE_TAG := 2026.08.24.2
 
 .PHONY: help dev base up restart down down-volumes status verify collections logs \
 	boot-log tunnel-log login claude shell fleet _require-env _require-secrets _require-uid

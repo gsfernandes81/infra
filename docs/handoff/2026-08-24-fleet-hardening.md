@@ -17,10 +17,13 @@ collections match `ansible/requirements.yml`. **`make verify` from the host is s
 worth running** — it covers the docker-side state and the fleet hop, which cannot be
 seen from in here.
 
-**The pin has since moved to `2026.08.24.1` and nothing is running it yet.** That tag
-does not exist in ghcr until `gh workflow run dev-base.yml`; `make up` in either repo
-fails on the pull until then, which is the visible direction. Both steps drop the
-containers' sessions and are the owner's to fire.
+~~**The pin has since moved to `2026.08.24.1` and nothing is running it yet.**~~
+**Overtaken 2026-08-24 17:14**: the workflow was dispatched, `2026.08.24.1` is on ghcr
+(`sha256:400a4873…`, arm64 + amd64), and infra-dev and or3-dev both run it. The pin has
+since moved again — to `2026.08.24.2`, for the `child-init.sh` seam dd-dev and ds-dev
+needed — and *that* tag is the one not built yet. Same two owner-fired steps as before:
+`gh workflow run dev-base.yml`, then a rebuild per repo, each dropping that container's
+sessions. The phase table's 2d row is the durable record.
 
 ## The status board is a live artifact
 

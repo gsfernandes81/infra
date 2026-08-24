@@ -95,17 +95,41 @@ fi
 } > "$HOME/.ssh/config"
 chmod 600 "$HOME/.ssh/config"
 
+#
+# SPLIT BY WHOSE CONTAINER THIS IS. The fleet sentence is infra-dev's: it names three
+# hosts that mean nothing in or3-dev, dd-dev or ds-dev, and a warning that names the
+# wrong thing is worse than none — it sends whoever reads it to look at a mount that was
+# never meant to hold that file. A child that named its own DEV_SECRETS_DIR is by
+# definition not infra-dev, so it gets the plain statement of what did not happen.
 if [ ! -f "$SECRETS/ssh_config.fleet" ]; then
-    say "WARNING: no ssh_config.fleet in $SECRETS — zero, one and two are unreachable."
-    say "         That is the DEFAULT — see docs/management-plane.md. Everything else works."
+    if [ -z "${DEV_SECRETS_DIR:-}" ]; then
+        say "WARNING: no ssh_config.fleet in $SECRETS — zero, one and two are unreachable."
+        say "         That is the DEFAULT — see docs/management-plane.md. Everything else works."
+    else
+        say "no ssh_config.fleet in $SECRETS — nothing is prepended to ~/.ssh/config."
+    fi
 fi
 
 # authorized_keys is what lets you in at all. Without it the container comes up and
 # refuses every connection, which looks like a broken sshd rather than a missing file,
 # so say so loudly.
+#
+# THE MIDDLE BRANCH IS NOT A SPECIAL CASE, it is the drop-in seam telling the truth. A
+# child may point sshd at a different file — dd-dev and ds-dev serve the HOST account's
+# authorized_keys, bind-mounted read-only, which is how those two were reached before
+# they were built on this base and is not a thing to re-key. sshd takes the first
+# AuthorizedKeysFile it obtains and the Include is at the top of sshd_config, so a
+# drop-in wins; this file is then simply not what the door reads, and saying "NOTHING can
+# ssh in" about it would be false at the moment it is most likely to be believed.
+#
+# The test is the drop-in's own text rather than an environment variable, for the reason
+# `sshd -t` runs before the exec: the artefact is the authority on what sshd will do, and
+# a flag is a second place for that to be stated wrongly.
 if [ -f "$SECRETS/authorized_keys" ]; then
     cp -f "$SECRETS/authorized_keys" "$HOME/.ssh/authorized_keys"
     chmod 600 "$HOME/.ssh/authorized_keys"
+elif grep -rqiE '^[[:space:]]*AuthorizedKeysFile' /home/dev/sshd_config.d/ 2>/dev/null; then
+    say "authorized_keys comes from a drop-in in sshd_config.d, not from $SECRETS."
 else
     say "WARNING: no authorized_keys in $SECRETS — NOTHING can ssh in. Use: make shell"
     : > "$HOME/.ssh/authorized_keys"
@@ -239,10 +263,45 @@ git config --global url."git@github.com:".insteadOf "https://github.com/"
 # the network is down, or because the tree has local work, is worse than one running a
 # slightly old checkout — and /workspace is the HOST's clone, so a merge started here
 # would be left half-done in the host's working tree.
+#
+# `set -o pipefail` around it, and that is not decoration: without it the `if` tests
+# SED's status and not git's, so the branch below has never once been taken — a failed
+# pull printed git's own error and then nothing, which reads as a pull that worked. It is
+# the trap CLAUDE.md § *Shell traps* states in the abstract, sitting in this file.
 if [ -d /workspace/.git ]; then
+    set -o pipefail
     if git -C /workspace pull --ff-only 2>&1 | sed 's/^/[entrypoint] git: /'; then :; else
         say "pull skipped (not fast-forward, or offline) — the checkout is unchanged"
     fi
+    set +o pipefail
+fi
+
+# ── the child's own start-up, if it ships one ───────────────────────────────
+# THE FIFTH SEAM, added 2026-08-24 for dd-dev and ds-dev. Both bake their dependencies
+# into /home/dev/venv at build time and both must add the editable project once
+# /workspace is mounted, which is a thing to RUN at start and not a file to place — so
+# none of the other four seams could express it, and this file's own header says that is
+# when the base changes.
+#
+# HERE AND NOT EARLIER: after the pull, so a lockfile that just moved is the one the
+# child installs from; before the supervisor and before sshd, so no session — remote
+# control's or a person's — can arrive to a half-installed environment. A child that
+# wraps the CMD instead gets neither of those, which is why this is a hook and not a
+# convention.
+#
+# NON-FATAL, like the pull above and for the same reason: the door is the one thing that
+# must come up. A child whose venv did not sync is a container you can ssh into and fix;
+# a container that refused to start over it is one nobody on this fleet has a route to.
+# The failure is loud, and it is the child's own output that says what broke.
+if [ -f /home/dev/child-init.sh ]; then
+    say "child-init.sh — this image's own start-up"
+    set -o pipefail
+    if bash /home/dev/child-init.sh 2>&1 | sed 's/^/[child-init] /'; then
+        say "child-init.sh finished"
+    else
+        say "WARNING: child-init.sh exited non-zero — starting anyway. Its output is above."
+    fi
+    set +o pipefail
 fi
 
 # ── sshd host key ───────────────────────────────────────────────────────────
