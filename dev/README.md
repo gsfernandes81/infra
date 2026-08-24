@@ -620,13 +620,23 @@ a build-order dependency between repos that has to be made obvious rather than
 discovered, and it is a change to the thing you are working *inside*, which is the
 category this repo's `CLAUDE.md` is most careful about.
 
-**dd-dev and ds-dev converted on 2026-08-24**, in their own repos, and between them
-they used every seam: `child-init.sh` for the venv sync and the `.dev-ssh` git
-identities, `DEV_SECRETS_DIR` pointed at that same `.dev-ssh` inside the mount,
-`DEV_REMOTE_CONTROL=1` with the supervisor each already had, and an
-`sshd_config.d/10-authorized-keys.conf` naming the host account's `authorized_keys` —
-which is how both were reached before the base existed and is not a thing to re-key.
+**dd-dev and ds-dev converted on 2026-08-24**, in their own repos, and between them they
+used every seam: `child-init.sh` for the venv sync, `DEV_SECRETS_DIR` pointed at the
+gitignored `.dev-ssh/` inside their own bind mount, `DEV_REMOTE_CONTROL=1` with the
+supervisor each already had, their own `ssh_config`, and two `sshd_config.d` drop-ins —
+`10-authorized-keys.conf`, naming the host account's `authorized_keys` (how both were
+reached before the base existed, and not a thing to re-key), and `20-forwarding.conf`,
+which puts `AllowTcpForwarding` back to the default their old config left in place.
 Neither repo needs this one checked out: the `FROM` pulls.
+
+**Their identities arrive through `ssh_config.fleet`, and that is not a coincidence of
+naming.** Both used to symlink `~/.ssh/config` at a host-side file, which under this base
+is destructive — the entrypoint assembles that path with a redirection at every start, a
+redirection follows a symlink, and `~/.ssh` is not a volume, so the second boot of a
+container would have truncated the host's own config. The entrypoint now `rm -f`s the
+path before writing it, and both children renamed their file to the one thing the base
+prepends. It buys them the ordering as well: identities in force *before* the start-up
+pull, which nothing a child runs can be, because `child-init.sh` runs after it.
 
 Two start-up warnings were fixed in the same change rather than inherited by two more
 containers. The fleet sentence — *zero, one and two are unreachable* — now prints only

@@ -206,6 +206,12 @@ script**, run in a separate terminal, with the output pasted back.
 - **`cmd > file` truncates `file` before `cmd` runs.** `ssh host 'cat cfg' > ~/.ssh/config`
   emptied the config, so ssh then had no `Host` block and could not resolve the host.
   Write to a temp file and `mv` into place.
+  **And a redirection follows a symlink, truncating the target.** A dev container whose
+  `child-init.sh` symlinked `~/.ssh/config` at the host's gitignored one would have had
+  that host file overwritten by the base's own assembly on the SECOND boot — the first
+  boot writes a regular file, `stop`/`start` reuses the filesystem, and the write lands
+  through the link. Caught in review, not in production. `rm -f` before a write to any
+  path something else may have re-pointed.
 - **`[ -d /path ]` runs unprivileged.** On root-only paths (a btrfs top level, `/media/immich-db`
   at mode 700) it returns false for directories that demonstrably exist. Use `sudo test -d`.
   A guard built on the wrong answer silently skips the work it was meant to do.

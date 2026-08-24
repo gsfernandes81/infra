@@ -91,6 +91,16 @@ fi
 # fleet access is the deferred control-node question, so in practice this file is absent
 # and the container has no route to zero, one or two. That is the default and the
 # warning below says so rather than treating it as a fault.
+#
+# `rm -f` FIRST, AND THAT LINE IS LOAD-BEARING. A redirection follows a symlink and
+# truncates its TARGET, so if anything in this container has made ~/.ssh/config a symlink
+# — a child's child-init.sh pointing it at a file in the bind mount, or a person doing the
+# same by hand — this write lands in that file instead. ~/.ssh is not a volume, but a
+# `docker stop`/`start` reuses the container's filesystem, so the second boot is where it
+# fires: the host's own gitignored ssh config is overwritten with the lines below, and the
+# only sign is that pushes start failing. It is CLAUDE.md § *Shell traps*' first entry
+# aimed at a path this file writes every start rather than at a file somebody names once.
+rm -f "$HOME/.ssh/config"
 {
     if [ -f "$SECRETS/ssh_config.fleet" ]; then
         cat "$SECRETS/ssh_config.fleet"
