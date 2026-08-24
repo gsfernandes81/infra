@@ -475,14 +475,14 @@ ones that answer the question this document started from.
 | 2 | `README.md` + `recovery.md` cite the generated inventory | docs only | 1 | **done** 2026-08-21 |
 | 2b | `infra-dev` container, and the Cloudflare edge in front of it | `zero`, edge | 2 | **done** 2026-08-22 |
 | 2c | `one`'s array — both "broken services" were the SP900 in bay 0 | `one`'s enclosure | — | **done 2026-08-24** — disk pulled, unattended boot proven |
-| 2d | One base image for the four dev containers — `dev/README.md` § *Four copies of this* | `zero`'s dev containers | 2b | infra side **built 2026-08-24**, rebuild pending; or3/dd/ds convert in their repos |
-| 2e | Rotate the fleet's own tunnel tokens | `zero`, `one`, `two`, edge | 2b | **`zero` and `one` done 2026-08-23** — one's by retiring its tunnel under 2g. `two`'s token is out of the 755 file and in a credentials file; its rotation waits for 2g |
+| 2d | One base image for the four dev containers — `dev/README.md` § *Four copies of this* | `zero`'s dev containers | 2b | infra side **done 2026-08-24** — base on ghcr, `infra-dev` rebuilt from it; **or3 converting now** in its own repo, `dd`/`ds` untouched |
+| 2e | Rotate the fleet's own tunnel tokens | `zero`, `one`, `two`, edge | 2b | **`zero` and `one` done 2026-08-23** — one's by retiring its tunnel under 2g. **`two`'s half is no longer a task of its own**: it is folded into 2g, which voids that token rather than rotating it |
 | 2f | `cloudflared`'s init script logs nowhere | `zero`, `one`, `two` | — | **done on all three, 2026-08-23** |
-| 2g | All three tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, `two`, DNS | 2f | `one` and `zero` **done 2026-08-23**; `two` deferred ~a week |
+| 2g | All three tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, `two`, DNS | 2f | `one` and `zero` **done 2026-08-23**; **`two` deferred ~a week, and on `two` it is one job with 2e and the dashboard sweep** |
 | 2h | cloudflared: staggered autoupdate, `one` 6h → `two` 72h → `zero` 240h | all three | — | **done 2026-08-24** — the staggered frequencies are installed and live on all three |
-| 3 | First stack adopted: `send2ereader` on `one` | one stack, non-critical box | 2 | |
+| 3 | First stack adopted: `send2ereader` on `one`, **with its connector in the stack** | one stack, non-critical box, `one`'s ingress | 2 | |
 | 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two stacks | 3 | |
-| 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | |
+| 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | Phase 3 now tests the mechanism first, on a disposable stack |
 | 6 | `dd` off `two` | `two`, `one` | arm64 CI, upstream | |
 | 7 | **Rootless podman on `one`** — roadmap §2 | `one` | 3 | |
 | 8 | `two` as the scheduled read-only control node | `two` | 6, 7 | |
@@ -493,10 +493,13 @@ the fleet *failing* rather than merely unbuilt, and Phase 3 adopts a stack that 
 works. **2c has since gone the other way** — it was diagnosed on 2026-08-23 and is blocked
 on physical access, so it can no longer be ranked at all; see below. The rotation still
 outranks Phase 3, because the reason it was deferred, "when physically present", stopped
-being true the day `infra-dev` came up. 2d is maintenance cost rather than risk and can
-wait for whichever of the four images next needs a change.
+being true the day `infra-dev` came up. 2d was ranked as maintenance cost rather than
+risk, to wait for whichever of the four images next needed a change; it was built on
+2026-08-24 instead.
 
-**Which leaves 2e and Phase 3 as the next actionable work**, in that order.
+**Which left 2e and Phase 3 as the next actionable work**, in that order. As of 2026-08-24
+both have moved: 2e's last host is inside 2g on `two` (below), so the next actionable work
+is **`two`'s tunnel, then Phase 3**.
 
 **2g, filed 2026-08-23 — DECIDED, not optional-but-nice.** The owner's reason, and it is
 the deciding one: *"I'm not interested in leaving more config than I have to in a web
@@ -605,6 +608,20 @@ Three things the rehearsal was worth, none of which were the plan:
 
 `two` is deferred about a week, deliberately. Two hostnames, the smallest job, on the box
 with the least margin and no bastion of its own.
+
+**On `two` this is one job with 2e and the Cloudflare dashboard sweep, decided 2026-08-24.**
+Not three items that happen to be adjacent — three that close each other, in the order they
+already have to run. The new tunnel arrives with credentials in a 0600 file, so 2e is
+satisfied by *construction* rather than performed; deleting the old tunnel then **voids**
+the token still inline in `two`'s 755 init script, which is stronger than rotating it and is
+the last disclosed credential on the fleet. The orphaned Access service tokens and
+applications left by the failed runs of 2026-08-22 are objects on the same tunnel and the
+same dashboard visit — [`cloudflare.md`](cloudflare.md) § *Safe to delete* is the list.
+Tracking them apart invites the half-done state this repo keeps meeting: a tunnel migrated
+and its old credential still live somewhere nobody swept.
+
+**The sweep stays a human step inside that job.** It needs judgement about which token the
+phone currently holds, and that is not a fact any check on a box can establish.
 
 **When it happens, phase 1 run for real IS the rehearsal.** All three plays were
 substantially rewritten in the 2026-08-24 review (block/rescue rollbacks, the
@@ -841,6 +858,39 @@ What it did turns out to be covered already, which is why this is cheap:
 **The work is not the deletion.** It is rewriting [`recovery.md`](recovery.md)'s bring-back
 commands in the same commit, so the document read when a box has rebooted never names a
 script that no longer exists. Do both together or neither.
+
+### Phase 3 also moves `send2ereader`'s connector into the stack — DECIDED 2026-08-24
+
+Phase 3 was "adopt a stack". It now also carries **phase 5's mechanism**, on the stack
+being adopted: `send2ereader` gets its own `cloudflared` inside its compose project
+instead of being served by `one`'s host tunnel.
+
+**What it actually removes is the published port, and that is the reason to do it.**
+Today `bookit.gsrpi.uk` is a rule in
+[`hosts/one/system/cloudflared-config.yml`](../hosts/one/system/cloudflared-config.yml)
+pointing at `http://127.0.0.1:3001`, and `deployments/send2ereader/compose.yaml` publishes
+`3001:3001` *only* so the host tunnel can reach it. A connector on the compose network
+reaches `send2ereader:3001` directly, so the ingress rule comes out of the host file and
+the port publication goes with it — the service stops listening on `one` at all. Moving
+the connector without deleting the port would be motion for its own sake.
+
+**It is done here because this is the cheapest place to be wrong.** The mechanism has one
+precedent, `infra-dev`, which is a dev container holding a live agent session — breaking it
+costs the session that would be fixing it. `send2ereader` is a disposable stack on the
+non-critical box, and its outage is a book that arrives later. Phase 5 then converts the
+dev containers against a pattern that has already run somewhere.
+
+**The shape is the open question, and `infra-dev` does not answer it.** `infra-dev` runs
+`cloudflared` inside its *own* image, started from its entrypoint — available to it because
+the base image is ours to build. An upstream application image is not, so `send2ereader`
+wants a second service in the compose project instead. Sidecar versus baked-in is the first
+thing to settle in phase 3, and it is a pattern decision for every stack after it, not a
+detail of this one.
+
+**What does not change:** `bin/compose` still goes at Phase 3, and `recovery.md` is still
+rewritten in the same commit. The connector adds a third thing to that commit — `one`'s
+tracked ingress loses a rule — and the same rule applies to it: all of it together, or
+none of it.
 
 ### What `one` must answer before `zero` is considered
 

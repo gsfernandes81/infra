@@ -32,6 +32,7 @@ boxed note in "`two` also runs a test bot" below for what replaced them and why.
 | **`root-setup.sh` generates the dispatch key itself; the private half goes in the Claude Code environment block** ⚠︎SUPERSEDED | The operator had to arrive with a keypair and paste its public half in. Now the box makes one, installs the public half, and prints the private half once as base64 for `DD_CTL_KEY_B64`; a `SessionStart` hook in the app repo materialises it per session, so ephemeral containers keep working with nothing to re-authorise. The private half never touches the SD card — generated on tmpfs, shredded on exit. **That environment block is not masked**, and that is the constraint the whole arrangement is built around: only a key whose entire reach is dd-ctl's six argument-less verbs may go in it. Never a key that gets a shell. The one exposure is the print itself, in terminal scrollback; the script says so rather than letting it pass. |
 | **Exactly one dispatch line, and rotation is opt-in** ⚠︎SUPERSEDED | A second `command=…,restrict` line is not an error anyone can see: both keys authenticate, sshd reports nothing, and neither the box nor the operator can say which one the environment block holds — so revoking the wrong one reads as a broken deploy. A plain re-run therefore reports the installed key's fingerprint and generates nothing, and `DD_CTL_ROTATE=1` **replaces**. That is the single deliberate exception to append-never-rewrite for `authorized_keys` (which is right, because a botched rewrite on a tunnel-only box is unrecoverable): backup first, build beside and rename atomically, and require every non-dispatch line to come back byte-for-byte — so a rotation cannot cost `gavin` his own key. |
 | **The live `dd-ctl` is root-owned, and that is the whole mechanism** ⚠︎SUPERSEDED | `/usr/local/bin/dd-ctl`, a real file, 0755, in a root-only-writable directory — never a symlink into `~gavin/infra` and never the checkout's copy run in place. `gavin` owns the checkout, so a forced command resolving through anything `gavin` can rewrite is not a restriction: replace the target, get an unrestricted shell. It was never a boundary *against* `gavin`, who has sudo; it stops the holder of the **restricted key** rewriting the thing that restricts them. **It is not sufficient on its own** — the login shell runs first; see below. |
+| **On `two`, 2g, 2e and the Cloudflare dashboard sweep are one job** | They close each other, so tracking them apart invites a half-done state. A tunnel created with `config_src: local` arrives with credentials in a 0600 file, so 2e is satisfied by *construction*; deleting the old tunnel then **voids** the token still inline in `two`'s 755 init script — the fleet's last disclosed credential — which beats rotating it. The orphaned Access tokens and applications from the failed runs of 2026-08-22 are objects on the same tunnel and the same dashboard visit. The sweep half stays a human step: it needs judgement about which token the phone holds. |
 
 ## `two` also runs a test bot, and what that bends
 
@@ -355,6 +356,30 @@ Recorded because they're easy to repeat:
 - **esmira and immich-ml weren't "down with no containers"** — each had an *exited*
   container and a registered project. Deleting their compose files alone would have
   orphaned them permanently; they needed a real `compose down`.
+
+## A stack's `cloudflared` belongs in the stack, starting at Phase 3
+
+**Decided 2026-08-24.** `send2ereader` is adopted with its own connector inside its compose
+project, rather than being served by `one`'s host tunnel. This pulls Phase 5's mechanism
+forward onto the stack Phase 3 was already adopting.
+
+**Because the point is deleting the published port, not moving the connector.**
+`bookit.gsrpi.uk` is a rule in `hosts/one/system/cloudflared-config.yml` aimed at
+`http://127.0.0.1:3001`, and the compose file publishes `3001:3001` *only* to make that
+reachable. A connector on the compose network reaches `send2ereader:3001` directly, so the
+rule and the port both go and the service stops listening on the host. A connector moved
+without the port deleted would have bought nothing.
+
+**Because this is the cheapest place to get it wrong.** The only precedent is `infra-dev`,
+a dev container holding a live agent session — breaking it costs the session that would fix
+it. `send2ereader` is disposable, on the non-critical box, and its outage is a book that
+arrives later. Phase 5 then converts the dev containers against a pattern that has already
+run somewhere else first.
+
+**The shape is deliberately left open.** `infra-dev` runs `cloudflared` from its own
+entrypoint, which it can do because that image is ours; an upstream application image is
+not, so this wants a second compose service instead. Sidecar versus baked-in is the first
+thing Phase 3 settles, and it is a pattern decision for every stack after it.
 
 ## The lesson worth keeping
 
