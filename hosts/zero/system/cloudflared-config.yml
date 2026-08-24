@@ -50,6 +50,4 @@ ingress:
     service: ssh://127.0.0.1:2222
   - hostname: ssh-zero-dev-ds.gsrpi.uk
     service: ssh://127.0.0.1:2223
-  - hostname: ssh-zero-dev-or3.gsrpi.uk
-    service: ssh://127.0.0.1:2224
   - service: http_status:404
