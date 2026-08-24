@@ -26,6 +26,13 @@
 # makes the leak sound plausible.) So a drop-in cannot break this file by structure;
 # it breaks it by being wrong on its own terms, which `sshd -t` catches in entrypoint.sh
 # before anything is exec'd.
+# THIS PATH IS WRITTEN TWICE. entrypoint.sh's preflight strips this line by grepping
+# for the literal `^Include /home/dev/sshd_config.d/` before falling back, so moving the
+# directory means editing both. Nothing checks that they agree: if they drift, the grep
+# matches nothing, the "stripped" copy is identical to this file, the fallback fails the
+# same way the original did, and the operator is told the copy could not be written or
+# the base does not parse — neither of which is true. It degrades safely and explains
+# itself wrongly, which is the combination this repo likes least.
 Include /home/dev/sshd_config.d/*.conf
 
 Port 2222
