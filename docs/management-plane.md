@@ -480,7 +480,7 @@ ones that answer the question this document started from.
 | 2f | `cloudflared`'s init script logs nowhere | `zero`, `one`, `two` | — | **done on all three, 2026-08-23** |
 | 2g | All three tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, `two`, DNS | 2f | `one` and `zero` **done 2026-08-23**; **`two` deferred ~a week, and on `two` it is one job with 2e and the dashboard sweep** |
 | 2h | cloudflared: staggered autoupdate, `one` 6h → `two` 72h → `zero` 240h | all three | — | **done 2026-08-24** — the staggered frequencies are installed and live on all three |
-| 2i | Retire `ssh-zero-dev-or3.gsrpi.uk` — or3-dev's second, unprotected door | `zero`'s host tunnel, DNS | or3-dev's own tunnel being live | queued, and it opens an exposure window the moment or3-dev's tunnel does |
+| 2i | Retire `ssh-zero-dev-or3.gsrpi.uk` — or3-dev's second, unprotected door | `zero`'s host tunnel, DNS | **nothing — do it BEFORE or3-dev's tunnel goes up** | queued; done first there is no exposure window at all |
 | 3 | First stack adopted: `send2ereader` on `one`, **with its connector in the stack** | one stack, non-critical box, `one`'s ingress | 2 | |
 | 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two stacks | 3 | |
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | Phase 3 now tests the mechanism first, on a disposable stack |
@@ -597,10 +597,19 @@ it becomes a *second* public route to the same container, and only the new one i
 Access. Retiring it is therefore not cleanup, and calling it cleanup is how it would sit
 there for months.
 
-**The window is real and it opens on a merge.** It starts when or3-dev's own tunnel comes
-up and closes when the rule and its DNS record are gone. Nothing about the conversion
-closes it automatically, and the container is more exposed after the improvement than
-before it until someone acts.
+**The window is real, but it is not opened by the merge — and that is the whole
+sequencing.** An earlier draft of this entry said the clock starts when 2d lands. It does
+not. The or3 agent's correction, verified against this repo's own code on 2026-08-24: the
+in-container tunnel is *additive*, `dev/entrypoint.sh` starting a connector only when
+`DEV_TUNNEL_HOSTNAME` is set **and** a credentials file exists, so an unset hostname means
+no second door. The window therefore opens when the owner sets that variable, which is a
+knob he holds rather than a consequence he inherits.
+
+**So do this first and there is no window.** Retiring the rule early costs nothing,
+because the break-glass path does not use the tunnel: `dev-client.yml` writes
+`<alias>-lan` as `ProxyCommand ssh zero nc %h %p`, which reaches `127.0.0.1:2224` through
+**zero's sshd**, and that is the same origin the ingress rule points at. Dropping the
+public hostname leaves the way in through zero untouched.
 
 **It cannot be done from `or3-dev`, and the reason is the standing-position rule.** The
 work is an edit to [`hosts/zero/system/cloudflared-config.yml`](../hosts/zero/system/cloudflared-config.yml),
