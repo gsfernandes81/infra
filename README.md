@@ -48,6 +48,9 @@ deployments/<stack>/   what a stack is — compose.yaml, .env (ignored), SOURCE
 hosts/<host>/          where it runs — symlinks into deployments/, tracked /etc copies
 hosts/two/setup/       how `two` was built — one reviewed root script, not on any PATH
 bin/                   the scripts above (_infra.py is their shared header parser)
+                       plus one-shot-ssh-config-reorder, which is TRANSIENT: it moves
+                       the managed blocks in a client's ~/.ssh/config once, and is
+                       deleted after the phone and the laptop have both run it
 ansible/               the management plane — inventory, playbooks, the audit
 dev/                   the infra-dev container on zero: work on this repo, from a phone
 docs/                  read these

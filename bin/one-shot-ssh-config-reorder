@@ -1,0 +1,171 @@
+#!/usr/bin/env sh
+# usage: sh bin/one-shot-ssh-config-reorder [path-to-ssh-config]
+#
+# ONE-SHOT. Delete this file once it has run on the phone and on the laptop —
+# ../CLAUDE.md, "One-shot migration scripts get deleted once run"; git history keeps it.
+#
+# WHAT IT IS FOR. Until 2026-08-25 dev-client.yml anchored its block at
+# `insertbefore: BOF`, which is a stronger claim than the requirement: a specific host
+# needs to precede `Host *`, and BOF also made it precede everything a human had written.
+# On the phone that pushed the file's own header — its title and its ORDERING RULE, the
+# thing you read first when something is wrong with this file — below two generated
+# blocks, and every dev container provisioned after that would have pushed it down again.
+#
+# The playbook now anchors on `Host *` like ssh-client.yml always did, so this cannot
+# recur. But blockinfile edits a block IN PLACE, so the blocks already written stay where
+# they are. This moves them, once.
+#
+# It also fixes two sentences in the hand-kept header that became false, and moves the
+# "defaults MUST stay last" note INSIDE the `Host *` block — above it, the next block
+# either playbook inserts separates the two again, which is how it drifted in the first
+# place.
+#
+# IT MOVES TEXT AND NOTHING ELSE. No ansible, no network, no token, no prompt.
+#
+# HOW IT KNOWS IT DID NO HARM, which is the only reason to run a script over an ssh
+# config at all: it records what `ssh -G` resolves for every literal Host in the file
+# BEFORE, applies the move, records AFTER, and diffs the two. A reorder that changes what
+# ssh resolves is a bug by definition, and this restores the backup and fails rather than
+# leaving you to notice during a rescue. The alias list is read out of the file, not
+# hardcoded, so it cannot go stale.
+#
+# `s24` is excluded from that list on purpose. The laptop's config carries
+# `Match host s24 exec "adb forward …"`, and ssh evaluates a Match exec WHILE PARSING —
+# so resolving that one alias would run adb as a side effect of a check.
+
+set -eu
+
+CFG="${1:-$HOME/.ssh/config}"
+STAMP=$(date +%Y%m%d-%H%M%S)
+# Outside the directory, mode 600 — never a .bak beside the original (../CLAUDE.md,
+# "Backups of secret-bearing files"). This file is not secret-bearing, but the habit is
+# the point: the one time it is, nobody re-derives the rule.
+BACKUP="$HOME/ssh-config.pre-reorder-$STAMP"
+TMP="$HOME/.ssh-config-reorder-$STAMP.tmp"
+BEFORE="$HOME/.ssh-G.before-$STAMP"
+AFTER="$HOME/.ssh-G.after-$STAMP"
+
+die() { printf '%s\n' "$*" >&2; exit 1; }
+cleanup() { rm -f "$TMP" "$BEFORE" "$AFTER"; }
+trap cleanup EXIT
+
+[ -f "$CFG" ] || die "no ssh config at $CFG"
+command -v ssh >/dev/null 2>&1 || die "no ssh on PATH — the verification below needs it"
+
+# Literal aliases only: no globs, no negations, and not s24 (see the header).
+aliases=$(awk '
+  /^[Hh]ost[ \t]/ {
+    for (i = 2; i <= NF; i++)
+      if ($i !~ /[*?!]/ && $i != "s24") print $i
+  }' "$CFG" | sort -u)
+[ -n "$aliases" ] || die "found no literal Host aliases in $CFG — refusing to touch it"
+
+snapshot() {
+  for a in $aliases; do
+    printf -- '--- %s\n' "$a"
+    ssh -F "$CFG" -G "$a" 2>&1 || printf 'ssh -G failed\n'
+  done
+}
+
+cp "$CFG" "$BACKUP"
+chmod 600 "$BACKUP"
+snapshot > "$BEFORE"
+
+awk '
+  { line[NR] = $0 }
+  END {
+    n = NR
+    # 1. find the dev-client blocks, the defaults note, and the Host * line
+    inblk = 0
+    for (i = 1; i <= n; i++) {
+      if (line[i] ~ /^# BEGIN .* \(ansible\/playbooks\/dev-client\.yml\)$/) { inblk = 1 }
+      if (inblk) { isblk[i] = 1 }
+      if (line[i] ~ /^# END .* \(ansible\/playbooks\/dev-client\.yml\)$/)   { inblk = 0 }
+
+      if (line[i] ~ /^#.*defaults.*MUST stay last/) { indef = 1 }
+      if (indef) { isdef[i] = 1 }
+      if (line[i] ~ /^# ServerAlive keeps sessions from wedging/) { indef = 0 }
+
+      if (!star && line[i] ~ /^[Hh]ost[ \t]+\*[ \t]*$/) { star = i }
+    }
+
+    # 2. emit everything except those, inserting the blocks just above Host *
+    for (i = 1; i <= n; i++) {
+      if (i == star) { for (j = 1; j <= n; j++) if (isblk[j]) out(line[j]) }
+      if (isblk[i] || isdef[i]) continue
+      out(fix(line[i]))
+    }
+
+    # 3. the defaults note, re-indented so it sits INSIDE the Host * block
+    if (star) {
+      first = 1
+      for (i = 1; i <= n; i++) {
+        if (!isdef[i]) continue
+        if (first) { out(""); first = 0 }
+        s = line[i]
+        sub(/^#/, "  #", s)
+        out(s)
+      }
+      if (!first) {
+        out("  #")
+        out("  # INSIDE the block, not above it: both playbooks insert before `Host *`,")
+        out("  # so a note sitting immediately above it is separated from it by the next")
+        out("  # block either of them writes. That is how this one drifted.")
+      }
+    }
+  }
+
+  # two sentences that became false when the hand-kept `Host or3-dev` block was deleted
+  # and when the adb section turned out to be Windows-only
+  function fix(s) {
+    sub(/^# The fleet, and `Host s24`, live in the/, "# The fleet lives in the", s)
+    sub(/^# ansible\/templates\/ssh-fleet-block\.j2 and re-run the play\.$/,
+        "# ansible/templates/ssh-fleet-block.j2 and re-run the play. `Host s24` is not\n# in it: the adb-tethered aliases render on the Windows laptop only.", s)
+    return s
+  }
+
+  # squeeze runs of blank lines and drop leading ones, so cutting a block does not
+  # leave a hole where it used to be
+  function out(s) {
+    if (s == "") { if (!seen) return; blank++; return }
+    while (blank > 0) { print ""; blank = 0 }
+    seen = 1
+    print s
+  }
+' "$CFG" > "$TMP"
+
+[ -s "$TMP" ] || die "the rewrite produced an empty file — $CFG is untouched"
+
+cp "$TMP" "$CFG"
+chmod 600 "$CFG"
+
+snapshot > "$AFTER"
+
+if ! diff -u "$BEFORE" "$AFTER" > "$HOME/.ssh-G.diff-$STAMP" 2>&1; then
+  cp "$BACKUP" "$CFG"
+  chmod 600 "$CFG"
+  printf '%s\n' \
+    "ROLLED BACK. The reorder changed what ssh resolves, which it must not." \
+    "Your config is restored from $BACKUP and is byte-identical to what it was." \
+    "The difference is in $HOME/.ssh-G.diff-$STAMP — send that, do not re-run this." >&2
+  exit 1
+fi
+rm -f "$HOME/.ssh-G.diff-$STAMP"
+
+if cmp -s "$BACKUP" "$CFG"; then
+  rm -f "$BACKUP"
+  printf '%s\n' "Nothing to move — $CFG was already in the right shape. No backup kept."
+  exit 0
+fi
+
+printf '%s\n' \
+  "Reordered $CFG." \
+  "" \
+  "  header      back at line 1" \
+  "  dev blocks  moved to just above \`Host *\`" \
+  "  defaults    moved inside the \`Host *\` block, where nothing can separate them" \
+  "" \
+  "Verified: \`ssh -G\` resolves identically for every literal Host in the file." \
+  "Backup at $BACKUP (mode 600). Delete it once you are happy:" \
+  "" \
+  "  rm $BACKUP"
