@@ -44,8 +44,11 @@ Host two-zero two-one
 # which uses a session channel that AllowTcpForwarding does not govern. That is what
 # they were until today, and it works with no server-side change at all.
 #
-# or3-dev is NOT converted and must not be: it targets 127.0.0.1:2224, which PermitOpen
-# deliberately does not include, so a jump to it is refused. It keeps the nc form.
+# THE DEV CONTAINERS' `-lan` ALIASES ARE NOT CONVERTED AND MUST NOT BE. `or3-dev-lan` and
+# `infra-dev-lan` — written by dev-client.yml, not by this template — target 127.0.0.1:2224
+# and :2225, which PermitOpen deliberately does not include, so a jump to either is
+# refused. They keep the nc form. (They also do not match the three rules above, which is
+# why nothing here has to exclude them: `*-zero` matches an alias ending in `-zero`.)
 Host *-zero
   ProxyJump zero
 
@@ -68,9 +71,11 @@ Host zero-dev-or3
   User dev
   RequestTTY yes
   RemoteCommand abduco -A claude claude
-  # This tunnel path and the nc path — `Host or3-dev` in the hand-kept section — reach
-  # the same container sshd, so they must share one known_hosts identity, per this
-  # file's own one-host-key-per-box rule below.
+  # This tunnel path and dev-client.yml's three — `or3-dev`, `-sh` and `-lan`, which set
+  # the same HostKeyAlias in their own block — reach the same container sshd, so they must
+  # share one known_hosts identity, per this file's own one-host-key-per-box rule below.
+  # (Until 2026-08-25 the second path was a hand-kept `Host or3-dev` further down the
+  # file; dev-client.yml now writes it, and the hand-kept block is gone.)
   HostKeyAlias or3-dev
 
 # ── through each box's own cloudflared tunnel ─────────────────────────────────
