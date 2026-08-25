@@ -42,8 +42,8 @@
 # Anything a child cannot express through those five is a change to THIS file, made
 # once, followed by a BASE_TAG bump. That is the trade the base image exists to make.
 #
-# REMOTE CONTROL LEFT THE FLEET on 2026-08-25, and with it a sixth seam that used to be
-# listed here: a child baked an rc-supervisor.sh, set DEV_REMOTE_CONTROL=1, and the
+# REMOTE CONTROL LEFT THE FLEET on 2026-08-25, and with it a seam that used to be listed
+# here: a child baked an rc-supervisor.sh, set DEV_REMOTE_CONTROL=1, and the
 # entrypoint started it. Every container
 # is now reached one way — ssh in, hold the work in an abduco session — so no child ships
 # an rc-supervisor.sh and nothing here starts one. What the entrypoint runs in its place
@@ -118,8 +118,16 @@ ARG USER_GID=1000
 # --no-install-recommends). fish matches the shell on the phone and on zero,
 # and is the dev user's login shell here — the /etc/shells line is added rather
 # than assumed, because that is what `chsh` and anything else consulting it read.
+#
+# procps IS ALREADY HERE WITHOUT THIS LINE, and that is exactly why the line exists:
+# openssh-server and fish both hard-depend on it, so `pgrep` and `ps` arrive as an
+# auto-installed dependency of something else. offload-idle-claude.sh and status.sh both
+# need `pgrep`, and a tool present only because an unrelated package happens to pull it
+# is the shape CLAUDE.md § *Landmines* records for iptables on `two`: it went missing days
+# later, for a reason nobody would connect back. Naming it costs nothing and makes the
+# dependency this image actually has visible in the file that declares them.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git make screen fish openssh-client openssh-server \
+        git make screen fish openssh-client openssh-server procps \
         curl gnupg ca-certificates tzdata less iproute2 \
     && rm -rf /var/lib/apt/lists/* \
     && if ! grep -qx /usr/bin/fish /etc/shells; then echo /usr/bin/fish >> /etc/shells; fi

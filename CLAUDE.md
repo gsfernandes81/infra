@@ -215,6 +215,12 @@ script**, run in a separate terminal, with the output pasted back.
 - **`[ -d /path ]` runs unprivileged.** On root-only paths (a btrfs top level, `/media/immich-db`
   at mode 700) it returns false for directories that demonstrably exist. Use `sudo test -d`.
   A guard built on the wrong answer silently skips the work it was meant to do.
+- **`pkill -f <pattern>` matches the shell you are running it from.** A command from an
+  agent session arrives as `bash -c '<the whole command>'`, so the pattern is sitting in
+  that shell's own argv: `pkill -f 'abduco -n faketest'` signalled the script mid-run,
+  everything after it never happened, and the only symptom was an exit code (144) with no
+  output. It happened twice in one session before the cause was obvious. Kill by pid from
+  a list you built first, and skip `$$`.
 - **`a | b || c`** tests `b`'s exit status, not `a`'s. A fallback after a pipeline
   never fires; `grep -c` returning `0` also exits 1 and breaks `&&` chains.
   **`set -o pipefail` is the wrong fix when you meant `a`.** It answers "did anything in

@@ -56,7 +56,7 @@ status() {
     fi
 
     printf 'claude    : %s\n' "$(grep 'claude' <<<"$procs" \
-        | grep -vE 'remote-control|/proc/' | grep -q . \
+        | grep -vE 'offload-idle-claude|/proc/' | grep -q . \
         && echo 'a claude is running in this container' || echo 'no claude running')"
 
     # `claude auth status`, not "is there a credentials file" — a file holding empty

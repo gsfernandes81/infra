@@ -39,6 +39,15 @@
 #
 # It also never runs `claude` itself, reads a conversation, or writes anything into
 # ~/.claude/projects. It reads mtimes and sends signals.
+#
+# ONE ASSUMPTION, STATED BECAUSE IT IS THE ONE THAT WOULD HURT. What gets stopped is the
+# session process and its descendants, which includes the `claude.exe daemon run --origin
+# transient` under it and that daemon's bg-pty-host/bg-spare helpers. That is right as long
+# as the transient daemon belongs to the session that spawned it — its own argv says so
+# (`--spawned-by {"label":"claude","cwd":…,"pid":<session>}`) and it is a child of that
+# session. If Claude Code ever shares one daemon between sessions in a container, this
+# would take machinery a live session is using: two concurrent sessions and a look at the
+# second one's tree is the measurement that would catch it.
 set -u
 
 CFG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
@@ -79,12 +88,26 @@ say() { printf '%s\n' "$*"; }
 # comm rather than argv: argv for these processes is long, quoted JSON in places, and the
 # thing being asked is only ever "what program is this".
 comm_of() { cat "/proc/$1/comm" 2>/dev/null; }
-ppid_of() { awk '{print $4}' "/proc/$1/stat" 2>/dev/null; }
 
-# Field 22 of /proc/<pid>/stat is the process's start time in clock ticks since boot. It
-# is what makes a pid safe to hold on to across a wait: a pid can be reused, a pid plus a
-# start time cannot. Everything that kills below re-checks it.
-starttime_of() { awk '{print $22}' "/proc/$1/stat" 2>/dev/null; }
+# EVERYTHING AFTER THE COMM, which is the only safe way to read this file by position.
+# Field 2 is the command in parentheses AND IT MAY CONTAIN SPACES — `postgres: writer`,
+# `gunicorn: worke`, anything that calls setproctitle. Counting fields from the start of
+# the line gives garbage for those, and garbage here is a process missing from the tree
+# walk: invisible to the busy check that is supposed to protect a working session, and
+# absent from the kill list, so it survives holding the memory this exists to reclaim.
+# Stripping through the LAST `)` is what the kernel's own documentation says to do.
+stat_after_comm() {
+    local raw
+    raw=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+    printf '%s' "${raw##*) }"
+}
+
+# In that stripped string the fields are the originals shifted by two: ppid is 4 -> 2, and
+# starttime — the process's start in clock ticks since boot — is 22 -> 20. starttime is
+# what makes a pid safe to hold across a wait: a pid can be reused, a pid plus a start
+# time cannot. Everything that kills below re-checks it.
+ppid_of() { local f; f=$(stat_after_comm "$1") || return 1; awk '{print $2}' <<<"$f"; }
+starttime_of() { local f; f=$(stat_after_comm "$1") || return 1; awk '{print $20}' <<<"$f"; }
 
 rss_kb_of() { awk '/^VmRSS:/{print $2}' "/proc/$1/status" 2>/dev/null; }
 
@@ -112,9 +135,15 @@ descendants() {
 # a Bash tool call, a `git` a subagent started, a build. That is the signal the transcript
 # clock cannot give, and the reason this script does not need to understand what claude is
 # doing — only whether something is being done.
+# MEASURED, not assumed: the comms in a live session's tree are `abduco`, `claude` and
+# `claude.exe` and nothing else. `node` was in this list and is not any more — claude's own
+# helpers do not present as node, so all it did was whitelist real work: a build, a test
+# server, anything a session `exec`s into node. Erring the other way costs memory that is
+# not reclaimed; erring this way costs somebody's running process. The empty case is a
+# process that exited between the walk and the read, and is not evidence of work.
 is_claude_machinery() {
     case "$1" in
-        claude|claude.exe|node|abduco|"") return 0 ;;
+        claude|claude.exe|abduco|"") return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -143,8 +172,15 @@ newest_transcript() {
 # `abduco` with no arguments lists sessions; column one is `*` when a client is attached
 # and a space when none is. The name is the last tab-separated field. Measured against
 # abduco 0.6, which is what the base builds.
+# Returns non-zero if the listing itself failed, and that distinction is the point: an
+# `abduco` that could not run yields no names, and "no names" would otherwise read as
+# "nobody is attached" — the one wrong answer that ends with somebody's session being
+# killed under them. A failed listing means this pass declines to judge anything.
 attached_sessions() {
-    abduco 2>/dev/null | awk -F'\t' '/^\*/ {print $NF}'
+    local out
+    out=$(abduco 2>/dev/null) || return 1
+    [ -n "$out" ] || return 1
+    printf '%s\n' "$out" | awk -F'\t' '/^\*/ {print $NF}'
 }
 
 # The session process is abduco's own child: `abduco -A claude claude` forks a server that
@@ -173,8 +209,13 @@ consider() {
     local abduco_pid=$1 now=$2 dry=$3
     local name child cwd slug transcript idle rss_kb pid tree_pids
 
-    name=$(abduco_session_name "$abduco_pid")
-    [ -n "$name" ] || name="(unnamed)"
+    # A session whose name cannot be read cannot be checked against the attached list, so
+    # it is not a session this script is entitled to have an opinion about.
+    name=$(abduco_session_name "$abduco_pid") || name=""
+    if [ -z "$name" ]; then
+        say "abduco pid $abduco_pid: cannot read its session name — left alone"
+        return
+    fi
 
     child=$(session_child_of "$abduco_pid") || {
         say "$name: no process under abduco — nothing to offload"; return; }
@@ -185,7 +226,12 @@ consider() {
         *) say "$name: runs '$child_comm', not claude — left alone"; return ;;
     esac
 
-    if attached_sessions | grep -qxF "$name"; then
+    local attached
+    if ! attached=$(attached_sessions); then
+        say "$name: could not list abduco sessions — left alone (cannot prove it is detached)"
+        return
+    fi
+    if grep -qxF "$name" <<<"$attached"; then
         say "$name: ATTACHED — somebody is there, left alone"
         return
     fi
@@ -255,6 +301,16 @@ offload() {
     local name=$1 child=$2 tree=$3 rss_mb=$4 idle_min=$5 cwd=$6 session_id=$7 abduco_pid=$8
     local pid start
 
+    # LAST-MOMENT RE-CHECK. Everything above took time — a `stat`, a tree walk, a listing —
+    # and the documented way into this container is `ssh -t <name> abduco -A claude claude`.
+    # Somebody arriving in that window would otherwise attach to a session already being
+    # signalled. Cheap, and it closes the only race between the decision and the kill.
+    local attached_now
+    if attached_now=$(attached_sessions) && grep -qxF "$name" <<<"$attached_now"; then
+        say "$name: someone attached while this was being decided — left alone"
+        return
+    fi
+
     declare -A starts=()
     for pid in $child $tree $abduco_pid; do
         start=$(starttime_of "$pid") && [ -n "$start" ] && starts[$pid]=$start
@@ -292,7 +348,9 @@ offload() {
         sig KILL "$abduco_pid"
     fi
 
-    log "offloaded '$name' after ${idle_min}m idle — freed ~${rss_mb} MB${survivors:+ (${survivors} needed SIGKILL)}"
+    local killnote=""
+    [ "$survivors" -gt 0 ] && killnote=" (${survivors} needed SIGKILL)"
+    log "offloaded '$name' after ${idle_min}m idle — freed ~${rss_mb} MB${killnote}"
     log "    resume it with:  cd $cwd && claude --resume $session_id"
     say "$name: OFFLOADED — ${idle_min}m idle, ~${rss_mb} MB freed. Resume: (cd $cwd && claude --resume $session_id)"
 }
@@ -308,14 +366,35 @@ pass() {
 }
 
 # ── modes ───────────────────────────────────────────────────────────────────
+# Refusals go to BOTH the terminal and the log. The daemon is started by the entrypoint
+# with its output discarded, right after a line saying it started — so a refusal that only
+# printed would leave a container that looks watched, is not, and says nothing anywhere.
+refuse() {
+    local msg
+    for msg in "$@"; do say "$msg"; log "REFUSED TO START: $msg"; done
+    exit 2
+}
+
+# Every knob is seconds, and `test -lt` on a non-integer does not fail — it errors and
+# returns 2, which reads as FALSE. That is not a theoretical shape: it would make the floor
+# check below pass AND make `idle < limit` false for every session, so a value of "90m"
+# would offload every detached claude on the first pass, including one that had just
+# spoken. Validated as digits before either comparison can be reached.
+is_seconds() { case "$1" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+for _knob in LIMIT:DEV_IDLE_OFFLOAD_SECONDS POLL:DEV_IDLE_POLL_SECONDS GRACE:DEV_IDLE_OFFLOAD_GRACE; do
+    _var=${_knob%%:*}; _env=${_knob#*:}
+    eval "_val=\$$_var"
+    is_seconds "$_val" || refuse "$_env=$_val is not a whole number of seconds — refusing."
+done
+unset _knob _var _env _val
+
 if [ "$LIMIT" -lt "$LIMIT_FLOOR" ]; then
     # Refused rather than clamped: a number somebody typed and a number this script chose
     # instead should never look the same from outside. See the header for why an hour is
     # the floor.
-    say "DEV_IDLE_OFFLOAD_SECONDS=$LIMIT is below the ${LIMIT_FLOOR}s floor — refusing."
-    say "    A claude can schedule its own wake-up up to an hour out; a limit under that"
-    say "    offloads sessions that were coming back."
-    exit 2
+    refuse "DEV_IDLE_OFFLOAD_SECONDS=$LIMIT is below the ${LIMIT_FLOOR}s floor — refusing." \
+           "    A claude can schedule its own wake-up up to an hour out; a limit under" \
+           "    that offloads sessions that were coming back."
 fi
 
 case "$MODE" in

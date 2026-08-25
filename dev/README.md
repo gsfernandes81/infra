@@ -554,7 +554,7 @@ needed instead became the base's four seams —
 | its secrets at `/run/or3-secrets`, holding `id_ed25519_or3ecr_m` and `id_ed25519_or3_deploy` | `DEV_SECRETS_DIR`, and the entrypoint copying **every** `id_*` rather than a list of names |
 | or3ecr's host key pinned in tracked content | `/home/dev/known_hosts.extra`, baked by the child |
 | `AllowTcpForwarding yes` — the phone's reverse forward is its reason to exist | `/home/dev/sshd_config.d/10-forwarding.conf`, and the `Include` at the *top* of `sshd_config` so a child's value wins |
-| ~~the Claude Remote Control supervisor~~ | It got the fifth seam — a hook the base fired when a child baked an `rc-supervisor.sh` — and **both are gone as of 2026-08-25**, along with or3-dev's daemon. No dev container on this fleet runs remote control; the row stays because the seam it justified is the one worth understanding: a hook in the base, the daemon in the child that owns the policy |
+| ~~the Claude Remote Control supervisor~~ | It had a seam of its own — a hook the base fired when a child baked an `rc-supervisor.sh` — and **both are gone as of 2026-08-25**, along with or3-dev's daemon. No dev container on this fleet runs remote control; the row stays because the seam it justified is the one worth understanding: a hook in the base, the daemon in the child that owns the policy |
 | `uv`, pinned to the version or3ecr runs | its own layer, above `USER dev`. Deliberately **not** in the base: that pin is a contract with `work/bootstrap/requirements-or3ecr.txt`, so it belongs to the repo holding the other half |
 
 That last row is the general rule: a thing goes in the base when the containers agree
