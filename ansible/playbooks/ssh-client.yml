@@ -11,11 +11,21 @@
 #
 #   ansible-playbook playbooks/ssh-client.yml
 #
+# FROM THIS DIRECTORY. ansible.cfg is read from the cwd and is the only thing pointing at
+# ./inventory; run from anywhere else, `hosts: control` matches nothing and the play is
+# skipped whole with an empty recap and exit 0. _inventory-guard.yml turns that silence
+# into a failure — its header carries the reasoning.
+#
 # The Windows laptop cannot be an Ansible target without sshd on it, which is a lot of
 # machinery for one file. So the play also renders the block with a Windows cloudflared
 # path to a local file, for pasting — one source of truth for the host list either way.
 #
 # NO NEW COLLECTIONS: ansible.builtin throughout.
+
+- name: Guard — refuse to run with no inventory
+  ansible.builtin.import_playbook: _inventory-guard.yml
+  vars:
+    required_group: control
 
 - name: Write the fleet ssh block on this control node
   hosts: control
@@ -33,10 +43,16 @@
     ip_one: "192.168.86.101"
     ip_two: "192.168.86.102"
 
-    # The laptop's config, as WSL sees it. Set to "" to skip the Windows half entirely.
-    # From WSL this file is directly writable, so the block is MANAGED there rather than
-    # pasted — which is most of what makes a WSL control node worth having at all.
-    windows_ssh_config: "/mnt/c/Users/gavin/.ssh/config"
+    # The laptop, as WSL sees it. Set EITHER of these to "" to skip the Windows half
+    # entirely. From WSL these are directly writable, so the block is MANAGED there rather
+    # than pasted — which is most of what makes a WSL control node worth having at all.
+    #
+    # THE PROBE IS THE HOME DIRECTORY, NOT THE CONFIG FILE. It used to be the config, which
+    # meant a laptop that had never had one fell through to the paste path even though the
+    # play could plainly have written it — `create: true` on the blockinfile below closes
+    # that, and dev-client.yml probes the same way for the same reason.
+    windows_home: "/mnt/c/Users/gavin"
+    windows_ssh_config: "{{ windows_home }}/.ssh/config"
 
     # Two spellings of one binary: the first is written into the config and is read by
     # Windows ssh; the second is the same file as WSL sees it, so it can be checked.
@@ -152,11 +168,22 @@
     # Under WSL, C:\Users\gavin\.ssh\config is a real writable file at /mnt/c/... So
     # from there the block is MANAGED rather than pasted, and the host list cannot
     # diverge between the two clients by anyone forgetting to paste.
-    - name: Is the laptop's ssh config reachable from here?
+    - name: Is the laptop's Windows home reachable from here (i.e. are we in WSL)?
       ansible.builtin.stat:
-        path: "{{ windows_ssh_config }}"
-      register: win_cfg
-      when: windows_ssh_config | length > 0
+        path: "{{ windows_home }}"
+      register: win_home
+      check_mode: false
+      when:
+        - windows_home | length > 0
+        - windows_ssh_config | length > 0
+
+    - name: Settle whether the Windows half runs at all
+      ansible.builtin.set_fact:
+        on_windows_client: >-
+          {{ (windows_home | length > 0)
+             and (windows_ssh_config | length > 0)
+             and (win_home.stat.exists | default(false))
+             and (win_home.stat.isdir | default(false)) }}
 
     # Checkable after all, because WSL can see it. This was the one string in this play
     # nobody had verified; from Termux it still is, and the paste file says so.
@@ -164,17 +191,18 @@
       ansible.builtin.stat:
         path: "{{ windows_cloudflared_wsl }}"
       register: win_cfd
-      when: win_cfg.stat.exists | default(false)
+      when: on_windows_client | bool
 
     - name: Refuse to write a Windows block naming a cloudflared that is not there
       ansible.builtin.assert:
         that: win_cfd.stat.exists | default(false)
         fail_msg: >-
-          {{ windows_ssh_config }} exists but {{ windows_cloudflared_wsl }} does not.
-          Writing the block anyway would give the laptop a ProxyCommand that fails on
-          every tunnel alias. Install cloudflared on Windows, or set
-          -e windows_ssh_config="" to skip the Windows half.
-      when: win_cfg.stat.exists | default(false)
+          {{ windows_home }} is a directory, so this looks like WSL with the laptop in
+          reach — but {{ windows_cloudflared_wsl }} does not exist. Writing the block
+          anyway would give the laptop a ProxyCommand that fails on every tunnel alias.
+          Install cloudflared on Windows, or set -e windows_home="" to skip the Windows
+          half.
+      when: on_windows_client | bool
 
     # No `mode:`. /mnt/c is drvfs and does not carry Unix permissions unless mounted with
     # metadata — setting one either fails or silently does nothing, and a task that
@@ -185,6 +213,7 @@
     - name: Write the fleet block into the laptop's ssh config
       ansible.builtin.blockinfile:
         path: "{{ windows_ssh_config }}"
+        create: true
         marker: "# {mark} infra-fleet (ansible/playbooks/ssh-client.yml)"
         insertbefore: '^Host \*\s*$'
         block: "{{ lookup('template', '../templates/ssh-fleet-block.j2') }}"
@@ -192,7 +221,7 @@
         cloudflared: "{{ windows_cloudflared }}"
         adb_jump: true
         multiplex: false
-      when: win_cfg.stat.exists | default(false)
+      when: on_windows_client | bool
 
     # Fallback for a control node that cannot see the laptop — Termux. Only written when
     # the direct write did not happen, so there is never a stale paste file sitting next
@@ -219,8 +248,9 @@
       # as the vars comment promises — but with it empty the stat above is skipped, its
       # `exists` defaults false, and this fallback would write the paste file anyway.
       when:
+        - windows_home | length > 0
         - windows_ssh_config | length > 0
-        - not (win_cfg.stat.exists | default(false))
+        - not (on_windows_client | bool)
 
     - name: Say what happened
       ansible.builtin.debug:
@@ -228,9 +258,9 @@
           - "wrote the infra-fleet block into {{ ssh_config }}"
           - >-
             windows: {{ 'managed directly at ' ~ windows_ssh_config
-            if win_cfg.stat.exists | default(false)
-            else ('skipped — windows_ssh_config is empty'
-                  if windows_ssh_config | length == 0
+            if on_windows_client | bool
+            else ('skipped — windows_home or windows_ssh_config is empty'
+                  if (windows_home | length == 0 or windows_ssh_config | length == 0)
                   else 'not reachable from here — paste from ' ~ windows_out) }}
           - "verify with: ssh -G two-zero | grep -E 'proxycommand|hostname|user'"
       changed_when: true

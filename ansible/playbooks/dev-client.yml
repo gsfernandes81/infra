@@ -1,26 +1,75 @@
 ---
-# The CLIENT half: configures the machine you ssh FROM — the phone, or a laptop — to
+# The CLIENT half: configures the machine you ssh FROM — the phone, or the laptop — to
 # reach a dev container through its Cloudflare tunnel. Targets the control node itself.
 #
 #     cd ansible
 #     ansible-playbook playbooks/dev-client.yml --check --diff
 #     ansible-playbook playbooks/dev-client.yml
 #
+# RUN IT FROM THIS DIRECTORY. ansible.cfg is read from the cwd and is the only thing that
+# points at ./inventory; from anywhere else `hosts: control` matches nothing and the play
+# is skipped whole, with an empty recap and exit 0. `_inventory-guard.yml` below turns
+# that silence into a failure — it is imported for exactly this reason and the reasoning
+# is in that file.
+#
 # ONE RUN PER CONTAINER, and the defaults are infra-dev's. For a second one, name it:
 #
 #     ansible-playbook playbooks/dev-client.yml \
 #       -e alias=or3-dev -e hostname=or3-dev.gsrpi.uk -e lan_port=2224
 #
-# Everything a run writes is keyed on `alias` — the token file, the ssh block's marker —
-# so two containers do not overwrite each other. They did before 2026-08-24: the token
-# path and the marker were the literal string `infra-dev`, which is invisible until the
-# second container exists and then loses the first one's token to the second run.
+# Everything a run writes is keyed on `alias` — the token file, the ssh block's marker,
+# the Windows wrapper — so two containers do not overwrite each other. They did before
+# 2026-08-24: the token path and the marker were the literal string `infra-dev`, which is
+# invisible until the second container exists and then loses the first one's token to the
+# second run.
 #
 # It answers "how does the service token get used automatically when I ssh in", and the
 # answer is deliberately not "export it in your shell profile". See below.
 #
 # Run it once per client. On a second machine, run it there — the token file and the ssh
-# block are per-client, and nothing about this is shared state.
+# block are per-client, and nothing about this is shared state. The exception, and it is
+# the whole point of the Windows half, is WSL: from there C:\Users\gavin is a directory
+# this play can write, so ONE RUN IN WSL PROVISIONS TWO CLIENTS.
+#
+# ── THE LAPTOP IS TWO CLIENTS, AND ANSIBLE ONLY RUNS ON ONE OF THEM ──────────────
+#
+# Windows cannot be an Ansible target without sshd on it, which is a lot of machinery for
+# two files. But under WSL the laptop's Windows home is mounted at /mnt/c/Users/gavin, so
+# the play run *in WSL* manages *Windows'* ssh config and token directly — the same trick
+# ssh-client.yml already uses for the infra-fleet block, and the reason a WSL control node
+# is worth having at all. So a single `ansible-playbook playbooks/dev-client.yml` in WSL
+# writes, on the Linux side:
+#
+#     ~/.ssh/config                         the block, POSIX ProxyCommand
+#     ~/.config/<alias>/token               mode 0600
+#
+# and on the Windows side, through /mnt/c:
+#
+#     C:\Users\gavin\.ssh\config            the block, wrapper ProxyCommand
+#     C:\Users\gavin\.config\<alias>\token  NTFS permissions — see the warning below
+#     C:\Users\gavin\.ssh\cf-access-<alias>.cmd
+#
+# From Termux, /mnt/c does not exist, the Windows half is skipped, and the ssh block plus
+# the wrapper are rendered to a paste file instead. The TOKEN is never rendered to a paste
+# file: a secret in a file the owner will open, read and copy out of is a secret in
+# scrollback, and this repo's root CLAUDE.md forbids exactly that.
+#
+# WINDOWS NEEDS A WRAPPER BECAUSE IT HAS NO `sh`. Every POSIX client loads the token in
+# one ssh_config line, `ProxyCommand sh -c '. token; exec cloudflared …'`. Win32-OpenSSH
+# has no sh, and moving the secret onto the command line to compensate is the one thing
+# that is not allowed. So the load-then-exec becomes a batch file — templates/cf-access.cmd.j2 —
+# with the same guarantee: the token reaches one short-lived cloudflared's environment and
+# nothing else.
+#
+# THE ONE THING THIS PLAY CANNOT PROMISE ON WINDOWS IS A FILE MODE. /mnt/c is drvfs and
+# carries no Unix permissions, so `mode: "0600"` there either fails or silently does
+# nothing — and a task that pretends to have set a mode is worse than one that does not
+# try (ssh-client.yml's Windows task says the same thing about the same mount). What
+# protects the Windows token is the NTFS ACL C:\Users\gavin hands down. The play PRINTS
+# that ACL when it writes the file. It does not assert on it: this repo's own rule is that
+# a check is calibrated against known-good state before its verdict is trusted, and
+# nothing here can see that laptop to calibrate against. Read the output once, then trust
+# the file.
 #
 # THE SECRET CANNOT BE PASSED ON THE COMMAND LINE. Not "should not" — the play refuses.
 #
@@ -41,6 +90,11 @@
 #
 # NO NEW COLLECTIONS: ansible.builtin throughout.
 
+- name: Guard — refuse to run with no inventory
+  ansible.builtin.import_playbook: _inventory-guard.yml
+  vars:
+    required_group: control
+
 - name: Configure this control node to reach a dev container over Cloudflare
   hosts: control
   gather_facts: false
@@ -48,6 +102,7 @@
   vars:
     dev_alias: "{{ alias | default('infra-dev') }}"
     dev_hostname: "{{ hostname | default('infra-dev.gsrpi.uk') }}"
+    dev_lan_port: "{{ lan_port | default(2225) }}"
     # lookup('env','HOME'), never ~. On Termux the passwd entry reports /data, which is
     # not writable — the same trap host_vars/localhost.yml already documents for
     # remote_tmp, and it fails here in exactly the same unhelpful way.
@@ -61,6 +116,36 @@
     # `cloudflared` resolves in your shell and then fails inside ssh's /bin/sh, which
     # presents as the tunnel being down.
     cloudflared: "{{ cfd_resolved }}"
+
+    # ── the Windows half, which only exists when this runs in WSL ────────────
+    # `-e windows_home=""` skips Windows entirely, paste file included. That is the one
+    # knob; every fail_msg below names it.
+    #
+    # AN OVERRIDE HAS TO MOVE BOTH SPELLINGS. `-e windows_home=...` changes where WSL
+    # writes; `windows_home_win` is what the config and the wrapper NAME, and it does not
+    # follow. Pass both or a second Windows account gets files in its own home that point
+    # at gavin's.
+    #
+    # TWO SPELLINGS OF EVERY PATH, STATED RATHER THAN DERIVED. One is how WSL reaches the
+    # file, the other is how Windows names it inside the config and the wrapper. A
+    # replace() chain over backslashes is clever, and clever is what put a bare
+    # `cloudflared` into a ProxyCommand in the first place; ssh-client.yml made the same
+    # call for the same reason.
+    windows_home_wsl: "{{ windows_home | default('/mnt/c/Users/gavin') }}"
+    windows_home_win: 'C:\Users\gavin'
+    windows_cloudflared: '"C:\Program Files (x86)\cloudflared\cloudflared.exe"'
+    windows_cloudflared_wsl: "/mnt/c/Program Files (x86)/cloudflared/cloudflared.exe"
+
+    win_ssh_config: "{{ windows_home_wsl }}/.ssh/config"
+    win_token_file_wsl: "{{ windows_home_wsl }}/.config/{{ dev_alias }}/token"
+    win_token_file: '{{ windows_home_win }}\.config\{{ dev_alias }}\token'
+    win_wrapper_wsl: "{{ windows_home_wsl }}/.ssh/cf-access-{{ dev_alias }}.cmd"
+    # No spaces in it, and therefore no quoting in the ssh_config line. Whether
+    # Win32-OpenSSH hands a ProxyCommand to cmd.exe or spawns it directly is not a thing
+    # to find out during a rescue, so neither quotes nor %USERPROFILE% appear there.
+    win_wrapper: '{{ windows_home_win }}\.ssh\cf-access-{{ dev_alias }}.cmd'
+
+    windows_out: "{{ home }}/ssh-dev-block-windows-{{ dev_alias }}.txt"
 
   tasks:
     # ── refuse a secret that arrived on the command line ────────────────────
@@ -117,6 +202,13 @@
       # purpose: on the phone it is 35.7 MiB of METERED data, which is a spend the owner
       # approves rather than a side effect of running a playbook. or3's
       # docs/data-ledger.md carries the figure.
+      #
+      # IN WSL THIS IS THE ONE THAT CATCHES YOU. The laptop's cloudflared is a Windows
+      # binary, and WSL's interop will not resolve it as `cloudflared` — only as
+      # `cloudflared.exe`, and only if its directory is on the Windows PATH. So a laptop
+      # that reaches zero perfectly well from PowerShell still needs a Linux cloudflared
+      # in WSL for the WSL half of this play. The Windows half uses the Windows binary and
+      # is checked separately, further down.
       ansible.builtin.assert:
         that: cfd.rc == 0
         fail_msg: |
@@ -133,6 +225,11 @@
             chmod +x $PREFIX/bin/cloudflared
 
           The hash is the one pinned in dev/Dockerfile, checked on 2026-08-22.
+
+          In WSL it is the amd64 build and it goes somewhere on the Linux PATH —
+          /usr/local/bin/cloudflared. The Windows cloudflared.exe does NOT satisfy this:
+          `command -v cloudflared` will not find it, and the POSIX ProxyCommand written
+          into ~/.ssh/config runs under WSL's /bin/sh, not under Windows.
         success_msg: "{{ cfd.stdout_lines[0] | default('cloudflared present') }}"
 
     - name: Settle on a path — an override wins, discovery is the fallback
@@ -164,6 +261,48 @@
           Install it, or pass the path explicitly:
           -e cloudflared_path=/data/data/com.termux/files/usr/bin/cloudflared
 
+    # ── are we in WSL, with the laptop's Windows home in reach? ──────────────
+    # THE HOME DIRECTORY, NOT ITS ssh/config. ssh-client.yml probes the config file
+    # itself, which means a laptop that has never had one falls through to the paste
+    # path even though the play could plainly have written it. Probing the home directory
+    # and letting blockinfile create the file is strictly more correct, and it is now what
+    # both plays do.
+    - name: Is the laptop's Windows home reachable from here (i.e. are we in WSL)?
+      ansible.builtin.stat:
+        path: "{{ windows_home_wsl }}"
+      register: win_home
+      check_mode: false
+      when: windows_home_wsl | length > 0
+
+    - name: Settle whether the Windows half runs at all
+      ansible.builtin.set_fact:
+        on_windows_client: >-
+          {{ (windows_home_wsl | length > 0)
+             and (win_home.stat.exists | default(false))
+             and (win_home.stat.isdir | default(false)) }}
+
+    - name: Check the Windows cloudflared, as WSL sees it
+      # Checkable, because WSL can see it. From Termux it is not, and the paste file
+      # says so rather than implying the path was verified.
+      ansible.builtin.stat:
+        path: "{{ windows_cloudflared_wsl }}"
+      register: win_cfd
+      check_mode: false
+      when: on_windows_client | bool
+
+    - name: Refuse to write a Windows block naming a cloudflared that is not there
+      # Before any Windows write, same as the POSIX assert above: a client left holding a
+      # token and a wrapper that cannot run is worse than one left untouched.
+      ansible.builtin.assert:
+        that: win_cfd.stat.exists | default(false)
+        fail_msg: >-
+          {{ windows_home_wsl }} is a directory, so this looks like WSL with the laptop in
+          reach — but {{ windows_cloudflared_wsl }} does not exist. The wrapper this play
+          writes runs that binary on every tunnel alias, and a wrapper naming a missing
+          one fails in a way that reads as the tunnel being down. Install cloudflared on
+          Windows, or set -e windows_home="" to skip the Windows half.
+      when: on_windows_client | bool
+
     # ── the service token ────────────────────────────────────────────────────
     - name: Does a token file already exist
       ansible.builtin.stat:
@@ -171,21 +310,36 @@
       register: tf
       check_mode: false
 
+    - name: Does the Windows token file already exist
+      ansible.builtin.stat:
+        path: "{{ win_token_file_wsl }}"
+      register: win_tf
+      check_mode: false
+      when: on_windows_client | bool
+
     - name: Decide whether a token is being set this run
-      # Set one when there is none. Otherwise leave it alone, so re-running to fix the
-      # ssh block does not demand the secret again — which matters, because a play that
-      # asks for a credential every time trains you to keep it somewhere pasteable.
-      # -e replace_token=true is the deliberate override, for a rotation.
+      # Set one when either client is missing it. Otherwise leave both alone, so
+      # re-running to fix an ssh block does not demand the secret again — which matters,
+      # because a play that asks for a credential every time trains you to keep it
+      # somewhere pasteable. -e replace_token=true is the deliberate override, for a
+      # rotation.
+      #
+      # `| default(true)` on the Windows stat is what makes a Termux run behave: the task
+      # above is skipped there, and a missing file must not be inferred from a skip.
       ansible.builtin.set_fact:
-        setting_token: "{{ (not tf.stat.exists) or (replace_token | default(false) | bool) }}"
+        setting_token: >-
+          {{ (not tf.stat.exists)
+             or ((on_windows_client | bool) and not (win_tf.stat.exists | default(true)))
+             or (replace_token | default(false) | bool) }}
 
     - name: Nothing to do for the token
       ansible.builtin.debug:
         msg: >-
-          keeping the token already at {{ token_file }} — pass -e replace_token=true to
-          replace it after a rotation.
+          keeping the token already at {{ token_file }}{{
+          ' and ' ~ win_token_file if on_windows_client | bool else '' }} — pass
+          -e replace_token=true to replace it after a rotation.
       changed_when: true
-      when: not setting_token
+      when: not (setting_token | bool)
 
     - name: What is about to be asked for
       # Printed separately because the two prompts below carry no_log, and a suppressed
@@ -197,8 +351,10 @@
           - "The ID is not secret and will echo. The secret will not echo."
           - "Neither reaches your shell history: these are read from the terminal, not"
           - "from the command line."
+          - "{{ 'It will be written for BOTH clients: WSL and Windows.'
+                if on_windows_client | bool else 'One client: this one.' }}"
       changed_when: true
-      when: setting_token and not ansible_check_mode
+      when: (setting_token | bool) and not ansible_check_mode
 
     - name: Read the Client ID
       # echo on — the ID is the username half and is not a credential. It can also come
@@ -207,7 +363,7 @@
         prompt: "  Client ID"
         echo: true
       register: id_in
-      when: setting_token and not ansible_check_mode and st_client_id is not defined
+      when: (setting_token | bool) and not ansible_check_mode and st_client_id is not defined
 
     - name: Read the Client Secret
       # THE ONE THAT CANNOT COME FROM THE COMMAND LINE. `pause` is a task, so it always
@@ -221,7 +377,7 @@
         echo: false
       register: secret_in
       no_log: true
-      when: setting_token and not ansible_check_mode
+      when: (setting_token | bool) and not ansible_check_mode
 
     - name: Both halves have to be non-empty
       # An empty secret writes a file that fails Access with no clue why, and the failure
@@ -235,15 +391,22 @@
           has been written. Cloudflare shows a service token's secret only at creation; if
           it is lost, mint a new token rather than guessing.
         success_msg: "both halves present"
-      when: setting_token and not ansible_check_mode
-      no_log: true
+      when: (setting_token | bool) and not ansible_check_mode
+      # NO no_log HERE, deliberately, and it used to be on. `assert` is an action plugin:
+      # it evaluates `that` itself and never templates those values into module args, so
+      # the registered result holds the expression TEXT and a boolean — no secret. What
+      # no_log did instead was censor this task's own fail_msg, replacing the message
+      # written for the moment a blank secret is typed with "the output has been hidden".
+      # That is the trap CLAUDE.md records from the service-token play, in a smaller
+      # costume: a no_log that hides the failure it exists to explain. It stays on the
+      # `pause` and on both `copy` tasks, where it guards an actual value.
 
     - name: The directory for it
       ansible.builtin.file:
         path: "{{ token_file | dirname }}"
         state: directory
         mode: "0700"
-      when: setting_token
+      when: setting_token | bool
 
     - name: Write the token, mode 600
       # A SOURCEABLE FILE, not a shell profile and not the ssh config, and the choice is
@@ -272,10 +435,83 @@
           TUNNEL_SERVICE_TOKEN_ID={{ st_client_id | default(id_in.user_input, true) | trim }}
           TUNNEL_SERVICE_TOKEN_SECRET={{ secret_in.user_input | trim }}
           export TUNNEL_SERVICE_TOKEN_ID TUNNEL_SERVICE_TOKEN_SECRET
-      when: setting_token and not ansible_check_mode
+      when: (setting_token | bool) and not ansible_check_mode
       no_log: true
 
-    # ── the ssh config block ─────────────────────────────────────────────────
+    # ── the same token, on the Windows side of the same laptop ───────────────
+    - name: The Windows directory for it
+      ansible.builtin.file:
+        path: "{{ win_token_file_wsl | dirname }}"
+        state: directory
+      # NO mode. /mnt/c is drvfs and does not carry Unix permissions unless mounted with
+      # metadata; setting one either fails or silently does nothing, and a task that
+      # pretends to have set a mode is worse than one that does not try.
+      when: (on_windows_client | bool) and (setting_token | bool)
+
+    - name: Write the Windows token
+      # A DIFFERENT FILE FROM THE WSL ONE, because %USERPROFILE% and WSL's $HOME are two
+      # different homes on two different filesystems. Two copies of the secret on one
+      # laptop is the cost of Windows ssh not being able to read the Linux one, and it is
+      # stated here rather than discovered later.
+      #
+      # No `export`, and comments the wrapper's findstr will skip: this file is read by
+      # cf-access-<alias>.cmd, not sourced by a shell. LF endings — findstr emits its own
+      # line terminators to the `for /f` that consumes it, so the endings here never reach
+      # the parser.
+      ansible.builtin.copy:
+        dest: "{{ win_token_file_wsl }}"
+        content: |
+          # Cloudflare Access service token for {{ dev_hostname }}.
+          # Written by ansible/playbooks/dev-client.yml, running in WSL. Read by
+          # {{ win_wrapper }} — this file is NOT a shell script and is not sourced.
+          #
+          # PERMISSIONS HERE ARE NTFS, NOT A UNIX MODE. Ansible cannot set a mode on
+          # /mnt/c and does not pretend to; what protects this file is the ACL that
+          # C:\Users\gavin hands down. The play prints that ACL when it writes this file.
+          TUNNEL_SERVICE_TOKEN_ID={{ st_client_id | default(id_in.user_input, true) | trim }}
+          TUNNEL_SERVICE_TOKEN_SECRET={{ secret_in.user_input | trim }}
+      when: (on_windows_client | bool) and (setting_token | bool) and not ansible_check_mode
+      no_log: true
+
+    - name: Read the Windows ACL on the token we just wrote
+      # Windows' own tool, reached through WSL interop. `command`, so the path is an
+      # argument and no shell is involved — and nothing secret is on this command line,
+      # only the name of the file.
+      #
+      # failed_when: false because interop can be switched off, and a laptop whose ACLs
+      # cannot be read is not a reason to fail a run that has already written the file.
+      ansible.builtin.command:
+        argv:
+          - /mnt/c/Windows/System32/icacls.exe
+          - "{{ win_token_file }}"
+      register: win_acl
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: (on_windows_client | bool) and (setting_token | bool) and not ansible_check_mode
+
+    - name: Who can read the Windows token
+      # A DISPLAY, NOT A VERDICT, and the distinction is deliberate. This repo's rule is
+      # that a check is calibrated against known-good state before its verdict is
+      # trusted; nothing here can see that laptop, the account names icacls prints are
+      # localised, and an assertion built on a guess about either would be the "check
+      # that passes for the wrong reason" this repo keeps re-learning about. So it prints
+      # and the owner reads it once.
+      #
+      # changed_when: true because ansible.cfg sets display_ok_hosts = False, and a debug
+      # task reports ok — which is how the Access service token banner went unprinted in
+      # August. A message that exists to be read has to be marked changed to be seen.
+      ansible.builtin.debug:
+        msg: "{{ win_acl.stdout | default('') | trim if (win_acl.rc | default(1)) == 0 else acl_unreadable }}"
+      vars:
+        acl_unreadable: >-
+          could not read the ACL (icacls exited {{ win_acl.rc | default('n/a') }}) — WSL
+          interop may be off. The token IS written. Check by hand, in PowerShell:
+          icacls "{{ win_token_file }}"
+      changed_when: true
+      when: (on_windows_client | bool) and (setting_token | bool) and not ansible_check_mode
+
+    # ── the ssh config block, on this client ─────────────────────────────────
     - name: Make sure ~/.ssh exists
       ansible.builtin.file:
         path: "{{ home }}/.ssh"
@@ -295,73 +531,98 @@
         create: true
         insertbefore: BOF
         marker: "# {mark} {{ dev_alias }} (ansible/playbooks/dev-client.yml)"
-        block: |
-          # Three ways to the same container. RemoteCommand on the first is the whole
-          # point: `ssh {{ dev_alias }}` IS the claude session, reattaching if one is
-          # already running, so the habit is one word rather than a remembered incantation.
-          # One caveat that comes with RemoteCommand: `ssh {{ dev_alias }} <command>` is then
-          # an error ("cannot execute command-line and remote command"), and scp/sftp to
-          # this alias will not work. Use {{ dev_alias }}-sh for either.
-          Host {{ dev_alias }}
-            HostName {{ dev_hostname }}
-            User dev
-            RequestTTY yes
-            # Two concerns, each where it belongs. `in-workspace` is a program in the
-            # IMAGE and holds the one thing the container owns — where its work is, so no
-            # client names the path. `abduco` is here because it is a property of THIS
-            # LINK: an ssh session from a phone dies at the lock screen, so the session
-            # has to outlive it. A laptop on ethernet running `ssh … 'git log'`, or a
-            # one-shot `claude -p`, wants the workspace and no abduco at all — which a
-            # wrapper owning both would have made impossible.
-            RemoteCommand in-workspace abduco -A claude claude
-            ProxyCommand sh -c '. {{ token_file }}; exec {{ cloudflared }} access ssh --hostname %h'
+        block: "{{ lookup('template', '../templates/ssh-dev-block.j2') }}"
+      vars:
+        windows: false
 
-          # Same transport, no RemoteCommand — for when you want a shell rather than a
-          # claude. Worth having as its own alias because the alternative is
-          # `ssh -o RemoteCommand=none {{ dev_alias }}`, which nobody remembers under pressure.
-          Host {{ dev_alias }}-sh
-            HostName {{ dev_hostname }}
-            User dev
-            ProxyCommand sh -c '. {{ token_file }}; exec {{ cloudflared }} access ssh --hostname %h'
+    # ── and on the Windows side of the same laptop ───────────────────────────
+    - name: Make sure the laptop's %USERPROFILE%\.ssh exists
+      # `template` DOES NOT CREATE PARENT DIRECTORIES, and this task runs before the
+      # blockinfile that would. Without it, a laptop that has never had an ssh config
+      # dies here — after the POSIX block is already written, which is the half-
+      # provisioned state every assert in this play is arranged to avoid. `--check` does
+      # not predict it either: blockinfile's own makedirs is skipped in check mode and
+      # template merely diffs, so the advertised dry run passes and the real one fails.
+      #
+      # No mode, for the drvfs reason the .config directory task carries.
+      ansible.builtin.file:
+        path: "{{ windows_home_wsl }}/.ssh"
+        state: directory
+      when: on_windows_client | bool
 
-          # Break-glass: through zero's own sshd, touching no Cloudflare at all. The two
-          # paths fail independently, which is the only reason neither is a single point
-          # of failure — Cloudflare down or a bad token does not touch this one, and a
-          # wedged zero sshd does not touch the other.
+    - name: The ProxyCommand wrapper Windows needs instead of `sh -c`
+      ansible.builtin.template:
+        src: ../templates/cf-access.cmd.j2
+        dest: "{{ win_wrapper_wsl }}"
+      # No mode, for the drvfs reason above. The wrapper holds no secret — it names the
+      # file that does — so inherited ACLs are the right protection for it anyway.
+      when: on_windows_client | bool
+
+    - name: The {{ dev_alias }} block in the laptop's Windows ssh config
+      # Same marker as the WSL block, in a different file. Two clients, two configs,
+      # neither aware of the other — and the same insertbefore rule, because Windows ssh
+      # reads its config with exactly the same first-value-wins semantics.
+      ansible.builtin.blockinfile:
+        path: "{{ win_ssh_config }}"
+        create: true
+        insertbefore: BOF
+        marker: "# {mark} {{ dev_alias }} (ansible/playbooks/dev-client.yml)"
+        block: "{{ lookup('template', '../templates/ssh-dev-block.j2') }}"
+      vars:
+        windows: true
+      when: on_windows_client | bool
+
+    # ── fallback for a control node that cannot see the laptop — Termux ──────
+    - name: Otherwise render the Windows block and wrapper to a file, to paste
+      # Only written when the direct write did not happen, so there is never a stale paste
+      # file sitting beside a managed one, inviting somebody to paste the older of the
+      # two.
+      #
+      # THE TOKEN IS NOT IN HERE, and that is not an omission. A secret in a file the
+      # owner will open, read and copy out of is a secret in scrollback, which is the one
+      # place CLAUDE.md says it must never be. The steps below have them type it into the
+      # file directly instead.
+      ansible.builtin.copy:
+        dest: "{{ windows_out }}"
+        mode: "0600"
+        content: |
+          # The Windows half of `{{ dev_alias }}`, for a laptop this control node cannot see.
+          # Generated by ansible/playbooks/dev-client.yml — edit the templates, not this.
           #
-          # NOT ProxyJump: zero's sshd sets AllowTcpForwarding no, which refuses the
-          # direct-tcpip channel ProxyJump opens. A session channel running nc is not
-          # covered by that setting.
-          Host {{ dev_alias }}-lan
-            HostName 127.0.0.1
-            Port {{ lan_port | default(2225) }}
-            User dev
-            ProxyCommand ssh zero nc %h %p
-
-          # ONE HOST KEY PER CONTAINER, NOT PER PATH — the same rule this config already
-          # applies to the Pis. The container's key lives in a docker volume and survives
-          # rebuilds, so all three routes meet the same key. Without a shared alias the
-          # rarely-used path has no stored entry and simply prompts you to accept whatever
-          # it is handed, during a rescue, which is when you are least likely to look.
-          # To clear it later: ssh-keygen -R {{ dev_alias }}
-          Host {{ dev_alias }} {{ dev_alias }}-sh {{ dev_alias }}-lan
-            HostKeyAlias {{ dev_alias }}
-            IdentityFile {{ ssh_key }}
-            IdentitiesOnly yes
-            ServerAliveInterval 30
-            ServerAliveCountMax 3
-
-            # Metering, not comfort — or3's ssh_config makes the same call for the same
-            # reason. This is the end of the session that holds its plaintext: claude's
-            # output is text and compresses hard, and it is compressed here before it is
-            # encrypted, so what crosses the phone's radio is the smaller thing.
-            #
-            # THE CLIENT IS THE HALF THAT TURNS IT ON. sshd already permits it by default
-            # and dev/sshd_config now says so out loud, but ssh's own default is `no` and
-            # nothing is negotiated unless both ends offer it. On -lan it costs a little
-            # CPU on a Pi for no metered link, which is not worth a second Host block to
-            # avoid; a rescue session is not where you tune throughput.
-            Compression yes
+          # RUNNING THIS PLAY FROM WSL DOES ALL OF IT FOR YOU, and checks the cloudflared
+          # path first. This file exists for when that is not possible. The paths below
+          # are NOT verified: this machine cannot see that filesystem.
+          #
+          # ── 1. the token, typed rather than pasted from here ───────────────────
+          # In PowerShell. Do NOT put the secret in this file or in a command argument.
+          #
+          #     mkdir -Force "$env:USERPROFILE\.config\{{ dev_alias }}" | Out-Null
+          #     mkdir -Force "$env:USERPROFILE\.ssh" | Out-Null
+          #     notepad "{{ win_token_file }}"
+          #
+          # Two lines, no quotes, no `export`:
+          #
+          #     TUNNEL_SERVICE_TOKEN_ID=<the id>
+          #     TUNNEL_SERVICE_TOKEN_SECRET=<the secret>
+          #
+          # Then read who can see it, and expect only you, Administrators and SYSTEM:
+          #
+          #     icacls "{{ win_token_file }}"
+          #
+          # ── 2. the wrapper, at {{ win_wrapper }} ───────────────────
+          # ---8<--- cf-access-{{ dev_alias }}.cmd ---8<---
+          {{ lookup('template', '../templates/cf-access.cmd.j2') }}
+          # ---8<--- end ---8<---
+          #
+          # ── 3. this block, in %USERPROFILE%\.ssh\config, ABOVE its `Host *` ────
+          # BEGIN {{ dev_alias }} (ansible/playbooks/dev-client.yml)
+          {{ lookup('template', '../templates/ssh-dev-block.j2') }}
+          # END {{ dev_alias }} (ansible/playbooks/dev-client.yml)
+      vars:
+        windows: true
+      when:
+        - windows_home_wsl | length > 0
+        - not (on_windows_client | bool)
 
     - name: How to use it
       ansible.builtin.debug:
@@ -370,9 +631,17 @@
           - "ssh {{ dev_alias }}-sh      a shell instead, same route"
           - "ssh {{ dev_alias }}-lan     break-glass, through zero, no Cloudflare"
           - ""
-          - "The token is at {{ token_file }} (0600) and is sourced by the ProxyCommand,"
-          - "so it reaches one cloudflared process and is in no other environment."
+          - "wsl/posix: block in {{ ssh_config }}, token at {{ token_file }} (0600),"
+          - "sourced by the ProxyCommand, so it reaches one cloudflared and no other"
+          - "environment."
           - ""
-          - "Both blocks are written. -lan works today; the Cloudflare one works once the"
-          - "tunnel is provisioned and DEV_TUNNEL_HOSTNAME is set on the container."
+          - >-
+            windows: {{ 'managed directly — block in ' ~ win_ssh_config ~ ', wrapper at '
+            ~ win_wrapper ~ ', token at ' ~ win_token_file ~ ' (NTFS ACL, printed above)'
+            if on_windows_client | bool
+            else ('skipped — windows_home is empty' if windows_home_wsl | length == 0
+                  else 'not reachable from here — follow ' ~ windows_out) }}
+          - ""
+          - "-lan needs `Host zero`, which ssh-client.yml writes. Run that first on a new"
+          - "client, on both sides of a laptop."
       changed_when: true

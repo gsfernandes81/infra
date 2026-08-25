@@ -247,6 +247,14 @@ ansible-playbook playbooks/dev-container.yml -e tunnel_hostname=infra-dev.gsrpi.
 ansible-playbook playbooks/dev-client.yml
 ```
 
+**Step 3 is per client, and the laptop counts as two of them.** Windows' `ssh.exe` and
+WSL's `ssh` read different configs from different homes. Run this play *in WSL* and it
+writes both — the Linux block and token, and Windows' block, token and the
+`cf-access-<alias>.cmd` wrapper it needs because it has no `sh`. Run it from Termux and
+`/mnt/c` is absent, so the Windows half becomes a paste file instead. The details, and
+why the Windows token's permissions are printed rather than asserted, are in
+[`../ansible/README.md`](../ansible/README.md) § *The laptop is two clients*.
+
 ### The service token cannot be given on the command line
 
 `dev-client.yml` reads it with `ansible.builtin.pause`, and a first task asserts that

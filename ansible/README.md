@@ -7,6 +7,12 @@ the boxes being managed. Every command in this file is typed in Termux. `fish: U
 command: ansible-playbook` on a Pi means you are on the wrong machine, not that something
 is missing from it.
 
+**The two client plays are the exception, and only because they target the client.**
+`ssh-client.yml` and `dev-client.yml` write `~/.ssh/config` on whatever machine runs them
+and reach no host at all, so they are run wherever that client is — the phone, or WSL on
+the laptop, where one run also configures Windows. See *The laptop is two clients* below.
+That is not a second control plane: neither play can touch a Pi.
+
 The design and the reasoning are in
 [`../docs/management-plane.md`](../docs/management-plane.md); this file is how to run it.
 
@@ -30,13 +36,67 @@ metapackage before it landed on a 1 GB Pi.
 | `packages.yml` | the declared package set on all three hosts |
 | `dev-container.yml` | the **host** side of `infra-dev` on zero — secrets dir, deploy key, authorized_keys, `dev/.env` |
 | `cloudflare-dev-tunnel.yml` | the **edge** side — tunnel, DNS, Access application and policy |
-| `dev-client.yml` | the **client** side — this control node's service token and `~/.ssh/config` block |
+| `dev-client.yml` | the **client** side — this control node's service token and `~/.ssh/config` block, **and the Windows half of the same laptop when run from WSL** |
+| `ssh-client.yml` | the fleet's aliases in this control node's `~/.ssh/config`, Windows included |
+| `_inventory-guard.yml` | not run directly — imported by the two client plays so a run with no inventory fails instead of exiting 0 |
 
-**The last three are one job split three ways, and the split is not arbitrary.** They
+**`dev-container.yml`, `cloudflare-dev-tunnel.yml` and `dev-client.yml` are one job split
+three ways, and the split is not arbitrary.** They
 hold state in three different places, need three different credentials — sudo on zero, a
 Cloudflare API token, an Access service token — and change at three different rates. A
 single play would demand all three credentials to do any of it, and re-running it to add
 a second client would put an API token back on the command line for no reason.
+
+### The laptop is two clients, and one run in WSL configures both
+
+`dev-client.yml` and `ssh-client.yml` both write `~/.ssh/config` on the machine they run
+on. On the laptop that is not one machine: Windows' `ssh.exe` and WSL's `ssh` read two
+different configs, from two different homes, and neither can use the other's.
+
+Windows cannot be an Ansible target without sshd on it. It does not need to be — from WSL,
+`C:\Users\gavin` is a directory at `/mnt/c/Users/gavin`, so **one run in WSL provisions
+both sides**:
+
+```sh
+# in WSL, in this directory
+ansible-playbook playbooks/ssh-client.yml       # the fleet aliases, both sides
+ansible-playbook playbooks/dev-client.yml       # infra-dev, both sides
+```
+
+| | WSL writes, for itself | WSL writes, for Windows |
+|---|---|---|
+| `ssh-client.yml` | `~/.ssh/config` | `C:\Users\gavin\.ssh\config` |
+| `dev-client.yml` | `~/.ssh/config`, `~/.config/<alias>/token` (0600) | `…\.ssh\config`, `…\.config\<alias>\token`, `…\.ssh\cf-access-<alias>.cmd` |
+
+Three things that are not obvious and have each cost a run:
+
+- **WSL needs its own Linux `cloudflared`.** The laptop's is `cloudflared.exe`, which
+  `command -v cloudflared` will not find and which the POSIX `ProxyCommand` — running
+  under WSL's `/bin/sh` — could not exec anyway. The Windows half uses the Windows binary
+  and is checked separately.
+- **Windows has no `sh`**, so its `ProxyCommand` is `cf-access-<alias>.cmd`, generated
+  from `templates/cf-access.cmd.j2`. It does what the `sh -c` does — load the token from a
+  file, exec cloudflared — without the secret ever reaching a command line.
+- **Ansible cannot set a mode on `/mnt/c`.** The Windows token is protected by the NTFS
+  ACL `C:\Users\gavin` hands down; the play prints that ACL when it writes the file and
+  deliberately does not assert on it. See `../docs/decisions.md`.
+
+From Termux `/mnt/c` does not exist, the Windows half is skipped, and the block and the
+wrapper are rendered to `~/ssh-dev-block-windows-<alias>.txt` to paste. **The token is
+never rendered to that file** — a secret in something you open and copy out of is a secret
+in scrollback.
+
+### Run them from this directory, or they do nothing at all
+
+`ansible.cfg` is read from the **cwd** and is the only thing pointing at `./inventory`.
+Run a play from anywhere else and `hosts: control` matches nothing, so Ansible prints
+`skipping: no hosts matched`, an empty recap, and **exits 0** — which on a phone screen
+with `display_ok_hosts = False` looks a great deal like a clean run with nothing to do.
+
+No task inside the play can catch that, because the play is skipped whole. So the two
+client plays import `playbooks/_inventory-guard.yml` above their own play; it matches
+`localhost` (which Ansible provides even with no inventory) and fails, loudly, naming the
+working directory as the usual cause.
 
 **None of them starts anything, and there is no flag that makes them.** `dev/Makefile` is
 the container's lifecycle interface and stays the only one — this repo's own split from
@@ -76,8 +136,8 @@ repo has traded hand-rolled shell for stock tooling — after `bin/compose` and 
 | `group_vars/all.yml` | where the report goes; applies to `localhost` too |
 | `group_vars/fleet.yml` | the container CLI |
 | `host_vars/` | empty, on purpose — see below |
-| `playbooks/` | the five above |
-| `templates/` | the report |
+| `playbooks/` | the ones above; `_inventory-guard.yml` is imported, never run |
+| `templates/` | the report, the two ssh blocks, and the Windows ProxyCommand wrapper |
 
 ## `-K`, and why it is not a wart
 

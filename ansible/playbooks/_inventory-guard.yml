@@ -1,0 +1,71 @@
+---
+# THE INVENTORY IS NOT OPTIONAL, AND ITS ABSENCE USED TO BE SILENT.
+#
+# `ansible.cfg` is read from the CWD — that is the first line of this directory's README
+# and it is load-bearing, because the cfg is the only thing that points at ./inventory.
+# Run any playbook here from somewhere else and the `control` (or `fleet`) pattern matches
+# nothing, so Ansible prints
+#
+#     [WARNING]: Could not match supplied host pattern, ignoring: control
+#     PLAY [...] ****
+#     skipping: no hosts matched
+#     PLAY RECAP ****
+#
+# and EXITS 0 with an empty recap. Not one task runs. With `display_ok_hosts = False` a
+# real run is also mostly banners and an empty-looking tail, so the two are hard to tell
+# apart at a glance on a phone — and the conclusion you draw is "it ran and there was
+# nothing to do", which is the opposite of what happened.
+#
+# No task inside the real play can catch this: the play is skipped as a whole. So the
+# guard has to be its OWN play, against a pattern that always matches. `hosts: localhost`
+# does — Ansible provides an implicit localhost even with no inventory at all, which is
+# exactly the case being caught.
+#
+# Import it above the real play and name the group it needs:
+#
+#     - name: Guard — refuse to run with no inventory
+#       ansible.builtin.import_playbook: _inventory-guard.yml
+#       vars:
+#         required_group: control
+#
+# Underscore-prefixed because it is not a playbook you run; it is one you import.
+#
+# IT WILL NEVER FIRE INSIDE `infra-dev`, and that is not a reason to think it is not
+# working. That container exports ANSIBLE_CONFIG, which Ansible reads before it looks at
+# the cwd — so the inventory is found from any directory in here. The clients this guard
+# is actually for are Termux and WSL, where nothing exports it and the cwd is the whole
+# story. Test it the way it will be met: `cd /tmp && ansible-playbook <repo>/ansible/playbooks/ssh-client.yml`
+# with ANSIBLE_CONFIG unset.
+#
+# NO NEW COLLECTIONS: ansible.builtin throughout.
+
+- name: Refuse to run without the inventory that defines `{{ required_group }}`
+  hosts: localhost
+  gather_facts: false
+  # No `connection:` here on purpose. With the inventory loaded, host_vars/localhost.yml
+  # already sets ansible_connection: local (and the Termux interpreter and tmp path with
+  # it); without it, the implicit localhost is local by definition. Setting it at play
+  # level would win over that host_vars file, which is the one place those Termux fixes
+  # live.
+
+  tasks:
+    - name: The inventory has to be loaded, and it has to have this group in it
+      ansible.builtin.assert:
+        that:
+          - required_group in groups
+          - groups[required_group] | default([]) | length > 0
+        fail_msg: |
+          No inventory. The group `{{ required_group }}` is not defined, which means
+          ./inventory was never parsed — and without this guard the play below would have
+          been skipped whole, with an empty recap and exit status 0.
+
+          Almost always the cause is the working directory: ansible.cfg is read from the
+          CWD and it is what points at ./inventory.
+
+              cd <repo>/ansible && ansible-playbook playbooks/<name>.yml
+
+          If you meant to run from elsewhere, say so explicitly — `-i <repo>/ansible/inventory`,
+          or export ANSIBLE_CONFIG=<repo>/ansible/ansible.cfg.
+        success_msg: >-
+          inventory loaded: {{ required_group }} =
+          {{ groups[required_group] | default([]) | join(', ') }}

@@ -1,0 +1,102 @@
+# Three ways to the same container. RemoteCommand on the first is the whole
+# point: `ssh {{ dev_alias }}` IS the claude session, reattaching if one is
+# already running, so the habit is one word rather than a remembered incantation.
+# One caveat that comes with RemoteCommand: `ssh {{ dev_alias }} <command>` is then
+# an error ("cannot execute command-line and remote command"), and scp/sftp to
+# this alias will not work. Use {{ dev_alias }}-sh for either.
+Host {{ dev_alias }}
+  HostName {{ dev_hostname }}
+  User dev
+  RequestTTY yes
+  # Two concerns, each where it belongs. `in-workspace` is a program in the
+  # IMAGE and holds the one thing the container owns — where its work is, so no
+  # client names the path. `abduco` is here because it is a property of THIS
+  # LINK: an ssh session from a phone dies at the lock screen, so the session
+  # has to outlive it. A laptop on ethernet running `ssh … 'git log'`, or a
+  # one-shot `claude -p`, wants the workspace and no abduco at all — which a
+  # wrapper owning both would have made impossible.
+  RemoteCommand in-workspace abduco -A claude claude
+{% if windows %}
+  # WINDOWS HAS NO `sh`, so the load-the-token-then-exec that the POSIX clients do
+  # inline moves into a batch wrapper. Same shape, same guarantee: the secret is
+  # read from a file and reaches the environment of one short-lived cloudflared,
+  # never a command line. The wrapper is written by the same playbook as this
+  # block — see ansible/templates/cf-access.cmd.j2 for why it is built the way it is.
+  #
+  # An absolute path with no spaces in it, and therefore no quoting. Win32-OpenSSH's
+  # handling of a quoted ProxyCommand is not something to discover during a rescue,
+  # and %USERPROFILE% is not something to discover either — whether ssh hands the
+  # line to cmd.exe (which would expand it) or spawns it directly (which would not)
+  # is exactly the kind of detail that presents as "the tunnel is down".
+  ProxyCommand {{ win_wrapper }} %h
+{% else %}
+  ProxyCommand sh -c '. {{ token_file }}; exec {{ cloudflared }} access ssh --hostname %h'
+{% endif %}
+
+# Same transport, no RemoteCommand — for when you want a shell rather than a
+# claude. Worth having as its own alias because the alternative is
+# `ssh -o RemoteCommand=none {{ dev_alias }}`, which nobody remembers under pressure.
+Host {{ dev_alias }}-sh
+  HostName {{ dev_hostname }}
+  User dev
+{% if windows %}
+  ProxyCommand {{ win_wrapper }} %h
+{% else %}
+  ProxyCommand sh -c '. {{ token_file }}; exec {{ cloudflared }} access ssh --hostname %h'
+{% endif %}
+
+# Break-glass: in through zero's own sshd, to the port compose publishes on
+# zero's loopback. What it is independent OF is the thing that usually breaks —
+# this container's tunnel, its Access application and its service token. A bad
+# or expired token does not touch this path, and a wedged container sshd does
+# not touch the other one.
+#
+# IT IS NOT A NO-CLOUDFLARE PATH, and the earlier wording here said it was.
+# `Host zero` is written by ssh-client.yml as ssh-zero.gsrpi.uk behind
+# `cloudflared access ssh` — zero's OWN tunnel — so a Cloudflare-wide outage
+# takes this alias with it. The paths that survive that are the LAN ones, and
+# from the LAN this alias is one override away:
+#
+#     ssh -o ProxyCommand='ssh zero-local nc %h %p' {{ dev_alias }}-lan
+#
+# Getting this wrong costs a rescue: a comment that names the wrong failure is
+# read at the moment there is no time to check it.
+#
+# NOT ProxyJump: zero's sshd sets AllowTcpForwarding no, which refuses the
+# direct-tcpip channel ProxyJump opens. A session channel running nc is not
+# covered by that setting.
+#
+# `ssh zero nc …` is the same line on every client, Windows included: Win32-OpenSSH
+# provides ssh.exe, and `Host zero` comes from the infra-fleet block that
+# ssh-client.yml writes into this same file. THAT BLOCK IS A PREREQUISITE — without
+# it this alias has no `zero` to reach and fails with a name it does not explain.
+Host {{ dev_alias }}-lan
+  HostName 127.0.0.1
+  Port {{ dev_lan_port }}
+  User dev
+  ProxyCommand ssh zero nc %h %p
+
+# ONE HOST KEY PER CONTAINER, NOT PER PATH — the same rule this config already
+# applies to the Pis. The container's key lives in a docker volume and survives
+# rebuilds, so all three routes meet the same key. Without a shared alias the
+# rarely-used path has no stored entry and simply prompts you to accept whatever
+# it is handed, during a rescue, which is when you are least likely to look.
+# To clear it later: ssh-keygen -R {{ dev_alias }}
+Host {{ dev_alias }} {{ dev_alias }}-sh {{ dev_alias }}-lan
+  HostKeyAlias {{ dev_alias }}
+  IdentityFile {{ ssh_key }}
+  IdentitiesOnly yes
+  ServerAliveInterval 30
+  ServerAliveCountMax 3
+
+  # Metering, not comfort — or3's ssh_config makes the same call for the same
+  # reason. This is the end of the session that holds its plaintext: claude's
+  # output is text and compresses hard, and it is compressed here before it is
+  # encrypted, so what crosses the phone's radio is the smaller thing.
+  #
+  # THE CLIENT IS THE HALF THAT TURNS IT ON. sshd already permits it by default
+  # and dev/sshd_config now says so out loud, but ssh's own default is `no` and
+  # nothing is negotiated unless both ends offer it. On -lan it costs a little
+  # CPU on a Pi for no metered link, which is not worth a second Host block to
+  # avoid; a rescue session is not where you tune throughput.
+  Compression yes

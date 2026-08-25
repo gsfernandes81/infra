@@ -488,6 +488,26 @@ ones that answer the question this document started from.
 | 7 | **Rootless podman on `one`** — roadmap §2 | `one` | 3 | |
 | 8 | `two` as the scheduled read-only control node | `two` | 6, 7 | |
 
+**Filed 2026-08-25, no phase number — the two client plays now cover Windows, and the
+phone's own block is behind them.** `dev-client.yml` had no Windows half at all: run from
+WSL it configured WSL and left Windows untouched, which is why a laptop that reaches
+`zero` from PowerShell could not reach `infra-dev` from anywhere. It now writes both sides
+of the laptop in one WSL run, and both client plays refuse to run with no inventory rather
+than exiting 0 with an empty recap. Two things this turned up on the **live phone**, which
+the repo cannot fix for it:
+
+- Its `infra-dev` block still carries a **bare** `cloudflared` in the `ProxyCommand` — the
+  output of the pre-2026-08-24 `| default('cloudflared', true)`, and the exact bug that
+  fix existed to remove. A bare name resolves in an interactive shell and then fails
+  inside ssh's `/bin/sh`, presenting as the tunnel being down. Re-running the play rewrites
+  the block in place with the absolute path and does not ask for the token again.
+- `Host or3-dev` is defined **twice** — the managed block at the top of the file and a
+  hand-written `nc`-through-zero block below it. First-value-wins gives
+  `HostName or3-dev.gsrpi.uk` from the first and `Port 2224` from the second (confirmed
+  with `ssh -G`). Inert while the ProxyCommand is `cloudflared access ssh --hostname %h`,
+  which ignores the port — and a live trap the moment it is not. The hand-written block is
+  fully superseded and should be deleted.
+
 **2b–2e were off this list until 2026-08-22.** They come out of the `infra-dev` handoff.
 As filed, two of them outranked Phase 3: `one`'s broken services were the only things on
 the fleet *failing* rather than merely unbuilt, and Phase 3 adopts a stack that currently
