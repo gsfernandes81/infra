@@ -522,14 +522,27 @@
       # blockinfile, so re-running edits the block in place instead of appending a second
       # copy — which ssh would not error on, it would just silently use the first.
       #
-      # insertbefore BOF matters: ssh takes the FIRST value it obtains for each keyword,
-      # so a `Host *` block already in this file would win over anything appended after
-      # it. Top of the file is the only safe place to add a specific host.
+      # insertbefore, NOT the default append: ssh takes the FIRST value it obtains for
+      # each keyword, so a `Host *` block already in this file would win over anything
+      # appended after it.
+      #
+      # ABOVE `Host *`, NOT AT THE TOP OF THE FILE, and the difference is not cosmetic.
+      # The anchor here was BOF until 2026-08-25, which is a stronger claim than the
+      # requirement: what a specific host needs is to precede the wildcard, and BOF also
+      # made it precede everything a human had written. The phone's own header — the file
+      # title and its ORDERING RULE, the thing you read first when something is wrong with
+      # this file — ended up below two generated blocks, and every dev container
+      # provisioned after that would have pushed it down again. `Host *` is the anchor
+      # ssh-client.yml has always used; both plays now agree, and a hand-kept header stays
+      # where its author put it.
+      #
+      # If `Host *` is absent, blockinfile appends, which is correct for a file that has
+      # no defaults section to lose to.
       ansible.builtin.blockinfile:
         path: "{{ ssh_config }}"
         mode: "0600"
         create: true
-        insertbefore: BOF
+        insertbefore: '^Host \*\s*$'
         marker: "# {mark} {{ dev_alias }} (ansible/playbooks/dev-client.yml)"
         block: "{{ lookup('template', '../templates/ssh-dev-block.j2') }}"
       vars:
@@ -565,7 +578,7 @@
       ansible.builtin.blockinfile:
         path: "{{ win_ssh_config }}"
         create: true
-        insertbefore: BOF
+        insertbefore: '^Host \*\s*$'
         marker: "# {mark} {{ dev_alias }} (ansible/playbooks/dev-client.yml)"
         block: "{{ lookup('template', '../templates/ssh-dev-block.j2') }}"
       vars:
