@@ -20,9 +20,15 @@ set -u
 #
 #   DEV_NAME             the container's name in the lines this prints  (default: hostname)
 #   DEV_SECRETS_DIR      where the read-only secrets mount lands        (/run/infra-secrets)
-#   DEV_REMOTE_CONTROL   1 starts the Claude Remote Control supervisor  (0)
 #   DEV_TUNNEL_HOSTNAME  cloudflared's ingress hostname                 (unset = no tunnel)
 #   DEV_CHILD_INIT_TIMEOUT  seconds child-init.sh gets before it is killed        (600)
+#   DEV_IDLE_OFFLOAD     0 stops the idle-claude offloader starting     (1)
+#   DEV_IDLE_OFFLOAD_SECONDS / DEV_IDLE_POLL_SECONDS — offload-idle-claude.sh's own
+#
+# DEV_REMOTE_CONTROL IS GONE, 2026-08-25. Every container on this fleet is now reached the
+# same way — ssh in, work in an abduco session — and none of them ships a remote-control
+# daemon for this to start. A variable that names a thing no image contains is a variable
+# somebody sets and then wonders about, so it is removed rather than left inert.
 #
 # and two files a child BAKES rather than sets, because their content is tracked and
 # reviewable rather than host-specific:
@@ -226,18 +232,15 @@ fi
 #   projects["/workspace"].hasTrustDialogAccepted — workspace trust. /workspace is not
 #       $HOME, so unlike home-directory trust this has to be persisted.
 #   theme, hasCompletedOnboarding — the first-run walkthrough.
-#   remoteDialogSeen — the one-time "Enable Remote Control? [y/N]" consent. When falsy,
-#       remote-control opens a readline prompt on stdin; with no interactive stdin the
-#       supervisor's daemon can never answer it and re-prompts on every restart.
 #
-# THE LAST ONE IS SEEDED ONLY UNDER DEV_REMOTE_CONTROL=1, and that condition is the
-# whole of its meaning. Seeding it in a container that never starts remote-control
-# suppresses a prompt that never appears, which is pre-consenting to a thing that
-# container deliberately does not do. infra-dev is that container and passes 0.
-python3 - "$CFG/.claude.json" /workspace "${DEV_REMOTE_CONTROL:-0}" <<'PY' || say "could not pre-seed .claude.json"
+# remoteDialogSeen WAS SEEDED HERE and is not any more, 2026-08-25. It suppresses the
+# one-time "Enable Remote Control? [y/N]" consent, which only a container that starts a
+# remote-control daemon ever meets — and no container on this fleet does. Seeding it now
+# would be pre-consenting, on four containers, to a thing none of them does.
+python3 - "$CFG/.claude.json" /workspace <<'PY' || say "could not pre-seed .claude.json"
 import json, os, sys
 
-path, project, seed_remote = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
+path, project = sys.argv[1], sys.argv[2]
 try:
     with open(path) as f:
         cfg = json.load(f)
@@ -256,9 +259,6 @@ if not cfg.get("theme"):
     dirty = True
 if cfg.get("hasCompletedOnboarding") is not True:
     cfg["hasCompletedOnboarding"] = True
-    dirty = True
-if seed_remote and cfg.get("remoteDialogSeen") is not True:
-    cfg["remoteDialogSeen"] = True
     dirty = True
 
 if dirty:
@@ -377,35 +377,29 @@ mkdir -p "$HOME/.local/share"
 } > "$HOME/.ssh/environment"
 chmod 600 "$HOME/.ssh/environment"
 
-# ── Claude Remote Control — a CHILD's daemon, started here ──────────────────
-# `claude remote-control` makes the container drivable from claude.ai/code and the
-# mobile app. TWO things must both be true before anything starts: the child baked a
-# /home/dev/rc-supervisor.sh, and DEV_REMOTE_CONTROL is 1.
+# ── the idle-claude offloader ───────────────────────────────────────────────
+# WHAT USED TO BE HERE was the Claude Remote Control hook: a child baked an
+# rc-supervisor.sh, set DEV_REMOTE_CONTROL=1, and this started it. Remote control is off
+# this fleet as of 2026-08-25 — every container is reached the same way now, by ssh with
+# the work held in an abduco session — so the hook has gone with the daemons it started.
 #
-# THE SUPERVISOR IS NOT IN THIS IMAGE, deliberately. Only an RC-enabled child uses it,
-# dd-dev's is a different design, and its permission mode is a decision belonging to the
-# container that makes it — this file's own header says a setting true for one child is
-# a child's setting. What the base owns is the hook: when to start it, and not to.
+# WHAT REPLACES IT IS THE OPPOSITE JOB. abduco is why a session survives a dropped link,
+# and it is also why a conversation nobody has touched since Tuesday is still resident:
+# measured on infra-dev, one idle session's process tree held 1,146 MB. The offloader
+# stops those and leaves the conversation on disk for `claude --resume`. It refuses to
+# touch an attached session, a session with work running under it, or one it has no
+# transcript to time — offload-idle-claude.sh's header has the whole of the reasoning,
+# and `--dry-run` prints its verdict on every session without acting on any of them.
 #
-# The switch is opt-in for the same reason the tunnel below is: the default way in is an
-# ssh session with abduco holding it, and a remote-control daemon nobody is driving is a
-# live claude with a permission classifier for company.
-#
-# The two "off" cases are reported apart, because they have different fixes and a single
-# message would send you to edit a .env in a container that could not act on it either
-# way. infra-dev is the second case and always will be.
-if [ ! -f /home/dev/rc-supervisor.sh ]; then
-    if [ "${DEV_REMOTE_CONTROL:-0}" = "1" ]; then
-        say "DEV_REMOTE_CONTROL=1 but this image ships no rc-supervisor.sh — nothing started."
-        say "    That is a change to the repo's dev/Dockerfile, not to its .env."
-    else
-        say "no remote control in this image (it ships no rc-supervisor.sh)"
-    fi
-elif [ "${DEV_REMOTE_CONTROL:-0}" = "1" ]; then
-    setsid bash /home/dev/rc-supervisor.sh </dev/null >/dev/null 2>&1 &
-    say "remote-control supervisor started (log: ~/.local/share/remote-control.log)"
+# BACKGROUNDED WITH setsid AND ITS OUTPUT DISCARDED, like every other daemon here: it
+# keeps its own log, and a daemon writing to this stream would be interleaved with sshd's
+# for the life of the container.
+if [ "${DEV_IDLE_OFFLOAD:-1}" = "1" ]; then
+    setsid bash /home/dev/offload-idle-claude.sh </dev/null >/dev/null 2>&1 &
+    say "idle-claude offloader started (log: ~/.local/share/claude-offload.log)"
+    say "    it stops a detached, idle, not-working claude and leaves it resumable"
 else
-    say "remote control off (DEV_REMOTE_CONTROL=1 in dev/.env, then make up)"
+    say "idle-claude offloader off (DEV_IDLE_OFFLOAD=0) — idle sessions keep their memory"
 fi
 
 # ── the tunnel — INERT unless asked for ─────────────────────────────────────

@@ -23,7 +23,7 @@ services:
       # `base` — the FROM pulls the tag from ghcr — so a tag bumped here and not yet
       # built by dev-base.yml fails on the pull until `make base` builds it locally.
       args:
-        BASE_TAG: ${BASE_TAG:-2026.08.24.2}
+        BASE_TAG: ${BASE_TAG:-2026.08.25}
     image: infra-dev
     container_name: infra-dev
     hostname: ${DEV_HOSTNAME:-infra-dev}  # Claude Code shows this as the machine title
@@ -67,14 +67,21 @@ services:
       # Read by the entrypoint at start, so it lands on `make up`, never on `restart`.
       DEV_TUNNEL_HOSTNAME: ${DEV_TUNNEL_HOSTNAME:-}
 
-      # NO remote-control switch, unlike or3-dev. This container exists to replace
-      # driving Claude from the phone; shipping a disabled daemon for the thing it
-      # replaces is hedging against its own reason to exist.
+      # NO remote-control switch, and as of 2026-08-25 there is no such switch to set:
+      # DEV_REMOTE_CONTROL is gone from the base along with the hook that read it, and no
+      # dev container on this fleet ships a remote-control daemon. Every one of them is
+      # reached the same way — ssh in, hold the work in an abduco session — which is what
+      # this container was built to be in the first place.
       #
-      # DEV_REMOTE_CONTROL would be inert here even if it were set: the base carries the
-      # hook, not the daemon, and this image bakes no /home/dev/rc-supervisor.sh. The
-      # entrypoint says so in those words at start. Adding one is a Dockerfile change
-      # with its own reasoning, not a line in a .env.
+      # THE IDLE OFFLOADER IS ON BY DEFAULT and needs nothing here. It stops a claude that
+      # has been detached, silent and not working for 90 minutes — longer than a claude
+      # can schedule its own wake-up for — and leaves the conversation on disk for `claude
+      # --resume`. `make idle` prints its verdict without acting; `make offload-log` says
+      # what it has taken. Three knobs, none of them usually worth setting:
+      #
+      #   DEV_IDLE_OFFLOAD: "0"            # keep idle sessions resident
+      #   DEV_IDLE_OFFLOAD_SECONDS: "7200" # a longer leash (3600 is the floor it refuses under)
+      #   DEV_IDLE_POLL_SECONDS: "600"     # look less often
 
     volumes:
       # The host clone. `git pull` in the container and on the host are the same

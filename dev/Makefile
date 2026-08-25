@@ -14,6 +14,8 @@
 #   make logs        follow the container log (= sshd's)
 #   make boot-log    the entrypoint's start-up lines, from the top
 #   make tunnel-log  what cloudflared has been saying, if the tunnel is on
+#   make idle        what the offloader would do to each claude session, right now
+#   make offload-log which sessions it has offloaded, and how to resume them
 #   make down        stop and remove the container (volumes stay)
 #   make down-volumes  also drop the volumes — logins and host key go with them
 #
@@ -52,10 +54,11 @@ DOCKER  := $(SUDO) docker
 # repo's back. THIS is the single source: COMPOSE passes it through the environment,
 # compose.yaml forwards it as a build arg, and the defaults in compose.yaml and
 # dev/Dockerfile are fallbacks that only matter outside `make`.
-BASE_TAG := 2026.08.24.2
+BASE_TAG := 2026.08.25
 
 .PHONY: help dev base up restart down down-volumes status verify collections logs \
-	boot-log tunnel-log login claude shell fleet _require-env _require-secrets _require-uid
+	boot-log tunnel-log idle offload-log login claude shell fleet _require-env \
+	_require-secrets _require-uid
 
 help:
 	@awk '/^#/ { sub(/^# ?/, ""); print; next } { exit }' $(MAKEFILE_LIST)
@@ -162,6 +165,15 @@ status verify collections boot-log tunnel-log fleet:
 
 logs:
 	$(DOCKER) logs -f --tail 100 $(CONTAINER)
+
+# The offloader's own two questions. `idle` is a DRY RUN — it prints its verdict on every
+# abduco session and stops nothing, which is also how you check the thing is reasoning the
+# way you expect before trusting it with a session you care about.
+idle:
+	$(DOCKER) exec $(CONTAINER) bash /home/dev/offload-idle-claude.sh --dry-run
+
+offload-log:
+	$(DOCKER) exec $(CONTAINER) sh -c 'tail -n 40 /home/dev/.local/share/claude-offload.log 2>/dev/null || echo "nothing offloaded yet"'
 
 # ── into the container ──────────────────────────────────────────────────────
 # The interactive half. All three are `docker exec -it`, which is the way in from

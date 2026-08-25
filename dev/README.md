@@ -30,16 +30,17 @@ been consciously postponed rather than an omission.
 - **Not a tunnel endpoint.** `or3-dev` publishes an sshd that the phone terminates a
   reverse forward on, to reach the vessel LAN. Nothing tunnels back through this one,
   and its `sshd_config` sets `AllowTcpForwarding no` to keep it that way.
-- **Not a Remote Control host.** The container exists to replace driving Claude from
-  the phone, and shipping a disabled daemon for the thing it replaces is hedging against
-  its own reason to exist. So this image ships **no `rc-supervisor.sh`** and its compose
-  sets no `DEV_REMOTE_CONTROL`.
-  Note what that means precisely, because the base image blurs it if you skim: the base
-  carries the *hook* — it starts `/home/dev/rc-supervisor.sh` when a child bakes one and
-  sets the switch — and it carries **no supervisor**. `or3-dev` ships the file, and the
-  entrypoint here says "no remote control in this image" rather than "off", because the
-  two have different fixes. Adding one should be a decision with reasoning attached
-  rather than a default nobody chose.
+- **Not a Remote Control host — and since 2026-08-25 neither is anything else here.**
+  This container existed to replace driving Claude from the phone, so shipping a disabled
+  daemon for the thing it replaces was always hedging against its own reason to exist.
+  That argument turned out to apply to all four: `dd-dev` and `ds-dev` ran a supervisor as
+  the container's payload, `or3-dev` shipped one defaulted off, and three arrangements for
+  one capability is three things to remember and three ways to be confused at 2am. All of
+  it is deleted — the supervisors in their repos, the hook and `DEV_REMOTE_CONTROL` here.
+  **One way in, everywhere: `ssh -t <name> abduco -A claude claude`.** It already survives
+  a dropped link, and it does not put a permission classifier in charge of a container
+  holding deploy keys. Adding remote control back is a decision with reasoning attached,
+  not a variable somebody sets.
 - **Not a holder of the docker socket.** See *The socket line somebody will add* below.
 - **Not a control node, by default.** It ships ansible but no route to the fleet. See
   *The control-node question, deferred*.
@@ -553,7 +554,7 @@ needed instead became the base's four seams —
 | its secrets at `/run/or3-secrets`, holding `id_ed25519_or3ecr_m` and `id_ed25519_or3_deploy` | `DEV_SECRETS_DIR`, and the entrypoint copying **every** `id_*` rather than a list of names |
 | or3ecr's host key pinned in tracked content | `/home/dev/known_hosts.extra`, baked by the child |
 | `AllowTcpForwarding yes` — the phone's reverse forward is its reason to exist | `/home/dev/sshd_config.d/10-forwarding.conf`, and the `Include` at the *top* of `sshd_config` so a child's value wins |
-| the Claude Remote Control supervisor | `DEV_REMOTE_CONTROL=1`, plus its own `rc-supervisor.sh` baked at `/home/dev`. The base carries the **hook and not the daemon** — it starts that path when a child ships one — because only an RC-enabled child uses it, dd-dev's is a different design, and its permission mode is a decision belonging to the container making it |
+| ~~the Claude Remote Control supervisor~~ | It got the fifth seam — a hook the base fired when a child baked an `rc-supervisor.sh` — and **both are gone as of 2026-08-25**, along with or3-dev's daemon. No dev container on this fleet runs remote control; the row stays because the seam it justified is the one worth understanding: a hook in the base, the daemon in the child that owns the policy |
 | `uv`, pinned to the version or3ecr runs | its own layer, above `USER dev`. Deliberately **not** in the base: that pin is a contract with `work/bootstrap/requirements-or3ecr.txt`, so it belongs to the repo holding the other half |
 
 That last row is the general rule: a thing goes in the base when the containers agree
@@ -622,8 +623,8 @@ category this repo's `CLAUDE.md` is most careful about.
 
 **dd-dev and ds-dev converted on 2026-08-24**, in their own repos, and between them they
 used every seam: `child-init.sh` for the venv sync, `DEV_SECRETS_DIR` pointed at the
-gitignored `.dev-ssh/` inside their own bind mount, `DEV_REMOTE_CONTROL=1` with the
-supervisor each already had, their own `ssh_config`, and two `sshd_config.d` drop-ins —
+gitignored `.dev-ssh/` inside their own bind mount, their own `ssh_config`, and two
+`sshd_config.d` drop-ins —
 `10-authorized-keys.conf`, naming the host account's `authorized_keys` (how both were
 reached before the base existed, and not a thing to re-key), and `20-forwarding.conf`,
 which puts `AllowTcpForwarding` back to the default their old config left in place.
@@ -643,6 +644,45 @@ containers. The fleet sentence — *zero, one and two are unreachable* — now p
 for a container that did **not** name its own `DEV_SECRETS_DIR`, because it means
 nothing in the other three; and *NOTHING can ssh in* is not said when a drop-in names
 its own `AuthorizedKeysFile`, which is the case where it would be false and believed.
+
+## The idle-claude offloader
+
+`abduco` is why a session survives a dropped link. It is also why a conversation nobody
+has touched since Tuesday is still holding memory: **one idle session's process tree
+measured 1,146 MB RSS on this container** — 208 MB for the session, 145 MB for its
+transient daemon, and 819 MB across four `bg-pty-host`/`bg-spare` helpers. Four dev
+containers on a 4 GB Pi that also runs Immich cannot each hold a gigabyte for a
+conversation that ended.
+
+So the base runs `/home/dev/offload-idle-claude.sh` in the background. It stops an idle
+claude and leaves the conversation exactly where it was — on disk, in
+`~/.claude/projects`, for `claude --resume`. Nothing is closed; the memory is what is
+reclaimed.
+
+**Ninety minutes, and the number is derived rather than chosen.** A claude can schedule
+its own wake-up — `/loop`'s dynamic mode, `ScheduleWakeup` — and the runtime clamps that
+delay to at most an hour. An hour of silence is therefore the longest gap a session can be
+*expecting*; past it, nothing inside the process is going to bring it back and only a
+person will. 90 minutes is that hour plus room for a wake-up that fires late and then
+thinks. The script **refuses** a limit below 3600s rather than quietly raising it.
+
+Three things stop it, and each is a way it could otherwise be wrong:
+
+| It will not offload | Because |
+|---|---|
+| an **attached** session | somebody is at that terminal, and their claude vanishing mid-thought is worse than the RAM |
+| a session with **work running under it** | a Bash call, a background command, a subagent — each is a live descendant process, and that is the signal the transcript clock cannot give: a session waiting on a long build writes nothing for the whole build |
+| a session with **no transcript** | no conversation file, no clock, no opinion — it says so and leaves the process alone |
+
+`make idle` prints its verdict on every session and stops nothing — run that before
+trusting it with a session you care about. `make offload-log` says what it has taken and
+the exact command to bring each one back. `DEV_IDLE_OFFLOAD=0` turns it off;
+`DEV_IDLE_OFFLOAD_SECONDS` moves the limit.
+
+**It closes the abduco session it emptied, and that is not tidying.** abduco outlives the
+command it ran: the session stays listed with a `+`, keeps the name, and
+`abduco -A claude claude` — the documented way in — would attach you to the corpse instead
+of starting a new claude. Found by running it rather than by reading it.
 
 ## Secrets
 

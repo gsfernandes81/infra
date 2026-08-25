@@ -12,7 +12,7 @@
 # WHAT A CHILD IS EXPECTED TO CHANGE, and how. Five seams, none of which is a fork of a
 # file in here:
 #
-#   environment    DEV_NAME, DEV_SECRETS_DIR, DEV_REMOTE_CONTROL, DEV_TUNNEL_HOSTNAME —
+#   environment    DEV_NAME, DEV_SECRETS_DIR, DEV_TUNNEL_HOSTNAME, DEV_IDLE_OFFLOAD —
 #                  entrypoint.sh lists what each does. Set in the repo's compose.yaml.
 #   ssh_config     COPY its own over /home/dev/ssh_config. The entrypoint reads that
 #                  path, so a child's identities and hosts are its own business.
@@ -30,14 +30,9 @@
 #                  somebody reads `make boot-log` — so this is worth more care, not
 #                  less. sshd's own message names the offending file and line, which is
 #                  what that log carries.
-#   rc-supervisor.sh  COPY one in to /home/dev and set DEV_REMOTE_CONTROL=1, and the
-#                  entrypoint starts it. NOT carried here: only an RC-enabled child
-#                  uses it, dd-dev's is a different design, and its permission mode is
-#                  a decision that belongs to the container making it. or3-dev ships
-#                  the one this arrangement was written around.
 #   child-init.sh  COPY one in to /home/dev and the entrypoint RUNS it at start, after
-#                  the pull and before sshd. The fifth seam, added 2026-08-24: the four
-#                  above all PLACE something, and dd-dev and ds-dev needed something
+#                  the pull and before sshd. The newest of them, added 2026-08-24: the
+#                  four above all PLACE something, and dd-dev and ds-dev needed something
 #                  DONE — `uv sync` against the lockfile in the mount, which cannot
 #                  happen at build time because /workspace is not there yet. Non-fatal
 #                  AND time-bounded — it runs ahead of the door, so a hang costs the
@@ -46,6 +41,16 @@
 #
 # Anything a child cannot express through those five is a change to THIS file, made
 # once, followed by a BASE_TAG bump. That is the trade the base image exists to make.
+#
+# REMOTE CONTROL LEFT THE FLEET on 2026-08-25, and with it a sixth seam that used to be
+# listed here: a child baked an rc-supervisor.sh, set DEV_REMOTE_CONTROL=1, and the
+# entrypoint started it. Every container
+# is now reached one way — ssh in, hold the work in an abduco session — so no child ships
+# an rc-supervisor.sh and nothing here starts one. What the entrypoint runs in its place
+# is the opposite job: offload-idle-claude.sh, which STOPS a claude that nobody has spoken
+# to for longer than a claude can schedule its own wake-up, and leaves the conversation on
+# disk for `claude --resume`. abduco is what makes a session survive a dropped link, and
+# was therefore also what made an abandoned one hold a gigabyte of RAM for days.
 #
 # Built and pushed to ghcr.io/gsfernandes81/gsrpi-dev-base (PUBLIC — pure toolchain,
 # the same information as this file) by .github/workflows/dev-base.yml, on manual
@@ -290,6 +295,14 @@ COPY --chown=${USER_UID}:${USER_GID} config.fish /home/dev/.config/fish/config.f
 # It lives in the IMAGE rather than in the Makefile because every step of it needs
 # a tty and the credential stores it fills are all in here.
 COPY --chown=${USER_UID}:${USER_GID} login.sh /home/dev/login.sh
+
+# The idle-claude offloader, started in the background by the entrypoint unless
+# DEV_IDLE_OFFLOAD=0. Baked rather than left to each repo because it is fleet policy about
+# a shared 4 GB Pi, not a repo's preference — and because the number it keys on (how long
+# a claude can schedule its own wake-up for) is a fact about Claude Code, the same in
+# every container.
+COPY --chown=${USER_UID}:${USER_GID} offload-idle-claude.sh /home/dev/offload-idle-claude.sh
+
 COPY --chown=${USER_UID}:${USER_GID} entrypoint.sh /home/dev/entrypoint.sh
 
 CMD ["bash", "/home/dev/entrypoint.sh"]
