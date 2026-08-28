@@ -39,6 +39,10 @@
     zone_name: "gsrpi.uk"
     cred_file: "/etc/cloudflared/{{ inventory_hostname }}.json"
     new_cred_file: "/etc/cloudflared/{{ inventory_hostname }}-new.json"
+    # Where install-system-file puts cloudflared-config.yml, per that file's own
+    # `infra-path`/`infra-name` header. Named here so the rescue can put the old one back:
+    # restoring the credentials alone leaves this file naming a different tunnel.
+    cfg_file: "/etc/cloudflared/config.yml"
     repo_cfg: "{{ playbook_dir }}/../../hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
 
     # The clone ON THE HOST. Absolute, and not `~`: the install task runs with become,
@@ -291,6 +295,25 @@
         # on. Run as root, those calls are no-ops. Without it the tool fails safe
         # ("backup failed, nothing written") but it fails, which is a task away from
         # where the work is.
+        # BEFORE install-system-file, and symmetric with the credentials backup below.
+        # The rescue used to restore only the credentials, which left config.yml naming
+        # the NEW tunnel while two.json held the OLD one's — a mismatch cloudflared will
+        # not start on. So a rolled-back host came back with its door shut, and the play
+        # said "every hostname still points where it did", which was true about DNS and
+        # silent about the connector. Found on `two`, 2026-08-28.
+        #
+        # `-f` guard, same reason as the credentials: never overwrite an existing backup,
+        # or a second run erases the only copy of the pre-2g config.
+        - name: Back up the live config before replacing it
+          ansible.builtin.shell: |
+            set -e
+            [ -f {{ cfg_file }}.pre-2g ] || {
+              cp -a {{ cfg_file }} {{ cfg_file }}.pre-2g
+              chmod 644 {{ cfg_file }}.pre-2g
+            }
+          become: true
+          changed_when: true
+
         - name: Install the reviewed config
           ansible.builtin.command:
             cmd: bin/install-system-file cloudflared-config.yml --commit --allow-content-change
@@ -337,7 +360,11 @@
             return_content: true
           register: ready
           until: (ready.content | default('{}') | from_json).readyConnections | default(0) > 0
-          retries: 12
+          # 24 x 5s, not 12. The original budget was set on `one` and `zero` — a Pi 4 and
+          # a Pi 5. `two` is an ARM1176 with no AES acceleration, and 60s is not obviously
+          # enough there for a fresh tunnel to register four edge connections. Overridable
+          # with -e ready_retries=N; raising it costs only a slower failure.
+          retries: "{{ ready_retries | default(24) }}"
           delay: 5
 
         - name: Check it is serving the reviewed rules, not the old ones
@@ -381,6 +408,19 @@
         # Only when something was actually restored. A failure at the install step —
         # before any swap — fires this rescue too, and cycling there is a pointless
         # outage on a clean abort. The marker file is written by the restore above.
+        # The other half of the restore. Without it the box comes back with the old
+        # credentials and the new config, which do not name the same tunnel.
+        - name: Restore the pre-2g config
+          ansible.builtin.shell: |
+            set -e
+            if [ -f {{ cfg_file }}.pre-2g ]; then
+              cp -a {{ cfg_file }}.pre-2g {{ cfg_file }}
+              chmod 644 {{ cfg_file }}
+              touch /tmp/.cutover-restored
+            fi
+          become: true
+          changed_when: true
+
         - name: Cycle the connector back onto the old tunnel
           ansible.builtin.shell: |
             [ -f /tmp/.cutover-restored ] || exit 0
@@ -395,6 +435,30 @@
             rc-service cloudflared start >/dev/null 2>&1
           become: true
           changed_when: true
+
+        # A ROLLBACK THAT IS NOT VERIFIED IS A CLAIM. The rescue said the host was back
+        # on the old tunnel without ever asking the connector, so a failed cycle-back
+        # read exactly like a successful one.
+        - name: Did the old connector actually come back
+          ansible.builtin.uri:
+            url: "{{ probe }}/ready"
+            return_content: true
+          register: back_ready
+          until: (back_ready.content | default('{}') | from_json).readyConnections | default(0) > 0
+          retries: "{{ ready_retries | default(24) }}"
+          delay: 5
+          failed_when: false
+
+        - name: Say so if it did not
+          ansible.builtin.debug:
+            msg: >-
+              THE ROLLBACK RESTORED THE FILES BUT THE CONNECTOR IS NOT SERVING —
+              {{ inventory_hostname }}'s tunnel is DOWN. Reach it over the mesh
+              ({{ inventory_hostname }}-one or -zero, which do not use its tunnel) and
+              look: rc-service cloudflared status, then run it in the foreground, because
+              this host logs nowhere until 2f is done here.
+          changed_when: true
+          when: (back_ready.content | default('{}') | from_json).readyConnections | default(0) | int == 0
 
         - name: Stop here — rolled back, DNS never touched
           ansible.builtin.fail:
