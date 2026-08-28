@@ -55,19 +55,39 @@ if ! grep -q '^#.*defaults.*MUST stay last' "$CFG"; then
   exit 0
 fi
 
-# `Host *` has to be the LAST Host stanza, or appending would land the note inside
-# whatever block is actually last and silently attach it to the wrong thing.
-LAST_HOST=$(grep -n '^[Hh]ost[ \t]' "$CFG" | tail -1)
-case "$LAST_HOST" in
-  *:[Hh]ost\ \*|*:[Hh]ost\ \*[\ \t]*) : ;;
+# ── EVERY TEST BELOW IS AWK, NOT grep OR case, AND THAT IS THE FIX FOR A REAL BUG ──
+#
+# The first version tested `Host *` with a shell `case` against `grep -n '^[Hh]ost[ \t]'`,
+# and refused on a file whose last stanza WAS `Host *`. Three things produce that, and all
+# three print identically in a terminal, which is what made it a bad check:
+#
+#   - CRLF endings: the pattern sees `Host *\r` and does not match.
+#   - a trailing tab after the `*`.
+#   - two spaces between `Host` and `*`.
+#
+# And `[ \t]` inside a grep BRE is not a tab at all — it is a bracket expression matching
+# a space, a BACKSLASH or the letter `t`, so `Host<TAB>*` was never even found. awk's
+# regex engine understands `\t`, and normalising `\r` on read costs one sub().
+CRLF=no
+if head -c 8192 "$CFG" | tr -dc '\r' | grep -q . 2>/dev/null; then CRLF=yes; fi
+
+star_last=$(awk '
+  { sub(/\r$/, "") }
+  /^[Hh][Oo][Ss][Tt][ \t]/ { last = $0 }
+  END { print (last ~ /^[Hh][Oo][Ss][Tt][ \t]+\*[ \t]*$/) ? "yes" : "no\t" last }
+' "$CFG")
+
+case "$star_last" in
+  yes) : ;;
   *) die "refusing: the last Host stanza in $CFG is not \`Host *\` but:
-    ${LAST_HOST#*:}
+    ${star_last#*	}
   This script appends the note to the end of the file, which is only inside \`Host *\`
   when \`Host *\` is last. Move it there first, or pass a different file." ;;
 esac
 
 aliases=$(awk '
-  /^[Hh]ost[ \t]/ { for (i = 2; i <= NF; i++) if ($i !~ /[*?!]/ && $i != "s24") print $i }
+  { sub(/\r$/, "") }
+  /^[Hh][Oo][Ss][Tt][ \t]/ { for (i = 2; i <= NF; i++) if ($i !~ /[*?!]/ && $i != "s24") print $i }
 ' "$CFG" | sort -u)
 [ -n "$aliases" ] || die "found no literal Host aliases in $CFG — refusing to touch it"
 
@@ -82,8 +102,9 @@ cp "$CFG" "$BACKUP"
 chmod 600 "$BACKUP"
 snapshot > "$BEFORE"
 
-awk '
-  { line[NR] = $0 }
+awk -v crlf="$CRLF" '
+  BEGIN { ORS = (crlf == "yes") ? "\r\n" : "\n" }
+  { sub(/\r$/, ""); line[NR] = $0 }
   END {
     n = NR
     # the note: from its first line, the contiguous comment run, stopping before the
@@ -141,6 +162,10 @@ if ! diff -u "$BEFORE" "$AFTER" > "$HOME/.ssh-G.dn-diff-$STAMP" 2>&1; then
   exit 1
 fi
 rm -f "$HOME/.ssh-G.dn-diff-$STAMP"
+
+[ "$CRLF" = yes ] && printf '%s\n' \
+  "NOTE: this file uses CRLF line endings, and they have been kept. That is also what" \
+  "made the first version of this script refuse it — the pattern saw \`Host *<CR>\`."
 
 printf '%s\n' \
   "Moved the defaults note inside \`Host *\` in $CFG." \
