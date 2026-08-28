@@ -354,8 +354,10 @@ The order, once `infra-dev` has been up long enough to be trusted:
    `decisions.md` refuses a key on `zero` authorising it to reach `one` at all. `two` is
    the bastion for both boxes — the lifeboat direction, which is the one that entry
    blesses. Confirmed reachable 2026-08-23.
-3. `two` — check first whether the token is even still inline: `recovery.md` says
-   "check before assuming" and nobody has.
+3. `two` — ~~check first whether the token is even still inline~~. Checked 2026-08-28:
+   it is **not**. It moved to `/etc/cloudflared/two.json` on 2026-08-23 and the init
+   script runs `--config`, no `--token`. The secret is unchanged, so it is still live
+   until 2g deletes the tunnel — see that phase.
 
 Not started, and deliberately not bundled with the dev container work: it is churn on the
 boxes you are connected through, and the whole point of doing `infra-dev` first is to
@@ -701,8 +703,11 @@ with the least margin and no bastion of its own.
 Not three items that happen to be adjacent — three that close each other, in the order they
 already have to run. The new tunnel arrives with credentials in a 0600 file, so 2e is
 satisfied by *construction* rather than performed; deleting the old tunnel then **voids**
-the token still inline in `two`'s 755 init script, which is stronger than rotating it and is
-the last disclosed credential on the fleet. The orphaned Access service tokens and
+the credential that was inline in `two`'s 755 init script until 2026-08-23, which is
+stronger than rotating it. **That move ended the exposure, not the disclosure** — the
+tunnel secret itself never changed, so whoever read that world-readable file still holds a
+working credential for tunnel `bdb4a988`. Only the delete ends that, which is why this is
+still 2e's last host and why the correction does not make it less urgent. The orphaned Access service tokens and
 applications left by the failed runs of 2026-08-22 are objects on the same tunnel and the
 same dashboard visit — [`cloudflare.md`](cloudflare.md) § *Safe to delete* is the list.
 Tracking them apart invites the half-done state this repo keeps meeting: a tunnel migrated
@@ -755,8 +760,12 @@ however long that takes.
 
 Two is not a copy-paste of the other two: it runs no docker, so
 `/etc/init.d/docker` is not there to model on, and whether `log_proxy` exists at all needs
-checking before assuming the same block works. It also tracks no `/etc` files yet, so this
-would be the first — which pulls in the `python3`-for-`check-system-drift` question.
+checking before assuming the same block works. ~~It also tracks no `/etc` files yet~~ —
+**both halves of that were stale when written.** `two` tracks `cloudflared`,
+`cloudflared-config.yml` and `sshd-infra.conf`, each carrying an `infra-` header; and
+`python3` is in `base_packages` with `ansible_python_interpreter` pinned to it fleet-wide,
+so `check-system-drift` and `install-system-file` have always been able to run there. 2g's
+cutover depends on the latter, which is why it was worth proving rather than inheriting.
 
 **2c narrowed on 2026-08-23, and then turned out to be one fault rather than two.** The
 owner's call on the first half: `ionic-traces` **stays down**. Very few users, and only
