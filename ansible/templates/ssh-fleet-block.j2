@@ -65,10 +65,34 @@ Host two
 
 # Listed explicitly, not `zero*`: that would also catch zero-local and zero-two, which
 # must NOT go through the edge. No token is sourced here — the boxes' tunnels admit you
-# on your certificate, while every dev container sits behind an Access service token.
-# The dev containers are NOT in this block; dev-client.yml writes three aliases each.
-Host zero one two
+# on your certificate, while every dev container's own hostname sits behind an Access
+# service token and gets the `sh -c` form from dev-client.yml instead.
+Host zero one two zero-dev-dd zero-dev-ds
   ProxyCommand {{ cloudflared }} access ssh --hostname %h
+
+# ── dd-dev and ds-dev through ZERO'S tunnel — the OLD door ────────────────────
+# Rules on zero's host tunnel (hosts/zero/system/cloudflared-config.yml) aimed at those
+# containers' loopback ports. Once each has its own connector and hostname, this is a
+# SECOND door to it, which is phase 2i.
+#
+# THEY STAY UNTIL 2i ACTUALLY CLOSES THEM. Deleting the alias closes nothing: the rule
+# lives on zero, and removing it is an edit to a boot-path file plus a connector cycle.
+# So dropping these buys no security and costs the only working route on any client whose
+# new tunnel is not up yet. `zero-dev-or3` is absent because it was genuinely dead — its
+# ingress rule came off in 7bb2075 (2026-08-24), leaving an alias naming a hostname with
+# no route behind it, which fails exactly like the container being down.
+#
+# HostKeyAlias matches dev-client.yml's block for the same container, so this route and
+# `dd-dev` / `dd-dev-lan` share one known_hosts entry rather than three.
+Host zero-dev-dd
+  HostName ssh-zero-dev-dd.gsrpi.uk
+  User dev
+  HostKeyAlias dd-dev
+
+Host zero-dev-ds
+  HostName ssh-zero-dev-ds.gsrpi.uk
+  User dev
+  HostKeyAlias ds-dev
 {% if adb_jump %}
 
 # ── the phone as a jump host — WINDOWS ONLY ───────────────────────────────────
