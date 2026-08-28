@@ -248,6 +248,18 @@ So the load-then-exec becomes `%USERPROFILE%\.ssh\cf-access-<alias>.cmd`, genera
 `exec`, so cloudflared is a child of the wrapper rather than a replacement for it — two
 processes per session, which is the cost.
 
+**The wrapper is CRLF and ASCII-only, and both are load-bearing.** cmd.exe seeks by byte
+offset between commands in a batch file and miscounts on an LF-only one, resuming mid-line
+and running fragments of the comments as commands; and it reads the file in the console
+codepage, so an em dash arrives as several bytes of something else. `dev-client.yml` writes
+it with `newline_sequence: "\r\n"`.
+
+**`IdentityFile` and `IdentitiesOnly` appear only if that client has the key.** With
+`IdentitiesOnly yes`, ssh offers an agent key only when its public half matches a named
+file — so on a client whose key lives in an agent and never on disk, naming a missing file
+leaves ssh nothing to offer and you get `Permission denied (publickey)`. The two sides of
+the laptop are checked separately, because `~` in WSL is not `C:\Users\gavin`.
+
 **The Windows token's permissions are printed, not asserted.** `/mnt/c` is drvfs and
 carries no Unix mode, so `mode: "0600"` there either fails or silently does nothing, and a
 task that pretends to have set a mode is worse than one that does not try. What protects

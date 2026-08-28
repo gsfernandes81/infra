@@ -566,6 +566,82 @@
       changed_when: true
       when: (on_windows_client | bool) and (setting_token | bool) and not ansible_check_mode
 
+    # ── can this client corroborate the identity it would name? ──────────────
+    # `IdentitiesOnly yes` is worth having: it stops ssh walking every key an agent holds
+    # and hitting MaxAuthTries before reaching the right one. But it is only safe
+    # alongside an IdentityFile that EXISTS, because with it set ssh offers an agent key
+    # only when its public half matches a named file. On a client whose private key lives
+    # in an agent — Windows' OpenSSH agent reached from WSL is the case that found this —
+    # neither ~/.ssh/id_ed25519 nor its .pub is on the Linux side, so the pair we wrote
+    # left ssh nothing to offer and the container answered "Permission denied (publickey)".
+    #
+    # Either half is enough: ssh can use the .pub alone to ask the agent for that identity.
+    - name: Is there a private key at the path the block would name
+      ansible.builtin.stat:
+        path: "{{ ssh_key | regex_replace('^~', home) }}"
+      register: idf
+      check_mode: false
+      when: ssh_key | length > 0
+
+    - name: Is there at least a public key there
+      ansible.builtin.stat:
+        path: "{{ (ssh_key | regex_replace('^~', home)) ~ '.pub' }}"
+      register: idpub
+      check_mode: false
+      when: ssh_key | length > 0
+
+    - name: Refuse an identity that was named explicitly and is not there
+      # An explicit -e identity=... that does not resolve is a typo, not an agent client.
+      # Guessing past it would write a block that cannot authenticate and say nothing.
+      ansible.builtin.assert:
+        that: (idf.stat.exists | default(false)) or (idpub.stat.exists | default(false))
+        fail_msg: >-
+          -e identity={{ ssh_key }} was given, but neither that file nor its .pub exists on
+          this client. Point it at a real key, or pass -e identity="" to omit IdentityFile
+          and IdentitiesOnly entirely, which is what an agent-only client wants.
+      when:
+        - identity is defined
+        - ssh_key | length > 0
+
+    # The same question for the WINDOWS side, which is a different file: `~` there is
+    # C:\Users\gavin, not WSL's home, and the two have different keys on this laptop.
+    - name: Is there a key on the Windows side
+      ansible.builtin.stat:
+        path: "{{ windows_home_wsl }}/.ssh/{{ ssh_key | basename }}"
+      register: win_idf
+      check_mode: false
+      when:
+        - on_windows_client | bool
+        - ssh_key | length > 0
+
+    - name: Is there at least a public key on the Windows side
+      ansible.builtin.stat:
+        path: "{{ windows_home_wsl }}/.ssh/{{ ssh_key | basename }}.pub"
+      register: win_idpub
+      check_mode: false
+      when:
+        - on_windows_client | bool
+        - ssh_key | length > 0
+
+    - name: Settle whether either block names an identity at all
+      ansible.builtin.set_fact:
+        identity_usable: >-
+          {{ (ssh_key | length > 0)
+             and ((idf.stat.exists | default(false)) or (idpub.stat.exists | default(false))) }}
+        win_identity_usable: >-
+          {{ (ssh_key | length > 0)
+             and ((win_idf.stat.exists | default(false)) or (win_idpub.stat.exists | default(false))) }}
+
+    - name: Say so when it does not
+      ansible.builtin.debug:
+        msg: >-
+          No IdentityFile or IdentitiesOnly in {{ dev_alias }}'s block: this client has
+          neither {{ ssh_key }} nor its .pub, so its keys come from an agent or ssh's own
+          discovery. Naming a missing file alongside IdentitiesOnly is what produces
+          "Permission denied (publickey)" with nothing offered.
+      changed_when: true
+      when: not (identity_usable | bool)
+
     # ── the ssh config block, on this client ─────────────────────────────────
     - name: Make sure ~/.ssh exists
       ansible.builtin.file:
@@ -601,7 +677,17 @@
         marker: "# {mark} {{ dev_alias }} (ansible/playbooks/dev-client.yml)"
         block: "{{ lookup('template', '../templates/ssh-dev-block.j2') }}"
       vars:
+        # identity_named, NOT identity_usable, and the rename is the whole fix.
+        # `set_fact` outranks task `vars:` in Ansible's precedence — 19 against 15 — so a
+        # task var sharing a fact's name is silently ignored, and BOTH blocks rendered
+        # with the POSIX client's answer. The Windows side of this laptop has a key file
+        # where WSL does not, so that was the wrong answer for one of them. A name the
+        # play never set_facts cannot be shadowed.
+        #
+        # `| bool` in the template because set_fact turns "True"/"False" into real
+        # booleans while a task var stays a string, and a non-empty string is truthy.
         windows: false
+        identity_named: "{{ identity_usable }}"
 
     # ── and on the Windows side of the same laptop ───────────────────────────
     - name: Make sure the laptop's %USERPROFILE%\.ssh exists
@@ -619,9 +705,24 @@
       when: on_windows_client | bool
 
     - name: The ProxyCommand wrapper Windows needs instead of `sh -c`
+      # newline_sequence IS THE POINT OF THIS TASK. cmd.exe seeks by byte offset between
+      # commands in a batch file and miscounts on an LF-only one, resuming mid-line and
+      # running fragments of the comments as commands — a burst of `'ible' is not
+      # recognized as an internal or external command`, from the middle of the word
+      # "ansible". Found on the laptop 2026-08-28, against a header comment of mine
+      # asserting LF was fine here. Nothing in this control plane can run cmd.exe, so
+      # that claim was never checkable and should not have been made.
+      #
+      # Two other spellings were tried and are recorded so nobody repeats them: a
+      # `replace('\n', '\r\n')` filter on a lookup silently does nothing, and CRLF in the
+      # template file itself survives only while the file has no Jinja in it — the lexer
+      # normalises newlines once it does. This parameter is the mechanism the module
+      # actually provides, and it leaves the template an ordinary LF file like every
+      # other one in the repo.
       ansible.builtin.template:
         src: ../templates/cf-access.cmd.j2
         dest: "{{ win_wrapper_wsl }}"
+        newline_sequence: "\r\n"
       # No mode, for the drvfs reason above. The wrapper holds no secret — it names the
       # file that does — so inherited ACLs are the right protection for it anyway.
       when: on_windows_client | bool
@@ -638,6 +739,7 @@
         block: "{{ lookup('template', '../templates/ssh-dev-block.j2') }}"
       vars:
         windows: true
+        identity_named: "{{ win_identity_usable }}"
       when: on_windows_client | bool
 
     # ── fallback for a control node that cannot see the laptop — Termux ──────
@@ -688,6 +790,7 @@
           # END {{ dev_alias }} (ansible/playbooks/dev-client.yml)
       vars:
         windows: true
+        identity_named: "{{ win_identity_usable }}"
       when:
         - windows_home_wsl | length > 0
         - not (on_windows_client | bool)

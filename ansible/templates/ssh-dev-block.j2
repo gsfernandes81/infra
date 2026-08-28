@@ -42,8 +42,19 @@ Host {{ dev_alias }}-lan
 # To clear it: ssh-keygen -R {{ dev_alias }}
 Host {{ dev_alias }} {{ dev_alias }}-sh {{ dev_alias }}-lan
   HostKeyAlias {{ dev_alias }}
+{% if identity_named | bool %}
+  # IdentitiesOnly stops ssh walking every key an agent holds and hitting MaxAuthTries
+  # before it reaches the right one. It also means an AGENT key is only offered when its
+  # public half matches the file named here — so both lines are omitted on a client that
+  # has neither ~/.ssh/id_ed25519 nor its .pub, where they would produce
+  # "Permission denied (publickey)" with nothing to offer.
   IdentityFile {{ ssh_key }}
   IdentitiesOnly yes
+{% else %}
+  # No IdentityFile or IdentitiesOnly: this client has no {{ ssh_key | default('key file', true) }}
+  # to name, so its keys come from an agent and ssh's own discovery. Naming a file that is
+  # not there, with IdentitiesOnly, leaves ssh nothing to offer at all.
+{% endif %}
   ServerAliveInterval 30
   ServerAliveCountMax 3
   Compression yes
