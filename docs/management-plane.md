@@ -505,7 +505,19 @@ dev container, and carries the registry that says which containers exist, on whi
 behind which hostnames. It runs on the phone and in WSL, writes both sides of the laptop
 from the latter, and takes `-e prompt_for_token=false` so a container whose tunnel is not
 provisioned yet is skipped by name instead of stopping the run with a prompt for a
-credential nobody can produce. The phone's reorder ran; its one-shot script is deleted.
+credential nobody can produce.
+
+Both clients are done. The phone and the laptop each ran their reorder and both one-shot
+scripts are deleted, per this repo's rule that they go once they have run. What the laptop
+found on the way is worth more than the scripts were: the Windows ProxyCommand wrapper was
+unusable because cmd.exe miscounts byte offsets in an LF-only batch file; `IdentitiesOnly`
+alongside an `IdentityFile` that does not exist gives `Permission denied (publickey)` on a
+client whose key lives in an agent; and `authorize-dev-client.yml` exists at all because
+the key that admits a client is a fact about the container, not something the client holds.
+All three are in [`decisions.md`](decisions.md) and [`ssh-clients.md`](ssh-clients.md).
+
+**Still open, and not this phase's:** `dd-dev` and `ds-dev` have no tunnel of their own, so
+`this-client.yml` skips them by name until Phase 5; and 2i's rules are still live on zero.
 
 **Filed 2026-08-25, no phase number — the two client plays now cover Windows, and the
 phone's own block is behind them.** `dev-client.yml` had no Windows half at all: run from
