@@ -1,15 +1,17 @@
-# The fleet: three named paths to each Pi, plus a mesh through both of the others.
+# The fleet. GENERATED: edit ansible/templates/ssh-fleet-block.j2 and re-run
+# playbooks/this-client.yml, not this. Reasoning: docs/ssh-clients.md
 #
 #   <host>                    via that box's own cloudflared tunnel
 #   <host>-local              direct on the LAN
 #   <host>-zero|-one|-two     through another box, over the LAN
+{% if adb_jump %}
+#   <host>-s24                through the phone, over USB — for when only it has a network
+{% endif %}
 #
-# WHY THE MESH EXISTS. On 2026-08-23 `two`'s tunnel was stopped while it was the only
-# configured route to it — there was no `two-zero` to fall back to, and no key on zero
-# or one that reaches it, so the box was unreachable until a ProxyCommand was assembled
-# by hand under pressure. Every box is now reachable through both of the others.
+# Every box is reachable through both of the others. That mesh exists because on
+# 2026-08-23 `two`'s tunnel was stopped while it was the only configured route to it.
 #
-# ORDERING: ssh takes the FIRST value it obtains for each keyword, so this block must sit
+# ORDERING: ssh takes the FIRST value it obtains for each keyword, so this block sits
 # ABOVE `Host *`. The playbook inserts it there rather than appending.
 
 # ── LAN ───────────────────────────────────────────────────────────────────────
@@ -34,23 +36,14 @@ Host two-zero two-one
   HostName {{ ip_two }}
 
 # ── the jump rules ────────────────────────────────────────────────────────────
-# ProxyJump, since 2026-08-23: all three hosts now set AllowTcpForwarding yes with
-# PermitOpen scoped to exactly these three addresses on port 22
-# (hosts/*/system/sshd-infra.conf). Verified live in both directions on all three, and
-# with a negative test that a destination outside the list is refused.
+# THESE DEPEND ON hosts/*/system/sshd-infra.conf, which sets AllowTcpForwarding yes with
+# PermitOpen scoped to these three addresses on port 22. If it is ever removed, ProxyJump
+# fails with "administratively prohibited" — revert to the form these had until
+# 2026-08-23, which needs no server-side change at all:
 #
-# THESE RULES DEPEND ON THAT DROP-IN. If it is ever removed, ProxyJump fails with
-# "administratively prohibited" and these revert to `ProxyCommand ssh <host> nc %h %p`,
-# which uses a session channel that AllowTcpForwarding does not govern. That is what
-# they were until today, and it works with no server-side change at all.
+#     ProxyCommand ssh <host> nc %h %p
 #
-# THE DEV CONTAINERS' `-lan` ALIASES ARE NOT CONVERTED AND MUST NOT BE. `infra-dev-lan`,
-# `or3-dev-lan`, `dd-dev-lan` and `ds-dev-lan` — written by dev-client.yml, not by this
-# template — target 127.0.0.1 on 2225, 2224, 2222 and 2223, none of which PermitOpen
-# includes, so a jump to any of them is refused. They keep the `nc` form, which rides a
-# session channel that AllowTcpForwarding does not govern. (They also do not match the
-# three rules below, which is why nothing here has to exclude them: `*-zero` matches an
-# alias ENDING in `-zero`.)
+# `*-zero` matches an alias ENDING in `-zero`, so no dev-container alias is caught here.
 Host *-zero
   ProxyJump zero
 
@@ -59,24 +52,6 @@ Host *-one
 
 Host *-two
   ProxyJump two
-
-# ── THE DEV CONTAINERS ARE NOT IN THIS BLOCK ANY MORE ─────────────────────────
-# `zero-dev-dd`, `zero-dev-ds` and `zero-dev-or3` used to live here: aliases for the
-# `ssh-zero-dev-*.gsrpi.uk` rules on ZERO'S OWN host tunnel, which is a different door
-# from the one each container now opens for itself. Every dev container has its own
-# tunnel and its own Access service token, run by a connector inside it, and
-# dev-client.yml writes three aliases for each — `<c>`, `<c>-sh` and `<c>-lan`. See
-# playbooks/this-client.yml, which is the registry and the one command that writes them.
-#
-# `zero-dev-or3` was already dead when it was removed from here: its ingress rule came
-# off zero's tunnel in 7bb2075 (2026-08-24), so the alias named a hostname with no route
-# behind it — the failure that looks like the container being down.
-#
-# THE OTHER TWO RULES ARE STILL ON ZERO'S TUNNEL. Dropping the aliases stops this client
-# using that door; it does not close it. Closing it is an edit to
-# hosts/zero/system/cloudflared-config.yml plus a connector cycle on zero, which is the
-# owner's to run and is filed as 2i in docs/management-plane.md. Until then each of those
-# containers has two doors and only one of them is the one we chose.
 
 # ── through each box's own cloudflared tunnel ─────────────────────────────────
 Host zero
@@ -88,43 +63,26 @@ Host one
 Host two
   HostName ssh-two.gsrpi.uk
 
-# One copy of the path rather than three. Listed explicitly, not `zero*`: that would also
-# catch zero-local and zero-two, which must NOT go through the edge.
-#
-# No token is sourced here, and that is the difference between a box and a container: the
-# three Pis' tunnels admit you on your certificate, while every dev container sits behind
-# an Access application with a service token. dev-client.yml's blocks carry the `sh -c`
-# that loads one; this line must not grow into that shape.
+# Listed explicitly, not `zero*`: that would also catch zero-local and zero-two, which
+# must NOT go through the edge. No token is sourced here — the boxes' tunnels admit you
+# on your certificate, while every dev container sits behind an Access service token.
+# The dev containers are NOT in this block; dev-client.yml writes three aliases each.
 Host zero one two
   ProxyCommand {{ cloudflared }} access ssh --hostname %h
-
 {% if adb_jump %}
-# ── the phone as a jump host ──────────────────────────────────────────────────
-# `adb forward` runs as a SIDE EFFECT of this Match. ssh evaluates `Match exec` while
-# parsing config — including when resolving a jump host — so the forward exists before
-# s24 is dialled, and `ssh zero-s24` is one command rather than two.
+
+# ── the phone as a jump host — WINDOWS ONLY ───────────────────────────────────
+# Every byte of egress happens ON THE PHONE, so the targets are tunnel hostnames and the
+# phone runs cloudflared. Not ProxyJump: an ssh:// ingress is not raw TCP at the edge.
 #
-# If the phone is not attached, adb exits non-zero, the block does not apply, and you get
-# a plain connection refused on localhost:8022. That is the right error: it names the
-# thing that is missing rather than failing somewhere further along.
+# `adb forward` runs as a SIDE EFFECT of the Match below — ssh evaluates `Match exec`
+# while parsing, so the forward exists before s24 is dialled. No phone attached means adb
+# exits non-zero, the block does not apply, and you get a plain connection refused.
+#
+# Not rendered for WSL or the phone, and that is not an oversight — docs/ssh-clients.md.
 Match host s24 exec "adb forward tcp:8022 tcp:8022"
   ConnectTimeout 10
 
-# THE TARGETS ARE TUNNEL HOSTNAMES, NOT LAN ADDRESSES, and that is the whole point.
-# This path exists for the ship: the laptop has no internet, the phone does, and they are
-# joined by a USB cable. So every byte of network egress happens ON THE PHONE — the LAN
-# addresses would mean nothing to it from out there.
-#
-# NOT ProxyJump. That would have the phone open a raw TCP connection to
-# ssh-zero.gsrpi.uk:22, where nothing is listening: an ssh:// ingress is not raw TCP at
-# the edge, and only `cloudflared access ssh` can speak to it. So the phone RUNS
-# cloudflared, exactly as the -zero and -one rules have their jump host run `nc`.
-#
-# Absolute path, not the bare name: this runs in a non-interactive ssh session on the
-# phone, whose PATH is not the one you get when you open Termux.
-#
-# When everything is on the same network these are not the aliases you want —
-# <host>-local is direct, and <host>-zero|-one|-two go over the LAN.
 Host zero-s24
   HostName ssh-zero.gsrpi.uk
 
@@ -138,39 +96,27 @@ Host *-s24
   ProxyCommand ssh s24 {{ phone_cloudflared }} access ssh --hostname %h
 
 Host s24
-  # 127.0.0.1, NOT localhost. ssh resolves `localhost` to ::1 first and `adb forward`
-  # binds IPv4 only, so the name gives `kex_exchange_identification: Connection refused`
-  # while the forward is demonstrably up in `adb forward --list`. Same IPv6-first
-  # resolution that produced zero's `dial tcp [::1]:8384` cloudflared errors in January.
+  # 127.0.0.1, NOT localhost: ssh tries ::1 first and adb forward binds IPv4 only, so the
+  # name fails with kex_exchange_identification while the forward is plainly up.
   HostName 127.0.0.1
   Port 8022
+  # Android's uid for Termux. It CHANGES if the app is reinstalled — check this first if
+  # `ssh s24` starts refusing.
   User {{ s24_user }}
-
-# WHY THIS WHOLE SECTION IS WINDOWS-ONLY, and not an oversight to be fixed later:
-#
-#   - From WSL it CANNOT work. WSL2 has its own network namespace, so the `adb forward`
-#     that Windows creates binds a loopback WSL cannot see — and `adb` is a Windows
-#     binary regardless. Rendering these aliases there would give WSL four addresses
-#     that resolve and never connect.
-#   - From the phone it is pointless: s24 would be its own sshd over loopback.
-#
-# So the phone-tethered path belongs to the laptop's Windows ssh, and only there.
 {% endif %}
 
 # ── one host key per BOX, not per path ────────────────────────────────────────
-# Without this each path keeps its own known_hosts entry, so a rarely-used route has no
-# stored key and simply prompts you to accept whatever it is handed — during a rescue,
-# which is exactly when you are least likely to check.
-# To clear one later: ssh-keygen -R zero
+# Else a rarely-used route has no stored key and prompts you to accept whatever it is
+# handed, mid-rescue. To clear one: ssh-keygen -R zero
 Host zero zero-local zero-one zero-two zero-s24
   HostKeyAlias zero
 
 Host one one-local one-zero one-two one-s24
   HostKeyAlias one
 
-# ChaCha20 first: `two` is an ARM1176 with no AES acceleration, where software AES is
-# both slower AND exposed to cache-timing side channels. Ordered, not pinned — AES-GCM
-# stays available so this rescue path cannot fail closed.
+# ChaCha20 first: `two` is an ARM1176 with no AES acceleration, where software AES is both
+# slower AND exposed to cache-timing side channels. Ordered, not pinned, so this rescue
+# path cannot fail closed.
 Host two two-local two-zero two-one two-s24
   HostKeyAlias two
   Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
@@ -179,16 +125,9 @@ Host two two-local two-zero two-one two-s24
 Host zero* one* two*
   User gavin
 {% if multiplex %}
-  # ControlMaster is the real latency win — the first connection stays open and later
-  # ones reuse it, so a run of commands pays TCP and auth setup once.
-  #
-  # KEYED BY ALIAS (%n), not by host. %C and the usual %r@%h:%p both hash the RESOLVED
-  # address, so `zero-one` and `zero-local` would share one socket — and a rescue path
-  # that silently reuses a working direct connection is not a test of anything.
-  #
-  # OMITTED ON WINDOWS. Win32-OpenSSH has never implemented multiplexing, and setting it
-  # there fails with `getsockname failed: Not a socket` — which reads like a network
-  # fault and is not one.
+  # Keyed by ALIAS (%n): %C and %r@%h:%p hash the RESOLVED address, so zero-one and
+  # zero-local would share one socket — and a rescue path that silently reuses a working
+  # direct connection is not a test of anything. Omitted on Windows, which cannot do it.
   ControlMaster auto
   ControlPath ~/.ssh/cm/%n-%r
   ControlPersist 10m

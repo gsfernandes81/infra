@@ -50,6 +50,11 @@ a second client would put an API token back on the command line for no reason.
 
 ### One command, for whichever client you are on
 
+**The reasoning behind every alias it writes is [`../docs/ssh-clients.md`](../docs/ssh-clients.md)**,
+not this file and not the generated blocks. Those blocks keep only what you need with a
+wedged connection in front of you; the background is in the doc. This section is how to
+run it.
+
 ```sh
 cd ~/infra/ansible
 ansible-playbook playbooks/this-client.yml --check --diff   # see it first

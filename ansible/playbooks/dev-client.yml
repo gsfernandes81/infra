@@ -88,6 +88,11 @@
 # The client ID is a different thing and is treated differently: it is not secret (it is
 # the username half), so -e is fine for it and it is prompted for only when absent.
 #
+#
+# THE REASONING BEHIND THE ALIASES THIS WRITES IS docs/ssh-clients.md. It moved there on
+# 2026-08-28: it had been inline in the templates, which meant a client's ssh config
+# carried the dev-container explanation once PER CONTAINER — 484 lines to say 130 lines
+# of configuration. The blocks now keep what you need mid-rescue; the doc keeps the rest.
 # NO NEW COLLECTIONS: ansible.builtin throughout.
 
 - name: Guard — refuse to run with no inventory

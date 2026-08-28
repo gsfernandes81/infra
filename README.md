@@ -151,6 +151,7 @@ None are in git. `.gitignore` covers `.env`, `*.key`, `qBittorrent.conf`, `*.sql
 | [recovery.md](docs/recovery.md) | It broke, or it rebooted. Start here. |
 | [fleet-inventory.md](docs/fleet-inventory.md) | What is *actually* running, read off the boxes. Generated — never hand-edited. |
 | [management-plane.md](docs/management-plane.md) | How the fleet is managed, and why it is Ansible. |
+| [ssh-clients.md](docs/ssh-clients.md) | Reaching the fleet and the dev containers from a laptop or a phone. The generated `~/.ssh/config` blocks point here. |
 | [host-setup.md](docs/host-setup.md) | Building one of these boxes from bare Alpine. |
 | [port-forwarding.md](docs/port-forwarding.md) | The fragile bit. Read before touching the torrents stack. |
 | [roadmap.md](docs/roadmap.md) | What's next, and the traps waiting in it. |
