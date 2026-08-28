@@ -266,10 +266,13 @@ tunnel pointing at those containers' loopback ports. Now that every container ru
 connector behind its own hostname and token, they are a second door to each — a different
 door with a different trust story.
 
-`zero-dev-dd` and `zero-dev-ds` are still in the fleet block, and stay there until 2i
-actually closes those rules. Deleting an alias closes nothing — the rule lives on zero —
-so dropping them would buy no security and would cost the only working route to those
-containers on any client whose own tunnel is not up yet. Closing them edits
+No client alias points at them. `dd-dev` and `ds-dev` are not running until they are
+deployed with a connector of their own, at which point `dev-client.yml` gives them the
+same three aliases every other container has — so an alias for the old door would name a
+hostname with nothing behind it, which fails exactly like a container being down.
+
+Dropping the alias does not close the door, and nothing about this pretends it does. The
+rules are still on zero. Closing them edits
 `hosts/zero/system/cloudflared-config.yml` and cycles zero's connector, which is
 [`management-plane.md`](management-plane.md)'s phase 2i and the owner's to run — from a
 mesh route, since `ssh-zero.gsrpi.uk` **is** the tunnel being cycled.
