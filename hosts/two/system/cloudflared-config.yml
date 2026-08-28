@@ -4,25 +4,42 @@
 # infra-name: config.yml
 # infra-mode: 0644
 #
-# Credentials and metrics for `two`'s host tunnel. NOT its ingress.
+# GENERATED INTO THE REPO by ansible/playbooks/cloudflare-tunnel-new.yml, from the
+# ingress the connector was actually serving — not from the dashboard and not from
+# anyone's transcription. Read the diff before committing it: from here on this file IS
+# the routing, and a hostname missing from it is a hostname serving 404.
 #
-# WHY. Until 2026-08-23 two's token was INLINE in /etc/init.d/cloudflared, a mode-755
-# world-readable file — the only host where the August move to /etc/conf.d never
-# happened. It went straight to a credentials file rather than via conf.d, because that
-# is one fewer place a secret lives and one fewer step to undo later.
+# Generating into the repo is not the thing CLAUDE.md rejects. What is rejected is
+# generating boot-path content into /etc; these bytes go through a diff, a commit and
+# bin/install-system-file like every other tracked file.
 #
-# NO INGRESS HERE. This tunnel is remotely-managed, which is certain rather than
-# assumed: it has only ever run with `--token` and no `--config`, so it has never read a
-# local file and its routes can only have come from Cloudflare. cloudflared ignores
-# local ingress whenever a remote configuration exists — proven on zero by clearing the
-# remote copy and watching the connector drop to one rule. Moving the routes here is 2g,
-# and it needs a NEW tunnel because `config_src` is create-time only.
+# THIS TUNNEL IS LOCALLY-MANAGED, so unlike the old one the rules below are in force.
+# cloudflared prefers a REMOTE configuration whenever one exists and ignores local
+# ingress silently — which is why the previous config.yml on zero carried rules that had
+# never taken effect and looked exactly like rules that had. This tunnel was created with
+# `config_src: local` and has no remote configuration, so there is nothing to lose to.
+#
+# ORDER IS BEHAVIOUR: cloudflared matches first-rule-wins. This preserves the order the
+# edge served. Do not sort it.
+#
+# `localhost` IS REWRITTEN TO 127.0.0.1 on the way through, deliberately, and it is the
+# one thing here that is not a faithful copy of the edge. ssh resolves localhost to ::1
+# first and much of this fleet binds IPv4 only — zero's cloudflared logged
+# `dial tcp [::1]:8384: connect: connection refused` for months against a Syncthing that
+# was running. CLAUDE.md § Landmines carries the rule. A literal costs nothing.
 
-tunnel: bdb4a988-7c8b-4f5f-a2bf-e42464309d64
+tunnel: f9407a5c-9361-4b59-85ab-a1f61811fb37
 credentials-file: /etc/cloudflared/two.json
 
-# Pinned so the probe has a fixed target. THE PIN MAKES THE RESTART METHOD LOAD-BEARING:
-# `rc-service restart` does not wait, cloudflared's grace period is 30s, and the outgoing
-# process still holds this port when the incoming one binds it — which killed six
-# respawns on zero. Cycle with stop -> poll until 20241 is free -> start, never restart.
+# Pinned so the probe in docs/recovery.md has a fixed target. THE PIN MAKES THE RESTART
+# METHOD LOAD-BEARING: `rc-service restart` does not wait, cloudflared's grace period is
+# 30s, and the outgoing process still holds this port when the incoming one binds it —
+# six respawns died that way on zero. Cycle with stop, poll until 20241 clears, start.
 metrics: 127.0.0.1:20241
+
+ingress:
+  - hostname: ssh-two.gsrpi.uk
+    service: ssh://127.0.0.1:22
+  - hostname: anchor-two.gsrpi.uk
+    service: http://127.0.0.1:8080
+  - service: http_status:404
