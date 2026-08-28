@@ -100,7 +100,7 @@
   vars:
     required_group: control
 
-- name: Configure this control node to reach a dev container over Cloudflare
+- name: Configure this client to reach {{ dev_alias }} over Cloudflare
   hosts: control
   gather_facts: false
 
@@ -385,27 +385,42 @@
       # Printed separately because the two prompts below carry no_log, and a suppressed
       # prompt is a cursor sitting there with no explanation. This task says what is
       # wanted; the prompts just take it.
+      #
+      # IT NAMES THE CONTAINER, AND SO DO THE PROMPTS AND THE PLAY BANNER. this-client.yml
+      # imports this play once per container, so without the alias in them you get four
+      # identical banners and four identical `Client Secret` cursors and no way to tell
+      # which one is being asked for — reported from the laptop, 2026-08-28. A prompt for
+      # a credential has to say which credential.
       ansible.builtin.debug:
         msg:
-          - "Paste the Access service token, from the Cloudflare Zero Trust dashboard."
+          - "───────────────────────────────────────────────────────────────────────"
+          - "{{ dev_alias | upper }} — the Access service token for {{ dev_hostname }}."
+          - ""
+          - "It is per CONTAINER, not per client, so it is the same pair every other"
+          - "client already presents. Read it off one that has it:"
+          - "    cat ~/.config/{{ dev_alias }}/token"
+          - "Or from the Zero Trust dashboard, the token named {{ dev_alias }} — but the"
+          - "secret is shown only at creation, so the dashboard cannot give it back."
+          - ""
           - "The ID is not secret and will echo. The secret will not echo."
           - "Neither reaches your shell history: these are read from the terminal, not"
           - "from the command line."
-          - "{{ 'It will be written for BOTH clients: WSL and Windows.'
-                if on_windows_client | bool else 'One client: this one.' }}"
+          - "{{ 'Written for BOTH sides of this laptop: WSL and Windows.'
+                if on_windows_client | bool else 'Written for this client only.' }}"
+          - "───────────────────────────────────────────────────────────────────────"
       changed_when: true
       when: (setting_token | bool) and not ansible_check_mode
 
-    - name: Read the Client ID
+    - name: Read {{ dev_alias }}'s Client ID
       # echo on — the ID is the username half and is not a credential. It can also come
       # from -e st_client_id=..., which is why this is skipped when it is already set.
       ansible.builtin.pause:
-        prompt: "  Client ID"
+        prompt: "  {{ dev_alias }}  Client ID"
         echo: true
       register: id_in
       when: (setting_token | bool) and not ansible_check_mode and st_client_id is not defined
 
-    - name: Read the Client Secret
+    - name: Read {{ dev_alias }}'s Client Secret
       # THE ONE THAT CANNOT COME FROM THE COMMAND LINE. `pause` is a task, so it always
       # runs and there is no variable name for -e to pre-empt — which is exactly what
       # vars_prompt could not promise. echo: false so it is not on screen either.
@@ -413,7 +428,7 @@
       # no_log because the registered result holds user_input verbatim, and `-v` would
       # otherwise print it. That is the same leak in a different costume.
       ansible.builtin.pause:
-        prompt: "  Client Secret (not echoed)"
+        prompt: "  {{ dev_alias }}  Client Secret (not echoed)"
         echo: false
       register: secret_in
       no_log: true
@@ -682,7 +697,9 @@
         msg:
           - "ssh {{ dev_alias }}         the claude session itself, over Cloudflare"
           - "ssh {{ dev_alias }}-sh      a shell instead, same route"
-          - "ssh {{ dev_alias }}-lan     break-glass, through zero, no Cloudflare"
+          - "ssh {{ dev_alias }}-lan     break-glass, through zero's sshd"
+          - "    independent of THIS container's tunnel, Access app and token —"
+          - "    but NOT of Cloudflare: `Host zero` is zero's own tunnel."
           - ""
           - "wsl/posix: block in {{ ssh_config }}, token at {{ token_file }} (0600),"
           - "sourced by the ProxyCommand, so it reaches one cloudflared and no other"
