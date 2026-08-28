@@ -31,7 +31,7 @@
 
   vars_prompt:
     - name: cf_api_token
-      prompt: "Cloudflare API token (Tunnel:Edit AND Zone:DNS:Edit on gsrpi.uk)"
+      prompt: "Cloudflare API token — THREE permissions, not phase 1's one: Account>Cloudflare Tunnel>Edit, Zone>Zone>Read, Zone>DNS>Edit (last two on gsrpi.uk)"
       private: true
 
   vars:
@@ -262,6 +262,13 @@
       changed_when: true
 
     # ── find the DNS records, and record where they point ────────────────────
+    # no_log HIDES THE REASON A REFUSAL HAPPENED, and CLAUDE.md already records that:
+    # "a `no_log` write that can be refused carries `failed_when: false`, then a task that
+    # prints the body's error list (never the invocation — that is where the Authorization
+    # header is), then an `assert` that stops the play". This is a READ and it was still
+    # bare `no_log`, so a 403 arrived as `Status code was 403` with the response censored —
+    # and the response body is the only place Cloudflare says WHICH permission is missing.
+    # Cost a run on `two`, 2026-08-28.
     - name: Find the zone
       ansible.builtin.uri:
         url: "{{ cf_api }}/zones?name={{ zone_name }}"
@@ -269,6 +276,31 @@
       register: zone
       delegate_to: localhost
       no_log: true
+      failed_when: false
+
+    - name: Say what Cloudflare refused, if it did
+      # The body only. NEVER `zone` whole, and never the invocation: that is where the
+      # Authorization header lives.
+      ansible.builtin.debug:
+        msg: >-
+          Cloudflare answered {{ zone.status | default('?') }} listing the zone
+          {{ zone_name }}: {{ zone.json.errors | default('no error body') }}
+      changed_when: true
+      when: (zone.status | default(0)) != 200
+
+    - name: The token has to be able to see the zone
+      ansible.builtin.assert:
+        that:
+          - (zone.status | default(0)) == 200
+          - (zone.json.result | default([]) | length) > 0
+        fail_msg: >-
+          Could not list the zone {{ zone_name }} (HTTP {{ zone.status | default('?') }}).
+          A 403 here almost always means the token is phase 1's — that one only needs
+          Account -> Cloudflare Tunnel -> Edit, and this phase also touches DNS. Mint one
+          with all three: Account -> Cloudflare Tunnel -> Edit, Zone -> Zone -> Read, and
+          Zone -> DNS -> Edit, the last two scoped to {{ zone_name }}. Nothing has been
+          changed on {{ inventory_hostname }} or at the edge.
+        success_msg: "token can see {{ zone_name }}"
 
     - name: Keep the zone id
       ansible.builtin.set_fact:
@@ -282,6 +314,19 @@
       loop: "{{ move_hosts }}"
       delegate_to: localhost
       no_log: true
+      failed_when: false
+
+    - name: The token has to be able to read those records
+      ansible.builtin.assert:
+        that: item.status | default(0) == 200
+        fail_msg: >-
+          Cloudflare answered {{ item.status | default('?') }} reading the DNS record for
+          {{ item.item }}: {{ item.json.errors | default('no error body') }}.
+          Zone -> DNS -> Edit on {{ zone_name }} is the permission this needs. Nothing has
+          been changed.
+      loop: "{{ recs.results }}"
+      loop_control:
+        label: "{{ item.item }}"
 
     # Recorded BEFORE anything changes, so a rollback restores the exact previous target
     # rather than assuming it was the old tunnel. Printed, because if this play dies

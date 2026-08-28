@@ -19,7 +19,7 @@
 
   vars_prompt:
     - name: cf_api_token
-      prompt: "Cloudflare API token (Tunnel:Edit AND Zone:DNS:Edit on gsrpi.uk)"
+      prompt: "Cloudflare API token — Account>Cloudflare Tunnel>Edit, Zone>Zone>Read, Zone>DNS>Edit (last two on gsrpi.uk)"
       private: true
 
   vars:

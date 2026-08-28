@@ -158,7 +158,11 @@ on any of them.
 ## Safe to delete
 
 - **API tokens after use.** Rotation and migration need `Account -> Cloudflare Tunnel ->
-  Edit` and `Zone -> DNS -> Edit` on `gsrpi.uk`, and nothing else.
+  Edit`, `Zone -> Zone -> Read` and `Zone -> DNS -> Edit` on `gsrpi.uk`, and nothing else.
+  **Zone -> Zone -> Read is not optional and was missing from this list**: the cutover
+  begins by finding the zone id with `GET /zones?name=gsrpi.uk`, which a tunnel-only token
+  cannot do. It cost a run on `two`, 2026-08-28 — a 403 whose body was censored by
+  `no_log`, so the answer was in the response nobody could see.
 - **Orphaned Access service tokens.** At least one is expected: created 2026-08-22, its
   secret censored by `no_log` before it was printed and unrecoverable. Identify the live
   one by the `client_id` in the phone's `~/.config/infra-dev/token`.
