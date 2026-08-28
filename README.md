@@ -23,7 +23,7 @@ It is deployed with plain `podman-compose`, in an unprivileged deploy account's 
 
 ```sh
 ssh claude@ssh-two.gsrpi.uk
-cd /srv/infra/deployments/destiny-director
+cd ~gavin/infra/deployments/destiny-director   # NOT /srv/infra — see hosts/two/setup/README.md
 podman-compose pull
 podman-compose up -d postgres
 podman-compose up -d --no-deps --force-recreate beacon

@@ -85,7 +85,7 @@ end of a session for the next one. Two rules, both of which have bitten:
 ## Git & workflow
 
 - **`main` is the only long-lived branch, and it is what the boxes run.** The checkouts
-  on the hosts (`~gavin/infra` on `zero`, `/srv/infra` on `two`) track `main`; a bad
+  on the hosts (`~gavin/infra` on **both** `zero` and `two`) track `main`; a bad
   `main` is a bad fleet.
 - **Merge to `main` as soon as the work is complete and non-breaking. This is strongly
   encouraged, not merely allowed.** Small, frequent, finished commits straight to `main`,

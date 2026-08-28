@@ -148,6 +148,12 @@ install -d -o gavin -g deploy -m 2750 /srv
 As **gavin**:
 
 ```sh
+# ⚠︎ AS BUILT, THIS IS NOT WHERE THE CHECKOUT ENDED UP. `two` carries it at
+# ~gavin/infra and has no /srv/infra at all — established 2026-08-28, when a playbook
+# was pointed at the documented path and found nothing. The rest of this section, and
+# the destiny-director paths below, describe the same directory that does not exist.
+# Left as written rather than silently rewritten: this is the build procedure, and what
+# it says was intended is worth keeping next to what actually happened.
 git clone git@github.com:gsfernandes81/infra.git /srv/infra
 ```
 
