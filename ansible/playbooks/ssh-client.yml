@@ -141,7 +141,28 @@
 
     # ControlPath sockets. Absent, every multiplexed connection fails with an opaque
     # `unix_listener: cannot bind` that reads like a network problem.
-    - name: Ensure the ControlPath directory exists
+    - name: Ensure ANSIBLE's ControlPath directory exists
+      # ~/.ssh/cp, and it is NOT the same directory as ~/.ssh/cm below. Two multiplexing
+      # configs coexist and each needs its own socket directory:
+      #
+      #   ~/.ssh/cp   ansible.cfg's `ssh_args = … -o ControlPath=~/.ssh/cp/%C`
+      #   ~/.ssh/cm   the infra-fleet block's `ControlPath ~/.ssh/cm/%n-%r`
+      #
+      # Only the second was created here, so a control node that had run the client plays
+      # still failed the first time it ran a play against a fleet HOST:
+      #
+      #   unix_listener: cannot bind to path ~/.ssh/cp/<hash>: No such file or directory
+      #
+      # reported as UNREACHABLE, which reads like a network fault and is a missing mkdir.
+      # It hid for months because `hosts: control` plays connect locally and never
+      # multiplex, so the phone — where the directory was made by hand, as ansible.cfg
+      # says to — was the only node that had ever needed it.
+      ansible.builtin.file:
+        path: "{{ home }}/.ssh/cp"
+        state: directory
+        mode: "0700"
+
+    - name: Ensure the fleet block's ControlPath directory exists
       ansible.builtin.file:
         path: "{{ home }}/.ssh/cm"
         state: directory
