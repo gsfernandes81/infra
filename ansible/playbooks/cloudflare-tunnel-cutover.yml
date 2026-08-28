@@ -88,6 +88,29 @@
           play would stop it mid-run. Come in over the mesh instead and tell Ansible so:
           -e ansible_host={{ inventory_hostname }}-zero   (or -one / -two)
 
+    # ── the host's clone has to be where we think it is ──────────────────────
+    # A `chdir` into a directory that is not there fails inside the block, which fires
+    # the rescue for something that is not a rollback. Worse, this value came from
+    # CLAUDE.md and hosts/<host>/setup/README.md — both of which describe how a box was
+    # BUILT, not what it currently is. `two` was documented at /srv/infra and is not
+    # there. The box is the authority; this asks it before anything is written.
+    - name: Is the host's clone where host_repo says
+      ansible.builtin.stat:
+        path: "{{ host_repo }}/.git"
+      register: repo_stat
+      become: true
+
+    - name: Refuse a host_repo that is not a checkout
+      ansible.builtin.assert:
+        that: repo_stat.stat.exists | default(false)
+        fail_msg: >-
+          {{ host_repo }} on {{ inventory_hostname }} is not a git checkout, and this play
+          runs bin/install-system-file from there. Find the real one —
+          `ls -ld ~gavin/infra /srv/infra` on the box — and set it in
+          ansible/host_vars/{{ inventory_hostname }}.yml as `infra_checkout`, or pass
+          -e infra_checkout=/the/real/path for this run.
+        success_msg: "{{ host_repo }} is a checkout"
+
     # ── what we are moving from, and to ──────────────────────────────────────
     - name: Read both credentials files
       ansible.builtin.slurp:
