@@ -57,14 +57,66 @@
   vars:
     # Either form. The FILE is the easy one to type on a phone; the inline one has to be
     # JSON, for the reason the assert below spells out.
+    #
+    # THE PATH IS MADE ABSOLUTE FIRST, because `lookup('file', 'x.pub')` does not mean
+    # "x.pub in the directory I am standing in". A relative path is resolved against the
+    # PLAYBOOK's directory, so a key sitting in ansible/ is looked for in
+    # ansible/playbooks/ and reported missing while `ls` plainly shows it. Expanding ~ and
+    # anchoring anything else to $PWD makes the argument mean what it looks like it means.
+    pubkey_path: >-
+      {{ (client_pubkey_file | default('')) | regex_replace('^~', lookup('env', 'HOME')) }}
+    pubkey_file: >-
+      {{ pubkey_path if pubkey_path is match('^/')
+         else (lookup('env', 'PWD') ~ '/' ~ pubkey_path) }}
+    # Only ever read AFTER the file assert below has proved it readable. A lookup that
+    # throws inside a fail_msg takes the whole task down while rendering its own error,
+    # which is how this play first reported a missing file: forty lines of traceback
+    # ending in "Finalization of task args failed", for a wrong relative path.
     pubkey: >-
-      {{ (lookup('file', client_pubkey_file) if client_pubkey_file is defined
+      {{ (lookup('file', pubkey_file) if client_pubkey_file is defined
           else client_pubkey | default('')) | trim }}
     dev_clients: "{{ containers | default(['infra-dev', 'or3-dev']) }}"
     dev_secrets_overrides: "{{ secrets_dirs | default({}) }}"
     host_home: "{{ ansible_facts['env']['HOME'] }}"
 
   tasks:
+    - name: One of the two forms has to be given
+      ansible.builtin.assert:
+        that: (client_pubkey_file is defined) or (client_pubkey is defined)
+        fail_msg: |
+          Give the client's PUBLIC key, one of two ways:
+
+            -e client_pubkey_file=~/laptop.pub
+            -e '{"client_pubkey": "ssh-ed25519 AAAAC3NzaC1... you@machine"}'
+
+          NOT -e client_pubkey=ssh-ed25519 AAAA... you@machine — the k=v form splits on
+          whitespace and everything after the first space is thrown away.
+        success_msg: "a key was given"
+
+    - name: The key file has to be readable ON THE CONTROL NODE
+      # delegate_to: localhost, and that is not a detail. This play targets `zero`, so an
+      # undelegated stat would look for the key on ZERO — where it is not, and never was.
+      # The lookup that reads it runs on the control node like every lookup does, so the
+      # check has to be made in the same place as the read.
+      ansible.builtin.stat:
+        path: "{{ pubkey_file }}"
+      register: pkf
+      delegate_to: localhost
+      run_once: true
+      check_mode: false
+      when: client_pubkey_file is defined
+
+    - name: Say where it looked, when it is not there
+      ansible.builtin.assert:
+        that: pkf.stat.exists | default(false)
+        fail_msg: >-
+          No file at {{ pubkey_file }} on this control node. A relative
+          -e client_pubkey_file is resolved against $PWD by this play, so run it from the
+          directory holding the key or give an absolute path. Note the file is read HERE,
+          not on {{ inventory_hostname }} — every lookup runs on the control node.
+        success_msg: "key file readable at {{ pubkey_file }}"
+      when: client_pubkey_file is defined
+
     - name: A public key has to be given, and has to look like one
       # No default. Authorising "" would be a no-op that reports changed, and authorising
       # a private key by mistake is the accident worth spending an assert on: the two
@@ -74,6 +126,7 @@
           - pubkey | length > 0
           - pubkey is search('^(ssh-ed25519|ssh-rsa|ecdsa-sha2-|sk-)')
           - pubkey.split() | length >= 2
+          - pubkey.split('\n') | length == 1
         fail_msg: |
           Got: "{{ pubkey }}"
 

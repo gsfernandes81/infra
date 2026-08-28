@@ -94,6 +94,11 @@ ansible-playbook playbooks/authorize-dev-client.yml \
   -e client_pubkey_file=~/laptop.pub
 ```
 
+A relative path is anchored to the directory you run from, not to `playbooks/` — which
+is what a bare `lookup('file', …)` would have done, and would have looked for a key in
+`ansible/playbooks/` that was sitting in `ansible/`. The file is read on the **control
+node**, never on `zero`.
+
 `Permission denied (publickey)` with a key visible in `ssh -v` means the client half is
 right and this half has not been run. It appends — the phone's key is untouched — and it
 refuses a secrets directory that is not there rather than creating one nothing mounts.
