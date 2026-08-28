@@ -39,6 +39,7 @@ metapackage before it landed on a 1 GB Pi.
 | `dev-client.yml` | the **client** side — one dev container's service token and `~/.ssh/config` block, **and the Windows half of the same laptop when run from WSL** |
 | `ssh-client.yml` | the fleet's aliases in this client's `~/.ssh/config`, Windows included |
 | **`this-client.yml`** | **the one you actually run** — the two above, composed: every ssh block this repo owns, and the dev-container registry |
+| `authorize-dev-client.yml` | adds one client's **public** key to the dev containers' `authorized_keys` on `zero` — the host half of letting a new laptop or phone in |
 | `_inventory-guard.yml` | not run directly — imported by the client plays so a run with no inventory fails instead of exiting 0 |
 
 **`dev-container.yml`, `cloudflare-dev-tunnel.yml` and `dev-client.yml` are one job split
@@ -82,6 +83,25 @@ Writes every container that already has a token and skips the rest, naming each 
 default is to prompt, which is right for a client being set up against a fully provisioned
 fleet and wrong when half the tunnels are still Phase 5 — there, one unanswerable prompt
 would stop the containers that *are* ready from being written.
+
+### A new client needs two halves, and only one of them is `this-client.yml`
+
+The ssh block and the service token are things a client *holds*. The key that admits it
+is a fact about the **container**, and lives on `zero`:
+
+```sh
+ansible-playbook playbooks/authorize-dev-client.yml \
+  -e client_pubkey_file=~/laptop.pub
+```
+
+`Permission denied (publickey)` with a key visible in `ssh -v` means the client half is
+right and this half has not been run. It appends — the phone's key is untouched — and it
+refuses a secrets directory that is not there rather than creating one nothing mounts.
+
+**Do not pass the key as `-e client_pubkey=ssh-ed25519 AAAA... you@host`.** Ansible's
+`k=v` extra-var form splits on whitespace, so that arrives as the single word
+`ssh-ed25519` — a truncation that still looks like a key. Use the file form above, or
+JSON: `-e '{"client_pubkey": "ssh-ed25519 AAAA... you@host"}'`.
 
 `dev-client.yml` still runs on its own for one container, which is the rotation path:
 

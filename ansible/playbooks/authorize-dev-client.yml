@@ -1,0 +1,157 @@
+---
+# Add one client's PUBLIC key to the dev containers' authorized_keys on the host.
+#
+#     cd ansible
+#     ansible-playbook playbooks/authorize-dev-client.yml \
+#       -e '{"client_pubkey": "ssh-ed25519 AAAA... you@machine"}' --check --diff
+#     ansible-playbook playbooks/authorize-dev-client.yml \
+#       -e '{"client_pubkey": "ssh-ed25519 AAAA... you@machine"}'
+#
+# JSON, OR A FILE — NOT `-e client_pubkey=...`. Ansible's k=v extra-var form splits on
+# WHITESPACE into several pairs, so a key with a comment on the end arrives as the single
+# word "ssh-ed25519" and `authorized_key` fails with "list index out of range", which
+# names nothing. The other form takes a path and is easier to type:
+#
+#     -e client_pubkey_file=~/laptop.pub
+#
+# RUN IT FROM A CONTROL NODE THAT CAN REACH `zero` — the phone, or WSL if `ssh zero`
+# works there. This is the only play in the client set that touches a host: the ssh block
+# and the service token are things a client holds, but the key that admits it is a fact
+# about the container, and that lives on zero.
+#
+# It APPENDS. `ansible.posix.authorized_key` with the default `exclusive: false` adds a
+# line and leaves every other one alone, which is the whole reason this is not a `copy`:
+# once a container is reached through a tunnel, that file is the only door, and a botched
+# rewrite of it is unrecoverable from anywhere. Re-running with a key already present
+# reports ok and changes nothing.
+#
+# WHY ONLY TWO CONTAINERS BY DEFAULT. `infra-dev` and `or3-dev` read the
+# `authorized_keys` in their own secrets mount. `dd-dev` and `ds-dev` do not — their
+# sshd_config drop-in names its own AuthorizedKeysFile and serves the HOST account's keys
+# (docs/decisions.md, "A start-up warning that names the wrong thing"), so a key added
+# here would be a file nothing reads. Authorise those two by adding the key to gavin's
+# own ~/.ssh/authorized_keys on zero instead. Override with -e containers='["a","b"]' if
+# that ever changes.
+#
+# THE SECRETS DIRECTORY IS A CONVENTION, AND THIS PLAY PROVES IT RATHER THAN ASSUMING IT.
+# infra-dev's is ~/.infra-dev-secrets; the pattern is ~/.<alias>-secrets. or3-dev's real
+# path is set in or3's compose file, which is not in this repo — so the play stats the
+# directory and REFUSES if it is not there rather than creating a stray one somewhere
+# nothing is mounted from. Point it somewhere else per run with:
+#
+#     -e secrets_dirs='{"or3-dev": "/home/gavin/somewhere-else"}'
+#
+# NO NEW COLLECTIONS: ansible.builtin, plus ansible.posix.authorized_key, which
+# requirements.yml already carries and already explains.
+
+- name: Guard — refuse to run with no inventory
+  ansible.builtin.import_playbook: _inventory-guard.yml
+  vars:
+    required_group: fleet
+
+- name: Authorise a client key on the dev containers that read one
+  hosts: "{{ dev_host | default('zero') }}"
+  gather_facts: true
+  become: false
+
+  vars:
+    # Either form. The FILE is the easy one to type on a phone; the inline one has to be
+    # JSON, for the reason the assert below spells out.
+    pubkey: >-
+      {{ (lookup('file', client_pubkey_file) if client_pubkey_file is defined
+          else client_pubkey | default('')) | trim }}
+    dev_clients: "{{ containers | default(['infra-dev', 'or3-dev']) }}"
+    dev_secrets_overrides: "{{ secrets_dirs | default({}) }}"
+    host_home: "{{ ansible_facts['env']['HOME'] }}"
+
+  tasks:
+    - name: A public key has to be given, and has to look like one
+      # No default. Authorising "" would be a no-op that reports changed, and authorising
+      # a private key by mistake is the accident worth spending an assert on: the two
+      # differ by one word at the front, and this play's argument is pasted by hand.
+      ansible.builtin.assert:
+        that:
+          - pubkey | length > 0
+          - pubkey is search('^(ssh-ed25519|ssh-rsa|ecdsa-sha2-|sk-)')
+          - pubkey.split() | length >= 2
+        fail_msg: |
+          Got: "{{ pubkey }}"
+
+          A key must be at least two whitespace-separated fields — a type and the base64
+          body. If what you see above is just "ssh-ed25519", THAT IS THE BUG AND IT IS IN
+          HOW IT WAS PASSED, not in the key: `-e key=value` splits on WHITESPACE into
+          several key=value pairs, so everything after the first space is silently thrown
+          away. It is a truncation that still looks like a key, which is why this task
+          counts the fields rather than trusting the prefix.
+
+          Two forms that work. JSON, quoted once:
+
+            -e '{"client_pubkey": "ssh-ed25519 AAAAC3NzaC1... you@machine"}'
+
+          or, easier to type by hand, point at a file:
+
+            -e client_pubkey_file=~/laptop.pub
+
+          If what you have starts with "-----BEGIN", that is the PRIVATE half and must
+          not leave the machine it is on.
+        success_msg: "public key looks like one"
+
+    - name: Where each container's secrets directory is
+      ansible.builtin.set_fact:
+        resolved_dirs: >-
+          {{ dict(dev_clients | zip(dev_clients | map('regex_replace', '^(.*)$',
+             host_home ~ '/.\1-secrets'))) | combine(dev_secrets_overrides) }}
+
+    - name: Each one has to exist already
+      # Never created here. An existing secrets directory is the evidence that this is
+      # the path the container actually mounts; creating one would put an authorized_keys
+      # somewhere nothing reads and report success.
+      ansible.builtin.stat:
+        path: "{{ resolved_dirs[item] }}"
+      register: sd
+      loop: "{{ dev_clients }}"
+      check_mode: false
+
+    - name: Refuse a directory that is not there
+      ansible.builtin.assert:
+        that: item.stat.isdir | default(false)
+        fail_msg: >-
+          {{ resolved_dirs[item.item] }} is not a directory on {{ inventory_hostname }},
+          so it is not {{ item.item }}'s secrets mount. Find the host side of that
+          container's bind mount — it is in that container's own compose file — and pass
+          it: -e secrets_dirs='{"{{ item.item }}": "/the/real/path"}'
+      loop: "{{ sd.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Create authorized_keys where there is none
+      # force: false, so this only ever creates. The append is the next task's job, and a
+      # copy that could overwrite is one bad re-run away from locking every client out.
+      ansible.builtin.copy:
+        content: ""
+        dest: "{{ resolved_dirs[item] }}/authorized_keys"
+        mode: "0600"
+        force: false
+      loop: "{{ dev_clients }}"
+
+    - name: Authorise the key
+      ansible.posix.authorized_key:
+        user: "{{ ansible_facts['user_id'] }}"
+        key: "{{ pubkey }}"
+        path: "{{ resolved_dirs[item] }}/authorized_keys"
+        manage_dir: false
+        state: present
+      loop: "{{ dev_clients }}"
+
+    - name: What now
+      ansible.builtin.debug:
+        msg:
+          - "Authorised on: {{ dev_clients | join(', ') }}"
+          - ""
+          - "The containers read that file at start-up, so the ones already running need"
+          - "to pick it up. From a shell on {{ inventory_hostname }}:"
+          - "    cd ~/infra/dev && make restart      # infra-dev"
+          - "and the equivalent in each other container's own repo."
+          - ""
+          - "Then, from the client this key belongs to: ssh infra-dev"
+      changed_when: true
