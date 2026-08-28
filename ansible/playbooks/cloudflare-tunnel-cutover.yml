@@ -113,6 +113,32 @@
           {{ new_cred_file }} is tunnel {{ new_tunnel }} but the reviewed config says
           {{ target_tunnel }}. One of them is from a different run of phase 1.
 
+    # THE CHECK ABOVE READS THE CONTROL NODE, NOT THE HOST — `lookup('file', …)` always
+    # does. So it proves the reviewed config is right HERE and says nothing about what
+    # install-system-file is about to install THERE, which is read from the host's own
+    # clone. On `two`, 2026-08-28, that clone had never been pulled: the install was a
+    # no-op that left config.yml naming the OLD tunnel, the credentials were then swapped
+    # to the NEW one, and cloudflared could not authenticate a tunnel its config did not
+    # name. It surfaced as a 503 with zero ready connections and looked like a slow box.
+    - name: Read the reviewed config from the HOST's own clone
+      ansible.builtin.slurp:
+        src: "{{ host_repo }}/hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
+      register: host_repo_cfg
+      become: true
+
+    - name: The host's clone has to carry the reviewed config too
+      ansible.builtin.assert:
+        that: (host_repo_cfg.content | b64decode | from_yaml).tunnel == new_tunnel
+        fail_msg: >-
+          {{ host_repo }} on {{ inventory_hostname }} still has tunnel
+          {{ (host_repo_cfg.content | b64decode | from_yaml).tunnel }} in
+          hosts/{{ inventory_hostname }}/system/cloudflared-config.yml, but phase 1
+          produced {{ new_tunnel }}. That clone has not been pulled since the review, so
+          installing from it would be a no-op and the credential swap would then point
+          the connector at a tunnel its config does not name. Commit and push phase 1's
+          config, then on {{ inventory_hostname }}:  git -C {{ host_repo }} pull
+        success_msg: "the host's clone carries the reviewed config"
+
     # RESUMABLE. If the live credentials already name the target, the host half is done
     # — installed, swapped, cycled — and re-running it would achieve nothing while the
     # backup step actively destroyed the rollback. That is not hypothetical: the run on
@@ -326,6 +352,25 @@
         # live file already holds the NEW credentials, so copying it over the backup
         # would erase the only local copy of the old ones — a rollback destroyed by the
         # act of retrying.
+        # The installed artefact, not the repo copy — this is the file cloudflared opens.
+        # Placed BEFORE the credential swap so a mismatch is a clean abort with the host
+        # still on its old tunnel, rather than a rescue after an outage.
+        - name: Prove the installed config now names the new tunnel
+          ansible.builtin.slurp:
+            src: "{{ cfg_file }}"
+          register: installed_cfg
+          become: true
+
+        - name: Refuse to swap credentials the installed config does not match
+          ansible.builtin.assert:
+            that: (installed_cfg.content | b64decode | from_yaml).tunnel == new_tunnel
+            fail_msg: >-
+              {{ cfg_file }} still names tunnel
+              {{ (installed_cfg.content | b64decode | from_yaml).tunnel }} after
+              install-system-file ran, but the new credentials are for {{ new_tunnel }}.
+              Nothing has been swapped and the host is still on its old tunnel.
+            success_msg: "installed config names {{ new_tunnel }}"
+
         - name: Back up the old credentials, then put the new ones in place
           ansible.builtin.shell: |
             set -e
