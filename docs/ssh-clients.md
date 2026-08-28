@@ -271,6 +271,30 @@ plane can see that laptop to calibrate the check against.
 `cloudflared.exe`, and the POSIX `ProxyCommand` runs under WSL's `/bin/sh`, not under
 Windows.
 
+## Letting a new client in
+
+Two halves. The ssh block and the service token are things a client *holds*;
+`this-client.yml` writes those. The key that admits it is a fact about the **container**:
+
+```sh
+ansible-playbook playbooks/authorize-dev-client.yml -e client_pubkey_file=~/laptop.pub
+```
+
+`Permission denied (publickey)` with a key visible in `ssh -v` means the client half is
+right and this one has not been run.
+
+**It does not restart anything, and must not.** `dev/entrypoint.sh` copies the
+`authorized_keys` out of the read-only secrets mount at start-up, and `sshd_config` names
+that copy — so the play refreshes the copy inside each container over its `-sh` alias.
+Restarting sshd would be the wrong tool: sshd is **exec'd as PID 1**, so restarting it
+restarts the container and every detached abduco session goes with it. It is also
+unnecessary — sshd reads `AuthorizedKeysFile` on each authentication attempt, not at
+start-up.
+
+`dd-dev` and `ds-dev` are excluded: their drop-in names its own `AuthorizedKeysFile` and
+serves the host account's keys, so add the key to `gavin`'s `~/.ssh/authorized_keys` on
+zero for those.
+
 ## The dev containers' second door
 
 `ssh-zero-dev-dd.gsrpi.uk` and `ssh-zero-dev-ds.gsrpi.uk` are rules on **zero's** host

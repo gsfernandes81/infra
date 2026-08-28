@@ -19,6 +19,11 @@
 # and the service token are things a client holds, but the key that admits it is a fact
 # about the container, and that lives on zero.
 #
+# IT ALSO REACHES INTO EACH CONTAINER, over that container's own `-sh` ssh alias, to
+# refresh the copy sshd reads — see the task's own comment for why that is not a restart
+# and why a restart would be the wrong tool. That half is best-effort: a container that is
+# down is reported, not fatal, because the host-side write is the durable one.
+#
 # It APPENDS. `ansible.posix.authorized_key` with the default `exclusive: false` adds a
 # line and leaves every other one alone, which is the whole reason this is not a `copy`:
 # once a container is reached through a tunnel, that file is the only door, and a botched
@@ -196,15 +201,68 @@
         state: present
       loop: "{{ dev_clients }}"
 
+    # ── and the copy sshd actually reads ─────────────────────────────────────
+    # THE HOST FILE IS NOT THE ONE SSHD READS. dev/entrypoint.sh copies
+    # $DEV_SECRETS_DIR/authorized_keys to ~/.ssh/authorized_keys at start-up, and
+    # sshd_config names that copy — so a key added above reaches a running container only
+    # once the copy is refreshed.
+    #
+    # DO NOT RESTART TO ACHIEVE THAT. sshd is exec'd as PID 1, so restarting it is
+    # restarting the container, and every detached abduco session goes with it. sshd reads
+    # AuthorizedKeysFile on each authentication attempt, not at start-up, so refreshing
+    # the copy is enough and costs nothing.
+    #
+    # Reached over ssh with the container's own `-sh` alias — the same path the owner
+    # would use by hand, so a failure here is fixed by the command that failed. delegated
+    # to localhost because that alias is in the CLIENT's ssh config, not zero's. The bare
+    # alias would be wrong: it carries a RemoteCommand, which makes `ssh <alias> <cmd>` an
+    # error.
+    - name: Refresh the copy sshd reads, inside each container
+      ansible.builtin.command:
+        # expand_argument_vars: false OR THE SCRIPT IS RESOLVED ON THE WRONG MACHINE.
+        # `command` expands environment variables in its arguments by default, so `$HOME`
+        # below became the CONTROL NODE's home before ssh was ever invoked, and the copy
+        # was aimed at a path that exists on the phone and not in the container. It fails
+        # loudly rather than silently, but it fails. Everything in this argument is meant
+        # for the remote shell; none of it is for ours.
+        expand_argument_vars: false
+        argv:
+          - ssh
+          - -o
+          - BatchMode=yes
+          - -o
+          - ConnectTimeout=10
+          - "{{ item }}-sh"
+          - >-
+            d=""; for c in /run/*secrets*; do [ -f "$c/authorized_keys" ] || continue;
+            [ -n "$d" ] && { echo "more than one secrets mount: $d and $c" >&2; exit 3; };
+            d="$c"; done;
+            [ -n "$d" ] || { echo "no secrets mount holding authorized_keys" >&2; exit 2; };
+            cp -f "$d/authorized_keys" "$HOME/.ssh/authorized_keys";
+            chmod 600 "$HOME/.ssh/authorized_keys";
+            echo "refreshed from $d"
+      delegate_to: localhost
+      register: refreshed
+      changed_when: refreshed.rc == 0
+      # NOT fatal. The host-side write above is the durable half and has already
+      # succeeded; a container that is down, or one this client has no route to, is a
+      # thing to report rather than a reason to fail a run that did its job.
+      failed_when: false
+      loop: "{{ dev_clients }}"
+
     - name: What now
       ansible.builtin.debug:
-        msg:
-          - "Authorised on: {{ dev_clients | join(', ') }}"
-          - ""
-          - "The containers read that file at start-up, so the ones already running need"
-          - "to pick it up. From a shell on {{ inventory_hostname }}:"
-          - "    cd ~/infra/dev && make restart      # infra-dev"
-          - "and the equivalent in each other container's own repo."
-          - ""
-          - "Then, from the client this key belongs to: ssh infra-dev"
+        msg: >-
+          {{ ['Authorised on: ' ~ (dev_clients | join(', '))]
+             + (refreshed.results | selectattr('rc', 'eq', 0)
+                | map(attribute='item') | list
+                | map('regex_replace', '^(.*)$', '  refreshed \1 live — no restart, sessions kept')
+                | list)
+             + (refreshed.results | rejectattr('rc', 'eq', 0)
+                | map(attribute='item') | list
+                | map('regex_replace', '^(.*)$',
+                      '  COULD NOT refresh \1 — it will pick the key up at its next start,'
+                      ~ ' or run: ssh \1-sh "cp -f /run/*secrets*/authorized_keys'
+                      ~ ' ~/.ssh/authorized_keys"')
+                | list) }}
       changed_when: true
