@@ -44,11 +44,13 @@ Host two-zero two-one
 # which uses a session channel that AllowTcpForwarding does not govern. That is what
 # they were until today, and it works with no server-side change at all.
 #
-# THE DEV CONTAINERS' `-lan` ALIASES ARE NOT CONVERTED AND MUST NOT BE. `or3-dev-lan` and
-# `infra-dev-lan` — written by dev-client.yml, not by this template — target 127.0.0.1:2224
-# and :2225, which PermitOpen deliberately does not include, so a jump to either is
-# refused. They keep the nc form. (They also do not match the three rules above, which is
-# why nothing here has to exclude them: `*-zero` matches an alias ending in `-zero`.)
+# THE DEV CONTAINERS' `-lan` ALIASES ARE NOT CONVERTED AND MUST NOT BE. `infra-dev-lan`,
+# `or3-dev-lan`, `dd-dev-lan` and `ds-dev-lan` — written by dev-client.yml, not by this
+# template — target 127.0.0.1 on 2225, 2224, 2222 and 2223, none of which PermitOpen
+# includes, so a jump to any of them is refused. They keep the `nc` form, which rides a
+# session channel that AllowTcpForwarding does not govern. (They also do not match the
+# three rules below, which is why nothing here has to exclude them: `*-zero` matches an
+# alias ENDING in `-zero`.)
 Host *-zero
   ProxyJump zero
 
@@ -58,25 +60,23 @@ Host *-one
 Host *-two
   ProxyJump two
 
-# ── the dev containers on zero — User dev, so they must precede the shared block
-Host zero-dev-dd
-  HostName ssh-zero-dev-dd.gsrpi.uk
-  User dev
-  # Same rule as or3-dev below: one known_hosts identity for the container, so any
-  # future second path to it meets the same stored key instead of prompting.
-  HostKeyAlias dd-dev
-
-Host zero-dev-or3
-  HostName ssh-zero-dev-or3.gsrpi.uk
-  User dev
-  RequestTTY yes
-  RemoteCommand abduco -A claude claude
-  # This tunnel path and dev-client.yml's three — `or3-dev`, `-sh` and `-lan`, which set
-  # the same HostKeyAlias in their own block — reach the same container sshd, so they must
-  # share one known_hosts identity, per this file's own one-host-key-per-box rule below.
-  # (Until 2026-08-25 the second path was a hand-kept `Host or3-dev` further down the
-  # file; dev-client.yml now writes it, and the hand-kept block is gone.)
-  HostKeyAlias or3-dev
+# ── THE DEV CONTAINERS ARE NOT IN THIS BLOCK ANY MORE ─────────────────────────
+# `zero-dev-dd`, `zero-dev-ds` and `zero-dev-or3` used to live here: aliases for the
+# `ssh-zero-dev-*.gsrpi.uk` rules on ZERO'S OWN host tunnel, which is a different door
+# from the one each container now opens for itself. Every dev container has its own
+# tunnel and its own Access service token, run by a connector inside it, and
+# dev-client.yml writes three aliases for each — `<c>`, `<c>-sh` and `<c>-lan`. See
+# playbooks/this-client.yml, which is the registry and the one command that writes them.
+#
+# `zero-dev-or3` was already dead when it was removed from here: its ingress rule came
+# off zero's tunnel in 7bb2075 (2026-08-24), so the alias named a hostname with no route
+# behind it — the failure that looks like the container being down.
+#
+# THE OTHER TWO RULES ARE STILL ON ZERO'S TUNNEL. Dropping the aliases stops this client
+# using that door; it does not close it. Closing it is an edit to
+# hosts/zero/system/cloudflared-config.yml plus a connector cycle on zero, which is the
+# owner's to run and is filed as 2i in docs/management-plane.md. Until then each of those
+# containers has two doors and only one of them is the one we chose.
 
 # ── through each box's own cloudflared tunnel ─────────────────────────────────
 Host zero
@@ -88,9 +88,14 @@ Host one
 Host two
   HostName ssh-two.gsrpi.uk
 
-# One copy of the path rather than five. Listed explicitly, not `zero*`: that would also
+# One copy of the path rather than three. Listed explicitly, not `zero*`: that would also
 # catch zero-local and zero-two, which must NOT go through the edge.
-Host zero one two zero-dev-dd zero-dev-or3
+#
+# No token is sourced here, and that is the difference between a box and a container: the
+# three Pis' tunnels admit you on your certificate, while every dev container sits behind
+# an Access application with a service token. dev-client.yml's blocks carry the `sh -c`
+# that loads one; this line must not grow into that shape.
+Host zero one two
   ProxyCommand {{ cloudflared }} access ssh --hostname %h
 
 {% if adb_jump %}

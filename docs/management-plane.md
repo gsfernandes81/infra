@@ -390,10 +390,21 @@ movable container gives that up and owns its own clone. That is a real trade and
 be made knowingly, in or3, not implied by a placement decision made here.
 
 **Ports stop being a registry problem** once addressing is by tunnel hostname: nothing is
-published on a host, so nothing collides. Until then, and for the pinned stacks, the
-allocation is: `zero` — 2283 Immich, 8384/22000 Syncthing, **2222 `dd-dev`, 2223 `ds-dev`,
-2224 `or3-dev`**; `one` — 8080 qBittorrent, ~~7777 ionic-traces~~ (stopped, 2c), 3001 send2ereader,
-8384/22000 Syncthing; `two` — none published.
+published on a host, so nothing collides. That is the destination, not the present — every
+dev container still publishes an sshd on zero's loopback, and each one's `<alias>-lan` is
+the break-glass path that reaches it. The allocation is: `zero` — 2283 Immich, 8384/22000
+Syncthing, **2222 `dd-dev`, 2223 `ds-dev`, 2224 `or3-dev`, 2225 `infra-dev`**; `one` — 8080
+qBittorrent, ~~7777 ionic-traces~~ (stopped, 2c), 3001 send2ereader, 8384/22000 Syncthing;
+`two` — none published.
+
+**Since 2026-08-28 that list is a copy, not the record.** The registry is the table in
+[`../ansible/playbooks/this-client.yml`](../ansible/playbooks/this-client.yml), which is
+the file that *consumes* the numbers — every `<alias>-lan` block written onto every client
+is built from them, so a wrong one is noticed the next time somebody uses the rescue path
+rather than the next time somebody reads a comment. This closes the drift row at the top
+of this document, whose worked example was exactly these ports living in or3's compose
+file where nothing here could contradict them. **2225 was missing from this paragraph
+until the registry moved** — which is the argument, made by the paragraph itself.
 
 ## Dev containers: what the credential experiment established
 
@@ -480,13 +491,21 @@ ones that answer the question this document started from.
 | 2f | `cloudflared`'s init script logs nowhere | `zero`, `one`, `two` | — | **done on all three, 2026-08-23** |
 | 2g | All three tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, `two`, DNS | 2f | `one` and `zero` **done 2026-08-23**; **`two` deferred ~a week, and on `two` it is one job with 2e and the dashboard sweep** |
 | 2h | cloudflared: staggered autoupdate, `one` 6h → `two` 72h → `zero` 240h | all three | — | **done 2026-08-24** — the staggered frequencies are installed and live on all three |
-| 2i | Retire `ssh-zero-dev-or3.gsrpi.uk` — or3-dev's second, unprotected door | `zero`'s host tunnel, DNS | **nothing — do it BEFORE or3-dev's tunnel goes up** | queued; done first there is no exposure window at all |
+| 2i | Retire the `ssh-zero-dev-*` rules — each dev container's second, unprotected door | `zero`'s host tunnel, DNS | nothing | **or3's ingress rule is gone** (`7bb2075`, 2026-08-24); its CNAME and whether the connector was cycled are **unverified — nothing tracked records either**. `ssh-zero-dev-dd` and `ssh-zero-dev-ds` rules are **still live** in `hosts/zero/system/cloudflared-config.yml`, and now that every container has its own tunnel they are second doors on the same argument. Client-side all three aliases are gone from `ssh-fleet-block.j2` (2026-08-28), which stops this fleet *using* those doors but does not close them |
 | 3 | First stack adopted: `send2ereader` on `one`, **with its connector in the stack** | one stack, non-critical box, `one`'s ingress | 2 | |
 | 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two stacks | 3 | |
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | Phase 3 now tests the mechanism first, on a disposable stack |
 | 6 | `dd` off `two` | `two`, `one` | arm64 CI, upstream | |
 | 7 | **Rootless podman on `one`** — roadmap §2 | `one` | 3 | |
 | 8 | `two` as the scheduled read-only control node | `two` | 6, 7 | |
+
+**Closed 2026-08-28 — one command now writes every ssh block this repo owns.**
+`playbooks/this-client.yml` composes `ssh-client.yml` with one `dev-client.yml` import per
+dev container, and carries the registry that says which containers exist, on which ports,
+behind which hostnames. It runs on the phone and in WSL, writes both sides of the laptop
+from the latter, and takes `-e prompt_for_token=false` so a container whose tunnel is not
+provisioned yet is skipped by name instead of stopping the run with a prompt for a
+credential nobody can produce. The phone's reorder ran; its one-shot script is deleted.
 
 **Filed 2026-08-25, no phase number — the two client plays now cover Windows, and the
 phone's own block is behind them.** `dev-client.yml` had no Windows half at all: run from

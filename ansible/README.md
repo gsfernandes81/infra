@@ -36,9 +36,10 @@ metapackage before it landed on a 1 GB Pi.
 | `packages.yml` | the declared package set on all three hosts |
 | `dev-container.yml` | the **host** side of `infra-dev` on zero — secrets dir, deploy key, authorized_keys, `dev/.env` |
 | `cloudflare-dev-tunnel.yml` | the **edge** side — tunnel, DNS, Access application and policy |
-| `dev-client.yml` | the **client** side — this control node's service token and `~/.ssh/config` block, **and the Windows half of the same laptop when run from WSL** |
-| `ssh-client.yml` | the fleet's aliases in this control node's `~/.ssh/config`, Windows included |
-| `_inventory-guard.yml` | not run directly — imported by the two client plays so a run with no inventory fails instead of exiting 0 |
+| `dev-client.yml` | the **client** side — one dev container's service token and `~/.ssh/config` block, **and the Windows half of the same laptop when run from WSL** |
+| `ssh-client.yml` | the fleet's aliases in this client's `~/.ssh/config`, Windows included |
+| **`this-client.yml`** | **the one you actually run** — the two above, composed: every ssh block this repo owns, and the dev-container registry |
+| `_inventory-guard.yml` | not run directly — imported by the client plays so a run with no inventory fails instead of exiting 0 |
 
 **`dev-container.yml`, `cloudflare-dev-tunnel.yml` and `dev-client.yml` are one job split
 three ways, and the split is not arbitrary.** They
@@ -46,6 +47,43 @@ hold state in three different places, need three different credentials — sudo 
 Cloudflare API token, an Access service token — and change at three different rates. A
 single play would demand all three credentials to do any of it, and re-running it to add
 a second client would put an API token back on the command line for no reason.
+
+### One command, for whichever client you are on
+
+```sh
+cd ~/infra/ansible
+ansible-playbook playbooks/this-client.yml --check --diff   # see it first
+ansible-playbook playbooks/this-client.yml
+```
+
+That is the fleet block, plus a block for every dev container, plus — from WSL — the
+Windows side of the same laptop. It prompts once per container that has no service token
+on this client, and not at all when they all do.
+
+**`this-client.yml` is also the registry.** Its header table is where the dev containers'
+ports and tunnel hostnames are recorded, because it is the file that consumes them: every
+`<alias>-lan` written onto every client is built from that table, so a wrong number is
+found by somebody using a rescue path rather than by somebody re-reading a comment. It
+used to be a comment in or3's compose file — `../docs/management-plane.md` opens its drift
+table with that as the worked example.
+
+**When a container's tunnel does not exist yet:**
+
+```sh
+ansible-playbook playbooks/this-client.yml -e prompt_for_token=false
+```
+
+Writes every container that already has a token and skips the rest, naming each one. The
+default is to prompt, which is right for a client being set up against a fully provisioned
+fleet and wrong when half the tunnels are still Phase 5 — there, one unanswerable prompt
+would stop the containers that *are* ready from being written.
+
+`dev-client.yml` still runs on its own for one container, which is the rotation path:
+
+```sh
+ansible-playbook playbooks/dev-client.yml -e alias=or3-dev -e hostname=or3-dev.gsrpi.uk \
+  -e lan_port=2224 -e replace_token=true
+```
 
 ### The laptop is two clients, and one run in WSL configures both
 
@@ -59,8 +97,7 @@ both sides**:
 
 ```sh
 # in WSL, in this directory
-ansible-playbook playbooks/ssh-client.yml       # the fleet aliases, both sides
-ansible-playbook playbooks/dev-client.yml       # infra-dev, both sides
+ansible-playbook playbooks/this-client.yml      # everything, both sides
 ```
 
 | | WSL writes, for itself | WSL writes, for Windows |
@@ -93,8 +130,8 @@ Run a play from anywhere else and `hosts: control` matches nothing, so Ansible p
 `skipping: no hosts matched`, an empty recap, and **exits 0** — which on a phone screen
 with `display_ok_hosts = False` looks a great deal like a clean run with nothing to do.
 
-No task inside the play can catch that, because the play is skipped whole. So the two
-client plays import `playbooks/_inventory-guard.yml` above their own play; it matches
+No task inside the play can catch that, because the play is skipped whole. So the client
+plays import `playbooks/_inventory-guard.yml` above their own play; it matches
 `localhost` (which Ansible provides even with no inventory) and fails, loudly, naming the
 working directory as the usual cause.
 
@@ -137,6 +174,7 @@ repo has traded hand-rolled shell for stock tooling — after `bin/compose` and 
 | `group_vars/fleet.yml` | the container CLI |
 | `host_vars/` | empty, on purpose — see below |
 | `playbooks/` | the ones above; `_inventory-guard.yml` is imported, never run |
+| `playbooks/this-client.yml` | the dev-container registry lives in its header |
 | `templates/` | the report, the two ssh blocks, and the Windows ProxyCommand wrapper |
 
 ## `-K`, and why it is not a wart

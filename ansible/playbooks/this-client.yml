@@ -1,0 +1,102 @@
+---
+# EVERY SSH BLOCK THIS REPO OWNS, ON THE MACHINE YOU RUN IT FROM. One command.
+#
+#     cd ansible
+#     ansible-playbook playbooks/this-client.yml --check --diff
+#     ansible-playbook playbooks/this-client.yml
+#
+# Run it from THIS DIRECTORY — ansible.cfg is read from the cwd and is the only thing
+# pointing at ./inventory. _inventory-guard.yml, imported by both halves below, turns a
+# wrong working directory into a failure instead of an empty recap and exit 0.
+#
+# Run it WHEREVER THE CLIENT IS: the phone, or WSL on the laptop. It reaches no host in
+# the fleet — it writes ~/.ssh/config on the machine executing it, and from WSL it also
+# writes the Windows side of the same laptop through /mnt/c. Nothing here can touch a Pi.
+#
+# ── THE REGISTRY ────────────────────────────────────────────────────────────────
+#
+# Four dev containers run on `zero`, each with its own Cloudflare tunnel, its own Access
+# service token, and a connector inside the container — which is the whole point of that
+# design: the tunnel's identity travels with the container, so moving one to `one`
+# changes no ingress rule anywhere (docs/management-plane.md § Addressing).
+#
+#   container   loopback port on zero   tunnel hostname        image lives in
+#   ─────────   ─────────────────────   ────────────────────   ──────────────────
+#   infra-dev   2225                    infra-dev.gsrpi.uk     this repo, dev/
+#   or3-dev     2224                    or3-dev.gsrpi.uk       or3
+#   dd-dev      2222                    dd-dev.gsrpi.uk        destiny-director
+#   ds-dev      2223                    ds-dev.gsrpi.uk        dossier
+#
+# THIS TABLE IS THE PORT REGISTRY, and that is a change of address. It used to be a
+# comment in or3's compose file — docs/management-plane.md's drift table opens with that
+# as its worked example of a fact recorded in the newest claimant's app repo, where
+# nothing in this repo could contradict it. A number a playbook consumes is a number that
+# gets noticed when it is wrong; a comment in another repo never does.
+#
+# The ports are the break-glass half. Each `<alias>-lan` reaches 127.0.0.1:<port> through
+# zero's own sshd, so it does not depend on that container's tunnel, its Access
+# application or its token — which is exactly the set of things that breaks.
+#
+# ── WHEN A CONTAINER'S TUNNEL IS NOT UP YET ─────────────────────────────────────
+#
+#     ansible-playbook playbooks/this-client.yml -e prompt_for_token=false
+#
+# Provisions every container that already has a token on this client and SKIPS the rest,
+# naming each one it skipped. Without the flag it prompts, once per container missing a
+# token — which is right for a client being set up against a fleet that is fully
+# provisioned, and wrong when two of the four tunnels do not exist yet, because the
+# prompt for a credential nobody can produce stops the other two from being written.
+#
+# The order below is deliberate: the two oldest tunnels first, so a partially provisioned
+# fleet configures the containers you are most likely to need before it reaches the ones
+# it may have to skip.
+#
+# ── ADDING A FIFTH ──────────────────────────────────────────────────────────────
+#
+# A row above and an import below — but only after the edge and the host halves exist,
+# because a client block is the third of three:
+#
+#     ansible-playbook playbooks/cloudflare-dev-tunnel.yml -e name=<c> -e secrets_dir=<its mount>
+#     ansible-playbook playbooks/dev-container.yml -e tunnel_hostname=<c>.gsrpi.uk
+#     ansible-playbook playbooks/this-client.yml
+#
+# NO NEW COLLECTIONS, and no tasks of its own: this file is composition and a table.
+# Everything it runs belongs to the two plays it imports.
+
+# ── the servers: the fleet, the mesh, and the LAN and cross-box rescue paths ────
+- name: The fleet
+  ansible.builtin.import_playbook: ssh-client.yml
+
+# ── the dev containers ─────────────────────────────────────────────────────────
+# One import each rather than a loop over the table above, deliberately. dev-client.yml
+# prompts for a credential and writes it at 0600; a loop would put those prompts and
+# those writes inside `loop:` results, where `no_log` hides which iteration is which and
+# a mistake becomes a mistake about a secret. Static imports keep the reviewed
+# single-alias play exactly as it is, and each stanza reads as the fact it asserts.
+- name: infra-dev
+  ansible.builtin.import_playbook: dev-client.yml
+  vars:
+    alias: infra-dev
+    hostname: infra-dev.gsrpi.uk
+    lan_port: 2225
+
+- name: or3-dev
+  ansible.builtin.import_playbook: dev-client.yml
+  vars:
+    alias: or3-dev
+    hostname: or3-dev.gsrpi.uk
+    lan_port: 2224
+
+- name: dd-dev
+  ansible.builtin.import_playbook: dev-client.yml
+  vars:
+    alias: dd-dev
+    hostname: dd-dev.gsrpi.uk
+    lan_port: 2222
+
+- name: ds-dev
+  ansible.builtin.import_playbook: dev-client.yml
+  vars:
+    alias: ds-dev
+    hostname: ds-dev.gsrpi.uk
+    lan_port: 2223

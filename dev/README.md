@@ -242,9 +242,11 @@ ansible-playbook playbooks/cloudflare-dev-tunnel.yml
 # 2. the HOST — re-run with the hostname, which rewrites dev/.env
 ansible-playbook playbooks/dev-container.yml -e tunnel_hostname=infra-dev.gsrpi.uk
 
-# 3. the CLIENT — this phone. Prompts for the service token, once.
+# 3. the CLIENT — the machine you ssh FROM. Prompts for the service token, once.
 #    The secret CANNOT be passed with -e; the play refuses it. See below.
-ansible-playbook playbooks/dev-client.yml
+#    this-client.yml does every dev container and the fleet in one run; dev-client.yml
+#    on its own does one container, which is the rotation path.
+ansible-playbook playbooks/this-client.yml
 ```
 
 **Step 3 is per client, and the laptop counts as two of them.** Windows' `ssh.exe` and

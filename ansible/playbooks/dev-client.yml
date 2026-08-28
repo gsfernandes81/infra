@@ -332,6 +332,41 @@
              or ((on_windows_client | bool) and not (win_tf.stat.exists | default(true)))
              or (replace_token | default(false) | bool) }}
 
+    # ── the escape hatch, for a container whose tunnel is not up yet ─────────
+    - name: Say which container is being skipped, and why
+      # Before the meta below, because meta cannot carry a message and a play that ends
+      # silently is indistinguishable from one that had nothing to do.
+      #
+      # changed_when: true for ansible.cfg's display_ok_hosts = False — a debug reports
+      # ok, and this is the one line explaining why an alias the caller asked for is not
+      # in their config.
+      ansible.builtin.debug:
+        msg: >-
+          SKIPPED {{ dev_alias }} — no service token at {{ token_file }} and this run was
+          told not to ask (-e prompt_for_token=false). Nothing was written for it: an ssh
+          block whose ProxyCommand sources a file that is not there fails as
+          "Connection closed", which reads like the container being down. Provision it
+          with playbooks/cloudflare-dev-tunnel.yml -e name={{ dev_alias }}, then re-run.
+      changed_when: true
+      when:
+        - setting_token | bool
+        - not (prompt_for_token | default(true) | bool)
+
+    - name: End this container's play rather than block on a credential that does not exist
+      # THE POINT OF THE FLAG. this-client.yml imports this play once per dev container,
+      # and a container whose tunnel has not been provisioned yet has no token to give —
+      # so the default behaviour, prompting, would stop the one command that is supposed
+      # to configure every other container. `meta: end_play` ends THIS import only; the
+      # imports after it still run (verified). Everything already provisioned still gets
+      # written, and the run says out loud what it left out.
+      #
+      # Default TRUE, so an interactive `ansible-playbook playbooks/dev-client.yml` still
+      # asks. The flag is for the composed run, not for hiding a missing credential.
+      ansible.builtin.meta: end_play
+      when:
+        - setting_token | bool
+        - not (prompt_for_token | default(true) | bool)
+
     - name: Nothing to do for the token
       ansible.builtin.debug:
         msg: >-
