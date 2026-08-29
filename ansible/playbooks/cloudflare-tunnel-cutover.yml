@@ -130,6 +130,10 @@
     - name: Establish how Ansible is reaching this host
       ansible.builtin.shell: echo "$SSH_CONNECTION"
       register: sshconn
+      # A read. Without this it is skipped under --check, stdout comes back empty, and the
+      # guard refuses every dry run — correct, but it means --check can never show you the
+      # plan. Tested: it refuses with this task's real message rather than crashing.
+      check_mode: false
       changed_when: false
 
     # Two conditions, and the first is not decoration: an EMPTY SSH_CONNECTION means the
@@ -172,6 +176,30 @@
         success_msg: "{{ host_repo }} is a checkout"
 
     # ── what we are moving from, and to ──────────────────────────────────────
+    - name: Both credentials files have to be there
+      # The slurp below is no_log, so its failure is "the output has been hidden" — on a
+      # host where phase 1 never ran, or on a re-run after the Done message's own
+      # `rm {{ new_cred_file }}` cleanup. The read stays censored; the refusal says which
+      # file is missing.
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: cred_stat
+      loop: [ "{{ cred_file }}", "{{ new_cred_file }}" ]
+      become: true
+      check_mode: false
+
+    - name: Say which one
+      ansible.builtin.assert:
+        that: item.stat.exists
+        fail_msg: >-
+          {{ item.item }} is not on {{ inventory_hostname }}. If it is
+          {{ new_cred_file }}, phase 1 has not run here — or it ran and the cleanup at the
+          end of a previous cutover removed it, in which case this host is already cut
+          over and there is nothing to do.
+      loop: "{{ cred_stat.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
     - name: Read both credentials files
       ansible.builtin.slurp:
         src: "{{ item }}"
@@ -211,15 +239,23 @@
 
     - name: The host's clone has to carry the reviewed config too
       ansible.builtin.assert:
-        that: (host_repo_cfg.content | b64decode | from_yaml).tunnel == new_tunnel
+        # BYTE-EQUAL, not just the tunnel id. Comparing one key passes a clone that has
+        # the right tunnel and a stale INGRESS — a hostname added on the control node
+        # after the host last pulled. That install then succeeds, the credentials swap,
+        # the connector cycles, and only the post-cycle rules check catches it, with a
+        # full rollback and an outage in the middle. Comparing the bytes makes this
+        # preflight cover exactly what that later check verifies.
+        that: (host_repo_cfg.content | b64decode) == lookup('file', repo_cfg)
         fail_msg: >-
-          {{ host_repo }} on {{ inventory_hostname }} still has tunnel
-          {{ (host_repo_cfg.content | b64decode | from_yaml).tunnel }} in
-          hosts/{{ inventory_hostname }}/system/cloudflared-config.yml, but phase 1
-          produced {{ new_tunnel }}. That clone has not been pulled since the review, so
-          installing from it would be a no-op and the credential swap would then point
-          the connector at a tunnel its config does not name. Commit and push phase 1's
-          config, then on {{ inventory_hostname }}:  git -C {{ host_repo }} pull
+          hosts/{{ inventory_hostname }}/system/cloudflared-config.yml differs between
+          this control node and {{ host_repo }} on {{ inventory_hostname }}. The host has
+          tunnel {{ (host_repo_cfg.content | b64decode | from_yaml).tunnel }}; phase 1
+          produced {{ new_tunnel }}. Either that clone has not been pulled since the
+          review — in which case installing from it is a no-op and the credential swap
+          then points the connector at a tunnel its config does not name — or the ingress
+          differs, which the post-cycle check would only catch after an outage. Commit and
+          push phase 1's config, then on {{ inventory_hostname }}:
+          git -C {{ host_repo }} pull
         success_msg: "the host's clone carries the reviewed config"
 
     # RESUMABLE. If the live credentials already name the target, the host half is done

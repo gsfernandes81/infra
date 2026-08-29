@@ -688,6 +688,7 @@
         # booleans while a task var stays a string, and a non-empty string is truthy.
         windows: false
         identity_named: "{{ identity_usable }}"
+        identity_path: "{{ ssh_key }}"
 
     # ── and on the Windows side of the same laptop ───────────────────────────
     - name: Make sure the laptop's %USERPROFILE%\.ssh exists
@@ -740,6 +741,13 @@
       vars:
         windows: true
         identity_named: "{{ win_identity_usable }}"
+        # THE BASENAME, under Windows' own ~/.ssh — not ssh_key verbatim. `~` there is
+        # C:\Users\gavin, a different home with different keys, and the existence check
+        # above already looks for the basename there. Writing a Linux path into the
+        # Windows block would name a file that machine does not have, while the check
+        # that passed had looked at a different one. Only bites with -e identity=<a
+        # custom path>; the default resolves to the same string either way.
+        identity_path: "~/.ssh/{{ ssh_key | basename }}"
       when: on_windows_client | bool
 
     # ── fallback for a control node that cannot see the laptop — Termux ──────
@@ -791,6 +799,13 @@
       vars:
         windows: true
         identity_named: "{{ win_identity_usable }}"
+        # THE BASENAME, under Windows' own ~/.ssh — not ssh_key verbatim. `~` there is
+        # C:\Users\gavin, a different home with different keys, and the existence check
+        # above already looks for the basename there. Writing a Linux path into the
+        # Windows block would name a file that machine does not have, while the check
+        # that passed had looked at a different one. Only bites with -e identity=<a
+        # custom path>; the default resolves to the same string either way.
+        identity_path: "~/.ssh/{{ ssh_key | basename }}"
       when:
         - windows_home_wsl | length > 0
         - not (on_windows_client | bool)

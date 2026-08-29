@@ -48,7 +48,7 @@ Host {{ dev_alias }} {{ dev_alias }}-sh {{ dev_alias }}-lan
   # public half matches the file named here — so both lines are omitted on a client that
   # has neither ~/.ssh/id_ed25519 nor its .pub, where they would produce
   # "Permission denied (publickey)" with nothing to offer.
-  IdentityFile {{ ssh_key }}
+  IdentityFile {{ identity_path }}
   IdentitiesOnly yes
 {% else %}
   # No IdentityFile or IdentitiesOnly: this client has no {{ ssh_key | default('key file', true) }}
