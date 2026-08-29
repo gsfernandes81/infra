@@ -148,12 +148,25 @@ install -d -o gavin -g deploy -m 2750 /srv
 As **gavin**:
 
 ```sh
-# ⚠︎ AS BUILT, THIS IS NOT WHERE THE CHECKOUT ENDED UP. `two` carries it at
-# ~gavin/infra and has no /srv/infra at all — established 2026-08-28, when a playbook
-# was pointed at the documented path and found nothing. The rest of this section, and
-# the destiny-director paths below, describe the same directory that does not exist.
+# ⚠︎ AS BUILT, THIS IS NOT WHERE ANYTHING ENDED UP, AND /srv/infra IS DEAD.
+# Established 2026-08-28 when a playbook was pointed at the documented path and found
+# nothing, and confirmed by the owner on 2026-08-29. What `two` actually carries, in
+# ~gavin:
+#
+#     infra/               the checkout of THIS repo — what every playbook means
+#     destiny-director/    the app's own clone
+#     dd-bundle/           from the deploy work
+#     docker-compose/      a leftover; this box runs podman and has no docker
+#     cloudflared          a stray root-owned copy of the binary from the July hand
+#                          install. /usr/bin/cloudflared is the one the service runs
+#
+# So the `deploy` group ownership and the mode-2750 hardening below never happened
+# either — they were properties of a directory that was never created. The rest of this
+# section, and the destiny-director paths in it, describe that directory.
+#
 # Left as written rather than silently rewritten: this is the build procedure, and what
-# it says was intended is worth keeping next to what actually happened.
+# it says was intended is worth keeping beside what actually happened. If the hardening
+# is still wanted it is a fresh decision about ~gavin/infra, not a repair of this.
 git clone git@github.com:gsfernandes81/infra.git /srv/infra
 ```
 

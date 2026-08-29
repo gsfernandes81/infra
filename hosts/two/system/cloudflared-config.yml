@@ -40,6 +40,12 @@ metrics: 127.0.0.1:20241
 ingress:
   - hostname: ssh-two.gsrpi.uk
     service: ssh://127.0.0.1:22
-  - hostname: anchor-two.gsrpi.uk
-    service: http://127.0.0.1:8080
+  # `anchor-two.gsrpi.uk` removed 2026-08-29. It routed to destiny-director's anchor bot
+  # while that was being trialled on this box; the experiment ended, the origin has not
+  # listened on 8080 since, and deployments/destiny-director/compose.yaml has its `ports:`
+  # block commented out — so the rule answered 502 always rather than only while the bot
+  # was down. It was captured faithfully by phase 1 because the edge was still serving it,
+  # which is what a faithful capture does: it copies what is there, not what is wanted.
+  #
+  # Its CNAME is a separate object and still exists — see plans/cloudflare-dashboard-sweep.md.
   - service: http_status:404

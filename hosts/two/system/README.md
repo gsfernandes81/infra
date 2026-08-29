@@ -166,7 +166,7 @@ argument-less verbs. The current key reaches a shell, so it must **not** go ther
 
 ## The checkout is shared, and read-only to the deploy account
 
-One clone, **documented as `/srv/infra` and actually at `~gavin/infra`** (checked 2026-08-29 — the intent below describes how it was meant to be built): `gavin:deploy`, dirs `2750`,
+One clone, **documented as `/srv/infra`, actually at `~gavin/infra`, and `/srv/infra` is dead** (owner, 2026-08-29). The ownership and modes below describe the directory that was never created — treat them as the intent, not the state: `gavin:deploy`, dirs `2750`,
 files `0640`. `gavin` pulls and edits; `claude` reads. That is what makes "the deploy
 account cannot choose the image" a permission rather than a claim.
 

@@ -34,8 +34,10 @@ rootful.
 
 ## 3. openSUSE MicroOS — the target
 
-**Decided.** Transactional/immutable root with btrfs snapshots and automatic rollback
-on a failed boot, which is what you want on a box you can't physically reach for
+**Decided — and gated on being ashore, not on anything technical.** Reconfirmed by the
+owner 2026-08-29: it is waiting for physical presence, and it is **not set in stone** —
+it can be overturned. Transactional/immutable root with btrfs snapshots and automatic
+rollback on a failed boot, which is what you want on a box you can't physically reach for
 months. Official Pi 5 support since Nov 2025 (SUSE did the U-Boot work). Podman and
 Quadlet are the native container story.
 

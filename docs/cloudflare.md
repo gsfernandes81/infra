@@ -77,7 +77,7 @@ with `curl -s 127.0.0.1:20241/config` on the host.
 | Hostname | Origin | |
 |---|---|---|
 | `ssh-two.gsrpi.uk` | `ssh://127.0.0.1:22` | the lifeboat's own door |
-| `anchor-two.gsrpi.uk` | `http://127.0.0.1:8080` | destiny-director's anchor — **502 when the bot is down**, which is its normal state |
+| ~~`anchor-two.gsrpi.uk`~~ | ~~`http://127.0.0.1:8080`~~ | **removed 2026-08-29.** It served destiny-director's anchor bot while that was trialled on `two`; the experiment ended and nothing has listened on 8080 since. It was **502 always**, not "502 when the bot is down" — `deployments/destiny-director/compose.yaml` has its `ports:` block commented out. Its CNAME still exists |
 
 Both carried identical `originRequest` settings, equal to the tunnel default, so nothing
 was lost in the rewrite — the assert that would have caught a `noTLSVerify` or
