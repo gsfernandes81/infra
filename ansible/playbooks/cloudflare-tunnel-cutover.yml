@@ -59,6 +59,61 @@
       Authorization: "Bearer {{ cf_api_token }}"
 
   tasks:
+    # ── is this token even a token? ──────────────────────────────────────────
+    # FIRST, before anything reads a box or the API. Cloudflare answers a token it will
+    # not accept with `9109 Invalid access token` on whatever endpoint you happened to
+    # hit, so the failure lands wherever the play got to and looks like that endpoint's
+    # problem. `/user/tokens/verify` asks the one question directly, and separates the two
+    # causes that are otherwise indistinguishable: a token string that is wrong, expired
+    # or not yet active, versus a valid token missing a permission.
+    #
+    # failed_when: false + print the body + assert — the pattern CLAUDE.md records for a
+    # no_log call that can be refused. The body is the only thing that names the cause;
+    # the invocation is never printed, because that is where the Authorization header is.
+    - name: Verify the API token before using it
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/user/tokens/verify"
+        headers: "{{ api_hdr }}"
+      register: tok
+      delegate_to: localhost
+      run_once: true
+      no_log: true
+      failed_when: false
+      check_mode: false
+
+    - name: Say what Cloudflare said about the token
+      ansible.builtin.debug:
+        msg: >-
+          token verify: HTTP {{ tok.status | default('?') }},
+          status {{ tok.json.result.status | default('unknown') }},
+          {{ tok.json.errors | default([]) }}
+      changed_when: true
+      when: (tok.status | default(0)) != 200 or (tok.json.result.status | default('')) != 'active'
+
+    - name: Refuse a token Cloudflare will not accept
+      ansible.builtin.assert:
+        that:
+          - (tok.status | default(0)) == 200
+          - (tok.json.result.status | default('')) == 'active'
+        fail_msg: |
+          Cloudflare will not accept this token at all — this is NOT a missing permission.
+          A scope problem gets you a 403 on the specific endpoint with the token still
+          verifying as active; this fails verification outright.
+
+          Check, in order: that the whole token was pasted (it is read with echo off, so a
+          truncated paste is invisible); that it has not expired or been revoked; that its
+          start date is not in the future; and that it is an API token from My Profile ->
+          API Tokens rather than a Global API Key or an Access service token.
+
+          Test it by hand without this play:
+            read -rs TOKEN
+            curl -s -H "Authorization: Bearer $TOKEN" \
+              https://api.cloudflare.com/client/v4/user/tokens/verify
+            unset TOKEN
+
+          Nothing has been read or changed.
+        success_msg: "token verifies as active"
+
     # ── are we standing on the thing we are about to stop? ───────────────────
     # This play cycles the target's cloudflared. If Ansible reached the target THROUGH
     # that tunnel, the first thing it does is sever its own connection — which is
@@ -294,11 +349,11 @@
           - (zone.status | default(0)) == 200
           - (zone.json.result | default([]) | length) > 0
         fail_msg: >-
-          Could not list the zone {{ zone_name }} (HTTP {{ zone.status | default('?') }}).
-          A 403 here almost always means the token is phase 1's — that one only needs
-          Account -> Cloudflare Tunnel -> Edit, and this phase also touches DNS. Mint one
-          with all three: Account -> Cloudflare Tunnel -> Edit, Zone -> Zone -> Read, and
-          Zone -> DNS -> Edit, the last two scoped to {{ zone_name }}. Nothing has been
+          Could not list the zone {{ zone_name }} (HTTP {{ zone.status | default('?') }}),
+          and the body above says why. The token verified as active at the top of this
+          play, so this is a MISSING PERMISSION rather than a bad token: this phase needs
+          Zone -> Zone -> Read and Zone -> DNS -> Edit on {{ zone_name }} in addition to
+          the Account -> Cloudflare Tunnel -> Edit that phase 1 wanted. Nothing has been
           changed on {{ inventory_hostname }} or at the edge.
         success_msg: "token can see {{ zone_name }}"
 
