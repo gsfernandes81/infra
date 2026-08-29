@@ -475,6 +475,18 @@ its verdict; that step was skipped, and the result was a **failure for the wrong
 the same defect as a pass for the wrong reason, and harder to notice because a red result
 looks like information.
 
+## The status board
+
+<https://claude.ai/code/artifact/0133f388-9fd7-4392-8d2c-0e1b18610784>
+
+The phase table below rendered for reading on a phone — every phase exactly once, grouped
+done / in flight / open / gated. **The table is the record and the board is the view**: if
+they disagree, the board drifted.
+
+**Update it IN PLACE**, by passing that URL to the Artifact tool as `url`. Publishing
+without it creates a second board and orphans this one, which is the failure this note
+exists to prevent.
+
 ## Sequencing, and where podman fits
 
 Ordered by risk, not by appeal. **Phases 0–2 change nothing on any host**, and they are the

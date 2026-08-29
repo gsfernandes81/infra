@@ -39,6 +39,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # PINNED MAJORS, AND THE WARNINGS ARE COSMETIC FOR NOW. GitHub deprecation-warns
+      # these actions' Node runtime on every run. Nothing breaks until GitHub hard-cuts
+      # the old runtime, at which point every `uses:` here needs a major bump in one
+      # change — checkout, login-action, setup-qemu, setup-buildx, build-push. Recorded
+      # here rather than in a handoff note, which is where it used to live and where it
+      # would have died with the note.
       - uses: actions/checkout@v4
 
       # The Makefile is the tag's single source everywhere else, so it is here too —
