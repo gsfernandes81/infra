@@ -777,11 +777,24 @@ Alpine script using the same supervisor, in the default runlevel, demonstrably w
 log. `containerd` was the other candidate and was passed over because CLAUDE.md records
 that service as unused, and a script that may never have run is not known-good state.
 
-**`two` still needs it, and it needs it more.** An earlier version of this entry said two
-could be skipped because 2g replaces its tunnel wholesale. That is the same reasoning that
-would have skipped `one` — where doing it first is what made zero's diagnosis possible an
-hour later. Two's 2g is last of the three, so skipping means the lifeboat logs nothing for
-however long that takes.
+~~**`two` still needs it, and it needs it more.**~~ **`two` was done at the same sitting,
+2026-08-23** — the phase table row said so all along and this paragraph did not, which is
+a doc disagreeing with itself rather than with a box. Settled 2026-08-29 against the
+tracked artefact: `hosts/two/system/cloudflared` declares `output_log` and `error_log`,
+both pointing at `/var/log/cloudflared.log`.
+
+**It is a different fix from the other two, which is presumably why this paragraph
+survived.** `zero` and `one` pipe through `log_proxy`, which arrived with docker; `two`
+runs neither docker nor containerd, so it uses OpenRC's plain file variables — `output_log`
+and `error_log` map to `--stdout` and `--stderr` in that box's own
+`supervise-daemon.sh`. The cost is no rotation, which was measured and accepted: 1 MB in
+seven months on 27 GB free.
+
+**The stale version cost something.** During `two`'s cutover on 2026-08-29 this paragraph
+was read as current, twice, and used to tell the owner the lifeboat logs nowhere and that
+a foreground run was the only way to see a connector error. There was a log the whole
+time, and it would have shown the credential/config mismatch directly instead of it being
+inferred from a 503.
 
 Two is not a copy-paste of the other two: it runs no docker, so
 `/etc/init.d/docker` is not there to model on, and whether `log_proxy` exists at all needs
