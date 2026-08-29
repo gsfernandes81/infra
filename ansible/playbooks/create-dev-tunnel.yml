@@ -2,8 +2,8 @@
 # Provisions the Cloudflare side of a dev container's tunnel, over the API.
 #
 #     cd ansible
-#     ansible-playbook playbooks/cloudflare-dev-tunnel.yml --check    # prove, no -K
-#     ansible-playbook playbooks/cloudflare-dev-tunnel.yml            # apply
+#     ansible-playbook playbooks/create-dev-tunnel.yml --check    # prove, no -K
+#     ansible-playbook playbooks/create-dev-tunnel.yml            # apply
 #
 # Four objects, and every one of them idempotent — each is looked up before it is
 # created, so a re-run after a partial failure is the intended way to finish:
@@ -136,7 +136,7 @@
         success_msg: "no retired flags"
 
     # ── 0  the token, the zone and the account ─────────────────────────────
-    # `check_mode: false` on every read, the same reason audit.yml carries it: under
+    # `check_mode: false` on every read, the same reason audit-fleet.yml carries it: under
     # --check a task is skipped by default, so a dry run would resolve nothing and then
     # fail on every id it needed. A read is safe in check mode by definition. The
     # writes below carry no such line, so --check skips exactly those.
@@ -338,7 +338,7 @@
           name: "{{ cf_hostname }}"
           content: "{{ cf_tunnel_id | default(cf_unknown_id, true) }}.cfargotunnel.com"
           proxied: true
-          comment: "{{ cf_name }} container tunnel — ansible/playbooks/cloudflare-dev-tunnel.yml"
+          comment: "{{ cf_name }} container tunnel — ansible/playbooks/create-dev-tunnel.yml"
       register: cf_dns_w
       delegate_to: localhost
       when: not cf_dns_ok
@@ -525,7 +525,7 @@
       # created a credential nobody can use. Everything else on the wire stays masked.
       #
       # changed_when: true is a display decision and not a lie about state — the same one
-      # system-files.yml documents. ansible.cfg sets display_ok_hosts = False and a debug
+      # install-system-files.yml documents. ansible.cfg sets display_ok_hosts = False and a debug
       # task reports ok, so without it THIS BANNER DOES NOT PRINT: the play mints a
       # credential Cloudflare will never show again and says nothing. Found 2026-08-24.
       ansible.builtin.debug:
@@ -543,7 +543,7 @@
 
           Hand them to the client play, which is the only thing that should store them:
 
-              ansible-playbook playbooks/dev-client.yml{{ ' -e replace_token=true' if cf_st_verb == 'rotated' else '' }}
+              ansible-playbook playbooks/configure-client-dev.yml{{ ' -e replace_token=true' if cf_st_verb == 'rotated' else '' }}
 
           It prompts for both — the secret is read from the terminal and CANNOT be
           passed with -e, so it reaches neither your shell history nor the process

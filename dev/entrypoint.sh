@@ -413,7 +413,7 @@ fi
 # host-setup.md's token-in-argv leak, and management-plane.md's rule that secrets never
 # go in command_args. In a container there is no supervise-daemon writing argv to
 # syslog, but `docker inspect` shows both argv and env, and .Config.Env is exactly what
-# audit.yml refuses to read because it holds secrets. A credentials FILE, mounted
+# audit-fleet.yml refuses to read because it holds secrets. A credentials FILE, mounted
 # read-only, is the spelling that puts the secret in neither.
 #
 # The second dividend is that ingress lives in a config file rather than in the
@@ -431,7 +431,7 @@ if [ -n "${DEV_TUNNEL_HOSTNAME:-}" ] && [ -s "$TUNNEL_CREDS" ]; then
 
     if [ -z "$TUNNEL_ID" ]; then
         say "WARNING: $TUNNEL_CREDS has no TunnelID — not starting the tunnel."
-        say "         Re-run ansible/playbooks/cloudflare-dev-tunnel.yml; loopback works."
+        say "         Re-run ansible/playbooks/create-dev-tunnel.yml; loopback works."
     else
         # metrics on 20241 to match what the host tunnels use, because that is the probe
         # recovery.md already trusts: /ready with readyConnections >= 1 was chosen there
@@ -488,7 +488,7 @@ EOF
     fi
 elif [ -n "${DEV_TUNNEL_HOSTNAME:-}" ]; then
     say "DEV_TUNNEL_HOSTNAME is set but $TUNNEL_CREDS is missing — no tunnel."
-    say "    Run ansible/playbooks/cloudflare-dev-tunnel.yml. Loopback is unaffected."
+    say "    Run ansible/playbooks/create-dev-tunnel.yml. Loopback is unaffected."
 else
     say "no tunnel (DEV_TUNNEL_HOSTNAME unset — see dev/README.md § Cloudflare)"
 fi

@@ -1,10 +1,10 @@
 ---
 # Install the tracked /etc copies onto each host, through bin/install-system-file.
 #
-#   ansible-playbook playbooks/system-files.yml --check --diff -K    # what WOULD change
-#   ansible-playbook playbooks/system-files.yml -K                   # install it
-#   ansible-playbook playbooks/system-files.yml -l zero -K           # one host
-#   ansible-playbook playbooks/system-files.yml -e only=cloudflared -K
+#   ansible-playbook playbooks/install-system-files.yml --check --diff -K    # what WOULD change
+#   ansible-playbook playbooks/install-system-files.yml -K                   # install it
+#   ansible-playbook playbooks/install-system-files.yml -l zero -K           # one host
+#   ansible-playbook playbooks/install-system-files.yml -e only=cloudflared -K
 #
 # THIS IS A DRIVER, NOT A REIMPLEMENTATION. Every guard lives in bin/install-system-file
 # and stays there: the infra- header, the refusal to change content without being told,

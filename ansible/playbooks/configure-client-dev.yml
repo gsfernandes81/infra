@@ -3,18 +3,18 @@
 # reach a dev container through its Cloudflare tunnel. Targets the control node itself.
 #
 #     cd ansible
-#     ansible-playbook playbooks/dev-client.yml --check --diff
-#     ansible-playbook playbooks/dev-client.yml
+#     ansible-playbook playbooks/configure-client-dev.yml --check --diff
+#     ansible-playbook playbooks/configure-client-dev.yml
 #
 # RUN IT FROM THIS DIRECTORY. ansible.cfg is read from the cwd and is the only thing that
 # points at ./inventory; from anywhere else `hosts: control` matches nothing and the play
-# is skipped whole, with an empty recap and exit 0. `_inventory-guard.yml` below turns
+# is skipped whole, with an empty recap and exit 0. `_assert-inventory.yml` below turns
 # that silence into a failure — it is imported for exactly this reason and the reasoning
 # is in that file.
 #
 # ONE RUN PER CONTAINER, and the defaults are infra-dev's. For a second one, name it:
 #
-#     ansible-playbook playbooks/dev-client.yml \
+#     ansible-playbook playbooks/configure-client-dev.yml \
 #       -e alias=or3-dev -e hostname=or3-dev.gsrpi.uk -e lan_port=2224
 #
 # Everything a run writes is keyed on `alias` — the token file, the ssh block's marker,
@@ -36,8 +36,8 @@
 # Windows cannot be an Ansible target without sshd on it, which is a lot of machinery for
 # two files. But under WSL the laptop's Windows home is mounted at /mnt/c/Users/gavin, so
 # the play run *in WSL* manages *Windows'* ssh config and token directly — the same trick
-# ssh-client.yml already uses for the infra-fleet block, and the reason a WSL control node
-# is worth having at all. So a single `ansible-playbook playbooks/dev-client.yml` in WSL
+# configure-client-fleet.yml already uses for the infra-fleet block, and the reason a WSL control node
+# is worth having at all. So a single `ansible-playbook playbooks/configure-client-dev.yml` in WSL
 # writes, on the Linux side:
 #
 #     ~/.ssh/config                         the block, POSIX ProxyCommand
@@ -64,7 +64,7 @@
 # THE ONE THING THIS PLAY CANNOT PROMISE ON WINDOWS IS A FILE MODE. /mnt/c is drvfs and
 # carries no Unix permissions, so `mode: "0600"` there either fails or silently does
 # nothing — and a task that pretends to have set a mode is worse than one that does not
-# try (ssh-client.yml's Windows task says the same thing about the same mount). What
+# try (configure-client-fleet.yml's Windows task says the same thing about the same mount). What
 # protects the Windows token is the NTFS ACL C:\Users\gavin hands down. The play PRINTS
 # that ACL when it writes the file. It does not assert on it: this repo's own rule is that
 # a check is calibrated against known-good state before its verdict is trusted, and
@@ -96,7 +96,7 @@
 # NO NEW COLLECTIONS: ansible.builtin throughout.
 
 - name: Guard — refuse to run with no inventory
-  ansible.builtin.import_playbook: _inventory-guard.yml
+  ansible.builtin.import_playbook: _assert-inventory.yml
   vars:
     required_group: control
 
@@ -134,7 +134,7 @@
     # TWO SPELLINGS OF EVERY PATH, STATED RATHER THAN DERIVED. One is how WSL reaches the
     # file, the other is how Windows names it inside the config and the wrapper. A
     # replace() chain over backslashes is clever, and clever is what put a bare
-    # `cloudflared` into a ProxyCommand in the first place; ssh-client.yml made the same
+    # `cloudflared` into a ProxyCommand in the first place; configure-client-fleet.yml made the same
     # call for the same reason.
     windows_home_wsl: "{{ windows_home | default('/mnt/c/Users/gavin') }}"
     windows_home_win: 'C:\Users\gavin'
@@ -194,7 +194,7 @@
       #
       # `shell`, not `command`: `command -v` is a SHELL BUILTIN, so the command module
       # has nothing to exec and reports cloudflared missing even where it is plainly on
-      # PATH — the same bug fixed in ssh-client.yml on 2026-08-23.
+      # PATH — the same bug fixed in configure-client-fleet.yml on 2026-08-23.
       ansible.builtin.shell: command -v cloudflared
       register: cfd_path
       changed_when: false
@@ -238,7 +238,7 @@
         success_msg: "{{ cfd.stdout_lines[0] | default('cloudflared present') }}"
 
     - name: Settle on a path — an override wins, discovery is the fallback
-      # Mirrors ssh-client.yml. -e cloudflared_path=... beats detection, and the assert
+      # Mirrors configure-client-fleet.yml. -e cloudflared_path=... beats detection, and the assert
       # below is on the RESULT either way, so a wrong override cannot slip through.
       ansible.builtin.set_fact:
         cfd_resolved: >-
@@ -267,7 +267,7 @@
           -e cloudflared_path=/data/data/com.termux/files/usr/bin/cloudflared
 
     # ── are we in WSL, with the laptop's Windows home in reach? ──────────────
-    # THE HOME DIRECTORY, NOT ITS ssh/config. ssh-client.yml probes the config file
+    # THE HOME DIRECTORY, NOT ITS ssh/config. configure-client-fleet.yml probes the config file
     # itself, which means a laptop that has never had one falls through to the paste
     # path even though the play could plainly have written it. Probing the home directory
     # and letting blockinfile create the file is strictly more correct, and it is now what
@@ -351,21 +351,21 @@
           told not to ask (-e prompt_for_token=false). Nothing was written for it: an ssh
           block whose ProxyCommand sources a file that is not there fails as
           "Connection closed", which reads like the container being down. Provision it
-          with playbooks/cloudflare-dev-tunnel.yml -e name={{ dev_alias }}, then re-run.
+          with playbooks/create-dev-tunnel.yml -e name={{ dev_alias }}, then re-run.
       changed_when: true
       when:
         - setting_token | bool
         - not (prompt_for_token | default(true) | bool)
 
     - name: End this container's play rather than block on a credential that does not exist
-      # THE POINT OF THE FLAG. this-client.yml imports this play once per dev container,
+      # THE POINT OF THE FLAG. configure-client.yml imports this play once per dev container,
       # and a container whose tunnel has not been provisioned yet has no token to give —
       # so the default behaviour, prompting, would stop the one command that is supposed
       # to configure every other container. `meta: end_play` ends THIS import only; the
       # imports after it still run (verified). Everything already provisioned still gets
       # written, and the run says out loud what it left out.
       #
-      # Default TRUE, so an interactive `ansible-playbook playbooks/dev-client.yml` still
+      # Default TRUE, so an interactive `ansible-playbook playbooks/configure-client-dev.yml` still
       # asks. The flag is for the composed run, not for hiding a missing credential.
       ansible.builtin.meta: end_play
       when:
@@ -386,7 +386,7 @@
       # prompt is a cursor sitting there with no explanation. This task says what is
       # wanted; the prompts just take it.
       #
-      # IT NAMES THE CONTAINER, AND SO DO THE PROMPTS AND THE PLAY BANNER. this-client.yml
+      # IT NAMES THE CONTAINER, AND SO DO THE PROMPTS AND THE PLAY BANNER. configure-client.yml
       # imports this play once per container, so without the alias in them you get four
       # identical banners and four identical `Client Secret` cursors and no way to tell
       # which one is being asked for — reported from the laptop, 2026-08-28. A prompt for
@@ -485,7 +485,7 @@
         mode: "0600"
         content: |
           # Cloudflare Access service token for {{ dev_hostname }}.
-          # Written by ansible/playbooks/dev-client.yml. Sourced by ~/.ssh/config's
+          # Written by ansible/playbooks/configure-client-dev.yml. Sourced by ~/.ssh/config's
           # ProxyCommand for host `{{ dev_alias }}`. POSIX sh — not fish.
           TUNNEL_SERVICE_TOKEN_ID={{ st_client_id | default(id_in.user_input, true) | trim }}
           TUNNEL_SERVICE_TOKEN_SECRET={{ secret_in.user_input | trim }}
@@ -517,7 +517,7 @@
         dest: "{{ win_token_file_wsl }}"
         content: |
           # Cloudflare Access service token for {{ dev_hostname }}.
-          # Written by ansible/playbooks/dev-client.yml, running in WSL. Read by
+          # Written by ansible/playbooks/configure-client-dev.yml, running in WSL. Read by
           # {{ win_wrapper }} — this file is NOT a shell script and is not sourced.
           #
           # PERMISSIONS HERE ARE NTFS, NOT A UNIX MODE. Ansible cannot set a mode on
@@ -664,7 +664,7 @@
       # title and its ORDERING RULE, the thing you read first when something is wrong with
       # this file — ended up below two generated blocks, and every dev container
       # provisioned after that would have pushed it down again. `Host *` is the anchor
-      # ssh-client.yml has always used; both plays now agree, and a hand-kept header stays
+      # configure-client-fleet.yml has always used; both plays now agree, and a hand-kept header stays
       # where its author put it.
       #
       # If `Host *` is absent, blockinfile appends, which is correct for a file that has
@@ -674,7 +674,7 @@
         mode: "0600"
         create: true
         insertbefore: '^Host \*\s*$'
-        marker: "# {mark} {{ dev_alias }} (ansible/playbooks/dev-client.yml)"
+        marker: "# {mark} {{ dev_alias }} (ansible/playbooks/configure-client-dev.yml)"
         block: "{{ lookup('template', '../templates/ssh-dev-block.j2') }}"
       vars:
         # identity_named, NOT identity_usable, and the rename is the whole fix.
@@ -736,7 +736,7 @@
         path: "{{ win_ssh_config }}"
         create: true
         insertbefore: '^Host \*\s*$'
-        marker: "# {mark} {{ dev_alias }} (ansible/playbooks/dev-client.yml)"
+        marker: "# {mark} {{ dev_alias }} (ansible/playbooks/configure-client-dev.yml)"
         block: "{{ lookup('template', '../templates/ssh-dev-block.j2') }}"
       vars:
         windows: true
@@ -765,7 +765,7 @@
         mode: "0600"
         content: |
           # The Windows half of `{{ dev_alias }}`, for a laptop this control node cannot see.
-          # Generated by ansible/playbooks/dev-client.yml — edit the templates, not this.
+          # Generated by ansible/playbooks/configure-client-dev.yml — edit the templates, not this.
           #
           # RUNNING THIS PLAY FROM WSL DOES ALL OF IT FOR YOU, and checks the cloudflared
           # path first. This file exists for when that is not possible. The paths below
@@ -793,9 +793,9 @@
           # ---8<--- end ---8<---
           #
           # ── 3. this block, in %USERPROFILE%\.ssh\config, ABOVE its `Host *` ────
-          # BEGIN {{ dev_alias }} (ansible/playbooks/dev-client.yml)
+          # BEGIN {{ dev_alias }} (ansible/playbooks/configure-client-dev.yml)
           {{ lookup('template', '../templates/ssh-dev-block.j2') }}
-          # END {{ dev_alias }} (ansible/playbooks/dev-client.yml)
+          # END {{ dev_alias }} (ansible/playbooks/configure-client-dev.yml)
       vars:
         windows: true
         identity_named: "{{ win_identity_usable }}"
@@ -830,6 +830,6 @@
             else ('skipped — windows_home is empty' if windows_home_wsl | length == 0
                   else 'not reachable from here — follow ' ~ windows_out) }}
           - ""
-          - "-lan needs `Host zero`, which ssh-client.yml writes. Run that first on a new"
+          - "-lan needs `Host zero`, which configure-client-fleet.yml writes. Run that first on a new"
           - "client, on both sides of a laptop."
       changed_when: true

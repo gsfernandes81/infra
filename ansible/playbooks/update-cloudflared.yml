@@ -1,7 +1,7 @@
 ---
 # Update cloudflared on ONE host, deliberately, in a staggered rollout.
 #
-#   ansible-playbook playbooks/cloudflared-update.yml \
+#   ansible-playbook playbooks/update-cloudflared.yml \
 #       -e target=one -e version=2026.9.1 -e sha256=<hash for that host's arch> -K
 #
 # NOT IN USE, decided 2026-08-23. The hosts autoupdate, staggered by check frequency

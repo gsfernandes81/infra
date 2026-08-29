@@ -21,7 +21,7 @@ ansible_python_interpreter: /usr/bin/python3
 # scattered smartmontools, btrfs-progs, bcache-tools, docs and zram-init across host_vars
 # on the reasoning that each host should carry only what its hardware needs. That produces
 # three machines that differ in ways nobody chose, which is what a fallback is written
-# against: audit.yml grew a netstat branch because ss was on one host out of three, and
+# against: audit-fleet.yml grew a netstat branch because ss was on one host out of three, and
 # one's hardware.md looked hand-edited for a week because usbutils was on two out of three.
 # Every divergence here has to earn itself; unexplained divergence is the bug.
 #
@@ -55,7 +55,7 @@ base_packages:
   - git
   - htop
   - hwids-usb
-  - iproute2          # ss(8) — its absence is why audit.yml carries a netstat branch
+  - iproute2          # ss(8) — its absence is why audit-fleet.yml carries a netstat branch
   - iptables          # named explicitly so `apk del`'s orphan reclaim can never take it:
                       # netavark shells out to it while not depending on it, which is the
                       # trap in CLAUDE.md that broke rootless podman days after a cleanup

@@ -8,7 +8,7 @@ command: ansible-playbook` on a Pi means you are on the wrong machine, not that 
 is missing from it.
 
 **The two client plays are the exception, and only because they target the client.**
-`ssh-client.yml` and `dev-client.yml` write `~/.ssh/config` on whatever machine runs them
+`configure-client-fleet.yml` and `configure-client-dev.yml` write `~/.ssh/config` on whatever machine runs them
 and reach no host at all, so they are run wherever that client is — the phone, or WSL on
 the laptop, where one run also configures Windows. See *The laptop is two clients* below.
 That is not a second control plane: neither play can touch a Pi.
@@ -20,44 +20,44 @@ The design and the reasoning are in
 # in Termux
 cd ~/infra/ansible
 ansible fleet -m ping                       # transport works
-ansible-playbook playbooks/audit.yml -K     # what runs where -> docs/fleet-inventory.md
+ansible-playbook playbooks/audit-fleet.yml -K     # what runs where -> docs/fleet-inventory.md
 ```
 
 **Not everything here is read-only any more, and the list is longer than it looks.**
-`audit.yml` still is. Everything below changes something:
+`audit-fleet.yml` still is. Everything below changes something:
 
 | play | what it can change |
 |---|---|
-| `packages.yml` | installs and removes packages on all three hosts |
-| `system-files.yml` | writes tracked `/etc` copies — **boot-path files** — on all three |
-| `cloudflared-update.yml` | replaces the cloudflared binary and cycles the connector (marked NOT IN USE; it refuses while a host autoupdates) |
-| `cloudflare-tunnel-new.yml` | creates a Cloudflare tunnel and writes credentials at 0600 |
-| `cloudflare-tunnel-cutover.yml` | **cycles a connector and repoints DNS** — there is a deliberate outage in it |
-| `cloudflare-tunnel-retire.yml` | **deletes a tunnel. Irreversible** |
-| `cloudflare-dev-tunnel.yml` | creates edge objects and prints a secret that cannot be re-fetched |
+| `install-packages.yml` | installs and removes packages on all three hosts |
+| `install-system-files.yml` | writes tracked `/etc` copies — **boot-path files** — on all three |
+| `update-cloudflared.yml` | replaces the cloudflared binary and cycles the connector (marked NOT IN USE; it refuses while a host autoupdates) |
+| `create-host-tunnel.yml` | creates a Cloudflare tunnel and writes credentials at 0600 |
+| `cutover-host-tunnel.yml` | **cycles a connector and repoints DNS** — there is a deliberate outage in it |
+| `retire-host-tunnel.yml` | **deletes a tunnel. Irreversible** |
+| `create-dev-tunnel.yml` | creates edge objects and prints a secret that cannot be re-fetched |
 | the `*-client.yml` plays | write ssh config and a 0600 token on the client, not on a host |
-| `authorize-dev-client.yml` | writes `authorized_keys` on `zero` and refreshes it inside containers |
+| `authorize-configure-client-dev.yml` | writes `authorized_keys` on `zero` and refreshes it inside containers |
 
 Most take `--check`, and running that first is the habit: it is what caught the `docs`
 metapackage before it landed on a 1 GB Pi. **The tunnel plays are the exception** —
-`cloudflare-tunnel-new.yml` cannot be rehearsed that way at all, because the API create is
+`create-host-tunnel.yml` cannot be rehearsed that way at all, because the API create is
 skipped in check mode and everything after it dies on undefined.
 
 ## The playbooks
 
 | | |
 |---|---|
-| `audit.yml` | read-only; what runs where → `docs/fleet-inventory.md` |
-| `packages.yml` | the declared package set on all three hosts |
-| `dev-container.yml` | the **host** side of `infra-dev` on zero — secrets dir, deploy key, authorized_keys, `dev/.env` |
-| `cloudflare-dev-tunnel.yml` | the **edge** side — tunnel, DNS, Access application and policy |
-| `dev-client.yml` | the **client** side — one dev container's service token and `~/.ssh/config` block, **and the Windows half of the same laptop when run from WSL** |
-| `ssh-client.yml` | the fleet's aliases in this client's `~/.ssh/config`, Windows included |
-| **`this-client.yml`** | **the one you actually run** — the two above, composed: every ssh block this repo owns, and the dev-container registry |
-| `authorize-dev-client.yml` | adds one client's **public** key to the dev containers' `authorized_keys` on `zero` — the host half of letting a new laptop or phone in |
-| `_inventory-guard.yml` | not run directly — imported by the client plays so a run with no inventory fails instead of exiting 0 |
+| `audit-fleet.yml` | read-only; what runs where → `docs/fleet-inventory.md` |
+| `install-packages.yml` | the declared package set on all three hosts |
+| `prepare-dev-host.yml` | the **host** side of `infra-dev` on zero — secrets dir, deploy key, authorized_keys, `dev/.env` |
+| `create-dev-tunnel.yml` | the **edge** side — tunnel, DNS, Access application and policy |
+| `configure-client-dev.yml` | the **client** side — one dev container's service token and `~/.ssh/config` block, **and the Windows half of the same laptop when run from WSL** |
+| `configure-client-fleet.yml` | the fleet's aliases in this client's `~/.ssh/config`, Windows included |
+| **`configure-client.yml`** | **the one you actually run** — the two above, composed: every ssh block this repo owns, and the dev-container registry |
+| `authorize-configure-client-dev.yml` | adds one client's **public** key to the dev containers' `authorized_keys` on `zero` — the host half of letting a new laptop or phone in |
+| `_assert-inventory.yml` | not run directly — imported by the client plays so a run with no inventory fails instead of exiting 0 |
 
-**`dev-container.yml`, `cloudflare-dev-tunnel.yml` and `dev-client.yml` are one job split
+**`prepare-dev-host.yml`, `create-dev-tunnel.yml` and `configure-client-dev.yml` are one job split
 three ways, and the split is not arbitrary.** They
 hold state in three different places, need three different credentials — sudo on zero, a
 Cloudflare API token, an Access service token — and change at three different rates. A
@@ -73,15 +73,15 @@ run it.
 
 ```sh
 cd ~/infra/ansible
-ansible-playbook playbooks/this-client.yml --check --diff   # see it first
-ansible-playbook playbooks/this-client.yml
+ansible-playbook playbooks/configure-client.yml --check --diff   # see it first
+ansible-playbook playbooks/configure-client.yml
 ```
 
 That is the fleet block, plus a block for every dev container, plus — from WSL — the
 Windows side of the same laptop. It prompts once per container that has no service token
 on this client, and not at all when they all do.
 
-**`this-client.yml` is also the registry.** Its header table is where the dev containers'
+**`configure-client.yml` is also the registry.** Its header table is where the dev containers'
 ports and tunnel hostnames are recorded, because it is the file that consumes them: every
 `<alias>-lan` written onto every client is built from that table, so a wrong number is
 found by somebody using a rescue path rather than by somebody re-reading a comment. It
@@ -91,7 +91,7 @@ table with that as the worked example.
 **When a container's tunnel does not exist yet:**
 
 ```sh
-ansible-playbook playbooks/this-client.yml -e prompt_for_token=false
+ansible-playbook playbooks/configure-client.yml -e prompt_for_token=false
 ```
 
 Writes every container that already has a token and skips the rest, naming each one. The
@@ -99,13 +99,13 @@ default is to prompt, which is right for a client being set up against a fully p
 fleet and wrong when half the tunnels are still Phase 5 — there, one unanswerable prompt
 would stop the containers that *are* ready from being written.
 
-### A new client needs two halves, and only one of them is `this-client.yml`
+### A new client needs two halves, and only one of them is `configure-client.yml`
 
 The ssh block and the service token are things a client *holds*. The key that admits it
 is a fact about the **container**, and lives on `zero`:
 
 ```sh
-ansible-playbook playbooks/authorize-dev-client.yml \
+ansible-playbook playbooks/authorize-configure-client-dev.yml \
   -e client_pubkey_file=~/laptop.pub
 ```
 
@@ -123,16 +123,16 @@ refuses a secrets directory that is not there rather than creating one nothing m
 `ssh-ed25519` — a truncation that still looks like a key. Use the file form above, or
 JSON: `-e '{"client_pubkey": "ssh-ed25519 AAAA... you@host"}'`.
 
-`dev-client.yml` still runs on its own for one container, which is the rotation path:
+`configure-client-dev.yml` still runs on its own for one container, which is the rotation path:
 
 ```sh
-ansible-playbook playbooks/dev-client.yml -e alias=or3-dev -e hostname=or3-dev.gsrpi.uk \
+ansible-playbook playbooks/configure-client-dev.yml -e alias=or3-dev -e hostname=or3-dev.gsrpi.uk \
   -e lan_port=2224 -e replace_token=true
 ```
 
 ### The laptop is two clients, and one run in WSL configures both
 
-`dev-client.yml` and `ssh-client.yml` both write `~/.ssh/config` on the machine they run
+`configure-client-dev.yml` and `configure-client-fleet.yml` both write `~/.ssh/config` on the machine they run
 on. On the laptop that is not one machine: Windows' `ssh.exe` and WSL's `ssh` read two
 different configs, from two different homes, and neither can use the other's.
 
@@ -142,13 +142,13 @@ both sides**:
 
 ```sh
 # in WSL, in this directory
-ansible-playbook playbooks/this-client.yml      # everything, both sides
+ansible-playbook playbooks/configure-client.yml      # everything, both sides
 ```
 
 | | WSL writes, for itself | WSL writes, for Windows |
 |---|---|---|
-| `ssh-client.yml` | `~/.ssh/config` | `C:\Users\gavin\.ssh\config` |
-| `dev-client.yml` | `~/.ssh/config`, `~/.config/<alias>/token` (0600) | `…\.ssh\config`, `…\.config\<alias>\token`, `…\.ssh\cf-access-<alias>.cmd` |
+| `configure-client-fleet.yml` | `~/.ssh/config` | `C:\Users\gavin\.ssh\config` |
+| `configure-client-dev.yml` | `~/.ssh/config`, `~/.config/<alias>/token` (0600) | `…\.ssh\config`, `…\.config\<alias>\token`, `…\.ssh\cf-access-<alias>.cmd` |
 
 Three things that are not obvious and have each cost a run:
 
@@ -176,7 +176,7 @@ Run a play from anywhere else and `hosts: control` matches nothing, so Ansible p
 with `display_ok_hosts = False` looks a great deal like a clean run with nothing to do.
 
 No task inside the play can catch that, because the play is skipped whole. So the client
-plays import `playbooks/_inventory-guard.yml` above their own play; it matches
+plays import `playbooks/_assert-inventory.yml` above their own play; it matches
 `localhost` (which Ansible provides even with no inventory) and fails, loudly, naming the
 working directory as the usual cause.
 
@@ -200,10 +200,10 @@ told to go somewhere else:
 ssh -t zero 'cd ~/infra/dev && make up'      # or dev, restart, status, verify, logs
 ```
 
-`-t` because `make` sudos and sudo wants a tty. `dev-container.yml` prints exactly this
+`-t` because `make` sudos and sudo wants a tty. `prepare-dev-host.yml` prints exactly this
 line, filled in, when it finishes.
 
-**`dev-container.yml` replaced `dev/seed-secrets.sh`, which is deleted.** Three of that
+**`prepare-dev-host.yml` replaced `dev/seed-secrets.sh`, which is deleted.** Three of that
 script's five steps were fleet access, which went with the control-node question being
 deferred; what was left did not justify a bespoke script. That is the third time this
 repo has traded hand-rolled shell for stock tooling — after `bin/compose` and after a
@@ -218,8 +218,8 @@ repo has traded hand-rolled shell for stock tooling — after `bin/compose` and 
 | `group_vars/all.yml` | where the report goes; applies to `localhost` too |
 | `group_vars/fleet.yml` | the container CLI |
 | `host_vars/` | four files: the three hosts' container runtimes, plus `localhost.yml`'s Termux fixes — see below |
-| `playbooks/` | the ones above; `_inventory-guard.yml` is imported, never run |
-| `playbooks/this-client.yml` | the dev-container registry lives in its header |
+| `playbooks/` | the ones above; `_assert-inventory.yml` is imported, never run |
+| `playbooks/configure-client.yml` | the dev-container registry lives in its header |
 | `templates/` | the report, the two ssh blocks, and the Windows ProxyCommand wrapper |
 
 ## `-K`, and why it is not a wart
@@ -252,7 +252,7 @@ reaching for things that were not there:
 - `stdout_callback = yaml` lives in `community.general`, and core's `result_format = yaml`
   does the same job — so that one was a core setting all along.
 - `ansible.builtin.apk` **does not exist and never did**; apk has always been
-  `community.general.apk`. `playbooks/packages.yml` failed at its first task.
+  `community.general.apk`. `playbooks/install-packages.yml` failed at its first task.
 
 **The cost argument that shaped this was wrong, and correcting it changed a decision.**
 The apk task was first rewritten by hand rather than adding a collection, on the belief
@@ -269,7 +269,7 @@ than this file used to claim.
 
 ## Where "prefer the standard tool" loses — the audit's `docker inspect`
 
-`playbooks/audit.yml` reads containers with a hand-rolled `docker inspect --format`, not
+`playbooks/audit-fleet.yml` reads containers with a hand-rolled `docker inspect --format`, not
 `community.docker.docker_container_info`, and that is deliberate rather than left over.
 It is the first case where the rule recorded in `docs/management-plane.md` does not win,
 so the reason is here rather than assumed.
@@ -309,7 +309,7 @@ this repo was going to do anyway.
 
 ## The two things in here that are easy to break
 
-**The `{% raw %}` guard in `audit.yml`.** Docker's `--format` is Go template syntax and
+**The `{% raw %}` guard in `audit-fleet.yml`.** Docker's `--format` is Go template syntax and
 uses the same `{{ }}` delimiters as Jinja. Without the guard, Ansible tries to resolve
 `.Name` as an Ansible variable and the task dies before Docker ever sees the string.
 

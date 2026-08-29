@@ -1,15 +1,15 @@
 ---
 # The first playbook in this repo that CHANGES a host. Everything before it reads.
 #
-#     ansible-playbook playbooks/packages.yml --check --diff --limit one      # prove, no -K
-#     ansible-playbook playbooks/packages.yml -K --diff --limit one           # apply
+#     ansible-playbook playbooks/install-packages.yml --check --diff --limit one      # prove, no -K
+#     ansible-playbook playbooks/install-packages.yml -K --diff --limit one           # apply
 #
 # Apply smallest blast radius first: one, then two, then zero.
 #
 # The lists are in group_vars/fleet.yml and host_vars/<host>.yml, and the split is the
 # point: base_packages is nearly everything, and the only per-host entry is the container
 # runtime, because `two` had docker and containerd removed deliberately. Unexplained
-# divergence between the three boxes is treated as the bug — it is what made audit.yml
+# divergence between the three boxes is treated as the bug — it is what made audit-fleet.yml
 # grow a netstat branch and made one's hardware.md look hand-edited.
 #
 # NEEDS community.general — see ../requirements.yml. An earlier version of this file did
@@ -29,7 +29,7 @@
 #   rather than any spelling that prunes.
 #
 # WHY THE FALLBACKS STAY
-#   Installing iproute2 does not license deleting the netstat branch in audit.yml. A host
+#   Installing iproute2 does not license deleting the netstat branch in audit-fleet.yml. A host
 #   built tomorrow has not run this playbook yet, and that branch is what makes its
 #   Listening section a reading rather than an UNREADABLE. Packages remove the need to
 #   *rely* on a fallback, not the need to *have* one.

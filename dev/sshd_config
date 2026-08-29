@@ -69,7 +69,7 @@ PermitUserEnvironment yes
 # on OpenSSH 9.2 — this changes no behaviour and is here because the behaviour is worth
 # being able to see. It is also only half the switch: compression is negotiated, the ssh
 # CLIENT defaults to `no`, and both ends have to offer it. The half that turns it on is
-# in ansible/playbooks/dev-client.yml, on the aliases the phone uses.
+# in ansible/playbooks/configure-client-dev.yml, on the aliases the phone uses.
 #
 # It is worth having on THIS session, which is not true of every sshd. or3's ssh_config
 # has the argument: compression belongs on the session whose plaintext it is, because it

@@ -1,7 +1,7 @@
 ---
 # Phase 1 — the read-only audit. What actually runs where.
 #
-#     cd ansible && ansible-playbook playbooks/audit.yml -K
+#     cd ansible && ansible-playbook playbooks/audit-fleet.yml -K
 #
 # This CHANGES NOTHING on any host. Every task is a read, every one is
 # `changed_when: false`, and there is no handler, no template and no copy aimed at a

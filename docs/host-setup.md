@@ -201,7 +201,7 @@ Two things `/boot` — the red line — needs by hand, not by script:
 
 ## cloudflared
 
-**Do not install it by hand.** ⚠︎ **And `cloudflared-update.yml` is NOT the route either
+**Do not install it by hand.** ⚠︎ **And `update-cloudflared.yml` is NOT the route either
 — it is marked NOT IN USE and it refuses to run** while the target carries
 `--autoupdate-freq`, which all three do since 2h. This paragraph also described it
 wrongly: it does not pick the asset from `uname -m`, it uses the pinned uniform `arm`

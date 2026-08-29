@@ -24,7 +24,7 @@
 # Import it above the real play and name the group it needs:
 #
 #     - name: Guard — refuse to run with no inventory
-#       ansible.builtin.import_playbook: _inventory-guard.yml
+#       ansible.builtin.import_playbook: _assert-inventory.yml
 #       vars:
 #         required_group: control
 #
@@ -34,7 +34,7 @@
 # working. That container exports ANSIBLE_CONFIG, which Ansible reads before it looks at
 # the cwd — so the inventory is found from any directory in here. The clients this guard
 # is actually for are Termux and WSL, where nothing exports it and the cwd is the whole
-# story. Test it the way it will be met: `cd /tmp && ansible-playbook <repo>/ansible/playbooks/ssh-client.yml`
+# story. Test it the way it will be met: `cd /tmp && ansible-playbook <repo>/ansible/playbooks/configure-client-fleet.yml`
 # with ANSIBLE_CONFIG unset.
 #
 # NO NEW COLLECTIONS: ansible.builtin throughout.

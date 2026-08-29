@@ -1,5 +1,5 @@
 # The fleet. GENERATED: edit ansible/templates/ssh-fleet-block.j2 and re-run
-# playbooks/this-client.yml, not this. Reasoning: docs/ssh-clients.md
+# playbooks/configure-client.yml, not this. Reasoning: docs/ssh-clients.md
 #
 #   <host>                    via that box's own cloudflared tunnel
 #   <host>-local              direct on the LAN
@@ -66,7 +66,7 @@ Host two
 # Listed explicitly, not `zero*`: that would also catch zero-local and zero-two, which
 # must NOT go through the edge. No token is sourced here — the boxes' tunnels admit you
 # on your certificate, while every dev container's own hostname sits behind an Access
-# service token and gets the `sh -c` form from dev-client.yml instead.
+# service token and gets the `sh -c` form from configure-client-dev.yml instead.
 Host zero one two
   ProxyCommand {{ cloudflared }} access ssh --hostname %h
 
@@ -74,7 +74,7 @@ Host zero one two
 # they are. `zero-dev-dd`, `zero-dev-ds` and `zero-dev-or3` were aliases for the
 # `ssh-zero-dev-*` rules on ZERO'S host tunnel — a door zero opens on a container's
 # behalf. Every dev container now comes up with its own connector, its own hostname and
-# its own Access token, and dev-client.yml writes three aliases for each. dd-dev and
+# its own Access token, and configure-client-dev.yml writes three aliases for each. dd-dev and
 # ds-dev are not running at all until they are deployed that way, so an alias for either
 # would name a hostname with nothing behind it, which fails exactly like a container being
 # down. or3's rule is already gone (7bb2075).

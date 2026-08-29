@@ -18,7 +18,7 @@ stored three to five times, by hand, in prose. So every one of them has drifted:
 
 | Fact | Where it is recorded | State on 2026-08-21 |
 |---|---|---|
-| `zero` runs `or3-dev` on port 2224 | ~~nowhere in this repo~~ → `ansible/playbooks/this-client.yml`'s registry table | **closed 2026-08-28** |
+| `zero` runs `or3-dev` on port 2224 | ~~nowhere in this repo~~ → `ansible/playbooks/configure-client.yml`'s registry table | **closed 2026-08-28** |
 | 2222 = `dd-dev`, 2223 = `ds-dev`, 2224 = `or3-dev` | a **comment in or3's `dev/compose.yaml`** | the port registry for `zero` lives in the newest claimant's app repo |
 | `zero`'s dev containers | `README.md` says "two" and names `dd-dev`, `dd-mysql`, `ds-dev`; [`recovery.md`](recovery.md) names only `dd-dev` and `dd-mysql` | two records, both wrong, wrong differently |
 | `zero` and `two` are onboarded | [`roadmap.md`](roadmap.md) §1 says they "aren't in it yet — only placeholder dirs" | stale; both have symlinks |
@@ -239,7 +239,7 @@ Tailscale; a preference for not adding a second overlay.
 
 Settled with the owner, and `infra-dev` is the first and so far only one built.
 
-**Provisioning is a playbook**, `ansible/playbooks/cloudflare-dev-tunnel.yml`, creating
+**Provisioning is a playbook**, `ansible/playbooks/create-dev-tunnel.yml`, creating
 four objects over the Cloudflare API: the tunnel, the CNAME, an Access service token and
 an Access application with one policy. It was written as a shell script first and that
 was the wrong instinct — the same one that put `bin/compose` in this repo, and the second
@@ -405,7 +405,7 @@ qBittorrent, ~~7777 ionic-traces~~ (stopped, 2c), 3001 send2ereader, 8384/22000 
 `two` — none published.
 
 **Since 2026-08-28 that list is a copy, not the record.** The registry is the table in
-[`../ansible/playbooks/this-client.yml`](../ansible/playbooks/this-client.yml), which is
+[`../ansible/playbooks/configure-client.yml`](../ansible/playbooks/configure-client.yml), which is
 the file that *consumes* the numbers — every `<alias>-lan` block written onto every client
 is built from them, so a wrong one is noticed the next time somebody uses the rescue path
 rather than the next time somebody reads a comment. This closes the drift row at the top
@@ -501,7 +501,7 @@ ones that answer the question this document started from.
 |---|---|---|---|---|
 | 0 | Control node on Termux, inventory, `ansible fleet -m ping` | nothing | — | **done** 2026-08-21 |
 | 1 | Read-only audit playbook | nothing | 0 | **done** 2026-08-21 — run against all three; `docs/fleet-inventory.md` is generated and committed |
-| 1b | Fleet package standardisation — `playbooks/packages.yml` | all three | 1 | **done** 2026-08-21 |
+| 1b | Fleet package standardisation — `playbooks/install-packages.yml` | all three | 1 | **done** 2026-08-21 |
 | 2 | `README.md` + `recovery.md` cite the generated inventory | docs only | 1 | **done** 2026-08-21 |
 | 2b | `infra-dev` container, and the Cloudflare edge in front of it | `zero`, edge | 2 | **done** 2026-08-22 |
 | 2c | `one`'s array — both "broken services" were the SP900 in bay 0 | `one`'s enclosure | — | **done 2026-08-24** — disk pulled, unattended boot proven |
@@ -519,7 +519,7 @@ ones that answer the question this document started from.
 | 8 | `two` as the scheduled read-only control node | `two` | 6, 7 | |
 
 **Closed 2026-08-28 — one command now writes every ssh block this repo owns.**
-`playbooks/this-client.yml` composes `ssh-client.yml` with one `dev-client.yml` import per
+`playbooks/configure-client.yml` composes `configure-client-fleet.yml` with one `configure-client-dev.yml` import per
 dev container, and carries the registry that says which containers exist, on which ports,
 behind which hostnames. It runs on the phone and in WSL, writes both sides of the laptop
 from the latter, and takes `-e prompt_for_token=false` so a container whose tunnel is not
@@ -531,15 +531,15 @@ scripts are deleted, per this repo's rule that they go once they have run. What 
 found on the way is worth more than the scripts were: the Windows ProxyCommand wrapper was
 unusable because cmd.exe miscounts byte offsets in an LF-only batch file; `IdentitiesOnly`
 alongside an `IdentityFile` that does not exist gives `Permission denied (publickey)` on a
-client whose key lives in an agent; and `authorize-dev-client.yml` exists at all because
+client whose key lives in an agent; and `authorize-configure-client-dev.yml` exists at all because
 the key that admits a client is a fact about the container, not something the client holds.
 All three are in [`decisions.md`](decisions.md) and [`ssh-clients.md`](ssh-clients.md).
 
 **Still open, and not this phase's:** `dd-dev` and `ds-dev` have no tunnel of their own, so
-`this-client.yml` skips them by name until Phase 5; and 2i's rules are still live on zero.
+`configure-client.yml` skips them by name until Phase 5; and 2i's rules are still live on zero.
 
 **Filed 2026-08-25, no phase number — the two client plays now cover Windows, and the
-phone's own block is behind them.** `dev-client.yml` had no Windows half at all: run from
+phone's own block is behind them.** `configure-client-dev.yml` had no Windows half at all: run from
 WSL it configured WSL and left Windows untouched, which is why a laptop that reaches
 `zero` from PowerShell could not reach `infra-dev` from anywhere. It now writes both sides
 of the laptop in one WSL run, and both client plays refuse to run with no inventory rather
@@ -652,7 +652,7 @@ So it stays on, at different check frequencies: `one` 6h, `two` 72h, `zero` 240h
 host that checks rarely is simply behind, so a release that breaks `one` has days before
 it reaches `zero`. What this does not give: guaranteed order (zero's check can land just
 after a release, a few percent per release) or a health gate (a bad version reaches all
-three eventually). `playbooks/cloudflared-update.yml` — explicit, hash-verified, each
+three eventually). `playbooks/update-cloudflared.yml` — explicit, hash-verified, each
 stage refusing while an earlier one is unhealthy — exists and is not used; **revisit once
 uptime monitoring exists**, e.g. `ping.<host>.gsrpi.uk`, because a gate is only worth
 building when something can tell you a host is down, and today nothing can.
@@ -678,7 +678,7 @@ no second door. The window therefore opens when the owner sets that variable, wh
 knob he holds rather than a consequence he inherits.
 
 **So do this first and there is no window.** Retiring the rule early costs nothing,
-because the break-glass path does not use the tunnel: `dev-client.yml` writes
+because the break-glass path does not use the tunnel: `configure-client-dev.yml` writes
 `<alias>-lan` as `ProxyCommand ssh zero nc %h %p`, which reaches `127.0.0.1:2224` through
 **zero's sshd**, and that is the same origin the ingress rule points at. Dropping the
 public hostname leaves the way in through zero untouched.
@@ -723,7 +723,7 @@ Four attempts, and every one of them found a real defect rather than bad luck:
 
 1. **`~/.ssh/cp` did not exist on the laptop**, so the first play against a fleet host
    died with `unix_listener: cannot bind`, reported as UNREACHABLE — which reads like the
-   box being down. `ssh-client.yml` created `~/.ssh/cm` and not ansible.cfg's own socket
+   box being down. `configure-client-fleet.yml` created `~/.ssh/cm` and not ansible.cfg's own socket
    directory; the phone had it only because someone once made it by hand.
 2. **The host's clone was stale**, so `install-system-file` installed the old config as a
    no-op, the credentials were then swapped to the new tunnel, and cloudflared could not
@@ -763,7 +763,7 @@ phone currently holds, and that is not a fact any check on a box can establish.
 substantially rewritten in the 2026-08-24 review (block/rescue rollbacks, the
 originRequest assert, the re-run guard) and have not run since. A `--check` of phase 1
 cannot rehearse them — the `uri` create is skipped in check mode and everything after it
-dies on undefined, the exact bootstrap trap `cloudflare-dev-tunnel.yml`'s header
+dies on undefined, the exact bootstrap trap `create-dev-tunnel.yml`'s header
 documents. But phase 1 for real is inherently consequence-free: it creates a tunnel
 nothing points at, abandoned by one delete. Running it against `two` exercises the new
 guards — and the originRequest assert is checking the one tunnel nobody has ever
@@ -919,10 +919,10 @@ having run the read-only phase before the writing ones.
   earlier dry run in this repo had agreed with the real one, which is how a dry run
   becomes a formality — this is the one that paid for the habit.
 - **Standardising packages deleted two divergences that had been read as facts.** The
-  netstat branch in `audit.yml` existed because `ss` was on one host out of three, and
+  netstat branch in `audit-fleet.yml` existed because `ss` was on one host out of three, and
   `one`'s `hardware.md` looked hand-edited because `usbutils` was on two out of three.
   Both are gone, and the fallbacks stay: a host built tomorrow has not run
-  `packages.yml` yet.
+  `install-packages.yml` yet.
 
 Phase 2's own corrections were smaller and all of the same shape — the docs asserted
 ports that were not listening (`8384/22000` on `one`, `2222` on `zero`) and a dev

@@ -2,9 +2,9 @@
 # Add one client's PUBLIC key to the dev containers' authorized_keys on the host.
 #
 #     cd ansible
-#     ansible-playbook playbooks/authorize-dev-client.yml \
+#     ansible-playbook playbooks/authorize-configure-client-dev.yml \
 #       -e '{"client_pubkey": "ssh-ed25519 AAAA... you@machine"}' --check --diff
-#     ansible-playbook playbooks/authorize-dev-client.yml \
+#     ansible-playbook playbooks/authorize-configure-client-dev.yml \
 #       -e '{"client_pubkey": "ssh-ed25519 AAAA... you@machine"}'
 #
 # JSON, OR A FILE — NOT `-e client_pubkey=...`. Ansible's k=v extra-var form splits on
@@ -50,7 +50,7 @@
 # requirements.yml already carries and already explains.
 
 - name: Guard — refuse to run with no inventory
-  ansible.builtin.import_playbook: _inventory-guard.yml
+  ansible.builtin.import_playbook: _assert-inventory.yml
   vars:
     required_group: fleet
 

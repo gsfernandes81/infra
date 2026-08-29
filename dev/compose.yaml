@@ -61,7 +61,7 @@ services:
       # The tunnel's hostname, and the ONLY switch it has: unset means no tunnel at
       # all, and the container is reached over the loopback port as before. The
       # credentials arrive separately, through the secrets mount, written there by
-      # ansible/playbooks/cloudflare-dev-tunnel.yml — so a hostname set with no
+      # ansible/playbooks/create-dev-tunnel.yml — so a hostname set with no
       # credentials present is a warning at start, not a failure to come up.
       #
       # Read by the entrypoint at start, so it lands on `make up`, never on `restart`.

@@ -38,7 +38,7 @@ if ssh -o BatchMode=yes -T git@github.com 2>&1 | grep -q 'successfully authentic
 elif [ ! -f "$HOME/.ssh/id_ed25519_infra_deploy" ]; then
   warn "No deploy key in this container."
   info "It comes from \$INFRA_SECRETS/id_ed25519_infra_deploy on zero, which"
-  info "ansible/playbooks/dev-container.yml generates there. Add it and restart:"
+  info "ansible/playbooks/prepare-dev-host.yml generates there. Add it and restart:"
   info "    cd ~/infra/dev && make restart"
 else
   warn "The deploy key is present but github.com does not accept it."

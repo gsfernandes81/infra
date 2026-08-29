@@ -10,7 +10,7 @@
 # 2. There is no /usr/bin/python3. ansible_playbook_python is whatever interpreter is
 #    running ansible-playbook — correct by construction, on Termux and anywhere else.
 #
-# This file applies to the delegated report-writing task in playbooks/audit.yml. It is
+# This file applies to the delegated report-writing task in playbooks/audit-fleet.yml. It is
 # host_vars rather than a global setting because both values are wrong for the Pis.
 ansible_connection: local
 ansible_python_interpreter: "{{ ansible_playbook_python }}"

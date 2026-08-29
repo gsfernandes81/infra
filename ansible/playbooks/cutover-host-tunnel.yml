@@ -1,7 +1,7 @@
 ---
 # 2g, phase 2 of 3: swap the host onto the new tunnel and move DNS to follow.
 #
-#   ansible-playbook playbooks/cloudflare-tunnel-cutover.yml -e target=one -K
+#   ansible-playbook playbooks/cutover-host-tunnel.yml -e target=one -K
 #
 # Needs a token with BOTH Account -> Cloudflare Tunnel -> Edit and Zone -> DNS -> Edit
 # on gsrpi.uk. Prompted, never stored, and every API call is delegated to the control
@@ -830,6 +830,6 @@
         msg:
           - "every hostname answers as it did before the cutover"
           - "the previous tunnel now has no DNS pointing at it, and no connector"
-          - "next: cloudflare-tunnel-retire.yml, once you are happy to lose it"
+          - "next: retire-host-tunnel.yml, once you are happy to lose it"
           - "cleanup here: rm {{ new_cred_file }} and {{ cred_file }}.pre-2g"
       changed_when: true

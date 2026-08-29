@@ -1,7 +1,7 @@
 ---
 # 2g, phase 3 of 3: delete the old tunnel.
 #
-#   ansible-playbook playbooks/cloudflare-tunnel-retire.yml -e target=one -K
+#   ansible-playbook playbooks/retire-host-tunnel.yml -e target=one -K
 #
 # WHY THIS MATTERS BEYOND TIDINESS. Deleting the tunnel kills its credential outright.
 # `one`'s token has been assumed disclosed since it sat world-readable in a 755 init
@@ -315,7 +315,7 @@
 
     # no_log HIDES THE HEADERS, WHICH CARRY THE TOKEN — but it also hides the response,
     # and on this task the response IS the diagnostic. That is the failure
-    # cloudflare-dev-tunnel.yml already records: a no_log'd 201 censored the only copy of
+    # create-dev-tunnel.yml already records: a no_log'd 201 censored the only copy of
     # a secret. So the task never fails on its own; the check below reads the registered
     # result and prints only the API's own error list, which contains nothing sensitive.
     - name: Delete the old tunnel

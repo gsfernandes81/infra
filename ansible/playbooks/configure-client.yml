@@ -2,11 +2,11 @@
 # EVERY SSH BLOCK THIS REPO OWNS, ON THE MACHINE YOU RUN IT FROM. One command.
 #
 #     cd ansible
-#     ansible-playbook playbooks/this-client.yml --check --diff
-#     ansible-playbook playbooks/this-client.yml
+#     ansible-playbook playbooks/configure-client.yml --check --diff
+#     ansible-playbook playbooks/configure-client.yml
 #
 # Run it from THIS DIRECTORY — ansible.cfg is read from the cwd and is the only thing
-# pointing at ./inventory. _inventory-guard.yml, imported by both halves below, turns a
+# pointing at ./inventory. _assert-inventory.yml, imported by both halves below, turns a
 # wrong working directory into a failure instead of an empty recap and exit 0.
 #
 # Run it WHEREVER THE CLIENT IS: the phone, or WSL on the laptop. It reaches no host in
@@ -46,7 +46,7 @@
 #
 # ── WHEN A CONTAINER'S TUNNEL IS NOT UP YET ─────────────────────────────────────
 #
-#     ansible-playbook playbooks/this-client.yml -e prompt_for_token=false
+#     ansible-playbook playbooks/configure-client.yml -e prompt_for_token=false
 #
 # Provisions every container that already has a token on this client and SKIPS the rest,
 # naming each one it skipped. Without the flag it prompts, once per container missing a
@@ -63,46 +63,46 @@
 # A row above and an import below — but only after the edge and the host halves exist,
 # because a client block is the third of three:
 #
-#     ansible-playbook playbooks/cloudflare-dev-tunnel.yml -e name=<c> -e secrets_dir=<its mount>
-#     ansible-playbook playbooks/dev-container.yml -e tunnel_hostname=<c>.gsrpi.uk
-#     ansible-playbook playbooks/this-client.yml
+#     ansible-playbook playbooks/create-dev-tunnel.yml -e name=<c> -e secrets_dir=<its mount>
+#     ansible-playbook playbooks/prepare-dev-host.yml -e tunnel_hostname=<c>.gsrpi.uk
+#     ansible-playbook playbooks/configure-client.yml
 #
 # NO NEW COLLECTIONS, and no tasks of its own: this file is composition and a table.
 # Everything it runs belongs to the two plays it imports.
 
 # ── the servers: the fleet, the mesh, and the LAN and cross-box rescue paths ────
 - name: The fleet
-  ansible.builtin.import_playbook: ssh-client.yml
+  ansible.builtin.import_playbook: configure-client-fleet.yml
 
 # ── the dev containers ─────────────────────────────────────────────────────────
-# One import each rather than a loop over the table above, deliberately. dev-client.yml
+# One import each rather than a loop over the table above, deliberately. configure-client-dev.yml
 # prompts for a credential and writes it at 0600; a loop would put those prompts and
 # those writes inside `loop:` results, where `no_log` hides which iteration is which and
 # a mistake becomes a mistake about a secret. Static imports keep the reviewed
 # single-alias play exactly as it is, and each stanza reads as the fact it asserts.
 - name: infra-dev
-  ansible.builtin.import_playbook: dev-client.yml
+  ansible.builtin.import_playbook: configure-client-dev.yml
   vars:
     alias: infra-dev
     hostname: infra-dev.gsrpi.uk
     lan_port: 2225
 
 - name: or3-dev
-  ansible.builtin.import_playbook: dev-client.yml
+  ansible.builtin.import_playbook: configure-client-dev.yml
   vars:
     alias: or3-dev
     hostname: or3-dev.gsrpi.uk
     lan_port: 2224
 
 - name: dd-dev
-  ansible.builtin.import_playbook: dev-client.yml
+  ansible.builtin.import_playbook: configure-client-dev.yml
   vars:
     alias: dd-dev
     hostname: dd-dev.gsrpi.uk
     lan_port: 2222
 
 - name: ds-dev
-  ansible.builtin.import_playbook: dev-client.yml
+  ansible.builtin.import_playbook: configure-client-dev.yml
   vars:
     alias: ds-dev
     hostname: ds-dev.gsrpi.uk

@@ -1,9 +1,9 @@
 ---
 # 2g, phase 1 of 3: create a LOCALLY-MANAGED tunnel alongside the existing one.
 #
-#   1. cloudflare-tunnel-new.yml      <- you are here. Nothing serves differently.
-#   2. cloudflare-tunnel-cutover.yml     repoints DNS and swaps the service.
-#   3. cloudflare-tunnel-retire.yml      deletes the old tunnel.
+#   1. create-host-tunnel.yml      <- you are here. Nothing serves differently.
+#   2. cutover-host-tunnel.yml     repoints DNS and swaps the service.
+#   3. retire-host-tunnel.yml      deletes the old tunnel.
 #
 # WHY A NEW TUNNEL AT ALL. `config_src` is create-time only: PATCHing it on an existing
 # tunnel is rejected (tried 2026-08-23, `1002 Tunnel not found`, on a URL where GET works
@@ -14,7 +14,7 @@
 # created, inspected and deleted with no effect on anything. That is the whole point of
 # splitting it out: the irreversible-feeling step is phase 2, and this is not it.
 #
-#   ansible-playbook playbooks/cloudflare-tunnel-new.yml -e target=one -K
+#   ansible-playbook playbooks/create-host-tunnel.yml -e target=one -K
 #
 # -K IS REQUIRED. ansible.cfg sets become_ask_pass = False on purpose — `gavin` has no
 # NOPASSWD sudo and roadmap.md's "Not doing" list keeps it that way — so a play needing
@@ -316,6 +316,6 @@
           - "1. read the diff: git -C {{ repo_root }} diff hosts/{{ inventory_hostname }}/system/"
           - "   the ingress is now LOAD-BEARING — a hostname missing there is a 404"
           - "2. commit it, and pull on {{ inventory_hostname }}"
-          - "3. then: cloudflare-tunnel-cutover.yml"
+          - "3. then: cutover-host-tunnel.yml"
           - "to abandon instead: delete tunnel {{ new_tunnel }} and rm {{ new_cred_file }}"
       changed_when: true

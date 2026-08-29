@@ -3,8 +3,8 @@
 # `make up` can work. Run from Termux, or from any control node.
 #
 #     cd ansible
-#     ansible-playbook playbooks/dev-container.yml --check --diff   # prove, no -K needed
-#     ansible-playbook playbooks/dev-container.yml
+#     ansible-playbook playbooks/prepare-dev-host.yml --check --diff   # prove, no -K needed
+#     ansible-playbook playbooks/prepare-dev-host.yml
 #
 # This REPLACES dev/seed-secrets.sh, which is deleted. Three of that script's five steps
 # were the fleet key and its ssh fragments, and those went with the control-node question
@@ -198,7 +198,7 @@
         dest: "{{ infra_src }}/dev/.env"
         mode: "0600"
         content: |
-          # Written by ansible/playbooks/dev-container.yml. Gitignored.
+          # Written by ansible/playbooks/prepare-dev-host.yml. Gitignored.
           # Re-run that playbook rather than hand-editing, or the next run overwrites you.
           INFRA_SRC={{ infra_src }}
           INFRA_SECRETS={{ infra_secrets }}

@@ -13,7 +13,7 @@ Everything that is background rather than emergency is here.
 
 ```sh
 cd ~/infra/ansible
-ansible-playbook playbooks/this-client.yml
+ansible-playbook playbooks/configure-client.yml
 ```
 
 Run it **wherever the client is** — the phone, or WSL on the laptop, where the same run
@@ -25,8 +25,8 @@ Two blocks land in `~/.ssh/config`, each edited in place on re-runs:
 
 | Marker | Written by | Holds |
 |---|---|---|
-| `# BEGIN infra-fleet` | `ssh-client.yml` → `templates/ssh-fleet-block.j2` | the three Pis, three ways each |
-| `# BEGIN <container>` | `dev-client.yml` → `templates/ssh-dev-block.j2` | one dev container, three ways |
+| `# BEGIN infra-fleet` | `configure-client-fleet.yml` → `templates/ssh-fleet-block.j2` | the three Pis, three ways each |
+| `# BEGIN <container>` | `configure-client-dev.yml` → `templates/ssh-dev-block.j2` | one dev container, three ways |
 
 Do not hand-edit between the markers. Change the template and re-run — a hand edit
 survives until the next run and then vanishes, which is the worst of both.
@@ -251,7 +251,7 @@ processes per session, which is the cost.
 **The wrapper is CRLF and ASCII-only, and both are load-bearing.** cmd.exe seeks by byte
 offset between commands in a batch file and miscounts on an LF-only one, resuming mid-line
 and running fragments of the comments as commands; and it reads the file in the console
-codepage, so an em dash arrives as several bytes of something else. `dev-client.yml` writes
+codepage, so an em dash arrives as several bytes of something else. `configure-client-dev.yml` writes
 it with `newline_sequence: "\r\n"`.
 
 **`IdentityFile` and `IdentitiesOnly` appear only if that client has the key.** With
@@ -274,10 +274,10 @@ Windows.
 ## Letting a new client in
 
 Two halves. The ssh block and the service token are things a client *holds*;
-`this-client.yml` writes those. The key that admits it is a fact about the **container**:
+`configure-client.yml` writes those. The key that admits it is a fact about the **container**:
 
 ```sh
-ansible-playbook playbooks/authorize-dev-client.yml -e client_pubkey_file=~/laptop.pub
+ansible-playbook playbooks/authorize-configure-client-dev.yml -e client_pubkey_file=~/laptop.pub
 ```
 
 `Permission denied (publickey)` with a key visible in `ssh -v` means the client half is
@@ -303,7 +303,7 @@ connector behind its own hostname and token, they are a second door to each — 
 door with a different trust story.
 
 No client alias points at them. `dd-dev` and `ds-dev` are not running until they are
-deployed with a connector of their own, at which point `dev-client.yml` gives them the
+deployed with a connector of their own, at which point `configure-client-dev.yml` gives them the
 same three aliases every other container has — so an alias for the old door would name a
 hostname with nothing behind it, which fails exactly like a container being down.
 
