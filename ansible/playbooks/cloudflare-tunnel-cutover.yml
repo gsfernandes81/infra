@@ -47,11 +47,11 @@
 
     # The clone ON THE HOST. Absolute, and not `~`: the install task runs with become,
     # where `~` is root's home and `~/infra` does not exist there.
-    # NOT hardcoded any more. `two`'s clone is /srv/infra, not ~gavin/infra — CLAUDE.md
-    # § Git & workflow says so, and this play would have chdir'd into a directory that is
-    # not there. It fails inside the rescue, so nothing would have been left half-done,
-    # but it would have aborted the cutover on the lifeboat for a path typo. The value
-    # lives in host_vars, which is where a per-host fact belongs.
+    # NOT hardcoded. Every host's clone is ~gavin/infra, including `two` — CLAUDE.md said
+    # /srv/infra for that box and the box says otherwise, which is how this variable came
+    # to exist. `infra_checkout` in host_vars overrides it for any host that ever differs;
+    # no host sets it today, and adding one back for `two` would abort its cutover.
+    # The guard below stats the result rather than trusting either source.
     host_repo: "{{ infra_checkout | default('/home/gavin/infra') }}"
     probe: "http://127.0.0.1:20241"
     baseline_file: "{{ lookup('env', 'HOME') }}/.infra-2g-baseline-{{ inventory_hostname }}.json"

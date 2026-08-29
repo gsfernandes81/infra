@@ -71,8 +71,10 @@ containerd are removed from it. See [decisions.md](docs/decisions.md).
 
 ### Public hostnames
 
-Zero's tunnel serves eight, and **only one of them was recorded anywhere in this repo
-before 2026-08-23**. Since 2g finished on 2026-08-29 the authoritative record for every
+Zero's tunnel serves **four** — `ssh-zero`, `syncthing`, `syncthing-server`, `immich` —
+and only one of them was recorded anywhere in this repo before 2026-08-23. It served
+eight then; the `ssh-zero-dev-*` rules went with 2i and `torrents.gsrpi.uk` was dropped
+at 2g's review step, having never routed anything. Since 2g finished on 2026-08-29 the authoritative record for every
 host is `hosts/<host>/system/cloudflared-config.yml` — all three tunnels are
 locally-managed, so that tracked file **is** the routing rather than a snapshot of
 Cloudflare's. [cloudflare.md](docs/cloudflare.md) keeps per-host hostname tables for
@@ -81,8 +83,10 @@ reading at a glance; regenerate either on the host with
 
 Worth knowing without opening either: `ssh-zero.gsrpi.uk` reaches zero's sshd, which is
 why restarting that tunnel from a session that arrived through it would strand you. And
-zero's ingress carries a rule for `torrents.gsrpi.uk` that has never served anything —
-that hostname's CNAME points at **one**'s tunnel, and always has.
+zero's ingress **used to carry** a rule for `torrents.gsrpi.uk` that had never served
+anything — that hostname's CNAME points at **one**'s tunnel, and always has. 2g's review
+step caught it before the cutover; carrying it across would have moved one's torrent UI
+onto zero.
 
 ### Ports
 
@@ -119,10 +123,12 @@ one.** That rule says a dev container belongs to the repo it develops; this one 
 *this* repo, so `dev/` is exactly where it belongs. What it is not is a host service —
 nothing in `deployments/` or `hosts/` refers to it, and `bin/compose` cannot drive it.
 
-It also carries `ansible-core` and the collections, which makes it a **second control
-node** and a cheaper one than the phone: an audit run from Termux crosses metered mobile
-data to reach boxes that are on zero's own LAN, and the same run from inside the
-container crosses nothing that costs anything. [`dev/README.md`](dev/README.md).
+It also carries `ansible-core` and the collections — but **it is not a control node, by
+decision**: no fleet key, no `ssh_config.fleet`, so it has no route to `zero`, `one` or
+`two` and cannot run a playbook against any of them. The case for making it one is real
+and is filed as OPEN in [`docs/management-plane.md`](docs/management-plane.md) §
+*A control node inside the fleet* — an audit from Termux crosses metered mobile data to
+reach boxes on zero's own LAN — but it has not been taken. [`dev/README.md`](dev/README.md).
 
 **Only `or3-dev` was up at the last audit**, and only its port was listening. The others
 being down is the normal resting state, not a fault: nothing starts them but a person.
@@ -141,7 +147,7 @@ None are in git. `.gitignore` covers `.env`, `*.key`, `qBittorrent.conf`, `*.sql
 | Discord token, MySQL root password | `deployments/ionic-traces/.env` |
 | Immich Postgres password | `deployments/immich/.env` |
 | qBittorrent `Password_PBKDF2` | `/media/torrents-config/` — data volume, never here |
-| Cloudflare tunnel token | `/etc/init.d/cloudflared` — plaintext, world-readable, **on both hosts** |
+| Cloudflare tunnel credentials | `/etc/cloudflared/<host>.json` — 0600 root, all three hosts. ~~`/etc/init.d/cloudflared`, plaintext and world-readable~~: no host has passed `--token` since 2026-08-29, and the disclosed values were voided by deleting their tunnels |
 | Discord tokens, Bungie + Sheets keys | `~/destiny-director/.env` on `zero` — app repo, not here |
 | **Test** Discord tokens, Postgres password, Bungie keys | `deployments/destiny-director/.env` on `two` |
 | `two` deploy key (private half) | wherever you deploy from. It reaches an unprivileged account with a normal shell, so it does **not** belong in the Claude Code cloud environment block, whose values are not masked. Public half in `~claude/.ssh/authorized_keys` on `two`. See [`hosts/two/system/README.md`](hosts/two/system/README.md) |

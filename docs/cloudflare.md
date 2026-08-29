@@ -94,15 +94,22 @@ Snapshot; the file above is the source of truth. Regenerate with
 | `syncthing.gsrpi.uk` | `http://127.0.0.1:8384` | **behind Access** |
 | `syncthing-server.gsrpi.uk` | `tcp://127.0.0.1:22000` | the sync protocol, not the UI |
 | `immich.gsrpi.uk` | `http://127.0.0.1:2283` | no Access — 200 unauthenticated |
-| `ssh-zero-dev-dd.gsrpi.uk` | `ssh://127.0.0.1:2222` | 502 normally; that container is usually down |
-| `ssh-zero-dev-ds.gsrpi.uk` | `ssh://127.0.0.1:2223` | 502 normally, same |
-| `ssh-zero-dev-or3.gsrpi.uk` | `ssh://127.0.0.1:2224` | **being retired** — or3-dev has its own tunnel and its own name, `or3-dev.gsrpi.uk`. Drop this rule and its DNS record once that is proven, or the container has two public doors and only the new one is behind Access |
 | *(catch-all)* | `http_status:404` | |
+
+~~`ssh-zero-dev-dd` / `-ds` / `-or3`~~ — **all three removed from zero's ingress.** or3's
+in `7bb2075` once it had its own tunnel; `dd` and `ds` under 2i on 2026-08-29. They were
+doors zero opened on a container's behalf, and each was a second way in beside that
+container's own connector.
+
+**Removing a rule does not remove its CNAME.** A record still pointing at zero's tunnel
+now gets the catch-all 404, which reads like a container that is merely down. All three
+records go in the same visit — see [`../plans/cloudflare-dashboard-sweep.md`](../plans/cloudflare-dashboard-sweep.md).
 
 `infra-dev.gsrpi.uk` is **not** here — it has its own tunnel, run by a connector inside
 the container, which is the pattern *management-plane.md* § *Addressing* chose.
-`or3-dev.gsrpi.uk` joined it on 2026-08-24. `dd-dev` and `ds-dev` are still on the host
-tunnel; finishing that is Phase 5.
+`or3-dev.gsrpi.uk` joined it on 2026-08-24. **`dd-dev` and `ds-dev` have no tunnel of
+their own yet** — that is Phase 5 — and they are not running; until then they are reached
+through `ssh zero` and the published loopback ports 2222/2223.
 
 ## One's hostnames
 
@@ -199,4 +206,7 @@ on any of them.
   on 2026-08-23 with `websocket: bad handshake`. Refresh with
   `cloudflared access login https://ssh-zero.gsrpi.uk`. A service token would end the
   recurrence, at the cost of a policy change per hostname.
-- **The three `ssh-zero-dev-*` hostnames** have not been checked for Access.
+- **The three `ssh-zero-dev-*` hostnames** were never checked for Access, and their
+  ingress rules are now gone from zero — so the question that remains is only whether
+  their DNS records and any Access application still exist at Cloudflare. Folded into
+  [`../plans/cloudflare-dashboard-sweep.md`](../plans/cloudflare-dashboard-sweep.md).

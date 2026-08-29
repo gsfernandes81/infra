@@ -15,10 +15,17 @@
 #
 # ── THE REGISTRY ────────────────────────────────────────────────────────────────
 #
-# Four dev containers run on `zero`, each with its own Cloudflare tunnel, its own Access
-# service token, and a connector inside the container — which is the whole point of that
-# design: the tunnel's identity travels with the container, so moving one to `one`
-# changes no ingress rule anywhere (docs/management-plane.md § Addressing).
+# Four dev containers run on `zero`. The design is one tunnel per container, with its own
+# Access service token and a connector inside it — the tunnel's identity travels with the
+# container, so moving one to `one` changes no ingress rule anywhere
+# (docs/management-plane.md § Addressing).
+#
+# TWO OF THE FOUR ARE THERE. `infra-dev` and `or3-dev` have their own hostnames and
+# tokens. `dd-dev` and `ds-dev` do not yet — that is Phase 5 — and they are not running;
+# until then they are reached through `ssh zero` and the published loopback ports. The
+# table below lists all four because it is the registry, and `-e prompt_for_token=false`
+# is what makes a run against a partly-provisioned fleet skip the ones that are not
+# ready by name.
 #
 #   container   loopback port on zero   tunnel hostname        image lives in
 #   ─────────   ─────────────────────   ────────────────────   ──────────────────
