@@ -99,18 +99,31 @@ of one. See the roadmap before doing anything here.
 
 ## Tracked `/etc` copies
 
-**Still none.** This is a reference directory, and `bin/check-system-drift two` only
-reports differences. Nothing here is applied to the host.
+~~**Still none.**~~ **Three, since 2026-08-23**, each carrying an `infra-` header naming
+where it installs:
 
-There is no longer an installed executable to track. `/usr/local/bin/dd-ctl` used to be
+| file | installs at |
+|---|---|
+| `cloudflared` | `/etc/init.d/cloudflared` |
+| `cloudflared-config.yml` | `/etc/cloudflared/config.yml` |
+| `sshd-infra.conf` | sshd's drop-in directory |
+
+`bin/install-system-file` writes them and `bin/check-system-drift` reports on them, on
+this box as on the others — 2g's cutover runs the former here. This section said
+"still none" until 2026-08-29, which would tell a reader nothing on `two` is installable
+from the repo.
+
+There is no longer an installed *executable* to track. `/usr/local/bin/dd-ctl` used to be
 the obvious candidate; it is gone along with the forced command it implemented.
 
 What is worth checking by hand on this box now is smaller, and none of it is a hash:
 
 ```sh
 id claude                                  # expect no wheel
-stat -c '%U:%G %a' /srv/infra              # expect gavin:deploy 2750
-stat -c '%U:%G %a' /srv/infra/deployments/destiny-director/.env   # expect gavin:deploy 640
+# NOTE: /srv/infra does not exist on this box — the clone is ~gavin/infra. The setup
+# README documents the intent; the box went the other way. Checked 2026-08-29.
+stat -c '%U:%G %a' ~gavin/infra            # the clone, wherever it really is
+stat -c '%U:%G %a' ~gavin/infra/deployments/destiny-director/.env   # expect 640
 iptables -S OUTPUT | grep -c REJECT        # expect the LAN rules, step 8
 cat /etc/local.d/oom.start                 # cloudflared pinned to -1000
 ```
@@ -148,7 +161,7 @@ argument-less verbs. The current key reaches a shell, so it must **not** go ther
 
 ## The checkout is shared, and read-only to the deploy account
 
-One clone at **`/srv/infra`**, in neither home directory: `gavin:deploy`, dirs `2750`,
+One clone, **documented as `/srv/infra` and actually at `~gavin/infra`** (checked 2026-08-29 — the intent below describes how it was meant to be built): `gavin:deploy`, dirs `2750`,
 files `0640`. `gavin` pulls and edits; `claude` reads. That is what makes "the deploy
 account cannot choose the image" a permission rather than a claim.
 

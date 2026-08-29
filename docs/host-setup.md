@@ -168,7 +168,8 @@ Nothing there is in the `docker` group and nothing starts at boot.
 [`hosts/two/setup/README.md`](../hosts/two/setup/README.md) is the build of `two` for the
 destiny-director test bot, as a numbered instruction manual: packages, kernel modules,
 zram, the unprivileged deploy user, subuid/subgid, runtime directory and OOM priority,
-firewall, the shared `/srv/infra` checkout, and SSH access. Follow it top to bottom.
+firewall, the shared checkout (**documented as `/srv/infra`; the box has it at
+`~gavin/infra`** — checked 2026-08-29), and SSH access. Follow it top to bottom.
 
 It replaced an 1800-line `root-setup.sh` that did the same work with checks and a change
 report. The script also generated a restricted SSH deploy key and installed `dd-ctl` as a
@@ -200,10 +201,16 @@ Two things `/boot` — the red line — needs by hand, not by script:
 
 ## cloudflared
 
-**Do not install it by hand any more.** Use
-`ansible/playbooks/cloudflared-update.yml`, which picks the asset from the host's own
-`uname -m`, verifies a SHA256 you supply, cycles the connector and rolls back a failure.
-The reasons are below and they are not theoretical.
+**Do not install it by hand.** ⚠︎ **And `cloudflared-update.yml` is NOT the route either
+— it is marked NOT IN USE and it refuses to run** while the target carries
+`--autoupdate-freq`, which all three do since 2h. This paragraph also described it
+wrongly: it does not pick the asset from `uname -m`, it uses the pinned uniform `arm`
+build (deriving from `uname -m` is the very thing that play exists to avoid), and
+`uname -m` appears in it only to *report* what a native build would have been.
+
+The hosts keep themselves current on a staggered schedule; the play is the manual
+override for when that has to be taken away from them. The reasons are below and they
+are not theoretical.
 
 > ⚠ **What this section used to say could not work.** It gave
 > `.../releases/latest/download/cloudflared-linux-aarch64`. **There is no `aarch64`
@@ -219,7 +226,10 @@ began as an accident of the broken command above and is **now a decision**: see
 is that the staggered rollout only tests what later hosts will run, and per-architecture
 builds would make the lifeboat the sole canary for its own binary.
 
-> ⚠ **Autoupdate is off, and was previously on and live.** All three binaries were
+> ⚠ **HISTORICAL — autoupdate is ON and staggered since 2h (2026-08-24):** `one` 6h →
+> `two` 72h → `zero` 240h, so the lifeboat is never the first to take a new binary and
+> the internet-facing box is last. What follows describes why it was turned off first,
+> which is still the reason the stagger exists. **All three binaries were**
 > rewritten on 14–15 August, the day `2026.8.2` released, six months after a manual
 > install — so a boot-path binary on the internet-facing box was being replaced with
 > unverified bytes on a 24-hour cycle. It could also never have corrected the

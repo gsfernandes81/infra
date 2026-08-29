@@ -60,7 +60,7 @@ destiny-director)
 	  user's shell:
 
 	      ssh claude@ssh-two.gsrpi.uk
-	      cd /srv/infra/deployments/$stack && podman-compose pull
+	      cd ~gavin/infra/deployments/$stack && podman-compose pull
 
 	  See hosts/two/setup/README.md and docs/decisions.md.
 	EOF

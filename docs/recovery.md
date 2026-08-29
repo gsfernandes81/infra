@@ -11,7 +11,7 @@ repo has, and it is the thing the greps below are checking against.
 ## First, on either host
 
 ```sh
-sudo bin/check-mount-guards      # zero only — are the data guards still intact?
+sudo bin/check-mount-guards      # ANY host — are the data guards still intact?
 ```
 
 ## Bring the stacks back
@@ -76,10 +76,14 @@ four, each started by `make dev` in its **own** repo, never casually and never f
 
 `dd-mysql` is not a dev container — it is `dd-dev`'s database, and it comes up with it.
 
-**`infra-dev` is the one to bring up first when the thing that is broken is the fleet
-itself.** It holds ansible, the inventory and ssh to all three hosts, so it is where the
-audit and the playbooks run from — and it comes up without needing anything else on zero
-to be healthy. `cd ~/infra && make dev`. It cannot fix zero from inside zero if zero is
+**`infra-dev` is where the repo is worked on, and it is NOT a control node.** It carries
+ansible and the inventory, but **by default it has no route to `zero`, `one` or `two`** —
+no fleet key, no `ssh_config.fleet`, no `known_hosts.fleet`, by decision
+(`../docs/management-plane.md` § *A control node inside the fleet*). So it cannot run the
+audit or any playbook that targets a host, and when the fleet itself is broken it is not
+the thing to bring up first — **the phone is the control node**. This paragraph said the
+opposite until 2026-08-29, which would cost a `make dev` and two logins before you found
+out. `cd ~/infra && make dev`. It cannot fix zero from inside zero if zero is
 down, so the phone stays the fallback control node; see
 [`../dev/README.md`](../dev/README.md).
 
@@ -188,18 +192,22 @@ bind-mounts a path that could fail to mount.
 
 | | `nofail` | `chattr +i` | tunnel credential |
 |---|---|---|---|
-| `zero` | ✅ Aug 2026 | ✅ Aug 2026 | ✅ **rotated 2026-08-23**, and out of argv — credentials file |
-| `one` | ✅ Aug 2026 | ✅ Aug 2026 | moved out of the init script Aug 2026 but **a 755 copy of the old one survived until 2026-08-23**; still `--token` in argv, NOT rotated |
-| `two` | n/a (no data mounts) | n/a | **still INLINE in the 755 init script**, confirmed 2026-08-23 — never moved, never rotated |
+| `zero` | ✅ Aug 2026 | ✅ Aug 2026 | ✅ **done 2026-08-23** — rotated, out of argv, credentials file |
+| `one` | ✅ Aug 2026 | ✅ Aug 2026 | ✅ **done 2026-08-23** — old tunnel retired under 2g, which voided the disclosed value outright |
+| `two` | n/a (no data mounts) | n/a | ✅ **done 2026-08-29** — same way: tunnel `bdb4a988` deleted, which voided the credential that had been inline |
 
-**`zero` is done; `one` is not.** Both tokens were world-readable in a 755 init script
-for months, so both had to be assumed disclosed. Zero's was rotated on 2026-08-23 and
-that old value is now dead at Cloudflare — anyone holding a copy has nothing. **One's is
-still live and still disclosed**, and it is still passed as `--token` in `command_args`,
-so `supervise-daemon` logs it to syslog on every start.
+**All three are done, and no host passes a token in argv.** Every one is
+`--config /etc/cloudflared/config.yml tunnel run`, with the secret in
+`/etc/cloudflared/<host>.json` at 0600 root.
 
-**`two` is worse than either** — see below: its token was never even moved out of the
-init script.
+**Two of the three were closed by deletion rather than rotation**, and that is the
+stronger move: retiring the old tunnel makes the disclosed value dead at Cloudflare
+instead of merely superseded. `one` on 2026-08-23, `two` on 2026-08-29.
+
+⚠︎ **This table asserted the opposite until 2026-08-29** — that one's credential was
+"still live and still disclosed" and two's was "still INLINE in the 755 init script".
+Both had been false for days. It is the kind of claim that starts an emergency rotation
+at 3am for nothing, on the lifeboat.
 
 It did not need physical presence, which is what this file used to say. It needed a
 session that does not cross the tunnel being restarted — the `two` bastion — and that

@@ -356,10 +356,16 @@ that has one.**
   showed the forward plainly up. Both times the service was fine and the message pointed
   away from the cause. This applies to `HostName` in ssh_config, to `service:` in a
   cloudflared ingress, and to anything else where a literal costs nothing.
-- **Zero's tunnel is remotely managed; its ingress lives in the Cloudflare dashboard and
-  the local config is ignored.** Do not clear or "fix" the remote config from a playbook
-  because the repo's copy looks more correct — the repo's copy is a dated snapshot
-  (`docs/cloudflare.md`), and the box is the authority.
+- **cloudflared prefers a tunnel's REMOTE configuration whenever one exists, and ignores
+  local ingress silently** — no error, no log line, and an ignored local config looks
+  identical to one in force at `127.0.0.1:20241/config`. So on a remotely-managed tunnel
+  the dashboard is the authority and the repo's copy is a dated snapshot.
+  **⚠︎ NO TUNNEL ON THIS FLEET IS REMOTELY MANAGED ANY MORE** — 2g finished on
+  2026-08-29 and `hosts/<host>/system/cloudflared-config.yml` *is* the routing on all
+  three. This entry used to name zero specifically and say the opposite of what is now
+  true, which would have you go to the dashboard rather than install the tracked file.
+  Kept because the rule still governs any remotely-managed tunnel you meet, and because
+  `config_src` is create-time only: the way back to one is by accident, not by choice.
 - **"Exited" is not "absent".** A stack with an exited container, a registered compose
   project, or surviving named volumes must be torn down properly. Deleting its files
   first orphans them permanently.
