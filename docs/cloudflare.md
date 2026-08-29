@@ -11,14 +11,16 @@ Rewritten the same day, twice, because most of what it first said stopped being 
 |---|---|---|---|
 | `zero` | `ce28c17c-a722-4ba1-8e46-21985337f13f` | **locally** | `hosts/zero/system/cloudflared-config.yml` |
 | `one` | `1e7fde2e-ac2f-4a5e-8ad4-591208c1e2a6` | **locally** | `hosts/one/system/cloudflared-config.yml` |
-| `two` | `bdb4a988-7c8b-4f5f-a2bf-e42464309d64` | remotely | **Cloudflare** — the dashboard is the record |
+| `two` | `f9407a5c-9361-4b59-85ab-a1f61811fb37` | **locally** | `hosts/two/system/cloudflared-config.yml` |
 | `infra-dev` | separate, in the container | locally | `dev/entrypoint.sh` writes it |
 | `or3-dev` | separate, in the container | locally | the same `dev/entrypoint.sh`, from the base image |
 
-For zero and one the tracked file **is** the routing: edit it, commit it,
-`bin/install-system-file cloudflared-config.yml`, and cycle. For `two` the file carries
-only the tunnel id, credentials path and metrics port — its ingress is at Cloudflare and
-a local copy would be ignored.
+**All three now work the same way**, since 2026-08-29: the tracked file **is** the
+routing — edit it, commit it, `bin/install-system-file cloudflared-config.yml`, and
+cycle. `two` was the last holdout and carried only a tunnel id, credentials path and
+metrics port while its ingress lived at Cloudflare; the paragraph below about not
+clearing its remote configuration described that state and no longer applies to any host
+here. It is kept because the RULE it states is still true of any remotely-managed tunnel.
 
 ## The rule that makes that distinction matter
 
@@ -31,8 +33,9 @@ Nothing distinguishes an ignored local config from one in force: both report the
 rules at `127.0.0.1:20241/config`. That claim survived a day of work, three documents and
 two commit messages before anyone tested it.
 
-**On `two`, therefore: do not clear the remote configuration.** It is not stale, it is
-what serves. `PUT .../cfd_tunnel/{id}/configurations` does not touch DNS, and a `GET`
+**⚠︎ HISTORICAL — `two` was migrated on 2026-08-29 and has no remote configuration any
+more.** While it did: do not clear the remote configuration; it was not stale, it was what
+served. `PUT .../cfd_tunnel/{id}/configurations` does not touch DNS, and a `GET`
 first makes it byte-exactly reversible — but there is no reason to run it.
 
 ## Getting routes into git — how it was actually done
@@ -65,6 +68,20 @@ torrent UI onto zero.
 four on zero, almost all of it DNS propagation. Avoiding it means two connectors at once,
 which is either a second OpenRC service — the phantom-service trap in CLAUDE.md — or a
 detached process Ansible has to babysit.
+
+## Two's hostnames
+
+Snapshot; `hosts/two/system/cloudflared-config.yml` is the source of truth. Regenerate
+with `curl -s 127.0.0.1:20241/config` on the host.
+
+| Hostname | Origin | |
+|---|---|---|
+| `ssh-two.gsrpi.uk` | `ssh://127.0.0.1:22` | the lifeboat's own door |
+| `anchor-two.gsrpi.uk` | `http://127.0.0.1:8080` | destiny-director's anchor — **502 when the bot is down**, which is its normal state |
+
+Both carried identical `originRequest` settings, equal to the tunnel default, so nothing
+was lost in the rewrite — the assert that would have caught a `noTLSVerify` or
+`httpHostHeader` on the one tunnel nobody had inspected did not fire.
 
 ## Zero's hostnames
 
@@ -129,7 +146,8 @@ on any of them.
 ## Landmines
 
 - **A tunnel with private network routes cannot be deleted** (`1023`), and those routes
-  are not shown anywhere you would look. `./2g retire <host> drop` deletes them; it is
+  are not shown anywhere you would look. `cloudflare-tunnel-retire.yml -e drop_routes=true`
+  deletes them (the `./2g` wrapper that shortened this is gone with 2g); it is
   opt-in because dropping a route someone relies on is not undone by re-running.
 - **Deleting a Public Hostname in the UI deletes its DNS record.** The CNAMEs are
   load-bearing; the dashboard's ingress entries are not, for the two locally-managed
@@ -170,8 +188,12 @@ on any of them.
 
 ## Open
 
-- **`two` has not been migrated** — deferred deliberately, a week or so out. It is the
-  smallest job (two hostnames) on the box with the least margin, and it is the lifeboat.
+- ~~**`two` has not been migrated**~~ — **done 2026-08-29.** Two hostnames, on the box
+  with the least margin, reached over the `two-one` mesh so the cutover never travelled
+  through the tunnel it was cycling. Four attempts: a missing `~/.ssh/cp` reported as
+  UNREACHABLE, a stale clone that made `install-system-file` a no-op and left the
+  connector authenticating a tunnel its config did not name, an invalid API token, and
+  then the run that worked. Every guard those failures produced is in the plays.
 - **The fleet ssh hostnames have no service token.** `ssh-zero.gsrpi.uk` is behind Access
   and relies on a browser-obtained JWT that expires — it broke `ssh zero` from the phone
   on 2026-08-23 with `websocket: bad handshake`. Refresh with

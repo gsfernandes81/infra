@@ -16,7 +16,7 @@ stored three to five times, by hand, in prose. So every one of them has drifted:
 
 | Fact | Where it is recorded | State on 2026-08-21 |
 |---|---|---|
-| `zero` runs `or3-dev` on port 2224 | nowhere in this repo | absent |
+| `zero` runs `or3-dev` on port 2224 | ~~nowhere in this repo~~ → `ansible/playbooks/this-client.yml`'s registry table | **closed 2026-08-28** |
 | 2222 = `dd-dev`, 2223 = `ds-dev`, 2224 = `or3-dev` | a **comment in or3's `dev/compose.yaml`** | the port registry for `zero` lives in the newest claimant's app repo |
 | `zero`'s dev containers | `README.md` says "two" and names `dd-dev`, `dd-mysql`, `ds-dev`; [`recovery.md`](recovery.md) names only `dd-dev` and `dd-mysql` | two records, both wrong, wrong differently |
 | `zero` and `two` are onboarded | [`roadmap.md`](roadmap.md) §1 says they "aren't in it yet — only placeholder dirs" | stale; both have symlinks |
@@ -489,9 +489,9 @@ ones that answer the question this document started from.
 | 2b | `infra-dev` container, and the Cloudflare edge in front of it | `zero`, edge | 2 | **done** 2026-08-22 |
 | 2c | `one`'s array — both "broken services" were the SP900 in bay 0 | `one`'s enclosure | — | **done 2026-08-24** — disk pulled, unattended boot proven |
 | 2d | One base image for the four dev containers — `dev/README.md` § *Four copies of this* | `zero`'s dev containers | 2b | **All four converted, and `2026.08.25` is built** (2026-08-25, `sha256:f25cb8de…`, arm64 + amd64, from `2f05f2e`). That tag is the one with **no remote control anywhere** — every container is ssh + abduco, the supervisors deleted — and with `offload-idle-claude.sh`, which stops a detached idle claude and leaves it resumable; one held 1,146 MB. **Nothing runs it yet**: `make up` here, `make dev-up` in destiny-director and dossier, `make up` in or3, each dropping that container's sessions |
-| 2e | Rotate the fleet's own tunnel tokens | `zero`, `one`, `two`, edge | 2b | **`zero` and `one` done 2026-08-23** — one's by retiring its tunnel under 2g. **`two`'s half is no longer a task of its own**: it is folded into 2g, which voids that token rather than rotating it |
+| 2e | Rotate the fleet's own tunnel tokens | `zero`, `one`, `two`, edge | 2b | **DONE 2026-08-29.** `zero` and `one` on 2026-08-23, one's by retiring its tunnel under 2g; `two`'s the same way on 2026-08-29 — deleting tunnel `bdb4a988` voided the credential that had been inline in its 755 init script, which is stronger than rotating it. No disclosed credential is left on this fleet |
 | 2f | `cloudflared`'s init script logs nowhere | `zero`, `one`, `two` | — | **done on all three, 2026-08-23** |
-| 2g | All three tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, `two`, DNS | 2f | `one` and `zero` **done 2026-08-23**; **`two` deferred ~a week, and on `two` it is one job with 2e and the dashboard sweep** |
+| 2g | All three tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, `two`, DNS | 2f | **DONE on all three.** `one` and `zero` 2026-08-23, `two` 2026-08-29 over the `two-one` mesh. Every host's routing is now a tracked file, and `ansible/2g` — the wrapper written for this migration — is deleted, as its own header said it should be. **The dashboard sweep is the one part left, and it is manual** |
 | 2h | cloudflared: staggered autoupdate, `one` 6h → `two` 72h → `zero` 240h | all three | — | **done 2026-08-24** — the staggered frequencies are installed and live on all three |
 | 2i | Retire the `ssh-zero-dev-*` rules — each dev container's second, unprotected door | `zero`'s host tunnel, DNS | nothing | **or3's ingress rule is gone** (`7bb2075`, 2026-08-24); its CNAME and whether the connector was cycled are **unverified — nothing tracked records either**. `ssh-zero-dev-dd` and `ssh-zero-dev-ds` rules are **still live** in `hosts/zero/system/cloudflared-config.yml`, and now that every container has its own tunnel they are second doors on the same argument. Client-side all three aliases are gone from `ssh-fleet-block.j2` (2026-08-28): `dd-dev` and `ds-dev` are not running until they are deployed with a connector of their own, so an alias for the old door would name a hostname with nothing behind it. Dropping an alias does not close a door — the rules are still on zero, and this row is what closes them |
 | 3 | First stack adopted: `send2ereader` on `one`, **with its connector in the stack** | one stack, non-critical box, `one`'s ingress | 2 | |
@@ -696,8 +696,32 @@ Three things the rehearsal was worth, none of which were the plan:
   client address and names the mesh alias to use — which is the same standing-position
   rule as `CLAUDE.md` § *Changing the thing you are connected through*, learned again.
 
-`two` is deferred about a week, deliberately. Two hostnames, the smallest job, on the box
-with the least margin and no bastion of its own.
+**`two` was migrated on 2026-08-29, and 2g is done on all three.** What follows was
+written while it was still deferred; it is kept because the reasoning held and because
+what the migration cost is worth reading before the next one.
+
+Four attempts, and every one of them found a real defect rather than bad luck:
+
+1. **`~/.ssh/cp` did not exist on the laptop**, so the first play against a fleet host
+   died with `unix_listener: cannot bind`, reported as UNREACHABLE — which reads like the
+   box being down. `ssh-client.yml` created `~/.ssh/cm` and not ansible.cfg's own socket
+   directory; the phone had it only because someone once made it by hand.
+2. **The host's clone was stale**, so `install-system-file` installed the old config as a
+   no-op, the credentials were then swapped to the new tunnel, and cloudflared could not
+   authenticate a tunnel its config did not name. The guard that should have caught it
+   read `lookup('file', …)`, which runs on the **control node** — it compared phase 1's
+   output against the machine that produced it.
+3. **The API token was invalid**, and Cloudflare answers that with `9109` on whatever
+   endpoint you reach, so it looked like a missing permission on the zone lookup. The
+   response body said otherwise and `no_log` was hiding it.
+4. The run that worked.
+
+The plays now verify the token first, check the host's own clone and the **installed**
+config before swapping credentials, print refusal bodies, and restore the config as well
+as the credentials on rollback. `docs/decisions.md` carries each one.
+
+Two hostnames, the smallest job, on the box with the least margin and no bastion of its
+own — and it still took four goes. The deferral was right.
 
 **On `two` this is one job with 2e and the Cloudflare dashboard sweep, decided 2026-08-24.**
 Not three items that happen to be adjacent — three that close each other, in the order they
@@ -716,7 +740,7 @@ and its old credential still live somewhere nobody swept.
 **The sweep stays a human step inside that job.** It needs judgement about which token the
 phone currently holds, and that is not a fact any check on a box can establish.
 
-**When it happens, phase 1 run for real IS the rehearsal.** All three plays were
+**It did, and phase 1 run for real WAS the rehearsal.** All three plays were
 substantially rewritten in the 2026-08-24 review (block/rescue rollbacks, the
 originRequest assert, the re-run guard) and have not run since. A `--check` of phase 1
 cannot rehearse them — the `uri` create is skipped in check mode and everything after it
@@ -725,9 +749,10 @@ documents. But phase 1 for real is inherently consequence-free: it creates a tun
 nothing points at, abandoned by one delete. Running it against `two` exercises the new
 guards — and the originRequest assert is checking the one tunnel nobody has ever
 inspected, so if it fires, it fired before anything moved. Read the generated config at
-leisure; phase 2 (`./2g cut two`, which picks the `two-zero` mesh path) is a separate
-decision on a separate day if wanted. **Reach `two` over the mesh for phase 2** — its
-tunnel is the thing being cycled, which is how it went dark once already.
+leisure; phase 2 was a separate decision on a separate day, and was taken over `two-one`
+rather than the wrapper's default `two-zero` — `one` was idle and the laptop was off the
+LAN. **Reach `two` over the mesh for phase 2** — its tunnel is the thing being cycled,
+which is how it went dark once already.
 
 **2f, filed 2026-08-23.** `/etc/init.d/cloudflared` declares `stdout_log` and
 `stderr_log`, which `supervise-daemon` does not act on. `/var/log/cloudflared.err` was
