@@ -105,11 +105,16 @@
           start date is not in the future; and that it is an API token from My Profile ->
           API Tokens rather than a Global API Key or an Access service token.
 
-          Test it by hand without this play:
-            read -rs TOKEN
-            curl -s -H "Authorization: Bearer $TOKEN" \
-              https://api.cloudflare.com/client/v4/user/tokens/verify
-            unset TOKEN
+          Test it by hand without this play. FISH, which is what this fleet runs —
+          `read -rs` is bash and fish will not take it:
+
+            read -s TOKEN
+            curl -s -H "Authorization: Bearer $TOKEN" https://api.cloudflare.com/client/v4/user/tokens/verify
+            curl -s -H "Authorization: Bearer $TOKEN" "https://api.cloudflare.com/client/v4/zones?name=gsrpi.uk"
+            set -e TOKEN
+
+          In bash it is `read -rs TOKEN` and `unset TOKEN`. Either way the token stays out
+          of history: only the variable name is on the command line.
 
           Nothing has been read or changed.
         success_msg: "token verifies as active"
