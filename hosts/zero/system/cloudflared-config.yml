@@ -46,8 +46,19 @@ ingress:
     service: tcp://127.0.0.1:22000
   - hostname: immich.gsrpi.uk
     service: http://127.0.0.1:2283
-  - hostname: ssh-zero-dev-dd.gsrpi.uk
-    service: ssh://127.0.0.1:2222
-  - hostname: ssh-zero-dev-ds.gsrpi.uk
-    service: ssh://127.0.0.1:2223
+  # 2i, 2026-08-29: `ssh-zero-dev-dd` and `ssh-zero-dev-ds` removed from here.
+  #
+  # They were doors ZERO opened on a container's behalf — a rule on the host tunnel
+  # pointing at a container's loopback port — and each was a SECOND way in beside the
+  # container's own connector. `ssh-zero-dev-or3` went the same way in 7bb2075 once
+  # or3-dev had its own hostname behind its own Access application.
+  #
+  # dd-dev and ds-dev do NOT have their own tunnels yet; that is Phase 5. They are also
+  # not running, and will not be until they are deployed with an in-container connector,
+  # so removing these costs no access today. Until then they are reached through zero:
+  # `ssh zero`, then the published loopback port (2222 and 2223).
+  #
+  # Deleting the rule does not delete the CNAME. Both records were removed at Cloudflare
+  # in the same sitting; a record left pointing at this tunnel gets the catch-all 404
+  # below and looks like a service that is merely down.
   - service: http_status:404
