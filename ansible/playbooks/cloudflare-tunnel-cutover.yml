@@ -391,6 +391,21 @@
     # Recorded BEFORE anything changes, so a rollback restores the exact previous target
     # rather than assuming it was the old tunnel. Printed, because if this play dies
     # mid-loop the only copy of it is in a register that dies with it.
+    # FIRST, because everything below indexes `json.result[0]` — the WRITE THIS DOWN
+    # dump and the current-target set both do. With this assert further down, a hostname
+    # with no DNS record died on `object has no element 0` two tasks before reaching the
+    # message written for it. Nothing has changed at that point either way; the
+    # difference is whether you get a traceback or a sentence at 3am.
+    - name: Refuse if any hostname has no record, or more than one
+      ansible.builtin.assert:
+        that: item.json.result | length == 1
+        fail_msg: >-
+          {{ item.item }} resolved to {{ item.json.result | length }} DNS records. One is
+          expected; anything else means this play would repoint the wrong thing.
+      loop: "{{ recs.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
     - name: Record where each one points now — WRITE THIS DOWN
       ansible.builtin.debug:
         msg: >-
@@ -424,15 +439,6 @@
           Remove it from the reviewed config rather than carrying it across.
       when: not swap_done
 
-    - name: Refuse if any hostname has no record, or more than one
-      ansible.builtin.assert:
-        that: item.json.result | length == 1
-        fail_msg: >-
-          {{ item.item }} resolved to {{ item.json.result | length }} DNS records. One is
-          expected; anything else means this play would repoint the wrong thing.
-      loop: "{{ recs.results }}"
-      loop_control:
-        label: "{{ item.item }}"
 
     # ── the host: config, credentials, cycle ─────────────────────────────────
     # ONE BLOCK, ROLLED BACK AS ONE. The wait below retries and then FAILS if the new
@@ -458,6 +464,14 @@
         #
         # `-f` guard, same reason as the credentials: never overwrite an existing backup,
         # or a second run erases the only copy of the pre-2g config.
+        - name: Clear any stale rollback marker
+          # /tmp survives a failed run. A marker left behind by a rescue that died
+          # mid-way would arm a pointless cycle in some later run's rescue.
+          ansible.builtin.file:
+            path: /tmp/.cutover-restored
+            state: absent
+          become: true
+
         - name: Back up the live config before replacing it
           ansible.builtin.shell: |
             set -e
@@ -570,7 +584,7 @@
         - name: Restore the pre-2g credentials
           ansible.builtin.shell: |
             set -e
-            if [ -f {{ cred_file }}.pre-2g ]; then
+            if [ -f {{ cred_file }}.pre-2g ] && ! cmp -s {{ cred_file }}.pre-2g {{ cred_file }}; then
               cp -a {{ cred_file }}.pre-2g {{ cred_file }}
               chmod 600 {{ cred_file }}
               touch /tmp/.cutover-restored
@@ -578,15 +592,25 @@
           become: true
           changed_when: true
 
-        # Only when something was actually restored. A failure at the install step —
-        # before any swap — fires this rescue too, and cycling there is a pointless
-        # outage on a clean abort. The marker file is written by the restore above.
+        # Only when something was actually CHANGED. A failure at the install step — before
+        # any swap — fires this rescue too, and cycling there is a pointless outage on a
+        # clean abort.
+        #
+        # `cmp -s` in both restores above is what makes that true, and it was not true
+        # for a day: once config.yml gained a .pre-2g backup taken BEFORE
+        # install-system-file, every clean abort found that backup present, "restored"
+        # bytes identical to the live file, set the marker, and cycled. Seconds of
+        # nothing on `one`; on `two` it is the couple of minutes the raised readiness
+        # budget exists to cover, for a run that changed nothing.
+        #
+        # The marker is also cleared at the top of the block, so a rescue that died
+        # between `touch` and this task cannot arm a later run's rescue.
         # The other half of the restore. Without it the box comes back with the old
         # credentials and the new config, which do not name the same tunnel.
         - name: Restore the pre-2g config
           ansible.builtin.shell: |
             set -e
-            if [ -f {{ cfg_file }}.pre-2g ]; then
+            if [ -f {{ cfg_file }}.pre-2g ] && ! cmp -s {{ cfg_file }}.pre-2g {{ cfg_file }}; then
               cp -a {{ cfg_file }}.pre-2g {{ cfg_file }}
               chmod 644 {{ cfg_file }}
               touch /tmp/.cutover-restored
@@ -653,7 +677,10 @@
         return_content: true
       register: ready
       until: (ready.content | default('{}') | from_json).readyConnections | default(0) > 0
-      retries: 12
+      # Same budget as the in-block wait and the rescue's. This path runs right after a
+      # mid-run connection loss, on the box that budget was raised for; it was the one
+      # place still holding the old 60s.
+      retries: "{{ ready_retries | default(24) }}"
       delay: 5
       when: swap_done
 
@@ -686,6 +713,7 @@
 
     # ── move DNS, one record at a time ───────────────────────────────────────
     - name: Repoint each hostname at the new tunnel
+      register: moved
       ansible.builtin.uri:
         url: "{{ cf_api }}/zones/{{ zone_id }}/dns_records/{{ item.json.result[0].id }}"
         method: PATCH
@@ -699,6 +727,38 @@
         label: "{{ item.item }}"
       delegate_to: localhost
       no_log: true
+      # THE ONLY WRITE IN THIS PLAY THAT CLOUDFLARE CAN REFUSE, and until now the one
+      # call not carrying the pattern CLAUDE.md records for exactly that. The read
+      # asserts above do NOT cover it: listing dns_records succeeds with Zone -> DNS ->
+      # READ, so a read-only token passes every preflight, the host is swapped, the
+      # outage starts, and then this fails as a bare `Status code was 403` with the body
+      # — the only place Cloudflare names the missing permission — censored.
+      failed_when: false
+
+    - name: Say what Cloudflare refused, per record
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.item.item }}: HTTP {{ item.status | default('?') }}
+          {{ item.json.errors | default([]) }}
+      loop: "{{ moved.results }}"
+      loop_control:
+        label: "{{ item.item.item }}"
+      changed_when: true
+      when: (item.status | default(0)) not in [200, 201]
+
+    - name: Every record has to have moved
+      # DNS can end PARTIALLY moved — the loop continues past a failure — so the message
+      # has to say which did and which did not, and where the map back is.
+      ansible.builtin.assert:
+        that: moved.results | rejectattr('status', 'in', [200, 201]) | list | length == 0
+        fail_msg: >-
+          {{ moved.results | rejectattr('status', 'in', [200, 201])
+             | map(attribute='item.item') | list | join(', ') }} did NOT move; the bodies
+          are above. Zone -> DNS -> Edit on {{ zone_name }} is what a PATCH needs, and a
+          read-only token gets through every check before this one. Records that DID move
+          now point at {{ new_tunnel }}; the pre-change targets are in the
+          "WRITE THIS DOWN" output earlier in this run, which is the map back.
+        success_msg: "all {{ moved.results | length }} records moved"
 
     - name: Wait for each hostname to answer as it did before
       ansible.builtin.uri:
@@ -707,7 +767,22 @@
         timeout: 20
         follow_redirects: none
       register: after
-      failed_when: false
+      # failed_when COMPARES; it does not merely suppress. `failed_when: false` made this
+      # task incapable of failing: with `until`, exhausting the retries does NOT fail a
+      # task whose failed_when is false — it reports ok and the play carries on to print
+      # "every hostname answers as it did before the cutover", after DNS has moved.
+      # Tested on ansible-core 2.21. The play would have said that of a hostname serving
+      # nothing, which is the wrong-reason pass CLAUDE.md § Verifying changes is about.
+      #
+      # It was there because a legitimate baseline of 302 or 502 fails `uri`'s default
+      # status check on every attempt. Comparing against the baseline does both jobs: a
+      # matching attempt passes and breaks the loop, a persistent mismatch fails on
+      # exhaustion, and that is the only signal this play has that DNS actually landed.
+      #
+      # The rescue's /ready wait is the same shape and wants the OPPOSITE semantics —
+      # exhaustion there must fall through to the "TUNNEL IS DOWN" message rather than
+      # abort the rescue. Two tasks that look identical and are not.
+      failed_when: after.status != baseline_status[item]
       until: after.status == baseline_status[item]
       retries: 10
       delay: 6

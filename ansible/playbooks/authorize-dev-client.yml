@@ -233,6 +233,16 @@
           - -o
           - ConnectTimeout=10
           - "{{ item }}-sh"
+          # `sh -c`, AND THAT IS NOT DECORATION. sshd runs a remote command through the
+          # target user's LOGIN SHELL, and `dev` in these containers is fish — so this
+          # POSIX script was rejected on its first token, every container, every run:
+          # `fish: Unsupported use of '='. In fish, please use 'set d ""'`. Masked by
+          # failed_when: false, it reported "COULD NOT refresh — it will pick the key up
+          # at its next start", which reads as the container being down rather than as a
+          # command that cannot run. Shipped broken in 66e8358 and caught in review.
+          # Wrapping it means fish only has to parse one simple command.
+          - sh
+          - -c
           - >-
             d=""; for c in /run/*secrets*; do [ -f "$c/authorized_keys" ] || continue;
             [ -n "$d" ] && { echo "more than one secrets mount: $d and $c" >&2; exit 3; };

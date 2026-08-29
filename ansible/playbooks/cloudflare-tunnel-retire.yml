@@ -138,6 +138,10 @@
     # ── guard 2: nothing may still point at the doomed tunnel ────────────────
     # THIS IS THE ONE THAT MATTERS. A DNS record aimed at a deleted tunnel does not
     # degrade, it stops working permanently — the UUID cannot be recreated.
+    # Same shape as the cutover's, and for the same reason: the token preflight proves
+    # the token is ACTIVE, not that it is SCOPED. A token without Zone -> Zone -> Read
+    # fails here, and a bare `no_log` read reports that as `Status code was 403` with the
+    # body — the only place Cloudflare names the missing permission — censored.
     - name: Find the zone
       ansible.builtin.uri:
         url: "{{ cf_api }}/zones?name={{ zone_name }}"
@@ -145,18 +149,46 @@
       register: zone
       delegate_to: localhost
       no_log: true
+      failed_when: false
 
     - name: List every record in the zone
       ansible.builtin.uri:
-        url: "{{ cf_api }}/zones/{{ zone.json.result[0].id }}/dns_records?per_page=500"
+        url: "{{ cf_api }}/zones/{{ zone.json.result[0].id | default('') }}/dns_records?per_page=500"
         headers: "{{ api_hdr }}"
       register: allrecs
       delegate_to: localhost
       no_log: true
+      failed_when: false
+      when: (zone.status | default(0)) == 200
+
+    - name: Say what Cloudflare refused, if it did
+      ansible.builtin.debug:
+        msg: >-
+          zone lookup HTTP {{ zone.status | default('?') }} {{ zone.json.errors | default([]) }};
+          record listing HTTP {{ allrecs.status | default('skipped') }}
+          {{ allrecs.json.errors | default([]) }}
+      changed_when: true
+      when: (zone.status | default(0)) != 200 or (allrecs.status | default(0)) != 200
+
+    - name: The token has to be able to read the zone and its records
+      ansible.builtin.assert:
+        that:
+          - (zone.status | default(0)) == 200
+          - (zone.json.result | default([]) | length) > 0
+          - (allrecs.status | default(0)) == 200
+        fail_msg: >-
+          Could not read {{ zone_name }} or its records — the bodies are above. The token
+          verified as active, so this is scope: Zone -> Zone -> Read and Zone -> DNS ->
+          Edit on {{ zone_name }}, beside Account -> Cloudflare Tunnel -> Edit. Nothing
+          has been deleted.
+        success_msg: "zone and records readable"
 
     # `| default([], true)` on every Cloudflare result list here and below: a 403 comes
     # back as `result: null`, which is DEFINED, so the plain `default([])` never applies
     # and selectattr/length raise on none with an error that points away from the token.
+    # With the assert above, that path is now unreachable rather than merely defended —
+    # kept because the defence costs nothing and the next endpoint added here may not be
+    # guarded.
     - name: Which records still aim at the doomed tunnel
       ansible.builtin.set_fact:
         stragglers: >-
