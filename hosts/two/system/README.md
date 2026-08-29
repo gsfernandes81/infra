@@ -33,10 +33,15 @@ With it come three host changes:
 The build is [`../setup/README.md`](../setup/README.md), a numbered instruction manual.
 It replaced an 1800-line `root-setup.sh`.
 
-> **Status: not applied as of 2026-08-06.** The script has been reviewed and syntax
-> checked, and nothing in it has been run on the box. Docker removal is opt-in behind
-> `DD_REMOVE_DOCKER=1` and is a separate second run. Treat the three bullets above as
-> the intended end state, and confirm on the box before writing them down as fact.
+> ~~**Status: not applied as of 2026-08-06.**~~ **Applied — the box matches those
+> bullets.** Docker and containerd are gone (`ansible/host_vars/two.yml` declares podman,
+> crun, conmon, netavark and says docker "must never get back"), `python3` is present and
+> pinned fleet-wide in `group_vars/fleet.yml`, and the unprivileged `claude` account is
+> the documented way in (`README.md`). Docker removal was opt-in behind
+> `DD_REMOVE_DOCKER=1` as a separate second run; it happened.
+>
+> This banner said "nothing in it has been run on the box" for 23 days after the box
+> stopped matching it, on the page that tells you what `two` is.
 
 ## Its job: the lifeboat
 

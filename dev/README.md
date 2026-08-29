@@ -1,7 +1,10 @@
 # infra-dev — the development container on `zero`
 
 Runs Claude Code against **this** repo on `zero` (Pi 5, arm64), reached by ssh, with
-Ansible in the image so the container is also a control node for the fleet it manages.
+Ansible in the image — though **it is not a control node by default**: no fleet key, no
+route to `zero`, `one` or `two`. That is a decision, not an omission; see *Not a control
+node, by default* below and `../docs/management-plane.md` § *A control node inside the
+fleet*, where making it one is filed as OPEN.
 
 ## Why this exists
 
@@ -395,9 +398,11 @@ Each of those "must never" is a specific failure, not tidiness:
 - **The API token cannot go in the secrets directory** because that directory is mounted
   into the container. A container able to rewrite the Access policy in front of itself
   is not protected by it. Nothing the running container does needs that token.
-- **The tunnel credentials are a file, not `--token`.** The host tunnels use
-  `--token <secret>`, which is `host-setup.md`'s token-in-argv leak and
-  `management-plane.md`'s *secrets never go in `command_args`*. There is no
+- **The tunnel credentials are a file, not `--token`.** ⚠︎ **So are the host tunnels'
+  now** — that stopped being a difference on 2026-08-29, when 2g finished and every host
+  moved to `--config` with its secret in `/etc/cloudflared/<host>.json` at 0600. The
+  reason the container did it first still stands: it is `host-setup.md`'s token-in-argv
+  leak and `management-plane.md`'s *secrets never go in `command_args`*. There is no
   `supervise-daemon` in a container, but `docker inspect` shows argv **and** env, and
   `.Config.Env` is exactly what `audit.yml` refuses to read because it holds live
   secrets. A read-only credentials file is the spelling that is in neither.
@@ -557,7 +562,7 @@ converted as of 2026-08-24**; each conversion was, in that repo:
 
 **or3-dev converted on 2026-08-24**, and it is the conversion that proves the shape:
 it is the child that differs most, and none of its differences needed a fork. What it
-needed instead became the base's four seams —
+needed instead became the base's seams (four then, five now — `child-init.sh` was added for dd-dev and ds-dev) —
 
 | or3-dev needs | It gets it from |
 |---|---|
@@ -576,7 +581,7 @@ Children pin a tag, never `latest`, so a base rebuild cannot change a container 
 its repo's back. Bumping the base is: edit `BASE_TAG` in infra's Makefile, `make base`,
 then move each child's pin when that repo is ready.
 
-**The tag is `2026.08.24.2` as of the dd/ds conversion**, `.1` having been the or3 one
+**The tag is `2026.08.25`** (`dev/Makefile`'s `BASE_TAG` is the single source; `.24.2` was the dd/ds conversion), `.1` having been the or3 one
 — suffixes rather than new dates, because each earlier tag is already pushed and a
 pinned tag is a contract that the same tag is the same bytes. `dev-base.yml` refuses to
 overwrite one without `force`, which is the check working. A change to the base is now a

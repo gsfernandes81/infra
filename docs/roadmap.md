@@ -2,7 +2,8 @@
 
 All three hosts are in this repo now: `hosts/<host>/` carries each one's stacks as
 symlinks into `deployments/`, plus its tracked `/etc` copies. None of what follows is
-urgent; none of it should be started remotely — **except §6**, which is now specifically a
+urgent; none of it should be started remotely — ~~**except §6**~~, **which is done** (2e,
+closed 2026-08-29). What follows described it as a remote operation still to do; it was one, and it was
 remote operation, because `infra-dev` is the safe place to stand that it was waiting for.
 
 ## 1. Onboard `zero` into this repo — done
@@ -242,9 +243,11 @@ above.)
 [recovery.md](recovery.md#dont-break-remote-access) says both must be assumed disclosed.
 Rotation was deferred here to "when physically present", which from a ship is months.
 
-**Reversed 2026-08-22.** `infra-dev` is a way into `zero` that does not traverse zero's
-own tunnel, which is exactly what the two-phase procedure in `CLAUDE.md` needs to stand
-on. It is **Phase 2e** in
+**Reversed 2026-08-22, and ✔ DONE 2026-08-29.** `infra-dev` is a way into `zero` that does
+not traverse zero's own tunnel, which is exactly what the two-phase procedure in
+`CLAUDE.md` needs to stand on — though in the event every cutover was driven from a mesh
+route rather than from the container, which has no fleet access by default. It was
+**Phase 2e** in
 [management-plane.md](management-plane.md#sequencing-and-where-podman-fits), with the
 order, the probe, and the one check that has to happen first — proving which connector
 actually carries the session, from the owner's shell rather than from an agent process.

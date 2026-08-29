@@ -23,10 +23,25 @@ ansible fleet -m ping                       # transport works
 ansible-playbook playbooks/audit.yml -K     # what runs where -> docs/fleet-inventory.md
 ```
 
-**Not everything here is read-only any more.** `audit.yml` still is. `packages.yml`
-installs, and the three `dev-*` plays write keys, an `.env` and an ssh config. Every one
-of them takes `--check`, and running that first is the habit: it is what caught the `docs`
-metapackage before it landed on a 1 GB Pi.
+**Not everything here is read-only any more, and the list is longer than it looks.**
+`audit.yml` still is. Everything below changes something:
+
+| play | what it can change |
+|---|---|
+| `packages.yml` | installs and removes packages on all three hosts |
+| `system-files.yml` | writes tracked `/etc` copies — **boot-path files** — on all three |
+| `cloudflared-update.yml` | replaces the cloudflared binary and cycles the connector (marked NOT IN USE; it refuses while a host autoupdates) |
+| `cloudflare-tunnel-new.yml` | creates a Cloudflare tunnel and writes credentials at 0600 |
+| `cloudflare-tunnel-cutover.yml` | **cycles a connector and repoints DNS** — there is a deliberate outage in it |
+| `cloudflare-tunnel-retire.yml` | **deletes a tunnel. Irreversible** |
+| `cloudflare-dev-tunnel.yml` | creates edge objects and prints a secret that cannot be re-fetched |
+| the `*-client.yml` plays | write ssh config and a 0600 token on the client, not on a host |
+| `authorize-dev-client.yml` | writes `authorized_keys` on `zero` and refreshes it inside containers |
+
+Most take `--check`, and running that first is the habit: it is what caught the `docs`
+metapackage before it landed on a 1 GB Pi. **The tunnel plays are the exception** —
+`cloudflare-tunnel-new.yml` cannot be rehearsed that way at all, because the API create is
+skipped in check mode and everything after it dies on undefined.
 
 ## The playbooks
 
@@ -202,7 +217,7 @@ repo has traded hand-rolled shell for stock tooling — after `bin/compose` and 
 | `inventory` | deliberately thin — `~/.ssh/config` owns the transport |
 | `group_vars/all.yml` | where the report goes; applies to `localhost` too |
 | `group_vars/fleet.yml` | the container CLI |
-| `host_vars/` | empty, on purpose — see below |
+| `host_vars/` | four files: the three hosts' container runtimes, plus `localhost.yml`'s Termux fixes — see below |
 | `playbooks/` | the ones above; `_inventory-guard.yml` is imported, never run |
 | `playbooks/this-client.yml` | the dev-container registry lives in its header |
 | `templates/` | the report, the two ssh blocks, and the Windows ProxyCommand wrapper |
@@ -308,13 +323,22 @@ can tell you a read failed. Do not simplify those branches away.
 `--check`, `command` and `shell` are skipped by default, so a `--check` run would gather
 nothing and print a clean report. A read is safe in check mode by definition.
 
-## `host_vars/` is empty on purpose
+## What is in `host_vars/`, and what is deliberately not
 
-It is where per-host values go when one stack needs different ones on different hosts.
-Nothing needs that yet — **no stack in this repo runs on two hosts.** Syncthing looks like
-it does and does not: `zero`'s syncs the general share, `one`'s distributes completed
-torrents from inside the torrents stack. Two jobs, two definitions. The directory exists
-now so that adding the first real case is an addition rather than a restructure.
+~~It is empty on purpose.~~ It holds four files: `zero.yml`, `one.yml` and `two.yml`, each
+naming that host's container runtime and nothing else, and `localhost.yml`, which carries
+the two Ansible defaults that are wrong on Termux (`~` is not `$HOME` there, and there is
+no `/usr/bin/python3`).
+
+**The reason it was described as empty is still true and is the useful part:** per-host
+values are for when one stack needs different ones on different hosts, and **no stack in
+this repo runs on two hosts.** Syncthing looks like it does and does not: `zero`'s syncs
+the general share, `one`'s distributes completed torrents from inside the torrents stack.
+Two jobs, two definitions.
+
+`two.yml` is the one to read before adding anything here — it explains why that host must
+never get docker back, and `group_vars/fleet.yml` explains why almost everything else
+belongs there instead. Unexplained divergence between the hosts is the bug.
 
 ## Not audited
 

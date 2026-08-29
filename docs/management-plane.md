@@ -1,6 +1,8 @@
 # The management plane
 
-> **Status: in progress. Phase 0 done, Phase 1 written and unrun** — see *Sequencing*
+> **Status: phases 0 through 2i done or in progress; 3 onwards queued** — see *Sequencing*
+> for the table, which is the record. This line said "Phase 1 written and unrun" until
+> 2026-08-29, eight days and ten phases after that stopped being true.
 > below for what that means precisely. This is the argument, written down before the work,
 > so the work can be argued with rather than reverse-engineered. Sections marked
 > **DECIDED** are settled unless someone argues with the reason. Sections marked **OPEN**
@@ -328,7 +330,7 @@ for rather than revisiting this on a feeling:
 Until one of those, it is off, and the container is a development container that happens
 to have ansible in it for editing playbooks.
 
-### Still to do: the fleet's own tunnels — PLANNED, Phase 2e
+### The fleet's own tunnels — ✔ DONE 2026-08-29, Phase 2e
 
 `zero`'s and `one`'s tunnel tokens were world-readable in a 755 init script for months and
 `recovery.md` says both must be assumed disclosed. Rotation was deferred there to "when
@@ -356,12 +358,15 @@ The order, once `infra-dev` has been up long enough to be trusted:
    blesses. Confirmed reachable 2026-08-23.
 3. `two` — ~~check first whether the token is even still inline~~. Checked 2026-08-28:
    it is **not**. It moved to `/etc/cloudflared/two.json` on 2026-08-23 and the init
-   script runs `--config`, no `--token`. The secret is unchanged, so it is still live
-   until 2g deletes the tunnel — see that phase.
+   script runs `--config`, no `--token`. ~~The secret is unchanged, so it is still live
+   until 2g deletes the tunnel~~ — **2g deleted it on 2026-08-29, which is what voided
+   it.** Nothing disclosed is live on this fleet.
 
-Not started, and deliberately not bundled with the dev container work: it is churn on the
-boxes you are connected through, and the whole point of doing `infra-dev` first is to
-have somewhere safe to stand while doing it.
+~~Not started~~ — **all three done**, and it was deliberately not bundled with the dev
+container work at the time, because it is churn on the boxes you are connected through
+and the whole point of doing `infra-dev` first was to have somewhere safe to stand. That
+turned out to be the right order twice over: every one of these was cut over from a mesh
+route, and `two`'s took four attempts.
 
 **Two things travel with this decision.** A tunnel token per dev container — a secret,
 which is what the Vault path above is for. And
@@ -556,16 +561,18 @@ the repo cannot fix for it:
 **2b–2e were off this list until 2026-08-22.** They come out of the `infra-dev` handoff.
 As filed, two of them outranked Phase 3: `one`'s broken services were the only things on
 the fleet *failing* rather than merely unbuilt, and Phase 3 adopts a stack that currently
-works. **2c has since gone the other way** — it was diagnosed on 2026-08-23 and is blocked
-on physical access, so it can no longer be ranked at all; see below. The rotation still
-outranks Phase 3, because the reason it was deferred, "when physically present", stopped
-being true the day `infra-dev` came up. 2d was ranked as maintenance cost rather than
-risk, to wait for whichever of the four images next needed a change; it was built on
-2026-08-24 instead.
+works. 2c was then diagnosed on 2026-08-23 and briefly looked blocked on physical
+access; the disk was pulled on 2026-08-24 and it closed. 2d was ranked as maintenance
+cost rather than risk, to wait for whichever of the four images next needed a change; it
+was built on 2026-08-24 instead.
 
-**Which left 2e and Phase 3 as the next actionable work**, in that order. As of 2026-08-24
-both have moved: 2e's last host is inside 2g on `two` (below), so the next actionable work
-is **`two`'s tunnel, then Phase 3**.
+~~**Which left 2e and Phase 3 as the next actionable work**~~ — **that ranking is spent.**
+2e closed inside 2g on `two` on 2026-08-29, and every 2-series phase is done except 2i,
+whose repo half has landed and whose install-and-cycle on `zero` is the owner's step.
+**The next actionable numbered phase is 3.**
+
+⚠︎ Everything above this line is the ranking as it was argued, kept because the argument
+is the useful part. The phase table is the record of where things stand.
 
 **2g, filed 2026-08-23 — DECIDED, not optional-but-nice.** The owner's reason, and it is
 the deciding one: *"I'm not interested in leaving more config than I have to in a web
@@ -1109,7 +1116,9 @@ host is a later pass with its own review.
 - **A dry run that changes nothing is the first deliverable**, not the last. Ansible's
   `--check` against all three hosts, reporting drift only, is what proves the inventory is
   right before anything writes.
-- **The drift listed at the top of this document is not yet fixed.** It is evidence here,
+- ~~**The drift listed at the top of this document is not yet fixed.**~~ **It is** — the
+  drift table's own rows now carry their closures, Phase 2 landed on 2026-08-21, and the
+  two dead links it named are gone. It stays as evidence here,
   not a changelog. Fixing it — the port line, the dev-container count, `recovery.md`'s
   stack lists and port greps, roadmap §1's stale paragraph and its two dead links, and the
   missing `hosts/one/syncthing` symlink — is its own commit, and should happen whether or
