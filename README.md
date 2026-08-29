@@ -72,9 +72,11 @@ containerd are removed from it. See [decisions.md](docs/decisions.md).
 ### Public hostnames
 
 Zero's tunnel serves eight, and **only one of them was recorded anywhere in this repo
-before 2026-08-23**. They are listed in [cloudflare.md](docs/cloudflare.md) as a dated
-snapshot — the authoritative record is Cloudflare's own, because that tunnel is
-remotely-managed and local ingress is ignored. Regenerate the snapshot on the host with
+before 2026-08-23**. Since 2g finished on 2026-08-29 the authoritative record for every
+host is `hosts/<host>/system/cloudflared-config.yml` — all three tunnels are
+locally-managed, so that tracked file **is** the routing rather than a snapshot of
+Cloudflare's. [cloudflare.md](docs/cloudflare.md) keeps per-host hostname tables for
+reading at a glance; regenerate either on the host with
 `curl -s 127.0.0.1:20241/config`.
 
 Worth knowing without opening either: `ssh-zero.gsrpi.uk` reaches zero's sshd, which is

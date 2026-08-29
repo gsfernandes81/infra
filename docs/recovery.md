@@ -260,14 +260,20 @@ it does not control it.
 
 Both hosts run `cloudflared` from `/etc/init.d/cloudflared`. It's your way back in.
 
-**`zero` — done, 2026-08-23.** No token anywhere. `/etc/cloudflared/zero.json` (0600
-root) holds the credentials; `/etc/cloudflared/config.yml` (tracked) holds the tunnel id,
-that path, and the metrics port. **The ingress is not on the host** — this tunnel is
-remotely-managed and cloudflared ignores local ingress whenever a remote config exists,
-silently. The secret was rotated at the same sitting, so the disclosed one is dead.
+**All three — done. `zero` and `one` 2026-08-23, `two` 2026-08-29.** No token anywhere
+on any host. `/etc/cloudflared/<host>.json` (0600 root) holds the credentials;
+`/etc/cloudflared/config.yml` (tracked, per-host under `hosts/<host>/system/`) holds the
+tunnel id, that path, the metrics port **and the ingress**. Every tunnel is now
+locally-managed, so the routing in that file is the routing in force.
 
-**Rebuilding zero's tunnel therefore needs two files, not a token**, which is the thing
-to know here at 3am: `config.yml` is in the repo and installs with
+⚠︎ **The sentence this paragraph used to carry — "the ingress is not on the host, this
+tunnel is remotely-managed and cloudflared ignores local ingress silently" — was true of
+`zero` before 2026-08-23 and of `two` before 2026-08-29, and is now true of none of
+them.** The rule it states still holds for any remotely-managed tunnel you meet, and the
+reason it mattered is below: an ignored local config and a live one look identical.
+
+**Rebuilding any of these tunnels therefore needs two files, not a token**, which is the
+thing to know here at 3am: `config.yml` is in the repo and installs with
 `bin/install-system-file cloudflared-config.yml`, but `zero.json` is a secret and is
 NOT — it has to be regenerated from a tunnel token, which is base64 of
 `{"a":AccountTag,"t":TunnelID,"s":Secret}` and maps to
@@ -287,9 +293,11 @@ which is also the only way to tell where those rules came from, since a local co
 is being ignored looks identical to one that is not. Diff it against a known-good
 capture, and fetch a real hostname end to end.
 
-**`one` — NOT done. Still `--token` in argv, still the disclosed value.** Layout as
-`zero`'s was before 2026-08-23, tracked under `hosts/one/system/`. Its remediation is
-absorbed into 2g rather than repeated as 2e.
+~~**`one` — NOT done. Still `--token` in argv, still the disclosed value.**~~ **Done
+2026-08-23**, by retiring its old tunnel under 2g rather than rotating the token — which
+voids the disclosed value outright instead of superseding it. `two` went the same way on
+2026-08-29. **No host on this fleet passes a token in argv, and no disclosed tunnel
+credential is still live.**
 
 **And the August move here was never finished.** It left
 `/etc/init.d/cloudflared.bak-token` — 755, root:root, dated 20 July, a complete copy of
