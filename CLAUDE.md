@@ -106,6 +106,16 @@ end of a session for the next one. Two rules, both of which have bitten:
   - Merge it into `main` the moment it is complete and non-breaking, then delete the
     branch and the worktree. A worktree that outlives its work is the same stale-truth
     problem as a handoff that does.
+  - **In `infra-dev`, an Ansible change made in a worktree is not what your test runs.**
+    The image sets `ANSIBLE_CONFIG=/workspace/ansible/ansible.cfg`; a relative
+    `inventory =` inside that file resolves against *its own* directory, and Ansible
+    reads the variable before the cwd — so `cd` into the worktree and `ansible-playbook`
+    still loads the MAIN checkout's `inventory`, `group_vars` and `host_vars`. It fails in the
+    most confusing available way: a var you just added reads undefined while its
+    neighbours in the same file resolve, because the file being read is the other copy.
+    Prefix the run with `ANSIBLE_CONFIG=<worktree>/ansible/ansible.cfg`. Ad-hoc `ansible`
+    and `ansible-inventory` mislead here too — their playbook dir is the cwd, so they
+    load the worktree's `group_vars` and report the new value the playbook cannot see.
   - **Never run `git worktree prune` from a host** on a repo bind-mounted into a
     container. Worktrees registered as `/workspace/...` do not resolve host-side, so all
     of them read `prunable` and would be unregistered — live sessions included.
@@ -381,6 +391,15 @@ No `..` in compose files · every compose file declares `name:` · host-specific
 in gitignored `.env` (never `$HOME`) · `${VAR:?message}`, never `:-`, for anything whose
 absence should stop Compose · the deployed image is a literal in `compose.yaml`, not a
 variable · nothing boot-path is generated from a template.
+
+**A dev container's tunnel hostname is `<alias>.<dns_zone>` and is never written beside
+the alias it is built from.** `dns_zone` is in `ansible/group_vars/all.yml`; both ends
+derive it — `create-dev-tunnel.yml` when it creates the CNAME, `configure-client-dev.yml`
+when it writes the client block — so the two cannot name different hostnames. Adding a
+fifth container is an alias and a port, nothing else. `-e hostname=` overrides for one
+that does not follow the pattern, and `prepare-dev-host.yml`'s `tunnel_hostname` stays
+explicit because absence is a setting there. The general rule: derive where the value is
+a name, never where absence carries meaning.
 
 `/etc` copies under `hosts/<host>/system/` each declare where they install, in an
 `infra-` header carried by **both** the repo copy and the live file — see

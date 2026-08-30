@@ -520,9 +520,11 @@ ones that answer the question this document started from.
 
 **Closed 2026-08-28 — one command now writes every ssh block this repo owns.**
 `playbooks/configure-client.yml` composes `configure-client-fleet.yml` with one `configure-client-dev.yml` import per
-dev container, and carries the registry that says which containers exist, on which ports,
-behind which hostnames. It runs on the phone and in WSL, writes both sides of the laptop
-from the latter, and takes `-e prompt_for_token=false` so a container whose tunnel is not
+dev container, and carries the registry that says which containers exist and on which
+ports. Their hostnames are not in it: a dev container's is `<alias>.<dns_zone>`, derived
+at both ends from `group_vars/all.yml` rather than spelled beside the alias it is built
+from (see [`decisions.md`](decisions.md)). It runs on the phone and in WSL, writes both
+sides of the laptop from the latter, and takes `-e prompt_for_token=false` so a container whose tunnel is not
 provisioned yet is skipped by name instead of stopping the run with a prompt for a
 credential nobody can produce.
 

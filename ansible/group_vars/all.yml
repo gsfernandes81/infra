@@ -6,3 +6,20 @@
 # Where the audit report is written, on the CONTROL NODE. Anchored to the playbook rather
 # than the working directory, so it lands in the repo whichever directory you ran from.
 audit_report: "{{ playbook_dir }}/../../docs/fleet-inventory.md"
+
+# The DNS zone every hostname this repo writes lives in.
+#
+# ONE HOME, because two plays have to agree about it: create-dev-tunnel.yml CREATES
+# `<alias>.<dns_zone>` at the edge, and configure-client-dev.yml writes the client block
+# that NAMES it. Spelled as a literal in both, they are a pair that can drift, and the
+# drift presents as a client reaching a hostname nothing was provisioned under — which
+# reads exactly like the container being down.
+#
+# Here rather than in fleet.yml because configure-client-dev.yml targets `control`, which
+# is localhost, and fleet.yml would not reach it. Same reason audit_report is here.
+#
+# NO `| default('gsrpi.uk')` BESIDE ANY USE. A play that cannot see this should die on an
+# undefined variable, loudly; a fallback would put the literal back in the two places this
+# variable exists to remove it from, and they would silently be the fallback's value
+# rather than the fleet's. Same call as `${VAR:?message}` over `:-` in CLAUDE.md.
+dns_zone: gsrpi.uk

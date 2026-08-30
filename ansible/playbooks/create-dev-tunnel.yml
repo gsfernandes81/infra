@@ -67,7 +67,10 @@
 
   vars:
     cf_api: https://api.cloudflare.com/client/v4
-    cf_zone: "{{ zone | default('gsrpi.uk') }}"
+    # group_vars/all.yml, not a literal — configure-client-dev.yml derives the client
+    # side of the same hostname from that one value, and the two must not be able to
+    # disagree about the zone.
+    cf_zone: "{{ zone | default(dns_zone) }}"
     cf_name: "{{ name | default('infra-dev') }}"
     cf_hostname: "{{ hostname | default(cf_name ~ '.' ~ cf_zone) }}"
     # The ACCESS SERVICE TOKEN to put in the policy, BY NAME — not the API token above,

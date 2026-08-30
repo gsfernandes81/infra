@@ -27,12 +27,20 @@
 # is what makes a run against a partly-provisioned fleet skip the ones that are not
 # ready by name.
 #
-#   container   loopback port on zero   tunnel hostname        image lives in
-#   ─────────   ─────────────────────   ────────────────────   ──────────────────
-#   infra-dev   2225                    infra-dev.gsrpi.uk     this repo, dev/
-#   or3-dev     2224                    or3-dev.gsrpi.uk       or3
-#   dd-dev      2222                    dd-dev.gsrpi.uk        destiny-director
-#   ds-dev      2223                    ds-dev.gsrpi.uk        dossier
+#   container   loopback port on zero   image lives in
+#   ─────────   ─────────────────────   ──────────────────
+#   infra-dev   2225                    this repo, dev/
+#   or3-dev     2224                    or3
+#   dd-dev      2222                    destiny-director
+#   ds-dev      2223                    dossier
+#
+# THE HOSTNAME COLUMN IS GONE, AND SO ARE THE FOUR `hostname:` IMPORT VARS BELOW. Every
+# one of them was the alias with the zone appended — four more spellings of a fact the
+# edge already derives that way. A dev container's tunnel hostname IS
+# `<alias>.<dns_zone>`, `dns_zone` lives in group_vars/all.yml, and both halves derive it:
+# create-dev-tunnel.yml when it creates the CNAME, configure-client-dev.yml when it writes
+# the block that names it. A container that wants a hostname off the pattern passes
+# `-e hostname=` to configure-client-dev.yml directly; nothing in this table has to.
 #
 # THIS TABLE IS THE PORT REGISTRY, and that is a change of address. It used to be a
 # comment in or3's compose file — docs/management-plane.md's drift table opens with that
@@ -67,6 +75,14 @@
 #     ansible-playbook playbooks/prepare-dev-host.yml -e tunnel_hostname=<c>.gsrpi.uk
 #     ansible-playbook playbooks/configure-client.yml
 #
+# `tunnel_hostname` on the middle line is STILL SPELLED OUT, and that is not an oversight.
+# It is a different variable with different semantics: prepare-dev-host.yml rewrites
+# dev/.env wholesale, and its absent-preserves / given-wins-even-if-empty rule is what
+# stops a plain re-run blanking a hostname a previous run set. Giving it a derived default
+# would make "no -e" mean "turn the tunnel on" for a container deliberately reached on its
+# loopback port. Deriving is right where the value is a NAME; it is wrong where absence is
+# itself a setting.
+#
 # NO NEW COLLECTIONS, and no tasks of its own: this file is composition and a table.
 # Everything it runs belongs to the two plays it imports.
 
@@ -84,26 +100,22 @@
   ansible.builtin.import_playbook: configure-client-dev.yml
   vars:
     alias: infra-dev
-    hostname: infra-dev.gsrpi.uk
     lan_port: 2225
 
 - name: or3-dev
   ansible.builtin.import_playbook: configure-client-dev.yml
   vars:
     alias: or3-dev
-    hostname: or3-dev.gsrpi.uk
     lan_port: 2224
 
 - name: dd-dev
   ansible.builtin.import_playbook: configure-client-dev.yml
   vars:
     alias: dd-dev
-    hostname: dd-dev.gsrpi.uk
     lan_port: 2222
 
 - name: ds-dev
   ansible.builtin.import_playbook: configure-client-dev.yml
   vars:
     alias: ds-dev
-    hostname: ds-dev.gsrpi.uk
     lan_port: 2223

@@ -198,6 +198,18 @@ and `host_vars` applied, and the same command with `ANSIBLE_CONFIG` unset reprod
 `No inventory was parsed` warning exactly. If a future ansible changes that resolution,
 this is the line that breaks and `make fleet` is what says so.
 
+**The corollary, and it will bite anyone editing Ansible in a worktree.** Because the
+variable is absolute and wins over the cwd, `cd`-ing into
+`.claude/worktrees/<name>/ansible` and running a playbook still reads
+`/workspace/ansible`'s `inventory`, `group_vars` and `host_vars` — the *main* checkout's.
+The symptom is not an error: a variable added to the worktree's `group_vars/all.yml`
+reads undefined while the variables already in that file resolve normally, because the
+file being read is the other copy of it. Prefix the run with
+`ANSIBLE_CONFIG=<worktree>/ansible/ansible.cfg`. `ansible` and `ansible-inventory` do
+*not* share the confusion and so deepen it: their playbook directory is the cwd, so they
+pick up the worktree's `group_vars` and cheerfully print the value the playbook cannot
+see.
+
 **`-K` still works and is still required**, and that is the design rather than a wart.
 `gavin` is not in the `docker` group ([`../docs/decisions.md`](../docs/decisions.md):
 it is root-equivalent) and NOPASSWD sudo is in

@@ -15,7 +15,11 @@
 # ONE RUN PER CONTAINER, and the defaults are infra-dev's. For a second one, name it:
 #
 #     ansible-playbook playbooks/configure-client-dev.yml \
-#       -e alias=or3-dev -e hostname=or3-dev.gsrpi.uk -e lan_port=2224
+#       -e alias=or3-dev -e lan_port=2224
+#
+# THE HOSTNAME IS NOT PASSED. It is `<alias>.<dns_zone>` — the repo standard, derived
+# below from the same two values create-dev-tunnel.yml derives it from. `-e hostname=`
+# still wins, for a container that does not follow the pattern.
 #
 # Everything a run writes is keyed on `alias` — the token file, the ssh block's marker,
 # the Windows wrapper — so two containers do not overwrite each other. They did before
@@ -106,7 +110,12 @@
 
   vars:
     dev_alias: "{{ alias | default('infra-dev') }}"
-    dev_hostname: "{{ hostname | default('infra-dev.gsrpi.uk') }}"
+    # DERIVED, and it is the same expression create-dev-tunnel.yml uses to CREATE the
+    # hostname — so a client block cannot name something the edge was never provisioned
+    # under. The old default was the literal `infra-dev.gsrpi.uk`, which meant every
+    # caller for every OTHER container had to pass a hostname that was, in all four
+    # cases, its alias with the zone appended. An override still wins for the exception.
+    dev_hostname: "{{ hostname | default(dev_alias ~ '.' ~ dns_zone) }}"
     dev_lan_port: "{{ lan_port | default(2225) }}"
     # lookup('env','HOME'), never ~. On Termux the passwd entry reports /data, which is
     # not writable — the same trap host_vars/localhost.yml already documents for

@@ -126,9 +126,13 @@ JSON: `-e '{"client_pubkey": "ssh-ed25519 AAAA... you@host"}'`.
 `configure-client-dev.yml` still runs on its own for one container, which is the rotation path:
 
 ```sh
-ansible-playbook playbooks/configure-client-dev.yml -e alias=or3-dev -e hostname=or3-dev.gsrpi.uk \
+ansible-playbook playbooks/configure-client-dev.yml -e alias=or3-dev \
   -e lan_port=2224 -e replace_token=true
 ```
+
+The hostname is not passed. A dev container's is `<alias>.<dns_zone>`, and `dns_zone` is
+in `group_vars/all.yml` so that this play and `create-dev-tunnel.yml` cannot disagree
+about it. Pass `-e hostname=` only for a container that does not follow the standard.
 
 ### The laptop is two clients, and one run in WSL configures both
 
