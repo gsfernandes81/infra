@@ -107,15 +107,12 @@ end of a session for the next one. Two rules, both of which have bitten:
     branch and the worktree. A worktree that outlives its work is the same stale-truth
     problem as a handoff that does.
   - **In `infra-dev`, an Ansible change made in a worktree is not what your test runs.**
-    The image sets `ANSIBLE_CONFIG=/workspace/ansible/ansible.cfg`; a relative
-    `inventory =` inside that file resolves against *its own* directory, and Ansible
-    reads the variable before the cwd — so `cd` into the worktree and `ansible-playbook`
-    still loads the MAIN checkout's `inventory`, `group_vars` and `host_vars`. It fails in the
-    most confusing available way: a var you just added reads undefined while its
-    neighbours in the same file resolve, because the file being read is the other copy.
-    Prefix the run with `ANSIBLE_CONFIG=<worktree>/ansible/ansible.cfg`. Ad-hoc `ansible`
-    and `ansible-inventory` mislead here too — their playbook dir is the cwd, so they
-    load the worktree's `group_vars` and report the new value the playbook cannot see.
+    The image pins `ANSIBLE_CONFIG` at the MAIN checkout's `ansible.cfg` and it beats
+    the cwd, so a playbook run inside a worktree loads the other copy's `inventory` and
+    `group_vars`: a var you just added reads undefined while its neighbours in the same
+    file resolve. Prefix the run with `ANSIBLE_CONFIG=<worktree>/ansible/ansible.cfg`.
+    The mechanism, and the way ad-hoc `ansible` misleads differently, are in
+    [`dev/README.md`](dev/README.md) beside the `ANSIBLE_CONFIG` paragraph.
   - **Never run `git worktree prune` from a host** on a repo bind-mounted into a
     container. Worktrees registered as `/workspace/...` do not resolve host-side, so all
     of them read `prunable` and would be unregistered — live sessions included.
@@ -393,13 +390,12 @@ absence should stop Compose · the deployed image is a literal in `compose.yaml`
 variable · nothing boot-path is generated from a template.
 
 **A dev container's tunnel hostname is `<alias>.<dns_zone>` and is never written beside
-the alias it is built from.** `dns_zone` is in `ansible/group_vars/all.yml`; both ends
-derive it — `create-dev-tunnel.yml` when it creates the CNAME, `configure-client-dev.yml`
-when it writes the client block — so the two cannot name different hostnames. Adding a
-fifth container is an alias and a port, nothing else. `-e hostname=` overrides for one
-that does not follow the pattern, and `prepare-dev-host.yml`'s `tunnel_hostname` stays
-explicit because absence is a setting there. The general rule: derive where the value is
-a name, never where absence carries meaning.
+the alias it is built from** — `dns_zone` lives in `ansible/group_vars/all.yml`, and
+`create-dev-tunnel.yml` and `configure-client-dev.yml` both derive from it, so the two
+cannot name different hostnames. Generally: derive where the value is a *name*; never
+where absence is itself a setting, which is why `prepare-dev-host.yml`'s
+`tunnel_hostname` stays explicit. The reasoning is one row in
+[`docs/decisions.md`](docs/decisions.md).
 
 `/etc` copies under `hosts/<host>/system/` each declare where they install, in an
 `infra-` header carried by **both** the repo copy and the live file — see

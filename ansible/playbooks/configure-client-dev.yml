@@ -115,7 +115,16 @@
     # under. The old default was the literal `infra-dev.gsrpi.uk`, which meant every
     # caller for every OTHER container had to pass a hostname that was, in all four
     # cases, its alias with the zone appended. An override still wins for the exception.
-    dev_hostname: "{{ hostname | default(dev_alias ~ '.' ~ dns_zone) }}"
+    #
+    # `if … is defined`, NOT `| default(…)`, and the difference is not style. Jinja
+    # evaluates `default()`'s ARGUMENT eagerly, so `hostname | default(dev_alias ~ '.' ~
+    # dns_zone)` dies on an undefined `dns_zone` even when `-e hostname=` was given —
+    # the override failing for the sake of a value it does not need. The conditional
+    # form never evaluates the branch it does not take, so the escape hatch works on a
+    # control node where the variable is missing, which is the one situation somebody
+    # reaches for it. (`create-dev-tunnel.yml`'s `zone | default(dns_zone)` does not
+    # have the problem: a bare undefined passes through untouched when `zone` is set.)
+    dev_hostname: "{{ hostname if hostname is defined else dev_alias ~ '.' ~ dns_zone }}"
     dev_lan_port: "{{ lan_port | default(2225) }}"
     # lookup('env','HOME'), never ~. On Termux the passwd entry reports /data, which is
     # not writable — the same trap host_vars/localhost.yml already documents for

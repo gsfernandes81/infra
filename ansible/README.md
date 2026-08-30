@@ -82,7 +82,7 @@ Windows side of the same laptop. It prompts once per container that has no servi
 on this client, and not at all when they all do.
 
 **`configure-client.yml` is also the registry.** Its header table is where the dev containers'
-ports and tunnel hostnames are recorded, because it is the file that consumes them: every
+ports are recorded, because it is the file that consumes them: every
 `<alias>-lan` written onto every client is built from that table, so a wrong number is
 found by somebody using a rescue path rather than by somebody re-reading a comment. It
 used to be a comment in or3's compose file — `../docs/management-plane.md` opens its drift
@@ -219,7 +219,7 @@ repo has traded hand-rolled shell for stock tooling — after `bin/compose` and 
 |---|---|
 | `ansible.cfg` | read from the **cwd**, so run from this directory |
 | `inventory` | deliberately thin — `~/.ssh/config` owns the transport |
-| `group_vars/all.yml` | where the report goes; applies to `localhost` too |
+| `group_vars/all.yml` | the audit report's path and `dns_zone`; applies to `localhost` too |
 | `group_vars/fleet.yml` | the container CLI |
 | `host_vars/` | four files: the three hosts' container runtimes, plus `localhost.yml`'s Termux fixes — see below |
 | `playbooks/` | the ones above; `_assert-inventory.yml` is imported, never run |

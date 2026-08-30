@@ -524,9 +524,9 @@ dev container, and carries the registry that says which containers exist and on 
 ports. Their hostnames are not in it: a dev container's is `<alias>.<dns_zone>`, derived
 at both ends from `group_vars/all.yml` rather than spelled beside the alias it is built
 from (see [`decisions.md`](decisions.md)). It runs on the phone and in WSL, writes both
-sides of the laptop from the latter, and takes `-e prompt_for_token=false` so a container whose tunnel is not
-provisioned yet is skipped by name instead of stopping the run with a prompt for a
-credential nobody can produce.
+sides of the laptop from the latter, and takes `-e prompt_for_token=false` so a container
+whose tunnel is not provisioned yet is skipped by name instead of stopping the run with a
+prompt for a credential nobody can produce.
 
 Both clients are done. The phone and the laptop each ran their reorder and both one-shot
 scripts are deleted, per this repo's rule that they go once they have run. What the laptop
