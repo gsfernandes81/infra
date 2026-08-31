@@ -398,17 +398,18 @@ be made knowingly, in or3, not implied by a placement decision made here.
 
 **Ports stop being a registry problem** once addressing is by tunnel hostname: nothing is
 published on a host, so nothing collides. That is the destination, not the present — every
-dev container still publishes an sshd on zero's loopback, and each one's `<alias>-lan` is
-the break-glass path that reaches it. The allocation is: `zero` — 2283 Immich, 8384/22000
+dev container still publishes an sshd on zero's loopback, and that port is the
+break-glass path that reaches it — typed by hand since the `-lan` aliases were dropped. The allocation is: `zero` — 2283 Immich, 8384/22000
 Syncthing, **2222 `dd-dev`, 2223 `ds-dev`, 2224 `or3-dev`, 2225 `infra-dev`**; `one` — 8080
 qBittorrent, ~~7777 ionic-traces~~ (stopped, 2c), 3001 send2ereader, 8384/22000 Syncthing;
 `two` — none published.
 
 **Since 2026-08-28 that list is a copy, not the record.** The registry is the table in
 [`../ansible/playbooks/configure-client.yml`](../ansible/playbooks/configure-client.yml), which is
-the file that *consumes* the numbers — every `<alias>-lan` block written onto every client
-is built from them, so a wrong one is noticed the next time somebody uses the rescue path
-rather than the next time somebody reads a comment. This closes the drift row at the top
+the file that *consumed* the numbers — every `<alias>-lan` block written onto every client
+was built from them. ⚠︎ Those aliases were dropped on 2026-08-31 and that consumer went
+with them, so the table is documentation again; it stays there because it is still where
+a container is added and where the break-glass ports are read. This closes the drift row at the top
 of this document, whose worked example was exactly these ports living in or3's compose
 file where nothing here could contradict them. **2225 was missing from this paragraph
 until the registry moved** — which is the argument, made by the paragraph itself.
@@ -680,9 +681,10 @@ no second door. The window therefore opens when the owner sets that variable, wh
 knob he holds rather than a consequence he inherits.
 
 **So do this first and there is no window.** Retiring the rule early costs nothing,
-because the break-glass path does not use the tunnel: `configure-client-dev.yml` writes
-`<alias>-lan` as `ProxyCommand ssh zero nc %h %p`, which reaches `127.0.0.1:2224` through
-**zero's sshd**, and that is the same origin the ingress rule points at. Dropping the
+because the break-glass path does not use the tunnel: it reaches `127.0.0.1:2224` through
+**zero's sshd**, and that is the same origin the ingress rule points at. (It was the
+`<alias>-lan` alias when this was written; the alias is gone and the hop is typed, which
+changes nothing about the argument.) Dropping the
 public hostname leaves the way in through zero untouched.
 
 **It cannot be done from `or3-dev`, and the reason is the standing-position rule.** The

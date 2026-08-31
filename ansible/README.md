@@ -81,12 +81,13 @@ That is the fleet block, plus a block for every dev container, plus — from WSL
 Windows side of the same laptop. It prompts once per container that has no service token
 on this client, and not at all when they all do.
 
-**`configure-client.yml` is also the registry.** Its header table is where the dev containers'
-ports are recorded, because it is the file that consumes them: every
-`<alias>-lan` written onto every client is built from that table, so a wrong number is
-found by somebody using a rescue path rather than by somebody re-reading a comment. It
-used to be a comment in or3's compose file — `../docs/management-plane.md` opens its drift
-table with that as the worked example.
+**`configure-client.yml` is also the registry.** Its header table is where the dev
+containers' loopback ports are recorded. It used to be a comment in or3's compose file —
+`../docs/management-plane.md` opens its drift table with that as the worked example — and
+it moved here because this file consumed the numbers to build each `<alias>-lan` block.
+Those aliases were dropped on 2026-08-31, so the table is documentation now rather than
+an input: the ports are what you need for the manual break-glass hop, and nothing but a
+person will notice if one goes stale.
 
 **When a container's tunnel does not exist yet:**
 
@@ -126,8 +127,7 @@ JSON: `-e '{"client_pubkey": "ssh-ed25519 AAAA... you@host"}'`.
 `configure-client-dev.yml` still runs on its own for one container, which is the rotation path:
 
 ```sh
-ansible-playbook playbooks/configure-client-dev.yml -e alias=or3-dev \
-  -e lan_port=2224 -e replace_token=true
+ansible-playbook playbooks/configure-client-dev.yml -e alias=or3-dev -e replace_token=true
 ```
 
 The hostname is not passed. A dev container's is `<alias>.<dns_zone>`, and `dns_zone` is

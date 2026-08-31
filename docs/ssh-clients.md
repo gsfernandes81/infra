@@ -26,7 +26,7 @@ Two blocks land in `~/.ssh/config`, each edited in place on re-runs:
 | Marker | Written by | Holds |
 |---|---|---|
 | `# BEGIN infra-fleet` | `configure-client-fleet.yml` → `templates/ssh-fleet-block.j2` | the three Pis, three ways each |
-| `# BEGIN <container>` | `configure-client-dev.yml` → `templates/ssh-dev-block.j2` | one dev container, three ways |
+| `# BEGIN <container>` | `configure-client-dev.yml` → `templates/ssh-dev-block.j2` | one dev container, two ways |
 
 Do not hand-edit between the markers. Change the template and re-run — a hand edit
 survives until the next run and then vanishes, which is the worst of both.
@@ -48,14 +48,13 @@ it — anything above it is separated from it by the next block a playbook inser
 
 ## Three routes to a dev container
 
-Each container gets three aliases. They are not redundancy for its own sake; each fails
-for different reasons.
+Each container gets two aliases, and they are the same route — one carries a
+`RemoteCommand`, the other does not.
 
 | Alias | Route | Fails when |
 |---|---|---|
 | `<c>` | its own tunnel → Access → the container's sshd | its tunnel, its Access app, its token, or Cloudflare |
 | `<c>-sh` | the same, without `RemoteCommand` | the same |
-| `<c>-lan` | `ssh zero nc 127.0.0.1 <port>` | zero's sshd, or Cloudflare |
 
 **`ssh <c>` IS the claude session.** `RemoteCommand in-workspace abduco -A claude claude`
 reattaches if one is already running, so the habit is one word rather than a remembered
@@ -71,34 +70,42 @@ which a wrapper owning both would have made impossible.
 not work. `<c>-sh` exists for both. It is worth its own alias rather than
 `ssh -o RemoteCommand=none <c>`, which nobody remembers under pressure.
 
-### `-lan` is not a no-Cloudflare path
+### Break glass by hand — there is no third alias
 
-It is independent of the thing that usually breaks — **this container's** tunnel, its
-Access application and its service token. A bad or expired token does not touch it, and a
-wedged container sshd does not touch the other two.
-
-But `Host zero` is `ssh-zero.gsrpi.uk` behind `cloudflared access ssh` — zero's **own**
-tunnel — so a Cloudflare-wide outage takes `-lan` with it. The paths that survive that are
-the LAN ones. From the LAN, `-lan` is one override away:
+**Dropped 2026-08-31.** Every container used to get a `<c>-lan` that reached its sshd on
+`127.0.0.1:<port>` through the host's own sshd, independent of that container's tunnel,
+Access application and token — the set of things that actually breaks. The path is still
+there. Only the alias went:
 
 ```sh
-ssh -o ProxyCommand='ssh zero-local nc %h %p' infra-dev-lan
+ssh <host>                              # zero today; the container's host, whichever it is
+ssh -p <port> dev@127.0.0.1             # from that shell. Ports: ansible/playbooks/configure-client.yml
 ```
 
-An earlier version of this text claimed `-lan` touched no Cloudflare at all. A comment
-that names the wrong failure is read at the moment there is no time to check it.
+**Why an alias was the wrong shape for it.** The generated block had `ProxyCommand ssh
+zero nc %h %p` with `zero` written in, because a client-side alias must name the host the
+container sits on — and that is the one fact a movable container does not have. A dev
+container is designed to move (`management-plane.md` § *Placement*), and the day one did,
+the rescue alias would have pointed at the wrong box: a break-glass path that fails only
+when you need it is worse than none, because you spend the outage trusting it.
 
-### `nc`, not `ProxyJump`, for the containers
+**It was never a no-Cloudflare path anyway.** `Host <host>` is that box's own tunnel
+behind `cloudflared access ssh`, so a Cloudflare-wide outage takes the first hop with it.
+The paths that survive that are the LAN ones — `<host>-local`, below. An earlier version
+of this text claimed otherwise, and a comment that names the wrong failure is read at the
+moment there is no time to check it.
 
-`-lan` targets `127.0.0.1:<port>` on zero, which zero's `PermitOpen` deliberately does not
-include — so `ProxyJump` there is refused. A session channel running `nc` is not governed
-by `AllowTcpForwarding` at all, so it reaches the container without relaxing sshd on the
-internet-facing box. `nc` is busybox's on Alpine; `nc host port` is the one form busybox
-and openbsd-nc agree on.
+**If you want it in one line from a client**, `ProxyJump` will not do it: the target is
+`127.0.0.1:<port>` on the host, which `PermitOpen` deliberately does not include, so the
+jump is refused. A session channel running `nc` is not governed by `AllowTcpForwarding` at
+all, which is what the old alias exploited:
 
-`ssh zero nc …` is the same line on every client, Windows included: Win32-OpenSSH provides
-`ssh.exe`. **The fleet block is a prerequisite** — without it there is no `Host zero` to
-reach, and the failure names something else.
+```sh
+ssh -o ProxyCommand='ssh zero nc %h %p' -p 2225 dev@127.0.0.1
+```
+
+`nc` is busybox's on Alpine; `nc host port` is the one form busybox and openbsd-nc agree
+on, and `ssh <host> nc …` is the same line on every client, Windows included.
 
 ## The fleet: three named paths to each Pi
 
@@ -154,9 +161,9 @@ so what crosses the phone's radio is the smaller thing.
 
 **The client is the half that turns it on.** sshd already permits it by default and
 `dev/sshd_config` says so out loud, but ssh's own default is `no` and nothing is
-negotiated unless both ends offer it. On `-lan` it costs a little CPU on a Pi for no
-metered link, which is not worth a second `Host` block to avoid; a rescue session is not
-where you tune throughput.
+negotiated unless both ends offer it. On a break-glass session from the LAN it costs a
+little CPU on a Pi for no metered link, which is not worth a second `Host` block to
+avoid; a rescue session is not where you tune throughput.
 
 ## Multiplexing
 
@@ -304,7 +311,7 @@ door with a different trust story.
 
 No client alias points at them. `dd-dev` and `ds-dev` are not running until they are
 deployed with a connector of their own, at which point `configure-client-dev.yml` gives them the
-same three aliases every other container has — so an alias for the old door would name a
+same two aliases every other container has — so an alias for the old door would name a
 hostname with nothing behind it, which fails exactly like a container being down.
 
 Dropping the alias does not close the door, and nothing about this pretends it does. The

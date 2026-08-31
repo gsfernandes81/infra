@@ -89,7 +89,8 @@ own terminal — `gavin` is not in the docker group, so this half is never an an
 cd ~/infra/dev && make dev             # build, start, then walk the two logins
 ```
 
-That gives you `ssh infra-dev-lan` from the phone — through zero's own sshd — and
+That gives you a container reachable from the phone — `ssh zero`, then
+`ssh -p 2225 dev@127.0.0.1` until its tunnel is provisioned — and
 `make claude` from a terminal on zero. The two optional additions, each with its own
 section below and each safe to skip indefinitely:
 
@@ -145,9 +146,8 @@ what is under it keeps running, and a dropped connection costs nothing. A claude
 started *outside* a session dies with the ssh link that carried it, which on a phone
 means dies at the first lock screen.
 
-**There are two ways in and you want both.** Cloudflare is the normal one; the loopback
-port through zero is break-glass. See *Cloudflare* below for why keeping the second is
-not belt-and-braces.
+**There are two ways in and you want both.** Cloudflare is the normal one, and it is the
+only one with an alias:
 
 ```
 Host infra-dev                     # normal — no dependency on zero's sshd
@@ -155,20 +155,20 @@ Host infra-dev                     # normal — no dependency on zero's sshd
   User dev
   IdentityFile ~/.ssh/id_ed25519
   ProxyCommand cloudflared access ssh --hostname %h
-
-Host infra-dev-lan                 # break-glass — no dependency on Cloudflare
-  HostName 127.0.0.1
-  Port 2225
-  User dev
-  IdentityFile ~/.ssh/id_ed25519
-  ProxyCommand ssh zero nc %h %p
 ```
 
-The second must be a `ProxyCommand` rather than a `ProxyJump`, for the reason
-`or3/dev/README.md` § *`ProxyJump zero` does not work* sets out at length: zero's sshd
-sets `AllowTcpForwarding no`, which refuses the `direct-tcpip` channel `ProxyJump`
-opens, and flipping that setting would weaken the internet-facing box that runs Immich.
-The first needs no such workaround, which is one of the things the tunnel buys.
+The break-glass one is the loopback port through zero, typed rather than aliased —
+`ssh zero`, then `ssh -p 2225 dev@127.0.0.1`. It had an alias until 2026-08-31 and lost
+it because a client-side alias must name the host the container sits on, which a movable
+container does not have; [`../docs/ssh-clients.md`](../docs/ssh-clients.md) has the
+reasoning and the one-line form. See *Cloudflare* below for why keeping the second way in
+at all is not belt-and-braces.
+
+Reaching that port from a client is a `ProxyCommand` running `nc`, never a `ProxyJump`,
+for the reason `or3/dev/README.md` § *`ProxyJump zero` does not work* sets out at length:
+zero's sshd sets `AllowTcpForwarding no`, which refuses the `direct-tcpip` channel
+`ProxyJump` opens, and flipping that setting would weaken the internet-facing box that
+runs Immich. The tunnel path needs no such workaround, which is one of the things it buys.
 
 The Makefile is how the container is stood up and looked at, not how it is used.
 `make claude` and `make shell` are the same two sessions reached from a terminal on

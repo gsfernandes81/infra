@@ -1,14 +1,15 @@
-# {{ dev_alias }} — three routes to one container. GENERATED: edit
+# {{ dev_alias }} — two routes to one container. GENERATED: edit
 # ansible/templates/ssh-dev-block.j2 and re-run playbooks/configure-client.yml, not this.
 # Why any of it is shaped this way: docs/ssh-clients.md
 #
 #   {{ dev_alias }} — the claude session itself, reattached. It carries a RemoteCommand, so
 #     `ssh {{ dev_alias }} <cmd>` is an ERROR and scp/sftp to it will not work.
 #   {{ dev_alias }}-sh — a shell instead, same route. Use it for either of those.
-#   {{ dev_alias }}-lan — break-glass through zero's sshd. Independent of THIS container's
-#     tunnel, Access app and token; NOT of Cloudflare, since `Host zero` is zero's own
-#     tunnel. From the LAN, one override gets past that too:
-#       ssh -o ProxyCommand='ssh zero-local nc %h %p' {{ dev_alias }}-lan
+#
+# THERE IS NO `-lan` ALIAS, and the way in it named is still open. Break glass by hand:
+# `ssh <host>`, then `ssh -p <port> dev@127.0.0.1` on that box. The ports are in
+# ansible/playbooks/configure-client.yml. An alias for that hop had to hard-code which
+# host the container sits on, which is the one fact a movable container does not have.
 Host {{ dev_alias }}
   HostName {{ dev_hostname }}
   User dev
@@ -29,18 +30,9 @@ Host {{ dev_alias }}-sh
   ProxyCommand sh -c '. {{ token_file }}; exec {{ cloudflared }} access ssh --hostname %h'
 {% endif %}
 
-# nc, not ProxyJump: zero's PermitOpen does not include 127.0.0.1:{{ dev_lan_port }}, so a jump
-# is refused. Needs `Host zero` from the infra-fleet block — that block is a prerequisite.
-Host {{ dev_alias }}-lan
-  HostName 127.0.0.1
-  Port {{ dev_lan_port }}
-  User dev
-  ProxyCommand ssh zero nc %h %p
-
-# One host key for the container, not one per route — else the rarely-used path has no
-# stored entry and prompts you to accept whatever it is handed, mid-rescue.
-# To clear it: ssh-keygen -R {{ dev_alias }}
-Host {{ dev_alias }} {{ dev_alias }}-sh {{ dev_alias }}-lan
+# One host key for the container, not one per route, so the entry is stored under a name
+# that does not move if the route does. To clear it: ssh-keygen -R {{ dev_alias }}
+Host {{ dev_alias }} {{ dev_alias }}-sh
   HostKeyAlias {{ dev_alias }}
 {% if identity_named | bool %}
   # IdentitiesOnly stops ssh walking every key an agent holds and hitting MaxAuthTries

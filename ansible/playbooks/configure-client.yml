@@ -42,15 +42,20 @@
 # the block that names it. A container that wants a hostname off the pattern passes
 # `-e hostname=` to configure-client-dev.yml directly; nothing in this table has to.
 #
-# THIS TABLE IS THE PORT REGISTRY, and that is a change of address. It used to be a
-# comment in or3's compose file — docs/management-plane.md's drift table opens with that
-# as its worked example of a fact recorded in the newest claimant's app repo, where
-# nothing in this repo could contradict it. A number a playbook consumes is a number that
-# gets noticed when it is wrong; a comment in another repo never does.
+# THIS TABLE IS STILL THE PORT REGISTRY, and it is worth saying what that is now worth.
+# It used to be a comment in or3's compose file — docs/management-plane.md's drift table
+# opens with that as its worked example of a fact recorded in the newest claimant's app
+# repo, where nothing in this repo could contradict it. It moved here on 2026-08-28
+# because this file CONSUMED the numbers: every `<alias>-lan` block was built from them,
+# so a wrong one was found by somebody using the rescue path.
 #
-# The ports are the break-glass half. Each `<alias>-lan` reaches 127.0.0.1:<port> through
-# zero's own sshd, so it does not depend on that container's tunnel, its Access
-# application or its token — which is exactly the set of things that breaks.
+# **That consumer is gone.** The `-lan` aliases were dropped on 2026-08-31, so nothing
+# generated is built from these numbers any more and the argument that put them here is
+# weaker than it was. They stay because this is still the file you open to add a
+# container, and because the ports are what you need for the break-glass hop —
+# `ssh <host>`, then `ssh -p <port> dev@127.0.0.1` on that box — which is now typed
+# rather than aliased. Read that as: this table is documentation again, and documentation
+# drifts. If a number here is ever wrong, nothing will notice but a person.
 #
 # ── WHEN A CONTAINER'S TUNNEL IS NOT UP YET ─────────────────────────────────────
 #
@@ -100,22 +105,18 @@
   ansible.builtin.import_playbook: configure-client-dev.yml
   vars:
     alias: infra-dev
-    lan_port: 2225
 
 - name: or3-dev
   ansible.builtin.import_playbook: configure-client-dev.yml
   vars:
     alias: or3-dev
-    lan_port: 2224
 
 - name: dd-dev
   ansible.builtin.import_playbook: configure-client-dev.yml
   vars:
     alias: dd-dev
-    lan_port: 2222
 
 - name: ds-dev
   ansible.builtin.import_playbook: configure-client-dev.yml
   vars:
     alias: ds-dev
-    lan_port: 2223

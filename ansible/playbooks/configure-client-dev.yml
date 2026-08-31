@@ -14,8 +14,7 @@
 #
 # ONE RUN PER CONTAINER, and the defaults are infra-dev's. For a second one, name it:
 #
-#     ansible-playbook playbooks/configure-client-dev.yml \
-#       -e alias=or3-dev -e lan_port=2224
+#     ansible-playbook playbooks/configure-client-dev.yml -e alias=or3-dev
 #
 # THE HOSTNAME IS NOT PASSED. It is `<alias>.<dns_zone>` — the repo standard, derived
 # below from the same two values create-dev-tunnel.yml derives it from. `-e hostname=`
@@ -125,7 +124,6 @@
     # reaches for it. (`create-dev-tunnel.yml`'s `zone | default(dns_zone)` does not
     # have the problem: a bare undefined passes through untouched when `zone` is set.)
     dev_hostname: "{{ hostname if hostname is defined else dev_alias ~ '.' ~ dns_zone }}"
-    dev_lan_port: "{{ lan_port | default(2225) }}"
     # lookup('env','HOME'), never ~. On Termux the passwd entry reports /data, which is
     # not writable — the same trap host_vars/localhost.yml already documents for
     # remote_tmp, and it fails here in exactly the same unhelpful way.
@@ -833,9 +831,8 @@
         msg:
           - "ssh {{ dev_alias }}         the claude session itself, over Cloudflare"
           - "ssh {{ dev_alias }}-sh      a shell instead, same route"
-          - "ssh {{ dev_alias }}-lan     break-glass, through zero's sshd"
-          - "    independent of THIS container's tunnel, Access app and token —"
-          - "    but NOT of Cloudflare: `Host zero` is zero's own tunnel."
+          - "    no -lan alias: break glass by hand with `ssh <host>` and then"
+          - "    `ssh -p <port> dev@127.0.0.1`, ports in configure-client.yml."
           - ""
           - "wsl/posix: block in {{ ssh_config }}, token at {{ token_file }} (0600),"
           - "sourced by the ProxyCommand, so it reaches one cloudflared and no other"
@@ -848,6 +845,6 @@
             else ('skipped — windows_home is empty' if windows_home_wsl | length == 0
                   else 'not reachable from here — follow ' ~ windows_out) }}
           - ""
-          - "-lan needs `Host zero`, which configure-client-fleet.yml writes. Run that first on a new"
-          - "client, on both sides of a laptop."
+          - "the fleet block is still worth running first on a new client, on both sides"
+          - "of a laptop: `ssh <host>` is the first half of the break-glass hop."
       changed_when: true
