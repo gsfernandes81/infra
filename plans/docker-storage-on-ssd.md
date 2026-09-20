@@ -43,6 +43,13 @@ question in the best way available: **nothing is repartitioned, the bcache cache
 never detached, and the array never runs uncached.** Take the partition whole — 64 G is
 also the right size on its own merits (§5), so there is nothing to trade off.
 
+**It becomes one btrfs filesystem carrying two subvolumes**, `docker` and
+`container-tmp` (§4), which is what makes the arrangement identical on both hosts:
+`one` gets the same two subvolumes out of the array it already has. A plain partition
+with one filesystem per purpose would have been simpler to reason about and gives up
+exactly the thing that makes `one` free — subvolumes sharing a pool on demand instead
+of two sizes guessed in advance.
+
 The two alternatives are recorded because they were genuinely on the table and because
 one of them still matters later:
 
@@ -92,56 +99,119 @@ everywhere. Most explicit, nothing to migrate later, and it is the pattern the f
 already reads as normal. Worth doing for `immich_model-cache` on its own merits
 whichever of the above is chosen.
 
-## 4. What this does not move — and `/tmp` is already off the card
-
-Worth stating plainly, because "move docker onto the SSD" sounds like it might drag the
-live filesystem along with it. It does not, and in the case that matters most it must
-not.
+## 4. The containers' `/tmp` — a subvolume on the SSD
 
 **`/tmp` on the hosts is already `tmpfs`** — line 10 of each tracked `fstab`,
-`nosuid,nodev`, no `size=`. RAM, never the SD card, and moving it to the SSD would be a
-**downgrade**: tmpfs beats a USB-bridged SSD by orders of magnitude and costs no write
-endurance at all.
+`nosuid,nodev`. RAM, never the SD card, and it stays exactly as it is. It is not the
+subject here.
 
 **⚠︎ That was offered as the whole answer on 2026-09-20 and it was half of one.** The
-hosts' `/tmp` is tmpfs. **The dev containers' `/tmp` was not.** A container with no
-tmpfs mount for `/tmp` takes it from the writable overlay layer, which lives under
+hosts' `/tmp` is tmpfs. **The containers' `/tmp` was not.** A container with no mount
+at `/tmp` takes it from the writable overlay layer, which lives under
 `/var/lib/docker` — on `zero`, the SD card. So every claude scratchpad, every npm and
-`uv` extraction and every build temp file inside `infra-dev`, `or3-dev`, `dd-dev` and
-`ds-dev` has been an SD write, and *"the host's `/tmp` is fine"* is precisely what hid
-it. It is also wrong independently of the disk: scratch in the writable layer costs an
-overlayfs copy-up, counts as container size, and is reclaimed only on **recreate**, so
-a restart inherits yesterday's `/tmp`.
+`uv` extraction and every build temp file inside the dev containers has been an SD
+write, and *"the host's `/tmp` is fine"* is precisely what hid it. It is wrong
+independently of the disk, too: scratch in the writable layer costs an overlayfs
+copy-up, counts as container size, and is reclaimed only on **recreate**, so a restart
+inherits yesterday's `/tmp`.
 
-Fixed for `infra-dev` in `dev/compose.yaml` — and that fix **does not wait for any of
-this plan**, because it removes the writes rather than relocating them. The other three
-dev containers live in their own repos and need the same line (§9).
+### tmpfs was the first fix, and it is rejected
 
-Two numbers to carry. On the hosts, tmpfs with no `size=` defaults to half of RAM —
-~2 G on `zero`, **~500 M on `one`** — the number to remember the first time something
-dies with ENOSPC on a box with plenty of free disk. Inside a container the same default
-is actively dangerous: tmpfs pages are charged to the container's memory cgroup, and
-`infra-dev` is capped at `mem_limit: 1024m`. An unsized `/tmp` would advertise 2 G in
-`df` and OOM-kill the container somewhere past 1 G — reporting a killed process, not a
-full disk. Hence the explicit `size=`, `mode=1777` and `exec`.
+Not merely a preference. `/tmp` in these containers can legitimately be large — an
+extraction, a build tree, a claude working set — and **tmpfs pages are charged to the
+container's memory cgroup**. `infra-dev` is capped at `mem_limit: 1024m`, so a tmpfs
+`/tmp` converts "this needs a few GB of scratch" into an OOM kill that reports a dead
+process rather than a full disk. Sizing it small enough to be safe (256 M) is sizing it
+too small to be useful, and sizing it usefully large is a loaded gun on a 4 GB Pi that
+also runs Immich. Disk is the right medium for a scratch area whose size is not known
+in advance; the SSD is what makes it cheap.
 
-**`/` stays on the SD card, and that is a decision rather than inertia.**
-`bin/check-boot-layout` passes today for exactly one reason: `/` and `/boot` sit on the
-same physical device, so pulling it halts the machine and tampering costs a reboot you
-would notice. Move root to the SSD and leave `/boot` on the card — which is what a
-half-migration looks like — and the check returns `*** GAP ***` and exits 1, correctly:
-`/boot` would then be idle, removable and alterable on a running box. The script's own
-preferred fix is *"boot entirely from the SSD and remove the SD card"*, which the Pi 5
-can do, and which is a different project with its own recovery story. Not this one.
+### The conflict this has to resolve first: on `zero`, the btrfs array is not the SSD
 
-**`/var/log` stays too.** It is the SD writer left standing once docker moves —
-`cloudflared` logs there through `log_proxy` on both hosts. Small, rotated, and not
-worth a mount of its own; recorded so it is not mistaken later for something that was
-overlooked.
+"A subvolume on the existing btrfs filesystem" means different hardware on each host,
+and on the critical one it means the wrong hardware:
 
-So on the hosts the scope is `/var/lib/docker` and nothing else on the root filesystem
-— plus the containers' own `/tmp`, which is one line per compose file and is
-independent of everything above.
+- **`one`** — `sda1` **is** the MX500. Its btrfs filesystem is already on the SSD, so a
+  subvolume there is exactly what was asked for.
+- **`zero`** — the btrfs filesystem lives on `/dev/bcache0` + `/dev/bcache1`, i.e. the
+  two 1 T **spinning disks**. The SSD is the bcache *cache* in front of them. A
+  subvolume there is an HDD subvolume, and for `/tmp` that is the worst case for
+  bcache: writethrough means every scratch write lands on the platter at platter speed,
+  while the cache fills with blocks that are about to be deleted.
+
+**The resolution keeps the uniformity and fixes the device: make `sda2` a btrfs
+filesystem and give it both subvolumes.** Then each host has one btrfs filesystem on an
+SSD carrying a `docker` subvolume and a `container-tmp` subvolume, mounted under
+`/media/` like every other data mount on this fleet — same filesystem type, same
+subvolume idiom, same `fstab` shape, same guard coverage. The only difference left is
+which pool they come out of, and that difference is real (below).
+
+| | `zero` | `one` |
+|---|---|---|
+| Filesystem | **new** btrfs on `sda2` — 64 G, SSD, currently free | **existing** btrfs on `sda1` — the array, already SSD |
+| Docker data-root | `/media/docker` | `/media/docker` |
+| Container scratch | `/media/container-tmp` | `/media/container-tmp` |
+| Per container | `/media/container-tmp/<container>` | same |
+| Pool shared with | the data-root only | the data-root **and** `/media/torrents`, `/media/ionic-mysql` | 
+
+On `one` that shared pool is where the **wall** question from §2 returns, and `/tmp` is
+the likeliest thing to run away. A btrfs qgroup on the `container-tmp` subvolume alone
+is a narrower use of quotas than capping the whole docker tree and is worth it there;
+on `zero`'s dedicated 64 G pool the worst case is docker and scratch starving each
+other, which is loud and local.
+
+One consequence to record for `zero`: `sda2` is on the **same physical disk** as the
+bcache cache. Losing `sda` takes the cache, the data-root and every container's scratch
+at once. The array itself survives — writethrough, 0 dirty — so that is a stack that
+comes back down rather than data loss, and `nofail` keeps it from being a boot failure.
+
+### Four things that make or break it
+
+1. **`create_host_path: false`, and the source pre-created.** The dev containers run as
+   `dev`, not root. If Docker is allowed to invent a missing bind source it creates it
+   root-owned `0755`, and the container comes up with a `/tmp` it cannot write —
+   failing everything downstream with errors that never mention `/tmp`. Refusing to
+   start is the better outcome. The directory must exist, be owned by the uid the
+   container runs as, and be mode `1777`, before `make up`.
+2. **One directory per container, never one shared.** All four dev containers run at
+   the same uid, so a shared `/tmp` gives four claudes the same scratch with no
+   isolation and no way to tell whose leftovers are whose.
+3. **It persists, and `/tmp` must not.** This is the one thing tmpfs gave for free.
+   A disk-backed `/tmp` survives `make up` and reboots and grows forever. The right
+   place to empty it is the base image's `entrypoint.sh`, which all four containers
+   share and which already runs as `dev` — the owner of everything in its own `/tmp` —
+   at exactly the moment "the container just started" is true. **That is a base-image
+   change: `make base` and a `BASE_TAG` bump, so it is deliberately not bundled into
+   the compose change.** Doing it in `dev/Makefile` instead was considered and
+   rejected: it would put `btrfs subvolume` commands in the one interface that is
+   supposed to work the same on any host.
+4. **`chattr +C` (nodatacow) on the scratch subvolume, while it is empty.** Scratch
+   wants neither COW nor checksums; both cost fragmentation and write amplification on
+   an SSD for files that are written once and deleted. It only takes effect if set
+   before anything is written, which means at creation time or not at all.
+
+### `/` stays on the SD card
+
+Not inertia. `bin/check-boot-layout` passes today for exactly one reason: `/` and
+`/boot` are on the same physical device, so pulling it halts the machine and tampering
+costs a reboot you would notice. Move root to the SSD and leave `/boot` on the card —
+what a half-migration looks like — and the check returns `*** GAP ***` and exits 1,
+correctly. Its own preferred fix is *"boot entirely from the SSD and remove the SD
+card"*, which the Pi 5 can do, and which is a different project with its own recovery
+story.
+
+`/var/log` stays too — the SD writer left standing once docker moves, `cloudflared`
+through `log_proxy` on both hosts. Small, rotated, and recorded so it does not read
+later as an oversight.
+
+### This is not only the dev containers
+
+Every container on both hosts has `/tmp` in its writable layer, not just the four with
+a claude in them — `immich_server`, `mysql-ionic`, `torrent`, `send2ereader` and the
+rest are all writing scratch to an SD card today. The mechanism above is the same for
+all of them: a directory under `/media/container-tmp/<container>` and one bind mount in
+the stack's compose file. It is filed as a sweep in §9 rather than done here, because
+each one means recreating a running container and two of them are on the critical box.
 
 ## 5. Sizing
 
@@ -279,9 +349,23 @@ cheap to read while you are in there and load-bearing for
    dev-cache move is small and can happen immediately.
 4. **`zero`'s data-root** goes with roadmap §4, or on its own if §6 resolves to 1.
 
-**Off the critical path, and not gated on any of it:** the `/tmp` tmpfs (§4) is landed
-for `infra-dev` and still owed by `or3-dev`, `dd-dev` and `ds-dev`, each in its own
-repo. Same rule as the `.bak-token` sweep — *when a finding is about a class of thing,
-fix every one of them*, not just the one it was noticed on. `dd-dev` and `ds-dev` are
-down today, so their change costs nothing to make now and applies whenever they next
-come up.
+**The `/tmp` work (§4) rides along rather than queueing behind this.** Its subvolume
+comes out of the same filesystem and the same `fstab` sitting, so it costs one extra
+`btrfs subvolume create` at step 2 and step 4 — but the compose side is already written
+for `infra-dev` and refuses to start until `DEV_TMP_DIR` names a real directory, which
+is deliberate: it cannot half-land.
+
+Three follow-ups it leaves, in order of how much they matter:
+
+- **Emptying it on start** (§4, item 3) — the base image's `entrypoint.sh`, needing
+  `make base` and a `BASE_TAG` bump. Until it lands the scratch directories are swept
+  by hand, and that is the one respect in which this is worse than the tmpfs it
+  replaced. Worth pairing with the `/etc/dev-base-version` marker the phase table has
+  wanted since 2d, since it is the same rebuild.
+- **`or3-dev`, `dd-dev`, `ds-dev`** — the same two lines, each in its own repo. Same
+  rule as the `.bak-token` sweep: *when a finding is about a class of thing, fix every
+  one of them.* `dd-dev` and `ds-dev` are down today, so the change costs nothing to
+  make now and applies whenever they next come up.
+- **Every other container on both hosts** (§4, last part). Immich and `mysql-ionic` are
+  the ones that need a recreate on a box that matters, so this waits for a sitting
+  where that is already happening.

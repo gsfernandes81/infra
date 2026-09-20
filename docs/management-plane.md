@@ -535,9 +535,15 @@ plus three read-only measurements. Options, sizing and the measurement block are
 [`../plans/docker-storage-on-ssd.md`](../plans/docker-storage-on-ssd.md). `/` is not in
 scope — its staying on the SD card is what makes `bin/check-boot-layout` pass. `/tmp`
 turned out to be two questions: tmpfs on both **hosts** since the Alpine install, and
-**not** tmpfs in the dev containers, where it was the writable overlay layer and
-therefore the SD card. Fixed for `infra-dev`; `or3-dev`, `dd-dev` and `ds-dev` owe the
-same line in their own repos.
+in the containers not tmpfs at all — the writable overlay layer, and therefore the SD
+card. It gets a `container-tmp` subvolume beside the data-root on the same SSD
+filesystem, not a tmpfs: `/tmp` in a dev container can be large and tmpfs pages are
+charged to `mem_limit`, so RAM would convert a big extraction into an OOM kill
+reporting a dead process rather than a full disk. **Note for `zero`: "a subvolume on
+the existing btrfs filesystem" is the HDD array there, not the SSD** — the SSD is the
+bcache cache — so `sda2` becomes a btrfs filesystem of its own to keep the two hosts
+identical. Compose side done for `infra-dev`; the other three dev containers, every
+other container on both hosts, and emptying the thing on start all remain.
 
 
 **Closed 2026-08-28 — one command now writes every ssh block this repo owns.**
