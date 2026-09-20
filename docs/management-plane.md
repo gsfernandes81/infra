@@ -532,9 +532,12 @@ without repartitioning anything and without detaching the bcache cache — so th
 sequencing entanglement with roadmap §4 applies only to the *encryption* half, not to
 finding the bytes. Still undecided, and what is left is the credentials question above
 plus three read-only measurements. Options, sizing and the measurement block are in
-[`../plans/docker-storage-on-ssd.md`](../plans/docker-storage-on-ssd.md). Neither `/tmp`
-(already `tmpfs` on both hosts) nor `/` (whose staying on the SD card is what makes
-`bin/check-boot-layout` pass) is in scope.
+[`../plans/docker-storage-on-ssd.md`](../plans/docker-storage-on-ssd.md). `/` is not in
+scope — its staying on the SD card is what makes `bin/check-boot-layout` pass. `/tmp`
+turned out to be two questions: tmpfs on both **hosts** since the Alpine install, and
+**not** tmpfs in the dev containers, where it was the writable overlay layer and
+therefore the SD card. Fixed for `infra-dev`; `or3-dev`, `dd-dev` and `ds-dev` owe the
+same line in their own repos.
 
 
 **Closed 2026-08-28 — one command now writes every ssh block this repo owns.**

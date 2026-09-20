@@ -107,6 +107,39 @@ services:
       # same way it drives docker on one — over ssh, as a host — and community.docker's
       # docker_compose_v2 needs no local socket and no SDK to do it.
 
+    # /tmp is RAM here, and WITHOUT this line it is not. A container with no tmpfs for
+    # /tmp puts it in the writable overlay layer, which lives under /var/lib/docker —
+    # on zero that is the SD CARD. So every claude scratchpad, every npm/uv extraction
+    # and every build temp file has been an SD write. The HOST's /tmp has been tmpfs
+    # since the Alpine install (hosts/zero/system/fstab line 10); the containers on it
+    # quietly were not, and "the host is fine" is what hid it.
+    #
+    # It is also wrong independently of which disk that layer sits on: scratch in the
+    # writable layer costs an overlayfs copy-up, counts as container size, and is only
+    # reclaimed when the container is RECREATED — so a restart keeps yesterday's /tmp.
+    #
+    # EVERY OPTION IS SPELLED OUT, and that is not tidiness:
+    #   size  — an unsized tmpfs takes a default nobody here chose: the kernel's half
+    #           of HOST ram (~2 G on this box) in some forms, 64 M in others, varying
+    #           by daemon version. The 2 G case is the dangerous one, because tmpfs
+    #           pages are charged to THIS CGROUP and `mem_limit` above caps it at
+    #           1024m — so `df` would advertise 2 G of /tmp that OOM-kills the
+    #           container somewhere past 1 G. The symptom is a killed process, not
+    #           "no space left on device": the wrong error for the actual fault.
+    #           This is a CAP, not a reservation — it costs nothing until written to.
+    #           Raise it and mem_limit together, or neither.
+    #   mode  — 1777, or /tmp lands root-owned 0755 and `dev` cannot write to it.
+    #   exec  — some daemon versions default a tmpfs to noexec, and installers
+    #           extract-then-run out of /tmp. Spelling it out means the behaviour does
+    #           not depend on which default this daemon happens to use, and noexec
+    #           fails an install with a message that never mentions /tmp.
+    #
+    # Create-time, like the published port below: it lands on `make up`, never on
+    # `make restart`. And `make up` RECREATES this container — if you are reading this
+    # from inside it, that is the session you are in. Do it from zero, not from here.
+    tmpfs:
+      - /tmp:size=${DEV_TMPFS_SIZE:-256m},mode=1777,exec
+
     # The container has to reach the host it runs on — it is a control node, and that
     # host is in the inventory. Nothing else in the fleet needs this: `one` and `two` are
     # ordinary LAN addresses, reachable from a bridged container with no help. Its OWN

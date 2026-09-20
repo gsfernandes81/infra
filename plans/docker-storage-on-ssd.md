@@ -98,15 +98,32 @@ Worth stating plainly, because "move docker onto the SSD" sounds like it might d
 live filesystem along with it. It does not, and in the case that matters most it must
 not.
 
-**`/tmp` is already `tmpfs` on both hosts** — line 10 of each tracked `fstab`,
-`nosuid,nodev`, no `size=`. It is RAM. It has never touched the SD card, and putting it
-on the SSD would be a **downgrade**: tmpfs beats a USB-bridged SSD by orders of
-magnitude and costs no write endurance at all. Nothing in this plan touches it.
+**`/tmp` on the hosts is already `tmpfs`** — line 10 of each tracked `fstab`,
+`nosuid,nodev`, no `size=`. RAM, never the SD card, and moving it to the SSD would be a
+**downgrade**: tmpfs beats a USB-bridged SSD by orders of magnitude and costs no write
+endurance at all.
 
-The one thing worth knowing: with no `size=`, tmpfs defaults to half of RAM — roughly
-2 G on `zero`, roughly **500 M on `one`**. That is small, and it is the number to
-remember the first time something dies with ENOSPC on a box with plenty of free disk.
-The answer then is `TMPDIR` for that one operation, not a permanent move.
+**⚠︎ That was offered as the whole answer on 2026-09-20 and it was half of one.** The
+hosts' `/tmp` is tmpfs. **The dev containers' `/tmp` was not.** A container with no
+tmpfs mount for `/tmp` takes it from the writable overlay layer, which lives under
+`/var/lib/docker` — on `zero`, the SD card. So every claude scratchpad, every npm and
+`uv` extraction and every build temp file inside `infra-dev`, `or3-dev`, `dd-dev` and
+`ds-dev` has been an SD write, and *"the host's `/tmp` is fine"* is precisely what hid
+it. It is also wrong independently of the disk: scratch in the writable layer costs an
+overlayfs copy-up, counts as container size, and is reclaimed only on **recreate**, so
+a restart inherits yesterday's `/tmp`.
+
+Fixed for `infra-dev` in `dev/compose.yaml` — and that fix **does not wait for any of
+this plan**, because it removes the writes rather than relocating them. The other three
+dev containers live in their own repos and need the same line (§9).
+
+Two numbers to carry. On the hosts, tmpfs with no `size=` defaults to half of RAM —
+~2 G on `zero`, **~500 M on `one`** — the number to remember the first time something
+dies with ENOSPC on a box with plenty of free disk. Inside a container the same default
+is actively dangerous: tmpfs pages are charged to the container's memory cgroup, and
+`infra-dev` is capped at `mem_limit: 1024m`. An unsized `/tmp` would advertise 2 G in
+`df` and OOM-kill the container somewhere past 1 G — reporting a killed process, not a
+full disk. Hence the explicit `size=`, `mode=1777` and `exec`.
 
 **`/` stays on the SD card, and that is a decision rather than inertia.**
 `bin/check-boot-layout` passes today for exactly one reason: `/` and `/boot` sit on the
@@ -122,7 +139,9 @@ can do, and which is a different project with its own recovery story. Not this o
 worth a mount of its own; recorded so it is not mistaken later for something that was
 overlooked.
 
-So the scope is `/var/lib/docker`, and nothing else on the root filesystem.
+So on the hosts the scope is `/var/lib/docker` and nothing else on the root filesystem
+— plus the containers' own `/tmp`, which is one line per compose file and is
+independent of everything above.
 
 ## 5. Sizing
 
@@ -259,3 +278,10 @@ cheap to read while you are in there and load-bearing for
 3. **Decide §6 for `zero`** before anything is carved. If option 3, the model-cache and
    dev-cache move is small and can happen immediately.
 4. **`zero`'s data-root** goes with roadmap §4, or on its own if §6 resolves to 1.
+
+**Off the critical path, and not gated on any of it:** the `/tmp` tmpfs (§4) is landed
+for `infra-dev` and still owed by `or3-dev`, `dd-dev` and `ds-dev`, each in its own
+repo. Same rule as the `.bak-token` sweep — *when a finding is about a class of thing,
+fix every one of them*, not just the one it was noticed on. `dd-dev` and `ds-dev` are
+down today, so their change costs nothing to make now and applies whenever they next
+come up.
