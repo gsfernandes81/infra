@@ -519,6 +519,21 @@ ones that answer the question this document started from.
 | 7 | **Rootless podman on `one`** — roadmap §2 | `one` | 3 | |
 | 8 | `two` as the scheduled read-only control node | `two` | 6, 7 | |
 
+**Filed 2026-09-20, no phase number — Docker's storage onto the SSDs.** Asked as "move
+the volume driver"; it is the **data-root** that matters, because `one` has no named
+volumes at all and its SD card holds images, build cache and logs instead. Two things
+the ask did not expect: **`one` needs no repartition** — `sda1` *is* the MX500 and a
+btrfs subvolume of the existing array is already SSD — and on `zero` **a plain docker
+partition on the SSD puts the dev containers' GitHub and Claude credentials on a USB
+device that can be walked off with while the box runs, which is the one thing
+`bin/check-boot-layout`'s argument depends on not being true**. Undecided, and gated on
+four read-only measurements nobody has taken (`zero`'s `sda2` size above all — it is
+recorded as *unused* and may already be the whole answer). Options, sizing and the
+measurement block are in [`../plans/docker-storage-on-ssd.md`](../plans/docker-storage-on-ssd.md).
+Sequencing note: if the SSD has to be repartitioned, the bcache cache must be detached
+to do it — the same operation roadmap §4 already requires, so it should happen once.
+
+
 **Closed 2026-08-28 — one command now writes every ssh block this repo owns.**
 `playbooks/configure-client.yml` composes `configure-client-fleet.yml` with one `configure-client-dev.yml` import per
 dev container, and carries the registry that says which containers exist and on which
