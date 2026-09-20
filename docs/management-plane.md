@@ -526,12 +526,15 @@ the ask did not expect: **`one` needs no repartition** — `sda1` *is* the MX500
 btrfs subvolume of the existing array is already SSD — and on `zero` **a plain docker
 partition on the SSD puts the dev containers' GitHub and Claude credentials on a USB
 device that can be walked off with while the box runs, which is the one thing
-`bin/check-boot-layout`'s argument depends on not being true**. Undecided, and gated on
-four read-only measurements nobody has taken (`zero`'s `sda2` size above all — it is
-recorded as *unused* and may already be the whole answer). Options, sizing and the
-measurement block are in [`../plans/docker-storage-on-ssd.md`](../plans/docker-storage-on-ssd.md).
-Sequencing note: if the SSD has to be repartitioned, the bcache cache must be detached
-to do it — the same operation roadmap §4 already requires, so it should happen once.
+`bin/check-boot-layout`'s argument depends on not being true**. **`zero`'s `sda2` is
+64 G, free and usable whole** (owner, 2026-09-20), which settles the space question
+without repartitioning anything and without detaching the bcache cache — so the
+sequencing entanglement with roadmap §4 applies only to the *encryption* half, not to
+finding the bytes. Still undecided, and what is left is the credentials question above
+plus three read-only measurements. Options, sizing and the measurement block are in
+[`../plans/docker-storage-on-ssd.md`](../plans/docker-storage-on-ssd.md). Neither `/tmp`
+(already `tmpfs` on both hosts) nor `/` (whose staying on the SD card is what makes
+`bin/check-boot-layout` pass) is in scope.
 
 
 **Closed 2026-08-28 — one command now writes every ssh block this repo owns.**
