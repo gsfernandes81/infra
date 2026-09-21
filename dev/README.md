@@ -688,7 +688,17 @@ overwrite one without `force`, which is the check working — and since it runs 
 push it now also refuses the other way round: **a push that changes a file the image is
 built from without bumping `BASE_TAG` fails the run**, because the thing a person
 forgets is not the dispatch, it is the bump. Which files those are is derived from the
-`COPY` lines in `Dockerfile.base`, so adding one needs no edit in the workflow. A change to the base is now a
+`COPY` lines in `Dockerfile.base`, so adding one needs no edit in the workflow.
+
+**A comment in `Dockerfile.base` does not count, and a comment in `entrypoint.sh` does.**
+That is not an oversight. The first version of this compared file names, and failed a
+push whose only change to the Dockerfile was a paragraph of prose — in a file that is
+three-quarters prose, that is a red `main` nobody will keep reading. A Dockerfile comment
+provably cannot reach the built image, so comments are stripped before comparing (parser
+directives like `# syntax=` kept, and the stripping refused outright if the file ever
+grows a heredoc). In a shell script `#` cannot be told from content without parsing the
+shell — `entrypoint.sh` has two heredocs — so those compare byte for byte. Strip where it
+is provable; refuse where it would be a guess. A change to the base is now a
 change to four containers, so the question before editing `Dockerfile.base` is which of
 the five seams the change belongs in — a setting that is true for one child is a child's
 setting, however tempting it is to put it where it will be inherited.

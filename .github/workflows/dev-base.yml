@@ -14,8 +14,10 @@ name: dev-base
 #                                     BASE_TAG in the same commit as the base change and
 #                                     the image appears without anybody dispatching.
 #   tag exists, base unchanged     -> nothing to publish, and the run says so and passes.
-#                                     This is what a push that only touched dev/README.md
-#                                     or a Makefile target does.
+#                                     A push that only touched dev/README.md, a Makefile
+#                                     target, or a COMMENT IN Dockerfile.base — a comment
+#                                     cannot reach the built image, and this file is
+#                                     three-quarters prose.
 #   tag exists, base CHANGED       -> FAIL. main now describes an image that does not
 #                                     exist, and the fix is a BASE_TAG bump, not a
 #                                     rebuild of a tag other repos have already pinned.
@@ -119,11 +121,6 @@ jobs:
       # `before` is read from the environment rather than interpolated into the script:
       # a `${{ }}` inside a run block is textual substitution, and the habit of not doing
       # it is worth keeping even where the value is a commit sha GitHub wrote itself.
-      #
-      # A `before` that is not in this checkout — a first push to the branch, a
-      # force-push, a dispatch — cannot be diffed, and the safe answer is that the base
-      # MAY have changed. That errs towards the loud outcome, which is the one that can
-      # be resolved by a person reading it; the quiet one cannot.
       - name: Is there an image to publish
         id: decide
         env:
@@ -157,13 +154,61 @@ jobs:
             echo "Refusing to decide from an empty list — check the COPY lines." >&2
             exit 1; }
 
+          # A file's SIGNIFICANT content at a commit — what a rebuild would actually
+          # see differently. Not `git diff --name-only`, and the difference is the
+          # comment: this repo's Dockerfile is three-quarters prose, a comment line
+          # cannot reach the built image (the parser drops it, inside a `\`
+          # continuation as well), and failing a push over an edited paragraph is a red
+          # main nobody will keep reading. So comments are stripped — from the
+          # Dockerfile, and from nothing else:
+          #
+          #   - a PARSER DIRECTIVE is a comment that does change the build
+          #     (`# syntax=` on line 1), so those lines are kept.
+          #   - a HEREDOC makes a `#` line content rather than a comment, so a
+          #     Dockerfile containing `<<` is compared byte for byte instead. This one
+          #     has none; a future one might, and the guess is not worth making.
+          #   - EVERY OTHER INPUT IS A SHELL SCRIPT, where `#` cannot be told from
+          #     content without parsing the shell — entrypoint.sh alone has two
+          #     heredocs — so those are compared byte for byte and a comment edit in
+          #     one does ask for a tag bump. That asymmetry is deliberate: it errs
+          #     towards the loud answer everywhere the quiet one would be a guess.
+          #
+          # The awk is awk rather than grep for the reason CLAUDE.md records: `[ \t]`
+          # in a grep BRE is not a tab, it is a bracket expression matching a space, a
+          # backslash or the letter t.
+          significant() {
+            body=$(git show "$1:$2" 2>/dev/null) || return 1
+            case "$2" in
+              dev/Dockerfile.base)
+                case "$body" in
+                  *'<<'*) printf '%s\n' "$body" ;;
+                  *) printf '%s\n' "$body" | awk '
+                       /^[ \t]*#[ \t]*(syntax|escape)=/ { print; next }
+                       /^[ \t]*#/                       { next }
+                                                         { print }' ;;
+                esac ;;
+              *) printf '%s\n' "$body" ;;
+            esac
+          }
+
+          # An undiffable `before` — a first push, a force-push, a dispatch — cannot be
+          # compared, and the safe answer is that the image MAY have changed. That errs
+          # towards the loud outcome, which a person reading it can resolve; the quiet
+          # one cannot.
           if [ "$EVENT" != push ] || [ -z "$BEFORE" ] \
              || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
             changed=unknown
-          elif git diff --name-only "$BEFORE" "$AFTER" -- $inputs | grep -q .; then
-            changed=yes
           else
             changed=no
+            for f in $inputs; do
+              before_body=$(significant "$BEFORE" "$f") || { changed=yes; break; }
+              after_body=$(significant "$AFTER" "$f")   || { changed=yes; break; }
+              if [ "$before_body" != "$after_body" ]; then
+                changed=yes
+                echo "changed: $f"
+                break
+              fi
+            done
           fi
 
           echo "tag=$TAG published=$published base-changed=$changed force=${FORCE:-false}"
@@ -176,7 +221,7 @@ jobs:
             echo "$IMAGE:$TAG exists and force=true — overwriting it." >> "$GITHUB_STEP_SUMMARY"
           elif [ "$changed" = no ]; then
             echo "build=false" >> "$GITHUB_OUTPUT"
-            echo "Nothing to publish: $IMAGE:$TAG is already built from these exact files." \
+            echo "Nothing to publish: $IMAGE:$TAG is already built from these files (comments aside)." \
               >> "$GITHUB_STEP_SUMMARY"
           else
             {
