@@ -53,10 +53,16 @@
 # was therefore also what made an abandoned one hold a gigabyte of RAM for days.
 #
 # Built and pushed to ghcr.io/gsfernandes81/gsrpi-dev-base (PUBLIC — pure toolchain,
-# the same information as this file) by .github/workflows/dev-base.yml, on manual
-# dispatch. Children FROM the ghcr name, so there is no cross-repo build order: no
-# host needs this repo checked out to run a dev container. `make base` builds the
-# identical image locally under the same name, as the offline fallback. infra owns
+# the same information as this file) by .github/workflows/dev-base.yml, **automatically,
+# on any push to main that touches dev/** (2026-09-21; it used to want a manual
+# dispatch). What that workflow actually enforces is the tag: it publishes a BASE_TAG
+# that is new, does nothing for a push that changed no file this image is built from,
+# and FAILS on a push that changed one without bumping BASE_TAG — because the tag below
+# is a contract and main would otherwise describe an image that does not exist.
+# Children FROM the ghcr name, so there is no cross-repo build order: no host needs this
+# repo checked out to run a dev container. `make base` builds the identical image
+# locally under the same name, as the offline fallback — and is also the way to have the
+# image NOW rather than in the 20-40 minutes the arm64 leg takes under QEMU. infra owns
 # the source because infra is where fleet-wide decisions live.
 #
 # THE TAG IS THE CONTRACT. bump BASE_TAG in dev/Makefile, rebuild, then move each

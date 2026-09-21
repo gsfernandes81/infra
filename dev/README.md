@@ -634,7 +634,9 @@ here, and the two files that carry host-specific values (`ssh_config.fleet`,
 
 **Built on 2026-08-24, on the infra side**: `Dockerfile.base` is the shared ~700 lines,
 built by CI to `ghcr.io/gsfernandes81/gsrpi-dev-base:<BASE_TAG>` (public; tag set in
-the Makefile, single source; `.github/workflows/dev-base.yml`, manual dispatch), and
+the Makefile, single source; `.github/workflows/dev-base.yml`, which since 2026-09-21
+runs itself on any push to `main` touching `dev/` rather than waiting to be
+dispatched), and
 this repo's `Dockerfile` is now a thin child — `FROM` the ghcr name plus the ansible
 layer. There is no build order: the FROM pulls. `make base` builds the identical image
 locally under the same name as the offline fallback — docker prefers local over pull,
@@ -667,13 +669,19 @@ the other way for the same reason on the same day — it names a path inside `/w
 which is a different repo in every container, so it now lives in this repo's child.
 
 Children pin a tag, never `latest`, so a base rebuild cannot change a container behind
-its repo's back. Bumping the base is: edit `BASE_TAG` in infra's Makefile, `make base`,
-then move each child's pin when that repo is ready.
+its repo's back. **Bumping the base is: edit `BASE_TAG` in infra's Makefile, push to
+`main`, and the workflow publishes that tag on its own** — then move each child's pin
+when that repo is ready. `make base` is still there for the two cases it was always for:
+no network, and not wanting to wait 20-40 minutes for the arm64 leg under QEMU.
 
-**The tag is `2026.08.25`** (`dev/Makefile`'s `BASE_TAG` is the single source; `.24.2` was the dd/ds conversion), `.1` having been the or3 one
+**The tag is `2026.09.21`** (`dev/Makefile`'s `BASE_TAG` is the single source; `2026.08.25` was the Claude-updates-itself change's predecessor, `.24.2` the dd/ds conversion), `.1` having been the or3 one
 — suffixes rather than new dates, because each earlier tag is already pushed and a
 pinned tag is a contract that the same tag is the same bytes. `dev-base.yml` refuses to
-overwrite one without `force`, which is the check working. A change to the base is now a
+overwrite one without `force`, which is the check working — and since it runs on every
+push it now also refuses the other way round: **a push that changes a file the image is
+built from without bumping `BASE_TAG` fails the run**, because the thing a person
+forgets is not the dispatch, it is the bump. Which files those are is derived from the
+`COPY` lines in `Dockerfile.base`, so adding one needs no edit in the workflow. A change to the base is now a
 change to four containers, so the question before editing `Dockerfile.base` is which of
 the five seams the change belongs in — a setting that is true for one child is a child's
 setting, however tempting it is to put it where it will be inherited.

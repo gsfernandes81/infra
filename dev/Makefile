@@ -53,8 +53,15 @@ DOCKER  := $(SUDO) docker
 # ARG BASE_TAG default in each repo's child Dockerfile as that repo is ready — children
 # pin a tag, never latest, so a base rebuild cannot change a container behind its
 # repo's back. THIS is the single source: COMPOSE passes it through the environment,
-# compose.yaml forwards it as a build arg, and the defaults in compose.yaml and
-# dev/Dockerfile are fallbacks that only matter outside `make`.
+# compose.yaml forwards it as a build arg, the defaults in compose.yaml and
+# dev/Dockerfile are fallbacks that only matter outside `make`, and
+# .github/workflows/dev-base.yml reads this line to decide what to publish.
+#
+# THE BUMP IS WHAT PUBLISHES. Since 2026-09-21 a push to main that touches dev/ runs
+# that workflow: a new tag gets built and pushed on its own, and a base change WITHOUT a
+# bump fails the run rather than overwriting a tag other repos have pinned. So the order
+# is bump, push, wait (20-40 min for the arm64 leg), then `make up` — or `make base`
+# below, which builds the same image locally and does not wait.
 BASE_TAG := 2026.09.21
 
 .PHONY: help dev base up restart down down-volumes status verify collections logs \

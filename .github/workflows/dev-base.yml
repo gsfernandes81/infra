@@ -2,17 +2,49 @@ name: dev-base
 
 # Build gsrpi-dev-base (2d) and push it to ghcr, so the dev containers' base is a
 # registry pull instead of a local tag with a cross-repo build order. The source of
-# truth stays in THIS repo — dev/Dockerfile.base — and this workflow is deliberately
-# manual: a base rebuild changes every dev container that later bumps its pin, so it
-# happens when a person decides, not when a push happens to touch a path.
+# truth stays in THIS repo — dev/Dockerfile.base — and the tag comes from dev/Makefile,
+# which is the single source everywhere else too.
 #
-#   gh workflow run dev-base.yml            # build + push, tag read from dev/Makefile
+# IT RUNS ITSELF NOW, since 2026-09-21. A push to main that touches dev/ starts this,
+# and what happens next is decided by one question: **is the BASE_TAG in dev/Makefile
+# already published?** A pinned tag is a contract that the same tag is the same bytes,
+# so the answer decides between three outcomes and there is no fourth:
+#
+#   tag is new                     -> build and push it. This is the normal path: bump
+#                                     BASE_TAG in the same commit as the base change and
+#                                     the image appears without anybody dispatching.
+#   tag exists, base unchanged     -> nothing to publish, and the run says so and passes.
+#                                     This is what a push that only touched dev/README.md
+#                                     or a Makefile target does.
+#   tag exists, base CHANGED       -> FAIL. main now describes an image that does not
+#                                     exist, and the fix is a BASE_TAG bump, not a
+#                                     rebuild of a tag other repos have already pinned.
+#
+# That last one is the point of running automatically rather than the build itself: the
+# thing a person forgets is not the dispatch, it is the bump. Overwriting deliberately
+# is still possible and still takes saying so:
+#
+#   gh workflow run dev-base.yml                 # build + push, tag read from dev/Makefile
 #   gh workflow run dev-base.yml -f force=true   # allow overwriting an existing tag
+#
+# WHAT COUNTS AS "the base changed" IS DERIVED, NOT LISTED. The job reads the COPY
+# sources out of dev/Dockerfile.base and adds the Dockerfile itself; a second list in
+# here would be a list that drifts from the one that matters, and this repo has already
+# paid for that shape once (dev/Dockerfile's collections, which `make collections`
+# compares precisely because they could not be derived). Adding a COPY to the base
+# therefore needs no edit here.
+#
+# THE TRIGGER IS WIDER THAN THAT ON PURPOSE: any push touching dev/ starts the run, and
+# the derived list decides. The first steps are a checkout and two API calls — seconds —
+# so a run that concludes "nothing to publish" costs nothing worth optimising, and a
+# narrow paths: filter would be the second list this exists to avoid.
 #
 # PLATFORMS: linux/arm64 (zero and one) and linux/amd64 (laptop/WSL). Deliberately NO
 # armv6: `two` runs no dev containers and cannot — Claude Code ships arm64/x64 only,
 # and two has no docker at all. arm64 builds under QEMU on the free runners; expect
-# 20-40 minutes, which is fine for an image that rebuilds a few times a year.
+# 20-40 minutes, so a bumped tag is not pullable the moment the push lands: `make up`
+# on zero fails on the pull until the run finishes, and `make base` is the way through
+# if you cannot wait.
 #
 # THE PACKAGE IS PUBLIC (one manual visibility flip after the first push). Decided
 # 2026-08-24: the base is pure toolchain, the same information as the Dockerfile, and
@@ -21,6 +53,11 @@ name: dev-base
 # decision reopens before the layer lands.
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'dev/**'
+      - '.github/workflows/dev-base.yml'
   workflow_dispatch:
     inputs:
       force:
@@ -45,7 +82,12 @@ jobs:
       # change — checkout, login-action, setup-qemu, setup-buildx, build-push. Recorded
       # here rather than in a handoff note, which is where it used to live and where it
       # would have died with the note.
+      #
+      # fetch-depth: 0 because the decision below diffs this push against the commit it
+      # started from, and the default shallow checkout does not have that commit.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # The Makefile is the tag's single source everywhere else, so it is here too —
       # a tag typed into a dispatch box can typo; this one is reviewed in a diff.
@@ -63,20 +105,96 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # A pinned tag is a contract — children trust that the same tag is the same
-      # bytes, which is the whole argument for pinning over latest. So overwriting one
-      # is refused unless asked for by name.
-      - name: Refuse to overwrite an existing tag
-        if: ${{ !inputs.force }}
+      # The three outcomes in the header, decided here and nowhere else. The steps below
+      # are gated on `build`, so a run with nothing to publish stops after this and says
+      # why rather than building an image it would refuse to push.
+      #
+      # `before` is read from the environment rather than interpolated into the script:
+      # a `${{ }}` inside a run block is textual substitution, and the habit of not doing
+      # it is worth keeping even where the value is a commit sha GitHub wrote itself.
+      #
+      # A `before` that is not in this checkout — a first push to the branch, a
+      # force-push, a dispatch — cannot be diffed, and the safe answer is that the base
+      # MAY have changed. That errs towards the loud outcome, which is the one that can
+      # be resolved by a person reading it; the quiet one cannot.
+      - name: Is there an image to publish
+        id: decide
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+          FORCE: ${{ inputs.force }}
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          if docker manifest inspect "$IMAGE:${{ steps.tag.outputs.tag }}" >/dev/null 2>&1; then
-            echo "$IMAGE:${{ steps.tag.outputs.tag }} already exists." >&2
-            echo "Bump BASE_TAG in dev/Makefile, or re-run with force=true." >&2
+          set -u
+
+          if docker manifest inspect "$IMAGE:$TAG" >/dev/null 2>&1; then
+            published=yes
+          else
+            published=no
+          fi
+
+          # The image's inputs, derived from the Dockerfile: itself, plus every COPY
+          # source in it. `--from=` COPYs are skipped — those come from a build stage,
+          # not from this directory.
+          inputs=$(awk '
+            $1 == "COPY" {
+              if ($0 ~ /--from=/) next
+              for (i = 2; i < NF; i++) if ($i !~ /^--/) print "dev/" $i
+            }' dev/Dockerfile.base)
+          # Dockerfile.base itself, then the COPY sources. Unquoted below when it is
+          # handed to git, deliberately: each line is its own pathspec.
+          inputs=$(printf 'dev/Dockerfile.base\n%s\n' "$inputs")
+          [ "$(printf '%s\n' "$inputs" | wc -l)" -gt 1 ] || {
+            echo "could not derive the image's inputs from dev/Dockerfile.base." >&2
+            echo "Refusing to decide from an empty list — check the COPY lines." >&2
+            exit 1; }
+
+          if [ "$EVENT" != push ] || [ -z "$BEFORE" ] \
+             || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            changed=unknown
+          elif git diff --name-only "$BEFORE" "$AFTER" -- $inputs | grep -q .; then
+            changed=yes
+          else
+            changed=no
+          fi
+
+          echo "tag=$TAG published=$published base-changed=$changed force=${FORCE:-false}"
+
+          if [ "$published" = no ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "$IMAGE:$TAG is not published yet — building it." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${FORCE:-false}" = true ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "$IMAGE:$TAG exists and force=true — overwriting it." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$changed" = no ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing to publish: $IMAGE:$TAG is already built from these exact files." \
+              >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## The base changed and BASE_TAG did not"
+              echo
+              echo "\`$IMAGE:$TAG\` is already published, and a pinned tag is a contract that"
+              echo "the same tag is the same bytes — dd-dev, ds-dev and or3-dev pin it."
+              echo "So this push leaves \`main\` describing an image that does not exist."
+              echo
+              echo "Bump \`BASE_TAG\` in \`dev/Makefile\` and push that; this builds and"
+              echo "publishes the new tag on its own. Move each child's \`ARG BASE_TAG\`"
+              echo "when that repo is ready."
+              echo
+              echo "If the change genuinely cannot alter the built image and you want the"
+              echo "tag left alone, nothing needs doing here — the image is still correct."
+              echo "Re-running this will fail the same way; that is the check working."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::$IMAGE:$TAG is published and the base changed — bump BASE_TAG in dev/Makefile"
             exit 1
           fi
 
       - uses: docker/setup-qemu-action@v3
+        if: steps.decide.outputs.build == 'true'
       - uses: docker/setup-buildx-action@v3
+        if: steps.decide.outputs.build == 'true'
 
       # USER_UID/GID 1001: the dev user must match the OWNER OF THE CHECKOUT on the
       # host that bind-mounts it, or every file written from a container lands
@@ -85,6 +203,7 @@ jobs:
       # host; this build serves zero and one, where it is 1001. If a host with a
       # different uid ever runs these containers, that host builds locally.
       - name: Build and push
+        if: steps.decide.outputs.build == 'true'
         uses: docker/build-push-action@v6
         with:
           context: dev
@@ -97,4 +216,8 @@ jobs:
           tags: ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
 
       - name: Where it landed
-        run: echo "pushed $IMAGE:${{ steps.tag.outputs.tag }} (arm64, amd64)"
+        if: steps.decide.outputs.build == 'true'
+        run: |
+          echo "pushed $IMAGE:${{ steps.tag.outputs.tag }} (arm64, amd64)"
+          echo "Pushed \`$IMAGE:${{ steps.tag.outputs.tag }}\` (arm64, amd64)." >> "$GITHUB_STEP_SUMMARY"
+          echo "On zero: \`cd ~/infra/dev && make up\` pulls it." >> "$GITHUB_STEP_SUMMARY"
