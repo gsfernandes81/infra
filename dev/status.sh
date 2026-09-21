@@ -163,6 +163,11 @@ verify() {
     # in a stage of its own and gh is unpacked from a tarball, so those two are the
     # ones to ask: a stage that failed would have failed the build, but a COPY or a tar
     # that landed the wrong path would not.
+    # The libc, first, because everything under it links against this one. It is here
+    # because the image was moved to Debian trixie on 2026-09-21 for a floor of 2.39 —
+    # a floor nobody can see from outside the container, and a `FROM` line that gets
+    # reverted by a careless edit would show up nowhere else in this readout.
+    printf 'libc      : %s\n' "$(d exec "$CONTAINER" ldd --version 2>&1 | head -1 || echo 'MISSING — no ldd, which a Debian image always has')"
     printf 'abduco    : %s\n' "$(d exec "$CONTAINER" abduco -v 2>&1 | head -1 || echo 'MISSING — the abduco-build stage did not reach the image')"
     printf 'gh        : %s\n' "$(d exec "$CONTAINER" gh --version 2>&1 | head -1 || echo 'MISSING — the release tarball did not unpack to /usr/local/bin')"
     printf 'screen    : %s\n' "$(d exec "$CONTAINER" screen --version 2>&1 | head -1 || echo 'MISSING')"

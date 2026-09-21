@@ -63,7 +63,7 @@ DOCKER  := $(SUDO) docker
 # is bump, push, wait (about five minutes — see dev/README.md, where that number is
 # measured rather than guessed), then `make up`. Or `make base` below, which builds the
 # same image locally and waits for nobody.
-BASE_TAG := 2026.09.21
+BASE_TAG := 2026.09.21.1
 
 .PHONY: help dev base up restart down down-volumes status verify collections logs \
 	boot-log tunnel-log idle offload-log login claude claude-update shell fleet \

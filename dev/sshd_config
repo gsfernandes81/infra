@@ -26,6 +26,21 @@
 # makes the leak sound plausible.) So a drop-in cannot break this file by structure;
 # it breaks it by being wrong on its own terms, which `sshd -t` catches in entrypoint.sh
 # before anything is exec'd.
+#
+# ⚠︎ THAT MEASUREMENT IS OLDER THAN THE SSHD IT DESCRIBES. The base moved to Debian
+# trixie on 2026-09-21 for glibc 2.39+, which brought OpenSSH 10.x with it, and 9.2 is
+# no longer in the image. The claim is kept rather than deleted — it was measured, and
+# nothing suggests the behaviour changed — but it is now an inference about a version
+# nobody has run it against, which is exactly the shape this repo keeps getting caught
+# by. Re-measuring is two minutes in the container and does not need the fleet:
+#
+#   printf 'Match User nobody\n  AllowTcpForwarding yes\n' > ~/sshd_config.d/99-probe.conf
+#   sshd -t -f ~/sshd_config && echo "confined, as measured on 9.2"
+#   rm ~/sshd_config.d/99-probe.conf
+#
+# A failure there does not brick anything: entrypoint.sh's preflight already starts
+# without the drop-ins and says so. It would mean the seam needs the `Match` rule
+# documented the other way round.
 # THIS PATH IS WRITTEN TWICE. entrypoint.sh's preflight strips this line by grepping
 # for the literal `^Include /home/dev/sshd_config.d/` before falling back, so moving the
 # directory means editing both. Nothing checks that they agree: if they drift, the grep
@@ -65,9 +80,12 @@ GatewayPorts no
 # directory in an ssh session rather than only from /workspace/ansible.
 PermitUserEnvironment yes
 
-# Compression, stated rather than inherited. `sshd -T` already reports `compression yes`
-# on OpenSSH 9.2 — this changes no behaviour and is here because the behaviour is worth
-# being able to see. It is also only half the switch: compression is negotiated, the ssh
+# Compression, stated rather than inherited. `sshd -T` reported `compression yes` on
+# OpenSSH 9.2 — the version this was written against, and one the image no longer ships
+# since the trixie bump took it to 10.x — so on that version this changed no behaviour
+# and was here because the behaviour is worth being able to see. Stating it means the
+# line is now doing work if 10.x ever defaults the other way, rather than the setting
+# silently following the vendor. It is also only half the switch: compression is negotiated, the ssh
 # CLIENT defaults to `no`, and both ends have to offer it. The half that turns it on is
 # in ansible/playbooks/configure-client-dev.yml, on the aliases the phone uses.
 #

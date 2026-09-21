@@ -233,6 +233,42 @@ failure mode, and a floating version makes that arrive at a moment of its own ch
 The phone is on 2.21.0 and this image is on 2.21.3 — that is a real divergence, and
 closing it means bumping the phone, not floating this.
 
+## Debian trixie, for glibc 2.41
+
+**The base is `python:3.13-slim-trixie` as of the `2026.09.21.1` tag, and the reason is
+the libc floor.** Bookworm carried glibc 2.36; trixie carries 2.41, which clears the
+2.39 that was asked for. Nothing else about the distro was the motive, and the change is
+two `FROM` lines — but a distro bump is never only the package you wanted, so what else
+moved is written down rather than discovered later.
+
+| moved | consequence |
+|---|---|
+| glibc 2.36 → **2.41** | the point of the change |
+| OpenSSH 9.2 → **10.x** | two claims in `sshd_config` were *measured* on 9.2 — that a drop-in's `Match` is confined to that file, and that `sshd -T` already reports `compression yes`. They are annotated there as owing a re-measure, with the two-minute command to do it |
+| fish 3.6 → **4.x** | the login shell. `config.fish` uses `status is-login` and `cd`, which is the least of fish's surface |
+| Python 3.13 | unchanged — same image line, same interpreter for `entrypoint.sh` |
+| Node 22 | unchanged, still NodeSource. That repository serves trixie; it is also the line most likely to be what breaks, and `Dockerfile.base` says what the fallback is |
+
+**What does not move: the host kernels.** These containers run on Alpine — musl, no glibc
+at all — and a container's libc is its own business. glibc 2.41's kernel floor is far
+below the 6.x on `zero` and `one`, and the syscalls a newer glibc reaches for (`clone3`
+and friends) were already being made by 2.36 on those same boxes under that same docker,
+so a seccomp refusal would have arrived long before this bump rather than because of it.
+
+**What is now stale on purpose:** the abduco build-from-source stage. It existed because
+bookworm had no `abduco` package; trixie does. It is kept in the bump commit deliberately
+— the commit is the libc change and nothing else, and what `apt` would install was the
+one thing about trixie that could not be checked from where the change was written.
+Dropping it is the obvious follow-up: `apt-get install abduco`, delete the stage and its
+`COPY --from`, bump the tag, and CI proves it in five minutes.
+
+**Verifying the bump is `make verify`.** It now opens with a `libc` line — `ldd
+--version` from inside the container — because the floor is otherwise invisible from
+outside it, and a `FROM` line reverted by a careless edit would show up nowhere else in
+that readout. The rest of the list is the same one that already mattered: `claude`, `gh`,
+`abduco`, `screen`, `cloudflared` and the collections are each printed, and every one of
+them is a thing a distro bump can break.
+
 ## Claude Code updates itself
 
 **Since the `2026.09.21` base, the version of Claude Code in this container is a floor,
@@ -681,7 +717,7 @@ automatic one, on 2026-09-21. The number mattered because it was the argument fo
 reaching for `make base`, and at five minutes that argument is much weaker. Measured
 from the run timestamps, which is the artefact; the sentence in the docs was the guess.
 
-**The tag is `2026.09.21`** (`dev/Makefile`'s `BASE_TAG` is the single source; `2026.08.25` was the Claude-updates-itself change's predecessor, `.24.2` the dd/ds conversion), `.1` having been the or3 one
+**The tag is `2026.09.21.1`** (`dev/Makefile`'s `BASE_TAG` is the single source; `2026.09.21` was the bookworm image with the self-updating Claude, `2026.08.25` its predecessor, `.24.2` the dd/ds conversion), `2026.08.24.1` having been the or3 one
 — suffixes rather than new dates, because each earlier tag is already pushed and a
 pinned tag is a contract that the same tag is the same bytes. `dev-base.yml` refuses to
 overwrite one without `force`, which is the check working — and since it runs on every

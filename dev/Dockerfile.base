@@ -3,7 +3,8 @@
 # gsrpi-dev-base — the ONE base image for this fleet's dev containers (2d).
 #
 # This is dev/README.md § *Four copies of this* built: the ~700 lines that dd-dev,
-# ds-dev, or3-dev and infra-dev agreed on, in one place. Debian slim, Node + Claude
+# ds-dev, or3-dev and infra-dev agreed on, in one place. Debian trixie slim (glibc 2.41
+# since 2026-09-21; bookworm and its 2.36 before that), Node + Claude
 # Code, gh, abduco, sshd, fish, the dev user, cloudflared, the entrypoint and every
 # dotfile. A repo's own dev/Dockerfile becomes a FROM line
 # plus whatever that repo needs on top — see dev/Dockerfile here for the shape
@@ -88,12 +89,22 @@
 # copies in four repos.
 
 # ── abduco, built from source ───────────────────────────────────────────────
-# Built rather than installed because abduco is NOT in bookworm: Debian has it in
-# trixie and sid only, so `apt-get install abduco` fails this build outright. The
-# trixie .deb is not a way round that — it is linked against a newer glibc than
-# this base carries. It is one C file with no dependency beyond libc, so a
-# throwaway stage holding a compiler costs the final image nothing.
-FROM python:3.13-slim-bookworm AS abduco-build
+# THE REASON THIS STAGE EXISTS EXPIRED WITH THE DISTRO BUMP, and it is kept anyway,
+# for now, on purpose. It was here because abduco is NOT in bookworm — Debian had it in
+# trixie and sid only, so `apt-get install abduco` failed the build outright, and the
+# trixie .deb was not a way round it because it wanted a newer glibc than bookworm
+# carried. This image is now ON trixie, so the package is simply there.
+#
+# It stays in this commit because the commit is the libc bump and nothing else: what
+# `apt` would install here is the one thing about trixie that could not be checked from
+# where this was written, and swapping a hash-pinned source build for a package in the
+# same change would mix a provable difference with an unprovable one. Dropping it is the
+# obvious follow-up and CI proves it in five minutes — `apt-get install abduco` in the
+# main stage, this stage and its `COPY --from` deleted, BASE_TAG bumped.
+#
+# It is one C file with no dependency beyond libc, so a throwaway stage holding a
+# compiler costs the final image nothing.
+FROM python:3.13-slim-trixie AS abduco-build
 ARG ABDUCO_VERSION=0.6
 # Upstream's own release tarball, pinned by hash. The mismatch must FAIL the build
 # rather than be retried: this stage compiles what it downloads and the result is
@@ -110,7 +121,30 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && install -m 0755 "/tmp/abduco-${ABDUCO_VERSION}/abduco" /usr/local/bin/abduco
 
 # ── the container itself ────────────────────────────────────────────────────
-FROM python:3.13-slim-bookworm
+# TRIXIE, AND THE POINT OF IT IS THE LIBC. Debian 13 carries glibc 2.41; bookworm
+# carried 2.36, and the floor this image is asked to clear is 2.39. Nothing else about
+# the distro was the reason, which matters when reading what follows: everything below
+# this line is unchanged from the bookworm image except where a comment says otherwise.
+#
+# WHAT CAME WITH IT, because a distro bump is never only the one package you wanted:
+#
+#   OpenSSH 9.2 -> 10.x   the door. sshd_config carries two claims MEASURED on 9.2 —
+#                         that a drop-in's `Match` is confined to that file, and that
+#                         `sshd -T` already reports `compression yes`. Both are marked
+#                         in that file as owing a re-measure on this image; neither is
+#                         assumed to have survived, and the seam they describe is the
+#                         one that decides whether a child can be locked out.
+#   fish 3.6 -> 4.x       the login shell. config.fish uses `status is-login` and `cd`
+#                         and nothing else, which is the least of fish's surface.
+#   Python 3.13           unchanged — this is the same image line, so the entrypoint's
+#                         python3 is the interpreter it always was.
+#
+# WHAT DID NOT CHANGE and might be expected to: the host kernels. glibc's floor here is
+# far below Alpine's 6.x on zero and one, and the syscalls a newer glibc reaches for
+# (clone3 and friends) are already in use by 2.36 on these same boxes under this same
+# docker — so a seccomp refusal would have shown up long before this bump, not because
+# of it.
+FROM python:3.13-slim-trixie
 
 ARG USERNAME=dev
 ARG USER_UID=1000
@@ -203,6 +237,14 @@ COPY --from=abduco-build /usr/local/bin/abduco /usr/local/bin/abduco
 # child that does `USER root` and `npm install -g` lands its package in this same tree,
 # root-owned. That does not break claude — it already owns its own files — but it is how
 # a root-owned file appears in a dev-owned directory. Install as `dev`, or chown after.
+#
+# NODESOURCE ON TRIXIE is the part of the libc bump most likely to be what broke, if
+# anything did: the repository serves Debian 13 and Node 22, and the reports of trouble
+# with it are apt's newer signature policy complaining rather than refusing. If a build
+# ever fails in the line below rather than in the one after it, that is where to look —
+# and the fallback is trixie's own `nodejs` (20.x), which costs an EBADENGINE warning
+# from the claude-code package and nothing else, because that package's payload is a
+# native binary that does not run on node.
 ENV NPM_CONFIG_PREFIX=/opt/npm-global \
     PATH=/home/dev/.local/bin:/opt/npm-global/bin:$PATH
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
