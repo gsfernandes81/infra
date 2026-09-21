@@ -168,7 +168,7 @@ verify() {
     # a floor nobody can see from outside the container, and a `FROM` line that gets
     # reverted by a careless edit would show up nowhere else in this readout.
     printf 'libc      : %s\n' "$(d exec "$CONTAINER" ldd --version 2>&1 | head -1 || echo 'MISSING — no ldd, which a Debian image always has')"
-    printf 'abduco    : %s\n' "$(d exec "$CONTAINER" abduco -v 2>&1 | head -1 || echo 'MISSING — the abduco-build stage did not reach the image')"
+    printf 'abduco    : %s\n' "$(d exec "$CONTAINER" abduco -v 2>&1 | head -1 || echo 'MISSING — the abduco package did not install (a trixie package since 2026-09-21, not a build stage)')"
     printf 'gh        : %s\n' "$(d exec "$CONTAINER" gh --version 2>&1 | head -1 || echo 'MISSING — the release tarball did not unpack to /usr/local/bin')"
     printf 'screen    : %s\n' "$(d exec "$CONTAINER" screen --version 2>&1 | head -1 || echo 'MISSING')"
     printf 'claude    : %s\n' "$(d exec "$CONTAINER" claude --version 2>&1 | head -1 || echo 'MISSING')"

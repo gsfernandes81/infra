@@ -88,38 +88,6 @@
 # deprecation clock makes a slow deadline, becomes one ARG here instead of four
 # copies in four repos.
 
-# ── abduco, built from source ───────────────────────────────────────────────
-# THE REASON THIS STAGE EXISTS EXPIRED WITH THE DISTRO BUMP, and it is kept anyway,
-# for now, on purpose. It was here because abduco is NOT in bookworm — Debian had it in
-# trixie and sid only, so `apt-get install abduco` failed the build outright, and the
-# trixie .deb was not a way round it because it wanted a newer glibc than bookworm
-# carried. This image is now ON trixie, so the package is simply there.
-#
-# It stays in this commit because the commit is the libc bump and nothing else: what
-# `apt` would install here is the one thing about trixie that could not be checked from
-# where this was written, and swapping a hash-pinned source build for a package in the
-# same change would mix a provable difference with an unprovable one. Dropping it is the
-# obvious follow-up and CI proves it in five minutes — `apt-get install abduco` in the
-# main stage, this stage and its `COPY --from` deleted, BASE_TAG bumped.
-#
-# It is one C file with no dependency beyond libc, so a throwaway stage holding a
-# compiler costs the final image nothing.
-FROM python:3.13-slim-trixie AS abduco-build
-ARG ABDUCO_VERSION=0.6
-# Upstream's own release tarball, pinned by hash. The mismatch must FAIL the build
-# rather than be retried: this stage compiles what it downloads and the result is
-# then run, as the dev user, in a container holding ssh keys to all three hosts.
-ARG ABDUCO_SHA256=c90909e13fa95770b5afc3b59f311b3d3d2fdfae23f9569fa4f96a3e192a35f4
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        gcc libc6-dev make curl ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSLo /tmp/abduco.tar.gz \
-        "https://www.brain-dump.org/projects/abduco/abduco-${ABDUCO_VERSION}.tar.gz" \
-    && echo "${ABDUCO_SHA256}  /tmp/abduco.tar.gz" | sha256sum -c - \
-    && tar xzf /tmp/abduco.tar.gz -C /tmp \
-    && make -C "/tmp/abduco-${ABDUCO_VERSION}" \
-    && install -m 0755 "/tmp/abduco-${ABDUCO_VERSION}/abduco" /usr/local/bin/abduco
-
 # ── the container itself ────────────────────────────────────────────────────
 # TRIXIE, AND THE POINT OF IT IS THE LIBC. Debian 13 carries glibc 2.41; bookworm
 # carried 2.36, and the floor this image is asked to clear is 2.39. Nothing else about
@@ -157,7 +125,15 @@ ARG USER_GID=1000
 # it is a detach/attach and nothing else — no key handling of its own beyond
 # Ctrl-\ , no status line, no window management — so the TUI underneath keeps
 # every key it expects. screen stays because its scrollback and its status line
-# are worth having for ordinary shell work. abduco comes from the stage above.
+# are worth having for ordinary shell work.
+#
+# ABDUCO IS A PACKAGE HERE AND USED TO BE A BUILD STAGE — it was compiled from upstream's
+# hash-pinned tarball in a throwaway stage holding gcc, for one reason: bookworm had no
+# `abduco` package, and the trixie .deb wanted a newer glibc than bookworm carried. The
+# libc bump on 2026-09-21 moved this image to trixie, which ships it, so the whole stage
+# and its pin were deleted the same day. Same upstream 0.6 either way; what changes is
+# the provenance, from a tarball checked against a hash written here to a package signed
+# by Debian's archive — and this image stops carrying a compiler to build one C file.
 # openssh-server is the in-container sshd, which here is simply the door — nothing
 # tunnels back through it, unlike or3-dev's. openssh-client is what carries every
 # ansible connection to zero, one and two, and is also what git needs for
@@ -174,12 +150,10 @@ ARG USER_GID=1000
 # later, for a reason nobody would connect back. Naming it costs nothing and makes the
 # dependency this image actually has visible in the file that declares them.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git make screen fish openssh-client openssh-server procps \
+        git make screen abduco fish openssh-client openssh-server procps \
         curl gnupg ca-certificates tzdata less iproute2 \
     && rm -rf /var/lib/apt/lists/* \
     && if ! grep -qx /usr/bin/fish /etc/shells; then echo /usr/bin/fish >> /etc/shells; fi
-
-COPY --from=abduco-build /usr/local/bin/abduco /usr/local/bin/abduco
 
 # ── Node 22 LTS, and a Claude Code that can replace itself ──────────────────
 # Claude Code is NOT pinned here and never was: `npm install -g` takes whatever the
@@ -261,10 +235,12 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # remapping is needed. Bump GH_VERSION to upgrade; the pin matches dd's, so the two
 # containers answer `gh --version` the same way.
 #
-# Not hash-pinned, unlike abduco above, and the difference is deliberate: that
-# stage COMPILES what it downloads, this unpacks a signed release from the vendor's
-# own host over TLS. What guards this one is the pin — an unpinned `latest` is a
-# different binary on every rebuild with nothing to compare against.
+# Not hash-pinned, unlike cloudflared below, and the difference is deliberate: that one
+# holds a credential and puts an ssh endpoint on the internet, this unpacks a signed
+# release from the vendor's own host over TLS and then reads GitHub for you. What guards
+# this one is the pin — an unpinned `latest` is a different binary on every rebuild with
+# nothing to compare against. (This paragraph used to contrast with abduco, which was
+# compiled here from a hash-pinned tarball until trixie made it a package.)
 ARG GH_VERSION=2.96.0
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
@@ -281,10 +257,11 @@ RUN set -eux; \
 # for the same reason the collections are: a start that needs the network is a start
 # that fails when the network is down.
 #
-# Hash-pinned per architecture, like abduco and unlike gh. The difference from gh is not
-# the vendor, it is what the binary does: this one holds the credentials that put an ssh
-# endpoint on the public internet, and it is the process that puts it there. A pin alone
-# says "the same version"; a hash says "the same bytes".
+# Hash-pinned per architecture, and since abduco became a package it is the only thing in
+# this image pinned that way. The difference from gh is not the vendor, it is what the
+# binary does: this one holds the credentials that put an ssh endpoint on the public
+# internet, and it is the process that puts it there. A pin alone says "the same
+# version"; a hash says "the same bytes".
 #
 # Measured 2026-08-22 by downloading both and checking them: 37,404,344 B (arm64) and
 # 39,799,316 B (amd64), and BOTH ARE FULLY STATIC — `readelf -l` finds no INTERP segment
