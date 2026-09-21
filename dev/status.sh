@@ -159,19 +159,43 @@ fleet() {
 verify() {
     status
     printf '\n'
-    # A rebuild is where a tool silently fails to arrive. abduco is built from source
-    # in a stage of its own and gh is unpacked from a tarball, so those two are the
-    # ones to ask: a stage that failed would have failed the build, but a COPY or a tar
-    # that landed the wrong path would not.
-    # The libc, first, because everything under it links against this one. It is here
+    # A rebuild is where a tool silently fails to arrive: gh is unpacked from a tarball
+    # and cloudflared is a hash-checked download, so a build that succeeded can still
+    # have landed either in the wrong path. These lines ask the container instead of
+    # trusting the build.
+    #
+    # `tool` EXISTS BECAUSE THE FALLBACK IT REPLACES COULD NOT FIRE. Every one of these
+    # was `$(… | head -1 || echo 'MISSING — …')`, and a `||` after a pipeline tests the
+    # LAST command in it: `head` succeeds on empty input, so the message naming the cause
+    # was unreachable in all five. Nothing looked wrong, because what printed instead was
+    # docker's own "executable file not found", which reads like an answer. CLAUDE.md
+    # § *Shell traps* has the general form; this is that trap sitting in the file that
+    # exists to tell you the truth about the container.
+    #
+    # `command -v` RUNS FIRST, IN THE SAME EXEC, and that is what makes the fallback
+    # mean what it says. Exit status cannot answer "is it in the image": `abduco -v` is
+    # the kind of tool that prints its version and exits non-zero, and a readout calling
+    # that MISSING would be the other failure this repo keeps recording — a check wrong
+    # about a healthy system. So: binary absent, nothing is run and nothing is printed,
+    # and the message fires. Binary present, its own first line is printed whatever it
+    # exits with. One exec either way.
+    tool() {
+        local label=$1 fallback=$2; shift 2
+        local out
+        out="$(d exec "$CONTAINER" sh -c 'command -v "$1" >/dev/null 2>&1 || exit 0; exec "$@"' \
+                 sh "$@" 2>&1 | head -1)"
+        printf '%-10s: %s\n' "$label" "${out:-MISSING — $fallback}"
+    }
+
+    # The libc first, because everything under it links against this one. It is here
     # because the image was moved to Debian trixie on 2026-09-21 for a floor of 2.39 —
     # a floor nobody can see from outside the container, and a `FROM` line that gets
     # reverted by a careless edit would show up nowhere else in this readout.
-    printf 'libc      : %s\n' "$(d exec "$CONTAINER" ldd --version 2>&1 | head -1 || echo 'MISSING — no ldd, which a Debian image always has')"
-    printf 'abduco    : %s\n' "$(d exec "$CONTAINER" abduco -v 2>&1 | head -1 || echo 'MISSING — the abduco package did not install (a trixie package since 2026-09-21, not a build stage)')"
-    printf 'gh        : %s\n' "$(d exec "$CONTAINER" gh --version 2>&1 | head -1 || echo 'MISSING — the release tarball did not unpack to /usr/local/bin')"
-    printf 'screen    : %s\n' "$(d exec "$CONTAINER" screen --version 2>&1 | head -1 || echo 'MISSING')"
-    printf 'claude    : %s\n' "$(d exec "$CONTAINER" claude --version 2>&1 | head -1 || echo 'MISSING')"
+    tool libc   'no ldd, which a Debian image always has' ldd --version
+    tool abduco 'the abduco package did not install (a trixie package since 2026-09-21, not a build stage)' abduco -v
+    tool gh     'the release tarball did not unpack to /usr/local/bin' gh --version
+    tool screen 'no screen in the image' screen --version
+    tool claude 'no claude in the image at all — not an update that failed' claude --version
     # The version above is not what a rebuild landed any more — Claude Code updates
     # itself in place, so it is whatever this container has reached by now. THIS line is
     # the one that says whether it still can.
@@ -202,7 +226,7 @@ verify() {
     else
         printf 'autoupdate: %s\n' "$autoupdate, nothing blocking it; last attempt: ${attempt:-unknown}"
     fi
-    printf 'cloudflared: %s\n' "$(d exec "$CONTAINER" cloudflared --version 2>&1 | head -1 || echo 'MISSING — the hash-pinned download did not land')"
+    tool cloudflared 'the hash-pinned download did not land' cloudflared --version
     # The one the phone's RemoteCommand names. Absent here and `ssh infra-dev` fails with
     # "Unknown command: in-workspace" from the container's fish — which reads like a
     # broken ssh config and is in fact an image that was never rebuilt. Cheap to check,
