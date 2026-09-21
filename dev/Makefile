@@ -60,8 +60,9 @@ DOCKER  := $(SUDO) docker
 # THE BUMP IS WHAT PUBLISHES. Since 2026-09-21 a push to main that touches dev/ runs
 # that workflow: a new tag gets built and pushed on its own, and a base change WITHOUT a
 # bump fails the run rather than overwriting a tag other repos have pinned. So the order
-# is bump, push, wait (20-40 min for the arm64 leg), then `make up` — or `make base`
-# below, which builds the same image locally and does not wait.
+# is bump, push, wait (about five minutes — see dev/README.md, where that number is
+# measured rather than guessed), then `make up`. Or `make base` below, which builds the
+# same image locally and waits for nobody.
 BASE_TAG := 2026.09.21
 
 .PHONY: help dev base up restart down down-volumes status verify collections logs \

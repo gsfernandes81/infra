@@ -672,7 +672,14 @@ Children pin a tag, never `latest`, so a base rebuild cannot change a container 
 its repo's back. **Bumping the base is: edit `BASE_TAG` in infra's Makefile, push to
 `main`, and the workflow publishes that tag on its own** — then move each child's pin
 when that repo is ready. `make base` is still there for the two cases it was always for:
-no network, and not wanting to wait 20-40 minutes for the arm64 leg under QEMU.
+no network, and not wanting to wait for CI at all.
+
+**That wait is about five minutes, not the 20-40 the workflow and three other files used
+to claim.** Nobody had checked: the three runs that have built this image took 4m16s,
+4m42s and 4m07s end to end, arm64-under-QEMU leg included — the last of them the first
+automatic one, on 2026-09-21. The number mattered because it was the argument for
+reaching for `make base`, and at five minutes that argument is much weaker. Measured
+from the run timestamps, which is the artefact; the sentence in the docs was the guess.
 
 **The tag is `2026.09.21`** (`dev/Makefile`'s `BASE_TAG` is the single source; `2026.08.25` was the Claude-updates-itself change's predecessor, `.24.2` the dd/ds conversion), `.1` having been the or3 one
 — suffixes rather than new dates, because each earlier tag is already pushed and a

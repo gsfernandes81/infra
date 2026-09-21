@@ -7,11 +7,12 @@
 # line moves. The base normally comes from ghcr — public, built by
 # .github/workflows/dev-base.yml from dev/Dockerfile.base in this repo, on every push to
 # main that changes it — so no host needs a build order any more. The corollary of it
-# being automatic: after a BASE_TAG bump the tag is real only once that run finishes,
-# 20-40 minutes for the arm64 leg, and `make up` fails on the pull until then. `make base` remains the OFFLINE FALLBACK: it builds the
-# identical image locally UNDER THE SAME NAME, and docker prefers a local image over a
-# pull, so a GitHub outage or a metered month means building on the host with children
-# none the wiser.
+# being automatic: after a BASE_TAG bump the tag is real only once that run finishes —
+# about five minutes — and `make up` fails on the pull until then.
+#
+# `make base` remains the OFFLINE FALLBACK: it builds the identical image locally UNDER
+# THE SAME NAME, and docker prefers a local image over a pull, so a GitHub outage or a
+# metered month means building on the host with children none the wiser.
 ARG BASE_TAG=2026.09.21
 FROM ghcr.io/gsfernandes81/gsrpi-dev-base:${BASE_TAG}
 

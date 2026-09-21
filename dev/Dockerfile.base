@@ -62,7 +62,7 @@
 # Children FROM the ghcr name, so there is no cross-repo build order: no host needs this
 # repo checked out to run a dev container. `make base` builds the identical image
 # locally under the same name, as the offline fallback — and is also the way to have the
-# image NOW rather than in the 20-40 minutes the arm64 leg takes under QEMU. infra owns
+# image without waiting the ~5 minutes the workflow takes. infra owns
 # the source because infra is where fleet-wide decisions live.
 #
 # THE TAG IS THE CONTRACT. bump BASE_TAG in dev/Makefile, rebuild, then move each

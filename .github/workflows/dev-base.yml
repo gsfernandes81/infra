@@ -41,10 +41,12 @@ name: dev-base
 #
 # PLATFORMS: linux/arm64 (zero and one) and linux/amd64 (laptop/WSL). Deliberately NO
 # armv6: `two` runs no dev containers and cannot — Claude Code ships arm64/x64 only,
-# and two has no docker at all. arm64 builds under QEMU on the free runners; expect
-# 20-40 minutes, so a bumped tag is not pullable the moment the push lands: `make up`
-# on zero fails on the pull until the run finishes, and `make base` is the way through
-# if you cannot wait.
+# and two has no docker at all. arm64 builds under QEMU on the free runners, and THIS
+# HEADER USED TO SAY THAT TAKES 20-40 MINUTES, which was a guess nobody had checked: the
+# three runs that have actually built this image took 4m16s, 4m42s and 4m07s end to end,
+# the last of them on 2026-09-21. Call it five minutes. It is still not instant, so a
+# bumped tag is not pullable the moment the push lands — `make up` on zero fails on the
+# pull until the run finishes, and `make base` is the way through if you cannot wait.
 #
 # THE PACKAGE IS PUBLIC (one manual visibility flip after the first push). Decided
 # 2026-08-24: the base is pure toolchain, the same information as the Dockerfile, and
@@ -82,6 +84,11 @@ jobs:
       # change — checkout, login-action, setup-qemu, setup-buildx, build-push. Recorded
       # here rather than in a handoff note, which is where it used to live and where it
       # would have died with the note.
+      #
+      # THE CUT HAS HALF-LANDED as of 2026-09-21: the runners now FORCE all five onto
+      # Node 24 and say so in the log. They still work, so this is still a warning and
+      # not a deadline — but the next thing to go wrong here is one of them not liking
+      # the runtime it is being given, and the fix is the same five-line bump.
       #
       # fetch-depth: 0 because the decision below diffs this push against the commit it
       # started from, and the default shallow checkout does not have that commit.
