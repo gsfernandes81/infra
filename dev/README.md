@@ -255,14 +255,19 @@ below the 6.x on `zero` and `one`, and the syscalls a newer glibc reaches for (`
 and friends) were already being made by 2.36 on those same boxes under that same docker,
 so a seccomp refusal would have arrived long before this bump rather than because of it.
 
-**What the bump made free: the abduco build stage is gone** (`2026.09.21.2`). It existed
-for exactly one reason — bookworm had no `abduco` package, and the trixie `.deb` wanted a
-newer glibc than bookworm carried — so the libc bump ended it the same day. `abduco` is
-now a line in the `apt-get install` list like `screen` beside it. Same upstream 0.6
-either way; what changed is the provenance, from a tarball checked against a hash written
-in this repo to a package signed by Debian's archive, and the image stops carrying a gcc
-stage to compile one C file. `make verify`'s `abduco` line is unchanged and still proves
-it arrived.
+**What the bump did *not* make free: the abduco build stage stays.** It was there because
+bookworm had no `abduco` package, and this repo's comment had said for a month that
+Debian had it "in trixie and sid only" — so moving to trixie looked like it ended the
+need for a compiler stage. It did not. `apt-get install abduco` fails on trixie with
+`E: Unable to locate package abduco`, on both architectures, against main,
+trixie-updates and trixie-security. That was the `2026.09.21.2` build, and it is the only
+time the claim was ever executed rather than repeated.
+
+The lesson is the repo's own and keeps recurring: **a fact nobody has run is not a
+measurement, however long it has sat in a comment.** The five-minute CI build is what
+turned it over, which is an argument for the automatic build rather than against the
+change. The stage is now the way this image gets abduco at all, not a workaround for an
+old base, and `Dockerfile.base` says so.
 
 **Verifying the bump is `make verify`.** It now opens with a `libc` line — `ldd
 --version` from inside the container — because the floor is otherwise invisible from
@@ -719,7 +724,7 @@ automatic one, on 2026-09-21. The number mattered because it was the argument fo
 reaching for `make base`, and at five minutes that argument is much weaker. Measured
 from the run timestamps, which is the artefact; the sentence in the docs was the guess.
 
-**The tag is `2026.09.21.2`** (`dev/Makefile`'s `BASE_TAG` is the single source; `.1` was trixie with the abduco stage still in it, `2026.09.21` the last bookworm image, `2026.08.25` its predecessor, `.24.2` the dd/ds conversion), `2026.08.24.1` having been the or3 one
+**The tag is `2026.09.21.1`** (`dev/Makefile`'s `BASE_TAG` is the single source; `2026.09.21` was the bookworm image with the self-updating Claude, `2026.08.25` its predecessor, `.24.2` the dd/ds conversion), `2026.08.24.1` having been the or3 one
 — suffixes rather than new dates, because each earlier tag is already pushed and a
 pinned tag is a contract that the same tag is the same bytes. `dev-base.yml` refuses to
 overwrite one without `force`, which is the check working — and since it runs on every

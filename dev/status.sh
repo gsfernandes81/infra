@@ -192,7 +192,7 @@ verify() {
     # a floor nobody can see from outside the container, and a `FROM` line that gets
     # reverted by a careless edit would show up nowhere else in this readout.
     tool libc   'no ldd, which a Debian image always has' ldd --version
-    tool abduco 'the abduco package did not install (a trixie package since 2026-09-21, not a build stage)' abduco -v
+    tool abduco 'the abduco-build stage did not reach the image (it is built from source: trixie has no abduco package, proved by a failed build 2026-09-21)' abduco -v
     tool gh     'the release tarball did not unpack to /usr/local/bin' gh --version
     tool screen 'no screen in the image' screen --version
     tool claude 'no claude in the image at all — not an update that failed' claude --version
