@@ -63,6 +63,13 @@
 # child's ARG BASE_TAG when that repo is ready — children pin a tag, never `latest`,
 # so a base rebuild cannot change a container behind its repo's back.
 #
+# ONE THING THE TAG DOES NOT PIN, since 2026-09-21: **Claude Code updates itself.** The
+# tag still fixes every other byte in here, and a container still starts on the version
+# the tag was built with — but that version is a floor, not a ceiling, and a container
+# left running will move past it on its own. That is deliberate and the reasoning is at
+# the node block below; it is stated here because this paragraph would otherwise read
+# as a promise the image no longer keeps.
+#
 # The repo is NOT copied in: each compose bind-mounts its host clone at /workspace.
 # Only the toolchain is baked. The entrypoint, sshd config and dotfiles here are
 # infra-dev's, which were written to be the last copy: everything repo-specific in
@@ -134,12 +141,70 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=abduco-build /usr/local/bin/abduco /usr/local/bin/abduco
 
-# Node 22 LTS + Claude Code.
+# ── Node 22 LTS, and a Claude Code that can replace itself ──────────────────
+# Claude Code is NOT pinned here and never was: `npm install -g` takes whatever the
+# registry serves on build day. What changed on 2026-09-21 is that the copy it installs
+# can now UPDATE ITSELF, which it could not before and did not say so where anybody
+# would see it.
+#
+# WHY IT COULD NOT. `npm install -g` as root writes into /usr/lib/node_modules, which is
+# root-owned; every session in this container runs as `dev`. Claude Code checks whether
+# it can write its own install directory before it updates, finds it cannot, and
+# mentions it once at start-up — inside a TUI, in a container people arrive at over ssh
+# and then leave running for weeks. So the version baked on build day was the version
+# you kept, and moving it meant a base rebuild plus a BASE_TAG bump in four repos, for a
+# program that ships several releases a week. That is a pin nobody can keep up with, and
+# what it actually produced was containers months behind with no signal saying so.
+#
+# WHAT MAKES IT WORK is one property and nothing else: the npm prefix is owned by the
+# account that runs claude. /opt/npm-global, chowned to the dev user below, on PATH. The
+# updater then rewrites /opt/npm-global/bin/claude in place, so every caller — an ssh
+# session, `make claude`, the offloader matching on the process name — keeps naming the
+# same thing and gets the new binary at its next start.
+#
+# NOT UNDER /home/dev, and that is the whole reason it is /opt rather than the
+# conventional ~/.npm-global. Every dev container mounts named volumes over paths inside
+# /home/dev — infra-dev has four — and a named volume only inherits the image's content
+# while it is EMPTY. A binary baked under a volume's mountpoint is therefore visible on
+# the first container and hidden by the first volume from then on, which is a broken
+# `claude` on a rebuild months later for a reason nobody would connect back. Under /opt
+# nothing can shadow it.
+#
+# `~/.local/bin` IS FIRST ON PATH for the one case this cannot control: that is where
+# Claude Code's own installer puts its launcher, so if `claude install` is ever run in
+# here, or an update migrates this to a native install, the newer of the two answers to
+# `claude` rather than whichever was installed first.
+#
+# NODE AND NPM STAY IN THIS IMAGE FOR THIS, which is the trap the next tidy-up will
+# meet: the `claude` npm installs is a NATIVE binary that does not run on Node, so
+# nothing in ordinary use needs Node in here any more — but the updater for an npm
+# install shells out to `npm`, and with npm off PATH it fails reporting "Check your
+# internet connection", which points at the network rather than at the missing tool.
+# Measured 2026-09-21 by running the update both ways round. Removing Node would look
+# free and would silently stop this moving again.
+#
+# THE START STILL NEEDS NO NETWORK, which is the rule the baked collections and the
+# baked cloudflared are here for as well. The image carries a working claude; the update
+# is opportunistic, happens in the background of a session, and takes effect at the next
+# start. A container with no route out runs what it was built with, exactly as before.
+#
+# TO TURN IT OFF: `DISABLE_AUTOUPDATER: "1"` in a child's compose `environment:`. That
+# is Claude Code's own variable rather than a `DEV_*` of ours — a second name for a
+# switch the vendor already has is a second thing to remember — and the entrypoint
+# publishes the environment into ~/.ssh/environment, so it reaches ssh sessions too.
+#
+# ONE TRAP THIS CREATES: NPM_CONFIG_PREFIX is set for every user in the image, so a
+# child that does `USER root` and `npm install -g` lands its package in this same tree,
+# root-owned. That does not break claude — it already owns its own files — but it is how
+# a root-owned file appears in a dev-owned directory. Install as `dev`, or chown after.
+ENV NPM_CONFIG_PREFIX=/opt/npm-global \
+    PATH=/home/dev/.local/bin:/opt/npm-global/bin:$PATH
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g @anthropic-ai/claude-code \
-    && npm cache clean --force
+    && npm cache clean --force \
+    && chown -R "${USER_UID}:${USER_GID}" /opt/npm-global
 
 # GitHub CLI, from the release tarball rather than GitHub's apt repository — the
 # same shape destiny-director's Dockerfile.dev uses, and one fewer signing key and
@@ -234,6 +299,11 @@ RUN if ! getent group "${USER_GID}" >/dev/null; then \
 # a file that does not exist, and the entrypoint publishes the whole environment into
 # ~/.ssh/environment, so it would have travelled into every ssh session there too. A
 # setting that is only true for one child belongs in that child.
+#
+# PATH AND NPM_CONFIG_PREFIX ARE NOT HERE. They are set at the node block above,
+# because the build steps between there and here have to run with them — an ENV only
+# applies from where it is written. What they are for is the whole of that block's
+# comment: they are what lets Claude Code update itself.
 ENV TZ=Etc/UTC \
     ABDUCO_CMD=/usr/bin/fish \
     CLAUDE_CONFIG_DIR=/home/dev/.claude \
@@ -279,11 +349,42 @@ WORKDIR /workspace
 # sshd default, and it is created here so the `Include` at the top of sshd_config
 # always resolves — a glob that matches nothing is fine, a directory that is not there
 # is a line nobody can see failing.
+#
+# .local/bin is in the list for a different reason than the rest: nothing in this image
+# puts anything there, and it is first on PATH. It is where Claude Code's own installer
+# would land a launcher — so it exists, owned by `dev`, for an update that decides to
+# use it rather than the npm prefix.
 RUN mkdir -p /home/dev/.claude /home/dev/.config/gh /home/dev/.config/fish \
-        /home/dev/.ssh-host /home/dev/.ssh/cp /home/dev/.local/share \
+        /home/dev/.ssh-host /home/dev/.ssh/cp /home/dev/.local/share /home/dev/.local/bin \
         /home/dev/.screen /home/dev/.abduco /home/dev/sshd_config.d \
     && chmod 700 /home/dev/.ssh-host /home/dev/.ssh /home/dev/.ssh/cp \
         /home/dev/.screen /home/dev/.abduco
+
+# THE BUILD'S OWN CHECK THAT CLAUDE CODE CAN STILL UPDATE ITSELF, run as `dev` because
+# that is the account whose answer counts — it is the same question Claude Code asks
+# before every background update, asked at build time where a wrong answer is a failed
+# build rather than an image whose claude quietly never moves again. A missing chown, a
+# child that re-roots the prefix, a future npm that lays the tree out differently: each
+# one lands here.
+#
+# `claude --version` runs beside it and is DELIBERATELY NOT FATAL, which is the one
+# place here that guesses rather than refuses. The arm64 leg of dev-base.yml builds under
+# QEMU on a GitHub runner, this binary is a large self-contained one, and an emulator
+# declining to run it would fail the whole base build for a reason that says nothing
+# about the image — while the thing this file is actually asserting, the writability
+# above, has already passed. A container that really did get a broken claude says so at
+# its first start: the entrypoint prints the version in the boot log and `make verify`
+# reads it off the running container.
+#
+# Pointed at a throwaway CLAUDE_CONFIG_DIR: /home/dev/.claude is a volume mountpoint in
+# every child, an empty volume inherits whatever the image left there, and config written
+# by a build is not config anybody chose. HOME is named explicitly because a `USER` line
+# does not set it for a RUN.
+RUN test -w "${NPM_CONFIG_PREFIX}/lib/node_modules" \
+    && test -w "${NPM_CONFIG_PREFIX}/bin" \
+    && { HOME=/home/dev CLAUDE_CONFIG_DIR=/tmp/claude-build-check claude --version \
+         || echo "WARNING: claude did not answer --version in this build (QEMU on the arm64 leg?) — the prefix is writable, so the build stands; check the container's boot log"; } \
+    && rm -rf /tmp/claude-build-check
 
 # The in-container sshd: port 2222, non-root, key-only, no forwarding.
 COPY --chown=${USER_UID}:${USER_GID} sshd_config /home/dev/sshd_config

@@ -10,7 +10,7 @@
 # identical image locally UNDER THE SAME NAME, and docker prefers a local image over a
 # pull, so a GitHub outage or a metered month means building on the host with children
 # none the wiser.
-ARG BASE_TAG=2026.08.25
+ARG BASE_TAG=2026.09.21
 FROM ghcr.io/gsfernandes81/gsrpi-dev-base:${BASE_TAG}
 
 # The base ends as the dev user; the installs below write system paths.
@@ -22,11 +22,14 @@ USER root
 # the same run from in here crosses nothing that costs anything.
 #
 # ansible-core, never the `ansible` metapackage — the same rule as the phone, and
-# ansible/README.md has the sizes. PINNED EXACTLY, unlike Claude Code in the base, and
-# for a reason specific to there being two control nodes: a playbook that works on
-# one and not the other is the failure mode, and a floating version makes that
-# arrive at a moment of its own choosing. The phone is on 2.21.0 as of 2026-08-22;
-# that is a divergence and closing it means bumping the phone, not floating this.
+# ansible/README.md has the sizes. PINNED EXACTLY, and the contrast with Claude Code in
+# the base is now the sharper one: that is unpinned AND updates itself, this cannot. The
+# reason is specific to there being two control nodes — a playbook that works on one and
+# not the other is the failure mode, and a floating version makes that arrive at a moment
+# of its own choosing. A claude that is a week newer than the phone's costs nothing of
+# the kind; an ansible that is costs a run you cannot reproduce. The phone is on 2.21.0
+# as of 2026-08-22; that is a divergence and closing it means bumping the phone, not
+# floating this.
 ARG ANSIBLE_CORE_VERSION=2.21.3
 RUN pip install --no-cache-dir "ansible-core==${ANSIBLE_CORE_VERSION}" \
     && ansible --version

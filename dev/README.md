@@ -233,6 +233,83 @@ failure mode, and a floating version makes that arrive at a moment of its own ch
 The phone is on 2.21.0 and this image is on 2.21.3 — that is a real divergence, and
 closing it means bumping the phone, not floating this.
 
+## Claude Code updates itself
+
+**Since the `2026.09.21` base, the version of Claude Code in this container is a floor,
+not a fact.** It starts on whatever the image was built with and moves past it on its
+own, in the background, with the new version taking effect the next time you start a
+`claude`. That is the one thing a `BASE_TAG` no longer pins.
+
+**Why it had to change.** Claude Code ships several releases a week. Pinning it means a
+base rebuild, a tag bump and four repos moved for every one of them, which nobody was
+ever going to do — so what the pin actually bought was a container quietly months
+behind. Worse, the auto-updater *was* there all along and could not run: `npm install
+-g` as root writes `/usr/lib/node_modules`, every session in here runs as `dev`, and
+Claude Code says it cannot update itself exactly once, at start-up, inside a TUI, in a
+container you leave running for weeks.
+
+**What makes it work is one property.** The npm prefix is `/opt/npm-global` and it is
+owned by `dev`, so the account that runs `claude` can replace it. Nothing else is
+configured: no timer, no wrapper, no daemon of ours. The updater rewrites
+`/opt/npm-global/bin/claude` in place, so everything that names `claude` — an ssh
+session, `make claude`, the offloader matching on the process name — keeps working
+unchanged.
+
+**It is `/opt` rather than `~/.npm-global` for a reason worth keeping.** This container
+mounts four named volumes over paths inside `/home/dev`, and **a named volume only
+inherits the image's content while it is empty**. A binary baked under a volume's
+mountpoint is visible on the container that created that volume and hidden from every
+one after it — a `claude` that breaks on a rebuild months later, for a reason nobody
+would connect back to a volume. `~/.local/bin` is still first on `PATH`, because that is
+where Claude Code's own installer puts a launcher if one is ever run in here.
+
+**Node stays in the image because of this**, and it is worth knowing before somebody
+removes it: the `claude` npm installs is a native binary that does not run on Node, so
+nothing in ordinary use needs Node in here any more — but the updater shells out to
+`npm`, and with npm off `PATH` it fails saying *"Check your internet connection"*, which
+points at the network rather than at the missing tool.
+
+**A start still needs no network**, which is the same rule the baked collections and the
+baked `cloudflared` are here for. The image carries a working `claude`; the update is
+opportunistic. A container with no route out runs what it was built with.
+
+**What it costs**, stated rather than discovered: each container updates itself
+separately, so four dev containers on `zero` fetch the same release four times. That is
+zero's own home line and not the phone's radio — the [data budget](#why-this-exists)
+rule cares about the destination, and this one is free.
+
+### Reading it and steering it
+
+| | |
+|---|---|
+| what this container is running now | `make verify` — the `claude` line |
+| whether it can still update itself | `make verify` — the `autoupdate` line, from `claude doctor` |
+| what it started with, and when | `make boot-log` — the entrypoint prints the version at every start |
+| update now, without waiting | `make claude-update` |
+| stop updating | `DISABLE_AUTOUPDATER: "1"` in `compose.yaml`'s `environment:`, then `make up` |
+| follow the slower channel | `autoUpdatesChannel: "stable"` in `~/.claude/settings.json` (the `infra-claude` volume, so it survives rebuilds) — about a week behind, skipping releases with known major regressions |
+
+**The `autoupdate` line does not read the field you would expect, and that is the point.**
+`claude doctor` has an `Auto-updates:` field, and it says `enabled` **whether or not an
+update can actually land** — it reports the `DISABLE_AUTOUPDATER` setting and nothing
+else. Measured on 2.1.278, both ways round: an npm prefix owned by the account that runs
+claude and the same prefix owned by root print that identical line, and the only thing
+that differs is a warning, `Can't auto-update: npm global folder isn't writable`. So
+that warning is what `make verify` looks for, with `Last update attempt: success → …`
+as the corroboration — an update this container actually performed, which no reading of
+settings can fake. A check built on the obvious field would have passed on exactly the
+broken arrangement this change exists to fix.
+
+**How that was established**, since nothing in an agent session can reach a container on
+`zero`: both cases were built and run in a throwaway sandbox — install the npm package
+into a prefix, hand it to an unprivileged account, run `claude doctor` as that account,
+then `chown` the prefix to root and run it again. The end-to-end proof is separate and
+stronger: 2.1.275 installed into a user-owned prefix, `claude update` run as that
+account, `Successfully updated from 2.1.275 to version 2.1.278`, the `bin/claude` path
+unchanged and still owned by the user. What has *not* been run is the image itself —
+that needs `make base` or the `dev-base` workflow, and `make verify` on the container is
+the acceptance check.
+
 ## Cloudflare
 
 ### The order, and why it is this way round

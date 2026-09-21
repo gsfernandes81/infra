@@ -23,7 +23,7 @@ services:
       # `base` — the FROM pulls the tag from ghcr — so a tag bumped here and not yet
       # built by dev-base.yml fails on the pull until `make base` builds it locally.
       args:
-        BASE_TAG: ${BASE_TAG:-2026.08.25}
+        BASE_TAG: ${BASE_TAG:-2026.09.21}
     image: infra-dev
     container_name: infra-dev
     hostname: ${DEV_HOSTNAME:-infra-dev}  # Claude Code shows this as the machine title
@@ -82,6 +82,22 @@ services:
       #   DEV_IDLE_OFFLOAD: "0"            # keep idle sessions resident
       #   DEV_IDLE_OFFLOAD_SECONDS: "7200" # a longer leash (3600 is the floor it refuses under)
       #   DEV_IDLE_POLL_SECONDS: "600"     # look less often
+
+      # CLAUDE CODE UPDATES ITSELF, and nothing here switches that on: it is the image's
+      # npm prefix being writable by `dev` that does (dev/Dockerfile.base's node block).
+      # The container starts on the version its BASE_TAG was built with and moves past it
+      # on its own, in the background, taking effect at the next `claude`. `make verify`
+      # prints whether it can — the `autoupdate:` line — and `make claude-update` does it
+      # now rather than waiting.
+      #
+      # To STOP it, and stay on exactly what the image shipped:
+      #
+      #   DISABLE_AUTOUPDATER: "1"
+      #
+      # Claude Code's own variable, not a DEV_* of ours. The release CHANNEL is not a
+      # variable at all — `autoUpdatesChannel` in ~/.claude/settings.json, which is the
+      # infra-claude volume and so survives rebuilds: "stable" is roughly a week behind
+      # and skips releases with known major regressions, "latest" (the default) is not.
 
     volumes:
       # The host clone. `git pull` in the container and on the host are the same

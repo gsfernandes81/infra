@@ -10,6 +10,7 @@
 #   make fleet       prove zero, one and two answer — by ssh, then by ansible
 #   make collections check the image's collections against ansible/requirements.yml
 #   make claude      a claude in the container's `claude` abduco session
+#   make claude-update  update Claude Code now, and say whether it updates itself
 #   make shell       a fish shell in the container
 #   make logs        follow the container log (= sshd's)
 #   make boot-log    the entrypoint's start-up lines, from the top
@@ -54,11 +55,11 @@ DOCKER  := $(SUDO) docker
 # repo's back. THIS is the single source: COMPOSE passes it through the environment,
 # compose.yaml forwards it as a build arg, and the defaults in compose.yaml and
 # dev/Dockerfile are fallbacks that only matter outside `make`.
-BASE_TAG := 2026.08.25
+BASE_TAG := 2026.09.21
 
 .PHONY: help dev base up restart down down-volumes status verify collections logs \
-	boot-log tunnel-log idle offload-log login claude shell fleet _require-env \
-	_require-secrets _require-uid
+	boot-log tunnel-log idle offload-log login claude claude-update shell fleet \
+	_require-env _require-secrets _require-uid
 
 help:
 	@awk '/^#/ { sub(/^# ?/, ""); print; next } { exit }' $(MAKEFILE_LIST)
@@ -195,3 +196,19 @@ claude:
 
 shell:
 	$(DOCKER) exec -it $(CONTAINER) fish
+
+# Claude Code updates ITSELF in the background and the new version takes effect at the
+# next `claude`, so this is not how it normally moves — it is how you move it NOW,
+# without waiting for a session to notice, and how you see what state the mechanism is
+# in. The second command is the readout, and the line to look for is `Can't auto-update`,
+# NOT `Auto-updates: enabled` — measured 2026-09-21, the latter says `enabled` even on an
+# install that cannot write its own directory and will never move. status.sh's
+# `autoupdate` line explains that at length; this prints both and lets you read them.
+#
+# Not `-it`: both commands print and exit, and a tty here would only matter if one of
+# them decided to ask something, which is exactly what a management target should not do.
+claude-update:
+	$(DOCKER) exec $(CONTAINER) claude update
+	$(DOCKER) exec $(CONTAINER) sh -c \
+	  "claude doctor 2>/dev/null | grep -E \"^(Auto-updates|Auto-update channel|Last update attempt):|Can't auto-update\"" \
+	  || echo "claude doctor said nothing about updating — run it in the container: make shell"

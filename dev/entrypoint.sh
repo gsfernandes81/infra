@@ -220,6 +220,23 @@ fi
 # It persists in the infra-claude volume and survives rebuilds.
 mkdir -p "$CFG"
 
+# WHICH CLAUDE THIS CONTAINER STARTED WITH, and the reason it is worth a line in every
+# boot log: the version is no longer a property of the image. Claude Code updates itself
+# in place now — the reasoning is in Dockerfile.base's node block — so `make boot-log` is
+# the only place that records what a container was actually running on a given day, and
+# the difference between this line and `claude --version` today is the update that
+# happened while it ran.
+#
+# `--version` asks nothing of the network and answers in milliseconds. The timeout is
+# there because this runs ahead of the door and a readout must not be able to hold it
+# shut, which is the same rule child-init.sh is bounded by.
+#
+# Captured before it is tested, not `… | head -1 || echo`: a `||` after a pipeline tests
+# the LAST command in it, so `head` succeeding on empty input would report a claude that
+# answered when none did. CLAUDE.md § *Shell traps* has the general form.
+claude_version="$(timeout 20 claude --version 2>/dev/null | head -1)"
+say "claude ${claude_version:-DID NOT ANSWER --version — this container has no working claude}"
+
 # A file left holding empty tokens is worse than no file: `claude auth status` reports
 # loggedIn false either way, but the login flow can trip over the husk.
 if [ -f "$CFG/.credentials.json" ] && ! grep -q '"accessToken": *"[^"]' "$CFG/.credentials.json" 2>/dev/null; then

@@ -167,6 +167,36 @@ verify() {
     printf 'gh        : %s\n' "$(d exec "$CONTAINER" gh --version 2>&1 | head -1 || echo 'MISSING — the release tarball did not unpack to /usr/local/bin')"
     printf 'screen    : %s\n' "$(d exec "$CONTAINER" screen --version 2>&1 | head -1 || echo 'MISSING')"
     printf 'claude    : %s\n' "$(d exec "$CONTAINER" claude --version 2>&1 | head -1 || echo 'MISSING')"
+    # The version above is not what a rebuild landed any more — Claude Code updates
+    # itself in place, so it is whatever this container has reached by now. THIS line is
+    # the one that says whether it still can.
+    #
+    # AND IT DELIBERATELY DOES NOT READ `Auto-updates:`, WHICH IS THE OBVIOUS FIELD AND
+    # THE WRONG ONE. Measured 2026-09-21 against Claude Code 2.1.278, both ways round:
+    # with the npm prefix owned by the account that runs claude, and with it owned by
+    # root as the old image had it, `claude doctor` prints `Auto-updates: enabled` in
+    # BOTH cases — that field reports the DISABLE_AUTOUPDATER setting and nothing about
+    # whether an update can land. The difference between the two runs was a warning,
+    # `Can't auto-update: npm global folder isn't writable`, and that string is
+    # therefore what this looks for. A check calibrated against a known-good container
+    # only would have passed for the wrong reason on a container that could not update
+    # at all, which is the failure this repo keeps re-learning.
+    #
+    # `Last update attempt` is the corroboration: `success -> <version> (<date>)` is an
+    # update that actually happened in this container, which no amount of reading
+    # settings can fake.
+    local doctor autoupdate blocked attempt
+    doctor="$(d exec "$CONTAINER" sh -c 'timeout 30 claude doctor 2>/dev/null' 2>/dev/null)"
+    autoupdate="$(printf '%s\n' "$doctor" | sed -n 's/^Auto-updates: *//p' | head -1)"
+    blocked="$(printf '%s\n' "$doctor" | grep -o "Can't auto-update.*" | head -1)"
+    attempt="$(printf '%s\n' "$doctor" | sed -n 's/^Last update attempt: *//p' | head -1)"
+    if [ -z "$doctor" ]; then
+        printf 'autoupdate: %s\n' 'could not read `claude doctor` — run it in the container'
+    elif [ -n "$blocked" ]; then
+        printf 'autoupdate: %s\n' "BLOCKED — $blocked (see dev/README.md)"
+    else
+        printf 'autoupdate: %s\n' "$autoupdate, nothing blocking it; last attempt: ${attempt:-unknown}"
+    fi
     printf 'cloudflared: %s\n' "$(d exec "$CONTAINER" cloudflared --version 2>&1 | head -1 || echo 'MISSING — the hash-pinned download did not land')"
     # The one the phone's RemoteCommand names. Absent here and `ssh infra-dev` fails with
     # "Unknown command: in-workspace" from the container's fish — which reads like a
