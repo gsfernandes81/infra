@@ -429,6 +429,10 @@ infra-dev · 6 open · 812M of 1.0G
 
 ### Mockup 4 — No room to open another
 ```
+infra-dev · 6 open · 892M of 1.0G
+────────────────────────────────────────
+5 z   mount guards on one             2d
+6 u   claude                          5h
 ╭──────────────────────────────────────╮
 │ No room for another claude           │
 │                                      │
@@ -445,6 +449,10 @@ infra-dev · 6 open · 812M of 1.0G
 
 ### Mockup 5 — A resume that fails
 ```
+infra-dev · 6 open · 812M of 1.0G
+────────────────────────────────────────
+5 z   mount guards on one             2d
+6 u   claude                          5h
 ╭──────────────────────────────────────╮
 │ Slot 5 did not resume                │
 │                                      │

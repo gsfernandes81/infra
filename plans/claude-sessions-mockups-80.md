@@ -43,47 +43,55 @@ infra-dev · 6 open · 812M of 1.0G
 ────────────────────────────────────────────────────────────────────────────────
 1 !   permission: write hosts/one                                             2m
 2 *   retire the old tunnel                                                  14m
-╭──────────────────────────────────────────────────────────────────────────────╮
-│ Close slot 2?                                                                │
-│   retire the old tunnel                                                      │
-│                                                                              │
-│ Running. Stops the process, not the                                          │
-│ conversation — resumable from disk.                                          │
-│                                                                              │
-│ y close    n keep                                                            │
-╰──────────────────────────────────────────────────────────────────────────────╯
+                    ╭──────────────────────────────────────╮
+                    │ Close slot 2?                        │
+                    │   retire the old tunnel              │
+                    │                                      │
+                    │ Running. Stops the process, not the  │
+                    │ conversation — resumable from disk.  │
+                    │                                      │
+                    │ y close    n keep                    │
+                    ╰──────────────────────────────────────╯
 ```
 
 ### Mockup 4 — No room to open another
 ```
-╭──────────────────────────────────────────────────────────────────────────────╮
-│ No room for another claude                                                   │
-│                                                                              │
-│ 892M of 1.0G used. A new one wants                                           │
-│ about 250M.                                                                  │
-│                                                                              │
-│ Offload slot 5, idle 2d?                                                     │
-│   mount guards on one                                                        │
-│   resumable from disk                                                        │
-│                                                                              │
-│ y offload, then open    n cancel                                             │
-╰──────────────────────────────────────────────────────────────────────────────╯
+infra-dev · 6 open · 892M of 1.0G
+────────────────────────────────────────────────────────────────────────────────
+5 z   mount guards on one                                                     2d
+6 u   claude                                                                  5h
+                    ╭──────────────────────────────────────╮
+                    │ No room for another claude           │
+                    │                                      │
+                    │ 892M of 1.0G used. A new one wants   │
+                    │ about 250M.                          │
+                    │                                      │
+                    │ Offload slot 5, idle 2d?             │
+                    │   mount guards on one                │
+                    │   resumable from disk                │
+                    │                                      │
+                    │ y offload, then open    n cancel     │
+                    ╰──────────────────────────────────────╯
 ```
 
 ### Mockup 5 — A resume that fails
 ```
-╭──────────────────────────────────────────────────────────────────────────────╮
-│ Slot 5 did not resume                                                        │
-│                                                                              │
-│ claude --resume 0f9c4a1e exited 1                                            │
-│   No conversation found with that                                            │
-│   session id                                                                 │
-│                                                                              │
-│ Left offloaded. Nothing was deleted;                                         │
-│ the transcript may be gone.                                                  │
-│                                                                              │
-│ r retry   c close it   ↵/Esc back                                            │
-╰──────────────────────────────────────────────────────────────────────────────╯
+infra-dev · 6 open · 812M of 1.0G
+────────────────────────────────────────────────────────────────────────────────
+5 z   mount guards on one                                                     2d
+6 u   claude                                                                  5h
+                    ╭──────────────────────────────────────╮
+                    │ Slot 5 did not resume                │
+                    │                                      │
+                    │ claude --resume 0f9c4a1e exited 1    │
+                    │   No conversation found with that    │
+                    │   session id                         │
+                    │                                      │
+                    │ Left offloaded. Nothing was deleted; │
+                    │ the transcript may be gone.          │
+                    │                                      │
+                    │ r retry   c close it   ↵/Esc back    │
+                    ╰──────────────────────────────────────╯
 ```
 
 ### Mockup 6 — Back from a slot, after detaching
