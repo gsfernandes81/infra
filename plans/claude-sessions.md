@@ -323,10 +323,14 @@ in *Why* was measured on a container in this state.
    - which managed-settings path the installed Claude Code reads;
    - where the session title lives in a transcript.
    Findings are written into this plan before Phase 3 starts.
-1. **Agent view off** — managed settings in `Dockerfile.base`, `BASE_TAG` bump, a
-   `decisions.md` row, `dev/README.md` updated. Recreating each container on the new base
-   clears any daemon and spares left running. Independent of everything below; can ship
-   first.
+1. ✔ **DONE 2026-10-01 — Agent view off.** `dev/claude-managed-settings.json` baked to
+   `/etc/claude-code/managed-settings.json` plus `CLAUDE_CODE_DISABLE_AGENT_VIEW=1` in the
+   image ENV, `BASE_TAG` → `2026.10.01` (Makefile, `dev/Dockerfile`, `dev/compose.yaml`'s
+   fallback), an `agentview` line in `make verify` that prints **both** switches, the
+   `dev/README.md` section and the `decisions.md` row. **Not yet in effect anywhere:**
+   nothing changes until each container is recreated on the new base, which is the
+   owner's to run — and that recreation is also what clears any daemon and spares still
+   running. The other dev repos pick it up when they bump `BASE_TAG`.
 2. **Mockups — OWNER APPROVAL GATE.**
    - Before any rendering code, give the owner plain-text mockups **at 40 columns**,
      drawn exactly as they would render, **inline in this plan** under a heading

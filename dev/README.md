@@ -353,6 +353,60 @@ unchanged and still owned by the user. What has *not* been run is the image itse
 that needs `make base` or the `dev-base` workflow, and `make verify` on the container is
 the acceptance check.
 
+## The agent view is off, and cannot be turned back on in here
+
+**Pressing ← at an empty prompt costs a gigabyte.** The footer offers it — *"← for
+agents"* — and what it starts is a `claude daemon`, a warm `bg-spare` with its
+`bg-pty-host`, and further full sessions behind those. Measured on 2026-10-01 against
+Claude Code 2.1.286, in a pty with a throwaway config:
+
+| state | RSS |
+|---|---|
+| plain interactive session, idle 60 s | ~250 MB — `claude` alone, no daemon |
+| after one **←** at an empty prompt | ~1,260 MB |
+| back at the prompt a minute later | ~1,250 MB — nothing released |
+| after that session exited | ~690 MB still running, until `claude daemon stop --any` |
+
+`zero` has 4 GB and carries four of these containers. That last row is the part that
+matters most: the leftovers **outlive the session that started them** and are invisible
+to [the idle offloader](#the-idle-claude-offloader), which walks down from abduco and
+finds nothing above them. or3-dev was holding ~700 MB of daemon and spares on
+2026-10-01 for precisely this reason.
+
+**So the base bakes `{"disableAgentView": true}` into
+`/etc/claude-code/managed-settings.json`.** Managed settings, not a user or project
+setting, because this is fleet policy about zero's RAM rather than a repo's preference:
+a checkout's `.claude/settings.json` and the `~/.claude/settings.json` on the
+`infra-claude` volume both lose to it. **←** then does nothing, `claude agents` refuses
+by name (*"disabled by the 'disableAgentView' setting"*), and no daemon starts.
+
+**What it costs, stated rather than discovered:** `claude --bg` and `claude agents` are
+unavailable in these containers. That is the intended trade, not a side effect.
+
+**There are two switches, and `make verify` prints both.** The image also sets
+`CLAUDE_CODE_DISABLE_AGENT_VIEW=1`, which the entrypoint publishes into
+`~/.ssh/environment` so it reaches ssh sessions too. The file is the authority; the
+variable is there because *which path a given Claude Code reads managed settings from*
+is not something anything in here can check, those locations have moved before, and a
+policy file in the wrong place fails silently and looks exactly like one in force. A
+variable has no place to be wrong about. Hence:
+
+```
+agentview : managed settings say off; env=1
+```
+
+and not a single PASS — a verdict that collapsed the two would hide the one case they
+exist for. The line reads the file's *content*, not its existence: an empty or truncated
+file passes `test -f` and leaves the view on.
+
+**The measurement's caveats**, because they are the reason this is a floor and not a
+final number: it used a dummy API key rather than a claude.ai login, and the binary
+skips warm spares when free memory is under ~1 GB, so a loaded `zero` may already have
+been getting a cheaper version of the bad case. Re-measuring on a real login is Phase 0
+work still open in [`../plans/claude-sessions.md`](../plans/claude-sessions.md), which is
+the design this belongs to — cheap idle sessions are its first half, and finding your
+way back to a session after a disconnect is the rest.
+
 ## Cloudflare
 
 ### The order, and why it is this way round

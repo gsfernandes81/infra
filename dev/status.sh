@@ -226,6 +226,29 @@ verify() {
     else
         printf 'autoupdate: %s\n' "$autoupdate, nothing blocking it; last attempt: ${attempt:-unknown}"
     fi
+    # AGENT VIEW OFF, PRINTED AS TWO SWITCHES rather than one verdict. The managed
+    # settings file is the authority — no project or user settings file can override it
+    # — and the env var is belt-and-braces for the thing nobody here can check from
+    # outside: which path this version of Claude Code actually reads managed settings
+    # from. Collapsing them into a single PASS would hide exactly the case they exist
+    # for, a file in the wrong place looking identical to one in force.
+    #
+    # The FILE is read, not tested for existence: an empty or truncated file passes
+    # `test -f` and turns the view back on. The VARIABLE is read in a fresh exec, which
+    # inherits the image's ENV and nothing else — so this line says what the image sets,
+    # which is what a rebuild is being verified for, and not what some shell exported.
+    local agentview_file agentview_env
+    agentview_file="$(d exec "$CONTAINER" sh -c \
+        'cat /etc/claude-code/managed-settings.json 2>/dev/null' 2>/dev/null | tr -d ' \n')"
+    agentview_env="$(d exec "$CONTAINER" sh -c \
+        'printf %s "${CLAUDE_CODE_DISABLE_AGENT_VIEW-}"' 2>/dev/null)"
+    case "$agentview_file" in
+        *'"disableAgentView":true'*) agentview_file='managed settings say off' ;;
+        '') agentview_file='NO /etc/claude-code/managed-settings.json — this image predates it (make up)' ;;
+        *)  agentview_file="PRESENT BUT NOT OFF — $agentview_file" ;;
+    esac
+    printf 'agentview : %s; env=%s\n' "$agentview_file" \
+        "${agentview_env:-UNSET — the image should set CLAUDE_CODE_DISABLE_AGENT_VIEW=1}"
     tool cloudflared 'the hash-pinned download did not land' cloudflared --version
     # The one the phone's RemoteCommand names. Absent here and `ssh infra-dev` fails with
     # "Unknown command: in-workspace" from the container's fish — which reads like a

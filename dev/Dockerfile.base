@@ -5,8 +5,8 @@
 # This is dev/README.md § *Four copies of this* built: the ~700 lines that dd-dev,
 # ds-dev, or3-dev and infra-dev agreed on, in one place. Debian trixie slim (glibc 2.41
 # since 2026-09-21; bookworm and its 2.36 before that), Node + Claude
-# Code, gh, abduco, sshd, fish, the dev user, cloudflared, the entrypoint and every
-# dotfile. A repo's own dev/Dockerfile becomes a FROM line
+# Code (with the agent view off by baked managed settings), gh, abduco, sshd, fish, the
+# dev user, cloudflared, the entrypoint and every dotfile. A repo's own dev/Dockerfile becomes a FROM line
 # plus whatever that repo needs on top — see dev/Dockerfile here for the shape
 # (ansible), or or3's for the other one (uv, and its own ssh identity).
 #
@@ -347,6 +347,14 @@ RUN if ! getent group "${USER_GID}" >/dev/null; then \
 # ~/.ssh/environment, so it would have travelled into every ssh session there too. A
 # setting that is only true for one child belongs in that child.
 #
+# CLAUDE_CODE_DISABLE_AGENT_VIEW is the SECOND of the two switches that turn the agent
+# view off, and it is here rather than in the managed settings file for one reason: it
+# cannot be aimed at the wrong path. The authority is
+# /etc/claude-code/managed-settings.json, copied in below, and which directory a given
+# Claude Code reads managed settings from is a thing that has moved before. A file in the
+# wrong place fails silently and looks exactly like one in force; this variable does not
+# have a place to be wrong about. The full reasoning is at that COPY.
+#
 # PATH AND NPM_CONFIG_PREFIX ARE NOT HERE. They are set at the node block above,
 # because the build steps between there and here have to run with them — an ENV only
 # applies from where it is written. What they are for is the whole of that block's
@@ -354,6 +362,7 @@ RUN if ! getent group "${USER_GID}" >/dev/null; then \
 ENV TZ=Etc/UTC \
     ABDUCO_CMD=/usr/bin/fish \
     CLAUDE_CONFIG_DIR=/home/dev/.claude \
+    CLAUDE_CODE_DISABLE_AGENT_VIEW=1 \
     GH_CONFIG_DIR=/home/dev/.config/gh \
     HISTFILE=/home/dev/.local/share/.bash_history \
     SCREENRC=/home/dev/.screenrc \
@@ -380,6 +389,40 @@ ENV TZ=Etc/UTC \
 # lost on a file that has to be executable or nothing runs it.
 COPY in-workspace /usr/local/bin/in-workspace
 RUN chmod 0755 /usr/local/bin/in-workspace
+
+# THE AGENT VIEW IS OFF FLEET-WIDE, AND THIS FILE IS THE AUTHORITY. Pressing ← at an
+# empty prompt — the footer offers it, "← for agents" — starts a `claude daemon`, a warm
+# `bg-spare` with its `bg-pty-host`, and further full sessions behind them. Measured
+# 2026-10-01 against Claude Code 2.1.286, in a pty with a throwaway config: an idle
+# session goes from ~250 MB RSS to ~1,260 MB on that one keypress, is still at ~1,250 MB
+# a minute later at the prompt, and leaves ~690 MB running after the session itself
+# exits. The leftovers are invisible to offload-idle-claude.sh, which walks down from
+# abduco and finds nothing above them. On a 4 GB Pi carrying four of these containers,
+# that is the budget, spent by a keystroke nobody meant to press — or3-dev was holding
+# ~700 MB of daemon and spares on 2026-10-01 for exactly this reason.
+#
+# MANAGED SETTINGS RATHER THAN ANY OTHER SETTINGS FILE, because this is fleet policy
+# about zero's RAM and not a repo's preference. A project's .claude/settings.json and
+# the user's own ~/.claude/settings.json both lose to this one, so no checkout and no
+# login can turn the view back on. The cost is stated rather than discovered: `claude
+# --bg` and `claude agents` do not work in these containers, the latter refusing by
+# name ("disabled by the 'disableAgentView' setting"). That is the point, and
+# plans/claude-sessions.md is the design that wants it.
+#
+# ROOT-OWNED, AND NOT UNDER /home/dev — both load-bearing. A policy file the account it
+# governs can rewrite is not a policy; and every child mounts named volumes over paths
+# inside /home/dev, where a baked file is visible on the container that created the
+# volume and hidden from every one after it.
+#
+# WHICH PATH THE INSTALLED CLAUDE CODE READS IS NOT ESTABLISHED, and that is what the
+# CLAUDE_CODE_DISABLE_AGENT_VIEW in the ENV block above is for. This is the documented
+# path, but managed-settings locations have moved before, a file in the wrong place
+# fails silently and looks exactly like one in force, and a variable has no place to be
+# wrong about. Phase 0 of plans/claude-sessions.md could not close that question from
+# inside a container, so both ship and `make verify` prints BOTH rather than concluding
+# the view is off from either one.
+COPY claude-managed-settings.json /etc/claude-code/managed-settings.json
+RUN chmod 0644 /etc/claude-code/managed-settings.json
 
 USER ${USERNAME}
 WORKDIR /workspace
