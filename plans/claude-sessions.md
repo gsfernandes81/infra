@@ -48,9 +48,9 @@ be:
   order and opens the chosen one — reattached if live, resumed if offloaded.
 - Ending a session is a deliberate act with one obvious spelling.
 
-**Not in scope:** merging the per-repo containers — but the owner intends to, so the
-design must work for one container holding several repos (the new-session flow asks for a
-repo when there is more than one); cloud sessions (claude.ai/code); anything on the phone
+**Not in scope:** merging the per-repo containers. It is not decided, and cheap idle
+sessions may remove the reason for it; nothing here should assume either layout. Cloud
+sessions (claude.ai/code); anything on the phone
 beyond the ssh config the client play already writes.
 
 ## Design
@@ -67,7 +67,7 @@ containers, which is the point.
 
 ### 2. Slots, conversations and the registry
 
-A **slot** is one abduco session (name `berth-<n>`), i.e. one running claude process. A
+A **slot** is one abduco session (name `claude-<n>`), i.e. one running claude process. A
 slot holds a sequence of **conversations** (Claude session ids): `/clear` starts a new one
 in the same process, `--resume` re-enters an old one. The registry is keyed by slot:
 
@@ -79,7 +79,7 @@ States: **attached** / **detached** (from abduco's listing, never stored) · **o
 **closed**. **Unread** is derived, not stored: a `Stop` later than `last_attach` — the
 session finished something while you were away.
 
-**Storage:** `~/.local/share/berth/`, one JSON file per slot, written tmp-then-rename,
+**Storage:** `~/.local/share/claude-sessions/`, one JSON file per slot, written tmp-then-rename,
 under a per-slot `flock` taken with a timeout. `~/.local/share` is already a persisted
 volume in all four children, and it keeps Claude's config directory Claude's. **The same
 per-slot lock is held by whoever acts on a slot** — the launcher attaching or resuming,
@@ -88,7 +88,7 @@ the current script only narrows, and makes "never resume a conversation that is 
 running" atomic across two ssh logins.
 
 **Which slot a hook belongs to:** the launcher starts each slot as
-`abduco -c berth-<n> env BERTH_SLOT=berth-<n> claude …`, so every hook inherits the name.
+`abduco -c claude-<n> env CLAUDE_SESSIONS_SLOT=claude-<n> claude …`, so every hook inherits the name.
 A hook binds to the slot **only when its claude is the direct child of that slot's abduco
 server** (checked in `/proc`); a nested claude — a `claude -p` from a Bash tool call, a
 subagent's — inherits the variable too, and must count as work running under the slot,
@@ -97,7 +97,7 @@ sessions*) are found by walking `/proc` from the hook up to the first claude who
 is an abduco server.
 
 **Hooks write the registry,** configured in the same managed settings, so every repo gets
-them without touching its `.claude/`. `berth hook` reads the event's JSON on stdin.
+them without touching its `.claude/`. `claude-sessions hook` reads the event's JSON on stdin.
 **It always exits 0**, logs its own failures to its log, and never blocks: a hook that
 exits 2 on `UserPromptSubmit` blocks the prompt, and on `Stop` it makes Claude carry on —
 a registry bug would wedge every session in the fleet. A test pins this.
@@ -117,16 +117,16 @@ a registry bug would wedge every session in the fleet. A test pins this.
 else the first user prompt, truncated. Phase 0 confirms where that lives.
 
 **Container restart:** `stop`/`start` keeps `~/.abduco` sockets on disk and reuses pids.
-The entrypoint runs `berth reconcile` at start: every slot whose pid + start time is gone
+The entrypoint runs `claude-sessions reconcile` at start: every slot whose pid + start time is gone
 becomes `offloaded`, and stale abduco sockets are removed.
 
 **Unregistered sessions:** until every client has re-run `configure-client.yml` (phone,
 WSL and Windows), `ssh <c>` still runs `abduco -A claude claude`, and so does
 `make claude` in all four repos and anything started by hand from `<c>-sh`. The menu lists
-**abduco's sessions ∪ the registry**, marking the ones it did not start; `berth offload`
+**abduco's sessions ∪ the registry**, marking the ones it did not start; `claude-sessions offload`
 keeps today's transcript-clock rule (and the hour floor) for those.
 
-### 3. The offloader, rewritten as `berth offload`
+### 3. The offloader, rewritten as `claude-sessions offload`
 
 Same contract as today — never an attached slot, never one with work running under it,
 never without evidence — with the hook state replacing the transcript clock:
@@ -147,17 +147,17 @@ never without evidence — with the hook state replacing the transcript clock:
   (CLAUDE.md, *Verifying changes*): it ships logging what it *would* kill for a week, the
   owner reads that log, and only then is it enabled.
 
-### 4. The launcher, `berth` — a Rust TUI
+### 4. The launcher, `claude-sessions` — a Rust TUI
 
-Reached through a door script, not directly: `berth-door` (in the image, beside
-`in-workspace`) runs `berth`, and if it exits non-zero prints why and `exec "$SHELL" -l` —
-`$SHELL`, because dd and dossier set the login shell to bash. Every lock `berth` takes has a
+Reached through a door script, not directly: `claude-sessions-door` (in the image, beside
+`in-workspace`) runs `claude-sessions`, and if it exits non-zero prints why and `exec "$SHELL" -l` —
+`$SHELL`, because dd and dossier set the login shell to bash. Every lock `claude-sessions` takes has a
 timeout, so a stuck lock cannot hold the door shut. `<c>-sh` remains the break-glass.
 
 - **Lists open slots** — live and offloaded, never closed, plus unregistered abduco
   sessions. Order: needs you, then unread, then most recent activity. Each row: mark,
   repo, title, age. Marks: needs you · unread · attached elsewhere · offloaded ·
-  timer pending · not started by berth (glyphs settled in the mockups).
+  timer pending · not started by claude-sessions (glyphs settled in the mockups).
 - **Opening a row:** live → `abduco -a` it; offloaded → start a new slot running
   `claude --resume <session_id>` in its cwd. abduco runs as a **child**, and on detach the
   menu comes back — a fresh login costs an Access handshake on the metered link.
@@ -166,7 +166,8 @@ timeout, so a stuck lock cannot hold the door shut. `<c>-sh` remains the break-g
 - **Guards:** never resume a conversation already running in another slot (two processes
   on one conversation fork it) — checked under the slot lock. When the cgroup is near its
   limit, offer to offload the longest-idle detached slot before starting another.
-- **New session:** `n`; asks for a repo only when the container holds more than one.
+- **New session:** `n`, in the workspace. (No repo picker: each container holds one
+  workspace. If containers are ever merged, a picker is a small addition then.)
 - **Close:** `c` on a row marks it closed (and stops it if live, after a confirm). The
   conversation stays on disk and in `claude --resume`.
 - **Shell:** `q` drops to a login shell in the workspace.
@@ -187,21 +188,21 @@ timeout, so a stuck lock cannot hold the door shut. `<c>-sh` remains the break-g
 
 ### 6. One binary, built outside this repo
 
-`berth` (menu, default), `berth hook`, `berth offload`, `berth reconcile`, `berth close`,
-`berth doctor`: one Rust binary, so the hook path, the offloader and the menu share one
+`claude-sessions` (menu, default), `claude-sessions hook`, `claude-sessions offload`, `claude-sessions reconcile`, `claude-sessions close`,
+`claude-sessions doctor`: one Rust binary, so the hook path, the offloader and the menu share one
 registry implementation and one set of tests.
 
-**The source lives in its own repo, `berth`** (owner, 2026-10-01) — this one is "config
+**The source lives in its own repo, `claude-sessions`** (owner, 2026-10-01) — this one is "config
 only — no source". That repo must be **public**: the base is built on a public GitHub
 runner with no token. It publishes static (musl) arm64 + amd64 binaries as releases,
 **cross-compiled** on the runner (the base itself builds its arm64 layer under QEMU, which
 would be very slow for Rust). `Dockerfile.base` downloads a **pinned** release and checks
 a per-arch SHA-256, in the shape of `CLOUDFLARED_SHA256_*` there, and runs
-`berth --version` as a **fatal** check — a static binary has no excuse not to run.
+`claude-sessions --version` as a **fatal** check — a static binary has no excuse not to run.
 
-**`berth` is pinned; Claude floats** (it updates itself in place). A change in a hook
+**`claude-sessions` is pinned; Claude floats** (it updates itself in place). A change in a hook
 payload degrades to "no evidence", which is safe, but RAM would creep back silently.
-`berth doctor` prints, per slot, when each event type was last seen, and `make verify`
+`claude-sessions doctor` prints, per slot, when each event type was last seen, and `make verify`
 shows it.
 
 ## Phases
@@ -228,7 +229,7 @@ shows it.
    - Before any rendering code, give the owner plain-text mockups **at 40 columns**,
      drawn exactly as they would render, **inline in this plan** under a heading
      `## Mockups`. They must cover: the list with every mark mixed; the empty list; the
-     new-session repo picker; the close confirmation; the low-memory offer; a resume that
+     close confirmation; the low-memory offer; a resume that
      fails; the screen after detaching from a slot; and the narrowest width at which the
      hint line still shows a way out. 80-column versions go in a separate file — the owner
      reads on a 40-column phone, where they would wrap.
@@ -237,19 +238,19 @@ shows it.
    - **Phase 4 begins with the first commit that adds ratatui, crossterm or any rendering
      code, and that commit cannot be made until the approved heading exists.** Its first
      act is a `decisions.md` row citing that heading. The approved mockups are copied into
-     the `berth` repo's docs when Phase 4 starts.
-3. **Registry, `berth hook`, `berth reconcile`** — the state machine, unit-tested over the
+     the `claude-sessions` repo's docs when Phase 4 starts.
+3. **Registry, `claude-sessions hook`, `claude-sessions reconcile`** — the state machine, unit-tested over the
    event table above, including `/clear`, resume, offload-then-`SessionEnd`, a nested
    claude, an idle-prompt notification, container restart, and two writers at once; plus
    the always-exit-0 test.
 4. **The TUI**, to the approved mockups. Rendering tested at 40×24 and 80×24 against a test
    backend; the zero-idle-bytes property tested under a pty; ordering and the guards
    unit-tested.
-5. **`berth offload`** replaces `offload-idle-claude.sh` (deleted in the same commit). The
+5. **`claude-sessions offload`** replaces `offload-idle-claude.sh` (deleted in the same commit). The
    orphan sweep ships dry-run, logging, and is armed only after the owner has read a
    week of its log.
 6. **Switch the door** — `ansible/templates/ssh-dev-block.j2`'s RemoteCommand becomes
-   `in-workspace berth-door`; the owner runs the client play from each client. Then
+   `in-workspace claude-sessions-door`; the owner runs the client play from each client. Then
    **delete this plan.**
 
 Phases 1 and 2 can run in parallel. Each phase lands on `main` complete and non-breaking.
@@ -272,7 +273,7 @@ agent view and must change with them:
 - **children** (in their own repos, when they bump `BASE_TAG`): `or3/dev/Makefile` and
   README; destiny-director's `Makefile`, `CLAUDE.md`, `docker-compose.dev.yml`,
   `docs/pi_dev_setup.md`; dossier's `Makefile` and `CLAUDE.md`.
-- **`docs/decisions.md` rows:** agent view off; `berth` is the door; source in its own
+- **`docs/decisions.md` rows:** agent view off; `claude-sessions` is the door; source in its own
   repo with a pinned, checksummed release; the 10-minute threshold; the registry's
   location and locking; one binary.
 
@@ -281,20 +282,16 @@ agent view and must change with them:
 - The source lives in its own repo; the base pulls a pinned release.
 - Offload threshold: 10 minutes after `Stop`, once timers are visible.
 - No learning-material commenting requirement; ordinary comment density.
+- The tool is called `claude-sessions`.
 - Menu ages tick at most once a minute; otherwise the menu is silent.
 - A slot with a pending timer is **never offloaded**, whoever set the timer; the menu marks
   it, so a forgotten `/loop` is visible and closable.
-
-## Still open
-
-**The name.** `berth` is a working name; the owner wants a plainer, non-ship one. Rename
-before Phase 2's mockups so they show the real name.
 
 ## Deferred — maybe not needed
 
 **A long-interval wake tool.** ScheduleWakeup clamps at an hour, and with timers pinning a
 slot, a loop that wants to wait longer holds its RAM the whole time. A tool Claude could
 call in place of ScheduleWakeup — "wake me in six hours with this prompt" — would let
-`berth offload` stop the slot and resume it when due, replaying the prompt. Only worth
+`claude-sessions offload` stop the slot and resume it when due, replaying the prompt. Only worth
 building if long waits turn out to be common; it needs Phase 0 to show a resumed session
 accepts a replayed prompt.
