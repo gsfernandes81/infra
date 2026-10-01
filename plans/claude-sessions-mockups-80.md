@@ -47,9 +47,10 @@ infra-dev · 6 open · 812M of 1.0G
 │ Close slot 2?                                                                │
 │   retire the old tunnel                                                      │
 │                                                                              │
-│ It is running. This stops it.                                                │
-│ The conversation stays on disk, and                                          │
-│ in claude --resume.                                                          │
+│ It is running, and resumable from                                            │
+│ disk afterwards: this stops the                                              │
+│ process, not the conversation.                                               │
+│ claude --resume brings it back.                                              │
 │                                                                              │
 │ y close    n keep                                                            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
