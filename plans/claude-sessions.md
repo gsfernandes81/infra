@@ -205,6 +205,108 @@ payload degrades to "no evidence", which is safe, but RAM would creep back silen
 `claude-sessions doctor` prints, per slot, when each event type was last seen, and `make verify`
 shows it.
 
+## Phase 0 findings, 2026-10-01 — PARTIAL, and what is left needs the owner
+
+Established from inside `infra-dev` (Claude Code 2.1.241, Debian bookworm image — see the
+last item: this container predates the current base). Everything here was run, not read.
+
+**1. `$CLAUDE_CONFIG_DIR/sessions/<pid>.json` exists, and it is nearly the whole
+registry.** One file per live claude, named by pid. Fields seen: `pid`, `sessionId`,
+`cwd`, `startedAt` (ms epoch), **`procStart`** (the `/proc` start-time ticks), `version`,
+`kind` (`interactive` | `bg`), `entrypoint`, `messagingSocketPath`, `name` +
+`nameSource` (`derived` gives `workspace-07`) + `nameSince`, `status` (`busy` | `idle`),
+`updatedAt`, `statusUpdatedAt`, and on background ones `jobId`, `agent`,
+`bridgeSessionId`, `parkedJobId`. A sibling `<pid>.<sha>.key` holds a `peerToken`.
+
+This answers three Phase 0 questions at once: **binding is nearly free** (pid → session
+id, with `procStart` as the reused-pid guard the plan wanted the hook to record);
+**`kind: "bg"` names the nested sessions** the design has to keep out of the binding; and
+**`name` is where the title lives** — with `nameSource` distinguishing a derived name from
+a real one, so the menu knows when to fall back to the first prompt.
+
+It does **not** replace the hooks. It is undocumented internal state that floats with the
+binary; it is pid-keyed, so dead files accumulate (this container holds files from
+August); and nothing in it is a record of *when you last looked*, which is what `unread`
+is. Treat it as the fast path and the corroboration, with the hooks as the contract.
+
+**2. Attached vs detached is a file mode, not a listing to parse.** abduco 0.6 keeps
+`~/.abduco/<name>@<hostname>` and sets the owner-execute bit while a client is attached:
+`srwx------` attached, `srw-------` detached. Verified both ways round on a probe session.
+So the menu can `stat` one path per slot — no subprocess, nothing to parse. Note the
+socket name carries the **hostname**, which this fleet derives from the container alias:
+renaming a container orphans every session in it.
+
+**3. Two clients can attach to one abduco session at once.** Two `abduco -a` clients on
+one probe session, both live. So *attached elsewhere* is not an exclusive lock and
+opening a row must not assume it is alone at the terminal.
+
+**4. A killed abduco server leaves its socket behind, with the attached bit still set.**
+`kill -9` on the server: `abduco`'s own listing dropped the session immediately, and
+`~/.abduco/probe-a@infra-dev` stayed on disk reading `srwx------`. **This is the
+calibration catch for finding 2** — a menu built on the mode alone shows a dead session
+as attached and refuses to offer it. The liveness test is the pid (plus `procStart`); the
+mode only ever answers *attached?* for a slot already known to be alive. `reconcile`'s
+stale-socket sweep is therefore not just a container-restart concern.
+
+**5. The ceiling is the cgroup, as the plan corrected.** `/sys/fs/cgroup/memory.max` =
+`1073741824` and `memory.current` = `864112640`, both readable unprivileged, on a v2
+cgroup. `MemAvailable` in here still describes all of `zero`.
+
+**6. The timer tools are `ScheduleWakeup`, `CronCreate`, `CronDelete`, `CronList`** —
+read off a live session's own tool registry rather than guessed. `TaskStop`/`TaskOutput`
+are not timers and must not pin a slot.
+
+**7. Hook payloads, from the vendor docs** (code.claude.com/docs/en/hooks, read
+2026-10-01). This is the contract, not yet an observation — item 8 still owes a captured
+payload. Three corrections the event table needs:
+
+- **`SessionStart.source` has a fifth value, `fork`** (`startup|resume|clear|compact|fork`).
+  It also carries `session_title` when one is set, and `seconds_since_last_response` on
+  resume — which is a better idle clock than anything we would compute.
+- **`SessionEnd.reason` has a sixth, `resume`** (`clear|resume|logout|prompt_input_exit|other`).
+  The plan's "reason `clear` → nothing" rule **must cover `resume` too**, or resuming a
+  conversation marks its slot closed.
+- `Notification` carries `notification_type` and `message`, and the full type list is
+  matchable: `permission_prompt`, `idle_prompt`, `auth_success`, `elicitation_dialog`,
+  `elicitation_url_dialog`, `elicitation_complete`, `elicitation_response`,
+  `agent_needs_input`, `agent_completed`, `quota_auto_resume_fired|stale|disabled`. Both
+  plan rows survive; `agent_needs_input` is a third *needs you*, and `auth_success` and
+  `agent_completed` are not.
+
+Also: common fields include `agent_id`/`agent_type` **on subagents only** — a cheaper
+nested-subagent test than the `/proc` walk, though a `claude -p` from a Bash call still
+needs the walk. `Stop` carries `last_assistant_message` and `stop_hook_active`.
+`UserPromptSubmit` and `Stop` are the two **blocking** events among the ones we use —
+`SessionStart`, `SessionEnd`, `Notification` and `PostToolUse` are observational and
+ignore the exit code entirely, so the always-exit-0 test should pin those two by name.
+And **`SessionEnd` hooks share a 1.5-second budget**: a lock timeout on that path must be
+well under it, or the write that marks a slot closed is cut off mid-way. Hooks in managed
+policy settings are confirmed supported, which is what Phase 1's file is for.
+
+**8. What is still open, and why this session could not close it.** Auto mode's classifier
+refused every nested `claude` invocation, every read under `~/.claude`, and `strings` on
+the binary, so none of the following was reachable from an agent session here:
+
+- the RAM re-measure with a real login, and what **←** does now;
+- a **captured** payload per event — item 7 is the documentation, and the documentation is
+  not the observation this repo's rules ask for;
+- whether `SessionEnd` fires on **SIGTERM** at all. The offloader's `offloading` →
+  `offloaded` transition depends on it, and if it does not fire, `reconcile` is the only
+  thing that ever clears an offloaded slot;
+- whether a fired wake-up passes through `UserPromptSubmit`;
+- **which managed-settings path the installed version reads.** Phase 1 ships the file
+  *and* the env var for exactly this reason;
+- that `--resume` keeps the session id;
+- abduco across a container `stop`/`start` (findings 2–4 are all within one container).
+
+**9. This container is not built on the current base, which is why its Claude Code is
+stuck.** `claude` here is `/usr/lib/node_modules/@anthropic-ai/claude-code`, root-owned,
+with no `/opt/npm-global` at all — the pre-2026-09-21 layout. So the self-updater cannot
+write and the version sat at 2.1.241 while npm's latest was 2.1.286. Recreating on
+`2026.09.21.2` (published; `ghcr.io/gsfernandes81/gsrpi-dev-base` lists
+`2026.08.24`…`2026.09.21.2`) is what fixes it. Worth recording because every RAM number
+in *Why* was measured on a container in this state.
+
 ## Phases
 
 0. **Verify on `zero` before building** (read-only; the owner runs anything needing the
