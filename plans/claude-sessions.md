@@ -619,10 +619,19 @@ at 6 columns, the right edge marked:
      code, and that commit cannot be made until the approved heading exists.** Its first
      act is a `decisions.md` row citing that heading. The approved mockups are copied into
      the `claude-sessions` repo's docs when Phase 4 starts.
-3. **Registry, `claude-sessions hook`, `claude-sessions reconcile`** — the state machine, unit-tested over the
-   event table above, including `/clear`, resume, offload-then-`SessionEnd`, a nested
-   claude, an idle-prompt notification, container restart, and two writers at once; plus
-   the always-exit-0 test.
+3. ✔ **MOSTLY DONE 2026-10-01 — the repo exists and the registry, hook, reconcile, doctor,
+   list and close are written and tested.**
+   **[`gsfernandes81/claude-sessions`](https://github.com/gsfernandes81/claude-sessions)** —
+   public, AGPL-3.0-or-later, created on the owner's word. 37 tests green, clippy clean at
+   `-D warnings`, covering every row of the event table (`/clear`, resume,
+   offload-then-`SessionEnd`, a nested claude, the idle-prompt notification that must do
+   nothing, every timer tool and the two that only look like one), the always-exit-0 promise
+   against the real binary, and several writers at once against a reader.
+   **Still open in that repo:** the managed-settings consent question (step 1 of its handoff;
+   it needs root on a container, which an agent session there does not have), CI — written but
+   parked at `ci/github-actions-ci.yml` because the token had no `workflow` scope — and the
+   first release. `claude-sessions offload` is Phase 5 and unwritten; `last_attach_ms` has no
+   writer until the menu exists, so `unread` is permanently true for now.
 4. **The TUI**, to the approved mockups. Rendering tested at 40×24 and 80×24 against a test
    backend; the zero-idle-bytes property tested under a pty; ordering and the guards
    unit-tested.
@@ -692,6 +701,28 @@ From the mockup review, same day — the three questions under `## Mockups`, eac
   cwd and start time against `~/.claude` transcripts would work and is guesswork; it is
   worth building only if `u` rows turn out to persist, which the client re-run is meant to
   prevent.
+
+## Answered 2026-10-01 — "is this not rebuilding what `claude --resume` gives us?"
+
+The owner's question, and the right one to ask before any of this is built. The answer is in
+the new repo's `docs/design.md` § *Why not just `claude --resume`*, and in short: three things,
+each of which is a way to lose work rather than a convenience.
+
+1. **`--resume` does not know what is running.** It lists conversations *on disk*; open one that
+   is already live in another process and it **forks** — two transcripts, diverging, no warning.
+   Knowing a row is live and **attaching** instead is the first thing a menu here must do, and
+   nothing Claude Code keeps will tell you.
+2. **What records a live session vanishes exactly when it matters.**
+   `$CLAUDE_CONFIG_DIR/sessions/<pid>.json` is pid-keyed and exists only while the process does;
+   offload a slot and it is gone, which is precisely when you need to know which conversation
+   belonged to it and in which directory.
+3. **Nothing records attention or absence** — a waiting permission prompt, a pending timer, and
+   **when you last looked**, which is the whole of `unread` and is a fact about the owner rather
+   than about the session.
+
+What the tool does *not* do is keep its own copy of what is cheap to read while a process is
+alive: a live slot's title and busy flag come from Claude Code's own file, and our stored copies
+are the last-known value for when it is gone.
 
 ## Deferred — maybe not needed
 
