@@ -417,10 +417,8 @@ infra-dev · 6 open · 812M of 1.0G
 │ Close slot 2?                        │
 │   retire the old tunnel              │
 │                                      │
-│ It is running, and resumable from    │
-│ disk afterwards: this stops the      │
-│ process, not the conversation.       │
-│ claude --resume brings it back.      │
+│ Running. Stops the process, not the  │
+│ conversation — resumable from disk.  │
 │                                      │
 │ y close    n keep                    │
 ╰──────────────────────────────────────╯
@@ -429,17 +427,14 @@ infra-dev · 6 open · 812M of 1.0G
 ### Mockup 4 — No room to open another
 ```
 ╭──────────────────────────────────────╮
-│ Not enough room for another claude   │
+│ No room for another claude           │
 │                                      │
-│ 892M of 1.0G used in this container. │
-│ A new session wants about 250M.      │
+│ 892M of 1.0G used. A new one wants   │
+│ about 250M.                          │
 │                                      │
 │ Offload slot 5, idle 2d?             │
 │   mount guards on one                │
-│                                      │
-│ Its conversation is kept. It comes   │
-│ back with claude --resume, and the   │
-│ menu will say so.                    │
+│   resumable from disk                │
 │                                      │
 │ y offload, then open    n cancel     │
 ╰──────────────────────────────────────╯
@@ -454,9 +449,8 @@ infra-dev · 6 open · 812M of 1.0G
 │   No conversation found with that    │
 │   session id                         │
 │                                      │
-│ The slot is left offloaded and       │
-│ nothing was deleted. Its transcript  │
-│ may have been cleaned up by Claude.  │
+│ Left offloaded. Nothing was deleted; │
+│ the transcript may be gone.          │
 │                                      │
 │ r retry   c close it   ↵ back        │
 ╰──────────────────────────────────────╯
