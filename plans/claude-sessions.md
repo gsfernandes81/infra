@@ -340,12 +340,19 @@ that width rather than typed to look right. The 80-column versions are in
 [`claude-sessions-mockups-80.md`](claude-sessions-mockups-80.md), separately, because at 40
 they would wrap and stop being mockups.
 
-**Everything here is ASCII**, which is this design's rule arriving with a bill: `no
-ambiguous-width glyphs` rules out `·`, `↵` and the whole box-drawing set — all of them
-East Asian *Ambiguous*, i.e. one column in some terminals and two in others, which is a
-layout that breaks on somebody else's font rather than on a bug. So `-` and `+` and
-`Enter`. If you would rather have the prettier glyphs and accept the risk, say so and I
-will redraw.
+**The glyphs are the ones Claude Code already draws** (owner, 2026-10-01): box drawing for
+the rules and the dialog frames, `·` in the header, `↵` for the open key. They are East
+Asian *Ambiguous* in the Unicode tables — one column in some terminals, two in others —
+and the reason to use them anyway is evidence rather than taste: Claude Code renders this
+exact set in every terminal this fleet is driven from. **Its mode indicators stay out**
+(`⏵⏵` and the rest), which is the one part of that vocabulary the owner has seen fail.
+
+**The marks column stays single-byte ASCII**, and that is not timidity about the rule above.
+It is the one field whose width is load-bearing: the age is right-aligned against it, so a
+mark that renders two columns wide pushes every age off the screen, while a rule that
+renders wide is merely long. Mockup 8's narrowing demo keeps plain `=` rulers for the same
+reason — the measured edge should be the one thing on the page that cannot itself be a
+width question.
 
 **One row is one slot**, and the repo is not in it: each container holds one workspace, so
 the repo is a property of the header, not of the row. The row is slot number, marks, title,
@@ -373,108 +380,108 @@ guessed:
 
 ### Mockup 1 — The list, every mark mixed
 ```
-infra-dev - 6 open - 812M of 1.0G
-----------------------------------------
+infra-dev · 6 open · 812M of 1.0G
+────────────────────────────────────────
 1 !   permission: write hosts/one     2m
 2 *   retire the old tunnel          14m
 3 *t  loop: watch the base build     31m
 4 @   immich upgrade                 now
 5 z   mount guards on one             2d
 6 u   claude                          5h
-----------------------------------------
-Enter open   n new   c close   ? keys
+────────────────────────────────────────
+↵ open   n new   c close   ? keys
 q shell
 ```
 
 ### Mockup 2 — Nothing open
 ```
-infra-dev - nothing open - 812M of 1.0G
-----------------------------------------
+infra-dev · nothing open · 812M of 1.0G
+────────────────────────────────────────
 
   No claude session in this container.
 
   n   start one in /workspace
   q   a shell instead
 
-----------------------------------------
+────────────────────────────────────────
 n new   ? keys   q shell
 ```
 
 ### Mockup 3 — Closing a live slot
 ```
-infra-dev - 6 open - 812M of 1.0G
-----------------------------------------
+infra-dev · 6 open · 812M of 1.0G
+────────────────────────────────────────
 1 !   permission: write hosts/one     2m
 2 *   retire the old tunnel          14m
-+--------------------------------------+
-| Close slot 2?                        |
-|   retire the old tunnel              |
-|                                      |
-| It is running. This stops it.        |
-| The conversation stays on disk, and  |
-| in claude --resume.                  |
-|                                      |
-| y close    n keep                    |
-+--------------------------------------+
+╭──────────────────────────────────────╮
+│ Close slot 2?                        │
+│   retire the old tunnel              │
+│                                      │
+│ It is running. This stops it.        │
+│ The conversation stays on disk, and  │
+│ in claude --resume.                  │
+│                                      │
+│ y close    n keep                    │
+╰──────────────────────────────────────╯
 ```
 
 ### Mockup 4 — No room to open another
 ```
-+--------------------------------------+
-| Not enough room for another claude   |
-|                                      |
-| 892M of 1.0G used in this container. |
-| A new session wants about 250M.      |
-|                                      |
-| Offload slot 5, idle 2d?             |
-|   mount guards on one                |
-|                                      |
-| Its conversation is kept. It comes   |
-| back with claude --resume, and the   |
-| menu will say so.                    |
-|                                      |
-| y offload, then open    n cancel     |
-+--------------------------------------+
+╭──────────────────────────────────────╮
+│ Not enough room for another claude   │
+│                                      │
+│ 892M of 1.0G used in this container. │
+│ A new session wants about 250M.      │
+│                                      │
+│ Offload slot 5, idle 2d?             │
+│   mount guards on one                │
+│                                      │
+│ Its conversation is kept. It comes   │
+│ back with claude --resume, and the   │
+│ menu will say so.                    │
+│                                      │
+│ y offload, then open    n cancel     │
+╰──────────────────────────────────────╯
 ```
 
 ### Mockup 5 — A resume that fails
 ```
-+--------------------------------------+
-| Slot 5 did not resume                |
-|                                      |
-| claude --resume 0f9c4a1e exited 1    |
-|   No conversation found with that    |
-|   session id                         |
-|                                      |
-| The slot is left offloaded and       |
-| nothing was deleted. Its transcript  |
-| may have been cleaned up by Claude.  |
-|                                      |
-| r retry   c close it   Enter back    |
-+--------------------------------------+
+╭──────────────────────────────────────╮
+│ Slot 5 did not resume                │
+│                                      │
+│ claude --resume 0f9c4a1e exited 1    │
+│   No conversation found with that    │
+│   session id                         │
+│                                      │
+│ The slot is left offloaded and       │
+│ nothing was deleted. Its transcript  │
+│ may have been cleaned up by Claude.  │
+│                                      │
+│ r retry   c close it   ↵ back        │
+╰──────────────────────────────────────╯
 ```
 
 ### Mockup 6 — Back from a slot, after detaching
 ```
-infra-dev - 6 open - 1.0G of 1.0G
-----------------------------------------
+infra-dev · 6 open · 1.0G of 1.0G
+────────────────────────────────────────
 1 !   permission: write hosts/one     2m
 2     retire the old tunnel          now
 3 *t  loop: watch the base build     31m
 4 @   immich upgrade                 12m
 5 z   mount guards on one             2d
 6 u   claude                          5h
-----------------------------------------
-detached from 2 - it is still running
-Enter open   n new   c close   ? keys
+────────────────────────────────────────
+detached from 2 · it is still running
+↵ open   n new   c close   ? keys
 q shell
 ```
 
 ### Mockup 7 — The keys, on ?
 ```
-infra-dev - keys and marks
-----------------------------------------
-Enter  open the row (resume if z)
+infra-dev · keys and marks
+────────────────────────────────────────
+↵      open the row (resume if z)
 n      new session in /workspace
 c      close the row
 q      drop to a shell
@@ -485,10 +492,10 @@ q      drop to a shell
 t  a timer is pending; never
    offloaded while one is
 @  attached somewhere else too
-z  offloaded: Enter resumes it
+z  offloaded: ↵ resumes it
 u  not started by claude-sessions
-----------------------------------------
-Enter open   n new   c close   ? keys
+────────────────────────────────────────
+↵ open   n new   c close   ? keys
 q shell
 ```
 
@@ -496,36 +503,38 @@ q shell
 ```
 at 40 columns, the right edge marked:
 ========================================
-Enter open   n new   c close   ? keys
+↵ open   n new   c close   ? keys
 q shell
 at 34 columns, the right edge marked:
 ==================================
-Enter open   n new   c close
-? keys   q shell
+↵ open   n new   c close   ? keys
+q shell
 at 26 columns, the right edge marked:
 ==========================
-Enter open   n new
-c close   ? keys   q shell
+↵ open   n new   c close
+? keys   q shell
 at 18 columns, the right edge marked:
 ==================
-Enter open   n new
+↵ open   n new
 c close   ? keys
 q shell
 at 12 columns, the right edge marked:
 ============
-Enter open
+↵ open
 n new
 c close
 ? keys
 q shell
 at 9 columns, the right edge marked:
 =========
+↵ open
 n new
 c close
 ? keys
 q shell
 at 7 columns, the right edge marked:
 =======
+↵ open
 n new
 c close
 ? keys
