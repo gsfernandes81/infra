@@ -175,13 +175,11 @@ timeout, so a stuck lock cannot hold the door shut. `<c>-sh` remains the break-g
   in the workspace; **`Esc` is the advertised quit**, and it ends the ssh session, because
   the door only falls through to a shell on a NON-ZERO exit. Inside a dialog or the keys
   screen `Esc` means *back* — only `Esc` on the list itself quits.
-- **`q` still quits and is deliberately not listed anywhere in the UI** (owner,
-  2026-10-01), so the old binding does not hit a dead key and does not take a column in a
-  40-column hint line either. **Worth knowing, because it is not harmless:** under the old
-  keys `q` dropped you to a shell, and under these it ends the session — so the muscle
-  memory it exists to spare is the one it will surprise. It is recorded here because a key
-  that works and is written down nowhere is folklore, and this is the one place that is
-  not the UI.
+- **`q` quits too, and is deliberately listed nowhere in the UI** (owner, 2026-10-01).
+  Not for habit — nothing has been deployed, so there is no habit to spare — but because it
+  is the first key anybody tries, it costs nothing to accept, and it would spend a column in
+  a 40-column hint line that `Esc` already covers. Recorded here because a key that works
+  and is written down nowhere is folklore, and the plan is the one place that is not the UI.
 - **Data discipline:** the screen redraws on a keypress or a registry change, and ages
   tick **at most once a minute** (owner, 2026-10-01). Between those, **an idle menu emits
   zero bytes** — the property `ytq`'s marquee was built to, and tested the same way.
@@ -339,11 +337,17 @@ on the `infra-claude` volume, or a `.claude/settings.json` in each repo, both of
 the "cannot be turned off" property that managed settings buy. Test by adding a hook to
 `/etc/claude-code/managed-settings.json` in a scratch container and starting `claude -p`.
 
-## Mockups
+## Mockups — approved by the owner on 2026-10-01
 
-**Not approved yet — Phase 2 is a gate, and this is what it is waiting on.** Rename this
-heading to `## Mockups — approved by the owner on <date>` with the approval quoted, and
-only then may a commit add ratatui, crossterm or any rendering code.
+> "Designs approved for use."
+
+Also, in the same review: *"Font widths or box alignment is still off but CSS works
+otherwise"* and *"Use colour similarly to how Claude code does."* Both are answered below,
+the first by measurement rather than by another guess.
+
+**Phase 4 may now begin**, and its first commit — the one that adds ratatui, crossterm or
+any rendering code — opens with a `decisions.md` row citing this heading. These screens are
+copied into the `claude-sessions` repo's docs when it starts.
 
 These are drawn at **40 columns**, the phone in portrait, and every line was generated to
 that width rather than typed to look right. The 80-column versions are in
@@ -351,11 +355,22 @@ that width rather than typed to look right. The 80-column versions are in
 they would wrap and stop being mockups.
 
 **The glyphs are the ones Claude Code already draws** (owner, 2026-10-01): box drawing for
-the rules and the dialog frames, `·` in the header, `↵` for the open key. They are East
-Asian *Ambiguous* in the Unicode tables — one column in some terminals, two in others —
-and the reason to use them anyway is evidence rather than taste: Claude Code renders this
-exact set in every terminal this fleet is driven from. **Its mode indicators stay out**
-(`⏵⏵` and the rest), which is the one part of that vocabulary the owner has seen fail.
+the rules and the dialog frames, `·` in the header. They are East Asian *Ambiguous* in the
+Unicode tables — one column in some terminals, two in others — and the reason to use them
+anyway is evidence rather than taste: Claude Code renders this set in every terminal this
+fleet is driven from. Its mode indicators stay out (`⏵⏵` and the rest), which is the one
+part of that vocabulary the owner has seen fail.
+
+**Except `↵`, which is not in the fonts, and that is what the misalignment was.** The owner
+reported box alignment still off after the glyph redraw, twice. It was not CSS: U+21B5 is
+**absent from every monospace face on Google Fonts** — checked by downloading the subset and
+reading its cmap for JetBrains Mono, Noto Sans Mono, Source Code Pro, IBM Plex Mono, Fira
+Mono and Space Mono on 2026-10-01. Every other glyph here is present in all of them at a
+uniform 600-unit advance; `↵` is in none, so it fell back to another face with a different
+advance and dragged the line it sat on out of true. **That is a fact about the terminal too,
+not just the browser** — a glyph the common monospace fonts do not carry is a glyph that
+will fall back wherever it is drawn. So the key is spelled `Enter`, in letters, and it costs
+nothing: `Enter open   n new   c close   ? keys` is 37 columns and still fits 40.
 
 **The marks column stays single-byte ASCII**, and that is not timidity about the rule above.
 It is the one field whose width is load-bearing: the age is right-aligned against it, so a
@@ -363,6 +378,30 @@ mark that renders two columns wide pushes every age off the screen, while a rule
 renders wide is merely long. Mockup 8's narrowing demo keeps plain `=` rulers for the same
 reason — the measured edge should be the one thing on the page that cannot itself be a
 width question.
+
+### Colour, in Claude Code's vocabulary rather than a new one
+
+Owner, 2026-10-01: *"Use colour similarly to how Claude code does."* Claude Code is sparing
+with it — an amber accent on the thing that wants you, plain foreground for content, dim for
+everything that is structure rather than information. The launcher takes those three and one
+blue:
+
+| where | colour | because |
+|---|---|---|
+| `!` wants you | amber | the only mark that is a *request*, and the only amber on the screen |
+| `*` unread | foreground | news, not a problem |
+| `t` timer pending | blue | a fact about time, and the reason the slot cannot be offloaded |
+| `@` `z` `u` | dim | state, not news |
+| slot number, age, rules, frames, the header after the container name | dim | structure |
+| title | foreground | the content |
+| a key in the hint line | amber; the word after it dim | the key is the actionable half |
+| a dialog's first line | amber | it is the question being asked |
+
+Two rules come with it. **Nothing is colour-only** — every mark is a glyph first, so a
+monochrome terminal, a pipe or a screen reader loses nothing. And **amber is spent once**: if
+`!` and anything else were both amber, neither would mean *this one*. The plain-text mockups
+below cannot show colour, which is the honest reason the table above exists; the published
+page renders it.
 
 **One row is one slot**, and the repo is not in it: each container holds one workspace, so
 the repo is a property of the header, not of the row. The row is slot number, marks, title,
@@ -399,7 +438,7 @@ infra-dev · 6 open · 812M of 1.0G
 5 z   mount guards on one             2d
 6 u   claude                          5h
 ────────────────────────────────────────
-↵ open   n new   c close   ? keys
+Enter open   n new   c close   ? keys
 s shell
 ```
 
@@ -470,7 +509,7 @@ infra-dev · 6 open · 812M of 1.0G
 │ Left offloaded. Nothing was deleted; │
 │ the transcript may be gone.          │
 │                                      │
-│ r retry   c close it   ↵/Esc back    │
+│ r retry   c close it   Esc back      │
 ╰──────────────────────────────────────╯
 ```
 
@@ -486,7 +525,7 @@ infra-dev · 6 open · 1.0G of 1.0G
 6 u   claude                          5h
 ────────────────────────────────────────
 detached from 2 · it is still running
-↵ open   n new   c close   ? keys
+Enter open   n new   c close   ? keys
 s shell
 ```
 
@@ -494,7 +533,7 @@ s shell
 ```
 infra-dev · keys and marks
 ────────────────────────────────────────
-↵      open the row (resume if z)
+Enter  open the row (resume if z)
 n      new session in /workspace
 c      close the row
 s      a shell in /workspace
@@ -506,10 +545,10 @@ Esc    quit the launcher
 t  a timer is pending; not
    offloaded until it fires
 @  attached somewhere else too
-z  offloaded: ↵ resumes it
+z  offloaded: Enter resumes it
 u  not started by claude-sessions
 ────────────────────────────────────────
-↵ open   n new   c close   ? keys
+Enter open   n new   c close   ? keys
 s shell
 ```
 
@@ -517,38 +556,36 @@ s shell
 ```
 at 40 columns, the right edge marked:
 ========================================
-↵ open   n new   c close   ? keys
+Enter open   n new   c close   ? keys
 s shell
 at 34 columns, the right edge marked:
 ==================================
-↵ open   n new   c close   ? keys
-s shell
+Enter open   n new   c close
+? keys   s shell
 at 26 columns, the right edge marked:
 ==========================
-↵ open   n new   c close
-? keys   s shell
+Enter open   n new
+c close   ? keys   s shell
 at 18 columns, the right edge marked:
 ==================
-↵ open   n new
+Enter open   n new
 c close   ? keys
 s shell
 at 12 columns, the right edge marked:
 ============
-↵ open
+Enter open
 n new
 c close
 ? keys
 s shell
 at 9 columns, the right edge marked:
 =========
-↵ open
 n new
 c close
 ? keys
 s shell
 at 7 columns, the right edge marked:
 =======
-↵ open
 n new
 c close
 ? keys
@@ -584,8 +621,9 @@ at 6 columns, the right edge marked:
    nothing changes until each container is recreated on the new base, which is the
    owner's to run — and that recreation is also what clears any daemon and spares still
    running. The other dev repos pick it up when they bump `BASE_TAG`.
-2. **Mockups — OWNER APPROVAL GATE. Drafted 2026-10-01; waiting on your word.** They are
-   inline under [`## Mockups`](#mockups), with three questions I guessed at.
+2. ✔ **DONE 2026-10-01 — Mockups approved.** Eight screens inline under
+   `## Mockups — approved by the owner on 2026-10-01`, with the approval quoted there. The
+   gate is open: Phase 4's first commit cites that heading in a `decisions.md` row.
    - Before any rendering code, give the owner plain-text mockups **at 40 columns**,
      drawn exactly as they would render, **inline in this plan** under a heading
      `## Mockups`. They must cover: the list with every mark mixed; the empty list; the
@@ -650,15 +688,18 @@ agent view and must change with them:
 From the mockup review, same day — the three questions under `## Mockups`, each answered
 *yes*, plus the glyphs:
 
-- **The glyph set is Claude Code's own** — box drawing, `·`, `↵` — **and its mode
+- **The glyph set is Claude Code's own** — box drawing, `·` — **and its mode
   indicators are not**, which is the one part of that vocabulary the owner has seen fail.
-  The marks column stays single-byte because the age is right-aligned against it.
+  The marks column stays single-byte because the age is right-aligned against it. **`↵` is
+  out too, for a measured reason rather than a judged one:** it is in no monospace face on
+  Google Fonts, so it falls back and drags its line out of true wherever it is drawn. The
+  key is spelled `Enter`. See the glyph paragraph under `## Mockups`.
 - **`u` stays**: a session the launcher did not start is marked as such. It goes
   permanently blank once every client has re-run `configure-client.yml`, and that is the
   right failure mode for a mark — the one time it is not blank is the time you want it.
-- **`↵` on an offloaded row resumes immediately, with no confirmation.** RAM is spent on
+- **`Enter` on an offloaded row resumes immediately, with no confirmation.** RAM is spent on
   what you open, in the order you open it. The honest consequence, accepted rather than
-  designed around: near the cgroup limit, `↵` can answer with the no-room offer for a
+  designed around: near the cgroup limit, `Enter` can answer with the no-room offer for a
   *different* slot instead of the session you asked for.
 - **The row's title is Claude Code's own session title** where the transcript carries one,
   else the first user prompt truncated; a row with a prompt waiting shows what the prompt

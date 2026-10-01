@@ -20,7 +20,7 @@ infra-dev · 6 open · 812M of 1.0G
 5 z   mount guards on one                                                     2d
 6 u   claude                                                                  5h
 ────────────────────────────────────────────────────────────────────────────────
-↵ open   n new   c close   ? keys   s shell
+Enter open   n new   c close   ? keys   s shell
 ```
 
 ### Mockup 2 — Nothing open
@@ -90,7 +90,7 @@ infra-dev · 6 open · 812M of 1.0G
                     │ Left offloaded. Nothing was deleted; │
                     │ the transcript may be gone.          │
                     │                                      │
-                    │ r retry   c close it   ↵/Esc back    │
+                    │ r retry   c close it   Esc back      │
                     ╰──────────────────────────────────────╯
 ```
 
@@ -106,14 +106,14 @@ infra-dev · 6 open · 1.0G of 1.0G
 6 u   claude                                                                  5h
 ────────────────────────────────────────────────────────────────────────────────
 detached from 2 · it is still running
-↵ open   n new   c close   ? keys   s shell
+Enter open   n new   c close   ? keys   s shell
 ```
 
 ### Mockup 7 — The keys, on ?
 ```
 infra-dev · keys and marks
 ────────────────────────────────────────────────────────────────────────────────
-↵      open the row (resume if z)
+Enter  open the row (resume if z)
 n      new session in /workspace
 c      close the row
 s      a shell in /workspace
@@ -125,48 +125,46 @@ Esc    quit the launcher
 t  a timer is pending; not
    offloaded until it fires
 @  attached somewhere else too
-z  offloaded: ↵ resumes it
+z  offloaded: Enter resumes it
 u  not started by claude-sessions
 ────────────────────────────────────────────────────────────────────────────────
-↵ open   n new   c close   ? keys   s shell
+Enter open   n new   c close   ? keys   s shell
 ```
 
 ### Mockup 8 — The hint line as the terminal narrows
 ```
 at 40 columns, the right edge marked:
 ========================================
-↵ open   n new   c close   ? keys
+Enter open   n new   c close   ? keys
 s shell
 at 34 columns, the right edge marked:
 ==================================
-↵ open   n new   c close   ? keys
-s shell
+Enter open   n new   c close
+? keys   s shell
 at 26 columns, the right edge marked:
 ==========================
-↵ open   n new   c close
-? keys   s shell
+Enter open   n new
+c close   ? keys   s shell
 at 18 columns, the right edge marked:
 ==================
-↵ open   n new
+Enter open   n new
 c close   ? keys
 s shell
 at 12 columns, the right edge marked:
 ============
-↵ open
+Enter open
 n new
 c close
 ? keys
 s shell
 at 9 columns, the right edge marked:
 =========
-↵ open
 n new
 c close
 ? keys
 s shell
 at 7 columns, the right edge marked:
 =======
-↵ open
 n new
 c close
 ? keys
