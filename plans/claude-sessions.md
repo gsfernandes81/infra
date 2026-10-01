@@ -329,6 +329,214 @@ on the `infra-claude` volume, or a `.claude/settings.json` in each repo, both of
 the "cannot be turned off" property that managed settings buy. Test by adding a hook to
 `/etc/claude-code/managed-settings.json` in a scratch container and starting `claude -p`.
 
+## Mockups
+
+**Not approved yet — Phase 2 is a gate, and this is what it is waiting on.** Rename this
+heading to `## Mockups — approved by the owner on <date>` with the approval quoted, and
+only then may a commit add ratatui, crossterm or any rendering code.
+
+These are drawn at **40 columns**, the phone in portrait, and every line was generated to
+that width rather than typed to look right. The 80-column versions are in
+[`claude-sessions-mockups-80.md`](claude-sessions-mockups-80.md), separately, because at 40
+they would wrap and stop being mockups.
+
+**Everything here is ASCII**, which is this design's rule arriving with a bill: `no
+ambiguous-width glyphs` rules out `·`, `↵` and the whole box-drawing set — all of them
+East Asian *Ambiguous*, i.e. one column in some terminals and two in others, which is a
+layout that breaks on somebody else's font rather than on a bug. So `-` and `+` and
+`Enter`. If you would rather have the prettier glyphs and accept the risk, say so and I
+will redraw.
+
+**One row is one slot**, and the repo is not in it: each container holds one workspace, so
+the repo is a property of the header, not of the row. The row is slot number, marks, title,
+age. Ages tick at most once a minute; nothing else redraws on its own.
+
+**Marks** — `!` wants you (a permission prompt or an elicitation is waiting) · `*` unread
+(it finished something while you were away) · `t` a timer is pending, so it is never
+offloaded · `@` attached somewhere else as well · `z` offloaded, and Enter resumes it ·
+`u` not started by `claude-sessions`, so it is one of today's `abduco -A claude` sessions.
+The marks field holds three, which is the most that can be true at once and still be worth
+reading.
+
+**Open questions I would put to you with the drawings**, because they are the places I
+guessed:
+
+1. **Is `u` worth a column?** It matters only until every client has re-run
+   `configure-client.yml`, and then it is permanently blank.
+2. **Should `Enter` on an offloaded row resume immediately, or confirm first?** Drawn as
+   immediate — RAM is only spent on what you open, which was the rule — but it is the one
+   key that can cost 250 MB without asking.
+3. **Is the title the right thing in the row?** Claude's own session title when there is
+   one, else the first prompt truncated. Screen 1 shows both kinds mixed: row 1 is a
+   permission prompt's subject, row 6 is an unregistered session with nothing to show but
+   the command.
+
+### Mockup 1 — The list, every mark mixed
+```
+infra-dev - 6 open - 812M of 1.0G
+----------------------------------------
+1 !   permission: write hosts/one     2m
+2 *   retire the old tunnel          14m
+3 *t  loop: watch the base build     31m
+4 @   immich upgrade                 now
+5 z   mount guards on one             2d
+6 u   claude                          5h
+----------------------------------------
+Enter open   n new   c close   ? keys
+q shell
+```
+
+### Mockup 2 — Nothing open
+```
+infra-dev - nothing open - 812M of 1.0G
+----------------------------------------
+
+  No claude session in this container.
+
+  n   start one in /workspace
+  q   a shell instead
+
+----------------------------------------
+n new   ? keys   q shell
+```
+
+### Mockup 3 — Closing a live slot
+```
+infra-dev - 6 open - 812M of 1.0G
+----------------------------------------
+1 !   permission: write hosts/one     2m
+2 *   retire the old tunnel          14m
++--------------------------------------+
+| Close slot 2?                        |
+|   retire the old tunnel              |
+|                                      |
+| It is running. This stops it.        |
+| The conversation stays on disk, and  |
+| in claude --resume.                  |
+|                                      |
+| y close    n keep                    |
++--------------------------------------+
+```
+
+### Mockup 4 — No room to open another
+```
++--------------------------------------+
+| Not enough room for another claude   |
+|                                      |
+| 892M of 1.0G used in this container. |
+| A new session wants about 250M.      |
+|                                      |
+| Offload slot 5, idle 2d?             |
+|   mount guards on one                |
+|                                      |
+| Its conversation is kept. It comes   |
+| back with claude --resume, and the   |
+| menu will say so.                    |
+|                                      |
+| y offload, then open    n cancel     |
++--------------------------------------+
+```
+
+### Mockup 5 — A resume that fails
+```
++--------------------------------------+
+| Slot 5 did not resume                |
+|                                      |
+| claude --resume 0f9c4a1e exited 1    |
+|   No conversation found with that    |
+|   session id                         |
+|                                      |
+| The slot is left offloaded and       |
+| nothing was deleted. Its transcript  |
+| may have been cleaned up by Claude.  |
+|                                      |
+| r retry   c close it   Enter back    |
++--------------------------------------+
+```
+
+### Mockup 6 — Back from a slot, after detaching
+```
+infra-dev - 6 open - 1.0G of 1.0G
+----------------------------------------
+1 !   permission: write hosts/one     2m
+2     retire the old tunnel          now
+3 *t  loop: watch the base build     31m
+4 @   immich upgrade                 12m
+5 z   mount guards on one             2d
+6 u   claude                          5h
+----------------------------------------
+detached from 2 - it is still running
+Enter open   n new   c close   ? keys
+q shell
+```
+
+### Mockup 7 — The keys, on ?
+```
+infra-dev - keys and marks
+----------------------------------------
+Enter  open the row (resume if z)
+n      new session in /workspace
+c      close the row
+q      drop to a shell
+?      this
+
+!  wants you: a prompt is waiting
+*  unread: it finished while away
+t  a timer is pending; never
+   offloaded while one is
+@  attached somewhere else too
+z  offloaded: Enter resumes it
+u  not started by claude-sessions
+----------------------------------------
+Enter open   n new   c close   ? keys
+q shell
+```
+
+### Mockup 8 — The hint line as the terminal narrows
+```
+at 40 columns, the right edge marked:
+========================================
+Enter open   n new   c close   ? keys
+q shell
+at 34 columns, the right edge marked:
+==================================
+Enter open   n new   c close
+? keys   q shell
+at 26 columns, the right edge marked:
+==========================
+Enter open   n new
+c close   ? keys   q shell
+at 18 columns, the right edge marked:
+==================
+Enter open   n new
+c close   ? keys
+q shell
+at 12 columns, the right edge marked:
+============
+Enter open
+n new
+c close
+? keys
+q shell
+at 9 columns, the right edge marked:
+=========
+n new
+c close
+? keys
+q shell
+at 7 columns, the right edge marked:
+=======
+n new
+c close
+? keys
+q shell
+at 6 columns, the right edge marked:
+======
+  (the menu refuses to draw; the
+   door execs a login shell and
+   says why)
+```
+
 ## Phases
 
 0. **Verify on `zero` before building** (read-only; the owner runs anything needing the
@@ -353,7 +561,8 @@ the "cannot be turned off" property that managed settings buy. Test by adding a 
    nothing changes until each container is recreated on the new base, which is the
    owner's to run — and that recreation is also what clears any daemon and spares still
    running. The other dev repos pick it up when they bump `BASE_TAG`.
-2. **Mockups — OWNER APPROVAL GATE.**
+2. **Mockups — OWNER APPROVAL GATE. Drafted 2026-10-01; waiting on your word.** They are
+   inline under [`## Mockups`](#mockups), with three questions I guessed at.
    - Before any rendering code, give the owner plain-text mockups **at 40 columns**,
      drawn exactly as they would render, **inline in this plan** under a heading
      `## Mockups`. They must cover: the list with every mark mixed; the empty list; the

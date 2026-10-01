@@ -1,0 +1,173 @@
+# claude-sessions — the mockups at 80 columns
+
+The approval gate is the 40-column set, inline in
+[`claude-sessions.md`](claude-sessions.md) under `## Mockups`; the owner reads on a phone,
+where these would wrap. This file is the same screens drawn at 80 so the desktop case is
+on the record too. Both are generated to width, not typed.
+
+What 80 columns changes: nothing structural. The title field grows from 29 to 69
+characters, so fewer titles are truncated, and the hint line fits on one line instead of
+two. The marks, the order and the keys are identical.
+
+### Mockup 1 — The list, every mark mixed
+```
+infra-dev - 6 open - 812M of 1.0G
+--------------------------------------------------------------------------------
+1 !   permission: write hosts/one                                             2m
+2 *   retire the old tunnel                                                  14m
+3 *t  loop: watch the base build                                             31m
+4 @   immich upgrade                                                         now
+5 z   mount guards on one                                                     2d
+6 u   claude                                                                  5h
+--------------------------------------------------------------------------------
+Enter open   n new   c close   ? keys   q shell
+```
+
+### Mockup 2 — Nothing open
+```
+infra-dev - nothing open - 812M of 1.0G
+--------------------------------------------------------------------------------
+
+  No claude session in this container.
+
+  n   start one in /workspace
+  q   a shell instead
+
+--------------------------------------------------------------------------------
+n new   ? keys   q shell
+```
+
+### Mockup 3 — Closing a live slot
+```
+infra-dev - 6 open - 812M of 1.0G
+--------------------------------------------------------------------------------
+1 !   permission: write hosts/one                                             2m
+2 *   retire the old tunnel                                                  14m
++------------------------------------------------------------------------------+
+| Close slot 2?                                                                |
+|   retire the old tunnel                                                      |
+|                                                                              |
+| It is running. This stops it.                                                |
+| The conversation stays on disk, and                                          |
+| in claude --resume.                                                          |
+|                                                                              |
+| y close    n keep                                                            |
++------------------------------------------------------------------------------+
+```
+
+### Mockup 4 — No room to open another
+```
++------------------------------------------------------------------------------+
+| Not enough room for another claude                                           |
+|                                                                              |
+| 892M of 1.0G used in this container.                                         |
+| A new session wants about 250M.                                              |
+|                                                                              |
+| Offload slot 5, idle 2d?                                                     |
+|   mount guards on one                                                        |
+|                                                                              |
+| Its conversation is kept. It comes                                           |
+| back with claude --resume, and the                                           |
+| menu will say so.                                                            |
+|                                                                              |
+| y offload, then open    n cancel                                             |
++------------------------------------------------------------------------------+
+```
+
+### Mockup 5 — A resume that fails
+```
++------------------------------------------------------------------------------+
+| Slot 5 did not resume                                                        |
+|                                                                              |
+| claude --resume 0f9c4a1e exited 1                                            |
+|   No conversation found with that                                            |
+|   session id                                                                 |
+|                                                                              |
+| The slot is left offloaded and                                               |
+| nothing was deleted. Its transcript                                          |
+| may have been cleaned up by Claude.                                          |
+|                                                                              |
+| r retry   c close it   Enter back                                            |
++------------------------------------------------------------------------------+
+```
+
+### Mockup 6 — Back from a slot, after detaching
+```
+infra-dev - 6 open - 1.0G of 1.0G
+--------------------------------------------------------------------------------
+1 !   permission: write hosts/one                                             2m
+2     retire the old tunnel                                                  now
+3 *t  loop: watch the base build                                             31m
+4 @   immich upgrade                                                         12m
+5 z   mount guards on one                                                     2d
+6 u   claude                                                                  5h
+--------------------------------------------------------------------------------
+detached from 2 - it is still running
+Enter open   n new   c close   ? keys   q shell
+```
+
+### Mockup 7 — The keys, on ?
+```
+infra-dev - keys and marks
+--------------------------------------------------------------------------------
+Enter  open the row (resume if z)
+n      new session in /workspace
+c      close the row
+q      drop to a shell
+?      this
+
+!  wants you: a prompt is waiting
+*  unread: it finished while away
+t  a timer is pending; never
+   offloaded while one is
+@  attached somewhere else too
+z  offloaded: Enter resumes it
+u  not started by claude-sessions
+--------------------------------------------------------------------------------
+Enter open   n new   c close   ? keys   q shell
+```
+
+### Mockup 8 — The hint line as the terminal narrows
+```
+at 40 columns, the right edge marked:
+========================================
+Enter open   n new   c close   ? keys
+q shell
+at 34 columns, the right edge marked:
+==================================
+Enter open   n new   c close
+? keys   q shell
+at 26 columns, the right edge marked:
+==========================
+Enter open   n new
+c close   ? keys   q shell
+at 18 columns, the right edge marked:
+==================
+Enter open   n new
+c close   ? keys
+q shell
+at 12 columns, the right edge marked:
+============
+Enter open
+n new
+c close
+? keys
+q shell
+at 9 columns, the right edge marked:
+=========
+n new
+c close
+? keys
+q shell
+at 7 columns, the right edge marked:
+=======
+n new
+c close
+? keys
+q shell
+at 6 columns, the right edge marked:
+======
+  (the menu refuses to draw; the
+   door execs a login shell and
+   says why)
+```
