@@ -385,19 +385,33 @@ unavailable in these containers. That is the intended trade, not a side effect.
 
 **There are two switches, and `make verify` prints both.** The image also sets
 `CLAUDE_CODE_DISABLE_AGENT_VIEW=1`, which the entrypoint publishes into
-`~/.ssh/environment` so it reaches ssh sessions too. The file is the authority; the
-variable is there because *which path a given Claude Code reads managed settings from*
-is not something anything in here can check, those locations have moved before, and a
-policy file in the wrong place fails silently and looks exactly like one in force. A
-variable has no place to be wrong about. Hence:
+`~/.ssh/environment` so it reaches ssh sessions too. The variable is not a hedge about
+where the file goes — **the binary checks it first, before any settings file is loaded** —
+so it is the switch that holds in the states the file does not: a malformed file is
+ignored whole, and a settings path that a later version moves takes the file with it.
 
 ```
 agentview : managed settings say off; env=1
 ```
 
-and not a single PASS — a verdict that collapsed the two would hide the one case they
-exist for. The line reads the file's *content*, not its existence: an empty or truncated
-file passes `test -f` and leaves the view on.
+Two switches, two fields, and not a single PASS — a verdict that collapsed them would
+hide the one case they exist for. **The file is parsed, not grepped**, and that is a fix
+rather than a flourish: the first version of this line matched the substring
+`"disableAgentView":true`, which reads *off* for a file truncated after the word `true`
+— no closing brace, so Claude Code's own parse fails, it ignores the file, and the view
+is on while the readout says otherwise. It also read *off* for the key nested under some
+other object and *not off* for a tab after the colon. A substring test cannot answer a
+question about JSON. The check now asks what the binary asks, `=== true` included, so a
+`"true"` string is correctly reported as not off.
+
+**Where the path came from**, because this repo does not take a documented default on
+trust: grepping the installed binary (2.1.286) in this container on 2026-10-01 gives
+`default:return"/etc/claude-code"` for every platform that is not macOS or Windows, with
+a `managed-settings.d` drop-in directory beside the file, and the gate itself reading
+`if(a.CLAUDE_CODE_DISABLE_AGENT_VIEW) … if(aI()?.settings.disableAgentView===!0) …`.
+That closed the one Phase 0 question this change had shipped a hedge for. One corollary
+worth knowing: the variable is tested for truthiness, so `CLAUDE_CODE_DISABLE_AGENT_VIEW=0`
+**also** disables the view — it is not how you turn it back on.
 
 **The measurement's caveats**, because they are the reason this is a floor and not a
 final number: it used a dummy API key rather than a claude.ai login, and the binary
@@ -778,7 +792,14 @@ automatic one, on 2026-09-21. The number mattered because it was the argument fo
 reaching for `make base`, and at five minutes that argument is much weaker. Measured
 from the run timestamps, which is the artefact; the sentence in the docs was the guess.
 
-**The tag is `2026.09.21.1`** (`dev/Makefile`'s `BASE_TAG` is the single source; `2026.09.21` was the bookworm image with the self-updating Claude, `2026.08.25` its predecessor, `.24.2` the dd/ds conversion), `2026.08.24.1` having been the or3 one
+**The tag is whatever `dev/Makefile`'s `BASE_TAG` line says — `2026.10.01` as this is
+written — and naming it a second time here is how it goes stale, which it had: this
+sentence said `2026.09.21.1` for two bumps.** Read the Makefile, not this. The genealogy,
+because the suffixes are not self-explaining: `2026.10.01` turned the agent view off,
+`2026.09.21.2` put the abduco compile stage back when trixie turned out not to package it,
+`2026.09.21.1` was trixie itself, `2026.09.21` the bookworm image with the self-updating
+Claude, `2026.08.25` its predecessor, `.24.2` the dd/ds conversion and `2026.08.24.1` the
+or3 one
 — suffixes rather than new dates, because each earlier tag is already pushed and a
 pinned tag is a contract that the same tag is the same bytes. `dev-base.yml` refuses to
 overwrite one without `force`, which is the check working — and since it runs on every

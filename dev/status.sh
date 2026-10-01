@@ -227,28 +227,52 @@ verify() {
         printf 'autoupdate: %s\n' "$autoupdate, nothing blocking it; last attempt: ${attempt:-unknown}"
     fi
     # AGENT VIEW OFF, PRINTED AS TWO SWITCHES rather than one verdict. The managed
-    # settings file is the authority — no project or user settings file can override it
-    # — and the env var is belt-and-braces for the thing nobody here can check from
-    # outside: which path this version of Claude Code actually reads managed settings
-    # from. Collapsing them into a single PASS would hide exactly the case they exist
-    # for, a file in the wrong place looking identical to one in force.
+    # settings file is the authority — no project or user settings file can override it —
+    # and the env var is the belt-and-braces, checked FIRST by the binary, before settings
+    # are loaded at all.
     #
-    # The FILE is read, not tested for existence: an empty or truncated file passes
-    # `test -f` and turns the view back on. The VARIABLE is read in a fresh exec, which
-    # inherits the image's ENV and nothing else — so this line says what the image sets,
-    # which is what a rebuild is being verified for, and not what some shell exported.
+    # THE FILE IS PARSED, NOT GREPPED, and that is a fix rather than a flourish. The first
+    # version flattened the file and looked for the substring `"disableAgentView":true`,
+    # which reads "off" for a file truncated anywhere after the word `true` — no closing
+    # brace, so Claude Code's own JSON parse fails, it ignores the whole file, and the view
+    # is ON while this line says it is off. It also read "off" for the key nested under
+    # some other object, where it means nothing, and read "not off" for a tab after the
+    # colon, which is valid JSON the binary accepts. A substring test cannot answer a
+    # question about JSON. python3 is in the image — the base is python:3.13-slim-trixie —
+    # so the check asks the same question the binary asks.
+    #
+    # `is True`, not truthiness: the binary tests `settings.disableAgentView === true`, so
+    # the string "true" and the number 1 do NOT turn the view off, and a readout that
+    # accepted them would be wrong in the direction that matters.
+    #
+    # THE ENV VAR IS READ FROM THE CONTAINER, not from the image — `docker exec` inherits
+    # the container's whole Config.Env, which is the image's ENV plus anything the child's
+    # compose `environment:` or `env_file` added. That is the right scope: it is what a
+    # session in there will actually see. The message says "in this container" rather than
+    # blaming the image, because a child can blank it.
+    #
+    # `2>&1` on the file read is deliberate: python's own message is the answer, and so is
+    # docker's when the container is not running — a real cause beats a guessed one. The
+    # `:-` fallback below is for the case where docker says nothing at all.
     local agentview_file agentview_env
-    agentview_file="$(d exec "$CONTAINER" sh -c \
-        'cat /etc/claude-code/managed-settings.json 2>/dev/null' 2>/dev/null | tr -d ' \n')"
-    agentview_env="$(d exec "$CONTAINER" sh -c \
-        'printf %s "${CLAUDE_CODE_DISABLE_AGENT_VIEW-}"' 2>/dev/null)"
-    case "$agentview_file" in
-        *'"disableAgentView":true'*) agentview_file='managed settings say off' ;;
-        '') agentview_file='NO /etc/claude-code/managed-settings.json — this image predates it (make up)' ;;
-        *)  agentview_file="PRESENT BUT NOT OFF — $agentview_file" ;;
-    esac
-    printf 'agentview : %s; env=%s\n' "$agentview_file" \
-        "${agentview_env:-UNSET — the image should set CLAUDE_CODE_DISABLE_AGENT_VIEW=1}"
+    agentview_file="$(d exec "$CONTAINER" python3 -c '
+import json, sys
+p = "/etc/claude-code/managed-settings.json"
+try:
+    v = json.load(open(p)).get("disableAgentView")
+except FileNotFoundError:
+    sys.exit("NO " + p + " — this image predates it (rebuild: make up)")
+except ValueError as e:
+    sys.exit("NOT VALID JSON, so Claude Code ignores the whole file — %s" % e)
+except OSError as e:
+    sys.exit("UNREADABLE — %s" % e)
+print("managed settings say off" if v is True else
+      "PRESENT BUT NOT OFF — disableAgentView is %r, and the binary wants exactly true" % (v,))
+' 2>&1)"
+    agentview_env="$(d exec "$CONTAINER" sh -c 'printf %s "${CLAUDE_CODE_DISABLE_AGENT_VIEW-}"' 2>/dev/null)"
+    printf 'agentview : %s; env=%s\n' \
+        "${agentview_file:-could not ask the container — see the container line above}" \
+        "${agentview_env:-UNSET in this container — the image should set it to 1}"
     tool cloudflared 'the hash-pinned download did not land' cloudflared --version
     # The one the phone's RemoteCommand names. Absent here and `ssh infra-dev` fails with
     # "Unknown command: in-workspace" from the container's fish — which reads like a

@@ -4,9 +4,9 @@
 #
 # This is dev/README.md § *Four copies of this* built: the ~700 lines that dd-dev,
 # ds-dev, or3-dev and infra-dev agreed on, in one place. Debian trixie slim (glibc 2.41
-# since 2026-09-21; bookworm and its 2.36 before that), Node + Claude
-# Code (with the agent view off by baked managed settings), gh, abduco, sshd, fish, the
-# dev user, cloudflared, the entrypoint and every dotfile. A repo's own dev/Dockerfile becomes a FROM line
+# since 2026-09-21; bookworm and its 2.36 before that), Node + Claude Code (with the agent
+# view off by baked managed settings), gh, abduco, sshd, fish, the dev user, cloudflared,
+# the entrypoint and every dotfile. A repo's own dev/Dockerfile becomes a FROM line
 # plus whatever that repo needs on top — see dev/Dockerfile here for the shape
 # (ansible), or or3's for the other one (uv, and its own ssh identity).
 #
@@ -348,12 +348,11 @@ RUN if ! getent group "${USER_GID}" >/dev/null; then \
 # setting that is only true for one child belongs in that child.
 #
 # CLAUDE_CODE_DISABLE_AGENT_VIEW is the SECOND of the two switches that turn the agent
-# view off, and it is here rather than in the managed settings file for one reason: it
-# cannot be aimed at the wrong path. The authority is
-# /etc/claude-code/managed-settings.json, copied in below, and which directory a given
-# Claude Code reads managed settings from is a thing that has moved before. A file in the
-# wrong place fails silently and looks exactly like one in force; this variable does not
-# have a place to be wrong about. The full reasoning is at that COPY.
+# view off. The authority is /etc/claude-code/managed-settings.json, copied in below; this
+# variable is here because the binary checks it FIRST, before any settings file is loaded,
+# so it holds even in the states where the file does not — a malformed file is ignored
+# whole, and a settings path that moves takes the file with it. The full reasoning is at
+# that COPY.
 #
 # PATH AND NPM_CONFIG_PREFIX ARE NOT HERE. They are set at the node block above,
 # because the build steps between there and here have to run with them — an ENV only
@@ -414,13 +413,25 @@ RUN chmod 0755 /usr/local/bin/in-workspace
 # inside /home/dev, where a baked file is visible on the container that created the
 # volume and hidden from every one after it.
 #
-# WHICH PATH THE INSTALLED CLAUDE CODE READS IS NOT ESTABLISHED, and that is what the
-# CLAUDE_CODE_DISABLE_AGENT_VIEW in the ENV block above is for. This is the documented
-# path, but managed-settings locations have moved before, a file in the wrong place
-# fails silently and looks exactly like one in force, and a variable has no place to be
-# wrong about. Phase 0 of plans/claude-sessions.md could not close that question from
-# inside a container, so both ship and `make verify` prints BOTH rather than concluding
-# the view is off from either one.
+# THIS IS THE PATH THE INSTALLED BINARY READS, and that is checked rather than assumed —
+# it was the one Phase 0 question left open, and it is now closed. Claude Code 2.1.286
+# carries `default:return"/etc/claude-code"` for every platform that is not macOS or
+# Windows, with a managed-settings.d drop-in directory beside the file; found by grepping
+# the binary in this container on 2026-10-01, and the gate it feeds reads
+#
+#   if(a.CLAUDE_CODE_DISABLE_AGENT_VIEW)return"is disabled by CLAUDE_CODE_DISABLE_AGENT_VIEW";
+#   if(aI()?.settings.disableAgentView===!0)return"is disabled by the 'disableAgentView' setting";
+#
+# which says three things worth keeping. The ENV VARIABLE IS CHECKED FIRST, before settings
+# are loaded at all, so it is not a guess about where the file goes — it is the switch that
+# survives the file being unreadable, ignored or moved by a later version. THE FILE TEST IS
+# STRICT `=== true`, so the JSON boolean is load-bearing: `"true"` as a string does not
+# disable anything. And the variable is tested for TRUTHINESS, so `=0` would disable it too
+# — a thing to know before writing `=0` expecting it to re-enable the view.
+#
+# `make verify` prints BOTH switches and parses the file rather than grepping it, because a
+# file in the wrong place, or one truncated after the word `true`, fails silently and looks
+# exactly like one in force.
 COPY claude-managed-settings.json /etc/claude-code/managed-settings.json
 RUN chmod 0644 /etc/claude-code/managed-settings.json
 

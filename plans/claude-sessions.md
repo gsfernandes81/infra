@@ -57,12 +57,13 @@ beyond the ssh config the client play already writes.
 
 ### 1. The agent view is off fleet-wide
 
-`disableAgentView: true` in **managed settings** baked into the base
-(`/etc/claude-code/managed-settings.json`, or a file in `managed-settings.d/` — Phase 0
-checks which the installed version reads), so neither a repo's `.claude/settings.json` nor
-a user setting can turn it back on. `CLAUDE_CODE_DISABLE_AGENT_VIEW=1` in the image's ENV
-is optional belt-and-braces; the entrypoint already publishes ENV to ssh sessions via
-`~/.ssh/environment`. Cost: `claude --bg`/`claude agents` are unavailable in these
+`disableAgentView: true` in **managed settings** baked into the base at
+`/etc/claude-code/managed-settings.json` — the path checked against the binary, not
+assumed; a `managed-settings.d/` drop-in directory sits beside it — so neither a repo's
+`.claude/settings.json` nor a user setting can turn it back on.
+`CLAUDE_CODE_DISABLE_AGENT_VIEW=1` in the image's ENV is the second switch, and it is
+checked *before* settings load, so it holds where the file does not; the entrypoint
+already publishes ENV to ssh sessions via `~/.ssh/environment`. Cost: `claude --bg`/`claude agents` are unavailable in these
 containers, which is the point.
 
 ### 2. Slots, conversations and the registry
@@ -294,18 +295,39 @@ the binary, so none of the following was reachable from an agent session here:
   `offloaded` transition depends on it, and if it does not fire, `reconcile` is the only
   thing that ever clears an offloaded slot;
 - whether a fired wake-up passes through `UserPromptSubmit`;
-- **which managed-settings path the installed version reads.** Phase 1 ships the file
-  *and* the env var for exactly this reason;
 - that `--resume` keeps the session id;
 - abduco across a container `stop`/`start` (findings 2–4 are all within one container).
 
-**9. This container is not built on the current base, which is why its Claude Code is
+**9. ⚠︎ SETTLED SINCE — this was written on the OLD container.** It was recreated on
+`2026.09.21.2` the same day; `claude` is now `/opt/npm-global/...`, dev-owned, at 2.1.286,
+and the self-updater works. Every RAM number in *Why* was measured before that, which is
+the part still worth re-checking. The finding as written:
+
+**This container is not built on the current base, which is why its Claude Code is
 stuck.** `claude` here is `/usr/lib/node_modules/@anthropic-ai/claude-code`, root-owned,
 with no `/opt/npm-global` at all — the pre-2026-09-21 layout. So the self-updater cannot
 write and the version sat at 2.1.241 while npm's latest was 2.1.286. Recreating on
 `2026.09.21.2` (published; `ghcr.io/gsfernandes81/gsrpi-dev-base` lists
 `2026.08.24`…`2026.09.21.2`) is what fixes it. Worth recording because every RAM number
 in *Why* was measured on a container in this state.
+
+**10. A HAZARD FOR PHASE 3, found while closing item 8: managed settings can make
+Claude Code stop and ask.** The binary carries a consent dialog — *"Managed settings
+require approval"*, with *"these can change where Claude Code runs or what it can connect
+to"*, a *"unchanged since your last approval"* memory, and an error string
+`Managed-settings consent dialog exited without an answer`. The counts it elides are
+`elidedCommandCount`, `elidedSandboxCount` and `elidedIsolationCount`, so those three
+categories are certainly in scope. `disableAgentView` is in none of them, which is why
+Phase 1's file is inert at launch — verified by grep, not by running it.
+
+**What is NOT established is whether `hooks` in a managed settings file triggers it**, and
+Phase 3 puts hooks exactly there. If it does, every launch after a hook change blocks on a
+dialog: one keypress inside abduco, but a non-interactive path (a `claude -p`, a wake-up,
+anything the launcher starts without a tty) dies with that error string. **Establish this
+before Phase 3 designs where its hooks live** — the alternatives are the user settings file
+on the `infra-claude` volume, or a `.claude/settings.json` in each repo, both of which lose
+the "cannot be turned off" property that managed settings buy. Test by adding a hook to
+`/etc/claude-code/managed-settings.json` in a scratch container and starting `claude -p`.
 
 ## Phases
 
