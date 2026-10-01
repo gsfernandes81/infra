@@ -633,6 +633,29 @@ agent view and must change with them:
 - A slot with a pending timer is **never offloaded**, whoever set the timer; the menu marks
   it, so a forgotten `/loop` is visible and closable.
 
+From the mockup review, same day — the three questions under `## Mockups`, each answered
+*yes*, plus the glyphs:
+
+- **The glyph set is Claude Code's own** — box drawing, `·`, `↵` — **and its mode
+  indicators are not**, which is the one part of that vocabulary the owner has seen fail.
+  The marks column stays single-byte because the age is right-aligned against it.
+- **`u` stays**: a session the launcher did not start is marked as such. It goes
+  permanently blank once every client has re-run `configure-client.yml`, and that is the
+  right failure mode for a mark — the one time it is not blank is the time you want it.
+- **`↵` on an offloaded row resumes immediately, with no confirmation.** RAM is spent on
+  what you open, in the order you open it. The honest consequence, accepted rather than
+  designed around: near the cgroup limit, `↵` can answer with the no-room offer for a
+  *different* slot instead of the session you asked for.
+- **The row's title is Claude Code's own session title** where the transcript carries one,
+  else the first user prompt truncated; a row with a prompt waiting shows what the prompt
+  is about instead, because that is the more useful thing to read at that moment. Titles
+  are free text, so truncation is on display width, not bytes.
+- **An unregistered row cannot be named, and will not be guessed at.** There is no session
+  id to map to a transcript, so all there is to show is the abduco session name. Matching
+  cwd and start time against `~/.claude` transcripts would work and is guesswork; it is
+  worth building only if `u` rows turn out to persist, which the client re-run is meant to
+  prevent.
+
 ## Deferred — maybe not needed
 
 **A long-interval wake tool.** ScheduleWakeup clamps at an hour, and with timers pinning a
