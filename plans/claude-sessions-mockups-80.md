@@ -20,7 +20,7 @@ infra-dev · 6 open · 812M of 1.0G
 5 z   mount guards on one                                                     2d
 6 u   claude                                                                  5h
 ────────────────────────────────────────────────────────────────────────────────
-↵ open   n new   c close   ? keys   q shell
+↵ open   n new   c close   ? keys   s shell   q quit
 ```
 
 ### Mockup 2 — Nothing open
@@ -34,7 +34,7 @@ infra-dev · nothing open · 812M of 1.0G
   q   a shell instead
 
 ────────────────────────────────────────────────────────────────────────────────
-n new   ? keys   q shell
+n new   ? keys   s shell   q quit
 ```
 
 ### Mockup 3 — Closing a live slot
@@ -82,7 +82,7 @@ infra-dev · 6 open · 812M of 1.0G
 │ Left offloaded. Nothing was deleted;                                         │
 │ the transcript may be gone.                                                  │
 │                                                                              │
-│ r retry   c close it   ↵ back                                                │
+│ r retry   c close it   ↵/Esc back                                            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -98,7 +98,7 @@ infra-dev · 6 open · 1.0G of 1.0G
 6 u   claude                                                                  5h
 ────────────────────────────────────────────────────────────────────────────────
 detached from 2 · it is still running
-↵ open   n new   c close   ? keys   q shell
+↵ open   n new   c close   ? keys   s shell   q quit
 ```
 
 ### Mockup 7 — The keys, on ?
@@ -108,18 +108,19 @@ infra-dev · keys and marks
 ↵      open the row (resume if z)
 n      new session in /workspace
 c      close the row
-q      drop to a shell
+s      a shell in /workspace
+q, Esc quit the launcher
 ?      this
 
 !  wants you: a prompt is waiting
 *  unread: it finished while away
-t  a timer is pending; never
-   offloaded while one is
+t  a timer is pending; not
+   offloaded until it fires
 @  attached somewhere else too
 z  offloaded: ↵ resumes it
 u  not started by claude-sessions
 ────────────────────────────────────────────────────────────────────────────────
-↵ open   n new   c close   ? keys   q shell
+↵ open   n new   c close   ? keys   s shell   q quit
 ```
 
 ### Mockup 8 — The hint line as the terminal narrows
@@ -127,43 +128,52 @@ u  not started by claude-sessions
 at 40 columns, the right edge marked:
 ========================================
 ↵ open   n new   c close   ? keys
-q shell
+s shell   q quit
 at 34 columns, the right edge marked:
 ==================================
 ↵ open   n new   c close   ? keys
-q shell
+s shell   q quit
 at 26 columns, the right edge marked:
 ==========================
 ↵ open   n new   c close
-? keys   q shell
+? keys   s shell   q quit
 at 18 columns, the right edge marked:
 ==================
 ↵ open   n new
 c close   ? keys
-q shell
+s shell   q quit
 at 12 columns, the right edge marked:
 ============
 ↵ open
 n new
 c close
 ? keys
-q shell
+s shell
+q quit
 at 9 columns, the right edge marked:
 =========
 ↵ open
 n new
 c close
 ? keys
-q shell
+s shell
+q quit
 at 7 columns, the right edge marked:
 =======
 ↵ open
 n new
 c close
 ? keys
-q shell
+s shell
+q quit
 at 6 columns, the right edge marked:
 ======
+↵ open
+n new
+? keys
+q quit
+at 5 columns, the right edge marked:
+=====
   (the menu refuses to draw; the
    door execs a login shell and
    says why)
