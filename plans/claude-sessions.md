@@ -172,9 +172,16 @@ timeout, so a stuck lock cannot hold the door shut. `<c>-sh` remains the break-g
 - **Close:** `c` on a row marks it closed (and stops it if live, after a confirm). The
   conversation stays on disk and in `claude --resume`.
 - **Shell and quit, which used to be one key and are now two:** `s` drops to a login shell
-  in the workspace; `q` and `Esc` leave the launcher, which ends the ssh session, because
+  in the workspace; **`Esc` is the advertised quit**, and it ends the ssh session, because
   the door only falls through to a shell on a NON-ZERO exit. Inside a dialog or the keys
-  screen `Esc` means *back* — only `Esc` on the list itself quits (owner, 2026-10-01).
+  screen `Esc` means *back* — only `Esc` on the list itself quits.
+- **`q` still quits and is deliberately not listed anywhere in the UI** (owner,
+  2026-10-01), so the old binding does not hit a dead key and does not take a column in a
+  40-column hint line either. **Worth knowing, because it is not harmless:** under the old
+  keys `q` dropped you to a shell, and under these it ends the session — so the muscle
+  memory it exists to spare is the one it will surprise. It is recorded here because a key
+  that works and is written down nowhere is folklore, and this is the one place that is
+  not the UI.
 - **Data discipline:** the screen redraws on a keypress or a registry change, and ages
   tick **at most once a minute** (owner, 2026-10-01). Between those, **an idle menu emits
   zero bytes** — the property `ytq`'s marquee was built to, and tested the same way.
@@ -393,7 +400,7 @@ infra-dev · 6 open · 812M of 1.0G
 6 u   claude                          5h
 ────────────────────────────────────────
 ↵ open   n new   c close   ? keys
-s shell   q quit
+s shell
 ```
 
 ### Mockup 2 — Nothing open
@@ -407,7 +414,7 @@ infra-dev · nothing open · 812M of 1.0G
   q   a shell instead
 
 ────────────────────────────────────────
-n new   ? keys   s shell   q quit
+n new   ? keys   s shell
 ```
 
 ### Mockup 3 — Closing a live slot
@@ -480,7 +487,7 @@ infra-dev · 6 open · 1.0G of 1.0G
 ────────────────────────────────────────
 detached from 2 · it is still running
 ↵ open   n new   c close   ? keys
-s shell   q quit
+s shell
 ```
 
 ### Mockup 7 — The keys, on ?
@@ -491,7 +498,7 @@ infra-dev · keys and marks
 n      new session in /workspace
 c      close the row
 s      a shell in /workspace
-q, Esc quit the launcher
+Esc    quit the launcher
 ?      this
 
 !  wants you: a prompt is waiting
@@ -503,7 +510,7 @@ z  offloaded: ↵ resumes it
 u  not started by claude-sessions
 ────────────────────────────────────────
 ↵ open   n new   c close   ? keys
-s shell   q quit
+s shell
 ```
 
 ### Mockup 8 — The hint line as the terminal narrows
@@ -511,20 +518,20 @@ s shell   q quit
 at 40 columns, the right edge marked:
 ========================================
 ↵ open   n new   c close   ? keys
-s shell   q quit
+s shell
 at 34 columns, the right edge marked:
 ==================================
 ↵ open   n new   c close   ? keys
-s shell   q quit
+s shell
 at 26 columns, the right edge marked:
 ==========================
 ↵ open   n new   c close
-? keys   s shell   q quit
+? keys   s shell
 at 18 columns, the right edge marked:
 ==================
 ↵ open   n new
 c close   ? keys
-s shell   q quit
+s shell
 at 12 columns, the right edge marked:
 ============
 ↵ open
@@ -532,7 +539,6 @@ n new
 c close
 ? keys
 s shell
-q quit
 at 9 columns, the right edge marked:
 =========
 ↵ open
@@ -540,7 +546,6 @@ n new
 c close
 ? keys
 s shell
-q quit
 at 7 columns, the right edge marked:
 =======
 ↵ open
@@ -548,15 +553,8 @@ n new
 c close
 ? keys
 s shell
-q quit
 at 6 columns, the right edge marked:
 ======
-↵ open
-n new
-? keys
-q quit
-at 5 columns, the right edge marked:
-=====
   (the menu refuses to draw; the
    door execs a login shell and
    says why)
