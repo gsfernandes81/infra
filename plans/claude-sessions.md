@@ -64,7 +64,7 @@ containers, which is the point.
 
 ### 2. Slots, sessions and the registry
 
-A **slot** is one abduco session (name `cc-<n>`), i.e. one running claude process. A slot
+A **slot** is one abduco session (name `berth-<n>`), i.e. one running claude process. A slot
 holds a sequence of **conversations** (Claude session ids): `/clear` starts a new one in the
 same process, `--resume` re-enters an old one. The registry is keyed by slot and records,
 per slot:
@@ -79,7 +79,7 @@ writes). After a restart every slot whose pid is gone reads as **offloaded** —
 lost, it just needs resuming.
 
 **Hooks write it,** configured in the same managed settings so every repo gets them without
-touching its `.claude/`. One fast binary (`cs hook`, below) reads the hook's JSON on stdin:
+touching its `.claude/`. One fast binary (`berth hook`, below) reads the hook's JSON on stdin:
 
 | event | registry effect |
 |---|---|
@@ -97,14 +97,14 @@ weakness: it cannot tie a transcript to a process and judges by "newest file in 
 **Title:** Claude's own session title if the transcript carries one (summary / `/rename`),
 else the first user prompt, truncated. Phase 0 confirms where that lives.
 
-### 3. The offloader, rewritten as `cs offload`
+### 3. The offloader, rewritten as `berth offload`
 
 Same contract as today — never an attached slot, never one with work running under it,
 never without evidence — with the hook state replacing the transcript clock:
 
 - Offloadable when: detached, `Stop` is the latest event, no `needs_you`, no
   `pending_wake`, no non-claude descendants, idle past the threshold.
-- The threshold drops from 90 min to **10 min** (owner to confirm). The hour floor existed
+- The threshold drops from 90 min to **10 min** (owner, 2026-10-01). The hour floor existed
   only because self-scheduled wake-ups were invisible; `pending_wake` makes them visible.
 - Marks the slot `offloading` **before** signalling, then `offloaded` after; keeps the
   TERM → grace → KILL → abduco teardown and the pid-plus-start-time checks of the current
@@ -112,7 +112,7 @@ never without evidence — with the hook state replacing the transcript clock:
 - Also sweeps orphaned `daemon run` / `bg-spare` / `bg-pty-host` trees whose spawning
   session is gone (defence in depth now that the agent view is off).
 
-### 4. The launcher, `cs` — a Rust TUI
+### 4. The launcher, `berth` — a Rust TUI
 
 Replaces `abduco -A claude claude` as the RemoteCommand, so every `ssh <c>` lands in it.
 
@@ -130,11 +130,12 @@ Replaces `abduco -A claude claude` as the RemoteCommand, so every `ssh <c>` land
   conversation stays on disk and in `claude --resume`.
 - **Shell:** `q` drops to a login shell in the workspace.
 - **Data discipline:** the screen redraws on keypress or a registry change, never on a
-  timer; ages are refreshed at most once a minute, or only on keypress. **An idle menu
-  emits zero bytes** — the property `ytq`'s marquee was built to, and tested the same way.
+  timer, except that ages tick **at most once a minute** (owner, 2026-10-01). Between
+  those ticks **an idle menu emits zero bytes** — the property `ytq`'s marquee was built
+  to, and tested the same way.
 - **Width:** usable at 40 columns (Termux portrait) up; no ambiguous-width glyphs.
 - **Startup:** fast enough to be invisible on every ssh (target < 100 ms on `zero`).
-- **If `cs` itself fails,** the RemoteCommand falls through to a login shell rather than
+- **If `berth` itself fails,** the RemoteCommand falls through to a login shell rather than
   closing the connection; `<c>-sh` remains the documented break-glass.
 
 ### 5. Ending a session
@@ -148,11 +149,11 @@ Replaces `abduco -A claude claude` as the RemoteCommand, so every `ssh <c>` land
 
 ### 6. One binary, built outside this repo
 
-`cs` (menu, default), `cs hook`, `cs offload`, `cs close`: one Rust binary, so the hook
+`berth` (menu, default), `berth hook`, `berth offload`, `berth close`: one Rust binary, so the hook
 path, the offloader and the menu share one registry implementation and one set of tests.
 
-**Where the source lives is an owner decision** (see Open questions). This repo is
-"config only — no source", so the recommendation is a **separate repo** that publishes
+**The source lives in its own repo, `berth`** (owner, 2026-10-01) — this one is "config
+only — no source". That repo publishes
 static (musl) arm64 + amd64 binaries as releases, and `Dockerfile.base` downloads a
 **pinned** release with its checksum — the same shape as dd's pinned Railway CLI. Build by
 cross-compiling on the runner, not under QEMU, which is how the base's arm64 layer is
@@ -179,15 +180,15 @@ built today and would be very slow for Rust.
    offer; a resume that fails; the narrowest width at which the hint line still shows a
    way out. Iterate until the owner approves; record the approved mockups in the new
    repo's docs. **Do not start Phase 4 without that approval.**
-3. **Registry + `cs hook`** — the state machine, unit-tested over the event table above
+3. **Registry + `berth hook`** — the state machine, unit-tested over the event table above
    (including `/clear`, resume, offload-then-`SessionEnd`, container restart).
 4. **The TUI**, to the approved mockups. Rendering tested at 40×24 and 80×24 against a
    test backend; the zero-idle-bytes property tested under a pty; ordering and the guards
    unit-tested.
-5. **`cs offload`** replaces `offload-idle-claude.sh` (deleted in the same commit), with the
+5. **`berth offload`** replaces `offload-idle-claude.sh` (deleted in the same commit), with the
    orphan sweep. Dry-run mode kept.
 6. **Switch the door** — `ansible/templates/ssh-dev-block.j2`'s RemoteCommand becomes
-   `in-workspace cs`; `docs/ssh-clients.md`, `dev/README.md` and the base header updated;
+   `in-workspace berth`; `docs/ssh-clients.md`, `dev/README.md` and the base header updated;
    `decisions.md` rows for each decision taken. The owner runs the client play from the
    phone. Then **delete this plan.**
 
@@ -196,12 +197,29 @@ A push to `main` touching `dev/` publishes a new base tag automatically; no cont
 picks it up until its repo's `BASE_TAG` is bumped, and **bringing containers up on a new
 base is the owner's to do** (CLAUDE.md, *Privileged commands*).
 
-## Open questions for the owner
+## Taken by the owner, 2026-10-01
 
-1. Where the Rust source lives (recommended: its own repo, binaries pulled into the base
-   by pinned release).
-2. The offload threshold once wake-ups are visible (proposed: 10 min).
-3. Whether a slot with a pending wake-up may ever be offloaded (proposed: never).
-4. Whether the code should double as Rust learning material, with commenting to match, as
-   dossier's rewrite does (`REWRITE.md` D2).
-5. Whether ages on the menu tick (≤ 1 redraw a minute) or update only on keypress.
+Each becomes a `decisions.md` row in the commit that implements it.
+
+- The source lives in its own repo; the base pulls a pinned release.
+- Offload threshold: 10 minutes after `Stop`, once wake-ups are visible.
+- No learning-material commenting requirement; ordinary comment density.
+- Menu ages tick at most once a minute; otherwise the menu is silent.
+- The tool is called `berth` (a slot is a berth a session is moored in).
+
+## Still open
+
+**Offloading a slot with a pending timer.** Two in-process timers exist, and both die with
+the claude process, so who set one does not change what offloading does to it:
+
+- **ScheduleWakeup** — one-shot, at most an hour out. Set by `/loop` with no interval
+  (Claude picks its own pace), and Claude can also use it on its own initiative.
+- **CronCreate** — fixed-interval or one-off schedules, set by `/loop 5m …` or by asking
+  for a reminder. Recurring ones can run indefinitely.
+
+Options: (a) **never offload while any timer is pending**, and mark such slots in the menu
+so a forgotten `/loop` is visible and closable — simplest, costs that slot's RAM while the
+loop lives; (b) offload anyway and have `berth offload` resume the slot when the timer is
+due, replaying its prompt — saves RAM on long-interval loops, but re-implements the timer
+outside Claude and needs Phase 0 to prove a resumed session accepts the replayed prompt.
+Recommendation: (a), with (b) only if long-interval loops turn out to be common.
