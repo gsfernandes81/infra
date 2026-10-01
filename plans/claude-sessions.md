@@ -381,51 +381,33 @@ width question.
 
 ### Colour, in Claude Code's vocabulary rather than a new one
 
-Owner, 2026-10-01: *"Use colour similarly to how Claude code does."* Claude Code is sparing
-with it — an amber accent on the thing that wants you, plain foreground for content, dim for
-everything that is structure rather than information. The launcher takes those three and one
-blue:
+Owner, 2026-10-01: *"Use colour similarly to how Claude code does."* — then, on the first
+attempt: *"Too much yellow / orange. Use a less worrying colour at base."* The first version
+put amber on every key in the hint line and on every dialog title, which broke the rule
+written beside it: amber is the colour that reads as a *problem*, and a screen covered in it
+reads as a screen full of problems. **The base accent is blue; amber is left to one mark.**
 
 | where | colour | because |
 |---|---|---|
-| `!` wants you | amber | the only mark that is a *request*, and the only amber on the screen |
-| `*` unread | foreground | news, not a problem |
+| `!` wants you | amber | the only mark that is a *request*, and the only amber anywhere |
+| a key you can press — the hint line, the keys screen | blue | actionable, not alarming |
 | `t` timer pending | blue | a fact about time, and the reason the slot cannot be offloaded |
+| `*` unread | foreground, bold | news, not a problem |
+| a dialog's first line | foreground, bold | it is the question, and a question is not a warning |
 | `@` `z` `u` | dim | state, not news |
 | slot number, age, rules, frames, the header after the container name | dim | structure |
 | title | foreground | the content |
-| a key in the hint line | amber; the word after it dim | the key is the actionable half |
-| a dialog's first line | amber | it is the question being asked |
+
+Keys and `t` share the one blue deliberately: they never appear in the same column, and two
+blues would be a distinction nobody could name. **In a full list of six slots there are two
+amber characters on the screen, and both mean the same thing** — which is the test for
+whether amber is still worth having.
 
 Two rules come with it. **Nothing is colour-only** — every mark is a glyph first, so a
 monochrome terminal, a pipe or a screen reader loses nothing. And **amber is spent once**: if
 `!` and anything else were both amber, neither would mean *this one*. The plain-text mockups
-below cannot show colour, which is the honest reason the table above exists; the published
-page renders it.
-
-**One row is one slot**, and the repo is not in it: each container holds one workspace, so
-the repo is a property of the header, not of the row. The row is slot number, marks, title,
-age. Ages tick at most once a minute; nothing else redraws on its own.
-
-**Marks** — `!` wants you (a permission prompt or an elicitation is waiting) · `*` unread
-(it finished something while you were away) · `t` a timer is pending, so it is never
-offloaded · `@` attached somewhere else as well · `z` offloaded, and Enter resumes it ·
-`u` not started by `claude-sessions`, so it is one of today's `abduco -A claude` sessions.
-The marks field holds three, which is the most that can be true at once and still be worth
-reading.
-
-**Open questions I would put to you with the drawings**, because they are the places I
-guessed:
-
-1. **Is `u` worth a column?** It matters only until every client has re-run
-   `configure-client.yml`, and then it is permanently blank.
-2. **Should `Enter` on an offloaded row resume immediately, or confirm first?** Drawn as
-   immediate — RAM is only spent on what you open, which was the rule — but it is the one
-   key that can cost 250 MB without asking.
-3. **Is the title the right thing in the row?** Claude's own session title when there is
-   one, else the first prompt truncated. Screen 1 shows both kinds mixed: row 1 is a
-   permission prompt's subject, row 6 is an unregistered session with nothing to show but
-   the command.
+below cannot show colour, which is the honest reason this table exists; the published page
+renders it.
 
 ### Mockup 1 — The list, every mark mixed
 ```
