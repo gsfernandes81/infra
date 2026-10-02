@@ -402,9 +402,9 @@ chmod 600 "$HOME/.ssh/environment"
 # marks the slots whose pid and start time are gone, and removes the sockets dead abduco
 # servers left in ~/.abduco — which would otherwise answer `abduco -A` with a corpse.
 # Here because it must come before the offloader below and before sshd lets a session
-# in, and as `dev` because that is who runs claude. Safe to run at any time for sessions
-# spelled the fleet's way (`abduco -A|-c|-n name …`) — v0.1.0 reads no other flag form, so a
-# hand-started `abduco -fA name` could have its live socket swept. Non-zero only
+# in, and as `dev` because that is who runs claude. Safe to run at any time: since v0.2.0
+# it reads abduco's flags getopt-style (`-fA` included), and sweeps nothing at all while
+# any live abduco's session cannot be named. Non-zero only
 # on a real error, which is printed and does not stop the door. Time-bounded for the
 # reason child-init.sh is: anything ahead of sshd that hangs costs the door.
 if out=$(timeout 30 claude-sessions reconcile 2>&1); then

@@ -636,8 +636,9 @@ at 6 columns, the right edge marked:
    hooks-config; no menu) **and pinned in `Dockerfile.base`** with its two SHA-256s, the
    hooks generated into `/etc/claude-code/managed-settings.d/claude-sessions.json` at build,
    and `reconcile` run by the entrypoint — `BASE_TAG` `2026.10.02`. The consent question is
-   now a bring-up check, below.
-4. **The TUI**, to the approved mockups. Rendering tested at 40×24 and 80×24 against a test
+   now a bring-up check, below. **Superseded the same day by v0.2.0 at `2026.10.02.1`** (step 4).
+4. ✔ **DONE 2026-10-02 — released in claude-sessions v0.2.0, pinned in the base at
+   `BASE_TAG` `2026.10.02.1`.** The TUI, to the approved mockups. Rendering tested at 40×24 and 80×24 against a test
    backend; the zero-idle-bytes property tested under a pty; ordering and the guards
    unit-tested.
 5. **`claude-sessions offload`** replaces `offload-idle-claude.sh` (deleted in the same commit). The
@@ -648,17 +649,32 @@ at 6 columns, the right edge marked:
      `~/.local/share/claude-sessions-dry-run.log`; `offload-idle-claude.sh` still acts.
      `make idle` and `make offload-log` show both; `make sessions` is `doctor`.
    - **Bring-up (owner's), in order:**
-     1. Wait for `dev-base.yml` to publish `2026.10.02`, then recreate infra-dev:
+     1. Wait for `dev-base.yml` to publish `2026.10.02.1` (v0.2.0 and the door; it
+        supersedes `2026.10.02`, so if that was never brought up, skip straight here),
+        then recreate infra-dev:
         `ssh -t zero 'cd ~/infra/dev && make up'`.
-     2. `make verify` reads `sessions  : claude-sessions 0.1.0` and a `hooks` line naming six
-        events; `make boot-log` has the `claude-sessions reconcile:` and `DRY RUN` lines.
+     2. `make verify` reads `sessions  : claude-sessions 0.2.0`, a `hooks` line naming six
+        events and a `door` line naming `/usr/local/bin/claude-sessions-door`; `make boot-log` has the `claude-sessions reconcile:` and `DRY RUN` lines.
      3. **Start `claude` in the container and confirm no approval dialog appears** — the
         managed-settings consent question, so far settled from the docs only.
      4. Prompt it once, then `make sessions`: the slot shows events. "events: none seen"
         means the hooks are not firing.
+     4a. **The menu, by hand, before any client points at it.** From `ssh infra-dev-sh`, run
+        `claude-sessions-door`. Press `n`, then detach (abduco's key): the menu comes back
+        with `detached from N · it is still running`, and `make sessions` shows that slot
+        with a pid and recent `SessionStart`/`UserPromptSubmit`. That proves a slot binds;
+        it depends on claude's process name being `claude`, so **a slot with no pid is
+        reported before anything else.** The slot's stderr is captured to
+        `~/.local/share/claude-sessions/claude-<n>.stderr` for its whole life (it is how a
+        failed resume shows its error) — on that first start, check nothing interactive
+        went missing into it. And an idle menu sends **zero bytes**: worth a glance at the
+        phone's link meter, ages ticking at most once a minute.
      5. Read `make offload-log` over a few days. A day after rollout, `make sessions` again.
      6. The other dev repos pick this up when they bump `BASE_TAG`.
-   - **Stage B gate — found in review of Stage A, 2026-10-02; all three fixes belong in claude-sessions:**
+   - **Stage B gate — found in review of Stage A, 2026-10-02. All three are FIXED in v0.2.0**
+     (issues closed upstream; #4 checked here against the very state that showed it — pid
+     161 drops out of `doctor` while `/proc/161` still opens). **The checks below stay the
+     gate**: they read what the deployed binary does, and a closed issue does not.
      - **A hook can lose its event to the offloader's lock** ([claude-sessions#1](https://github.com/gsfernandes81/claude-sessions/issues/1)). `offload` (dry run included)
        takes each slot's lock and reads all of `/proc` while holding it; `hook` waits only
        `SESSION_END_WAIT` (400 ms) for every event, then logs and drops it. A dropped
@@ -666,10 +682,14 @@ at 6 columns, the right edge marked:
        minutes later unless a tool happens to be running. Fix upstream: snapshot `/proc`
        before locking, and have `--dry-run` not lock (it writes nothing). **Until then, any
        `hook.log` line saying a non-`SessionEnd` event lost the lock blocks Stage B.**
+       *v0.2.0:* `/proc` is read before any lock, only a slot about to be stopped is
+       locked, `--dry-run` locks nothing, and hook events other than `SessionEnd` wait 2 s.
+       A `SessionEnd` losing the lock during an offload is still expected and not a fault.
      - **`claude.exe` counts as foreign work** ([#2](https://github.com/gsfernandes81/claude-sessions/issues/2)). `foreign_descendant` exempts only `claude`;
        the old script measured `claude.exe` helpers in live trees. If they reappear, every
        slot is held forever and nothing is offloaded. Check the dry-run log for persistent
        `claude.exe … is running under it` holds; the fix is one allow-list entry upstream.
+       *v0.2.0:* `claude.exe` no longer holds a slot; `node` still does.
      - **A dead Claude Code sessions file reads as live** ([#4](https://github.com/gsfernandes81/claude-sessions/issues/4)). Claude Code writes
        `procStart` as a string, so `live.rs` never compares it and falls back to "the pid
        exists" — which a thread id satisfies (`/proc/<tid>` opens but is not listed). Seen in
@@ -677,8 +697,10 @@ at 6 columns, the right edge marked:
        offloader is unaffected (registry records only), but the menu Stage B makes the
        entrypoint lists dead sessions and `running_elsewhere` refuses to resume them. **Until
        fixed, a `doctor` line naming a pid that `ps` does not show blocks Stage B.**
-     - Lower priority, not a gate: `reconcile` can sweep a live socket started with combined
-       abduco flags (`-fA`) ([#3](https://github.com/gsfernandes81/claude-sessions/issues/3)).
+     - Not a gate, and **fixed in v0.2.0**: `reconcile` could sweep a live socket started
+       with combined abduco flags (`-fA`) ([#3](https://github.com/gsfernandes81/claude-sessions/issues/3)). It now reads flags
+       getopt-style and sweeps nothing while any live abduco's session cannot be named; the
+       entrypoint's "safe at any time" caveat is gone.
    - **Stage B — the swap, one commit:** the entrypoint loop drops `--dry-run` and its log
      (the binary keeps `offload.log` itself; delete `~/.local/share/claude-sessions-dry-run.log`,
      which grows unbounded until then), `offload-idle-claude.sh` is deleted with its
@@ -691,6 +713,16 @@ at 6 columns, the right edge marked:
 6. **Switch the door** — `ansible/templates/ssh-dev-block.j2`'s RemoteCommand becomes
    `in-workspace claude-sessions-door`; the owner runs the client play from each client. Then
    **delete this plan.**
+   - **The door itself landed 2026-10-02 at `2026.10.02.1`** — `dev/claude-sessions-door`,
+     in the image beside `in-workspace`, to the contract in claude-sessions' `docs/design.md`
+     § *The door*. Every branch was run before it was committed: a forwarded command, no
+     tty, a menu exiting non-zero (one line, then `$SHELL -l`), and the real v0.2.0 menu in
+     a 40×24 pty quit with `q` (exit 0, no shell).
+   - **The template switch is NOT in that commit, because the template is not infra-dev's
+     alone.** `configure-client-dev.yml -e alias=…` renders it for every dev container,
+     and each child pins its own `BASE_TAG`; a client re-run after the switch would give
+     `ssh or3-dev` (or dd-dev, ds-dev) "Unknown command: claude-sessions-door" until that
+     repo bumps. It lands when the owner says how that ordering is handled.
 
 Phases 1 and 2 can run in parallel. Each phase lands on `main` complete and non-breaking.
 A push to `main` touching `dev/` publishes a new base tag automatically; no container

@@ -302,6 +302,10 @@ print(" ".join(sorted(h)) if h else "PRESENT BUT EMPTY — no hooks in it")
     # and it is the check that would have said so.
     printf 'in-workspace: %s\n' "$(d exec "$CONTAINER" sh -c 'command -v in-workspace' 2>/dev/null \
         || echo 'MISSING — this image predates it. Rebuild: make up')"
+    # The same failure one step later: once ssh-dev-block.j2's RemoteCommand names the door,
+    # a client re-run against an image without it gets "Unknown command" at login.
+    printf 'door      : %s\n' "$(d exec "$CONTAINER" sh -c 'command -v claude-sessions-door' 2>/dev/null \
+        || echo 'MISSING — this image predates it. Rebuild: make up')"
     printf '\n'
     collections
     printf '\n'

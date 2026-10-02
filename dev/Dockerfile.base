@@ -372,7 +372,7 @@ ENV TZ=Etc/UTC \
     SCREENRC=/home/dev/.screenrc \
     SCREENDIR=/home/dev/.screen
 
-# ── ROOT-OWNED to the `USER` line (in-workspace, managed settings, claude-sessions);
+# ── ROOT-OWNED to the `USER` line (in-workspace, managed settings, claude-sessions, the door);
 #    everything after it belongs to dev ────────────────────────────────────
 #
 # WHERE THIS CONTAINER'S WORK IS, as a program. `in-workspace <cmd>` cds and execs, so a
@@ -480,9 +480,9 @@ RUN chmod 0644 /etc/claude-code/managed-settings.json
 #
 # 0644 IS LOAD-BEARING: every session runs as `dev`, and a file it cannot read means
 # sessions start with no hooks and nothing on screen says so.
-ARG CLAUDE_SESSIONS_VERSION=0.1.0
-ARG CLAUDE_SESSIONS_SHA256_arm64=3ee6e6640c59184e0d6c2c8f74980c718669f186429169d0b387b8ca4b967fe8
-ARG CLAUDE_SESSIONS_SHA256_amd64=160fb2bd63f81e9daa61a7d82cb3257eb5f053fa82e6a612494a4f4d1dfc6871
+ARG CLAUDE_SESSIONS_VERSION=0.2.0
+ARG CLAUDE_SESSIONS_SHA256_arm64=9b58f0728ae8914f2e1a2767cdd1d592b4991f1aec390a03f2b4222be9414c25
+ARG CLAUDE_SESSIONS_SHA256_amd64=c63eaebe8bd4e84e5ffb3406c18220089aae6a3842ee996315a2e432dcecc09b
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
@@ -501,6 +501,14 @@ RUN set -eux; \
     chmod 0644 /etc/claude-code/managed-settings.d/claude-sessions.json; \
     python3 -c 'import json, sys; h = json.load(open(sys.argv[1]))["hooks"]; assert h, "no hooks"; print("claude-sessions hooks:", " ".join(sorted(h)))' \
       /etc/claude-code/managed-settings.d/claude-sessions.json
+
+# THE DOOR — what an ssh login runs once ssh-dev-block.j2's RemoteCommand names it: the
+# claude-sessions menu at a terminal, a login shell for anything else or if the menu
+# fails. infra's half of the contract in claude-sessions' docs/design.md § "The door",
+# and why it is shaped that way is in the file's own header. Root-owned beside
+# in-workspace for the same reason; inert until a client's RemoteCommand runs it.
+COPY claude-sessions-door /usr/local/bin/claude-sessions-door
+RUN chmod 0755 /usr/local/bin/claude-sessions-door
 
 USER ${USERNAME}
 WORKDIR /workspace
