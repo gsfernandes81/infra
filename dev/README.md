@@ -954,7 +954,7 @@ claude`): the menu at a terminal; a login shell when there is no terminal or the
 exits non-zero (it has said why on stderr by then); a forwarded `SSH_ORIGINAL_COMMAND`
 run as given. **A client re-run reaches every dev container's alias at once**, and a
 container whose base predates `2026.10.02.1` has no door — `ssh <it>` then answers
-*Unknown command: claude-sessions-door* until that repo bumps, and `<it>-sh` gets in.
+`exec: claude-sessions-door: not found` (from `in-workspace`, which is dash) until that repo bumps, and `<it>-sh` gets in.
 
 | Piece | Where | What it does |
 |---|---|---|

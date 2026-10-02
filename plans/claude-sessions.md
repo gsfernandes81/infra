@@ -722,7 +722,7 @@ at 6 columns, the right edge marked:
      (`decisions.md`), with `make claude`, the banners and the docs. **Owner's, in order:**
      recreate infra-dev on `2026.10.02.1` first (Phase 5 bring-up above, step 4a included),
      then re-run `configure-client.yml` on each client. or3-dev, dd-dev and ds-dev answer
-     *Unknown command: claude-sessions-door* until each repo bumps `BASE_TAG`; `<c>-sh`
+     `exec: claude-sessions-door: not found` until each repo bumps `BASE_TAG`; `<c>-sh`
      gets in meanwhile. **This plan is deleted** when the clients are re-run, the children
      have bumped, and Stage B has landed.
 

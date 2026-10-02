@@ -70,8 +70,9 @@ all — that is `<c>-sh`.
 
 **Changed 2026-10-02 from `in-workspace abduco -A claude claude`.** The template serves
 every dev container, and a container gets the door only when its repo's `BASE_TAG` reaches
-`2026.10.02.1`; until then, after a client re-run, `ssh <c>` to it answers *Unknown
-command: claude-sessions-door* and `<c>-sh` is the way in. Taken knowingly over a per-alias
+`2026.10.02.1`; until then, after a client re-run, `ssh <c>` to it answers
+`in-workspace: 42: exec: claude-sessions-door: not found` (dash's wording — `in-workspace`
+is `sh`, so this is not fish's *Unknown command*) and `<c>-sh` is the way in. Taken knowingly over a per-alias
 switch (`docs/decisions.md`). Sessions started the old way still show, marked `u`, and
 `Enter` attaches them.
 

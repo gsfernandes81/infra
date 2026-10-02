@@ -6,7 +6,8 @@
 #   bash /home/dev/offload-idle-claude.sh --once      one pass, for real
 #   bash /home/dev/offload-idle-claude.sh             the daemon (what the entrypoint runs)
 #
-# WHAT IT IS FOR. The way into these containers is `ssh -t <name> abduco -A claude claude`,
+# WHAT IT IS FOR. The way into these containers was `ssh -t <name> abduco -A claude claude`
+# (the claude-sessions door since 2026-10-02, and claude-sessions offload replaces this),
 # and the point of abduco is that the session survives the link — so a claude nobody is
 # talking to stays resident for days. Measured on infra-dev, 2026-08-25: ONE idle session's
 # process tree held 1,146 MB RSS (the session itself 208 MB, its transient daemon 145 MB,
@@ -287,8 +288,9 @@ consider() {
 # THAT LAST STEP IS NOT TIDYING, and leaving it out was this script's first real bug,
 # found by running it rather than by reading it. abduco outlives the command it ran: the
 # session stays in `abduco`'s listing with a `+`, its socket keeps the name (the finished
-# state is the socket's execute bit), and `abduco -A claude claude` — the documented way
-# into every one of these containers — ATTACHES TO THAT CORPSE instead of starting a new
+# state is the socket's execute bit), and `abduco -A claude claude` — the way into every
+# one of these containers until 2026-10-02, and still what an un-re-run client does —
+# ATTACHES TO THAT CORPSE instead of starting a new
 # claude. You would ssh in, get a dead screen, and have no reason to suspect the reason.
 # So the session that was offloaded is closed, and only that one: a finished session
 # somebody else left is theirs to look at, and abduco keeps it for exactly that.
@@ -302,7 +304,7 @@ offload() {
     local pid start
 
     # LAST-MOMENT RE-CHECK. Everything above took time — a `stat`, a tree walk, a listing —
-    # and the documented way into this container is `ssh -t <name> abduco -A claude claude`.
+    # and a client not yet re-run onto the door still runs `abduco -A claude claude`.
     # Somebody arriving in that window would otherwise attach to a session already being
     # signalled. Cheap, and it closes the only race between the decision and the kill.
     local attached_now

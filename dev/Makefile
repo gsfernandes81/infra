@@ -9,7 +9,7 @@
 #   make login       log this container into GitHub and claude.ai (idempotent)
 #   make fleet       prove zero, one and two answer — by ssh, then by ansible
 #   make collections check the image's collections against ansible/requirements.yml
-#   make claude      a claude in the container's `claude` abduco session
+#   make claude      the claude-sessions menu, as `ssh infra-dev` lands on it
 #   make claude-update  update Claude Code now, and say whether it updates itself
 #   make shell       a fish shell in the container
 #   make logs        follow the container log (= sshd's)

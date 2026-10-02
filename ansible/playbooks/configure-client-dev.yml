@@ -384,7 +384,7 @@
           {{ dev_alias }}: no Access token at {{ token_file }}, and this run was told not
           to ask (-e prompt_for_token=false). Its ssh block is still written; `ssh
           {{ dev_alias }}` will say the token is missing until a run without the flag (or
-          with --tags access -e alias={{ dev_alias }}) is given one. A container that has
+          with configure-client-dev.yml --tags access -e alias={{ dev_alias }}) is given one. A container that has
           no tunnel yet gets one from playbooks/create-dev-tunnel.yml -e name={{ dev_alias }}.
       changed_when: true
       when:
@@ -485,8 +485,9 @@
       ansible.builtin.debug:
         msg: >-
           SKIPPED {{ dev_alias }}'s Access token — both halves left blank. Nothing written
-          to {{ token_file }}; the ssh block is still written. Re-run with
-          --tags access -e alias={{ dev_alias }} once its tunnel exists.
+          to {{ token_file }}{{ ' (the token already there is kept)' if tf.stat.exists | default(false) else '' }};
+          the ssh block is still written. Once its tunnel exists:
+          configure-client-dev.yml --tags access -e alias={{ dev_alias }}.
       changed_when: true
       when: (asking_for_token | bool) and (token_blank | bool)
 
@@ -896,11 +897,31 @@
     - name: Is there a token now — the answer the summary below gives
       tags: [always]
       # Read again rather than inferred from this run's choices: under --tags ssh none of
-      # those ran, and the file may have come from an earlier run.
+      # those ran, and the file may have come from an earlier run. Same for the block and
+      # the Windows token below — the summary states what is on disk, not what this run
+      # meant to do, because under --tags access no block was written and under --tags ssh
+      # no Windows token was.
       ansible.builtin.stat:
         path: "{{ token_file }}"
       register: token_now
       check_mode: false
+
+    - name: Is there a block now
+      tags: [always]
+      ansible.builtin.command:
+        argv: [grep, -qF, "# BEGIN {{ dev_alias }} (ansible/playbooks/configure-client-dev.yml)", "{{ ssh_config }}"]
+      register: block_now
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Is there a Windows token now
+      tags: [always]
+      ansible.builtin.stat:
+        path: "{{ win_token_file_wsl }}"
+      register: win_token_now
+      check_mode: false
+      when: on_windows_client | bool
 
     - name: How to use it
       tags: [always]
@@ -911,11 +932,12 @@
           - "    no -lan alias: break glass by hand with `ssh <host>` and then"
           - "    `ssh -p <port> dev@127.0.0.1`, ports in configure-client.yml."
           - ""
-          - "wsl/posix: block in {{ ssh_config }}; token {{ ('at ' ~ token_file ~ ' (0600), sourced by the ProxyCommand, so it reaches one cloudflared and no other environment') if token_now.stat.exists | default(false) else ('NOT on this client, so ssh ' ~ dev_alias ~ ' says so and stops: --tags access -e alias=' ~ dev_alias ~ ' adds it') }}."
+          - "wsl/posix: block {{ ('in ' ~ ssh_config) if block_now.rc == 0 else ('NOT in ' ~ ssh_config ~ ' — run with --tags ssh') }}; token {{ ('at ' ~ token_file ~ ' (0600), sourced by the ProxyCommand, so it reaches one cloudflared and no other environment') if token_now.stat.exists | default(false) else ('NOT on this client, so ssh ' ~ dev_alias ~ ' says so and stops: configure-client-dev.yml --tags access -e alias=' ~ dev_alias ~ ' adds it') }}."
           - ""
           - >-
             windows: {{ 'managed directly — block in ' ~ win_ssh_config ~ ', wrapper at '
-            ~ win_wrapper ~ ', token at ' ~ win_token_file ~ ' (NTFS ACL, printed above)'
+            ~ win_wrapper ~ ', token ' ~ (('at ' ~ win_token_file ~ ' (NTFS ACL)')
+                if win_token_now.stat.exists | default(false) else 'NOT written yet')
             if on_windows_client | bool
             else ('skipped — windows_home is empty' if windows_home_wsl | length == 0
                   else 'not reachable from here — follow ' ~ windows_out) }}

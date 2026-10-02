@@ -1,7 +1,7 @@
 #!/bin/sh
 # Run something where this container's work is.
 #
-#     in-workspace abduco -A claude claude
+#     in-workspace claude-sessions-door
 #     in-workspace git status
 #     in-workspace                          (no args: a login shell)
 #
