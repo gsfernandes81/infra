@@ -23,7 +23,7 @@ services:
       # `base` — the FROM pulls the tag from ghcr — so a tag bumped here and not yet
       # built by dev-base.yml fails on the pull until `make base` builds it locally.
       args:
-        BASE_TAG: ${BASE_TAG:-2026.10.01}
+        BASE_TAG: ${BASE_TAG:-2026.10.02}
     image: infra-dev
     container_name: infra-dev
     hostname: ${DEV_HOSTNAME:-infra-dev}  # Claude Code shows this as the machine title
@@ -82,6 +82,11 @@ services:
       #   DEV_IDLE_OFFLOAD: "0"            # keep idle sessions resident
       #   DEV_IDLE_OFFLOAD_SECONDS: "7200" # a longer leash (3600 is the floor it refuses under)
       #   DEV_IDLE_POLL_SECONDS: "600"     # look less often
+      #
+      # Its replacement, `claude-sessions offload`, runs beside it as a DRY RUN until Stage B
+      # of plans/claude-sessions.md's Phase 5 (dev/README.md § claude-sessions). The first
+      # switch governs both; the other two are the old script's only — the new one keys on
+      # 10 minutes after a `Stop`, fixed, and has no floor to refuse under.
 
       # CLAUDE CODE UPDATES ITSELF, and nothing here switches that on: it is the image's
       # npm prefix being writable by `dev` that does (dev/Dockerfile.base's node block).

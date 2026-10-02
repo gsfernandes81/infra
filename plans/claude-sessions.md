@@ -632,12 +632,40 @@ at 6 columns, the right edge marked:
    parked at `ci/github-actions-ci.yml` because the token had no `workflow` scope — and the
    first release. `claude-sessions offload` is Phase 5 and unwritten; `last_attach_ms` has no
    writer until the menu exists, so `unread` is permanently true for now.
+   **Update 2026-10-02: v0.1.0 is released** (hook, reconcile, offload, list, doctor, close,
+   hooks-config; no menu) **and pinned in `Dockerfile.base`** with its two SHA-256s, the
+   hooks generated into `/etc/claude-code/managed-settings.d/claude-sessions.json` at build,
+   and `reconcile` run by the entrypoint — `BASE_TAG` `2026.10.02`. The consent question is
+   now a bring-up check, below.
 4. **The TUI**, to the approved mockups. Rendering tested at 40×24 and 80×24 against a test
    backend; the zero-idle-bytes property tested under a pty; ordering and the guards
    unit-tested.
 5. **`claude-sessions offload`** replaces `offload-idle-claude.sh` (deleted in the same commit). The
    orphan sweep ships dry-run, logging, and is armed only after the owner has read a
-   week of its log.
+   week of its log. **Written, in v0.1.0. Two stages** (`decisions.md` row, 2026-10-02):
+   - ✔ **Stage A, landed 2026-10-02 — dry run beside the old script.** The entrypoint runs
+     `claude-sessions offload --dry-run` every 3 minutes into
+     `~/.local/share/claude-sessions-dry-run.log`; `offload-idle-claude.sh` still acts.
+     `make idle` and `make offload-log` show both; `make sessions` is `doctor`.
+   - **Bring-up (owner's), in order:**
+     1. Wait for `dev-base.yml` to publish `2026.10.02`, then recreate infra-dev:
+        `ssh -t zero 'cd ~/infra/dev && make up'`.
+     2. `make verify` reads `sessions  : claude-sessions 0.1.0` and a `hooks` line naming six
+        events; `make boot-log` has the `claude-sessions reconcile:` and `DRY RUN` lines.
+     3. **Start `claude` in the container and confirm no approval dialog appears** — the
+        managed-settings consent question, so far settled from the docs only.
+     4. Prompt it once, then `make sessions`: the slot shows events. "events: none seen"
+        means the hooks are not firing.
+     5. Read `make offload-log` over a few days. A day after rollout, `make sessions` again.
+     6. The other dev repos pick this up when they bump `BASE_TAG`.
+   - **Stage B — the swap, one commit:** the entrypoint loop drops `--dry-run` and its log
+     (the binary keeps `offload.log` itself), `offload-idle-claude.sh` is deleted with its
+     `COPY`, its `make idle`/`offload-log` halves, `DEV_IDLE_OFFLOAD_SECONDS`/
+     `DEV_IDLE_POLL_SECONDS` (entrypoint header, `compose.yaml`), `status.sh`'s exclusion and
+     `procps` comment, the README's offloader section; the 90-minute `decisions.md` row is
+     marked ⚠︎SUPERSEDED. Expect idle sessions to stop after 10 minutes, ssh ones included.
+   - **The orphan sweep is armed in claude-sessions**, not here, after a week of
+     `offload.log`; the owner has a reminder for 2026-10-08.
 6. **Switch the door** — `ansible/templates/ssh-dev-block.j2`'s RemoteCommand becomes
    `in-workspace claude-sessions-door`; the owner runs the client play from each client. Then
    **delete this plan.**

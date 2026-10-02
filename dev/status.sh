@@ -55,8 +55,10 @@ status() {
         printf 'sessions  : %s\n' 'no abduco sessions (make claude, or ssh in and start one)'
     fi
 
+    # The offloaders are excluded by name, or their own argv would read as a claude:
+    # claude-sessions' dry-run loop is a `bash -c` carrying the word, every pass, forever.
     printf 'claude    : %s\n' "$(grep 'claude' <<<"$procs" \
-        | grep -vE 'offload-idle-claude|/proc/' | grep -q . \
+        | grep -vE 'offload-idle-claude|claude-sessions|/proc/' | grep -q . \
         && echo 'a claude is running in this container' || echo 'no claude running')"
 
     # `claude auth status`, not "is there a credentials file" — a file holding empty
@@ -274,6 +276,26 @@ print("managed settings say off" if v is True else
         "${agentview_file:-could not ask the container — see the container line above}" \
         "${agentview_env:-UNSET in this container — the image should set it to 1}"
     tool cloudflared 'the hash-pinned download did not land' cloudflared --version
+    tool sessions 'no claude-sessions — this image predates it (rebuild: make up)' claude-sessions --version
+    # The hooks that feed claude-sessions, read the way Claude Code reads them: parsed, and
+    # as `dev`, because a file that is malformed or unreadable to the session's account is
+    # ignored whole and silently — sessions start with no hooks. Whether they actually FIRE
+    # is a different question, answered by `make sessions` ("events: none seen").
+    local hooks_file
+    hooks_file="$(d exec "$CONTAINER" python3 -c '
+import json, sys
+p = "/etc/claude-code/managed-settings.d/claude-sessions.json"
+try:
+    h = json.load(open(p)).get("hooks") or {}
+except FileNotFoundError:
+    sys.exit("NO " + p + " — this image predates it (rebuild: make up)")
+except ValueError as e:
+    sys.exit("NOT VALID JSON, so Claude Code ignores the whole file — %s" % e)
+except OSError as e:
+    sys.exit("UNREADABLE as dev, so sessions start with no hooks — %s" % e)
+print(" ".join(sorted(h)) if h else "PRESENT BUT EMPTY — no hooks in it")
+' 2>&1)"
+    printf 'hooks     : %s\n' "${hooks_file:-could not ask the container — see the container line above}"
     # The one the phone's RemoteCommand names. Absent here and `ssh infra-dev` fails with
     # "Unknown command: in-workspace" from the container's fish — which reads like a
     # broken ssh config and is in fact an image that was never rebuilt. Cheap to check,

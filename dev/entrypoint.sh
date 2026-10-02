@@ -3,7 +3,8 @@
 # sessions' orphans get reaped).
 #
 # Order matters and is not arbitrary:
-#   ssh -> claude state -> pull -> sshd host key -> [rc(bg)] -> [tunnel(bg)] -> sshd(fg)
+#   ssh -> claude state -> pull -> sshd host key -> reconcile -> [offloaders(bg)]
+#   -> [tunnel(bg)] -> sshd(fg)
 # Everything that could block on a prompt is settled first, because nothing in here
 # can answer one.
 #
@@ -22,7 +23,8 @@ set -u
 #   DEV_SECRETS_DIR      where the read-only secrets mount lands        (/run/infra-secrets)
 #   DEV_TUNNEL_HOSTNAME  cloudflared's ingress hostname                 (unset = no tunnel)
 #   DEV_CHILD_INIT_TIMEOUT  seconds child-init.sh gets before it is killed        (600)
-#   DEV_IDLE_OFFLOAD     0 stops the idle-claude offloader starting     (1)
+#   DEV_IDLE_OFFLOAD     0 stops the idle-claude offloader starting, and the
+#                        claude-sessions dry run beside it               (1)
 #   DEV_IDLE_OFFLOAD_SECONDS / DEV_IDLE_POLL_SECONDS — offload-idle-claude.sh's own
 #
 # DEV_REMOTE_CONTROL IS GONE, 2026-08-25. Every container on this fleet is now reached the
@@ -394,6 +396,22 @@ mkdir -p "$HOME/.local/share"
 } > "$HOME/.ssh/environment"
 chmod 600 "$HOME/.ssh/environment"
 
+# ── claude-sessions reconcile — before anything reads the registry ──────────
+# The registry (~/.local/share/claude-sessions, one JSON file per abduco session) is on a
+# volume, so it outlives the container while every process it names does not. reconcile
+# marks the slots whose pid and start time are gone, and removes the sockets dead abduco
+# servers left in ~/.abduco — which would otherwise answer `abduco -A` with a corpse.
+# Here because it must come before the offloader below and before sshd lets a session
+# in, and as `dev` because that is who runs claude. Safe to run at any time; non-zero only
+# on a real error, which is printed and does not stop the door. Time-bounded for the
+# reason child-init.sh is: anything ahead of sshd that hangs costs the door.
+if out=$(timeout 30 claude-sessions reconcile 2>&1); then
+    say "claude-sessions ${out:-reconcile: said nothing}"
+else
+    say "claude-sessions reconcile FAILED (exit $?) — the registry may name dead sessions:"
+    printf '%s\n' "$out" | sed 's/^/[entrypoint]     /'
+fi
+
 # ── the idle-claude offloader ───────────────────────────────────────────────
 # WHAT USED TO BE HERE was the Claude Remote Control hook: a child baked an
 # rc-supervisor.sh, set DEV_REMOTE_CONTROL=1, and this started it. Remote control is off
@@ -411,10 +429,29 @@ chmod 600 "$HOME/.ssh/environment"
 # BACKGROUNDED WITH setsid AND ITS OUTPUT DISCARDED, like every other daemon here: it
 # keeps its own log, and a daemon writing to this stream would be interleaved with sshd's
 # for the life of the container.
+#
+# ITS REPLACEMENT RUNS BESIDE IT, AS A DRY RUN — Stage A of plans/claude-sessions.md's
+# Phase 5. `claude-sessions offload --dry-run` decides on every registered slot and stops
+# nothing, every three minutes, while the old script goes on doing the stopping. The new
+# rules are not the old ones — 10 minutes after a `Stop` rather than 90 of transcript
+# silence, and no one-hour floor — so a few days of reading what it WOULD have stopped is
+# the check before Stage B lets it. Its verdicts go only to stdout (offload.log takes real
+# stops and the orphan sweep's lines), so this loop is what keeps them, timestamped, in
+# claude-sessions-dry-run.log. Outside the registry directory on purpose: that one is the
+# tool's own. Each pass is time-bounded so a hang costs one pass, not the rest of the
+# container's life. Same switch as the old offloader, because in Stage B it becomes the
+# one this switch controls.
 if [ "${DEV_IDLE_OFFLOAD:-1}" = "1" ]; then
     setsid bash /home/dev/offload-idle-claude.sh </dev/null >/dev/null 2>&1 &
     say "idle-claude offloader started (log: ~/.local/share/claude-offload.log)"
     say "    it stops a detached, idle, not-working claude and leaves it resumable"
+    setsid bash -c '
+        while :; do
+            stamp=$(date -u "+%Y-%m-%dT%H:%M:%SZ")
+            timeout 120 claude-sessions offload --dry-run 2>&1 | sed "s/^/$stamp /" >> "$1"
+            sleep 180
+        done' _ "$HOME/.local/share/claude-sessions-dry-run.log" </dev/null >/dev/null 2>&1 &
+    say "claude-sessions offload: DRY RUN every 3m (log: ~/.local/share/claude-sessions-dry-run.log)"
 else
     say "idle-claude offloader off (DEV_IDLE_OFFLOAD=0) — idle sessions keep their memory"
 fi
