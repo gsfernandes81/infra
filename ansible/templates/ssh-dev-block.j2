@@ -6,6 +6,11 @@
 #     `ssh {{ dev_alias }} <cmd>` is an ERROR and scp/sftp to it will not work.
 #   {{ dev_alias }}-sh — a shell instead, same route. Use it for either of those.
 #
+# NO TOKEN, NO CONNECTION, AND IT SAYS SO. The block is written whether or not this client
+# holds {{ dev_alias }}'s Access token; without one the ProxyCommand stops before cloudflared
+# starts, naming the run that fixes it. Never a browser login: these apps admit service
+# tokens only, and that flow is no use from Termux.
+#
 # THERE IS NO `-lan` ALIAS, and the way in it named is still open. Break glass by hand:
 # `ssh <host>`, then `ssh -p <port> dev@127.0.0.1` on that box. The ports are in
 # ansible/playbooks/configure-client.yml. An alias for that hop had to hard-code which
@@ -18,7 +23,7 @@ Host {{ dev_alias }}
 {% if windows %}
   ProxyCommand {{ win_wrapper }} %h
 {% else %}
-  ProxyCommand sh -c '. {{ token_file }}; exec {{ cloudflared }} access ssh --hostname %h'
+  ProxyCommand sh -c 'if [ -r {{ token_file }} ]; then . {{ token_file }}; exec {{ cloudflared }} access ssh --hostname %h; fi; echo "{{ dev_alias }}: no Access token at {{ token_file }} - run configure-client-dev.yml -e alias={{ dev_alias }} --tags access" >&2; exit 1'
 {% endif %}
 
 Host {{ dev_alias }}-sh
@@ -27,7 +32,7 @@ Host {{ dev_alias }}-sh
 {% if windows %}
   ProxyCommand {{ win_wrapper }} %h
 {% else %}
-  ProxyCommand sh -c '. {{ token_file }}; exec {{ cloudflared }} access ssh --hostname %h'
+  ProxyCommand sh -c 'if [ -r {{ token_file }} ]; then . {{ token_file }}; exec {{ cloudflared }} access ssh --hostname %h; fi; echo "{{ dev_alias }}: no Access token at {{ token_file }} - run configure-client-dev.yml -e alias={{ dev_alias }} --tags access" >&2; exit 1'
 {% endif %}
 
 # One host key for the container, not one per route, so the entry is stored under a name

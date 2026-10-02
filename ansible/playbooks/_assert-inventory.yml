@@ -50,6 +50,9 @@
 
   tasks:
     - name: The inventory has to be loaded, and it has to have this group in it
+      # `always`, because a guard that `--tags ssh` skips is no guard: the client plays
+      # are split by tag, and this is the one task that must run whichever half is asked for.
+      tags: [always]
       ansible.builtin.assert:
         that:
           - required_group in groups

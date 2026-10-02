@@ -89,16 +89,16 @@ Those aliases were dropped on 2026-08-31, so the table is documentation now rath
 an input: the ports are what you need for the manual break-glass hop, and nothing but a
 person will notice if one goes stale.
 
-**When a container's tunnel does not exist yet:**
+**When a container's tunnel does not exist yet:** press Enter at both of its prompts.
+Both blank skips that container's token and the run carries on; its ssh block is written
+anyway, and `ssh <c>` says the token is missing rather than failing obscurely. The ssh
+blocks and the tokens are separate halves, tagged `ssh` and `access`:
 
 ```sh
-ansible-playbook playbooks/configure-client.yml -e prompt_for_token=false
+ansible-playbook playbooks/configure-client.yml --tags ssh      # every block, never prompts
+ansible-playbook playbooks/configure-client.yml --tags access   # tokens only
+ansible-playbook playbooks/configure-client.yml -e prompt_for_token=false   # blocks, plus tokens already held
 ```
-
-Writes every container that already has a token and skips the rest, naming each one. The
-default is to prompt, which is right for a client being set up against a fully provisioned
-fleet and wrong when half the tunnels are still Phase 5 — there, one unanswerable prompt
-would stop the containers that *are* ready from being written.
 
 ### A new client needs two halves, and only one of them is `configure-client.yml`
 

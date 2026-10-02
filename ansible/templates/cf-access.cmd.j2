@@ -18,7 +18,7 @@ rem    box-drawing character arrives as several bytes of something else. Keep th
 rem    plain here and put the shape of it in the doc.
 setlocal
 set "TOKENFILE={{ win_token_file }}"
-if not exist "%TOKENFILE%" ( echo cf-access: no token file, run configure-client-dev.yml from WSL 1>&2 & exit /b 1 )
+if not exist "%TOKENFILE%" ( echo {{ dev_alias }}: no Access token at %TOKENFILE% - run configure-client-dev.yml -e alias={{ dev_alias }} --tags access from WSL 1>&2 & exit /b 1 )
 rem findstr, not a bare for/f over the file: the token file carries comment lines that
 rem would otherwise be parsed into junk variables. The secret travels on findstr's
 rem STDOUT, never in its argv, which is the half a process list shows.

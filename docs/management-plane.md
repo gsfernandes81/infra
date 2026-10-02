@@ -527,7 +527,10 @@ at both ends from `group_vars/all.yml` rather than spelled beside the alias it i
 from (see [`decisions.md`](decisions.md)). It runs on the phone and in WSL, writes both
 sides of the laptop from the latter, and takes `-e prompt_for_token=false` so a container
 whose tunnel is not provisioned yet is skipped by name instead of stopping the run with a
-prompt for a credential nobody can produce.
+prompt for a credential nobody can produce. **Since 2026-10-02 that skips the token, not
+the container** — every block is written, a blank pair at the prompt is also a skip, and
+the two halves run separately as `--tags ssh` and `--tags access`
+([`ssh-clients.md`](ssh-clients.md)).
 
 Both clients are done. The phone and the laptop each ran their reorder and both one-shot
 scripts are deleted, per this repo's rule that they go once they have run. What the laptop

@@ -23,9 +23,8 @@
 # TWO OF THE FOUR ARE THERE. `infra-dev` and `or3-dev` have their own hostnames and
 # tokens. `dd-dev` and `ds-dev` do not yet — that is Phase 5 — and they are not running;
 # until then they are reached through `ssh zero` and the published loopback ports. The
-# table below lists all four because it is the registry, and `-e prompt_for_token=false`
-# is what makes a run against a partly-provisioned fleet skip the ones that are not
-# ready by name.
+# table below lists all four because it is the registry. Every one gets its ssh block;
+# a container with no token on this client gets no token, and `ssh <c>` says so.
 #
 #   container   loopback port on zero   image lives in
 #   ─────────   ─────────────────────   ──────────────────
@@ -59,13 +58,18 @@
 #
 # ── WHEN A CONTAINER'S TUNNEL IS NOT UP YET ─────────────────────────────────────
 #
-#     ansible-playbook playbooks/configure-client.yml -e prompt_for_token=false
+# Press Enter at both of its prompts. A blank Client ID AND a blank Client Secret skip
+# that container's TOKEN, by name, and the run carries on; one blank and one not is
+# refused as a slip. Its ssh block is written either way — the ProxyCommand checks for the
+# token and, without one, stops before cloudflared starts and names the run that fixes it.
+# Until 2026-10-02 a blank stopped the whole run, and a skipped container got no block.
 #
-# Provisions every container that already has a token on this client and SKIPS the rest,
-# naming each one it skipped. Without the flag it prompts, once per container missing a
-# token — which is right for a client being set up against a fleet that is fully
-# provisioned, and wrong when two of the four tunnels do not exist yet, because the
-# prompt for a credential nobody can produce stops the other two from being written.
+# THE TWO HALVES ARE TAGGED, so either runs alone:
+#
+#     ansible-playbook playbooks/configure-client.yml --tags ssh       # never prompts
+#     ansible-playbook playbooks/configure-client.yml --tags access    # tokens only
+#
+# `-e prompt_for_token=false` still works and means: every block, plus no new tokens.
 #
 # The order below is deliberate: the two oldest tunnels first, so a partially provisioned
 # fleet configures the containers you are most likely to need before it reaches the ones
@@ -94,6 +98,9 @@
 # ── the servers: the fleet, the mesh, and the LAN and cross-box rescue paths ────
 - name: The fleet
   ansible.builtin.import_playbook: configure-client-fleet.yml
+  # Tagged `ssh` here, not task by task inside it: the fleet play is ssh config and nothing
+  # else — no Access token is read or written — so the whole of it is the `ssh` half.
+  tags: [ssh]
 
 # ── the dev containers ─────────────────────────────────────────────────────────
 # One import each rather than a loop over the table above, deliberately. configure-client-dev.yml

@@ -215,8 +215,25 @@ token. The client holds it at `~/.config/<alias>/token`, mode 600, and the
 `ProxyCommand` sources it:
 
 ```
-ProxyCommand sh -c '. ~/.config/<alias>/token; exec cloudflared access ssh --hostname %h'
+ProxyCommand sh -c 'if [ -r ~/.config/<alias>/token ]; then . ~/.config/<alias>/token; exec cloudflared access ssh --hostname %h; fi; echo "<alias>: no Access token at … - run …" >&2; exit 1'
 ```
+
+(abbreviated; the real line names absolute paths and the exact run). **The ssh block and
+the token are separate, and the block does not need the token to be written.** A client
+gets a block for every container in the registry, up or not; one without a token says so
+on `ssh <c>` and stops **before `cloudflared` starts** — never falling through to Access's
+browser login, which these apps do not admit (service tokens only) and which is no use
+from Termux anyway. The split is in the playbook too, as tags:
+
+```sh
+ansible-playbook playbooks/configure-client.yml --tags ssh      # every block, no prompts
+ansible-playbook playbooks/configure-client.yml --tags access   # tokens only
+```
+
+At the prompt, **leave both the Client ID and the Client Secret blank to skip that
+container's token** — the run carries on to the next one. One blank and one not is
+refused as a slip. Until 2026-10-02 a blank stopped the whole composed run, and a
+container without a token got no block at all.
 
 So the secret is in the environment of exactly one short-lived `cloudflared` and nothing
 else. Three places it deliberately does **not** go:

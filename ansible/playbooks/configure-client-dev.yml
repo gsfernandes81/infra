@@ -175,6 +175,7 @@
     # inventory) — and either way it has already been through a shell. Failing here is
     # the only moment at which saying so is still useful.
     - name: Refuse a secret supplied on the command line
+      tags: [always]
       ansible.builtin.assert:
         that: st_client_secret is not defined
         fail_msg: |
@@ -196,6 +197,7 @@
 
     # ── cloudflared has to be here, and it is the one thing this cannot install ──
     - name: Is cloudflared installed
+      tags: [always]
       ansible.builtin.command: cloudflared --version
       register: cfd
       changed_when: false
@@ -203,6 +205,7 @@
       check_mode: false
 
     - name: Where cloudflared is
+      tags: [always]
       # An absolute path in the ProxyCommand rather than a bare name. ssh runs it through
       # /bin/sh, which inherits ssh's environment — and ssh is not always started from a
       # shell that has $PREFIX/bin on PATH. Discovered rather than hardcoded, so this
@@ -218,6 +221,7 @@
       check_mode: false
 
     - name: Fail early and usefully if it is not
+      tags: [always]
       # Before anything is written, so a client without the binary is not left holding a
       # token file and an ssh block that cannot work. Not installed by this play on
       # purpose: on the phone it is 35.7 MiB of METERED data, which is a spend the owner
@@ -254,6 +258,7 @@
         success_msg: "{{ cfd.stdout_lines[0] | default('cloudflared present') }}"
 
     - name: Settle on a path — an override wins, discovery is the fallback
+      tags: [always]
       # Mirrors configure-client-fleet.yml. -e cloudflared_path=... beats detection, and the assert
       # below is on the RESULT either way, so a wrong override cannot slip through.
       ansible.builtin.set_fact:
@@ -261,12 +266,14 @@
           {{ cloudflared_path | default(cfd_path.stdout | trim, true) }}
 
     - name: Check the path we are about to write
+      tags: [always]
       ansible.builtin.stat:
         path: "{{ cfd_resolved }}"
       register: cfd_stat
       when: cfd_resolved | length > 0
 
     - name: Refuse to write a block naming a cloudflared that is not there
+      tags: [always]
       # Asserting that detection succeeded proves nothing about the string it produced;
       # asserting the file is there and executable proves the thing the ProxyCommand
       # actually needs.
@@ -289,6 +296,7 @@
     # and letting blockinfile create the file is strictly more correct, and it is now what
     # both plays do.
     - name: Is the laptop's Windows home reachable from here (i.e. are we in WSL)?
+      tags: [always]
       ansible.builtin.stat:
         path: "{{ windows_home_wsl }}"
       register: win_home
@@ -296,6 +304,7 @@
       when: windows_home_wsl | length > 0
 
     - name: Settle whether the Windows half runs at all
+      tags: [always]
       ansible.builtin.set_fact:
         on_windows_client: >-
           {{ (windows_home_wsl | length > 0)
@@ -303,6 +312,7 @@
              and (win_home.stat.isdir | default(false)) }}
 
     - name: Check the Windows cloudflared, as WSL sees it
+      tags: [always]
       # Checkable, because WSL can see it. From Termux it is not, and the paste file
       # says so rather than implying the path was verified.
       ansible.builtin.stat:
@@ -312,6 +322,7 @@
       when: on_windows_client | bool
 
     - name: Refuse to write a Windows block naming a cloudflared that is not there
+      tags: [always]
       # Before any Windows write, same as the POSIX assert above: a client left holding a
       # token and a wrapper that cannot run is worse than one left untouched.
       ansible.builtin.assert:
@@ -326,12 +337,14 @@
 
     # ── the service token ────────────────────────────────────────────────────
     - name: Does a token file already exist
+      tags: [access]
       ansible.builtin.stat:
         path: "{{ token_file }}"
       register: tf
       check_mode: false
 
     - name: Does the Windows token file already exist
+      tags: [access]
       ansible.builtin.stat:
         path: "{{ win_token_file_wsl }}"
       register: win_tf
@@ -339,6 +352,7 @@
       when: on_windows_client | bool
 
     - name: Decide whether a token is being set this run
+      tags: [access]
       # Set one when either client is missing it. Otherwise leave both alone, so
       # re-running to fix an ssh block does not demand the secret again — which matters,
       # because a play that asks for a credential every time trains you to keep it
@@ -354,41 +368,38 @@
              or (replace_token | default(false) | bool) }}
 
     # ── the escape hatch, for a container whose tunnel is not up yet ─────────
-    - name: Say which container is being skipped, and why
-      # Before the meta below, because meta cannot carry a message and a play that ends
-      # silently is indistinguishable from one that had nothing to do.
-      #
+    - name: Say which container's token is being skipped, and why
+      tags: [access]
       # changed_when: true for ansible.cfg's display_ok_hosts = False — a debug reports
-      # ok, and this is the one line explaining why an alias the caller asked for is not
-      # in their config.
+      # ok, and this is the one line explaining why an alias has no token on this client.
+      #
+      # IT SKIPS THE TOKEN, NOT THE CONTAINER. Until 2026-10-02 this was followed by a
+      # `meta: end_play`, because the ssh block's ProxyCommand sourced the token file
+      # unconditionally and failed as "Connection closed" without it. The ProxyCommand now
+      # checks for the file and names this play when it is missing, so the block is safe to
+      # write without a token and is written either way — ssh config for every container,
+      # Access credentials for the ones that have them.
       ansible.builtin.debug:
         msg: >-
-          SKIPPED {{ dev_alias }} — no service token at {{ token_file }} and this run was
-          told not to ask (-e prompt_for_token=false). Nothing was written for it: an ssh
-          block whose ProxyCommand sources a file that is not there fails as
-          "Connection closed", which reads like the container being down. Provision it
-          with playbooks/create-dev-tunnel.yml -e name={{ dev_alias }}, then re-run.
+          {{ dev_alias }}: no Access token at {{ token_file }}, and this run was told not
+          to ask (-e prompt_for_token=false). Its ssh block is still written; `ssh
+          {{ dev_alias }}` will say the token is missing until a run without the flag (or
+          with --tags access -e alias={{ dev_alias }}) is given one. A container that has
+          no tunnel yet gets one from playbooks/create-dev-tunnel.yml -e name={{ dev_alias }}.
       changed_when: true
       when:
         - setting_token | bool
         - not (prompt_for_token | default(true) | bool)
 
-    - name: End this container's play rather than block on a credential that does not exist
-      # THE POINT OF THE FLAG. configure-client.yml imports this play once per dev container,
-      # and a container whose tunnel has not been provisioned yet has no token to give —
-      # so the default behaviour, prompting, would stop the one command that is supposed
-      # to configure every other container. `meta: end_play` ends THIS import only; the
-      # imports after it still run (verified). Everything already provisioned still gets
-      # written, and the run says out loud what it left out.
-      #
-      # Default TRUE, so an interactive `ansible-playbook playbooks/configure-client-dev.yml` still
-      # asks. The flag is for the composed run, not for hiding a missing credential.
-      ansible.builtin.meta: end_play
-      when:
-        - setting_token | bool
-        - not (prompt_for_token | default(true) | bool)
+    - name: Settle whether this run asks for a token
+      tags: [access]
+      ansible.builtin.set_fact:
+        asking_for_token: >-
+          {{ (setting_token | bool) and (prompt_for_token | default(true) | bool)
+             and not ansible_check_mode }}
 
     - name: Nothing to do for the token
+      tags: [access]
       ansible.builtin.debug:
         msg: >-
           keeping the token already at {{ token_file }}{{
@@ -398,6 +409,7 @@
       when: not (setting_token | bool)
 
     - name: What is about to be asked for
+      tags: [access]
       # Printed separately because the two prompts below carry no_log, and a suppressed
       # prompt is a cursor sitting there with no explanation. This task says what is
       # wanted; the prompts just take it.
@@ -419,24 +431,27 @@
           - "secret is shown only at creation, so the dashboard cannot give it back."
           - ""
           - "The ID is not secret and will echo. The secret will not echo."
+          - "LEAVE BOTH BLANK to skip it: no token is written, and its ssh block still is."
           - "Neither reaches your shell history: these are read from the terminal, not"
           - "from the command line."
           - "{{ 'Written for BOTH sides of this laptop: WSL and Windows.'
                 if on_windows_client | bool else 'Written for this client only.' }}"
           - "───────────────────────────────────────────────────────────────────────"
       changed_when: true
-      when: (setting_token | bool) and not ansible_check_mode
+      when: asking_for_token | bool
 
     - name: Read {{ dev_alias }}'s Client ID
+      tags: [access]
       # echo on — the ID is the username half and is not a credential. It can also come
       # from -e st_client_id=..., which is why this is skipped when it is already set.
       ansible.builtin.pause:
         prompt: "  {{ dev_alias }}  Client ID"
         echo: true
       register: id_in
-      when: (setting_token | bool) and not ansible_check_mode and st_client_id is not defined
+      when: (asking_for_token | bool) and st_client_id is not defined
 
     - name: Read {{ dev_alias }}'s Client Secret
+      tags: [access]
       # THE ONE THAT CANNOT COME FROM THE COMMAND LINE. `pause` is a task, so it always
       # runs and there is no variable name for -e to pre-empt — which is exactly what
       # vars_prompt could not promise. echo: false so it is not on screen either.
@@ -448,21 +463,49 @@
         echo: false
       register: secret_in
       no_log: true
-      when: (setting_token | bool) and not ansible_check_mode
+      when: asking_for_token | bool
 
-    - name: Both halves have to be non-empty
+    - name: Settle what was typed — both blank is a skip, not a mistake
+      tags: [access]
+      # A CONTAINER THAT IS NOT UP HAS NO TOKEN TO GIVE, and configure-client.yml asks for
+      # all four in one run. Pressing Enter twice is the answer available at that prompt,
+      # so it means "skip this one": no token is written, the run goes on to the next
+      # container, and the ssh block is written regardless (it says so when used). Asked
+      # for on 2026-10-02, after a composed run stopped at a blank prompt for a container
+      # that is not up.
+      ansible.builtin.set_fact:
+        token_id_typed: "{{ st_client_id | default(id_in.user_input | default(''), true) | trim }}"
+        token_blank: >-
+          {{ (st_client_id | default(id_in.user_input | default(''), true) | trim | length == 0)
+             and (secret_in.user_input | default('') | trim | length == 0) }}
+      when: asking_for_token | bool
+
+    - name: Say that it was skipped
+      tags: [access]
+      ansible.builtin.debug:
+        msg: >-
+          SKIPPED {{ dev_alias }}'s Access token — both halves left blank. Nothing written
+          to {{ token_file }}; the ssh block is still written. Re-run with
+          --tags access -e alias={{ dev_alias }} once its tunnel exists.
+      changed_when: true
+      when: (asking_for_token | bool) and (token_blank | bool)
+
+    - name: One half blank is a mistake — refuse it
+      tags: [access]
       # An empty secret writes a file that fails Access with no clue why, and the failure
       # presents as the tunnel being broken. Catch it here, where the cause is on screen.
+      # BOTH blank is the skip above; exactly one blank is a slip of the finger.
       ansible.builtin.assert:
         that:
-          - (st_client_id | default(id_in.user_input, true) | trim) | length > 0
+          - token_id_typed | length > 0
           - (secret_in.user_input | default('') | trim) | length > 0
         fail_msg: >-
-          Both the Client ID and the Client Secret are required and one was blank. Nothing
-          has been written. Cloudflare shows a service token's secret only at creation; if
-          it is lost, mint a new token rather than guessing.
+          {{ dev_alias }}: one of the Client ID and the Client Secret was blank and the other
+          was not. Nothing has been written. Leave BOTH blank to skip this container.
+          Cloudflare shows a service token's secret only at creation; if it is lost, mint a
+          new token rather than guessing.
         success_msg: "both halves present"
-      when: (setting_token | bool) and not ansible_check_mode
+      when: (asking_for_token | bool) and not (token_blank | bool)
       # NO no_log HERE, deliberately, and it used to be on. `assert` is an action plugin:
       # it evaluates `that` itself and never templates those values into module args, so
       # the registered result holds the expression TEXT and a boolean — no secret. What
@@ -472,14 +515,21 @@
       # costume: a no_log that hides the failure it exists to explain. It stays on the
       # `pause` and on both `copy` tasks, where it guards an actual value.
 
+    - name: Settle whether a token is written this run
+      tags: [access]
+      ansible.builtin.set_fact:
+        writing_token: "{{ (asking_for_token | bool) and not (token_blank | bool) }}"
+
     - name: The directory for it
+      tags: [access]
       ansible.builtin.file:
         path: "{{ token_file | dirname }}"
         state: directory
         mode: "0700"
-      when: setting_token | bool
+      when: writing_token | bool
 
     - name: Write the token, mode 600
+      tags: [access]
       # A SOURCEABLE FILE, not a shell profile and not the ssh config, and the choice is
       # the point of this play:
       #
@@ -503,23 +553,25 @@
           # Cloudflare Access service token for {{ dev_hostname }}.
           # Written by ansible/playbooks/configure-client-dev.yml. Sourced by ~/.ssh/config's
           # ProxyCommand for host `{{ dev_alias }}`. POSIX sh — not fish.
-          TUNNEL_SERVICE_TOKEN_ID={{ st_client_id | default(id_in.user_input, true) | trim }}
+          TUNNEL_SERVICE_TOKEN_ID={{ token_id_typed }}
           TUNNEL_SERVICE_TOKEN_SECRET={{ secret_in.user_input | trim }}
           export TUNNEL_SERVICE_TOKEN_ID TUNNEL_SERVICE_TOKEN_SECRET
-      when: (setting_token | bool) and not ansible_check_mode
+      when: writing_token | bool
       no_log: true
 
     # ── the same token, on the Windows side of the same laptop ───────────────
     - name: The Windows directory for it
+      tags: [access]
       ansible.builtin.file:
         path: "{{ win_token_file_wsl | dirname }}"
         state: directory
       # NO mode. /mnt/c is drvfs and does not carry Unix permissions unless mounted with
       # metadata; setting one either fails or silently does nothing, and a task that
       # pretends to have set a mode is worse than one that does not try.
-      when: (on_windows_client | bool) and (setting_token | bool)
+      when: (on_windows_client | bool) and (writing_token | bool)
 
     - name: Write the Windows token
+      tags: [access]
       # A DIFFERENT FILE FROM THE WSL ONE, because %USERPROFILE% and WSL's $HOME are two
       # different homes on two different filesystems. Two copies of the secret on one
       # laptop is the cost of Windows ssh not being able to read the Linux one, and it is
@@ -539,12 +591,13 @@
           # PERMISSIONS HERE ARE NTFS, NOT A UNIX MODE. Ansible cannot set a mode on
           # /mnt/c and does not pretend to; what protects this file is the ACL that
           # C:\Users\gavin hands down. The play prints that ACL when it writes this file.
-          TUNNEL_SERVICE_TOKEN_ID={{ st_client_id | default(id_in.user_input, true) | trim }}
+          TUNNEL_SERVICE_TOKEN_ID={{ token_id_typed }}
           TUNNEL_SERVICE_TOKEN_SECRET={{ secret_in.user_input | trim }}
-      when: (on_windows_client | bool) and (setting_token | bool) and not ansible_check_mode
+      when: (on_windows_client | bool) and (writing_token | bool)
       no_log: true
 
     - name: Read the Windows ACL on the token we just wrote
+      tags: [access]
       # Windows' own tool, reached through WSL interop. `command`, so the path is an
       # argument and no shell is involved — and nothing secret is on this command line,
       # only the name of the file.
@@ -559,9 +612,10 @@
       changed_when: false
       failed_when: false
       check_mode: false
-      when: (on_windows_client | bool) and (setting_token | bool) and not ansible_check_mode
+      when: (on_windows_client | bool) and (writing_token | bool)
 
     - name: Who can read the Windows token
+      tags: [access]
       # A DISPLAY, NOT A VERDICT, and the distinction is deliberate. This repo's rule is
       # that a check is calibrated against known-good state before its verdict is
       # trusted; nothing here can see that laptop, the account names icacls prints are
@@ -580,7 +634,7 @@
           interop may be off. The token IS written. Check by hand, in PowerShell:
           icacls "{{ win_token_file }}"
       changed_when: true
-      when: (on_windows_client | bool) and (setting_token | bool) and not ansible_check_mode
+      when: (on_windows_client | bool) and (writing_token | bool)
 
     # ── can this client corroborate the identity it would name? ──────────────
     # `IdentitiesOnly yes` is worth having: it stops ssh walking every key an agent holds
@@ -593,6 +647,7 @@
     #
     # Either half is enough: ssh can use the .pub alone to ask the agent for that identity.
     - name: Is there a private key at the path the block would name
+      tags: [ssh]
       ansible.builtin.stat:
         path: "{{ ssh_key | regex_replace('^~', home) }}"
       register: idf
@@ -600,6 +655,7 @@
       when: ssh_key | length > 0
 
     - name: Is there at least a public key there
+      tags: [ssh]
       ansible.builtin.stat:
         path: "{{ (ssh_key | regex_replace('^~', home)) ~ '.pub' }}"
       register: idpub
@@ -607,6 +663,7 @@
       when: ssh_key | length > 0
 
     - name: Refuse an identity that was named explicitly and is not there
+      tags: [ssh]
       # An explicit -e identity=... that does not resolve is a typo, not an agent client.
       # Guessing past it would write a block that cannot authenticate and say nothing.
       ansible.builtin.assert:
@@ -622,6 +679,7 @@
     # The same question for the WINDOWS side, which is a different file: `~` there is
     # C:\Users\gavin, not WSL's home, and the two have different keys on this laptop.
     - name: Is there a key on the Windows side
+      tags: [ssh]
       ansible.builtin.stat:
         path: "{{ windows_home_wsl }}/.ssh/{{ ssh_key | basename }}"
       register: win_idf
@@ -631,6 +689,7 @@
         - ssh_key | length > 0
 
     - name: Is there at least a public key on the Windows side
+      tags: [ssh]
       ansible.builtin.stat:
         path: "{{ windows_home_wsl }}/.ssh/{{ ssh_key | basename }}.pub"
       register: win_idpub
@@ -640,6 +699,7 @@
         - ssh_key | length > 0
 
     - name: Settle whether either block names an identity at all
+      tags: [ssh]
       ansible.builtin.set_fact:
         identity_usable: >-
           {{ (ssh_key | length > 0)
@@ -649,6 +709,7 @@
              and ((win_idf.stat.exists | default(false)) or (win_idpub.stat.exists | default(false))) }}
 
     - name: Say so when it does not
+      tags: [ssh]
       ansible.builtin.debug:
         msg: >-
           No IdentityFile or IdentitiesOnly in {{ dev_alias }}'s block: this client has
@@ -660,12 +721,14 @@
 
     # ── the ssh config block, on this client ─────────────────────────────────
     - name: Make sure ~/.ssh exists
+      tags: [ssh]
       ansible.builtin.file:
         path: "{{ home }}/.ssh"
         state: directory
         mode: "0700"
 
     - name: The {{ dev_alias }} block in ~/.ssh/config
+      tags: [ssh]
       # blockinfile, so re-running edits the block in place instead of appending a second
       # copy — which ssh would not error on, it would just silently use the first.
       #
@@ -708,6 +771,7 @@
 
     # ── and on the Windows side of the same laptop ───────────────────────────
     - name: Make sure the laptop's %USERPROFILE%\.ssh exists
+      tags: [ssh]
       # `template` DOES NOT CREATE PARENT DIRECTORIES, and this task runs before the
       # blockinfile that would. Without it, a laptop that has never had an ssh config
       # dies here — after the POSIX block is already written, which is the half-
@@ -722,6 +786,7 @@
       when: on_windows_client | bool
 
     - name: The ProxyCommand wrapper Windows needs instead of `sh -c`
+      tags: [ssh]
       # newline_sequence IS THE POINT OF THIS TASK. cmd.exe seeks by byte offset between
       # commands in a batch file and miscounts on an LF-only one, resuming mid-line and
       # running fragments of the comments as commands — a burst of `'ible' is not
@@ -745,6 +810,7 @@
       when: on_windows_client | bool
 
     - name: The {{ dev_alias }} block in the laptop's Windows ssh config
+      tags: [ssh]
       # Same marker as the WSL block, in a different file. Two clients, two configs,
       # neither aware of the other — and the same insertbefore rule, because Windows ssh
       # reads its config with exactly the same first-value-wins semantics.
@@ -768,6 +834,7 @@
 
     # ── fallback for a control node that cannot see the laptop — Termux ──────
     - name: Otherwise render the Windows block and wrapper to a file, to paste
+      tags: [ssh]
       # Only written when the direct write did not happen, so there is never a stale paste
       # file sitting beside a managed one, inviting somebody to paste the older of the
       # two.
@@ -826,17 +893,25 @@
         - windows_home_wsl | length > 0
         - not (on_windows_client | bool)
 
+    - name: Is there a token now — the answer the summary below gives
+      tags: [always]
+      # Read again rather than inferred from this run's choices: under --tags ssh none of
+      # those ran, and the file may have come from an earlier run.
+      ansible.builtin.stat:
+        path: "{{ token_file }}"
+      register: token_now
+      check_mode: false
+
     - name: How to use it
+      tags: [always]
       ansible.builtin.debug:
         msg:
-          - "ssh {{ dev_alias }}         the claude session itself, over Cloudflare"
+          - "ssh {{ dev_alias }}         the claude-sessions menu, over Cloudflare"
           - "ssh {{ dev_alias }}-sh      a shell instead, same route"
           - "    no -lan alias: break glass by hand with `ssh <host>` and then"
           - "    `ssh -p <port> dev@127.0.0.1`, ports in configure-client.yml."
           - ""
-          - "wsl/posix: block in {{ ssh_config }}, token at {{ token_file }} (0600),"
-          - "sourced by the ProxyCommand, so it reaches one cloudflared and no other"
-          - "environment."
+          - "wsl/posix: block in {{ ssh_config }}; token {{ ('at ' ~ token_file ~ ' (0600), sourced by the ProxyCommand, so it reaches one cloudflared and no other environment') if token_now.stat.exists | default(false) else ('NOT on this client, so ssh ' ~ dev_alias ~ ' says so and stops: --tags access -e alias=' ~ dev_alias ~ ' adds it') }}."
           - ""
           - >-
             windows: {{ 'managed directly — block in ' ~ win_ssh_config ~ ', wrapper at '
