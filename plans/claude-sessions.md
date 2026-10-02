@@ -658,7 +658,7 @@ at 6 columns, the right edge marked:
         means the hooks are not firing.
      5. Read `make offload-log` over a few days. A day after rollout, `make sessions` again.
      6. The other dev repos pick this up when they bump `BASE_TAG`.
-   - **Stage B gate — found in review of Stage A, 2026-10-02; both fixes belong in claude-sessions:**
+   - **Stage B gate — found in review of Stage A, 2026-10-02; all three fixes belong in claude-sessions:**
      - **A hook can lose its event to the offloader's lock** ([claude-sessions#1](https://github.com/gsfernandes81/claude-sessions/issues/1)). `offload` (dry run included)
        takes each slot's lock and reads all of `/proc` while holding it; `hook` waits only
        `SESSION_END_WAIT` (400 ms) for every event, then logs and drops it. A dropped
@@ -670,6 +670,13 @@ at 6 columns, the right edge marked:
        the old script measured `claude.exe` helpers in live trees. If they reappear, every
        slot is held forever and nothing is offloaded. Check the dry-run log for persistent
        `claude.exe … is running under it` holds; the fix is one allow-list entry upstream.
+     - **A dead Claude Code sessions file reads as live** ([#4](https://github.com/gsfernandes81/claude-sessions/issues/4)). Claude Code writes
+       `procStart` as a string, so `live.rs` never compares it and falls back to "the pid
+       exists" — which a thread id satisfies (`/proc/<tid>` opens but is not listed). Seen in
+       `make sessions`: a September bg session at pid 161, now a cloudflared thread. The
+       offloader is unaffected (registry records only), but the menu Stage B makes the
+       entrypoint lists dead sessions and `running_elsewhere` refuses to resume them. **Until
+       fixed, a `doctor` line naming a pid that `ps` does not show blocks Stage B.**
      - Lower priority, not a gate: `reconcile` can sweep a live socket started with combined
        abduco flags (`-fA`) ([#3](https://github.com/gsfernandes81/claude-sessions/issues/3)).
    - **Stage B — the swap, one commit:** the entrypoint loop drops `--dry-run` and its log
