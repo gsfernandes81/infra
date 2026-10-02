@@ -659,17 +659,19 @@ at 6 columns, the right edge marked:
      5. Read `make offload-log` over a few days. A day after rollout, `make sessions` again.
      6. The other dev repos pick this up when they bump `BASE_TAG`.
    - **Stage B gate — found in review of Stage A, 2026-10-02; both fixes belong in claude-sessions:**
-     - **A hook can lose its event to the offloader's lock.** `offload` (dry run included)
+     - **A hook can lose its event to the offloader's lock** ([claude-sessions#1](https://github.com/gsfernandes81/claude-sessions/issues/1)). `offload` (dry run included)
        takes each slot's lock and reads all of `/proc` while holding it; `hook` waits only
        `SESSION_END_WAIT` (400 ms) for every event, then logs and drops it. A dropped
        `UserPromptSubmit` leaves a mid-turn claude reading as idle — in Stage B, killed ten
        minutes later unless a tool happens to be running. Fix upstream: snapshot `/proc`
        before locking, and have `--dry-run` not lock (it writes nothing). **Until then, any
        `hook.log` line saying a non-`SessionEnd` event lost the lock blocks Stage B.**
-     - **`claude.exe` counts as foreign work.** `foreign_descendant` exempts only `claude`;
+     - **`claude.exe` counts as foreign work** ([#2](https://github.com/gsfernandes81/claude-sessions/issues/2)). `foreign_descendant` exempts only `claude`;
        the old script measured `claude.exe` helpers in live trees. If they reappear, every
        slot is held forever and nothing is offloaded. Check the dry-run log for persistent
        `claude.exe … is running under it` holds; the fix is one allow-list entry upstream.
+     - Lower priority, not a gate: `reconcile` can sweep a live socket started with combined
+       abduco flags (`-fA`) ([#3](https://github.com/gsfernandes81/claude-sessions/issues/3)).
    - **Stage B — the swap, one commit:** the entrypoint loop drops `--dry-run` and its log
      (the binary keeps `offload.log` itself; delete `~/.local/share/claude-sessions-dry-run.log`,
      which grows unbounded until then), `offload-idle-claude.sh` is deleted with its
