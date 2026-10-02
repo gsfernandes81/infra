@@ -40,7 +40,8 @@ been consciously postponed rather than an omission.
   the container's payload, `or3-dev` shipped one defaulted off, and three arrangements for
   one capability is three things to remember and three ways to be confused at 2am. All of
   it is deleted — the supervisors in their repos, the hook and `DEV_REMOTE_CONTROL` here.
-  **One way in, everywhere: `ssh -t <name> abduco -A claude claude`.** It already survives
+  **One way in, everywhere: `ssh <name>`**, which lands on the `claude-sessions` menu
+  (since 2026-10-02; it was `abduco -A claude claude`). Every session it opens survives
   a dropped link, and it does not put a permission classifier in charge of a container
   holding deploy keys. Adding remote control back is a decision with reasoning attached,
   not a variable somebody sets.
@@ -59,7 +60,7 @@ been consciously postponed rather than an omission.
 | `login.sh` | in the image: the interactive logins, idempotent — `make login` |
 | `status.sh` | on the host: the readouts — `make status`, `verify`, `fleet`, `collections` |
 | `in-workspace` | in the image, on PATH: run a command where the work is, so no client names the path |
-| `claude-sessions-door` | in the image, on PATH: what an ssh login will land on — the `claude-sessions` menu at a terminal, a login shell for anything else or if the menu fails. Inert until `ssh-dev-block.j2`'s `RemoteCommand` names it (see *claude-sessions*) |
+| `claude-sessions-door` | in the image, on PATH: what an ssh login lands on — the `claude-sessions` menu at a terminal, a login shell for anything else or if the menu fails (see *claude-sessions*) |
 | *(no setup script)* | the host side is `ansible/playbooks/prepare-dev-host.yml`, run from a control node |
 | `sshd_config` / `ssh_config` | the in-container daemon, and the baked half of how it reaches out |
 | `config.fish` | fish's config, baked in — puts every login shell in `/workspace` |
@@ -114,13 +115,12 @@ also shows `tunnel:` with a `readyConnections` count.
 
 ## How this container is used
 
-**You ssh into it and work in an `abduco` session** — from Termux on the phone, or from
+**You ssh into it and pick a session from the menu** — from Termux on the phone, or from
 a PC:
 
 ```sh
-ssh infra-dev                                  # a shell
-ssh -t infra-dev abduco -A claude claude       # a claude that survives the link
-abduco                                         # (inside) list sessions
+ssh infra-dev          # the claude-sessions menu: Enter attaches or resumes, n starts one
+ssh infra-dev-sh       # a shell
 ```
 
 **`in-workspace` is a program in the image**, and the split is deliberate. It cds to
@@ -129,8 +129,8 @@ work is* is the container's business: it is the container's bind mount, and no c
 should have to name the path. *Whether to hold the session across a dropped link* is the
 client's: the phone wants `abduco` because ssh dies at the lock screen, and a laptop
 running `ssh infra-dev-sh 'git log'`, a cron, or a one-shot `claude -p` want the workspace
-and no abduco at all. So the phone's config reads `RemoteCommand in-workspace abduco -A
-claude claude`, with each half owned by whoever knows the answer.
+and no abduco at all. So the phone's config reads `RemoteCommand in-workspace
+claude-sessions-door`, with each half owned by whoever knows the answer.
 
 The `cd` is needed for a reason worth knowing, because the symptom is baffling: sshd runs
 a remote command as `$SHELL -c '…'`, which is **not a login shell**, so `config.fish`'s
@@ -929,7 +929,7 @@ the exact command to bring each one back. `DEV_IDLE_OFFLOAD=0` turns it off;
 
 **It closes the abduco session it emptied, and that is not tidying.** abduco outlives the
 command it ran: the session stays listed with a `+`, keeps the name, and
-`abduco -A claude claude` — the documented way in — would attach you to the corpse instead
+`abduco -A claude claude` — the way in until 2026-10-02 — would attach you to the corpse instead
 of starting a new claude. Found by running it rather than by reading it.
 
 **It is being replaced, and the replacement is already running beside it as a dry run** —
@@ -944,17 +944,17 @@ outlives the container), kept current by Claude Code's own hooks. The base insta
 **v0.2.0** — a static binary, pinned by tag and SHA-256 per architecture, at
 `/usr/local/bin/claude-sessions`.
 
-**The menu is in this release, and ssh logins do not reach it yet.** `claude-sessions` with
-no arguments, at a terminal, lists the slots — live, offloaded, and `u` for an abduco
-session it did not start, which is what today's `abduco -A claude claude` logins are —
+**The menu is in this release, and it is where `ssh infra-dev` lands.** `claude-sessions`
+with no arguments, at a terminal, lists the slots — live, offloaded, and `u` for an abduco
+session it did not start, which is what the old `abduco -A claude claude` logins are —
 and `Enter` attaches or resumes, `n` starts a new slot in `/workspace`, `c` closes, `s`
-is a shell, `?` the keys, `q` quits. Piped, it prints `list`. Try it from a `-sh` login.
-**`claude-sessions-door`** is what a login will run: the menu at a terminal; a login shell
-when there is no terminal or the menu exits non-zero (it has said why on stderr by then);
-a forwarded `SSH_ORIGINAL_COMMAND` run as given. It is in the image and named by nothing
-until the client template's `RemoteCommand` switches to `in-workspace claude-sessions-door`
-— a separate step, because that template serves every dev container and each one has the
-door only once its repo's `BASE_TAG` includes it.
+is a shell, `?` the keys, `q` quits. Piped, it prints `list`. **`claude-sessions-door`**
+is what a login runs (`RemoteCommand in-workspace claude-sessions-door`, and `make
+claude`): the menu at a terminal; a login shell when there is no terminal or the menu
+exits non-zero (it has said why on stderr by then); a forwarded `SSH_ORIGINAL_COMMAND`
+run as given. **A client re-run reaches every dev container's alias at once**, and a
+container whose base predates `2026.10.02.1` has no door — `ssh <it>` then answers
+*Unknown command: claude-sessions-door* until that repo bumps, and `<it>-sh` gets in.
 
 | Piece | Where | What it does |
 |---|---|---|
@@ -1058,9 +1058,9 @@ claude, and PID 1 has not moved.
 
 **A session that is not in `abduco` dies with the link that carried it.** On a phone
 that is not a corner case: the ssh session ends at the lock screen, and an unwrapped
-claude ends with it, mid-edit. `abduco -A claude claude` is the habit — `make claude`
-and the ssh line above deliberately name the *same* session, so it does not matter
-which way you came in. `screen` is also in the image and is better for ordinary shell
+claude ends with it, mid-edit. The menu is the habit — every session it opens is an
+abduco session, and `make claude` and `ssh infra-dev` both land on it, so they list
+the same sessions whichever way you came in. `screen` is also in the image and is better for ordinary shell
 work; abduco is what you want under a full-screen program, because it is detach/attach
 and nothing else, so every key goes through to what is underneath.
 

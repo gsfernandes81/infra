@@ -210,16 +210,16 @@ sessions:
 login:
 	$(DOCKER) exec -it $(CONTAINER) bash /home/dev/login.sh
 
-# `abduco -A`: attach the session named `claude`, creating it if absent — so this is the
-# same command whether you are starting the work or coming back to it, and it is the SAME
-# session the phone's `ssh infra-dev` reaches, because both name `claude`. Ctrl-\
-# detaches; the claude under it keeps running, container and all.
+# The door — the same claude-sessions menu the phone's `ssh infra-dev` lands on, so it
+# lists the same sessions whichever way you came in: Enter attaches or resumes one, `n`
+# starts another, `q` leaves. Each session is an abduco session: Ctrl-\ detaches, the
+# menu comes back, and the claude keeps running, container and all.
 #
 # No `in-workspace` here, and that is not an inconsistency: `docker exec` honours the
 # image's WORKDIR, so this already starts in /workspace. Only sshd's remote-command path
 # ignores it, which is the one place the wrapper is needed.
 claude:
-	$(DOCKER) exec -it $(CONTAINER) abduco -A claude claude
+	$(DOCKER) exec -it $(CONTAINER) claude-sessions-door
 
 shell:
 	$(DOCKER) exec -it $(CONTAINER) fish

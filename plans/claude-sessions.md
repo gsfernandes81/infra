@@ -718,11 +718,13 @@ at 6 columns, the right edge marked:
      § *The door*. Every branch was run before it was committed: a forwarded command, no
      tty, a menu exiting non-zero (one line, then `$SHELL -l`), and the real v0.2.0 menu in
      a 40×24 pty quit with `q` (exit 0, no shell).
-   - **The template switch is NOT in that commit, because the template is not infra-dev's
-     alone.** `configure-client-dev.yml -e alias=…` renders it for every dev container,
-     and each child pins its own `BASE_TAG`; a client re-run after the switch would give
-     `ssh or3-dev` (or dd-dev, ds-dev) "Unknown command: claude-sessions-door" until that
-     repo bumps. It lands when the owner says how that ordering is handled.
+   - ✔ **The template switched the same day**, for every alias at once on the owner's word
+     (`decisions.md`), with `make claude`, the banners and the docs. **Owner's, in order:**
+     recreate infra-dev on `2026.10.02.1` first (Phase 5 bring-up above, step 4a included),
+     then re-run `configure-client.yml` on each client. or3-dev, dd-dev and ds-dev answer
+     *Unknown command: claude-sessions-door* until each repo bumps `BASE_TAG`; `<c>-sh`
+     gets in meanwhile. **This plan is deleted** when the clients are re-run, the children
+     have bumped, and Stage B has landed.
 
 Phases 1 and 2 can run in parallel. Each phase lands on `main` complete and non-breaking.
 A push to `main` touching `dev/` publishes a new base tag automatically; no container

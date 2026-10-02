@@ -108,11 +108,11 @@ cat <<'EOF'
 
   This container is used over ssh. From the phone or a PC:
 
-      ssh infra-dev                                  a shell
-      ssh -t infra-dev abduco -A claude claude       a claude that survives the link
+      ssh infra-dev                                  the session menu
+      ssh infra-dev-sh                               a shell
 
-  abduco detaches with Ctrl-\ and re-attaches with the same command, so a dropped
-  connection costs nothing. `abduco` on its own lists the sessions.
+  Every session the menu opens is an abduco session: Ctrl-\ detaches and the menu
+  comes back, and a dropped connection costs nothing — ssh in again and press Enter.
 
   The point of working in here rather than from the phone: the model traffic goes out
   over zero's home connection, and ansible reaches one and two over the home LAN.

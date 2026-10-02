@@ -56,14 +56,24 @@ Each container gets two aliases, and they are the same route — one carries a
 | `<c>` | its own tunnel → Access → the container's sshd | its tunnel, its Access app, its token, or Cloudflare |
 | `<c>-sh` | the same, without `RemoteCommand` | the same |
 
-**`ssh <c>` IS the claude session.** `RemoteCommand in-workspace abduco -A claude claude`
-reattaches if one is already running, so the habit is one word rather than a remembered
-incantation. Two concerns are deliberately split: `in-workspace` is a program in the
-**image** and holds the one thing the container owns — where its work is, so no client
-names that path. `abduco` is a property of **this link**: an ssh session from a phone dies
-at the lock screen, so the session has to outlive it. A laptop on ethernet running
-`ssh … 'git log'`, or a one-shot `claude -p`, wants the workspace and no abduco at all —
-which a wrapper owning both would have made impossible.
+**`ssh <c>` IS the session menu.** `RemoteCommand in-workspace claude-sessions-door` lands
+on `claude-sessions`: every session in the container, live or offloaded, `Enter` to attach
+or resume, `n` for a new one, `q` to leave — so the habit is still one word, and it now
+finds every session rather than the one named `claude`. Each session it opens is an
+abduco session, so it outlives the link: an ssh session from a phone dies at the lock
+screen, and the work must not. `in-workspace` is a program in the **image** and holds the
+one thing the container owns — where its work is, so no client names that path. The door
+is in the image too, and it never locks you out: a menu that cannot run (too narrow a
+terminal, a missing binary) says why and drops to a login shell. A laptop on ethernet
+running `ssh … 'git log'`, or a one-shot `claude -p`, wants the workspace and no menu at
+all — that is `<c>-sh`.
+
+**Changed 2026-10-02 from `in-workspace abduco -A claude claude`.** The template serves
+every dev container, and a container gets the door only when its repo's `BASE_TAG` reaches
+`2026.10.02.1`; until then, after a client re-run, `ssh <c>` to it answers *Unknown
+command: claude-sessions-door* and `<c>-sh` is the way in. Taken knowingly over a per-alias
+switch (`docs/decisions.md`). Sessions started the old way still show, marked `u`, and
+`Enter` attaches them.
 
 **The caveat that comes with `RemoteCommand`:** `ssh <c> <command>` is then an error
 (*cannot execute command-line and remote command*), and `scp`/`sftp` to that alias will

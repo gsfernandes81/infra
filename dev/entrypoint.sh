@@ -610,7 +610,7 @@ if ! sshd_err="$(/usr/sbin/sshd -t -f "$SSHD_CONF" 2>&1)"; then
     fi
 fi
 
-say "sshd on :2222 in the foreground — ssh in and work in an abduco session"
-say "    ssh $DEV_NAME                              a shell"
-say "    ssh -t $DEV_NAME abduco -A claude claude   a claude that survives the link"
+say "sshd on :2222 in the foreground — ssh in and pick a session from the menu"
+say "    ssh $DEV_NAME        the claude-sessions menu (Enter attaches, n is a new one)"
+say "    ssh $DEV_NAME-sh     a shell"
 exec /usr/sbin/sshd -D -e -f "$SSHD_CONF"
