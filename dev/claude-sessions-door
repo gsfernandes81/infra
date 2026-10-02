@@ -11,8 +11,10 @@
 # scp or a `ssh box cmd` corrupts the stream or waits forever for a key, so:
 #   - a command forwarded by sshd (SSH_ORIGINAL_COMMAND, set when this runs as a
 #     ForceCommand) runs that command. Today it runs as a RemoteCommand instead, where that
-#     variable is never set and `ssh <alias> cmd` is refused by the client — the branch is
-#     here so that moving the door into sshd later cannot hand sftp a menu;
+#     variable is never set and `ssh <alias> cmd` is refused by the client. The branch
+#     means a later move into sshd hands sftp a FAILED command rather than a menu — not a
+#     working sftp: sshd sets the variable to the literal `internal-sftp`, which no shell
+#     can run, so that move still needs the sftp special case in-workspace's header names;
 #   - no terminal on stdin or stdout means a plain login shell.
 #
 # THE MENU FAILING MUST NEVER LOCK THE DOOR. Exit 0 is the owner quitting, and ends the
@@ -21,10 +23,12 @@
 # a login shell, so a broken menu costs a keypress rather than a trip to `<alias>-sh`.
 #
 # `$SHELL`, never a named shell: infra-dev logs in to fish, dd-dev and dossier to bash, and
-# this file is in the base all of them share.
+# this file is in the base all of them share. sshd sets it; `docker exec` (`make claude`)
+# does not, so the account's passwd shell is the next answer and /bin/sh the last.
 set -u
 
-shell="${SHELL:-/bin/sh}"
+shell="${SHELL:-$(getent passwd "$(id -u)" | cut -d: -f7)}"
+shell="${shell:-/bin/sh}"
 
 if [ -n "${SSH_ORIGINAL_COMMAND:-}" ]; then
     exec "$shell" -c "$SSH_ORIGINAL_COMMAND"
@@ -34,8 +38,20 @@ if [ ! -t 0 ] || [ ! -t 1 ]; then
     exec "$shell" -l
 fi
 
+# THE TRAP IS WHAT KEEPS THE FALLBACK REACHABLE, and it was found in review, not in use.
+# /bin/sh here is dash, and a non-interactive dash that receives SIGINT while its
+# foreground child runs waits for the child and then kills ITSELF with that signal —
+# whatever the child exited with — so a ^C in the menu's start-up window (it reads /proc
+# and the registry before it puts the terminal in raw mode) or between a detach and the
+# redraw ended the login instead of reaching the shell below. A handler, not `trap ''`: an
+# ignored signal is inherited across exec, and the menu, abduco and every claude under it
+# would then ignore ^C too. A handler resets to the default in the child, so a ^C still
+# stops a menu caught before raw mode — exit 130, and the shell below. bash is no fix
+# either: it exits the same way when the child died OF the SIGINT, the common case.
+trap : INT
 claude-sessions
 status=$?
+trap - INT
 [ "$status" -eq 0 ] && exit 0
 
 echo "claude-sessions-door: the menu exited $status (its reason is above); here is a login shell instead" >&2
