@@ -193,6 +193,54 @@
         modification_time: preserve
         access_time: preserve
 
+    # LF THROUGHOUT, BEFORE ANY blockinfile TOUCHES THE FILE, removals included — here
+    # and again for the laptop's Windows file below. blockinfile finds its block by
+    # comparing each line to the marker plus os.linesep, "\n" here, so in a CRLF file its
+    # own markers do not match: it inserts a second block below the first, ssh, taking
+    # the first value it obtains, keeps reading the stale one, and the removals find
+    # nothing. Not only a Windows file's problem: WSL's own ~/.ssh/config turned out to be
+    # CRLF too, on 2026-10-03, by the dry run's diff adding an infra-dev block under the
+    # one already there. LF, not CRLF, because LF is the only ending blockinfile can
+    # write, and every ssh here, Windows OpenSSH included, reads it; the .cmd wrapper is
+    # the one file that must be CRLF, and configure-client-dev.yml says why.
+    #
+    # grep and sed, not `replace`: that module opens the file with universal newlines,
+    # never sees a "\r", and reports ok. rc 2 is a missing or unreadable file; the touch
+    # above makes the first impossible, and blockinfile fails the second with its own
+    # message.
+    #
+    # THE DOUBLE QUOTES ON grep's "\r" ARE LOAD-BEARING: YAML turns them into a real CR.
+    # Single-quoted, GNU grep reads `\r` as the letter r, matches every config, and the
+    # sed reports changed on every run. sed's `\r` and --follow-symlinks are GNU sed's,
+    # which is what WSL (Debian/Ubuntu) and Termux both ship; busybox sed has neither.
+    # Only a CR before a newline is stripped; a lone one is text, and stays.
+    - name: Does ~/.ssh/config have CRLF line endings
+      ansible.builtin.command:
+        argv: [grep, -qs, "\r", "{{ ssh_config }}"]
+      register: posix_crlf
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Convert ~/.ssh/config to LF, so blockinfile can find its markers
+      ansible.builtin.command:
+        argv: [sed, -i, --follow-symlinks, 's/\r$//', "{{ ssh_config }}"]
+      when: posix_crlf.rc == 0
+
+    # The sed above does not run under --check, so neither do its consequences: the
+    # removals find nothing and the diff shows a second block under the stale one. Said
+    # here because the play comment is not what the person running --check is reading.
+    - name: Say that a --check diff of a CRLF ~/.ssh/config is not what the real run writes
+      ansible.builtin.debug:
+        msg: >-
+          {{ ssh_config }} has CRLF line endings. A real run converts it to LF first; this
+          dry run cannot, so the diff below shows the fleet block ADDED under the existing
+          one. The real run edits it in place.
+      changed_when: true
+      when:
+        - ansible_check_mode
+        - posix_crlf.rc == 0
+
     # THE MARKER NAMES THE PLAYBOOK, so the 2026-08-29 rename (ssh-client.yml ->
     # configure-client-fleet.yml) orphaned every block written before it: the next run
     # inserted a second fleet block instead of editing the first, and ssh, taking the
@@ -262,26 +310,9 @@
           half.
       when: on_windows_client | bool
 
-    # LF THROUGHOUT, BEFORE ANY blockinfile TOUCHES THE FILE, removals included.
-    # blockinfile finds its block by comparing each line to the marker plus os.linesep,
-    # which under WSL is "\n" — so in a file that a Windows editor has saved as CRLF, its
-    # own markers do not match, it inserts a second block below the first, and ssh,
-    # taking the first value it obtains, keeps reading the stale one. The removals above
-    # them find nothing for the same reason. LF, not CRLF, because LF is the only ending
-    # blockinfile can write from here and Windows OpenSSH reads it fine; the .cmd wrapper
-    # is the one Windows file that must be CRLF, and configure-client-dev.yml says why.
-    #
-    # grep and sed, not `replace`: that module opens the file with universal newlines,
-    # never sees a "\r", and reports ok. rc 2 is a missing file, which `create: true`
-    # below handles; an unreadable one fails there, with blockinfile's own message.
-    #
-    # THE DOUBLE QUOTES ON grep's "\r" ARE LOAD-BEARING: YAML turns them into a real CR.
-    # Single-quoted, GNU grep reads `\r` as the letter r, matches every config, and the
-    # sed reports changed on every run. sed's own `\r` is GNU sed's escape — this is WSL,
-    # Debian/Ubuntu, GNU tools; busybox sed has neither that nor --follow-symlinks. On
-    # drvfs, sed -i can print "preserving permissions ... Operation not permitted" and
-    # still exit 0: the same refusal that keeps `mode:` off these tasks, not a failure.
-    # Only a CR before a newline is stripped; a lone one is text, and stays.
+    # LF, for the reasons given where ~/.ssh/config gets the same three tasks above.
+    # Under drvfs, sed -i can also print "preserving permissions ... Operation not
+    # permitted" and still exit 0: the refusal that keeps `mode:` off these tasks.
     - name: Does the laptop's ssh config have CRLF line endings
       ansible.builtin.command:
         argv: [grep, -qs, "\r", "{{ windows_ssh_config }}"]
@@ -298,9 +329,6 @@
         - on_windows_client | bool
         - win_crlf.rc | default(1) == 0
 
-    # The sed above does not run under --check, so neither do its consequences: the
-    # removals find nothing and the diff shows a second block under the stale one. Said
-    # here because the play comment is not what the person running --check is reading.
     - name: Say that a --check diff of a CRLF file is not what the real run writes
       ansible.builtin.debug:
         msg: >-

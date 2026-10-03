@@ -748,6 +748,39 @@
         state: directory
         mode: "0700"
 
+    - name: Does ~/.ssh/config have CRLF line endings
+      tags: [ssh]
+      # LF throughout, before any blockinfile below touches the file, on both sides of a
+      # laptop. In a CRLF file blockinfile cannot match its own markers (it compares
+      # against marker + "\n"), so it writes a second block under the first and ssh reads
+      # the stale one. Why LF and not CRLF, why grep and sed rather than `replace`, and
+      # why grep's "\r" must stay double-quoted: the same tasks in
+      # configure-client-fleet.yml.
+      ansible.builtin.command:
+        argv: [grep, -qs, "\r", "{{ ssh_config }}"]
+      register: posix_crlf
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Convert ~/.ssh/config to LF, so blockinfile can find its markers
+      tags: [ssh]
+      ansible.builtin.command:
+        argv: [sed, -i, --follow-symlinks, 's/\r$//', "{{ ssh_config }}"]
+      when: posix_crlf.rc == 0
+
+    - name: Say that a --check diff of a CRLF ~/.ssh/config is not what the real run writes
+      tags: [ssh]
+      ansible.builtin.debug:
+        msg: >-
+          {{ ssh_config }} has CRLF line endings. A real run converts it to LF first; this
+          dry run cannot, so the diff below shows the {{ dev_alias }} block ADDED under
+          the existing one. The real run edits it in place.
+      changed_when: true
+      when:
+        - ansible_check_mode
+        - posix_crlf.rc == 0
+
     - name: Drop the {{ dev_alias }} block this play wrote before it was renamed
       tags: [ssh]
       # THE MARKER NAMES THE PLAYBOOK, so the 2026-08-29 rename (dev-client.yml ->
@@ -851,12 +884,8 @@
 
     - name: Does the laptop's Windows ssh config have CRLF line endings
       tags: [ssh]
-      # LF throughout, before either blockinfile below touches the file. A Windows
-      # editor that saves it as CRLF leaves blockinfile unable to match its own markers
-      # (it compares against marker + "\n" here), so it writes a second block under the
-      # first and ssh reads the stale one. Why LF and not CRLF, why grep and sed rather
-      # than `replace`, why grep's "\r" must stay double-quoted, and what drvfs prints:
-      # the same pair of tasks in configure-client-fleet.yml.
+      # The same conversion as for ~/.ssh/config above, for the laptop's Windows file;
+      # what drvfs prints while it runs is in configure-client-fleet.yml.
       ansible.builtin.command:
         argv: [grep, -qs, "\r", "{{ win_ssh_config }}"]
       register: win_crlf
