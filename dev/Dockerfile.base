@@ -438,6 +438,12 @@ RUN chmod 0755 /usr/local/bin/in-workspace
 # `make verify` prints BOTH switches and parses the file rather than grepping it, because a
 # file in the wrong place, or one truncated after the word `true`, fails silently and looks
 # exactly like one in force.
+#
+# SINCE claude-sessions v0.3.0 THIS IS ALSO WHAT KEEPS ITS ORPHAN SWEEP SAFE. A live
+# `claude-sessions offload` kills any `daemon run --origin transient` tree whose parent is
+# no longer a `claude` once it is ten minutes old — and agent view's supervisor outlives
+# the session that started it ON PURPOSE, so with the view on, the sweep would kill working
+# supervisors. Turning the view back on anywhere means stopping the offloader there first.
 COPY claude-managed-settings.json /etc/claude-code/managed-settings.json
 RUN chmod 0644 /etc/claude-code/managed-settings.json
 
@@ -480,9 +486,9 @@ RUN chmod 0644 /etc/claude-code/managed-settings.json
 #
 # 0644 IS LOAD-BEARING: every session runs as `dev`, and a file it cannot read means
 # sessions start with no hooks and nothing on screen says so.
-ARG CLAUDE_SESSIONS_VERSION=0.2.0
-ARG CLAUDE_SESSIONS_SHA256_arm64=9b58f0728ae8914f2e1a2767cdd1d592b4991f1aec390a03f2b4222be9414c25
-ARG CLAUDE_SESSIONS_SHA256_amd64=c63eaebe8bd4e84e5ffb3406c18220089aae6a3842ee996315a2e432dcecc09b
+ARG CLAUDE_SESSIONS_VERSION=0.3.1
+ARG CLAUDE_SESSIONS_SHA256_arm64=4408f97e92ebe3ae4f48ef9cac2b55264af94c75f1ea30e452f49b197402779d
+ARG CLAUDE_SESSIONS_SHA256_amd64=82aff796426b5d0728636f56ef082b7e9fedb5f2b8863b3be0a8a118cc241dc9
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \

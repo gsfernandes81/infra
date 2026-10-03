@@ -384,6 +384,12 @@ by name (*"disabled by the 'disableAgentView' setting"*), and no daemon starts.
 **What it costs, stated rather than discovered:** `claude --bg` and `claude agents` are
 unavailable in these containers. That is the intended trade, not a side effect.
 
+**And since claude-sessions v0.3.0, something depends on it.** The live offloader's orphan
+sweep kills any transient `claude daemon` tree that has outlived its `claude`, which with
+the view off is only ever a leak — and with it on is agent view's supervisor doing its
+job. Turning the view back on anywhere means stopping the offloader there first
+([claude-sessions](#claude-sessions)).
+
 **There are two switches, and `make verify` prints both.** The image also sets
 `CLAUDE_CODE_DISABLE_AGENT_VIEW=1`, which the entrypoint publishes into
 `~/.ssh/environment` so it reaches ssh sessions too. The variable is not a hedge about
@@ -941,14 +947,22 @@ see the next section.
 session registry [`../plans/claude-sessions.md`](../plans/claude-sessions.md) designs: one
 JSON file per abduco session under `~/.local/share/claude-sessions/` (on the volume, so it
 outlives the container), kept current by Claude Code's own hooks. The base installs
-**v0.2.0** — a static binary, pinned by tag and SHA-256 per architecture, at
+**v0.3.1** — a static binary, pinned by tag and SHA-256 per architecture, at
 `/usr/local/bin/claude-sessions`.
 
 **The menu is in this release, and it is where `ssh infra-dev` lands.** `claude-sessions`
 with no arguments, at a terminal, lists the slots — live, offloaded, and `u` for an abduco
 session it did not start, which is what the old `abduco -A claude claude` logins are —
 and `Enter` attaches or resumes, `n` starts a new slot in `/workspace`, `c` closes, `s`
-is a shell, `?` the keys, `q` quits. Piped, it prints `list`. **`claude-sessions-door`**
+is a shell, `?` the keys, `q` quits. Piped, it prints `list`. Since v0.3.0 the menu fills
+the terminal, with its closing rule, status line and hints on the bottom lines, and **closed
+slots stay listed** at the bottom, marked `x`, not counted as open, and resumed by `Enter`
+— so a new slot never takes a closed one's name, and the numbers keep rising (`claude-7`,
+`claude-8`, …) rather than refilling gaps. **A row's title is what Claude Code's own
+`/resume` picker shows** (v0.3.1): the `/rename` name, else Claude Code's generated title,
+else the first prompt — read from the transcript by the hook at `SessionStart` and `Stop`,
+so a slot already running when its container is recreated keeps its old title until its
+next reply. **`claude-sessions-door`**
 is what a login runs (`RemoteCommand in-workspace claude-sessions-door`, and `make
 claude`): the menu at a terminal; a login shell when there is no terminal or the menu
 exits non-zero (it has said why on stderr by then); a forwarded `SSH_ORIGINAL_COMMAND`
@@ -972,8 +986,10 @@ replace this file outright. That a root-written file raises no dialog is from th
 docs, not yet from a box: the first `claude` in a rebuilt container is the check.
 
 **Stage A is a comparison, and the new rules are stricter about time.** `claude-sessions
-offload` stops a slot only when it is detached, its last event is a `Stop` at least **10
-minutes** ago, nothing waits on you (a permission prompt), no timer is pending
+offload` stops a slot only when it is detached, it has sat at its prompt for at least **10
+minutes** — since a `Stop`, or (v0.3.0) since a `SessionStart` that opened or resumed it and
+was never followed by a prompt; a compaction never counts, because it can land mid-turn —
+nothing waits on you (a permission prompt), no timer is pending
 (`ScheduleWakeup`/`CronCreate`, whoever set it), nothing but `claude` (and its
 `claude.exe` helpers) runs under it, and
 its conversation id and directory are recorded so it can be resumed. Anything it cannot
@@ -995,21 +1011,26 @@ make verify        the binary's version, and the hooks file parsed as dev
 `~/.local/share/claude-sessions-dry-run.log` keeps every pass, timestamped.
 `~/.local/share/claude-sessions/hook.log` is the hook's own failures — one line per offload
 saying `SessionEnd` could not take the lock is **expected**, because the offloader holds
-it while it stops the slot. `offload.log` beside it gets every real stop and every
-`sweep: WOULD KILL` line: the orphan sweep (stray `daemon run --origin transient` trees)
-only logs until it is armed, and arming it is a code change in claude-sessions after a week
-of that log has been read. **"events: none seen"** in `make sessions` means the hooks are
-not firing.
+it while it stops the slot. `offload.log` beside it gets every real stop and every line
+of the orphan sweep (stray `daemon run --origin transient` trees whose parent is no longer
+a `claude`). **The sweep is armed in the binary since v0.3.0 and still kills nothing
+here**, because Stage A runs `--dry-run`, which logs `sweep: WOULD KILL …` and stops
+nothing. Stage B therefore arms two things at once: the live offloader, and with it the
+sweep, which then logs `sweep: killed …` or `sweep: kept, too young …` for a tree under
+ten minutes old. **The sweep is only safe with the agent view off** ([above](#the-agent-view-is-off-and-cannot-be-turned-back-on-in-here)):
+agent view's supervisor outlives its session by design, and this rule would kill it.
+**"events: none seen"** in `make sessions` means the hooks are not firing.
 
-**Resuming an offloaded session is manual until the menu exists**: `claude-sessions doctor`
-prints each slot's session id, then `claude --resume <id>` in its directory. A slot that
-was resumed and never prompted is not offloaded until it is used once.
+**Resuming an offloaded or closed session is `Enter` on its row in the menu.** Without the
+menu: `claude-sessions doctor` prints each slot's session id, then `claude --resume <id>`
+in its directory.
 
 **One Stage A artefact to expect:** the registry does not know when the *old* script stops
 a session. If `SessionEnd` fires on that SIGTERM, the slot is recorded `closed` rather than
 offloaded; if it does not (still unmeasured), the slot stays `live` with a dead pid until
-the next container start's `reconcile`. The menu is the only thing that will care about the
-difference, and Stage B ends it.
+the next container start's `reconcile`. Since v0.3.0 a `closed` slot is still listed and
+resumable, so the difference costs a row's place at the bottom rather than the
+conversation, and Stage B ends it.
 
 `DEV_IDLE_OFFLOAD=0` turns off both offloaders. Overrides, neither normally worth setting:
 `CLAUDE_SESSIONS_DIR` (the registry) and `ABDUCO_SOCKET_DIR`. Do not put a source checkout

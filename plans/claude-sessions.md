@@ -638,22 +638,23 @@ at 6 columns, the right edge marked:
    and `reconcile` run by the entrypoint — `BASE_TAG` `2026.10.02`. The consent question is
    now a bring-up check, below. **Superseded the same day by v0.2.0 at `2026.10.02.1`** (step 4).
 4. ✔ **DONE 2026-10-02 — released in claude-sessions v0.2.0, pinned in the base at
-   `BASE_TAG` `2026.10.02.1`.** The TUI, to the approved mockups. Rendering tested at 40×24 and 80×24 against a test
+   `BASE_TAG` `2026.10.02.1`; v0.3.1 at `2026.10.03` (2026-10-03).** The TUI, to the approved mockups. Rendering tested at 40×24 and 80×24 against a test
    backend; the zero-idle-bytes property tested under a pty; ordering and the guards
    unit-tested.
 5. **`claude-sessions offload`** replaces `offload-idle-claude.sh` (deleted in the same commit). The
-   orphan sweep ships dry-run, logging, and is armed only after the owner has read a
-   week of its log. **Written, in v0.1.0. Two stages** (`decisions.md` row, 2026-10-02):
+   orphan sweep shipped dry-run, logging, and was armed in v0.3.0 on 2026-10-03 on the
+   owner's word (`decisions.md`, the sweep row) — live only once Stage B drops `--dry-run`.
+   **Written, in v0.1.0. Two stages** (`decisions.md` row, 2026-10-02):
    - ✔ **Stage A, landed 2026-10-02 — dry run beside the old script.** The entrypoint runs
      `claude-sessions offload --dry-run` every 3 minutes into
      `~/.local/share/claude-sessions-dry-run.log`; `offload-idle-claude.sh` still acts.
      `make idle` and `make offload-log` show both; `make sessions` is `doctor`.
    - **Bring-up (owner's), in order:**
-     1. Wait for `dev-base.yml` to publish `2026.10.02.1` (v0.2.0 and the door; it
-        supersedes `2026.10.02`, so if that was never brought up, skip straight here),
-        then recreate infra-dev:
+     1. Wait for `dev-base.yml` to publish `2026.10.03` (v0.3.1; it supersedes
+        `2026.10.02.1`, which is what the boxes run, and v0.3.0 was never rolled out), then
+        recreate infra-dev:
         `ssh -t zero 'cd ~/infra/dev && make up'`.
-     2. `make verify` reads `sessions  : claude-sessions 0.2.0`, a `hooks` line naming six
+     2. `make verify` reads `sessions  : claude-sessions 0.3.1`, a `hooks` line naming six
         events and a `door` line naming `/usr/local/bin/claude-sessions-door`; `make boot-log` has the `claude-sessions reconcile:` and `DRY RUN` lines.
      3. **Start `claude` in the container and confirm no approval dialog appears** — the
         managed-settings consent question, so far settled from the docs only.
@@ -669,6 +670,22 @@ at 6 columns, the right edge marked:
         failed resume shows its error) — on that first start, check nothing interactive
         went missing into it. And an idle menu sends **zero bytes**: worth a glance at the
         phone's link meter, ages ticking at most once a minute.
+     4b. **What v0.3.0 and v0.3.1 changed, by hand** (from claude-sessions' handoff, adjusted
+        for Stage A):
+        - *Titles:* send one prompt in a slot and let it finish — the row shows a short title,
+          the one Claude Code's `/resume` picker shows, never a reply. Then `/rename something`,
+          prompt again, and the row reads `something`. Slots already running at the recreate
+          keep their old titles until their next reply.
+        - *The footer* sits on the bottom line, at your usual size and on the phone in portrait.
+        - *Closing:* `c`, `y` — the slot moves to the bottom marked `x`, and `Enter` on it
+          resumes the conversation. A new slot after that takes a new number, not the gap.
+        - *Idle from the prompt:* open a slot, detach without prompting, leave it. Within about
+          13 minutes (10 idle plus the 3-minute loop) the **dry-run log** says it would offload
+          it — `make offload-log`'s *WOULD have stopped* half. **Not `offload.log`, and nothing
+          is stopped**: that is the handoff's check as Stage B will read it.
+        - *The sweep:* `grep 'sweep:' ~/.local/share/claude-sessions/offload.log | tail`. With
+          the agent view off, expect nothing, or `WOULD KILL` lines only. A `killed` line in
+          Stage A means the loop is not running `--dry-run` — report it before anything else.
      5. Read `make offload-log` over a few days. A day after rollout, `make sessions` again.
      6. The other dev repos pick this up when they bump `BASE_TAG`.
    - **Stage B gate — found in review of Stage A, 2026-10-02. All three are FIXED in v0.2.0**
@@ -697,6 +714,11 @@ at 6 columns, the right edge marked:
        offloader is unaffected (registry records only), but the menu Stage B makes the
        entrypoint lists dead sessions and `running_elsewhere` refuses to resume them. **Until
        fixed, a `doctor` line naming a pid that `ps` does not show blocks Stage B.**
+     - **The sweep, armed upstream in v0.3.0 and dry here** (2026-10-03). Stage B arms it in
+       the same step as the offloader, so every `sweep: WOULD KILL` line in `offload.log` gets
+       read first: each names a daemon whose parent is not a `claude`, and **one the owner
+       cannot account for blocks Stage B**. `make verify`'s `agentview` line must read off
+       on every container Stage B reaches.
      - Not a gate, and **fixed in v0.2.0**: `reconcile` could sweep a live socket started
        with combined abduco flags (`-fA`) ([#3](https://github.com/gsfernandes81/claude-sessions/issues/3)). It now reads flags
        getopt-style and sweeps nothing while any live abduco's session cannot be named; the
@@ -708,8 +730,9 @@ at 6 columns, the right edge marked:
      `DEV_IDLE_POLL_SECONDS` (entrypoint header, `compose.yaml`), `status.sh`'s exclusion and
      `procps` comment, the README's offloader section; the 90-minute `decisions.md` row is
      marked ⚠︎SUPERSEDED. Expect idle sessions to stop after 10 minutes, ssh ones included.
-   - **The orphan sweep is armed in claude-sessions**, not here, after a week of
-     `offload.log`; the owner has a reminder for 2026-10-08.
+   - ✔ **The orphan sweep was armed in claude-sessions v0.3.0** on 2026-10-03, earlier than
+     the week of `offload.log` it was waiting on; here it stays dry until Stage B (gate
+     above). The owner's 2026-10-08 reminder is now for reading those `WOULD KILL` lines.
 6. **Switch the door** — `ansible/templates/ssh-dev-block.j2`'s RemoteCommand becomes
    `in-workspace claude-sessions-door`; the owner runs the client play from each client. Then
    **delete this plan.**
