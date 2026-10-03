@@ -469,8 +469,8 @@ fi
 # host-setup.md's token-in-argv leak, and management-plane.md's rule that secrets never
 # go in command_args. In a container there is no supervise-daemon writing argv to
 # syslog, but `docker inspect` shows both argv and env, and .Config.Env is exactly what
-# audit-fleet.yml refuses to read because it holds secrets. A credentials FILE, mounted
-# read-only, is the spelling that puts the secret in neither.
+# generate-fleet-inventory.yml refuses to read because it holds secrets. A credentials
+# FILE, mounted read-only, is the spelling that puts the secret in neither.
 #
 # The second dividend is that ingress lives in a config file rather than in the
 # Cloudflare dashboard, so what this container answers on is reviewable here.

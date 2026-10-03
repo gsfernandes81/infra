@@ -3,9 +3,9 @@
 # report. Keeping it here rather than in fleet.yml avoids the second play having to reach
 # into hostvars for a value it is about to use itself.
 
-# Where the audit report is written, on the CONTROL NODE. Anchored to the playbook rather
+# Where the fleet inventory is written, on the CONTROL NODE. Anchored to the playbook rather
 # than the working directory, so it lands in the repo whichever directory you ran from.
-audit_report: "{{ playbook_dir }}/../../docs/fleet-inventory.md"
+fleet_inventory_report: "{{ playbook_dir }}/../../docs/fleet-inventory.md"
 
 # The DNS zone every hostname this repo writes lives in.
 #
@@ -16,7 +16,7 @@ audit_report: "{{ playbook_dir }}/../../docs/fleet-inventory.md"
 # reads exactly like the container being down.
 #
 # Here rather than in fleet.yml because configure-client-dev.yml targets `control`, which
-# is localhost, and fleet.yml would not reach it. Same reason audit_report is here.
+# is localhost, and fleet.yml would not reach it. Same reason fleet_inventory_report is here.
 #
 # NO `| default('gsrpi.uk')` BESIDE ANY USE. A play that cannot see this should die on an
 # undefined variable, loudly; a fallback would put the literal back in the two places this

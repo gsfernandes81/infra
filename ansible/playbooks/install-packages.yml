@@ -9,8 +9,9 @@
 # The lists are in group_vars/fleet.yml and host_vars/<host>.yml, and the split is the
 # point: base_packages is nearly everything, and the only per-host entry is the container
 # runtime, because `two` had docker and containerd removed deliberately. Unexplained
-# divergence between the three boxes is treated as the bug — it is what made audit-fleet.yml
-# grow a netstat branch and made one's hardware.md look hand-edited.
+# divergence between the three boxes is treated as the bug — it is what made
+# generate-fleet-inventory.yml grow a netstat branch and made one's hardware.md look
+# hand-edited.
 #
 # NEEDS community.general — see ../requirements.yml. An earlier version of this file did
 # the work with a hand-rolled `apk info -e` loop and `command: apk add`, on the reasoning
@@ -29,10 +30,10 @@
 #   rather than any spelling that prunes.
 #
 # WHY THE FALLBACKS STAY
-#   Installing iproute2 does not license deleting the netstat branch in audit-fleet.yml. A host
-#   built tomorrow has not run this playbook yet, and that branch is what makes its
-#   Listening section a reading rather than an UNREADABLE. Packages remove the need to
-#   *rely* on a fallback, not the need to *have* one.
+#   Installing iproute2 does not license deleting the netstat branch in
+#   generate-fleet-inventory.yml. A host built tomorrow has not run this playbook yet, and
+#   that branch is what makes its Listening section a reading rather than an UNREADABLE.
+#   Packages remove the need to *rely* on a fallback, not the need to *have* one.
 
 - name: Bring every host up to the declared package set
   hosts: fleet

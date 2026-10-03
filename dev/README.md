@@ -180,7 +180,7 @@ does, not a second one.
 
 ```sh
 ansible fleet -m ping                      # from any directory — see below
-ansible-playbook playbooks/audit-fleet.yml -K
+ansible-playbook playbooks/generate-fleet-inventory.yml -K
 ```
 
 **`ANSIBLE_CONFIG` is set in the image** to `/workspace/ansible/ansible.cfg`. On the
@@ -605,8 +605,8 @@ Each of those "must never" is a specific failure, not tidiness:
   reason the container did it first still stands: it is `host-setup.md`'s token-in-argv
   leak and `management-plane.md`'s *secrets never go in `command_args`*. There is no
   `supervise-daemon` in a container, but `docker inspect` shows argv **and** env, and
-  `.Config.Env` is exactly what `audit-fleet.yml` refuses to read because it holds live
-  secrets. A read-only credentials file is the spelling that is in neither.
+  `.Config.Env` is exactly what `generate-fleet-inventory.yml` refuses to read because it
+  holds live secrets. A read-only credentials file is the spelling that is in neither.
 - **The service token must not be in the container**, because it authorises *reaching*
   the container — putting it inside is the same mistake in the other direction. On the
   phone it goes in the environment rather than the `ProxyCommand`, because a secret on a

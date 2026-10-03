@@ -1,7 +1,7 @@
 ---
-# Phase 1 — the read-only audit. What actually runs where.
+# Phase 1 — the read-only fleet inventory. What actually runs where.
 #
-#     cd ansible && ansible-playbook playbooks/audit-fleet.yml -K
+#     cd ansible && ansible-playbook playbooks/generate-fleet-inventory.yml -K
 #
 # This CHANGES NOTHING on any host. Every task is a read, every one is
 # `changed_when: false`, and there is no handler, no template and no copy aimed at a
@@ -21,7 +21,7 @@
 # skipped by default, so a `--check` run of a read-only playbook would report nothing and
 # look like success. A read is safe in check mode by definition.
 
-- name: Audit what runs on the fleet
+- name: Inventory what runs on the fleet
   hosts: fleet
   gather_facts: true
   become: false
@@ -138,7 +138,7 @@
       # tasks above, so hostvars are fully populated by the time the template renders.
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../templates/fleet-inventory.md.j2"
-        dest: "{{ audit_report }}"
+        dest: "{{ fleet_inventory_report }}"
         mode: "0644"
       delegate_to: localhost
       run_once: true

@@ -20,11 +20,12 @@ The design and the reasoning are in
 # in Termux
 cd ~/infra/ansible
 ansible fleet -m ping                       # transport works
-ansible-playbook playbooks/audit-fleet.yml -K     # what runs where -> docs/fleet-inventory.md
+# what runs where -> docs/fleet-inventory.md
+ansible-playbook playbooks/generate-fleet-inventory.yml -K
 ```
 
 **Not everything here is read-only any more, and the list is longer than it looks.**
-`audit-fleet.yml` still is. Everything below changes something:
+`generate-fleet-inventory.yml` still is. Everything below changes something:
 
 | play | what it can change |
 |---|---|
@@ -47,7 +48,7 @@ skipped in check mode and everything after it dies on undefined.
 
 | | |
 |---|---|
-| `audit-fleet.yml` | read-only; what runs where → `docs/fleet-inventory.md` |
+| `generate-fleet-inventory.yml` | read-only; what runs where → `docs/fleet-inventory.md` |
 | `install-packages.yml` | the declared package set on all three hosts |
 | `prepare-dev-host.yml` | the **host** side of `infra-dev` on zero — secrets dir, deploy key, authorized_keys, `dev/.env` |
 | `create-dev-tunnel.yml` | the **edge** side — tunnel, DNS, Access application and policy |
@@ -219,7 +220,7 @@ repo has traded hand-rolled shell for stock tooling — after `bin/compose` and 
 |---|---|
 | `ansible.cfg` | read from the **cwd**, so run from this directory |
 | `inventory` | deliberately thin — `~/.ssh/config` owns the transport |
-| `group_vars/all.yml` | the audit report's path and `dns_zone`; applies to `localhost` too |
+| `group_vars/all.yml` | the fleet inventory's path and `dns_zone`; applies to `localhost` too |
 | `group_vars/fleet.yml` | the container CLI |
 | `host_vars/` | four files: the three hosts' container runtimes, plus `localhost.yml`'s Termux fixes — see below |
 | `playbooks/` | the ones above; `_assert-inventory.yml` is imported, never run |
@@ -271,12 +272,12 @@ knowledge, so it went.
 the number belongs in `docs/data-ledger.md` in the or3 repo; it is just a smaller number
 than this file used to claim.
 
-## Where "prefer the standard tool" loses — the audit's `docker inspect`
+## Where "prefer the standard tool" loses — the inventory's `docker inspect`
 
-`playbooks/audit-fleet.yml` reads containers with a hand-rolled `docker inspect --format`, not
-`community.docker.docker_container_info`, and that is deliberate rather than left over.
-It is the first case where the rule recorded in `docs/management-plane.md` does not win,
-so the reason is here rather than assumed.
+`playbooks/generate-fleet-inventory.yml` reads containers with a hand-rolled
+`docker inspect --format`, not `community.docker.docker_container_info`, and that is
+deliberate rather than left over. It is the first case where the rule recorded in
+`docs/management-plane.md` does not win, so the reason is here rather than assumed.
 
 **Checked 2026-08-21, after two wrong guesses.** `docker_container_info` talks to the
 Docker API through the Python Docker SDK on the *target*. The SDK is absent on `zero` and
@@ -313,9 +314,10 @@ this repo was going to do anyway.
 
 ## The two things in here that are easy to break
 
-**The `{% raw %}` guard in `audit-fleet.yml`.** Docker's `--format` is Go template syntax and
-uses the same `{{ }}` delimiters as Jinja. Without the guard, Ansible tries to resolve
-`.Name` as an Ansible variable and the task dies before Docker ever sees the string.
+**The `{% raw %}` guard in `generate-fleet-inventory.yml`.** Docker's `--format` is Go
+template syntax and uses the same `{{ }}` delimiters as Jinja. Without the guard, Ansible
+tries to resolve `.Name` as an Ansible variable and the task dies before Docker ever sees
+the string.
 
 **`UNREADABLE` is not `None`.** A failed read and an empty result look identical, and
 collapsing them is the wrong-reason pass this repo keeps designing against. The template

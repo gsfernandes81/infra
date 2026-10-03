@@ -926,9 +926,9 @@ having run the read-only phase before the writing ones.
   earlier dry run in this repo had agreed with the real one, which is how a dry run
   becomes a formality — this is the one that paid for the habit.
 - **Standardising packages deleted two divergences that had been read as facts.** The
-  netstat branch in `audit-fleet.yml` existed because `ss` was on one host out of three, and
-  `one`'s `hardware.md` looked hand-edited because `usbutils` was on two out of three.
-  Both are gone, and the fallbacks stay: a host built tomorrow has not run
+  netstat branch in `generate-fleet-inventory.yml` existed because `ss` was on one host
+  out of three, and `one`'s `hardware.md` looked hand-edited because `usbutils` was on two
+  out of three. Both are gone, and the fallbacks stay: a host built tomorrow has not run
   `install-packages.yml` yet.
 
 Phase 2's own corrections were smaller and all of the same shape — the docs asserted

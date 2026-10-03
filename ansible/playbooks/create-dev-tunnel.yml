@@ -139,10 +139,10 @@
         success_msg: "no retired flags"
 
     # ── 0  the token, the zone and the account ─────────────────────────────
-    # `check_mode: false` on every read, the same reason audit-fleet.yml carries it: under
-    # --check a task is skipped by default, so a dry run would resolve nothing and then
-    # fail on every id it needed. A read is safe in check mode by definition. The
-    # writes below carry no such line, so --check skips exactly those.
+    # `check_mode: false` on every read, the same reason generate-fleet-inventory.yml
+    # carries it: under --check a task is skipped by default, so a dry run would resolve
+    # nothing and then fail on every id it needed. A read is safe in check mode by
+    # definition. The writes below carry no such line, so --check skips exactly those.
     - name: Resolve the zone and its account
       ansible.builtin.uri:
         url: "{{ cf_api }}/zones?name={{ cf_zone }}"

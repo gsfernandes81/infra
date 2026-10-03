@@ -33,9 +33,10 @@ Full orientation is `README.md`; the reasoning is `docs/decisions.md`. Quick map
   (writes, never restarts), `check-boot-layout`, `check-mount-guards`, `hw-inventory`.
   `_infra.py` is their shared header parser. **Not wrapped in the Makefile yet, on
   purpose** — the Makefile header says why; do it as its own change or not at all.
-- **`ansible/`** — inventory, playbooks, the audit. **Runs from the phone, never from a
-  Pi**: there is no `ansible` on the boxes and there must not be. `infra-dev` carries it
-  as a *development* tool (syntax-check, `--check` against stubs), not a control plane.
+- **`ansible/`** — host list, playbooks, the fleet-inventory generator. **Runs from the
+  phone, never from a Pi**: there is no `ansible` on the boxes and there must not be.
+  `infra-dev` carries it as a *development* tool (syntax-check, `--check` against stubs),
+  not a control plane.
 - **`dev/`** — the `infra-dev` container. Lifecycle is `dev/Makefile` only (it computes
   `HOST_UID` from the checkout's owner; a second copy of that guard is how root-owned
   files end up in the bind mount). The top-level `Makefile` forwards `dev-*` to it.
