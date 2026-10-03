@@ -740,6 +740,15 @@ at 6 columns, the right edge marked:
        consecutive passes is one the live sweep would kill; a shorter run of lines is one it
        would have kept as too young. `make verify`'s `agentview` line must read off
        on every container Stage B reaches.
+     - **A slot never prompted is "resumable" with no conversation on disk** ([claude-sessions#5](https://github.com/gsfernandes81/claude-sessions/issues/5),
+       found at the v0.3.2 bring-up, 2026-10-03). Claude Code writes a new session's
+       transcript at its first prompt, but `offload` counts a slot resumable once `session_id`
+       and `cwd` are *recorded*. Seen on infra-dev: `claude-2`, closed on 2026-10-02 before
+       any prompt, was offered for `Enter`, and the resume exited in about a second with
+       empty stderr and no `SessionStart`. In Stage B, v0.3.0's rule offloads a new slot left
+       unprompted after 10 minutes, onto exactly that kind of row. Nothing is lost, but the
+       menu offers a resume that cannot work. **Stage B waits for the fix upstream, or for the
+       owner to accept it knowingly.**
      - Not a gate, and **fixed in v0.2.0**: `reconcile` could sweep a live socket started
        with combined abduco flags (`-fA`) ([#3](https://github.com/gsfernandes81/claude-sessions/issues/3)). It now reads flags
        getopt-style and sweeps nothing while any live abduco's session cannot be named; the
