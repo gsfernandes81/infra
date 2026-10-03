@@ -947,7 +947,7 @@ see the next section.
 session registry [`../plans/claude-sessions.md`](../plans/claude-sessions.md) designs: one
 JSON file per abduco session under `~/.local/share/claude-sessions/` (on the volume, so it
 outlives the container), kept current by Claude Code's own hooks. The base installs
-**v0.3.3** — a static binary, pinned by tag and SHA-256 per architecture, at
+**v0.3.4** — a static binary, pinned by tag and SHA-256 per architecture, at
 `/usr/local/bin/claude-sessions`.
 
 **The menu is in this release, and it is where `ssh infra-dev` lands.** `claude-sessions`
@@ -958,10 +958,16 @@ an empty group is not drawn, and an unregistered session counts as idle). There 
 and no numbers: an unread title is bold, a session attached elsewhere is dim, amber is the
 Needs-you heading, and status lines name a session by its quoted title. `Enter` attaches or resumes, `n` starts a new slot in `/workspace`, `c` closes, `s`
 is a shell, `?` the keys, `q` quits. Piped, it prints `list`. Since v0.3.0 the menu fills
-the terminal, with its closing rule, status line and hints on the bottom lines, and **closed
-slots stay listed in it** (piped `list` still leaves them out), in the `Closed` group, not counted as open, and resumed by `Enter`
-— so a new slot never takes a closed one's name, and the numbers keep rising (`claude-7`,
-`claude-8`, …) rather than refilling gaps. **A row's title is what Claude Code's own
+the terminal, with its closing rule, status line and hints on the bottom lines. **The
+`Closed` group is every conversation in Claude Code's own transcript store**
+(`$CLAUDE_CONFIG_DIR/projects/*/<id>.jsonl`, v0.3.4) that started in `/workspace` or below it
+and is not running — whoever started it: a slot, a `claude` run by hand, the old `abduco -A
+claude claude` path, or what a slot held before a `/clear`. A slot's *current* conversation
+is not repeated there, a transcript with no reply and no typed prompt (a bare `/clear`) is
+not a conversation, and piped `list` still leaves the group out. `Enter` on one runs `claude
+--resume <id>` in a new abduco slot from the directory it started in (or through the slot
+whose record names it). Closed slot records are no longer a list source, so a new slot may
+reuse a closed one's name. **A row's title is what Claude Code's own
 `/resume` picker shows** (v0.3.1): the `/rename` name, else Claude Code's generated title,
 else the first prompt — read from the transcript by the hook at `SessionStart` and `Stop`.
 A recreate ends every slot anyway, and each one takes its new title when it is resumed. **`claude-sessions-door`**
@@ -995,14 +1001,11 @@ nothing waits on you (a permission prompt), no timer is pending
 (`ScheduleWakeup`/`CronCreate`, whoever set it), nothing but `claude` (and its
 `claude.exe` helpers) runs under it, and
 its conversation id and directory are recorded so it can be resumed. **A slot whose
-conversation never reached disk** — a new slot closed or left before its first prompt, since
-Claude Code writes a *new* session's transcript at its first prompt (a `/clear` writes one at
-once) — **is closed instead** (v0.3.3,
-claude-sessions#5): the dry run says `would close, idle Nm — no conversation on disk to
-resume`, and the menu does not list such a stopped slot at all — so on the first start of
-v0.3.3, closed rows whose current conversation never reached disk simply vanish (on
-infra-dev, `claude` and `claude-2`). Nothing is lost: earlier conversations of that slot are
-still on disk, for `claude --resume`. The transcript is the path the
+has no conversation** — no reply and no typed prompt in its transcript: a new slot closed or
+left before its first prompt (Claude Code writes a new session's transcript only then), or a
+`/clear`ed slot left idle (a `/clear` writes a file at once, with nothing in it) — **is closed
+instead** (v0.3.3–v0.3.4, claude-sessions#5): the dry run says `would close, idle Nm — no
+conversation on disk to resume`. The transcript is the path the
 hooks recorded, or for a record older than v0.3.3 one derived from `$CLAUDE_CONFIG_DIR` —
 which is the image's `ENV`, `/home/dev/.claude`, for the loop and every slot alike, and must
 stay so. Anything it cannot
@@ -1034,10 +1037,10 @@ used to race their own `SessionStart` for it, which is what infra-dev's eight `b
 of the orphan sweep (stray `daemon run --origin transient` trees whose parent is no longer
 a `claude`). **The sweep is armed in the binary since v0.3.0 and still kills nothing
 here**, because Stage A runs `--dry-run`, which logs `sweep: WOULD KILL …` and stops
-nothing. **A dry-run line skips the ten-minute age check** the live sweep makes, and repeats
-every pass: a daemon seen in fewer than about four consecutive passes is one the live sweep
-would have kept as too young, not a leak. Each line carries `start <ticks>` (USER_HZ, 100 a
-second), so its age is `/proc/uptime` minus `start/100`. Stage B therefore arms two things at once: the live offloader, and with it the
+nothing. Since v0.3.4 **the dry run applies the live sweep's ten-minute age check**: a younger tree
+reads `sweep: would keep, too young (Ns) — …`, so a `WOULD KILL` is exactly what the live
+sweep would kill. (Before it, a dry-run line skipped the check and repeated every pass.)
+Stage B therefore arms two things at once: the live offloader, and with it the
 sweep, which then logs `sweep: killed …` or `sweep: kept, too young …` for a tree under
 ten minutes old. **The sweep is only safe with the agent view off** ([above](#the-agent-view-is-off-and-cannot-be-turned-back-on-in-here)):
 agent view's supervisor outlives its session by design, and this rule would kill it.
@@ -1050,9 +1053,9 @@ in its directory.
 **One Stage A artefact to expect:** the registry does not know when the *old* script stops
 a session. If `SessionEnd` fires on that SIGTERM, the slot is recorded `closed` rather than
 offloaded; if it does not (still unmeasured), the slot stays `live` with a dead pid until
-the next container start's `reconcile`. Since v0.3.0 a `closed` slot with a conversation is
-still listed and resumable, so the difference costs a row's group rather than the
-conversation, and Stage B ends it.
+the next container start's `reconcile`. Either way the conversation stays reachable: since
+v0.3.4 the `Closed` group lists it from the transcript store, whatever the record says, and
+Stage B ends the artefact.
 
 `DEV_IDLE_OFFLOAD=0` turns off both offloaders. Overrides, neither normally worth setting:
 `CLAUDE_SESSIONS_DIR` (the registry) and `ABDUCO_SOCKET_DIR`. Do not put a source checkout

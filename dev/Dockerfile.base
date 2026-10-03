@@ -333,7 +333,8 @@ RUN if ! getent group "${USER_GID}" >/dev/null; then \
 # Without it, ~/.claude.json sits on the container filesystem and every rebuild
 # re-runs onboarding on a container that has no one to answer it.
 # claude-sessions (since v0.3.3) also derives a pre-0.3.3 slot's transcript path from it,
-# and closes a slot with no transcript rather than offloading it — so the offload loop
+# closes a slot with no conversation rather than offloading it, and (v0.3.4) lists the
+# menu's Closed group from $CLAUDE_CONFIG_DIR/projects — so the offload loop, the menu
 # and every claude must see the same value. Being an image ENV, they do; never set it
 # for one and not the other.
 # GH_CONFIG_DIR does the same for `gh auth login`: with no keyring in a slim image
@@ -490,9 +491,9 @@ RUN chmod 0644 /etc/claude-code/managed-settings.json
 #
 # 0644 IS LOAD-BEARING: every session runs as `dev`, and a file it cannot read means
 # sessions start with no hooks and nothing on screen says so.
-ARG CLAUDE_SESSIONS_VERSION=0.3.3
-ARG CLAUDE_SESSIONS_SHA256_arm64=aec755e195500aea963c52f6b05c9d7f0ee160edc9b911bdb75ca842cecae13c
-ARG CLAUDE_SESSIONS_SHA256_amd64=4e74f362559da2aa0499c00d339b2a74201d7e45b214bdf6438ca9a3a9fa3a9d
+ARG CLAUDE_SESSIONS_VERSION=0.3.4
+ARG CLAUDE_SESSIONS_SHA256_arm64=8ce365dff702ba49d45aa11017be25aae6dec956c6c565528ca9295cf88e2f13
+ARG CLAUDE_SESSIONS_SHA256_amd64=e44c40f3e67329c684a4e7c9c3bc6efe32217fe97337441a037de23b5117553b
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \

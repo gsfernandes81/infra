@@ -647,7 +647,7 @@ at 6 columns, the right edge marked:
    and `reconcile` run by the entrypoint — `BASE_TAG` `2026.10.02`. The consent question is
    now a bring-up check, below. **Superseded the same day by v0.2.0 at `2026.10.02.1`** (step 4).
 4. ✔ **DONE 2026-10-02 — released in claude-sessions v0.2.0, pinned in the base at
-   `BASE_TAG` `2026.10.02.1`; v0.3.1 at `2026.10.03`, then v0.3.2 at `2026.10.03.1` (infra#2), then v0.3.3 at `2026.10.03.2` (infra#3), all 2026-10-03.** The TUI, to the approved mockups. Rendering tested at 40×24 and 80×24 against a test
+   `BASE_TAG` `2026.10.02.1`; v0.3.1 at `2026.10.03`, then v0.3.2 at `2026.10.03.1` (infra#2), then v0.3.3 at `2026.10.03.2` (infra#3), then v0.3.4 at `2026.10.03.3` (infra#4), all 2026-10-03.** The TUI, to the approved mockups. Rendering tested at 40×24 and 80×24 against a test
    backend; the zero-idle-bytes property tested under a pty; ordering and the guards
    unit-tested.
 5. **`claude-sessions offload`** replaces `offload-idle-claude.sh` (deleted in the same commit). The
@@ -661,13 +661,14 @@ at 6 columns, the right edge marked:
    - **Bring-up (owner's), in order:**
      ✔ **`2026.10.03.1` (v0.3.2) was brought up on infra-dev on 2026-10-03** and passed steps
      2–4b: no approval dialog, the menu, titles and `/clear` checked by the owner, the rest from
-     inside the container. Its one finding became claude-sessions#5, fixed in v0.3.3. For
-     `2026.10.03.2`, repeat steps 1, 2 and 4b — 4a and 3 are unchanged.
-     1. Wait for `dev-base.yml` to publish `2026.10.03.2` (v0.3.3; it supersedes
-        `2026.10.03.1`), then
+     inside the container. Its one finding became claude-sessions#5, fixed in v0.3.3–v0.3.4.
+     `2026.10.03.2` (v0.3.3) was never rolled out. For `2026.10.03.3`, repeat steps 1, 2 and
+     4b — 4a and 3 are unchanged.
+     1. Wait for `dev-base.yml` to publish `2026.10.03.3` (v0.3.4; it supersedes
+        `2026.10.03.1` and the unrolled `2026.10.03.2`), then
         recreate infra-dev:
         `ssh -t zero 'cd ~/infra/dev && make up'`.
-     2. `make verify` reads `sessions  : claude-sessions 0.3.3`, a `hooks` line naming six
+     2. `make verify` reads `sessions  : claude-sessions 0.3.4`, a `hooks` line naming six
         events and a `door` line naming `/usr/local/bin/claude-sessions-door`; `make boot-log` has the `claude-sessions reconcile:` and `DRY RUN` lines.
      3. **Start `claude` in the container and confirm no approval dialog appears** — the
         managed-settings consent question, so far settled from the docs only.
@@ -683,7 +684,7 @@ at 6 columns, the right edge marked:
         failed resume shows its error) — on that first start, check nothing interactive
         went missing into it. And an idle menu sends **zero bytes**: worth a glance at the
         phone's link meter, ages ticking at most once a minute.
-     4b. **What v0.3.0–v0.3.3 changed, by hand** (from claude-sessions' handoff, adjusted
+     4b. **What v0.3.0–v0.3.4 changed, by hand** (from claude-sessions' handoff, adjusted
         for Stage A):
         - *Titles:* send one prompt in a slot and let it finish — the row shows a short title,
           the one Claude Code's `/resume` picker shows, never a reply. Then `/rename something`,
@@ -693,27 +694,28 @@ at 6 columns, the right edge marked:
         - *The grouped list* (v0.3.3): rows under `Needs you`, `Working`, `Idle`, `Offloaded`,
           `Closed`, no marks or numbers, an unread title bold. Ages at full width keep their last
           character (`now`, not `no`).
-        - *Closing:* `c`, `y` — the slot moves to the `Closed` group, and `Enter` on it
-          resumes the conversation. A new slot after that takes a new number, not the gap.
-          A slot closed before its first prompt is not listed at all (v0.3.3).
+        - *Closing:* `c`, `y` — the conversation moves to the `Closed` group, and `Enter` on it
+          resumes it in a slot. A slot closed before its first prompt leaves no row (v0.3.3).
+        - *The `Closed` group is the transcript store* (v0.3.4): it shows, by title, the
+          conversations under `/home/dev/.claude/projects/-workspace*/` that are not running —
+          `claude` and `claude-2`'s earlier conversations included — and never a running slot's,
+          nor a `/clear`-only transcript (`claude-3`'s `8c084a28…`, if still on disk).
+        - *`Enter` on a conversation that never ran in a slot* (one from before the hooks, or
+          from `abduco -A claude claude`): a new `claude-N` starts running `claude --resume
+          <id>`, and `make sessions` shows its `SessionStart` binding it.
         - *`/clear` takes no lock* (v0.3.2): `/clear` in a slot, then `grep dropped
           ~/.local/share/claude-sessions/hook.log` stays empty while `make sessions` shows the
-          slot's new `SessionStart`. **Then leave that cleared slot idle** (v0.3.3): a `/clear`
-          writes its new transcript at once, so expect `would offload`, not `would close`. Close
-          it with `c` and press `Enter` on it: if the resume exits at once, report it to
-          claude-sessions — a transcript holding only the `/clear` is #5's failure with a file
-          present.
-        - *The upgrade's own effect:* closed rows whose current conversation never reached disk
-          disappear from the menu (on infra-dev, `claude` and `claude-2`). Expected, not a
-          regression.
+          slot's new `SessionStart`. **Then leave that cleared slot idle** (v0.3.4): a `/clear`-only
+          transcript is no conversation, so expect `would close`, and closing it leaves no row.
         - *Idle from the prompt:* open a slot, detach without prompting, leave it. Within about
           13 minutes (10 idle plus the 3-minute loop) the **dry-run log** says
-          `would close, idle Nm — no conversation on disk to resume` (v0.3.3: a new slot never
-          prompted has no transcript); `/resume` an old conversation into a slot and leave it,
+          `would close, idle Nm — no conversation on disk to resume` (a new slot never prompted
+          has no transcript); `/resume` an old conversation into a slot and leave it,
           and it says `would offload` instead — `make offload-log`'s *WOULD have stopped* half. **Not `offload.log`, and nothing
           is stopped**: that is the handoff's check as Stage B will read it.
         - *The sweep:* `grep 'sweep:' ~/.local/share/claude-sessions/offload.log | tail`. With
-          the agent view off, expect nothing, or `WOULD KILL` lines only. A `killed` line in
+          the agent view off, expect nothing, or `WOULD KILL` / `would keep, too young` lines
+          only (v0.3.4 applies the live age check to the dry run). A `killed` line in
           Stage A means the loop is not running `--dry-run` — report it before anything else.
      5. Read `make offload-log` over a few days. A day after rollout, `make sessions` again.
      6. The other dev repos pick this up when they bump `BASE_TAG`.
@@ -757,10 +759,10 @@ at 6 columns, the right edge marked:
      - **The sweep, armed upstream in v0.3.0 and dry here** (2026-10-03). Stage B arms it in
        the same step as the offloader, so every `sweep: WOULD KILL` line in `offload.log` gets
        read first: each names a daemon whose parent is not a `claude`, and **one the owner
-       cannot account for blocks Stage B**. The dry run skips the live sweep's ten-minute age
-       check and repeats each orphan every pass, so only a daemon seen in about four or more
-       consecutive passes is one the live sweep would kill; a shorter run of lines is one it
-       would have kept as too young. `make verify`'s `agentview` line must read off
+       cannot account for blocks Stage B**. Since v0.3.4 the dry run applies the live sweep's
+       ten-minute age check — a younger tree reads `would keep, too young` — so each `WOULD
+       KILL` is one the live sweep would kill. (Lines from before v0.3.4 skipped the check;
+       there only a daemon in about four or more consecutive passes counted.) `make verify`'s `agentview` line must read off
        on every container Stage B reaches.
      - **A slot never prompted is "resumable" with no conversation on disk** ([claude-sessions#5](https://github.com/gsfernandes81/claude-sessions/issues/5),
        found at the v0.3.2 bring-up, 2026-10-03). Claude Code writes a new session's
@@ -770,11 +772,12 @@ at 6 columns, the right edge marked:
        empty stderr and no `SessionStart`. In Stage B, v0.3.0's rule offloads a new slot left
        unprompted after 10 minutes, onto exactly that kind of row. Nothing is lost, but the
        menu offers a resume that cannot work. *v0.3.3:* such a slot is closed rather than
-       offloaded, and a stopped slot with no transcript is not listed. **The check:** a `would
-       close` line is right only for a slot whose transcript file does not exist — a new slot
-       never prompted; **a `would close` for one whose transcript exists blocks Stage B** — it
-       would mean the transcript path is wrong on that box. (The binary's test is the file, not
-       "prompted": a `/clear`ed slot left unprompted has one, and reads `would offload`.) A record from before v0.3.3 has no
+       offloaded, and a stopped slot with no transcript is not listed. *v0.3.4:* a conversation is a
+       transcript with a reply or a typed prompt, so a `/clear`ed slot left idle is closed too.
+       **The check:** a `would close` line is right only for a slot whose transcript is missing
+       or holds no real exchange — a new slot never prompted, or a bare `/clear`; **a `would
+       close` on a slot whose transcript holds a real exchange blocks Stage B** — it would mean
+       the transcript path, or the exchange test, is wrong on that box. A record from before v0.3.3 has no
        `transcript_path`, so its path is derived from `$CLAUDE_CONFIG_DIR`: confirmed
        2026-10-03 (infra#3) to be `/home/dev/.claude` in the loop and in every slot on
        infra-dev, from the image `ENV`, with or3's `dev/` setting no override; of infra-dev's
