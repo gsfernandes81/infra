@@ -309,20 +309,21 @@ on one of the boxes the control plane controls**.
   now, `two` at Phase 8 — and `two` was chosen on the reasoning that a control node should
   be the box with the least on it. zero is the box with the most.
 
-The argument the other way is real and is why this is open rather than closed: **an audit
-from Termux is metered end to end to reach boxes sitting on zero's own LAN, and from
-inside the container it is free.** That saving recurs every run, and Phase 8's answer to
-it — scheduling from `two` — is blocked behind Phase 7's rootless podman.
+The argument the other way is real and is why this is open rather than closed: **an
+inventory run from Termux is metered end to end to reach boxes sitting on zero's own LAN,
+and from inside the container it is free.** That saving recurs every run, and Phase 8's
+answer to it — scheduling from `two` — is blocked behind Phase 7's rootless podman.
 
 Three things would change the answer, and it is worth knowing which one you are waiting
 for rather than revisiting this on a feeling:
 
 1. **Phase 7 and 8 landing.** If `two` becomes the scheduled read-only control node, the
    metered-audit argument mostly evaporates and this stays off for good.
-2. **A read-only split.** The audit needs no `become` on `one` and `two`. A container
-   holding a key that can only read, with the mutating half staying on the phone, answers
-   the blast-radius objection without giving up the saving. Nothing in the repo does this
-   today and `ansible.cfg`'s `become: False` default is the right half of it already.
+2. **A read-only split.** The inventory play needs no `become` on `one` and `two`. A
+   container holding a key that can only read, with the mutating half staying on the
+   phone, answers the blast-radius objection without giving up the saving. Nothing in the
+   repo does this today and `ansible.cfg`'s `become: False` default is the right half of
+   it already.
 3. **The dev containers moving hosts** (Phase 5). A control node that follows the
    container to whichever box has room is a different proposition from one pinned to zero,
    and the objection about living inside what it controls stops being a constant.
@@ -501,7 +502,7 @@ ones that answer the question this document started from.
 | # | Phase | Touches | Gated on | State |
 |---|---|---|---|---|
 | 0 | Control node on Termux, inventory, `ansible fleet -m ping` | nothing | — | **done** 2026-08-21 |
-| 1 | Read-only audit playbook | nothing | 0 | **done** 2026-08-21 — run against all three; `docs/fleet-inventory.md` is generated and committed |
+| 1 | Read-only inventory playbook (`generate-fleet-inventory.yml`) | nothing | 0 | **done** 2026-08-21 — run against all three; `docs/fleet-inventory.md` is generated and committed |
 | 1b | Fleet package standardisation — `playbooks/install-packages.yml` | all three | 1 | **done** 2026-08-21 |
 | 2 | `README.md` + `recovery.md` cite the generated inventory | docs only | 1 | **done** 2026-08-21 |
 | 2b | `infra-dev` container, and the Cloudflare edge in front of it | `zero`, edge | 2 | **done** 2026-08-22 |
@@ -896,11 +897,11 @@ zones* against the five permissions it actually needed, and the place to fix tha
 mint time, not by deleting it again afterwards.
 
 **Phase 7 moved.** Rootless podman was going to be a follow-on; it is a **precondition of
-Phase 8**, because `podman ps` as the connecting user needs no sudo. The audit playbook
-takes `-K` today only because `gavin` is not in the `docker` group and NOPASSWD sudo is
-refused, and a scheduled run cannot type a password. `decisions.md` said this in one line
-long before Ansible existed here: *"`gavin` not in `docker` group | Root-equivalent.
-**Rootless Podman removes the need.**"*
+Phase 8**, because `podman ps` as the connecting user needs no sudo.
+`generate-fleet-inventory.yml` takes `-K` today only because `gavin` is not in the
+`docker` group and NOPASSWD sudo is refused, and a scheduled run cannot type a password.
+`decisions.md` said this in one line long before Ansible existed here: *"`gavin` not in
+`docker` group | Root-equivalent. **Rootless Podman removes the need.**"*
 
 **But it only removes it for `one`.** `zero` keeps needing sudo until MicroOS — see the
 table below — so Phase 8 starts out able to audit `one` unprivileged and `zero` not at all

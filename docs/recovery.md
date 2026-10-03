@@ -80,10 +80,10 @@ four, each started by `make dev` in its **own** repo, never casually and never f
 ansible and the inventory, but **by default it has no route to `zero`, `one` or `two`** —
 no fleet key, no `ssh_config.fleet`, no `known_hosts.fleet`, by decision
 (`../docs/management-plane.md` § *A control node inside the fleet*). So it cannot run the
-audit or any playbook that targets a host, and when the fleet itself is broken it is not
-the thing to bring up first — **the phone is the control node**. This paragraph said the
-opposite until 2026-08-29, which would cost a `make dev` and two logins before you found
-out. `cd ~/infra && make dev`. It cannot fix zero from inside zero if zero is
+fleet inventory or any playbook that targets a host, and when the fleet itself is broken
+it is not the thing to bring up first — **the phone is the control node**. This paragraph
+said the opposite until 2026-08-29, which would cost a `make dev` and two logins before
+you found out. `cd ~/infra && make dev`. It cannot fix zero from inside zero if zero is
 down, so the phone stays the fallback control node; see
 [`../dev/README.md`](../dev/README.md).
 

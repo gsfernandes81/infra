@@ -10,8 +10,8 @@
 # WHY -K IS NEEDED, and why that is the design rather than a wart:
 #   `gavin` is not in the `docker` group — decisions.md, because it is root-equivalent —
 #   and NOPASSWD sudo is in roadmap.md's "Not doing". So reading the docker socket costs
-#   one password prompt per run. That is fine for a human-run audit and it is exactly why
-#   Phase 7 (a scheduled read-only audit from `two`) CANNOT simply run this playbook: it
+#   one password prompt per run. That is fine for a human-run inventory and it is exactly
+#   why Phase 7 (a scheduled read-only run from `two`) CANNOT simply run this playbook: it
 #   would need passwordless sudo on zero and one, which this repo refuses. That problem is
 #   real, it is not solved here, and the shape of the answer is probably the one
 #   bin/hw-inventory already uses — each host writes its own report locally, and Ansible
@@ -114,7 +114,7 @@
       when: inventory_hostname in groups['containerized'] | default([])
 
     - name: Report what could not be read
-      # A partial audit that looks complete is the wrong-reason pass this repo keeps
+      # A partial inventory that looks complete is the wrong-reason pass this repo keeps
       # designing against. If a read failed, say so on the host it failed on.
       ansible.builtin.debug:
         msg: >-
@@ -144,7 +144,7 @@
       run_once: true
       vars:
         # lookups always run on the control node, so this is the phone's clock and not
-        # some audited host's — which matters, since one thing this audit has already
+        # some audited host's — which matters, since one thing this play has already
         # found is a host whose container timestamps sit in 1970.
         report_generated: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
         # Which hosts this run actually asked. A --limit run renders the others as

@@ -48,7 +48,7 @@ deployments/<stack>/   what a stack is — compose.yaml, .env (ignored), SOURCE
 hosts/<host>/          where it runs — symlinks into deployments/, tracked /etc copies
 hosts/two/setup/       how `two` was built — one reviewed root script, not on any PATH
 bin/                   the scripts above (_infra.py is their shared header parser)
-ansible/               the management plane — host list, playbooks, the fleet-inventory generator
+ansible/               the management plane — playbooks, the fleet-inventory generator
 dev/                   the infra-dev container on zero: work on this repo, from a phone
 docs/                  read these
 ```
@@ -127,8 +127,9 @@ It also carries `ansible-core` and the collections — but **it is not a control
 decision**: no fleet key, no `ssh_config.fleet`, so it has no route to `zero`, `one` or
 `two` and cannot run a playbook against any of them. The case for making it one is real
 and is filed as OPEN in [`docs/management-plane.md`](docs/management-plane.md) §
-*A control node inside the fleet* — an audit from Termux crosses metered mobile data to
-reach boxes on zero's own LAN — but it has not been taken. [`dev/README.md`](dev/README.md).
+*A control node inside the fleet* — an inventory run from Termux crosses metered mobile
+data to reach boxes on zero's own LAN — but it has not been taken.
+[`dev/README.md`](dev/README.md).
 
 **Only `or3-dev` was up at the last audit**, and only its port was listening. The others
 being down is the normal resting state, not a fault: nothing starts them but a person.

@@ -19,7 +19,8 @@ The design and the reasoning are in
 ```sh
 # in Termux
 cd ~/infra/ansible
-ansible fleet -m ping                       # transport works
+# transport works
+ansible fleet -m ping
 # what runs where -> docs/fleet-inventory.md
 ansible-playbook playbooks/generate-fleet-inventory.yml -K
 ```
@@ -232,10 +233,10 @@ repo has traded hand-rolled shell for stock tooling — after `bin/compose` and 
 `gavin` is not in the `docker` group ([`../docs/decisions.md`](../docs/decisions.md): it
 is root-equivalent) and NOPASSWD sudo is in
 [`../docs/roadmap.md`](../docs/roadmap.md)'s *Not doing*. So reading the Docker socket
-costs one sudo password per run. That is the right price for a human-run audit.
+costs one sudo password per run. That is the right price for a human-run inventory.
 
 **It is also the reason Phase 7 cannot just schedule this playbook.** A scheduled
-read-only audit from `two` would need passwordless sudo on `zero` and `one`, which this
+read-only run from `two` would need passwordless sudo on `zero` and `one`, which this
 repo refuses. The likely answer is the shape `bin/hw-inventory` already uses — each host
 writes its own report locally, and Ansible fetches it unprivileged — but that is not
 built, and pretending otherwise now would only find it later.

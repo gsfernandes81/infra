@@ -646,10 +646,10 @@ things follow from that shape and none of them is imaginary.
   should be the box with the least on it. zero is the box with the most.
 
 Against all of that there is one genuinely good argument, which is why this is deferred
-and not refused: **an audit from Termux is metered end to end to reach boxes that are on
-zero's own LAN, and from inside this container it is free.** That is a real, recurring
-saving, and Phase 8's answer — scheduling from `two` — is blocked on rootless podman,
-which is Phase 7.
+and not refused: **an inventory run from Termux is metered end to end to reach boxes that
+are on zero's own LAN, and from inside this container it is free.** That is a real,
+recurring saving, and Phase 8's answer — scheduling from `two` — is blocked on rootless
+podman, which is Phase 7.
 
 So it is left as one variable, off, with the argument written down rather than settled by
 whoever next runs the script:
