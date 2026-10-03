@@ -683,6 +683,9 @@ at 6 columns, the right edge marked:
         - *The footer* sits on the bottom line, at your usual size and on the phone in portrait.
         - *Closing:* `c`, `y` — the slot moves to the bottom marked `x`, and `Enter` on it
           resumes the conversation. A new slot after that takes a new number, not the gap.
+        - *`/clear` takes no lock* (v0.3.2): `/clear` in a slot, then `grep dropped
+          ~/.local/share/claude-sessions/hook.log` stays empty while `make sessions` shows the
+          slot's new `SessionStart`.
         - *Idle from the prompt:* open a slot, detach without prompting, leave it. Within about
           13 minutes (10 idle plus the 3-minute loop) the **dry-run log** says it would offload
           it — `make offload-log`'s *WOULD have stopped* half. **Not `offload.log`, and nothing
@@ -709,8 +712,12 @@ at 6 columns, the right edge marked:
        *v0.3.2:* the criterion is now read directly — `grep dropped
        ~/.local/share/claude-sessions/hook.log`, where each line names its event and a
        `SessionEnd`'s reason. **Any event other than `SessionEnd` dropped blocks Stage B.**
-       `SessionEnd (logout|prompt_input_exit|other)` while a close or offload held the slot is
-       expected; `SessionEnd (clear)` or `(resume)` takes no lock in v0.3.2, so one appearing
+       **In Stage A the only expected `SessionEnd` drop is one at a menu `c` close the owner
+       did** — `--dry-run` takes no lock, so nothing else holds a slot across a kill. Any other
+       `SessionEnd (logout|prompt_input_exit|other) dropped` during the day is reported before
+       Stage B: it would mean the eight v0.2.0 lines were not all `/clear`/`/resume` races, and
+       whatever held the lock against a `SessionEnd` can hold it against a `Stop` or a prompt.
+       `SessionEnd (clear)` or `(resume)` takes no lock in v0.3.2, so one appearing
        means the box is not running it. **Read after a day of the v0.3.2 dry run** (infra#2) —
        it also makes up for the 33 hours infra-dev had on v0.2.0.
      - **`claude.exe` counts as foreign work** ([#2](https://github.com/gsfernandes81/claude-sessions/issues/2)). `foreign_descendant` exempts only `claude`;
@@ -746,8 +753,9 @@ at 6 columns, the right edge marked:
      marked ⚠︎SUPERSEDED. Expect idle sessions to stop after 10 minutes, ssh ones included.
      If the live loop still pipes the command through anything (a timestamping `sed`), it
      reads the command's exit status from `${PIPESTATUS[0]}` on the next line and says when
-     it failed — `$?` after a pipeline is the last command's, and the Stage A loop's
-     failures were invisible for exactly that reason.
+     it failed. The Stage A loop reads no status at all — its `2>&1` keeps error text, but a
+     `timeout` kill (124) or a silent non-zero exit leaves nothing — and `$?` after the pipe
+     would be `sed`'s anyway.
    - ✔ **The orphan sweep was armed in claude-sessions v0.3.0** on 2026-10-03, earlier than
      the week of `offload.log` it was waiting on; here it stays dry until Stage B (gate
      above). The owner's 2026-10-08 reminder is now for reading those `WOULD KILL` lines.

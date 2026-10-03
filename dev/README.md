@@ -1011,8 +1011,9 @@ make verify        the binary's version, and the hooks file parsed as dev
 `~/.local/share/claude-sessions/hook.log` is the hook's own failures. Since v0.3.2 a lock
 failure names its event and, for a `SessionEnd`, its reason — `claude-1: SessionEnd (logout)
 dropped, lock: … busy for 400ms` — so `grep dropped` answers which events were lost. A
-`SessionEnd` dropped while an offload or a menu close held the slot is **expected**; any
-other event dropped is the fault Stage B is gated on. A `SessionEnd (clear)` or `(resume)`
+`SessionEnd` dropped while an offload or a menu close held the slot is **expected** — and in
+Stage A, where the dry run takes no lock, only at a menu `c` close; any other event dropped
+is the fault Stage B is gated on. A `SessionEnd (clear)` or `(resume)`
 cannot appear at all: those ends change nothing, so v0.3.2 takes no lock for them — they
 used to race their own `SessionStart` for it, which is what infra-dev's eight `busy for
 400ms` lines on v0.2.0 most likely were. `offload.log` beside it gets every real stop and every line
