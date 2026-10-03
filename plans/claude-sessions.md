@@ -641,7 +641,7 @@ at 6 columns, the right edge marked:
    and `reconcile` run by the entrypoint — `BASE_TAG` `2026.10.02`. The consent question is
    now a bring-up check, below. **Superseded the same day by v0.2.0 at `2026.10.02.1`** (step 4).
 4. ✔ **DONE 2026-10-02 — released in claude-sessions v0.2.0, pinned in the base at
-   `BASE_TAG` `2026.10.02.1`; v0.3.1 at `2026.10.03` (2026-10-03).** The TUI, to the approved mockups. Rendering tested at 40×24 and 80×24 against a test
+   `BASE_TAG` `2026.10.02.1`; v0.3.1 at `2026.10.03`, then v0.3.2 at `2026.10.03.1` (both 2026-10-03; infra#2).** The TUI, to the approved mockups. Rendering tested at 40×24 and 80×24 against a test
    backend; the zero-idle-bytes property tested under a pty; ordering and the guards
    unit-tested.
 5. **`claude-sessions offload`** replaces `offload-idle-claude.sh` (deleted in the same commit). The
@@ -653,11 +653,12 @@ at 6 columns, the right edge marked:
      `~/.local/share/claude-sessions-dry-run.log`; `offload-idle-claude.sh` still acts.
      `make idle` and `make offload-log` show both; `make sessions` is `doctor`.
    - **Bring-up (owner's), in order:**
-     1. Wait for `dev-base.yml` to publish `2026.10.03` (v0.3.1; it supersedes
-        `2026.10.02.1`, which is what the boxes run, and v0.3.0 was never rolled out), then
+     1. Wait for `dev-base.yml` to publish `2026.10.03.1` (v0.3.2; it supersedes
+        `2026.10.02.1`, which is what the boxes run — `2026.10.03` (v0.3.1) and v0.3.0 were
+        never rolled out), then
         recreate infra-dev:
         `ssh -t zero 'cd ~/infra/dev && make up'`.
-     2. `make verify` reads `sessions  : claude-sessions 0.3.1`, a `hooks` line naming six
+     2. `make verify` reads `sessions  : claude-sessions 0.3.2`, a `hooks` line naming six
         events and a `door` line naming `/usr/local/bin/claude-sessions-door`; `make boot-log` has the `claude-sessions reconcile:` and `DRY RUN` lines.
      3. **Start `claude` in the container and confirm no approval dialog appears** — the
         managed-settings consent question, so far settled from the docs only.
@@ -673,7 +674,7 @@ at 6 columns, the right edge marked:
         failed resume shows its error) — on that first start, check nothing interactive
         went missing into it. And an idle menu sends **zero bytes**: worth a glance at the
         phone's link meter, ages ticking at most once a minute.
-     4b. **What v0.3.0 and v0.3.1 changed, by hand** (from claude-sessions' handoff, adjusted
+     4b. **What v0.3.0–v0.3.2 changed, by hand** (from claude-sessions' handoff, adjusted
         for Stage A):
         - *Titles:* send one prompt in a slot and let it finish — the row shows a short title,
           the one Claude Code's `/resume` picker shows, never a reply. Then `/rename something`,
@@ -705,6 +706,13 @@ at 6 columns, the right edge marked:
        *v0.2.0:* `/proc` is read before any lock, only a slot about to be stopped is
        locked, `--dry-run` locks nothing, and hook events other than `SessionEnd` wait 2 s.
        A `SessionEnd` losing the lock during an offload is still expected and not a fault.
+       *v0.3.2:* the criterion is now read directly — `grep dropped
+       ~/.local/share/claude-sessions/hook.log`, where each line names its event and a
+       `SessionEnd`'s reason. **Any event other than `SessionEnd` dropped blocks Stage B.**
+       `SessionEnd (logout|prompt_input_exit|other)` while a close or offload held the slot is
+       expected; `SessionEnd (clear)` or `(resume)` takes no lock in v0.3.2, so one appearing
+       means the box is not running it. **Read after a day of the v0.3.2 dry run** (infra#2) —
+       it also makes up for the 33 hours infra-dev had on v0.2.0.
      - **`claude.exe` counts as foreign work** ([#2](https://github.com/gsfernandes81/claude-sessions/issues/2)). `foreign_descendant` exempts only `claude`;
        the old script measured `claude.exe` helpers in live trees. If they reappear, every
        slot is held forever and nothing is offloaded. Check the dry-run log for persistent
@@ -736,6 +744,10 @@ at 6 columns, the right edge marked:
      `DEV_IDLE_POLL_SECONDS` (entrypoint header, `compose.yaml`), `status.sh`'s exclusion and
      `procps` comment, the README's offloader section; the 90-minute `decisions.md` row is
      marked ⚠︎SUPERSEDED. Expect idle sessions to stop after 10 minutes, ssh ones included.
+     If the live loop still pipes the command through anything (a timestamping `sed`), it
+     reads the command's exit status from `${PIPESTATUS[0]}` on the next line and says when
+     it failed — `$?` after a pipeline is the last command's, and the Stage A loop's
+     failures were invisible for exactly that reason.
    - ✔ **The orphan sweep was armed in claude-sessions v0.3.0** on 2026-10-03, earlier than
      the week of `offload.log` it was waiting on; here it stays dry until Stage B (gate
      above). The owner's 2026-10-08 reminder is now for reading those `WOULD KILL` lines.

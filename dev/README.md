@@ -947,7 +947,7 @@ see the next section.
 session registry [`../plans/claude-sessions.md`](../plans/claude-sessions.md) designs: one
 JSON file per abduco session under `~/.local/share/claude-sessions/` (on the volume, so it
 outlives the container), kept current by Claude Code's own hooks. The base installs
-**v0.3.1** — a static binary, pinned by tag and SHA-256 per architecture, at
+**v0.3.2** — a static binary, pinned by tag and SHA-256 per architecture, at
 `/usr/local/bin/claude-sessions`.
 
 **The menu is in this release, and it is where `ssh infra-dev` lands.** `claude-sessions`
@@ -1008,9 +1008,14 @@ make verify        the binary's version, and the hooks file parsed as dev
 ```
 
 `~/.local/share/claude-sessions-dry-run.log` keeps every pass, timestamped.
-`~/.local/share/claude-sessions/hook.log` is the hook's own failures — one line per offload
-saying `SessionEnd` could not take the lock is **expected**, because the offloader holds
-it while it stops the slot. `offload.log` beside it gets every real stop and every line
+`~/.local/share/claude-sessions/hook.log` is the hook's own failures. Since v0.3.2 a lock
+failure names its event and, for a `SessionEnd`, its reason — `claude-1: SessionEnd (logout)
+dropped, lock: … busy for 400ms` — so `grep dropped` answers which events were lost. A
+`SessionEnd` dropped while an offload or a menu close held the slot is **expected**; any
+other event dropped is the fault Stage B is gated on. A `SessionEnd (clear)` or `(resume)`
+cannot appear at all: those ends change nothing, so v0.3.2 takes no lock for them — they
+used to race their own `SessionStart` for it, which is what infra-dev's eight `busy for
+400ms` lines on v0.2.0 most likely were. `offload.log` beside it gets every real stop and every line
 of the orphan sweep (stray `daemon run --origin transient` trees whose parent is no longer
 a `claude`). **The sweep is armed in the binary since v0.3.0 and still kills nothing
 here**, because Stage A runs `--dry-run`, which logs `sweep: WOULD KILL …` and stops
