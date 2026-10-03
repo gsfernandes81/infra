@@ -995,10 +995,14 @@ nothing waits on you (a permission prompt), no timer is pending
 (`ScheduleWakeup`/`CronCreate`, whoever set it), nothing but `claude` (and its
 `claude.exe` helpers) runs under it, and
 its conversation id and directory are recorded so it can be resumed. **A slot whose
-conversation never reached disk** — opened and closed or left before its first prompt, since
-Claude Code writes the transcript at the first prompt — **is closed instead** (v0.3.3,
+conversation never reached disk** — a new slot closed or left before its first prompt, since
+Claude Code writes a *new* session's transcript at its first prompt (a `/clear` writes one at
+once) — **is closed instead** (v0.3.3,
 claude-sessions#5): the dry run says `would close, idle Nm — no conversation on disk to
-resume`, and the menu does not list such a stopped slot at all. The transcript is the path the
+resume`, and the menu does not list such a stopped slot at all — so on the first start of
+v0.3.3, closed rows whose current conversation never reached disk simply vanish (on
+infra-dev, `claude` and `claude-2`). Nothing is lost: earlier conversations of that slot are
+still on disk, for `claude --resume`. The transcript is the path the
 hooks recorded, or for a record older than v0.3.3 one derived from `$CLAUDE_CONFIG_DIR` —
 which is the image's `ENV`, `/home/dev/.claude`, for the loop and every slot alike, and must
 stay so. Anything it cannot

@@ -155,6 +155,8 @@ Reached through a door script, not directly: `claude-sessions-door` (in the imag
 `$SHELL`, because dd and dossier set the login shell to bash. Every lock `claude-sessions` takes has a
 timeout, so a stuck lock cannot hold the door shut. `<c>-sh` remains the break-glass.
 
+- *(Superseded for the list by v0.3.3 — rows grouped by state, no marks or numbers; see the
+  note under Mockups and claude-sessions' `docs/design.md`. Kept as the original design.)*
 - **Lists every slot** — live and offloaded, and since v0.3.0 closed ones at the bottom,
   marked `x` and resumable — plus unregistered abduco sessions. Order: needs you, then unread, then most recent activity. Each row: mark,
   repo, title, age. Marks: needs you · unread · attached elsewhere · offloaded ·
@@ -673,7 +675,7 @@ at 6 columns, the right edge marked:
         means the hooks are not firing.
      4a. **The menu, by hand, before any client points at it.** From `ssh infra-dev-sh`, run
         `claude-sessions-door`. Press `n`, then detach (abduco's key): the menu comes back
-        with `detached from N · it is still running`, and `make sessions` shows that slot
+        with `detached · it is still running` (v0.3.3 names no session there), and `make sessions` shows that slot
         with a pid and recent `SessionStart`/`UserPromptSubmit`. That proves a slot binds;
         it depends on claude's process name being `claude`, so **a slot with no pid is
         reported before anything else.** The slot's stderr is captured to
@@ -696,7 +698,14 @@ at 6 columns, the right edge marked:
           A slot closed before its first prompt is not listed at all (v0.3.3).
         - *`/clear` takes no lock* (v0.3.2): `/clear` in a slot, then `grep dropped
           ~/.local/share/claude-sessions/hook.log` stays empty while `make sessions` shows the
-          slot's new `SessionStart`.
+          slot's new `SessionStart`. **Then leave that cleared slot idle** (v0.3.3): a `/clear`
+          writes its new transcript at once, so expect `would offload`, not `would close`. Close
+          it with `c` and press `Enter` on it: if the resume exits at once, report it to
+          claude-sessions — a transcript holding only the `/clear` is #5's failure with a file
+          present.
+        - *The upgrade's own effect:* closed rows whose current conversation never reached disk
+          disappear from the menu (on infra-dev, `claude` and `claude-2`). Expected, not a
+          regression.
         - *Idle from the prompt:* open a slot, detach without prompting, leave it. Within about
           13 minutes (10 idle plus the 3-minute loop) the **dry-run log** says
           `would close, idle Nm — no conversation on disk to resume` (v0.3.3: a new slot never
@@ -762,14 +771,16 @@ at 6 columns, the right edge marked:
        unprompted after 10 minutes, onto exactly that kind of row. Nothing is lost, but the
        menu offers a resume that cannot work. *v0.3.3:* such a slot is closed rather than
        offloaded, and a stopped slot with no transcript is not listed. **The check:** a `would
-       close` line is right only for a slot whose current conversation was never prompted; **a
-       `would close` for one that has a conversation blocks Stage B** — it would mean the
-       transcript path is wrong on that box. A record from before v0.3.3 has no
+       close` line is right only for a slot whose transcript file does not exist — a new slot
+       never prompted; **a `would close` for one whose transcript exists blocks Stage B** — it
+       would mean the transcript path is wrong on that box. (The binary's test is the file, not
+       "prompted": a `/clear`ed slot left unprompted has one, and reads `would offload`.) A record from before v0.3.3 has no
        `transcript_path`, so its path is derived from `$CLAUDE_CONFIG_DIR`: confirmed
        2026-10-03 (infra#3) to be `/home/dev/.claude` in the loop and in every slot on
        infra-dev, from the image `ENV`, with or3's `dev/` setting no override; of infra-dev's
-       four records, the two whose conversation was prompted resolve to a transcript and the
-       two that do not were never prompted.
+       four records, the two that resolve are a prompted conversation (`claude-1`) and a
+       `/clear`ed one written at the clear (`claude-3`), and the two that do not are new
+       conversations never prompted.
      - Not a gate, and **fixed in v0.2.0**: `reconcile` could sweep a live socket started
        with combined abduco flags (`-fA`) ([#3](https://github.com/gsfernandes81/claude-sessions/issues/3)). It now reads flags
        getopt-style and sweeps nothing while any live abduco's session cannot be named; the
@@ -830,6 +841,9 @@ agent view and must change with them:
   location and locking; one binary.
 
 ## Taken by the owner, 2026-10-01
+
+*(The marks named below — `u` among them — went in v0.3.3, which groups rows by state; an
+unregistered session is now a row in `Idle`. The decisions themselves stand.)*
 
 - The source lives in its own repo; the base pulls a pinned release.
 - Offload threshold: 10 minutes after `Stop`, once timers are visible.
