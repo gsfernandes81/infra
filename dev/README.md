@@ -947,16 +947,19 @@ see the next section.
 session registry [`../plans/claude-sessions.md`](../plans/claude-sessions.md) designs: one
 JSON file per abduco session under `~/.local/share/claude-sessions/` (on the volume, so it
 outlives the container), kept current by Claude Code's own hooks. The base installs
-**v0.3.2** — a static binary, pinned by tag and SHA-256 per architecture, at
+**v0.3.3** — a static binary, pinned by tag and SHA-256 per architecture, at
 `/usr/local/bin/claude-sessions`.
 
 **The menu is in this release, and it is where `ssh infra-dev` lands.** `claude-sessions`
-with no arguments, at a terminal, lists the slots — live, offloaded, and `u` for an abduco
+with no arguments, at a terminal, lists the slots — live, offloaded, closed, and any abduco
 session it did not start, which is what the old `abduco -A claude claude` logins are —
-and `Enter` attaches or resumes, `n` starts a new slot in `/workspace`, `c` closes, `s`
+**grouped by state** under `Needs you`, `Working`, `Idle`, `Offloaded` and `Closed` (v0.3.3;
+an empty group is not drawn, and an unregistered session counts as idle). There are no marks
+and no numbers: an unread title is bold, a session attached elsewhere is dim, amber is the
+Needs-you heading, and status lines name a session by its quoted title. `Enter` attaches or resumes, `n` starts a new slot in `/workspace`, `c` closes, `s`
 is a shell, `?` the keys, `q` quits. Piped, it prints `list`. Since v0.3.0 the menu fills
 the terminal, with its closing rule, status line and hints on the bottom lines, and **closed
-slots stay listed in it** (piped `list` still leaves them out) at the bottom, marked `x`, not counted as open, and resumed by `Enter`
+slots stay listed in it** (piped `list` still leaves them out), in the `Closed` group, not counted as open, and resumed by `Enter`
 — so a new slot never takes a closed one's name, and the numbers keep rising (`claude-7`,
 `claude-8`, …) rather than refilling gaps. **A row's title is what Claude Code's own
 `/resume` picker shows** (v0.3.1): the `/rename` name, else Claude Code's generated title,
@@ -991,7 +994,14 @@ was never followed by a prompt; a compaction never counts, because it can land m
 nothing waits on you (a permission prompt), no timer is pending
 (`ScheduleWakeup`/`CronCreate`, whoever set it), nothing but `claude` (and its
 `claude.exe` helpers) runs under it, and
-its conversation id and directory are recorded so it can be resumed. Anything it cannot
+its conversation id and directory are recorded so it can be resumed. **A slot whose
+conversation never reached disk** — opened and closed or left before its first prompt, since
+Claude Code writes the transcript at the first prompt — **is closed instead** (v0.3.3,
+claude-sessions#5): the dry run says `would close, idle Nm — no conversation on disk to
+resume`, and the menu does not list such a stopped slot at all. The transcript is the path the
+hooks recorded, or for a record older than v0.3.3 one derived from `$CLAUDE_CONFIG_DIR` —
+which is the image's `ENV`, `/home/dev/.claude`, for the loop and every slot alike, and must
+stay so. Anything it cannot
 see is a reason to keep the slot. **There is no one-hour floor** — a pending timer is now
 *seen*, so the floor's reason is gone — and today's `ssh` sessions feed the registry too:
 once a hook has fired they are listed like any other slot, marked `(not ours)` in
@@ -1036,8 +1046,8 @@ in its directory.
 **One Stage A artefact to expect:** the registry does not know when the *old* script stops
 a session. If `SessionEnd` fires on that SIGTERM, the slot is recorded `closed` rather than
 offloaded; if it does not (still unmeasured), the slot stays `live` with a dead pid until
-the next container start's `reconcile`. Since v0.3.0 a `closed` slot is still listed and
-resumable, so the difference costs a row's place at the bottom rather than the
+the next container start's `reconcile`. Since v0.3.0 a `closed` slot with a conversation is
+still listed and resumable, so the difference costs a row's group rather than the
 conversation, and Stage B ends it.
 
 `DEV_IDLE_OFFLOAD=0` turns off both offloaders. Overrides, neither normally worth setting:

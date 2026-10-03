@@ -332,6 +332,10 @@ RUN if ! getent group "${USER_GID}" >/dev/null; then \
 # infra-claude volume carries both halves of the login and survives a rebuild.
 # Without it, ~/.claude.json sits on the container filesystem and every rebuild
 # re-runs onboarding on a container that has no one to answer it.
+# claude-sessions (since v0.3.3) also derives a pre-0.3.3 slot's transcript path from it,
+# and closes a slot with no transcript rather than offloading it — so the offload loop
+# and every claude must see the same value. Being an image ENV, they do; never set it
+# for one and not the other.
 # GH_CONFIG_DIR does the same for `gh auth login`: with no keyring in a slim image
 # the token goes in hosts.yml, so that directory must sit on a volume.
 # HISTFILE points bash history at the persisted volume for the same reason; fish's
@@ -486,9 +490,9 @@ RUN chmod 0644 /etc/claude-code/managed-settings.json
 #
 # 0644 IS LOAD-BEARING: every session runs as `dev`, and a file it cannot read means
 # sessions start with no hooks and nothing on screen says so.
-ARG CLAUDE_SESSIONS_VERSION=0.3.2
-ARG CLAUDE_SESSIONS_SHA256_arm64=56f74f8455f18bfac2c7e1d043b21e289be68afb9a7d183bfc1af1c9ce37dcb0
-ARG CLAUDE_SESSIONS_SHA256_amd64=13ce9069a84c3fa15dd0617b8ff3d3bfb88ceb6d0c83a3bd5e15e11e0d04d270
+ARG CLAUDE_SESSIONS_VERSION=0.3.3
+ARG CLAUDE_SESSIONS_SHA256_arm64=aec755e195500aea963c52f6b05c9d7f0ee160edc9b911bdb75ca842cecae13c
+ARG CLAUDE_SESSIONS_SHA256_amd64=4e74f362559da2aa0499c00d339b2a74201d7e45b214bdf6438ca9a3a9fa3a9d
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \

@@ -64,7 +64,7 @@ DOCKER  := $(SUDO) docker
 # is bump, push, wait (about five minutes — see dev/README.md, where that number is
 # measured rather than guessed), then `make up`. Or `make base` below, which builds the
 # same image locally and waits for nobody.
-BASE_TAG := 2026.10.03.1
+BASE_TAG := 2026.10.03.2
 
 .PHONY: help dev base up restart down down-volumes status verify collections logs \
 	boot-log tunnel-log idle offload-log sessions login claude claude-update shell fleet \
@@ -194,7 +194,7 @@ offload-log:
 	@echo '── offload-idle-claude.sh: what it stopped ──'
 	@$(DOCKER) exec $(CONTAINER) sh -c 'tail -n 40 /home/dev/.local/share/claude-offload.log 2>/dev/null || echo "nothing offloaded yet"'
 	@echo '── claude-sessions: what it WOULD have stopped (dry run) ──'
-	@$(DOCKER) exec $(CONTAINER) sh -c 'grep -h "would offload" /home/dev/.local/share/claude-sessions-dry-run.log 2>/dev/null | tail -n 40 | grep . || echo "nothing yet"'
+	@$(DOCKER) exec $(CONTAINER) sh -c 'grep -hE "would (offload|close)" /home/dev/.local/share/claude-sessions-dry-run.log 2>/dev/null | tail -n 40 | grep . || echo "nothing yet"'
 	@echo '── claude-sessions: offload.log (real stops, and the orphan sweep) ──'
 	@$(DOCKER) exec $(CONTAINER) sh -c 'tail -n 40 /home/dev/.local/share/claude-sessions/offload.log 2>/dev/null || echo "empty"'
 
