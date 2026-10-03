@@ -1,18 +1,21 @@
-# {{ dev_alias }} — two routes to one container. GENERATED: edit
+{# ASCII ONLY. The laptop's copy of this block is read and edited under a Windows codepage,
+   where an em dash or a box-drawing rule becomes several characters of something else.
+   The play refuses this file otherwise. A Jinja comment, so it renders to nothing. #}
+# {{ dev_alias }} - two routes to one container. GENERATED: edit
 # ansible/templates/ssh-dev-block.j2 and re-run playbooks/configure-client.yml, not this.
 # Why any of it is shaped this way: docs/ssh-clients.md
 #
-#   {{ dev_alias }} — the claude-sessions menu: every session in the container, Enter to
+#   {{ dev_alias }} - the claude-sessions menu: every session in the container, Enter to
 #     attach or resume, n for a new one, q to leave. It carries a RemoteCommand, so
 #     `ssh {{ dev_alias }} <cmd>` is an ERROR and scp/sftp to it will not work. A container
 #     whose base predates the door (BASE_TAG < 2026.10.02.1) answers "in-workspace: 42:
-#     exec: claude-sessions-door: not found" — bump that repo's BASE_TAG; {{ dev_alias }}-sh
+#     exec: claude-sessions-door: not found" - bump that repo's BASE_TAG; {{ dev_alias }}-sh
 #     still gets in.
-#   {{ dev_alias }}-sh — a shell instead, same route. Use it for either of those.
+#   {{ dev_alias }}-sh - a shell instead, same route. Use it for either of those.
 #
 # NO TOKEN, NO CONNECTION, AND IT SAYS SO. The block is written whether or not this client
 # holds {{ dev_alias }}'s Access token; without one the ProxyCommand stops before cloudflared
-# starts, naming the run that fixes it — and so does a file that is there but empty or
+# starts, naming the run that fixes it - and so does a file that is there but empty or
 # half-written, which would otherwise reach cloudflared with no token and land on its
 # browser login. Never that: these apps admit service tokens only, and that flow is no use
 # from Termux.
@@ -48,7 +51,7 @@ Host {{ dev_alias }} {{ dev_alias }}-sh
 {% if identity_named | bool %}
   # IdentitiesOnly stops ssh walking every key an agent holds and hitting MaxAuthTries
   # before it reaches the right one. It also means an AGENT key is only offered when its
-  # public half matches the file named here — so both lines are omitted on a client that
+  # public half matches the file named here - so both lines are omitted on a client that
   # has neither ~/.ssh/id_ed25519 nor its .pub, where they would produce
   # "Permission denied (publickey)" with nothing to offer.
   IdentityFile {{ identity_path }}

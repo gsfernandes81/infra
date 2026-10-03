@@ -1,3 +1,6 @@
+{# ASCII ONLY. The laptop's copy of this block is read and edited under a Windows codepage,
+   where an em dash or a box-drawing rule becomes several characters of something else.
+   The play refuses this file otherwise. A Jinja comment, so it renders to nothing. #}
 # The fleet. GENERATED: edit ansible/templates/ssh-fleet-block.j2 and re-run
 # playbooks/configure-client.yml, not this. Reasoning: docs/ssh-clients.md
 #
@@ -5,7 +8,7 @@
 #   <host>-local              direct on the LAN
 #   <host>-zero|-one|-two     through another box, over the LAN
 {% if adb_jump %}
-#   <host>-s24                through the phone, over USB — for when only it has a network
+#   <host>-s24                through the phone, over USB - for when only it has a network
 {% endif %}
 #
 # Every box is reachable through both of the others. That mesh exists because on
@@ -14,7 +17,7 @@
 # ORDERING: ssh takes the FIRST value it obtains for each keyword, so this block sits
 # ABOVE `Host *`. The playbook inserts it there rather than appending.
 
-# ── LAN ───────────────────────────────────────────────────────────────────────
+# -- LAN -----------------------------------------------------------------------
 Host zero-local
   HostName {{ ip_zero }}
 
@@ -24,7 +27,7 @@ Host one-local
 Host two-local
   HostName {{ ip_two }}
 
-# ── through another box, over the LAN ─────────────────────────────────────────
+# -- through another box, over the LAN -----------------------------------------
 # HostName is resolved ON the jump host, so these are LAN addresses as it sees them.
 Host zero-one zero-two
   HostName {{ ip_zero }}
@@ -35,10 +38,10 @@ Host one-zero one-two
 Host two-zero two-one
   HostName {{ ip_two }}
 
-# ── the jump rules ────────────────────────────────────────────────────────────
+# -- the jump rules ------------------------------------------------------------
 # THESE DEPEND ON hosts/*/system/sshd-infra.conf, which sets AllowTcpForwarding yes with
 # PermitOpen scoped to these three addresses on port 22. If it is ever removed, ProxyJump
-# fails with "administratively prohibited" — revert to the form these had until
+# fails with "administratively prohibited" - revert to the form these had until
 # 2026-08-23, which needs no server-side change at all:
 #
 #     ProxyCommand ssh <host> nc %h %p
@@ -53,7 +56,7 @@ Host *-one
 Host *-two
   ProxyJump two
 
-# ── through each box's own cloudflared tunnel ─────────────────────────────────
+# -- through each box's own cloudflared tunnel ---------------------------------
 Host zero
   HostName ssh-zero.gsrpi.uk
 
@@ -64,7 +67,7 @@ Host two
   HostName ssh-two.gsrpi.uk
 
 # Listed explicitly, not `zero*`: that would also catch zero-local and zero-two, which
-# must NOT go through the edge. No token is sourced here — the boxes' tunnels admit you
+# must NOT go through the edge. No token is sourced here - the boxes' tunnels admit you
 # on your certificate, while every dev container's own hostname sits behind an Access
 # service token and gets the `sh -c` form from configure-client-dev.yml instead.
 Host zero one two
@@ -72,7 +75,7 @@ Host zero one two
 
 # NO DEV CONTAINER IS IN THIS BLOCK, and the reason is what they are rather than where
 # they are. `zero-dev-dd`, `zero-dev-ds` and `zero-dev-or3` were aliases for the
-# `ssh-zero-dev-*` rules on ZERO'S host tunnel — a door zero opens on a container's
+# `ssh-zero-dev-*` rules on ZERO'S host tunnel - a door zero opens on a container's
 # behalf. Every dev container now comes up with its own connector, its own hostname and
 # its own Access token, and configure-client-dev.yml writes two aliases for each. dd-dev and
 # ds-dev are not running at all until they are deployed that way, so an alias for either
@@ -81,18 +84,18 @@ Host zero one two
 #
 # The rules themselves are still in hosts/zero/system/cloudflared-config.yml. Removing
 # them is an edit to a boot-path file plus a connector cycle on zero, which is the owner's
-# to run — phase 2i in docs/management-plane.md, and not something dropping an alias does.
+# to run - phase 2i in docs/management-plane.md, and not something dropping an alias does.
 {% if adb_jump %}
 
-# ── the phone as a jump host — WINDOWS ONLY ───────────────────────────────────
+# -- the phone as a jump host - WINDOWS ONLY -----------------------------------
 # Every byte of egress happens ON THE PHONE, so the targets are tunnel hostnames and the
 # phone runs cloudflared. Not ProxyJump: an ssh:// ingress is not raw TCP at the edge.
 #
-# `adb forward` runs as a SIDE EFFECT of the Match below — ssh evaluates `Match exec`
+# `adb forward` runs as a SIDE EFFECT of the Match below - ssh evaluates `Match exec`
 # while parsing, so the forward exists before s24 is dialled. No phone attached means adb
 # exits non-zero, the block does not apply, and you get a plain connection refused.
 #
-# Not rendered for WSL or the phone, and that is not an oversight — docs/ssh-clients.md.
+# Not rendered for WSL or the phone, and that is not an oversight - docs/ssh-clients.md.
 Match host s24 exec "adb forward tcp:8022 tcp:8022"
   ConnectTimeout 10
 
@@ -113,12 +116,12 @@ Host s24
   # name fails with kex_exchange_identification while the forward is plainly up.
   HostName 127.0.0.1
   Port 8022
-  # Android's uid for Termux. It CHANGES if the app is reinstalled — check this first if
+  # Android's uid for Termux. It CHANGES if the app is reinstalled - check this first if
   # `ssh s24` starts refusing.
   User {{ s24_user }}
 {% endif %}
 
-# ── one host key per BOX, not per path ────────────────────────────────────────
+# -- one host key per BOX, not per path ----------------------------------------
 # Else a rarely-used route has no stored key and prompts you to accept whatever it is
 # handed, mid-rescue. To clear one: ssh-keygen -R zero
 Host zero zero-local zero-one zero-two zero-s24
@@ -134,12 +137,12 @@ Host two two-local two-zero two-one two-s24
   HostKeyAlias two
   Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
 
-# ── shared: the account, and multiplexing ─────────────────────────────────────
+# -- shared: the account, and multiplexing -------------------------------------
 Host zero* one* two*
   User gavin
 {% if multiplex %}
   # Keyed by ALIAS (%n): %C and %r@%h:%p hash the RESOLVED address, so zero-one and
-  # zero-local would share one socket — and a rescue path that silently reuses a working
+  # zero-local would share one socket - and a rescue path that silently reuses a working
   # direct connection is not a test of anything. Omitted on Windows, which cannot do it.
   ControlMaster auto
   ControlPath ~/.ssh/cm/%n-%r
