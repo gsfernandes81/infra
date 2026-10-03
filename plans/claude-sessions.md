@@ -145,8 +145,8 @@ never without evidence — with the hook state replacing the transcript clock:
   fall back to `MemAvailable` only when the limit is `max`.
 - **Orphan sweep:** `daemon run --origin transient` trees whose spawning pid + start time
   is gone, with their `bg-pty-host`/`bg-spare` children. **Calibrated before it is armed**
-  (CLAUDE.md, *Verifying changes*): it ships logging what it *would* kill for a week, the
-  owner reads that log, and only then is it enabled.
+  (CLAUDE.md, *Verifying changes*): it shipped log-only, and was armed in claude-sessions
+  v0.3.0 (2026-10-03) on the owner's word; here it stays dry until Stage B.
 
 ### 4. The launcher, `claude-sessions` — a Rust TUI
 
@@ -155,8 +155,8 @@ Reached through a door script, not directly: `claude-sessions-door` (in the imag
 `$SHELL`, because dd and dossier set the login shell to bash. Every lock `claude-sessions` takes has a
 timeout, so a stuck lock cannot hold the door shut. `<c>-sh` remains the break-glass.
 
-- **Lists open slots** — live and offloaded, never closed, plus unregistered abduco
-  sessions. Order: needs you, then unread, then most recent activity. Each row: mark,
+- **Lists every slot** — live and offloaded, and since v0.3.0 closed ones at the bottom,
+  marked `x` and resumable — plus unregistered abduco sessions. Order: needs you, then unread, then most recent activity. Each row: mark,
   repo, title, age. Marks: needs you · unread · attached elsewhere · offloaded ·
   timer pending · not started by claude-sessions (glyphs settled in the mockups).
 - **Opening a row:** live → `abduco -a` it; offloaded → start a new slot running
@@ -231,7 +231,10 @@ This answers three Phase 0 questions at once: **binding is nearly free** (pid �
 id, with `procStart` as the reused-pid guard the plan wanted the hook to record);
 **`kind: "bg"` names the nested sessions** the design has to keep out of the binding; and
 **`name` is where the title lives** — with `nameSource` distinguishing a derived name from
-a real one, so the menu knows when to fall back to the first prompt.
+a real one, so the menu knows when to fall back to the first prompt. *(Superseded in
+v0.3.1: `name` showed long replies of claude's on the boxes, and titles now come from the
+transcript's `custom-title` and `ai-title` entries, as Claude Code's own `/resume` picker
+reads them.)*
 
 It does **not** replace the hooks. It is undocumented internal state that floats with the
 binary; it is pid-keyed, so dead files accumulate (this container holds files from
@@ -674,8 +677,8 @@ at 6 columns, the right edge marked:
         for Stage A):
         - *Titles:* send one prompt in a slot and let it finish — the row shows a short title,
           the one Claude Code's `/resume` picker shows, never a reply. Then `/rename something`,
-          prompt again, and the row reads `something`. Slots already running at the recreate
-          keep their old titles until their next reply.
+          prompt again, and the row reads `something`. The recreate ends every slot; each
+          takes its new title when it is resumed.
         - *The footer* sits on the bottom line, at your usual size and on the phone in portrait.
         - *Closing:* `c`, `y` — the slot moves to the bottom marked `x`, and `Enter` on it
           resumes the conversation. A new slot after that takes a new number, not the gap.
@@ -717,7 +720,10 @@ at 6 columns, the right edge marked:
      - **The sweep, armed upstream in v0.3.0 and dry here** (2026-10-03). Stage B arms it in
        the same step as the offloader, so every `sweep: WOULD KILL` line in `offload.log` gets
        read first: each names a daemon whose parent is not a `claude`, and **one the owner
-       cannot account for blocks Stage B**. `make verify`'s `agentview` line must read off
+       cannot account for blocks Stage B**. The dry run skips the live sweep's ten-minute age
+       check and repeats each orphan every pass, so only a daemon seen in about four or more
+       consecutive passes is one the live sweep would kill; a shorter run of lines is one it
+       would have kept as too young. `make verify`'s `agentview` line must read off
        on every container Stage B reaches.
      - Not a gate, and **fixed in v0.2.0**: `reconcile` could sweep a live socket started
        with combined abduco flags (`-fA`) ([#3](https://github.com/gsfernandes81/claude-sessions/issues/3)). It now reads flags
@@ -828,8 +834,9 @@ each of which is a way to lose work rather than a convenience.
    than about the session.
 
 What the tool does *not* do is keep its own copy of what is cheap to read while a process is
-alive: a live slot's title and busy flag come from Claude Code's own file, and our stored copies
-are the last-known value for when it is gone.
+alive: a live slot's busy flag comes from Claude Code's own file, and our stored copy is the
+last-known value for when it is gone. (Its title did too, until v0.3.1 moved titles to the
+transcript, read by the hook.)
 
 ## Deferred — maybe not needed
 

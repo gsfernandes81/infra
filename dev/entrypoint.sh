@@ -435,8 +435,8 @@ fi
 # ITS REPLACEMENT RUNS BESIDE IT, AS A DRY RUN — Stage A of plans/claude-sessions.md's
 # Phase 5. `claude-sessions offload --dry-run` decides on every registered slot and stops
 # nothing, every three minutes, while the old script goes on doing the stopping. The new
-# rules are not the old ones — 10 minutes after a `Stop` rather than 90 of transcript
-# silence, and no one-hour floor — so a few days of reading what it WOULD have stopped is
+# rules are not the old ones — 10 minutes at the prompt (after a `Stop`, or a start never
+# prompted) rather than 90 of transcript silence, and no one-hour floor — so a few days of reading what it WOULD have stopped is
 # the check before Stage B lets it. Its verdicts go only to stdout (offload.log takes real
 # stops and the orphan sweep's lines), so this loop is what keeps them, timestamped, in
 # claude-sessions-dry-run.log. Outside the registry directory on purpose: that one is the
