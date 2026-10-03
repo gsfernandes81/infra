@@ -699,7 +699,10 @@ at 6 columns, the right edge marked:
         - *The `Closed` group is the transcript store* (v0.3.4): it shows, by title, the
           conversations under `/home/dev/.claude/projects/-workspace*/` that are not running —
           `claude` and `claude-2`'s earlier conversations included — and never a running slot's,
-          nor a `/clear`-only transcript (`claude-3`'s `8c084a28…`, if still on disk).
+          nor a `/clear`-only transcript (`claude-3`'s `8c084a28…`, if still on disk). **Expect
+          one row whose `Enter` is refused, `which is gone`:** `deploy ds-dev ansible`, filed
+          under a worktree (`/workspace/.claude/worktrees/dev-hostname-derived`) since deleted.
+          Not a bug.
         - *`Enter` on a conversation that never ran in a slot* (one from before the hooks, or
           from `abduco -A claude claude`): a new `claude-N` starts running `claude --resume
           <id>`, and `make sessions` shows its `SessionStart` binding it.
@@ -707,6 +710,9 @@ at 6 columns, the right edge marked:
           ~/.local/share/claude-sessions/hook.log` stays empty while `make sessions` shows the
           slot's new `SessionStart`. **Then leave that cleared slot idle** (v0.3.4): a `/clear`-only
           transcript is no conversation, so expect `would close`, and closing it leaves no row.
+          And `make sessions` shows that slot with only its new `SessionStart` — v0.3.4 starts a
+          new conversation's event times afresh, where v0.3.2 kept the prompt and `Stop` from
+          before the `/clear` (what misled infra's first §3 check, infra#3).
         - *Idle from the prompt:* open a slot, detach without prompting, leave it. Within about
           13 minutes (10 idle plus the 3-minute loop) the **dry-run log** says
           `would close, idle Nm — no conversation on disk to resume` (a new slot never prompted
@@ -777,7 +783,11 @@ at 6 columns, the right edge marked:
        **The check:** a `would close` line is right only for a slot whose transcript is missing
        or holds no real exchange — a new slot never prompted, or a bare `/clear`; **a `would
        close` on a slot whose transcript holds a real exchange blocks Stage B** — it would mean
-       the transcript path, or the exchange test, is wrong on that box. A record from before v0.3.3 has no
+       the transcript path, or the exchange test, is wrong on that box. **One known
+       exception, not a blocker:** the test counts a typed prompt only as a plain string not
+       starting with `<`, so a prompt that is only a paste (`<pasted_content …>`) or an image,
+       with no reply yet, is not a conversation — such a slot left idle reads `would close`
+       and is still `claude --resume`-able (filed upstream). A record from before v0.3.3 has no
        `transcript_path`, so its path is derived from `$CLAUDE_CONFIG_DIR`: confirmed
        2026-10-03 (infra#3) to be `/home/dev/.claude` in the loop and in every slot on
        infra-dev, from the image `ENV`, with or3's `dev/` setting no override; of infra-dev's
