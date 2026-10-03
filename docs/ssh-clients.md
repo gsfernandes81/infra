@@ -300,19 +300,21 @@ and running fragments of the comments as commands; and it reads the file in the 
 codepage, so an em dash arrives as several bytes of something else. `configure-client-dev.yml` writes
 it with `newline_sequence: "\r\n"`.
 
-**The laptop's `ssh_config` is the opposite on endings — LF — and ASCII like the wrapper.**
-Both plays convert it to LF before any `blockinfile` touches it, because `blockinfile`
-finds its block by comparing each line to the marker plus `os.linesep`, `"\n"` under WSL.
-Once a Windows editor has saved the file as CRLF, no marker matches: the next run writes a
-second block *under* the first, the pre-rename removals find nothing, and ssh reads the
-stale copy — first value wins. LF is the only ending `blockinfile` can write from WSL, and
-Win32-OpenSSH reads it fine, so the whole file goes to LF rather than round-tripping. The
-conversion is `grep` then `sed`, not `replace`, which opens files with universal newlines
-and never sees a `\r`. The generated blocks are ASCII because that file is opened and
-edited under a Windows codepage, where `—` and `─` arrived as several characters of
-something else; each play refuses a template with anything outside printable ASCII.
-**Your own lines are yours:** the plays convert their endings but never rewrite their
-text, so a hand-kept header drawn with box characters stays that way until you redraw it.
+**The laptop's `ssh_config` is the opposite on endings — LF — and ASCII like the
+wrapper.** Both plays convert it to LF before any `blockinfile` touches it, because
+`blockinfile` finds its block by comparing each line to the marker plus `os.linesep`,
+`"\n"` under WSL. Once a Windows editor has saved the file as CRLF, no marker matches: the
+next run writes a second block *under* the first, the pre-rename removals find nothing,
+and ssh reads the stale copy — first value wins. LF is the only ending `blockinfile` can
+write from WSL, and Win32-OpenSSH reads it fine, so the whole file goes to LF rather than
+round-tripping. The conversion is `grep` then `sed`, not `replace`, which opens files with
+universal newlines and never sees a `\r`. `--check` cannot convert, so on a CRLF file its
+diff shows a second block that the real run will not write, and the run says so. The
+generated blocks are ASCII because that file is opened and edited under a Windows
+codepage, where `—` and `─` arrived as several characters of something else; each play
+refuses a template with anything outside printable ASCII. **Your own lines are yours:**
+the plays convert their endings but never rewrite their text, so a hand-kept header drawn
+with box characters stays that way until you redraw it.
 
 **`IdentityFile` and `IdentitiesOnly` appear only if that client has the key.** With
 `IdentitiesOnly yes`, ssh offers an agent key only when its public half matches a named

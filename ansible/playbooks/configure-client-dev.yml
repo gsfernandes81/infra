@@ -198,10 +198,12 @@
     # The templates, not the rendered text: that would check only the branches this
     # client's vars select, and the Windows-only ones are the ones that matter. Here,
     # before the token prompt, so a failure costs nothing typed and leaves nothing written.
+    # "\r" is admitted for the reason configure-client-fleet.yml gives, and the paste
+    # file's own wrapper lines are ASCII by hand, not by this.
     - name: Refuse a template that is not ASCII
       tags: [ssh]
       ansible.builtin.assert:
-        that: lookup('file', '../templates/' ~ item) is not search('[^\t\n -~]')
+        that: lookup('file', '../templates/' ~ item) is not search('[^\t\n\r -~]')
         fail_msg: >-
           ansible/templates/{{ item }} has a character outside printable ASCII. Everything
           it renders reaches the laptop's Windows side, where the console codepage turns
@@ -853,8 +855,8 @@
       # editor that saves it as CRLF leaves blockinfile unable to match its own markers
       # (it compares against marker + "\n" here), so it writes a second block under the
       # first and ssh reads the stale one. Why LF and not CRLF, why grep and sed rather
-      # than `replace`, and what --check shows: the same pair of tasks in
-      # configure-client-fleet.yml.
+      # than `replace`, why grep's "\r" must stay double-quoted, and what drvfs prints:
+      # the same pair of tasks in configure-client-fleet.yml.
       ansible.builtin.command:
         argv: [grep, -qs, "\r", "{{ win_ssh_config }}"]
       register: win_crlf
@@ -868,6 +870,20 @@
       ansible.builtin.command:
         argv: [sed, -i, --follow-symlinks, 's/\r$//', "{{ win_ssh_config }}"]
       when:
+        - on_windows_client | bool
+        - win_crlf.rc | default(1) == 0
+
+    - name: Say that a --check diff of a CRLF file is not what the real run writes
+      tags: [ssh]
+      # The sed above is skipped under --check, so the diffs below are of the CRLF file.
+      ansible.builtin.debug:
+        msg: >-
+          {{ win_ssh_config }} has CRLF line endings. A real run converts it to LF first;
+          this dry run cannot, so the diff below shows the {{ dev_alias }} block ADDED
+          under the existing one. The real run edits it in place.
+      changed_when: true
+      when:
+        - ansible_check_mode
         - on_windows_client | bool
         - win_crlf.rc | default(1) == 0
 

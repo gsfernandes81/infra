@@ -135,10 +135,14 @@
 
     # The template, not the rendered block: that would check only the branches this
     # client's vars select, and the Windows-only stanzas are the ones that matter. Before
-    # anything is written, so a failure leaves no client half-done.
+    # anything is written, so a failure leaves no client half-done. "\r" is admitted: a
+    # checkout with core.autocrlf, or a template saved from a Windows editor, renders to
+    # LF anyway (the Jinja lexer normalises newlines), so refusing it would blame a dash
+    # that is not there. NOT GUARDED: the paste file's own wrapper lines further down,
+    # which are ASCII by hand.
     - name: Refuse a fleet template that is not ASCII
       ansible.builtin.assert:
-        that: lookup('file', '../templates/ssh-fleet-block.j2') is not search('[^\t\n -~]')
+        that: lookup('file', '../templates/ssh-fleet-block.j2') is not search('[^\t\n\r -~]')
         fail_msg: >-
           ansible/templates/ssh-fleet-block.j2 has a character outside printable ASCII.
           The laptop's copy of this block is read and edited under a Windows codepage,
@@ -270,8 +274,14 @@
     # grep and sed, not `replace`: that module opens the file with universal newlines,
     # never sees a "\r", and reports ok. rc 2 is a missing file, which `create: true`
     # below handles; an unreadable one fails there, with blockinfile's own message.
-    # Under --check the sed is skipped, so a CRLF file's diff shows a second block that
-    # the real run will not write.
+    #
+    # THE DOUBLE QUOTES ON grep's "\r" ARE LOAD-BEARING: YAML turns them into a real CR.
+    # Single-quoted, GNU grep reads `\r` as the letter r, matches every config, and the
+    # sed reports changed on every run. sed's own `\r` is GNU sed's escape — this is WSL,
+    # Debian/Ubuntu, GNU tools; busybox sed has neither that nor --follow-symlinks. On
+    # drvfs, sed -i can print "preserving permissions ... Operation not permitted" and
+    # still exit 0: the same refusal that keeps `mode:` off these tasks, not a failure.
+    # Only a CR before a newline is stripped; a lone one is text, and stays.
     - name: Does the laptop's ssh config have CRLF line endings
       ansible.builtin.command:
         argv: [grep, -qs, "\r", "{{ windows_ssh_config }}"]
@@ -285,6 +295,21 @@
       ansible.builtin.command:
         argv: [sed, -i, --follow-symlinks, 's/\r$//', "{{ windows_ssh_config }}"]
       when:
+        - on_windows_client | bool
+        - win_crlf.rc | default(1) == 0
+
+    # The sed above does not run under --check, so neither do its consequences: the
+    # removals find nothing and the diff shows a second block under the stale one. Said
+    # here because the play comment is not what the person running --check is reading.
+    - name: Say that a --check diff of a CRLF file is not what the real run writes
+      ansible.builtin.debug:
+        msg: >-
+          {{ windows_ssh_config }} has CRLF line endings. A real run converts it to LF
+          first; this dry run cannot, so the diff below shows the fleet block ADDED under
+          the existing one. The real run edits it in place.
+      changed_when: true
+      when:
+        - ansible_check_mode
         - on_windows_client | bool
         - win_crlf.rc | default(1) == 0
 
