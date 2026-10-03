@@ -754,10 +754,10 @@
       # laptop. In a CRLF file blockinfile cannot match its own markers (it compares
       # against marker + "\n"), so it writes a second block under the first and ssh reads
       # the stale one. Why LF and not CRLF, why grep and sed rather than `replace`, and
-      # why grep's "\r" must stay double-quoted: the same tasks in
+      # why grep's "\r$" must stay double-quoted: the same tasks in
       # configure-client-fleet.yml.
       ansible.builtin.command:
-        argv: [grep, -qs, "\r", "{{ ssh_config }}"]
+        argv: [grep, -qs, "\r$", "{{ ssh_config }}"]
       register: posix_crlf
       changed_when: false
       failed_when: false
@@ -887,7 +887,7 @@
       # The same conversion as for ~/.ssh/config above, for the laptop's Windows file;
       # what drvfs prints while it runs is in configure-client-fleet.yml.
       ansible.builtin.command:
-        argv: [grep, -qs, "\r", "{{ win_ssh_config }}"]
+        argv: [grep, -qs, "\r$", "{{ win_ssh_config }}"]
       register: win_crlf
       changed_when: false
       failed_when: false

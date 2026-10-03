@@ -205,18 +205,20 @@
     # the one file that must be CRLF, and configure-client-dev.yml says why.
     #
     # grep and sed, not `replace`: that module opens the file with universal newlines,
-    # never sees a "\r", and reports ok. rc 2 is a missing or unreadable file; the touch
-    # above makes the first impossible, and blockinfile fails the second with its own
-    # message.
+    # never sees a "\r", and reports ok. rc 2 is a missing or unreadable file: missing only
+    # under --check, where the touch above creates nothing and blockinfile's `create`
+    # handles it on the real run; unreadable, and blockinfile fails with its own message.
     #
-    # THE DOUBLE QUOTES ON grep's "\r" ARE LOAD-BEARING: YAML turns them into a real CR.
+    # THE DOUBLE QUOTES ON grep's "\r$" ARE LOAD-BEARING: YAML turns them into a real CR.
     # Single-quoted, GNU grep reads `\r` as the letter r, matches every config, and the
     # sed reports changed on every run. sed's `\r` and --follow-symlinks are GNU sed's,
     # which is what WSL (Debian/Ubuntu) and Termux both ship; busybox sed has neither.
-    # Only a CR before a newline is stripped; a lone one is text, and stays.
+    # Only a CR at the end of a line is stripped; a lone one is text, and stays. The grep
+    # asks exactly that question, "\r$" and not "\r", or a lone CR would make the sed
+    # report changed, and the --check notice fire, on every run forever.
     - name: Does ~/.ssh/config have CRLF line endings
       ansible.builtin.command:
-        argv: [grep, -qs, "\r", "{{ ssh_config }}"]
+        argv: [grep, -qs, "\r$", "{{ ssh_config }}"]
       register: posix_crlf
       changed_when: false
       failed_when: false
@@ -315,7 +317,7 @@
     # permitted" and still exit 0: the refusal that keeps `mode:` off these tasks.
     - name: Does the laptop's ssh config have CRLF line endings
       ansible.builtin.command:
-        argv: [grep, -qs, "\r", "{{ windows_ssh_config }}"]
+        argv: [grep, -qs, "\r$", "{{ windows_ssh_config }}"]
       register: win_crlf
       changed_when: false
       failed_when: false
