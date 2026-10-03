@@ -31,6 +31,17 @@ Two blocks land in `~/.ssh/config`, each edited in place on re-runs:
 Do not hand-edit between the markers. Change the template and re-run — a hand edit
 survives until the next run and then vanishes, which is the worst of both.
 
+**The marker names the playbook, so renaming a playbook orphans its blocks.** The run
+after the 2026-08-29 rename found no block under the new marker and inserted a second
+one *below* the old, which ssh then never read past: on the phone, `ssh infra-dev` kept
+attaching `abduco` after the template had moved to the door, and that was only the change
+visible enough to notice — any edit since the rename to a keyword the old block also set
+reached the file and lost to the block above it. Each play now removes its block under
+the pre-rename marker (`ssh-client.yml`, `dev-client.yml`) before writing its own, and on
+the laptop's Windows side also the bare `# BEGIN infra-fleet` the Termux paste file used to
+carry. The paste file now uses the real marker, so a pasted block is adopted by the next
+run from WSL rather than shadowing it.
+
 ## Ordering: first value wins
 
 `ssh` takes the **first** value it obtains for each keyword, so specific blocks go above

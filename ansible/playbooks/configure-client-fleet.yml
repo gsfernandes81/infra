@@ -176,6 +176,20 @@
         modification_time: preserve
         access_time: preserve
 
+    # THE MARKER NAMES THE PLAYBOOK, so the 2026-08-29 rename (ssh-client.yml ->
+    # configure-client-fleet.yml) orphaned every block written before it: the next run
+    # inserted a second fleet block instead of editing the first, and ssh, taking the
+    # first value it obtains, kept reading the old one. Harmless for the Pis, whose
+    # stanzas match; not for anything the template has since changed or dropped — the
+    # `zero-dev-*` aliases lived on in the old block. configure-client-dev.yml carries
+    # the same task for its own blocks, where the stale one hid the claude-sessions door.
+    - name: Drop the fleet block this play wrote before it was renamed
+      ansible.builtin.blockinfile:
+        path: "{{ ssh_config }}"
+        create: true
+        state: absent
+        marker: "# {mark} infra-fleet (ansible/playbooks/ssh-client.yml)"
+
     # insertbefore, NOT the default append. `Host *` carries the defaults and must stay
     # last: ssh takes the first value it obtains, so a fleet block placed after it would
     # silently lose to it. If `Host *` is absent the block appends, which is correct for
@@ -183,6 +197,7 @@
     - name: Write the fleet block above the `Host *` defaults
       ansible.builtin.blockinfile:
         path: "{{ ssh_config }}"
+        create: true
         marker: "# {mark} infra-fleet (ansible/playbooks/configure-client-fleet.yml)"
         insertbefore: '^Host \*\s*$'
         block: "{{ lookup('template', '../templates/ssh-fleet-block.j2') }}"
@@ -230,6 +245,24 @@
           half.
       when: on_windows_client | bool
 
+    # Two markers this play no longer writes, either of which shadows the managed block
+    # the same way. The pre-rename one, as on the POSIX side. And the BARE `infra-fleet`
+    # the Termux paste file below carried until 2026-10-03 — a laptop built by pasting
+    # it and later managed from WSL got a second block under it, the pasted one first.
+    #
+    # `create: true` creates nothing on a removal — with no file, blockinfile returns
+    # "File not present" — but without it a missing file fails rc=257.
+    - name: Drop the fleet blocks the laptop got under markers this play no longer writes
+      ansible.builtin.blockinfile:
+        path: "{{ windows_ssh_config }}"
+        create: true
+        state: absent
+        marker: "{{ item }}"
+      loop:
+        - "# {mark} infra-fleet (ansible/playbooks/ssh-client.yml)"
+        - "# {mark} infra-fleet"
+      when: on_windows_client | bool
+
     # No `mode:`. /mnt/c is drvfs and does not carry Unix permissions unless mounted with
     # metadata — setting one either fails or silently does nothing, and a task that
     # pretends to have set a mode is worse than one that does not try.
@@ -263,9 +296,9 @@
           # The cloudflared path below is NOT verified: this control node cannot see the
           # laptop's filesystem. Run this play from WSL and it manages that file directly,
           # checking the path first.
-          # BEGIN infra-fleet
+          # BEGIN infra-fleet (ansible/playbooks/configure-client-fleet.yml)
           {{ lookup('template', '../templates/ssh-fleet-block.j2') }}
-          # END infra-fleet
+          # END infra-fleet (ansible/playbooks/configure-client-fleet.yml)
       vars:
         cloudflared: "{{ windows_cloudflared }}"
         adb_jump: true

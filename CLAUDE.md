@@ -389,6 +389,12 @@ in gitignored `.env` (never `$HOME`) · `${VAR:?message}`, never `:-`, for anyth
 absence should stop Compose · the deployed image is a literal in `compose.yaml`, not a
 variable · nothing boot-path is generated from a template.
 
+**Renaming a play that writes a `blockinfile` block means carrying a `state: absent` for
+its old marker.** The markers name the playbook, so a rename leaves every client holding
+a block the play no longer finds, and the next run writes a second one *below* it, where
+ssh never reads. The 2026-08-29 rename did this and nobody saw it for five weeks — see
+the row in [`docs/decisions.md`](docs/decisions.md).
+
 **A dev container's tunnel hostname is `<alias>.<dns_zone>` and is never written beside
 the alias it is built from** — `dns_zone` lives in `ansible/group_vars/all.yml`, and
 `create-dev-tunnel.yml` and `configure-client-dev.yml` both derive from it, so the two

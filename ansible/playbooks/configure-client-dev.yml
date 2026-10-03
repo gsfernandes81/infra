@@ -728,6 +728,25 @@
         state: directory
         mode: "0700"
 
+    - name: Drop the {{ dev_alias }} block this play wrote before it was renamed
+      tags: [ssh]
+      # THE MARKER NAMES THE PLAYBOOK, so the 2026-08-29 rename (dev-client.yml ->
+      # configure-client-dev.yml) changed the key blockinfile finds its block by. Every
+      # client provisioned before then kept the old block, and the next run did not edit
+      # it — it inserted a second one BELOW it, above `Host *`. ssh takes the first value
+      # it obtains, so the stale block's RemoteCommand (`abduco -A claude claude`) and its
+      # ProxyCommand, which never checked the token was there, won — while the config
+      # visibly held the right ones further down. Found on the phone 2026-10-03, as
+      # `ssh infra-dev` never showing the door.
+      #
+      # `create: true` creates nothing here: with state=absent and no file, blockinfile
+      # returns "File not present". Without it, a fresh client fails rc=257 on a removal.
+      ansible.builtin.blockinfile:
+        path: "{{ ssh_config }}"
+        create: true
+        state: absent
+        marker: "# {mark} {{ dev_alias }} (ansible/playbooks/dev-client.yml)"
+
     - name: The {{ dev_alias }} block in ~/.ssh/config
       tags: [ssh]
       # blockinfile, so re-running edits the block in place instead of appending a second
@@ -808,6 +827,17 @@
         newline_sequence: "\r\n"
       # No mode, for the drvfs reason above. The wrapper holds no secret — it names the
       # file that does — so inherited ACLs are the right protection for it anyway.
+      when: on_windows_client | bool
+
+    - name: Drop the pre-rename {{ dev_alias }} block from the laptop's Windows ssh config
+      tags: [ssh]
+      # The same stale block, the same reason, the same first-value-wins loss — see the
+      # task that drops it from ~/.ssh/config above.
+      ansible.builtin.blockinfile:
+        path: "{{ win_ssh_config }}"
+        create: true
+        state: absent
+        marker: "# {mark} {{ dev_alias }} (ansible/playbooks/dev-client.yml)"
       when: on_windows_client | bool
 
     - name: The {{ dev_alias }} block in the laptop's Windows ssh config
