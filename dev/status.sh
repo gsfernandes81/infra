@@ -20,9 +20,10 @@ d() { "${DOCKER[@]}" "$@"; }
 # ── status ──────────────────────────────────────────────────────────────────
 status() {
     # One read of every process's cmdline, used by the lines below. Straight out of
-    # /proc rather than `pgrep`, because procps is not in the image's package list: if
-    # pgrep is absent, `pgrep … || echo "no daemon"` reports a healthy daemon as
-    # missing, and a status line that lies is worse than one that is not there.
+    # /proc rather than `pgrep`, because procps was not in the image's package list when
+    # this was written (it is now, Dockerfile.base): if pgrep is absent, `pgrep … || echo
+    # "no daemon"` reports a healthy daemon as missing, and a status line that lies is
+    # worse than one that is not there. /proc stays the read with no dependency at all.
     local procs
     procs="$(d exec "$CONTAINER" sh -c \
         'for p in /proc/[0-9]*/cmdline; do tr "\0" " " < "$p" 2>/dev/null; echo; done' 2>/dev/null || true)"
@@ -279,9 +280,13 @@ print("managed settings say off" if v is True else
     # the terminal's own buffer. They come from inside Claude Code's binary, and Claude Code
     # updates itself in a running container — so a rename would leave the variables set,
     # read by nothing, and scrolling quietly back to round trips. Counted in the binary the
-    # container runs right now; fewer than three is an issue for claude-sessions. Calibrated
-    # 2026-10-04 on 2.1.289: all three found, a made-up name in the same pattern none.
-    printf 'scrollvars: %s\n' "$(d exec "$CONTAINER" sh -c 'b=$(readlink -f "$(command -v claude)") && n=$(grep -aoE "CLAUDE_CODE_DISABLE_(ALTERNATE_SCREEN|MOUSE|VIRTUAL_SCROLL)" "$b" | sort -u | wc -l) && if [ "$n" -eq 3 ]; then echo "3 of 3 in $(claude --version 2>/dev/null | cut -d" " -f1)"; else echo "ONLY $n of 3 in $(claude --version 2>/dev/null | cut -d" " -f1) — a rename; tell claude-sessions"; fi' 2>/dev/null \
+    # container runs right now, WORD-BOUNDED: the binary also holds
+    # CLAUDE_CODE_DISABLE_MOUSE_CLICKS, which an unanchored match counts as MOUSE, so a
+    # rename of MOUSE alone would still have read 3 of 3. Calibrated 2026-10-04 on 2.1.289:
+    # -w finds all three, and finds nothing in a line holding only the _CLICKS name. This
+    # proves a name is PRESENT, not that it is read — each also sits in an allowlist and a
+    # string table — which is as far as a strings check goes; fewer than three is the alarm.
+    printf 'scrollvars: %s\n' "$(d exec "$CONTAINER" sh -c 'c=$(command -v claude) || { echo "no claude on PATH"; exit 0; }; b=$(readlink -f "$c"); v=$(claude --version 2>/dev/null | cut -d" " -f1); n=$(grep -aowE "CLAUDE_CODE_DISABLE_(ALTERNATE_SCREEN|MOUSE|VIRTUAL_SCROLL)" "$b" | sort -u | wc -l); if [ "$n" -eq 3 ]; then echo "3 of 3 names present in $v"; else echo "ONLY $n of 3 names present in $v — renamed, or the binary is no longer plain text; tell claude-sessions"; fi' 2>/dev/null \
         || echo 'could not ask the container')"
     tool cloudflared 'the hash-pinned download did not land' cloudflared --version
     tool sessions 'no claude-sessions — this image predates it (rebuild: make up)' claude-sessions --version

@@ -744,13 +744,16 @@ at 6 columns, the right edge marked:
           help fits the pipe buffer, so the reader only closes after the write. With `| true`
           the reader is gone first, and v0.3.6 exits 134 every time (calibrated 2026-10-04,
           five runs each).
-        - *Slots scroll locally* (v0.3.8, claude-sessions#8): start a session with `n`, then
-          from a shell in the container `for p in $(pgrep -x claude); do echo "== $p"; tr '\0'
-          '\n' < /proc/$p/environ | grep CLAUDE_CODE_DISABLE_ | sort; done` — each slot's
-          claude shows all three `=1`. **Calibrate first:** a `claude` started by hand in a
-          shell (`s`, then `claude`) shows only `CLAUDE_CODE_DISABLE_AGENT_VIEW=1`, the image's
-          own, and none of the three. Then on the phone, in a slot after a long reply, a swipe
-          scrolls Termux's buffer at once with no repaint, and long-press selects.
+        - *Slots scroll locally* (v0.3.8, claude-sessions#8): start a session with `n`, then run
+          this from a shell in the container (`bash -c`, because the menu's `s` shell is fish
+          here, which rejects the loop):
+          ```
+          bash -c 'for p in $(pgrep -x claude); do echo "== $p"; tr "\0" "\n" < /proc/$p/environ | grep CLAUDE_CODE_DISABLE_ | sort; done'
+          ```
+          Each slot's claude shows all three `=1`. **Calibrate first:** a `claude` started by
+          hand in a shell (`s`, then `claude`) shows only `CLAUDE_CODE_DISABLE_AGENT_VIEW=1`,
+          the image's own, and none of the three. Then on the phone, in a slot after a long
+          reply, a swipe scrolls Termux's buffer at once with no repaint, and long-press selects.
         - *The sweep:* `grep 'sweep:' ~/.local/share/claude-sessions/offload.log | tail`. With
           the agent view off, expect nothing, or `WOULD KILL` / `would keep, too young` lines
           only (v0.3.4 applies the live age check to the dry run). A `killed` line in

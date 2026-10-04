@@ -1000,7 +1000,9 @@ usually been hung up along with the menu before its fallback runs. **Since v0.3.
 claude the menu starts or resumes scrolls in the terminal's own buffer**
 ([claude-sessions#8](https://github.com/gsfernandes81/claude-sessions/issues/8)): it is
 started with `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN`, `CLAUDE_CODE_DISABLE_MOUSE` and
-`CLAUDE_CODE_DISABLE_VIRTUAL_SCROLL` set to `1` unless the login already set them, so a swipe
+`CLAUDE_CODE_DISABLE_VIRTUAL_SCROLL` set to `1` unless the login already set them (to any
+value — and Claude Code tests them for truthiness, so `=0` disables too; only an empty `NAME=`
+turns a feature back on, the same trap the agent-view variable has), so a swipe
 on the phone scrolls Termux locally instead of a round trip, and long-press selects. The
 owner's accepted costs: more flicker after a resize, history after a dropped link only in a
 terminal that stayed open (Ctrl+E redraws), no focus view or diff panel, no mouse. **Only
