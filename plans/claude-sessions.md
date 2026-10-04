@@ -647,7 +647,7 @@ at 6 columns, the right edge marked:
    and `reconcile` run by the entrypoint — `BASE_TAG` `2026.10.02`. The consent question is
    now a bring-up check, below. **Superseded the same day by v0.2.0 at `2026.10.02.1`** (step 4).
 4. ✔ **DONE 2026-10-02 — released in claude-sessions v0.2.0, pinned in the base at
-   `BASE_TAG` `2026.10.02.1`; v0.3.1 at `2026.10.03`, then v0.3.2 at `2026.10.03.1` (infra#2), then v0.3.3 at `2026.10.03.2` (infra#3), then v0.3.4 at `2026.10.03.3` (infra#4), all 2026-10-03; v0.3.6 at `2026.10.04` (infra#5), then v0.3.7 at `2026.10.04.1` (infra#6), both 2026-10-04.** The TUI, to the approved mockups. Rendering tested at 40×24 and 80×24 against a test
+   `BASE_TAG` `2026.10.02.1`; v0.3.1 at `2026.10.03`, then v0.3.2 at `2026.10.03.1` (infra#2), then v0.3.3 at `2026.10.03.2` (infra#3), then v0.3.4 at `2026.10.03.3` (infra#4), all 2026-10-03; v0.3.6 at `2026.10.04` (infra#5), then v0.3.7 at `2026.10.04.1` (infra#6), then v0.3.8 at `2026.10.04.3` (infra#8, with the forced door from `2026.10.04.2`), all 2026-10-04.** The TUI, to the approved mockups. Rendering tested at 40×24 and 80×24 against a test
    backend; the zero-idle-bytes property tested under a pty; ordering and the guards
    unit-tested.
 5. **`claude-sessions offload`** replaces `offload-idle-claude.sh` (deleted in the same commit). The
@@ -664,12 +664,14 @@ at 6 columns, the right edge marked:
      inside the container. Its one finding became claude-sessions#5, fixed in v0.3.3–v0.3.4.
      `2026.10.03.2` (v0.3.3) was never rolled out. `2026.10.03.3` (v0.3.4) has run on
      infra-dev since 2026-10-03 17:56; its 4b checks were not reported. `2026.10.04` (v0.3.6) was
-     never rolled out. For `2026.10.04.1`, repeat steps 1, 2 and 4b — 4a and 3 are unchanged.
-     1. Wait for `dev-base.yml` to publish `2026.10.04.1` (v0.3.7; it supersedes
-        `2026.10.03.3` and the unrolled `2026.10.04`), then
+     never rolled out. Nor were `2026.10.04.1` (v0.3.7) or `2026.10.04.2` (the forced door). For
+     `2026.10.04.3`, repeat steps 1, 2 and 4b — 4a and 3 are unchanged — and step 6's
+     forced-door bring-up, which the same recreate delivers.
+     1. Wait for `dev-base.yml` to publish `2026.10.04.3` (v0.3.8 and the forced door; it
+        supersedes `2026.10.03.3` and every tag since), then
         recreate infra-dev:
         `ssh -t zero 'cd ~/infra/dev && make up'`.
-     2. `make verify` reads `sessions  : claude-sessions 0.3.7`, a `hooks` line naming six
+     2. `make verify` reads `sessions  : claude-sessions 0.3.8` and `scrollvars: 3 of 3`, a `hooks` line naming six
         events and a `door` line naming `/usr/local/bin/claude-sessions-door`; `make boot-log` has the `claude-sessions reconcile:` and `DRY RUN` lines.
      3. **Start `claude` in the container and confirm no approval dialog appears** — the
         managed-settings consent question, so far settled from the docs only.
@@ -685,7 +687,7 @@ at 6 columns, the right edge marked:
         failed resume shows its error) — on that first start, check nothing interactive
         went missing into it. And an idle menu sends **zero bytes**: worth a glance at the
         phone's link meter, ages ticking at most once a minute.
-     4b. **What v0.3.0–v0.3.7 changed, by hand** (from claude-sessions' handoff, adjusted
+     4b. **What v0.3.0–v0.3.8 changed, by hand** (from claude-sessions' handoff, adjusted
         for Stage A):
         - *Titles:* send one prompt in a slot and let it finish — the row shows a short title,
           the one Claude Code's `/resume` picker shows, never a reply. Then `/rename something`,
@@ -742,6 +744,13 @@ at 6 columns, the right edge marked:
           help fits the pipe buffer, so the reader only closes after the write. With `| true`
           the reader is gone first, and v0.3.6 exits 134 every time (calibrated 2026-10-04,
           five runs each).
+        - *Slots scroll locally* (v0.3.8, claude-sessions#8): start a session with `n`, then
+          from a shell in the container `for p in $(pgrep -x claude); do echo "== $p"; tr '\0'
+          '\n' < /proc/$p/environ | grep CLAUDE_CODE_DISABLE_ | sort; done` — each slot's
+          claude shows all three `=1`. **Calibrate first:** a `claude` started by hand in a
+          shell (`s`, then `claude`) shows only `CLAUDE_CODE_DISABLE_AGENT_VIEW=1`, the image's
+          own, and none of the three. Then on the phone, in a slot after a long reply, a swipe
+          scrolls Termux's buffer at once with no repaint, and long-press selects.
         - *The sweep:* `grep 'sweep:' ~/.local/share/claude-sessions/offload.log | tail`. With
           the agent view off, expect nothing, or `WOULD KILL` / `would keep, too young` lines
           only (v0.3.4 applies the live age check to the dry run). A `killed` line in
@@ -875,8 +884,8 @@ at 6 columns, the right edge marked:
      have bumped, and Stage B has landed.
    - **The door moved into the container's sshd on 2026-10-04** (infra#7, `decisions.md`):
      `ForceCommand` in `dev/sshd_config`, a transport-only client block, forwarded commands
-     in `~`. Landed at `2026.10.04.2`. **Owner's, in order:** wait for `dev-base.yml` to
-     publish `2026.10.04.2` and recreate infra-dev (`ssh -t zero 'cd ~/infra/dev && make
+     in `~`. Landed at `2026.10.04.2`; reaches infra-dev as `2026.10.04.3`, with v0.3.8. **Owner's,
+     in order:** wait for `dev-base.yml` to publish `2026.10.04.3` and recreate infra-dev (`ssh -t zero 'cd ~/infra/dev && make
      up'`); `make verify`'s `door` line reads `/usr/local/bin/claude-sessions-door`, not
      `none`. Before re-running any client, `ssh infra-dev` from the phone must still reach the
      menu — the old block's `RemoteCommand` arrives at the forced door and is run, which the

@@ -492,9 +492,9 @@ RUN chmod 0644 /etc/claude-code/managed-settings.json
 #
 # 0644 IS LOAD-BEARING: every session runs as `dev`, and a file it cannot read means
 # sessions start with no hooks and nothing on screen says so.
-ARG CLAUDE_SESSIONS_VERSION=0.3.7
-ARG CLAUDE_SESSIONS_SHA256_arm64=38b72c4ad3f80d362337a4e65485c0686c10664c09f7e7c71ebb38b812ddb028
-ARG CLAUDE_SESSIONS_SHA256_amd64=f150c306b3ec6e8c00dfe05a7778456f2c6bf4b325f4d0896e06f413d96f186e
+ARG CLAUDE_SESSIONS_VERSION=0.3.8
+ARG CLAUDE_SESSIONS_SHA256_arm64=d40e685b9e9dff4d0c3866b74a33c462f7130bc4c9e8d49b9bf525af9d7ee589
+ARG CLAUDE_SESSIONS_SHA256_amd64=f1ff3eb92d387357460770e454e66953475cd0974561aa5af796617cc0fdbd87
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \

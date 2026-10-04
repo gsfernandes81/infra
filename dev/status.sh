@@ -275,6 +275,14 @@ print("managed settings say off" if v is True else
     printf 'agentview : %s; env=%s\n' \
         "${agentview_file:-could not ask the container — see the container line above}" \
         "${agentview_env:-UNSET in this container — the image should set it to 1}"
+    # The three names claude-sessions (v0.3.8+) sets on every slot's claude so it scrolls in
+    # the terminal's own buffer. They come from inside Claude Code's binary, and Claude Code
+    # updates itself in a running container — so a rename would leave the variables set,
+    # read by nothing, and scrolling quietly back to round trips. Counted in the binary the
+    # container runs right now; fewer than three is an issue for claude-sessions. Calibrated
+    # 2026-10-04 on 2.1.289: all three found, a made-up name in the same pattern none.
+    printf 'scrollvars: %s\n' "$(d exec "$CONTAINER" sh -c 'b=$(readlink -f "$(command -v claude)") && n=$(grep -aoE "CLAUDE_CODE_DISABLE_(ALTERNATE_SCREEN|MOUSE|VIRTUAL_SCROLL)" "$b" | sort -u | wc -l) && if [ "$n" -eq 3 ]; then echo "3 of 3 in $(claude --version 2>/dev/null | cut -d" " -f1)"; else echo "ONLY $n of 3 in $(claude --version 2>/dev/null | cut -d" " -f1) — a rename; tell claude-sessions"; fi' 2>/dev/null \
+        || echo 'could not ask the container')"
     tool cloudflared 'the hash-pinned download did not land' cloudflared --version
     tool sessions 'no claude-sessions — this image predates it (rebuild: make up)' claude-sessions --version
     # The hooks that feed claude-sessions, read the way Claude Code reads them: parsed, and

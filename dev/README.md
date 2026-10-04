@@ -957,7 +957,7 @@ outlives the container), kept current by Claude Code's own hooks — and, since 
 `archive/` beside them: one small file per conversation `c` has put away (`archived <ms>`)
 or taken back out (`kept <ms>`) — age-archiving writes nothing, being worked out as the
 list is read. The base installs
-**v0.3.7** — a static binary, pinned by tag and SHA-256 per architecture, at
+**v0.3.8** — a static binary, pinned by tag and SHA-256 per architecture, at
 `/usr/local/bin/claude-sessions`.
 
 **The menu is in this release, and it is where `ssh infra-dev` lands.** `claude-sessions`
@@ -996,7 +996,18 @@ dumped core into their working directory — `/workspace`, the repo
 output pipe no longer aborts any subcommand, and a real bug unwinds and exits 101 with no
 core. The door's fallback after a 129 prints to, and starts a shell on, a terminal that is
 gone; both fail quietly, which is why the door is unchanged — and in practice the door has
-usually been hung up along with the menu before its fallback runs. **A row's title is what Claude Code's own
+usually been hung up along with the menu before its fallback runs. **Since v0.3.8 every
+claude the menu starts or resumes scrolls in the terminal's own buffer**
+([claude-sessions#8](https://github.com/gsfernandes81/claude-sessions/issues/8)): it is
+started with `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN`, `CLAUDE_CODE_DISABLE_MOUSE` and
+`CLAUDE_CODE_DISABLE_VIRTUAL_SCROLL` set to `1` unless the login already set them, so a swipe
+on the phone scrolls Termux locally instead of a round trip, and long-press selects. The
+owner's accepted costs: more flicker after a resize, history after a dropped link only in a
+terminal that stayed open (Ctrl+E redraws), no focus view or diff panel, no mouse. **Only
+slots get them** — a `claude` typed into a shell runs with Claude Code's defaults. The names
+come from inside Claude Code's binary, which updates itself here, so **`make verify`'s
+`scrollvars` line counts them in the binary the container is running**: fewer than three is a
+rename, and an issue for claude-sessions. **A row's title is what Claude Code's own
 `/resume` picker shows** (v0.3.1): the `/rename` name, else Claude Code's generated title,
 else the first prompt — read from the transcript by the hook at `SessionStart` and `Stop`.
 A recreate ends every slot anyway, and each one takes its new title when it is resumed. **`claude-sessions-door`**
