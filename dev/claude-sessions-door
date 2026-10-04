@@ -21,6 +21,9 @@
 # login. Anything else — the binary missing, a terminal too narrow, a registry it cannot
 # read — and claude-sessions has already said why on stderr; this adds one line and becomes
 # a login shell, so a broken menu costs a keypress rather than a trip to `<alias>-sh`.
+# The one exception is 129 (claude-sessions v0.3.7): the terminal went away and the menu
+# said nothing. The line and the shell then meet a hung-up terminal and fail quietly, so
+# the door does not special-case it (decisions.md, the door row).
 #
 # `$SHELL`, never a named shell: infra-dev logs in to fish, dd-dev and dossier to bash, and
 # this file is in the base all of them share. sshd sets it; `docker exec` (`make claude`)

@@ -988,7 +988,8 @@ dumped core into their working directory — `/workspace`, the repo
 ([claude-sessions#6](https://github.com/gsfernandes81/claude-sessions/issues/6)); a closed
 output pipe no longer aborts any subcommand, and a real bug unwinds and exits 101 with no
 core. The door's fallback after a 129 prints to, and starts a shell on, a terminal that is
-gone; both fail quietly, which is why the door is unchanged. **A row's title is what Claude Code's own
+gone; both fail quietly, which is why the door is unchanged — and in practice the door has
+usually been hung up along with the menu before its fallback runs. **A row's title is what Claude Code's own
 `/resume` picker shows** (v0.3.1): the `/rename` name, else Claude Code's generated title,
 else the first prompt — read from the transcript by the hook at `SessionStart` and `Stop`.
 A recreate ends every slot anyway, and each one takes its new title when it is resumed. **`claude-sessions-door`**

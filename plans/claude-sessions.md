@@ -731,9 +731,12 @@ at 6 columns, the right edge marked:
           KILL and abduco's teardown), and it draws as braille dots on
           the phone (Termux) and in Windows Terminal, not as boxes.
         - *A dropped link* (v0.3.7, claude-sessions#6): open the menu over ssh from the phone and
-          kill the connection (airplane mode, or kill the ssh client). No `core` appears in
-          `/workspace`, and `~/.local/share/claude-sessions/` shows nothing new beyond normal
-          hook lines.
+          kill the connection (airplane mode, or kill the ssh client). **Wait two minutes**, or
+          until the old `claude-sessions` pid is gone: killing the client hangs the pty up at
+          once, but a link that just vanishes is noticed only after sshd's `ClientAliveInterval
+          30` × `ClientAliveCountMax 3`, about 90 s — reading sooner passes on v0.3.6 too. Then
+          no `core` is in `/workspace`, and `~/.local/share/claude-sessions/` shows nothing new
+          beyond normal hook lines.
         - *A closed pipe* (v0.3.7): `bash -c 'claude-sessions --help | true; echo
           ${PIPESTATUS[0]}'` prints `0`. **Not `| head -1`**, which passes on v0.3.6 too: the
           help fits the pipe buffer, so the reader only closes after the write. With `| true`
@@ -770,21 +773,27 @@ at 6 columns, the right edge marked:
        `SessionEnd (clear)` or `(resume)` takes no lock in v0.3.2, so one appearing
        means the box is not running it. **First reading, 2026-10-04** on v0.3.4, 2026-10-03 17:56
        → 2026-10-04 12:50 (380 passes, none missed): **not enough data** — no slot was alive
-       at any pass, so nothing was judged. Three things that night, all unexplained so far:
-       a Claude Code (pid 1506) started 01:40:32 and exited 01:40:46, never prompted, and its
-       `SessionEnd (other)` lost `claude-1`'s lock — what a menu `c` close looks like; then
-       **~650 MB ran from 01:41 to 02:02 that the registry never saw** (`memory:` 950 → 297
-       MB free, back to 728 at the first pass after 02:00), with no live slot, no transcript
-       and no shell history; and the menu dumped core into `/workspace` at 01:56:44 when its
-       terminal went away ([claude-sessions#6](https://github.com/gsfernandes81/claude-sessions/issues/6)).
-       The owner is asked what was started at ~01:41 and through which path — anything a
-       Stage B offloader cannot see is the more important half. *claude-sessions' reading*
-       (infra#6): the 13 s claude fits `n` then `c` (v0.3.4 reused the free name `claude-1`; a
-       close holds the slot lock across the stop, so that `SessionEnd` is always dropped — the
-       expected case), and the 650 MB fits a `claude` or a build started in the menu's `s`
-       shell, which is not in abduco, **is invisible to the registry and the offloader by
-       design**, and died with the link at 01:56. A reading, not proof; if the owner did
-       something else, it is worth an issue upstream. **Needs a day with slots in
+       at any pass, so nothing was judged. The night, as the files explain it (2026-10-04):
+       - **A 13 s Claude Code** (pid 1506, `claude-1`, 01:40:32–01:40:46, never prompted)
+         whose `SessionEnd (other)` lost the slot's lock: what `n` then `c` looks like (v0.3.4
+         reused the free name; a close holds the lock across the stop). The owner thinks
+         that likely and cannot confirm it — **expected, not a blocker**.
+       - **Its auto-update outlived it**: `npm install --global @anthropic-ai/claude-code@2.1.289`
+         from 01:40:42 until **SIGHUP at 01:41:08** (`~/.npm/_logs/2026-10-04T01_40_42_627Z-debug-0.log`),
+         after it had moved the installed package aside. npm rolled back — no `.claude-code-*`
+         left, and later updates installed cleanly — but **a `c` close can interrupt Claude
+         Code's self-update mid-install**, and a half-installed global package is every
+         slot's `claude`. Recorded, not acted on.
+       - **The "650 MB" was page cache, not a process**: `memory:` read 950 → 297 MB free from
+         the 01:41:55 pass until 02:02:55, with nothing running — `hook.log` has no `not ours`
+         line (every claude fires the managed hooks, so none ran outside a slot) and nothing
+         else was written. The line is `memory.max − memory.current`, which counts cache (now
+         892 MB "used", 515 MB of it `file`). Filed upstream as
+         [claude-sessions#7](https://github.com/gsfernandes81/claude-sessions/issues/7),
+         because `room_for` uses the same figure and Stage B would act on it.
+       - **The menu dumped core into `/workspace` at 01:56:44** when its terminal went away
+         ([claude-sessions#6](https://github.com/gsfernandes81/claude-sessions/issues/6), fixed
+         in v0.3.7). Memory did not move then (301 MB free at 01:56:55 and 01:59:55). **Needs a day with slots in
        use, then a second reading** (that day also makes up for the 33 hours on v0.2.0).
      - **`claude.exe` counts as foreign work** ([#2](https://github.com/gsfernandes81/claude-sessions/issues/2)). `foreign_descendant` exempts only `claude`;
        the old script measured `claude.exe` helpers in live trees. If they reappear, every
