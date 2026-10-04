@@ -300,11 +300,15 @@ print(" ".join(sorted(h)) if h else "PRESENT BUT EMPTY — no hooks in it")
     # it answers "in-workspace: not found" from the login shell.
     printf 'in-workspace: %s\n' "$(d exec "$CONTAINER" sh -c 'command -v in-workspace' 2>/dev/null \
         || echo 'MISSING — this image predates it. Rebuild: make up')"
-    # What sshd ACTUALLY forces, read the way sshd reads it (`-T` takes the drop-ins too, so
-    # a child's `ForceCommand none` shows here). `none` on a base that should have the door
-    # means `ssh <c>` lands on a plain shell rather than the menu — an image that predates
-    # 2026-10-04 or a drop-in that switched it off, not a client problem.
-    printf 'door      : %s\n' "$(d exec "$CONTAINER" sh -c '/usr/sbin/sshd -T -f /home/dev/sshd_config 2>/dev/null | sed -n "s/^forcecommand //p"' 2>/dev/null \
+    # What sshd ACTUALLY forces, read the way sshd reads it, from the config the RUNNING sshd
+    # was started with — the entrypoint falls back to sshd_config.nodrop when a drop-in is
+    # refused, and a readout of the other file would report a child's `ForceCommand none`
+    # the live daemon never read. The path comes out of its process title (OpenSSH 10 writes
+    # argv there as one string); `-C user=dev` takes any `Match` for this account into the
+    # answer. `none` on a base that should have the door means `ssh <c>` lands on a plain
+    # shell rather than the menu — an image that predates 2026-10-04 or a drop-in that
+    # switched it off, not a client problem.
+    printf 'door      : %s\n' "$(d exec "$CONTAINER" sh -c 'f=$(tr "\0" " " < /proc/$(cat /home/dev/.ssh-host/sshd.pid)/cmdline | sed -n "s/.* -f \([^ ]*\).*/\1/p"); /usr/sbin/sshd -T -C user=dev,host=localhost,addr=127.0.0.1 -f "${f:-/home/dev/sshd_config}" 2>/dev/null | sed -n "s/^forcecommand //p"' 2>/dev/null \
         | grep . || echo 'could not ask sshd')"
     printf '\n'
     collections

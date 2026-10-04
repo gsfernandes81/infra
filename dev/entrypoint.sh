@@ -612,5 +612,5 @@ fi
 
 say "sshd on :2222 in the foreground — ssh in and pick a session from the menu"
 say "    ssh $DEV_NAME        the claude-sessions menu (Enter attaches, n is a new one)"
-say "    ssh $DEV_NAME-sh     a shell"
+say "    ssh -t $DEV_NAME in-workspace   a shell in /workspace (ssh $DEV_NAME <cmd> runs it in ~)"
 exec /usr/sbin/sshd -D -e -f "$SSHD_CONF"

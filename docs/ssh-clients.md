@@ -374,7 +374,7 @@ door with a different trust story.
 
 No client alias points at them. `dd-dev` and `ds-dev` are not running until they are
 deployed with a connector of their own, at which point `configure-client-dev.yml` gives them the
-same two aliases every other container has — so an alias for the old door would name a
+same block every other container has, one route under two names — so an alias for the old door would name a
 hostname with nothing behind it, which fails exactly like a container being down.
 
 Dropping the alias does not close the door, and nothing about this pretends it does. The

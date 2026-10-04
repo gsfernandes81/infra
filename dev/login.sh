@@ -109,7 +109,7 @@ cat <<'EOF'
   This container is used over ssh. From the phone or a PC:
 
       ssh infra-dev                                  the session menu
-      ssh infra-dev-sh                               a shell
+      ssh -t infra-dev in-workspace                  a shell in /workspace
 
   Every session the menu opens is an abduco session: Ctrl-\ detaches and the menu
   comes back, and a dropped connection costs nothing — ssh in again and press Enter.

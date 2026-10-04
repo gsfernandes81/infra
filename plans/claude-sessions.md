@@ -675,8 +675,8 @@ at 6 columns, the right edge marked:
         managed-settings consent question, so far settled from the docs only.
      4. Prompt it once, then `make sessions`: the slot shows events. "events: none seen"
         means the hooks are not firing.
-     4a. **The menu, by hand, before any client points at it.** From `ssh infra-dev-sh`, run
-        `claude-sessions-door`. Press `n`, then detach (abduco's key): the menu comes back
+     4a. **The menu, by hand, before any client points at it.** From `make shell` (or `ssh -t infra-dev in-workspace`),
+        run `claude-sessions-door`. Press `n`, then detach (abduco's key): the menu comes back
         with `detached · it is still running` (v0.3.3 names no session there), and `make sessions` shows that slot
         with a pid and recent `SessionStart`/`UserPromptSubmit`. That proves a slot binds;
         it depends on claude's process name being `claude`, so **a slot with no pid is
