@@ -60,7 +60,7 @@ been consciously postponed rather than an omission.
 | `login.sh` | in the image: the interactive logins, idempotent — `make login` |
 | `status.sh` | on the host: the readouts — `make status`, `verify`, `fleet`, `collections` |
 | `in-workspace` | in the image, on PATH: run a command where the work is, so no client names the path |
-| `claude-sessions-door` | in the image, on PATH: what an ssh login lands on — the `claude-sessions` menu at a terminal, a login shell for anything else or if the menu fails (see *claude-sessions*) |
+| `claude-sessions-door` | in the image, on PATH, and sshd's `ForceCommand`: what every ssh session runs — the `claude-sessions` menu at a terminal, a forwarded command as given, a login shell for anything else or if the menu fails (see *claude-sessions*) |
 | *(no setup script)* | the host side is `ansible/playbooks/prepare-dev-host.yml`, run from a control node |
 | `sshd_config` / `ssh_config` | the in-container daemon, and the baked half of how it reaches out |
 | `config.fish` | fish's config, baked in — puts every login shell in `/workspace` |
@@ -119,25 +119,32 @@ also shows `tunnel:` with a `readyConnections` count.
 a PC:
 
 ```sh
-ssh infra-dev          # the claude-sessions menu: Enter attaches or resumes, n starts one
-ssh infra-dev-sh       # a shell
+ssh infra-dev                  # the claude-sessions menu: Enter attaches or resumes, n starts one
+ssh infra-dev in-workspace git log   # a command, in the repo (a bare `ssh infra-dev cmd` runs in ~)
+ssh -t infra-dev in-workspace  # a login shell in /workspace
 ```
 
-**`in-workspace` is a program in the image**, and the split is deliberate. It cds to
-`/workspace` and execs whatever it was handed — the directory and nothing else. *Where the
-work is* is the container's business: it is the container's bind mount, and no client
+**What a login runs is the container's decision.** sshd forces every session through
+`claude-sessions-door` (`sshd_config`'s `ForceCommand`, since 2026-10-04): a terminal with
+no command gets the menu, in `/workspace`; a forwarded command — `ssh … 'git log'`, scp,
+sftp, Zed, ansible — runs as given, in `~`, exactly as it would without the door; anything
+else gets a login shell. The client's ssh block is transport only, so it cannot name a
+program this image lacks. `infra-dev-sh` is the same alias under its old name.
+
+**`in-workspace` is a program in the image** for the commands that want the repo. It cds
+to `/workspace` and execs whatever it was handed — the directory and nothing else. *Where
+the work is* is the container's business: it is the container's bind mount, and no client
 should have to name the path. *Whether to hold the session across a dropped link* is the
-client's: the phone wants `abduco` because ssh dies at the lock screen, and a laptop
-running `ssh infra-dev-sh 'git log'`, a cron, or a one-shot `claude -p` want the workspace
-and no abduco at all. So the phone's config reads `RemoteCommand in-workspace
-claude-sessions-door`, with each half owned by whoever knows the answer.
+menu's: what it opens is an abduco session, because ssh dies at the phone's lock screen,
+while a laptop running a one-shot command wants no abduco at all.
 
 The `cd` is needed for a reason worth knowing, because the symptom is baffling: sshd runs
 a remote command as `$SHELL -c '…'`, which is **not a login shell**, so `config.fish`'s
 `status is-login` guard is false and its cd never fires. A plain `ssh` with no command
 *does* get a login shell and lands correctly, and `docker exec` is fine too because it
 honours the image's `WORKDIR` — so `make claude` needs no wrapper. Only the remote-command
-path is affected, which is why one alias worked and the other did not. And it matters
+path is affected — which is why, under the forced door, a forwarded command lands in `~`
+and `in-workspace` is how one asks for the repo. And it matters
 because the entrypoint seeds Claude Code's trust dialog for `/workspace`: a session started
 in `/home/dev` asks you to trust a directory that is not the repo.
 
@@ -993,12 +1000,11 @@ usually been hung up along with the menu before its fallback runs. **A row's tit
 `/resume` picker shows** (v0.3.1): the `/rename` name, else Claude Code's generated title,
 else the first prompt — read from the transcript by the hook at `SessionStart` and `Stop`.
 A recreate ends every slot anyway, and each one takes its new title when it is resumed. **`claude-sessions-door`**
-is what a login runs (`RemoteCommand in-workspace claude-sessions-door`, and `make
-claude`): the menu at a terminal; a login shell when there is no terminal or the menu
+is what every ssh session runs — sshd's `ForceCommand` since 2026-10-04, and `make
+claude` — the menu at a terminal; a login shell when there is no terminal or the menu
 exits non-zero (it has said why on stderr by then); a forwarded `SSH_ORIGINAL_COMMAND`
-run as given. **A client re-run reaches every dev container's alias at once**, and a
-container whose base predates `2026.10.02.1` has no door — `ssh <it>` then answers
-`exec: claude-sessions-door: not found` (from `in-workspace`, which is dash) until that repo bumps, and `<it>-sh` gets in.
+run as given, in `~`. A container whose base predates the forced door answers `ssh <it>`
+with a plain login shell until its repo bumps (*How this container is used*).
 
 | Piece | Where | What it does |
 |---|---|---|

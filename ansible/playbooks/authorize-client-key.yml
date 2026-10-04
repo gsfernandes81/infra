@@ -214,9 +214,11 @@
     #
     # Reached over ssh with the container's own `-sh` alias — the same path the owner
     # would use by hand, so a failure here is fixed by the command that failed. delegated
-    # to localhost because that alias is in the CLIENT's ssh config, not zero's. The bare
-    # alias would be wrong: it carries a RemoteCommand, which makes `ssh <alias> <cmd>` an
-    # error.
+    # to localhost because that alias is in the CLIENT's ssh config, not zero's. `-sh` and
+    # not the bare alias only until every client has re-run configure-client.yml since
+    # 2026-10-04: a client block from before then still gives the bare alias a
+    # RemoteCommand, which makes `ssh <alias> <cmd>` an error, while `-sh` works under both
+    # the old block and the new one, where the two names are one Host block.
     - name: Refresh the copy sshd reads, inside each container
       ansible.builtin.command:
         # expand_argument_vars: false OR THE SCRIPT IS RESOLVED ON THE WRONG MACHINE.

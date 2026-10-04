@@ -1,26 +1,29 @@
 #!/bin/sh
-# What an ssh login lands on: the claude-sessions menu, or a shell if the menu cannot run.
+# What every ssh session into this container runs: the claude-sessions menu, a forwarded
+# command, or a shell.
 #
-#     RemoteCommand in-workspace claude-sessions-door      (ansible/templates/ssh-dev-block.j2)
+#     ForceCommand /usr/local/bin/claude-sessions-door      (dev/sshd_config)
 #
 # The contract is claude-sessions' docs/design.md § "The door"; this is infra's half of it.
-# `in-workspace` has already put us in /workspace, which is also where the menu's `n` and
-# `s` start (CLAUDE_SESSIONS_WORKSPACE defaults to it).
+# It is sshd's ForceCommand since 2026-10-04 (infra#7), so no client names it: a client's
+# ssh block is transport only, and `ssh <c>`, `ssh <c> cmd`, scp, sftp and Zed all arrive
+# here. Before that it was each client's RemoteCommand, which made `ssh <c> cmd` a
+# client-side error and let a client name a door its container's image did not have.
 #
 # ONLY AN INTERACTIVE LOGIN GETS THE MENU. A full-screen program on the other end of rsync,
 # scp or a `ssh box cmd` corrupts the stream or waits forever for a key, so:
-#   - a command forwarded by sshd (SSH_ORIGINAL_COMMAND, set when this runs as a
-#     ForceCommand) runs that command. Today it runs as a RemoteCommand instead, where that
-#     variable is never set and `ssh <alias> cmd` is refused by the client. The branch
-#     means a later move into sshd hands sftp a FAILED command rather than a menu — not a
-#     working sftp: sshd sets the variable to the literal `internal-sftp`, which no shell
-#     can run, so that move still needs the sftp special case in-workspace's header names;
-#   - no terminal on stdin or stdout means a plain login shell.
+#   - a command the client asked for (SSH_ORIGINAL_COMMAND) runs as given, in $HOME where
+#     sshd put it — exactly as it ran before the door was forced, so nothing that worked
+#     then moves. That includes sftp: dev/sshd_config names a real sftp-server binary
+#     for this branch to run, because the `internal-sftp` it used to name is not one.
+#     `ssh <c> in-workspace cmd` runs a command in /workspace instead;
+#   - no terminal on stdin or stdout means a plain login shell;
+#   - a terminal and no command is the menu, in /workspace.
 #
 # THE MENU FAILING MUST NEVER LOCK THE DOOR. Exit 0 is the owner quitting, and ends the
 # login. Anything else — the binary missing, a terminal too narrow, a registry it cannot
 # read — and claude-sessions has already said why on stderr; this adds one line and becomes
-# a login shell, so a broken menu costs a keypress rather than a trip to `<alias>-sh`.
+# a login shell, so a broken menu costs a keypress rather than a `docker exec` from the host.
 # The one exception is 129 (claude-sessions v0.3.7): the terminal went away and the menu
 # said nothing. The line and the shell then meet a hung-up terminal and fail quietly, so
 # the door does not special-case it (decisions.md, the door row).
@@ -34,7 +37,19 @@ shell="${SHELL:-$(getent passwd "$(id -u)" | cut -d: -f7)}"
 shell="${shell:-/bin/sh}"
 
 if [ -n "${SSH_ORIGINAL_COMMAND:-}" ]; then
-    exec "$shell" -c "$SSH_ORIGINAL_COMMAND"
+    # Unset before it runs, or a command that leads back here loops: a client block from
+    # before 2026-10-04 still sends `in-workspace claude-sessions-door` as its command,
+    # and the door it reaches must see a login, not that same command again.
+    cmd=$SSH_ORIGINAL_COMMAND
+    unset SSH_ORIGINAL_COMMAND
+    exec "$shell" -c "$cmd"
+fi
+
+# Where the work is, for the menu and both shells — what `in-workspace` did when it ran
+# ahead of the door. Warn and carry on, as it does: with the bind mount missing you want
+# the way in anyway, most likely to find out why.
+if ! cd /workspace 2>/dev/null; then
+    echo "claude-sessions-door: /workspace is not there - the bind mount is missing; staying in $(pwd)" >&2
 fi
 
 if [ ! -t 0 ] || [ ! -t 1 ]; then

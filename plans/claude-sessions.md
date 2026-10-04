@@ -873,6 +873,19 @@ at 6 columns, the right edge marked:
      `exec: claude-sessions-door: not found` until each repo bumps `BASE_TAG`; `<c>-sh`
      gets in meanwhile. **This plan is deleted** when the clients are re-run, the children
      have bumped, and Stage B has landed.
+   - **The door moved into the container's sshd on 2026-10-04** (infra#7, `decisions.md`):
+     `ForceCommand` in `dev/sshd_config`, a transport-only client block, forwarded commands
+     in `~`. Landed at `2026.10.04.2`. **Owner's, in order:** wait for `dev-base.yml` to
+     publish `2026.10.04.2` and recreate infra-dev (`ssh -t zero 'cd ~/infra/dev && make
+     up'`); `make verify`'s `door` line reads `/usr/local/bin/claude-sessions-door`, not
+     `none`. Before re-running any client, `ssh infra-dev` from the phone must still reach the
+     menu — the old block's `RemoteCommand` arrives at the forced door and is run, which the
+     throwaway-sshd test proved but a real client has not. Then re-run `configure-client.yml`
+     on each client, and on each: `ssh infra-dev` is the menu, `ssh infra-dev 'pwd'` prints
+     `/home/dev`, `scp` of a file round-trips, **Zed's remote open to the bare alias works**
+     (the one check the throwaway sshd could not run), and `ssh -t infra-dev in-workspace`
+     is a shell in `/workspace`. or3's phone tunnel (`ssh -N -R` over `or3-dev-sh`) is
+     unaffected throughout: `-N` opens no session, and `-sh` is still a name.
 
 Phases 1 and 2 can run in parallel. Each phase lands on `main` complete and non-breaking.
 A push to `main` touching `dev/` publishes a new base tag automatically; no container

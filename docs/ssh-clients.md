@@ -59,38 +59,44 @@ it — anything above it is separated from it by the next block a playbook inser
 
 ## Three routes to a dev container
 
-Each container gets two aliases, and they are the same route — one carries a
-`RemoteCommand`, the other does not.
+Each container gets **one route and one alias**; `<c>-sh` is a second name for it.
 
 | Alias | Route | Fails when |
 |---|---|---|
-| `<c>` | its own tunnel → Access → the container's sshd | its tunnel, its Access app, its token, or Cloudflare |
-| `<c>-sh` | the same, without `RemoteCommand` | the same |
+| `<c>` (and `<c>-sh`) | its own tunnel → Access → the container's sshd | its tunnel, its Access app, its token, or Cloudflare |
 
-**`ssh <c>` IS the session menu.** `RemoteCommand in-workspace claude-sessions-door` lands
-on `claude-sessions`: every session in the container, live or offloaded, `Enter` to attach
-or resume, `n` for a new one, `q` to leave — so the habit is still one word, and it now
-finds every session rather than the one named `claude`. Each session it opens is an
-abduco session, so it outlives the link: an ssh session from a phone dies at the lock
-screen, and the work must not. `in-workspace` is a program in the **image** and holds the
-one thing the container owns — where its work is, so no client names that path. The door
-is in the image too, and it never locks you out: a menu that cannot run (too narrow a
-terminal, a missing binary) says why and drops to a login shell. A laptop on ethernet
-running `ssh … 'git log'`, or a one-shot `claude -p`, wants the workspace and no menu at
-all — that is `<c>-sh`.
+**The container decides what a login runs, not the client** (2026-10-04, infra#7). Its sshd
+forces every session through `claude-sessions-door` (`dev/sshd_config`, `ForceCommand`),
+and the client block is transport only — `HostName`, `User`, `ProxyCommand`, the host key
+and the identity. So:
 
-**Changed 2026-10-02 from `in-workspace abduco -A claude claude`.** The template serves
-every dev container, and a container gets the door only when its repo's `BASE_TAG` reaches
-`2026.10.02.1`; until then, after a client re-run, `ssh <c>` to it answers
-`in-workspace: 42: exec: claude-sessions-door: not found` (dash's wording — `in-workspace`
-is `sh`, so this is not fish's *Unknown command*) and `<c>-sh` is the way in. Taken knowingly over a per-alias
-switch (`docs/decisions.md`). Sessions started the old way still show, marked `u`, and
-`Enter` attaches them.
+| You run | You get |
+|---|---|
+| `ssh <c>` | **the session menu** — every session in the container, `Enter` to attach or resume, `n` for a new one, `q` to leave |
+| `ssh <c> 'git log'` | the command, in `~`, exactly as any ssh runs it — `ssh <c> in-workspace git log` for the repo |
+| `scp`, `sftp`, Zed, ansible | work, as against any sshd; `scp file <c>:` lands in `~` |
+| `ssh -t <c> in-workspace` | a login shell in `/workspace` |
+| `ssh -T <c>` | a login shell with no terminal |
+| `ssh -N -L/-R …` | the forward, untouched — `-N` opens no session, so the door never runs |
 
-**The caveat that comes with `RemoteCommand`:** `ssh <c> <command>` is then an error
-(*cannot execute command-line and remote command*), and `scp`/`sftp` to that alias will
-not work. `<c>-sh` exists for both. It is worth its own alias rather than
-`ssh -o RemoteCommand=none <c>`, which nobody remembers under pressure.
+Each session the menu opens is an abduco session, so it outlives the link: an ssh session
+from a phone dies at the lock screen, and the work must not. The door never locks you out:
+a menu that cannot run (too narrow a terminal, a missing binary) says why and drops to a
+login shell.
+
+**A container whose base predates 2026-10-04 answers `ssh <c>` with its plain login shell**
+— the old `-sh` behaviour, not an error — until its repo bumps `BASE_TAG`; the menu is then
+`claude-sessions-door` by hand. The client cannot name a program the image lacks any more,
+which is what used to make a not-yet-bumped child answer `exec: claude-sessions-door: not
+found`.
+
+**Before 2026-10-04** the main alias carried `RequestTTY yes` and `RemoteCommand in-workspace
+claude-sessions-door`, which made `ssh <c> <cmd>` a client-side error (*cannot execute
+command-line and remote command*) and scp/sftp to it unreliable; `<c>-sh` existed for both.
+A client not yet re-run still has that block and keeps working: its `RemoteCommand` arrives
+at the forced door as a command, and the door runs it — `in-workspace` then starts the door
+again, which this time sees a login. `<c>-sh` is kept as a name so tools that use it
+(`authorize-client-key.yml`, or3's phone tunnel) need no change, and goes once nothing does.
 
 ### Break glass by hand — there is no third alias
 

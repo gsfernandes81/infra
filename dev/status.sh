@@ -296,17 +296,16 @@ except OSError as e:
 print(" ".join(sorted(h)) if h else "PRESENT BUT EMPTY — no hooks in it")
 ' 2>&1)"
     printf 'hooks     : %s\n' "${hooks_file:-could not ask the container — see the container line above}"
-    # The one the phone's RemoteCommand names. Absent here and `ssh infra-dev` fails with
-    # "Unknown command: in-workspace" from the container's fish — which reads like a
-    # broken ssh config and is in fact an image that was never rebuilt. Cheap to check,
-    # and it is the check that would have said so.
+    # `ssh <c> in-workspace <cmd>` and `ssh -t <c> in-workspace` name it; an image without
+    # it answers "in-workspace: not found" from the login shell.
     printf 'in-workspace: %s\n' "$(d exec "$CONTAINER" sh -c 'command -v in-workspace' 2>/dev/null \
         || echo 'MISSING — this image predates it. Rebuild: make up')"
-    # The same failure one step later: once ssh-dev-block.j2's RemoteCommand names the door,
-    # a client re-run against an image without it gets, from in-workspace's dash,
-    # "exec: claude-sessions-door: not found" at login.
-    printf 'door      : %s\n' "$(d exec "$CONTAINER" sh -c 'command -v claude-sessions-door' 2>/dev/null \
-        || echo 'MISSING — this image predates it. Rebuild: make up')"
+    # What sshd ACTUALLY forces, read the way sshd reads it (`-T` takes the drop-ins too, so
+    # a child's `ForceCommand none` shows here). `none` on a base that should have the door
+    # means `ssh <c>` lands on a plain shell rather than the menu — an image that predates
+    # 2026-10-04 or a drop-in that switched it off, not a client problem.
+    printf 'door      : %s\n' "$(d exec "$CONTAINER" sh -c '/usr/sbin/sshd -T -f /home/dev/sshd_config 2>/dev/null | sed -n "s/^forcecommand //p"' 2>/dev/null \
+        | grep . || echo 'could not ask sshd')"
     printf '\n'
     collections
     printf '\n'

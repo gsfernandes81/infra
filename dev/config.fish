@@ -9,8 +9,9 @@
 # `fish -c ...` from a script has to keep the directory its caller chose — a
 # config that cd'd every fish would move the ground under anything scripted.
 #
-# THE CONSEQUENCE THAT BITES: an ssh RemoteCommand is `$SHELL -c '…'`, so it is not a
-# login shell either and this does NOT run for it. A client whose ssh config says
+# THE CONSEQUENCE THAT BITES: a forwarded ssh command — `ssh <c> cmd` through the door,
+# or a client's RemoteCommand — is `$SHELL -c '…'`, so it is not a login shell either and
+# this does NOT run for it, which is why such a command lands in ~. A client whose ssh config said
 # `RemoteCommand abduco -A claude claude` lands in /home/dev, and claude then asks to
 # trust a directory that is not the repo — the entrypoint seeded the trust dialog for
 # /workspace. The answer is /usr/local/bin/in-workspace, which cds and then execs

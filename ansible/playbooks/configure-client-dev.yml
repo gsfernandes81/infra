@@ -1045,7 +1045,8 @@
       ansible.builtin.debug:
         msg:
           - "ssh {{ dev_alias }}         the claude-sessions menu, over Cloudflare"
-          - "ssh {{ dev_alias }}-sh      a shell instead, same route"
+          - "ssh {{ dev_alias }} <cmd>   runs it in ~ (in-workspace <cmd> for /workspace); scp/sftp/Zed too"
+          - "ssh -t {{ dev_alias }} in-workspace   a login shell in /workspace"
           - "    no -lan alias: break glass by hand with `ssh <host>` and then"
           - "    `ssh -p <port> dev@127.0.0.1`, ports in configure-client.yml."
           - ""

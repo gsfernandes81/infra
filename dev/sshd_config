@@ -104,5 +104,22 @@ Compression yes
 ClientAliveInterval 30
 ClientAliveCountMax 3
 
-Subsystem sftp internal-sftp
+# EVERY SESSION GOES THROUGH THE DOOR (2026-10-04, infra#7). The image names the door,
+# not each client's ssh config, so a client cannot ask for a program this image lacks,
+# and one alias does everything: the door gives a terminal with no command the menu,
+# runs a forwarded command (`ssh <c> cmd`, scp, Zed, ansible) as sshd would have —
+# in $HOME — and gives anything else a login shell. `ssh -N` opens no session, so a
+# forward never meets it. A child that must not have it sets `ForceCommand none` in its
+# drop-in, which wins for the reason the Include is at the top.
+#
+# This reverses a rejection in dev/in-workspace's header; the reasons it was rejected,
+# and why each no longer holds, are in docs/decisions.md.
+ForceCommand /usr/local/bin/claude-sessions-door
+
+# A REAL BINARY, NOT internal-sftp, because of the line above. Under ForceCommand sshd
+# hands a subsystem request to the forced command with SSH_ORIGINAL_COMMAND set to the
+# subsystem's command — and `internal-sftp` is a word no shell can run, so sftp, and
+# the sftp-speaking scp that OpenSSH defaults to, would fail. The door runs this path
+# like any forwarded command. From openssh-sftp-server, which openssh-server depends on.
+Subsystem sftp /usr/lib/openssh/sftp-server
 StrictModes yes

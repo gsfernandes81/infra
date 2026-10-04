@@ -1,9 +1,8 @@
 #!/bin/sh
 # Run something where this container's work is.
 #
-#     in-workspace claude-sessions-door
-#     in-workspace git status
-#     in-workspace                          (no args: a login shell)
+#     ssh <c> in-workspace git status        a forwarded command, in the repo
+#     ssh -t <c> in-workspace                (no args: a login shell, in the repo)
 #
 # WHY THIS EXISTS. sshd runs a remote command as `$SHELL -c '…'`, which is NOT a login
 # shell — so config.fish's `status is-login` guard is false and its cd to /workspace
@@ -23,10 +22,15 @@
 # `ssh … 'git log'`, a cron, or a one-shot `claude -p` all want no such thing. Wrapping
 # both meant a client could not have the second without the first.
 #
-# Rejected: an sshd ForceCommand that cds every session whatever the client asked for.
-# More complete, and not worth it — it has to special-case sftp and $SSH_ORIGINAL_COMMAND,
-# it is boot-path-ish config on the only way in, and CLAUDE.md is explicit about care with
-# the thing you are connected through. This is inert until something runs it.
+# ⚠︎ ONCE REJECTED, NOW TAKEN (2026-10-04, infra#7): an sshd ForceCommand. It was turned
+# down here as needing sftp and $SSH_ORIGINAL_COMMAND special-cased, as boot-path-ish
+# config on the only way in, and for the care CLAUDE.md asks with the thing you are
+# connected through. The door already handled the command; sftp became a real binary
+# (dev/sshd_config); `docker exec` and the loopback port were always other ways in; and
+# the care governs the rollout, not the design. The full reckoning is in
+# docs/decisions.md. What changed here: the forced command is the DOOR, which cds itself
+# for a login, and forwarded commands stay in $HOME — so this is no longer on every
+# login's path, only on the ones that ask for the repo.
 set -u
 
 if ! cd /workspace 2>/dev/null; then
