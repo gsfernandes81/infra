@@ -66,6 +66,7 @@ The halves, for reading rather than running:
 | `_dev-container-tunnel.yml` | the **edge** side — tunnel, DNS, Access application and policy |
 | `_dev-container-host.yml` | the **host** side of `infra-dev` on zero — secrets dir, deploy key, authorized_keys, `dev/.env` |
 | `_assert-inventory.yml` | imported above every play that targets `control` or `fleet`, so a run with no inventory fails instead of exiting 0 |
+| `_cf-api-token.yml` | tasks, imported by every play that talks to Cloudflare: reads the API token file, refuses it on the command line, prints the minting steps when it is missing, verifies it |
 
 **`server-create-dev-container.yml` runs the edge half, then the host half, in one go.**
 Until 2026-10-04 they were three separately-run plays (the client half is still separate,
@@ -245,7 +246,7 @@ works, so mint a separate one on each machine, named for it: a lost laptop is th
 token and one set of service tokens to delete, and the phone notices nothing.
 
 **It must be a USER token, from My Profile — not an "Account API Token" from Manage
-Account.** Every tunnel play proves the token first with `GET /user/tokens/verify`, and
+Account.** Every play that reads it proves it first with `GET /user/tokens/verify`, and
 an account-owned token fails that call outright even when its permissions are right.
 
 ### Minting it

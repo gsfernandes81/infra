@@ -24,7 +24,7 @@
     old_cred_file: "/etc/cloudflared/{{ inventory_hostname }}.json.pre-2g"
     probe: "http://127.0.0.1:20241"
     api_hdr:
-      Authorization: "Bearer {{ cf_api_token }}"
+      Authorization: "Bearer {{ cf_token }}"
     # Hostnames knowingly left behind, comma-separated. They point at the old tunnel and
     # will stop resolving to anything when it goes. Naming them is the acknowledgement.
     abandon: ""
@@ -34,126 +34,9 @@
     drop_routes: false
 
   tasks:
-    # ── the API token: a file on this machine, or the instructions to make one ─
-    # group_vars/all.yml names the file and holds the instructions; ansible/README.md
-    # § "The Cloudflare API token" has the reasoning. Never on the command line and never
-    # prompted for: a prompt is a paste, and the owner asked for none. Never inside the
-    # repo checkout either — it is bind-mounted into infra-dev, which has no route to the
-    # fleet by decision and must not get one to the edge by accident.
-    - name: Refuse an API token supplied on the command line
-      # `-e cf_api_token=` would silently beat the file (extra vars win) after the value
-      # had already been through your shell. The same refusal the client play makes.
-      ansible.builtin.assert:
-        that: cf_api_token is not defined
-        fail_msg: >-
-          cf_api_token was passed as a variable. It is read from {{ cf_api_token_file }}
-          and nowhere else: an -e value is in your shell history and was in the process
-          list. Re-run without it, then in fish `history delete --contains cf_api_token`.
-        success_msg: "no API token on the command line"
-      run_once: true
-
-    - name: Look for the API token file on this machine
-      ansible.builtin.stat:
-        path: "{{ cf_api_token_file }}"
-      register: cf_tok_file
-      delegate_to: localhost
-      run_once: true
-      check_mode: false
-
-    - name: How to get one, when there is none
-      ansible.builtin.debug:
-        msg: "{{ cf_api_token_howto }}"
-      changed_when: true
-      run_once: true
-      when: not cf_tok_file.stat.exists
-
-    - name: Stop without one
-      ansible.builtin.assert:
-        that: cf_tok_file.stat.exists
-        fail_msg: "no API token file; the instructions are above"
-        success_msg: "API token file present"
-      run_once: true
-
-    - name: Refuse a token file anyone but you can read
-      ansible.builtin.assert:
-        that: cf_tok_file.stat.mode in ['0600', '0400']
-        fail_msg: >-
-          {{ cf_api_token_file }} is mode {{ cf_tok_file.stat.mode }}. chmod 600 it: it is
-          an API token with write access to every tunnel in this fleet.
-        success_msg: "API token file is mode {{ cf_tok_file.stat.mode }}"
-      run_once: true
-
-    - name: Read the API token from the file
-      ansible.builtin.set_fact:
-        cf_api_token: "{{ lookup('file', cf_api_token_file) | trim }}"
-      no_log: true
-
-    - name: Refuse an empty token file
-      ansible.builtin.assert:
-        that: cf_api_token | length > 0
-        fail_msg: "{{ cf_api_token_file }} is empty"
-        success_msg: "API token in hand"
-      run_once: true
-
-    # ── is this token even a token? ──────────────────────────────────────────
-    # FIRST, before anything reads a box or the API. Cloudflare answers a token it will
-    # not accept with `9109 Invalid access token` on whatever endpoint you happened to
-    # hit, so the failure lands wherever the play got to and looks like that endpoint's
-    # problem. `/user/tokens/verify` asks the one question directly, and separates the two
-    # causes that are otherwise indistinguishable: a token string that is wrong, expired
-    # or not yet active, versus a valid token missing a permission.
-    #
-    # failed_when: false + print the body + assert — the pattern CLAUDE.md records for a
-    # no_log call that can be refused. The body is the only thing that names the cause;
-    # the invocation is never printed, because that is where the Authorization header is.
-    - name: Verify the API token before using it
-      ansible.builtin.uri:
-        url: "{{ cf_api }}/user/tokens/verify"
-        headers: "{{ api_hdr }}"
-      register: tok
-      delegate_to: localhost
-      run_once: true
-      no_log: true
-      failed_when: false
-      check_mode: false
-
-    - name: Say what Cloudflare said about the token
-      ansible.builtin.debug:
-        msg: >-
-          token verify: HTTP {{ tok.status | default('?') }},
-          status {{ tok.json.result.status | default('unknown') }},
-          {{ tok.json.errors | default([]) }}
-      changed_when: true
-      when: (tok.status | default(0)) != 200 or (tok.json.result.status | default('')) != 'active'
-
-    - name: Refuse a token Cloudflare will not accept
-      ansible.builtin.assert:
-        that:
-          - (tok.status | default(0)) == 200
-          - (tok.json.result.status | default('')) == 'active'
-        fail_msg: |
-          Cloudflare will not accept this token at all — this is NOT a missing permission.
-          A scope problem gets you a 403 on the specific endpoint with the token still
-          verifying as active; this fails verification outright.
-
-          Check, in order: that the whole token was pasted (it is read with echo off, so a
-          truncated paste is invisible); that it has not expired or been revoked; that its
-          start date is not in the future; and that it is an API token from My Profile ->
-          API Tokens rather than a Global API Key or an Access service token.
-
-          Test it by hand without this play. FISH, which is what this fleet runs —
-          `read -rs` is bash and fish will not take it:
-
-            read -s TOKEN
-            curl -s -H "Authorization: Bearer $TOKEN" https://api.cloudflare.com/client/v4/user/tokens/verify
-            curl -s -H "Authorization: Bearer $TOKEN" "https://api.cloudflare.com/client/v4/zones?name=gsrpi.uk"
-            set -e TOKEN
-
-          In bash it is `read -rs TOKEN` and `unset TOKEN`. Either way the token stays out
-          of history: only the variable name is on the command line.
-
-          Nothing has been read or changed.
-        success_msg: "token verifies as active"
+    # ── the API token: read, checked and verified, in one shared file ─────────
+    - name: The Cloudflare API token
+      ansible.builtin.import_tasks: _cf-api-token.yml
 
     - name: Read the tunnel we are on now, and the one we left
       ansible.builtin.slurp:

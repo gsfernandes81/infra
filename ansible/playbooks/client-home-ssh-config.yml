@@ -75,6 +75,19 @@
 # NO NEW COLLECTIONS, and no tasks of its own: this file is composition and a table.
 # Everything it runs belongs to the two plays it imports.
 
+# ── a typo in -e only= must not be a silent, successful, empty run ─────────────
+# Every import below is gated on `only`, so a misspelt alias skips all of them and exits
+# 0 with an empty recap — the exact shape _assert-inventory.yml exists to prevent.
+- name: Refuse an `only` that names no container
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: only names a container in the registry above
+      ansible.builtin.assert:
+        that: only is not defined or only in ['infra-dev', 'or3-dev', 'dd-dev', 'ds-dev']
+        fail_msg: "-e only={{ only | default('') }} names no dev container; the registry in this file's header has the four"
+        success_msg: "{{ 'one container: ' ~ only if only is defined else 'every container' }}"
+
 # ── the servers: the fleet, the mesh, and the LAN and cross-box rescue paths ────
 - name: The fleet
   ansible.builtin.import_playbook: _client-fleet-ssh.yml
@@ -87,9 +100,9 @@
 
 # ── the dev containers ─────────────────────────────────────────────────────────
 # One import each rather than a loop over the table above, deliberately. _client-dev-ssh.yml
-# prompts for a credential and writes it at 0600; a loop would put those prompts and
-# those writes inside `loop:` results, where `no_log` hides which iteration is which and
-# a mistake becomes a mistake about a secret. Static imports keep the reviewed
+# mints a credential and writes it at 0600; a loop would put those calls and those writes
+# inside `loop:` results, where `no_log` hides which iteration is which and a mistake
+# becomes a mistake about a secret. Static imports keep the reviewed
 # single-alias play exactly as it is, and each stanza reads as the fact it asserts.
 - name: infra-dev
   ansible.builtin.import_playbook: _client-dev-ssh.yml

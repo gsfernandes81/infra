@@ -40,9 +40,9 @@
 # checks them, swapping task 2 is a small, contained change.
 #
 # THE API TOKEN IS A FILE, ~/.config/cloudflare/api-token (mode 600) on the machine
-# running this — the tasks at the top of the play, shared word for word with the three
-# server-*-tunnel plays and the client play, and group_vars/all.yml names the file and
-# holds the instructions printed when it is missing. One token, the union of what every
+# running this — read and verified by _cf-api-token.yml, the one tasks file every play
+# that talks to Cloudflare imports; group_vars/all.yml names the file and holds the
+# instructions printed when it is missing. One token, the union of what every
 # play needs; ansible/README.md § "The Cloudflare API token" has the permissions. Until
 # 2026-10-04 it was prompted for on every run and deliberately never stored; the owner
 # asked for the file and for no prompts, and the trade is recorded in docs/decisions.md.
@@ -95,9 +95,13 @@
     # Deliberately not a plausible UUID: if it ever escapes into a real request, that
     # request should fail obviously rather than create something against the wrong object.
     cf_unknown_id: WOULD-BE-CREATED-BY-A-REAL-RUN
-    # Where the container's read-only secrets mount points on the host. Matches
-    # INFRA_SECRETS in dev/.env; override with -e if that was changed.
-    infra_secrets: "{{ secrets_dir | default('~/.infra-dev-secrets') }}"
+    # Where the container's read-only secrets mount points on the host — and so where
+    # tunnel.json lives, which is how this play decides whether the tunnel ALREADY EXISTS.
+    # Keyed on the container's name, `~/.<name>-secrets`, the convention
+    # server-add-authorised-keys.yml also relies on: a literal infra-dev path here made
+    # `-e name=or3-dev` read infra-dev's credentials, find its tunnel alive, and CNAME
+    # or3-dev at it. -e secrets_dir= for a container whose mount is somewhere else.
+    infra_secrets: "{{ secrets_dir | default('~/.' ~ cf_name ~ '-secrets') }}"
     # Irrelevant to a service token, which does not expire with a session. Set explicitly
     # so the value is chosen rather than inherited from a Cloudflare default nobody read.
     cf_session_duration: 24h
@@ -113,66 +117,9 @@
     # An API token that someone named "service_token" is still an API token.
 
   tasks:
-    # ── the API token: a file on this machine, or the instructions to make one ─
-    # group_vars/all.yml names the file and holds the instructions; ansible/README.md
-    # § "The Cloudflare API token" has the reasoning. Never on the command line and never
-    # prompted for: a prompt is a paste, and the owner asked for none. Never inside the
-    # repo checkout either — it is bind-mounted into infra-dev, which has no route to the
-    # fleet by decision and must not get one to the edge by accident.
-    - name: Refuse an API token supplied on the command line
-      # `-e cf_api_token=` would silently beat the file (extra vars win) after the value
-      # had already been through your shell. The same refusal the client play makes.
-      ansible.builtin.assert:
-        that: cf_api_token is not defined
-        fail_msg: >-
-          cf_api_token was passed as a variable. It is read from {{ cf_api_token_file }}
-          and nowhere else: an -e value is in your shell history and was in the process
-          list. Re-run without it, then in fish `history delete --contains cf_api_token`.
-        success_msg: "no API token on the command line"
-      run_once: true
-
-    - name: Look for the API token file on this machine
-      ansible.builtin.stat:
-        path: "{{ cf_api_token_file }}"
-      register: cf_tok_file
-      delegate_to: localhost
-      run_once: true
-      check_mode: false
-
-    - name: How to get one, when there is none
-      ansible.builtin.debug:
-        msg: "{{ cf_api_token_howto }}"
-      changed_when: true
-      run_once: true
-      when: not cf_tok_file.stat.exists
-
-    - name: Stop without one
-      ansible.builtin.assert:
-        that: cf_tok_file.stat.exists
-        fail_msg: "no API token file; the instructions are above"
-        success_msg: "API token file present"
-      run_once: true
-
-    - name: Refuse a token file anyone but you can read
-      ansible.builtin.assert:
-        that: cf_tok_file.stat.mode in ['0600', '0400']
-        fail_msg: >-
-          {{ cf_api_token_file }} is mode {{ cf_tok_file.stat.mode }}. chmod 600 it: it is
-          an API token with write access to every tunnel in this fleet.
-        success_msg: "API token file is mode {{ cf_tok_file.stat.mode }}"
-      run_once: true
-
-    - name: Read the API token from the file
-      ansible.builtin.set_fact:
-        cf_api_token: "{{ lookup('file', cf_api_token_file) | trim }}"
-      no_log: true
-
-    - name: Refuse an empty token file
-      ansible.builtin.assert:
-        that: cf_api_token | length > 0
-        fail_msg: "{{ cf_api_token_file }} is empty"
-        success_msg: "API token in hand"
-      run_once: true
+    # ── the API token: read, checked and verified, in one shared file ─────────
+    - name: The Cloudflare API token
+      ansible.builtin.import_tasks: _cf-api-token.yml
 
     # ── flags this play no longer has ────────────────────────────────────────
     # Someone typing one from a note or from scrollback should be told what changed, not
@@ -199,7 +146,7 @@
     - name: Resolve the zone and its account
       ansible.builtin.uri:
         url: "{{ cf_api }}/zones?name={{ cf_zone }}"
-        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        headers: { Authorization: "Bearer {{ cf_token }}" }
       register: cf_zone_q
       delegate_to: localhost
       check_mode: false
@@ -257,7 +204,7 @@
       # looks exactly like the container being down. Catch it now, not at 03:00.
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account_id }}/cfd_tunnel/{{ cf_tunnel_id }}"
-        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        headers: { Authorization: "Bearer {{ cf_token }}" }
         status_code: [200, 404]
       register: cf_tunnel_q
       delegate_to: localhost
@@ -313,7 +260,7 @@
         # meant the object was made and the response carrying its one-and-only
         # secret was censored by no_log and thrown away. Accept both, everywhere.
         status_code: [200, 201]
-        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        headers: { Authorization: "Bearer {{ cf_token }}" }
         body_format: json
         body:
           name: "{{ cf_name }}"
@@ -350,7 +297,7 @@
       # an unrelated record instead of managing ours.
       ansible.builtin.uri:
         url: "{{ cf_api }}/zones/{{ cf_zone_id }}/dns_records?type=CNAME&name={{ cf_hostname }}"
-        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        headers: { Authorization: "Bearer {{ cf_token }}" }
       register: cf_dns_q
       delegate_to: localhost
       check_mode: false
@@ -387,7 +334,7 @@
              '/' ~ cf_dns_q.json.result[0].id if (cf_dns_q.json.result | length) > 0 else '' }}
         method: "{{ 'PUT' if (cf_dns_q.json.result | length) > 0 else 'POST' }}"
         status_code: [200, 201]
-        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        headers: { Authorization: "Bearer {{ cf_token }}" }
         body_format: json
         body:
           type: CNAME
@@ -405,7 +352,7 @@
     - name: List the account's Access applications
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps"
-        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        headers: { Authorization: "Bearer {{ cf_token }}" }
       register: cf_app_q
       delegate_to: localhost
       check_mode: false
@@ -436,7 +383,7 @@
              '/' ~ cf_app_id if cf_app_id is defined else '' }}
         method: "{{ 'PUT' if cf_app_id is defined else 'POST' }}"
         status_code: [200, 201]
-        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        headers: { Authorization: "Bearer {{ cf_token }}" }
         body_format: json
         body:
           name: "{{ cf_name }}"

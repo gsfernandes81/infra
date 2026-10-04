@@ -12,14 +12,15 @@
 #     ansible-playbook playbooks/client-home-ssh-config.yml -e only=<name>   # on EACH client
 #
 # No -K: nothing here needs root. It needs the Cloudflare API token, read from
-# ~/.config/cloudflare/api-token on the phone or prompted for — ansible/README.md § "The
-# Cloudflare API token" is where that is minted and what it must carry.
+# ~/.config/cloudflare/api-token on this machine; if that is missing it prints how to mint
+# one and stops — ansible/README.md § "The Cloudflare API token".
 #
 # TWO HALVES, imported in the order that lets one run do it all:
 #
-#   1. _dev-container-tunnel.yml  the EDGE: tunnel, CNAME, Access service token (its
-#                                 secret printed ONCE), Access application and policy.
-#                                 Idempotent — re-run after a partial failure to finish.
+#   1. _dev-container-tunnel.yml  the EDGE: tunnel, CNAME, and an Access application with
+#                                 NO policy — each client adds its own service token to
+#                                 it when client-home-ssh-config.yml runs there. Nothing is
+#                                 printed. Idempotent — re-run after a partial failure.
 #   2. _dev-container-host.yml    the HOST, infra-dev ONLY: secrets dir, deploy key,
 #                                 authorized_keys, and dev/.env with the hostname the edge
 #                                 half just created. Other containers keep their host side

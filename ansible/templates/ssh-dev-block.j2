@@ -35,7 +35,7 @@ Host {{ dev_alias }} {{ dev_alias }}-sh
 {% if windows %}
   ProxyCommand {{ win_wrapper }} %h
 {% else %}
-  ProxyCommand sh -c 'f="{{ token_file }}"; if [ -r "$f" ]; then . "$f"; if [ -n "${TUNNEL_SERVICE_TOKEN_ID:-}" ] && [ -n "${TUNNEL_SERVICE_TOKEN_SECRET:-}" ]; then exec "{{ cloudflared }}" access ssh --hostname %h; fi; echo "{{ dev_alias }}: $f is there but does not hold both halves of a token - run _client-dev-ssh.yml -e alias={{ dev_alias }} --tags access -e replace_token=true" >&2; exit 1; fi; echo "{{ dev_alias }}: no Access token at $f - run _client-dev-ssh.yml -e alias={{ dev_alias }} --tags access" >&2; exit 1'
+  ProxyCommand sh -c 'f="{{ token_file }}"; if [ -r "$f" ]; then . "$f"; if [ -n "${TUNNEL_SERVICE_TOKEN_ID:-}" ] && [ -n "${TUNNEL_SERVICE_TOKEN_SECRET:-}" ]; then exec "{{ cloudflared }}" access ssh --hostname %h; fi; echo "{{ dev_alias }}: $f is there but does not hold both halves of a token - run client-home-ssh-config.yml -e only={{ dev_alias }} --tags access -e replace_token=true" >&2; exit 1; fi; echo "{{ dev_alias }}: no Access token at $f - run client-home-ssh-config.yml -e only={{ dev_alias }} --tags access" >&2; exit 1'
 {% endif %}
   # One host key for the container under one name, whichever name was typed. To clear
   # it: ssh-keygen -R {{ dev_alias }}

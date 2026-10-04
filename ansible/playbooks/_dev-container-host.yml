@@ -82,9 +82,15 @@
                else env_tunnel_hostname) }}
     # The key that will be allowed to ssh INTO the container. Defaults to the control
     # node's own — run this from the phone and the phone authorises itself, which beats
-    # a paste. Override with -e to authorise a laptop as well; the module appends.
+    # a paste. Another client's key is server-add-authorised-keys.yml's job, but an
+    # override here works too: as JSON, -e '{"client_pubkey": "ssh-ed25519 AAAA… you@x"}',
+    # never -e client_pubkey=… (k=v splits on the space and keeps only "ssh-ed25519").
+    # `if … is defined`, not `default()`: Jinja evaluates default()'s argument eagerly, so
+    # the file lookup would fail on a control node without that key even when the
+    # override was given — the same trap _client-dev-ssh.yml documents for dev_hostname.
     dev_client_pubkey: >-
-      {{ client_pubkey | default(lookup('file', lookup('env', 'HOME') ~ '/.ssh/id_ed25519.pub'), true) }}
+      {{ client_pubkey if client_pubkey is defined
+         else lookup('file', lookup('env', 'HOME') ~ '/.ssh/id_ed25519.pub') }}
 
   tasks:
     - name: Read the existing dev/.env, if there is one

@@ -666,7 +666,10 @@ at 6 columns, the right edge marked:
      infra-dev since 2026-10-03 17:56; its 4b checks were not reported. `2026.10.04` (v0.3.6) was
      never rolled out. Nor were `2026.10.04.1` (v0.3.7) or `2026.10.04.2` (the forced door). For
      `2026.10.04.3`, repeat steps 1, 2 and 4b — 4a and 3 are unchanged — and step 6's
-     forced-door bring-up, which the same recreate delivers.
+     forced-door bring-up, which the same recreate delivers. **`2026.10.04.4` supersedes
+     `.3` before it was rolled out** (2026-10-04: no claude-sessions change, only the
+     entrypoint, login and sshd_config text that followed the published port out); read
+     `.4` wherever this step says `.3`.
      1. Wait for `dev-base.yml` to publish `2026.10.04.3` (v0.3.8 and the forced door; it
         supersedes `2026.10.03.3` and every tag since), then
         recreate infra-dev:
@@ -887,8 +890,8 @@ at 6 columns, the right edge marked:
      have bumped, and Stage B has landed.
    - **The door moved into the container's sshd on 2026-10-04** (infra#7, `decisions.md`):
      `ForceCommand` in `dev/sshd_config`, a transport-only client block, forwarded commands
-     in `~`. Landed at `2026.10.04.2`; reaches infra-dev as `2026.10.04.3`, with v0.3.8. **Owner's,
-     in order:** wait for `dev-base.yml` to publish `2026.10.04.3` and recreate infra-dev (`ssh -t zero 'cd ~/infra/dev && make
+     in `~`. Landed at `2026.10.04.2`; reaches infra-dev as `2026.10.04.4`, with v0.3.8. **Owner's,
+     in order:** wait for `dev-base.yml` to publish `2026.10.04.4` and recreate infra-dev (`ssh -t zero 'cd ~/infra/dev && make
      up'`); `make verify`'s `door` line reads `/usr/local/bin/claude-sessions-door`, not
      `none`. Before re-running any client, `ssh infra-dev` from the phone must still reach the
      menu — the old block's `RemoteCommand` arrives at the forced door and is run, which the

@@ -168,9 +168,10 @@ on any of them.
 - **Leave infra-dev's Access application, policy and service token alone.** They are the
   way into the container. Different tunnel; confirm which you are looking at.
 - **An Access service token is not an API token is not a tunnel token.** Three unrelated
-  credentials sharing a word. The tunnel plays read the API token from
-  `~/.config/cloudflare/api-token` or prompt for it, saying which one it is not; the
-  token itself is minted once, per `ansible/README.md` § *The Cloudflare API token*.
+  credentials sharing a word. Every play that talks to Cloudflare reads the API token
+  from `~/.config/cloudflare/api-token` and prints how to mint one if it is missing
+  (`ansible/README.md` § *The Cloudflare API token*); the service tokens are minted per
+  client by `client-home-ssh-config.yml`; the tunnel token is the credentials file.
 - **A service token in a policy cannot be deleted — rotate it.** `400`, code `12139`,
   `service_token_in_use`. Every token this fleet uses is named by an Access policy, so
   this is the normal case, not an edge one. `POST …/service_tokens/{id}/rotate` keeps the

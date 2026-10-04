@@ -398,49 +398,12 @@
       when: not (minting | bool)
 
     # ── the API token this needs ─────────────────────────────────────────────
-    # The same file every server play reads; group_vars/all.yml names it and holds the
-    # instructions printed when it is missing. A client without one cannot mint, so it
-    # stops here — the fleet half has already written its blocks, and --tags ssh writes
-    # the dev blocks without touching tokens at all.
-    - name: Look for the API token file
+    # The same file every server play reads, through the same tasks file. A client without
+    # one cannot mint, so it stops here — the fleet half has already written its blocks,
+    # and --tags ssh writes the dev blocks without touching tokens at all.
+    - name: The Cloudflare API token
+      ansible.builtin.import_tasks: _cf-api-token.yml
       tags: [access]
-      ansible.builtin.stat:
-        path: "{{ cf_api_token_file }}"
-      register: cf_tok_file
-      check_mode: false
-      when: minting | bool
-
-    - name: How to get one, when there is none
-      tags: [access]
-      ansible.builtin.debug:
-        msg: "{{ cf_api_token_howto }}"
-      changed_when: true
-      when: (minting | bool) and not cf_tok_file.stat.exists
-
-    - name: Stop without one
-      tags: [access]
-      ansible.builtin.assert:
-        that: cf_tok_file.stat.exists
-        fail_msg: >-
-          {{ dev_alias }}: no API token at {{ cf_api_token_file }}, so no service token can
-          be minted for this client. The instructions are above. --tags ssh writes the ssh
-          blocks without one.
-        success_msg: "API token file present"
-      when: minting | bool
-
-    - name: Refuse a token file anyone but you can read
-      tags: [access]
-      ansible.builtin.assert:
-        that: cf_tok_file.stat.mode in ['0600', '0400']
-        fail_msg: "{{ cf_api_token_file }} is mode {{ cf_tok_file.stat.mode }}; chmod 600 it"
-        success_msg: "API token file is mode {{ cf_tok_file.stat.mode }}"
-      when: minting | bool
-
-    - name: Read the API token
-      tags: [access]
-      ansible.builtin.set_fact:
-        cf_api_token: "{{ lookup('file', cf_api_token_file) | trim }}"
-      no_log: true
       when: minting | bool
 
     # ── where it goes: the account, the application, its policy ──────────────
@@ -449,7 +412,7 @@
       tags: [access]
       ansible.builtin.uri:
         url: "{{ cf_api }}/zones?name={{ dev_zone }}"
-        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        headers: { Authorization: "Bearer {{ cf_token }}" }
       register: cf_zone_q
       check_mode: false
       changed_when: false
@@ -472,7 +435,7 @@
       tags: [access]
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_zone_q.json.result[0].account.id }}/access/apps"
-        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        headers: { Authorization: "Bearer {{ cf_token }}" }
       register: cf_apps
       check_mode: false
       changed_when: false
@@ -509,7 +472,7 @@
       tags: [access]
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/service_tokens"
-        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        headers: { Authorization: "Bearer {{ cf_token }}" }
       register: cf_st_q
       check_mode: false
       changed_when: false
@@ -520,7 +483,7 @@
       tags: [access]
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ cf_app.id }}/policies"
-        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        headers: { Authorization: "Bearer {{ cf_token }}" }
       register: cf_pol_q
       check_mode: false
       changed_when: false
@@ -564,7 +527,7 @@
              ('/' ~ cf_st_existing.id ~ '/rotate') if cf_st_existing else '' }}
         method: POST
         status_code: [200, 201]
-        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        headers: { Authorization: "Bearer {{ cf_token }}" }
         body_format: json
         body: "{{ omit if cf_st_existing else {'name': st_name} }}"
       register: cf_st_w
@@ -607,7 +570,7 @@
              ('/' ~ cf_pol.id) if cf_pol else '' }}
         method: "{{ 'PUT' if cf_pol else 'POST' }}"
         status_code: [200, 201]
-        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        headers: { Authorization: "Bearer {{ cf_token }}" }
         body_format: json
         body:
           name: "{{ cf_pol.name | default('service tokens') }}"
@@ -640,8 +603,10 @@
 
     - name: Stop if the token was not admitted
       tags: [access]
-      # The token exists but admits nothing, so the file is still written below: a re-run
-      # finds the token by name, rotates it, and tries the policy again.
+      # Stopping here leaves the token minted but admitting nothing, and NOT written to
+      # the file — so the next run, finding no file, finds the token by name, rotates it,
+      # and tries the policy again. Writing the file first would make the next run find
+      # the file and do nothing, with a token that admits nothing behind it.
       ansible.builtin.assert:
         that: cf_pol_w.status | default(0) in [200, 201]
         fail_msg: >-

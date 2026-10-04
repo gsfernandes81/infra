@@ -448,18 +448,18 @@ direction, and this container is what zero's control node is *for*.
 ```sh
 cd ~/infra/ansible
 
-# 1. the SERVER side, one run: the EDGE (tunnel, DNS, Access application, service token,
-#    whose secret is printed once) and then the HOST (secrets dir, deploy key,
-#    authorized_keys, dev/.env with the hostname). Reads the Cloudflare API token from
-#    ~/.config/cloudflare/api-token, or prompts — ../ansible/README.md § The Cloudflare API token.
+# 1. the SERVER side, one run: the EDGE (tunnel, DNS, an Access application with no
+#    policy yet) and then the HOST (secrets dir, deploy key, authorized_keys, dev/.env
+#    with the hostname). Reads the Cloudflare API token from ~/.config/cloudflare/api-token
+#    and prints how to mint one if it is missing — ../ansible/README.md § The Cloudflare API token.
 ansible-playbook playbooks/server-create-dev-container.yml --check
 ansible-playbook playbooks/server-create-dev-container.yml
 
 # 2. start it, with the tunnel already in dev/.env
 ssh -t zero 'cd ~/infra/dev && make up'
 
-# 3. the CLIENT — the machine you ssh FROM. Prompts for the service token, once.
-#    The secret CANNOT be passed with -e; the play refuses it. See below.
+# 3. the CLIENT — the machine you ssh FROM. Mints this client's own service token over
+#    the API and adds it to the application's policy; nothing is typed. See below.
 #    Every dev container and the fleet in one run; -e only=<alias> for one container,
 #    which is also the rotation path (-e replace_token=true).
 ansible-playbook playbooks/client-home-ssh-config.yml
