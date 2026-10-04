@@ -727,7 +727,8 @@ at 6 columns, the right edge marked:
           Conversations in `/workspace` older than 30 days sit behind `Archived` at start, and
           `claude --resume <id>` still finds an archived one — the archive is the menu's only.
         - *The spinner* (v0.3.6): closing a running session shows it on that row and `closing
-          session` on the status line until done (up to 5 s), and it draws as braille dots on
+          session` on the status line until done (5 s for TERM, up to about 10 s if it needs
+          KILL and abduco's teardown), and it draws as braille dots on
           the phone (Termux) and in Windows Terminal, not as boxes.
         - *The sweep:* `grep 'sweep:' ~/.local/share/claude-sessions/offload.log | tail`. With
           the agent view off, expect nothing, or `WOULD KILL` / `would keep, too young` lines
@@ -758,14 +759,18 @@ at 6 columns, the right edge marked:
        Stage B: it would mean the eight v0.2.0 lines were not all `/clear`/`/resume` races, and
        whatever held the lock against a `SessionEnd` can hold it against a `Stop` or a prompt.
        `SessionEnd (clear)` or `(resume)` takes no lock in v0.3.2, so one appearing
-       means the box is not running it. **First reading, 2026-10-04** on v0.3.4 (19 h, 380
-       passes): **not enough data** — no slot was alive at any pass, so nothing was judged —
-       and one `SessionEnd (other) dropped` at 01:40:46 that no pass saw the slot of, unexplained
-       unless the owner did a `c` close then. The menu also dumped core into `/workspace` at
-       01:56:44 when its terminal went away ([claude-sessions#6](https://github.com/gsfernandes81/claude-sessions/issues/6)),
-       which may be the same episode. **Needs a day with slots in use, then a second reading.**
-       **Read after a day of the v0.3.2 dry run** (infra#2) —
-       it also makes up for the 33 hours infra-dev had on v0.2.0.
+       means the box is not running it. **First reading, 2026-10-04** on v0.3.4, 2026-10-03 17:56
+       → 2026-10-04 12:50 (380 passes, none missed): **not enough data** — no slot was alive
+       at any pass, so nothing was judged. Three things that night, all unexplained so far:
+       a Claude Code (pid 1506) started 01:40:32 and exited 01:40:46, never prompted, and its
+       `SessionEnd (other)` lost `claude-1`'s lock — what a menu `c` close looks like; then
+       **~650 MB ran from 01:41 to 02:02 that the registry never saw** (`memory:` 950 → 297
+       MB free, back to 728 at the first pass after 02:00), with no live slot, no transcript
+       and no shell history; and the menu dumped core into `/workspace` at 01:56:44 when its
+       terminal went away ([claude-sessions#6](https://github.com/gsfernandes81/claude-sessions/issues/6)).
+       The owner is asked what was started at ~01:41 and through which path — anything a
+       Stage B offloader cannot see is the more important half. **Needs a day with slots in
+       use, then a second reading** (that day also makes up for the 33 hours on v0.2.0).
      - **`claude.exe` counts as foreign work** ([#2](https://github.com/gsfernandes81/claude-sessions/issues/2)). `foreign_descendant` exempts only `claude`;
        the old script measured `claude.exe` helpers in live trees. If they reappear, every
        slot is held forever and nothing is offloaded. Check the dry-run log for persistent

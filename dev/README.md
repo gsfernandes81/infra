@@ -947,7 +947,9 @@ see the next section.
 session registry [`../plans/claude-sessions.md`](../plans/claude-sessions.md) designs: one
 JSON file per abduco session under `~/.local/share/claude-sessions/` (on the volume, so it
 outlives the container), kept current by Claude Code's own hooks — and, since v0.3.5, an
-`archive/` beside them, one small file per conversation the menu has put away. The base installs
+`archive/` beside them: one small file per conversation `c` has put away (`archived <ms>`)
+or taken back out (`kept <ms>`) — age-archiving writes nothing, being worked out as the
+list is read. The base installs
 **v0.3.6** — a static binary, pinned by tag and SHA-256 per architecture, at
 `/usr/local/bin/claude-sessions`.
 
@@ -979,7 +981,7 @@ days. **The archive is the menu's only** — it writes `archive/<id>` in the reg
 touches Claude Code's files, so `claude --resume` still finds everything. **Since v0.3.6**
 anything slower than a quarter second shows Docker Compose's braille spinner on the row being
 worked on and says what on the status line (`closing session`, `resuming session`, …), keys
-other than `q`, Ctrl-C and a resize wait for it, and only changed lines are written, so an
+other than `q`, Ctrl-C and a resize are ignored meanwhile, and only changed lines are written, so an
 idle menu still sends nothing. **A row's title is what Claude Code's own
 `/resume` picker shows** (v0.3.1): the `/rename` name, else Claude Code's generated title,
 else the first prompt — read from the transcript by the hook at `SessionStart` and `Stop`.
