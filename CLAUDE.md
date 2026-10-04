@@ -398,10 +398,11 @@ the row in [`docs/decisions.md`](docs/decisions.md).
 
 **A dev container's tunnel hostname is `<alias>.<dns_zone>` and is never written beside
 the alias it is built from** — `dns_zone` lives in `ansible/group_vars/all.yml`, and
-`create-dev-tunnel.yml` and `configure-client-dev.yml` both derive from it, so the two
-cannot name different hostnames. Generally: derive where the value is a *name*; never
-where absence is itself a setting, which is why `prepare-dev-host.yml`'s
-`tunnel_hostname` stays explicit. The reasoning is one row in
+`server-create-dev-container.yml` and `client-home-ssh-config.yml` both derive from it, so
+the two cannot name different hostnames. Generally: derive where the value is a *name*;
+never where absence is itself a setting, which is why the host half of
+`server-create-dev-container.yml` keeps `tunnel_hostname` explicit on its own command
+line and only takes the derived value from the edge half within one run. The reasoning is one row in
 [`docs/decisions.md`](docs/decisions.md).
 
 `/etc` copies under `hosts/<host>/system/` each declare where they install, in an

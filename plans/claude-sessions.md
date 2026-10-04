@@ -121,7 +121,7 @@ else the first user prompt, truncated. Phase 0 confirms where that lives.
 The entrypoint runs `claude-sessions reconcile` at start: every slot whose pid + start time is gone
 becomes `offloaded`, and stale abduco sockets are removed.
 
-**Unregistered sessions:** until every client has re-run `configure-client.yml` (phone,
+**Unregistered sessions:** until every client has re-run `client-home-ssh-config.yml` (phone,
 WSL and Windows), `ssh <c>` still runs `abduco -A claude claude`, and so does
 `make claude` in all four repos and anything started by hand from `<c>-sh`. The menu lists
 **abduco's sessions ∪ the registry**, marking the ones it did not start; `claude-sessions offload`
@@ -881,7 +881,7 @@ at 6 columns, the right edge marked:
    - ✔ **The template switched the same day**, for every alias at once on the owner's word
      (`decisions.md`), with `make claude`, the banners and the docs. **Owner's, in order:**
      recreate infra-dev on `2026.10.02.1` first (Phase 5 bring-up above, step 4a included),
-     then re-run `configure-client.yml` on each client. or3-dev, dd-dev and ds-dev answer
+     then re-run `client-home-ssh-config.yml` on each client. or3-dev, dd-dev and ds-dev answer
      `exec: claude-sessions-door: not found` until each repo bumps `BASE_TAG`; `<c>-sh`
      gets in meanwhile. **This plan is deleted** when the clients are re-run, the children
      have bumped, and Stage B has landed.
@@ -892,7 +892,7 @@ at 6 columns, the right edge marked:
      up'`); `make verify`'s `door` line reads `/usr/local/bin/claude-sessions-door`, not
      `none`. Before re-running any client, `ssh infra-dev` from the phone must still reach the
      menu — the old block's `RemoteCommand` arrives at the forced door and is run, which the
-     throwaway-sshd test proved but a real client has not. Then re-run `configure-client.yml`
+     throwaway-sshd test proved but a real client has not. Then re-run `client-home-ssh-config.yml`
      on each client, and on each: `ssh infra-dev` is the menu, `ssh infra-dev 'pwd'` prints
      `/home/dev`, `scp` of a file round-trips, **Zed's remote open to the bare alias works**
      (the one check the throwaway sshd could not run), and `ssh -t infra-dev in-workspace`
@@ -946,7 +946,7 @@ From the mockup review, same day — the three questions under `## Mockups`, eac
   Google Fonts, so it falls back and drags its line out of true wherever it is drawn. The
   key is spelled `Enter`. See the glyph paragraph under `## Mockups`.
 - **`u` stays**: a session the launcher did not start is marked as such. It goes
-  permanently blank once every client has re-run `configure-client.yml`, and that is the
+  permanently blank once every client has re-run `client-home-ssh-config.yml`, and that is the
   right failure mode for a mark — the one time it is not blank is the time you want it.
 - **`Enter` on an offloaded row resumes immediately, with no confirmation.** RAM is spent on
   what you open, in the order you open it. The honest consequence, accepted rather than

@@ -1,9 +1,11 @@
 ---
-# Provisions the Cloudflare side of a dev container's tunnel, over the API.
+# NOT A PLAYBOOK YOU RUN — the underscore says so. server-create-dev-container.yml
+# imports it as its first half; run that. This half provisions the Cloudflare side of a
+# dev container's tunnel, over the API.
 #
 #     cd ansible
-#     ansible-playbook playbooks/create-dev-tunnel.yml --check    # prove, no -K
-#     ansible-playbook playbooks/create-dev-tunnel.yml            # apply
+#     ansible-playbook playbooks/server-create-dev-container.yml --check    # prove, no -K
+#     ansible-playbook playbooks/server-create-dev-container.yml            # apply
 #
 # Four objects, and every one of them idempotent — each is looked up before it is
 # created, so a re-run after a partial failure is the intended way to finish:
@@ -30,25 +32,24 @@
 # could not be verified when this was written (Galaxy was unreachable). If someone
 # checks them, swapping task 2 is a small, contained change.
 #
-# THE API TOKEN IS NEVER WRITTEN ANYWHERE. vars_prompt keeps it in memory for the run.
+# THE API TOKEN LIVES ON THE PHONE, at ~/.config/cloudflare/api-token (mode 600), or is
+# prompted for when that file is absent — the tasks at the top of this play, shared
+# word for word with the three server-*-tunnel plays. One token, the union of what all
+# four need; ansible/README.md § "The Cloudflare API token" is where it is minted and the
+# exact permissions. Until 2026-10-04 it was prompted for on every run and deliberately
+# never stored; the owner asked for the file, and the trade is recorded in
+# docs/decisions.md.
+#
 # It must NEVER go in {{ infra_secrets }}: that directory is mounted into the container,
 # and a container able to rewrite the Access policy in front of itself is not protected
-# by it. Nothing the running container does needs this token.
+# by it. Nothing the running container does needs this token. And never in the repo
+# checkout, gitignored or not: the checkout is bind-mounted into infra-dev, whose whole
+# point is having no route to the fleet.
 #
-# Token scopes (Cloudflare -> My Profile -> API Tokens -> Create Token -> Custom):
-#   Zone    : Zone                        : Read     (gsrpi.uk)
-#   Zone    : DNS                         : Edit     (gsrpi.uk)
-#   Account : Cloudflare Tunnel           : Edit
-#   Account : Access: Apps and Policies   : Edit
-#   Account : Access: Service Tokens      : Edit
-#
-# THE API TOKEN IS DISPOSABLE, AND THAT IS THE POINT OF NEVER STORING IT. Nothing keeps
-# it: not this repo, not the container, not $INFRA_SECRETS. So delete it in the dashboard
-# the moment provisioning is done and mint a fresh one the next time you provision —
-# there is no config to update and nothing to break, because nothing was ever holding it.
-# A deleted API token also costs nothing already built: the tunnel, the DNS record, the
-# Access application and the service token all keep working, since none of them
-# authenticate with it.
+# Deleting the API token in the dashboard costs nothing already built: the tunnel, the
+# DNS record, the Access application and the service token all keep working, since none
+# of them authenticate with it. Rotation is: delete it there, mint a new one, overwrite
+# the file.
 #
 # WHAT THIS PLAY CANNOT MINT IS THE API TOKEN ITSELF. Cloudflare does have
 # POST /user/tokens, and it requires an existing token with User:API Tokens:Edit — so it
@@ -67,7 +68,7 @@
 
   vars:
     cf_api: https://api.cloudflare.com/client/v4
-    # group_vars/all.yml, not a literal — configure-client-dev.yml derives the client
+    # group_vars/all.yml, not a literal — _client-dev-ssh.yml derives the client
     # side of the same hostname from that one value, and the two must not be able to
     # disagree about the zone.
     cf_zone: "{{ zone | default(dns_zone) }}"
@@ -105,21 +106,93 @@
     # so the value is chosen rather than inherited from a Cloudflare default nobody read.
     cf_session_duration: 24h
 
-  vars_prompt:
     # "API token", and the distinction is not pedantry — it has already cost a round.
     # Cloudflare has TWO things whose names collide:
     #   API token          — My Profile -> API Tokens. Authorises THIS PLAY to call the
-    #                        API. It is what this prompt wants.
-    #   Access service token — Zero Trust -> Access -> Service Auth. A client_id/secret
-    #                        pair a MACHINE presents to get THROUGH Access. This play
-    #                        creates one and prints it once; the phone holds it.
+    #                        API. It is what the file below holds.
+    #   Access service token — Zero Trust -> Access -> Service credentials. A
+    #                        client_id/secret pair a MACHINE presents to get THROUGH
+    #                        Access. This play creates one and prints it once; the
+    #                        phone holds it.
     # An API token that someone named "service_token" is still an API token.
-    - name: cf_api_token
-      prompt: "Cloudflare API token (My Profile -> API Tokens, NOT an Access service token)"
-      private: true
-      confirm: false
+    # The one Cloudflare API token, on the control node. ansible/README.md § "The Cloudflare
+    # API token". -e cf_api_token_file= points at another; absent, the play prompts.
+    cf_api_token_file: "{{ lookup('env', 'HOME') }}/.config/cloudflare/api-token"
 
   tasks:
+    # ── the API token: a file on the control node, else a prompt ─────────────
+    # ONE token for every tunnel play, the union of what they need, kept at
+    # {{ cf_api_token_file }} at mode 600 on the phone. ansible/README.md § "The Cloudflare
+    # API token" is where it is minted and exactly which permissions it carries. Absent
+    # the file, the play asks, echo off, as it always did — so nothing here is required.
+    # NEVER inside the repo checkout: that is bind-mounted into infra-dev, which has no
+    # route to the fleet by decision and must not get one to the edge by accident. And
+    # never in $INFRA_SECRETS, which is mounted into the container.
+    - name: Refuse an API token supplied on the command line
+      # `-e cf_api_token=` would silently beat both the file and the prompt — extra vars
+      # win — after the value had already been through your shell. The same refusal
+      # _client-dev-ssh.yml makes for the Access secret, for the same reason.
+      ansible.builtin.assert:
+        that: cf_api_token is not defined
+        fail_msg: >-
+          cf_api_token was passed as a variable. It is read from {{ cf_api_token_file }}
+          or prompted for, never taken from the command line: an -e value is in your
+          shell history and was in the process list. Re-run without it, then in fish
+          `history delete --contains cf_api_token`.
+        success_msg: "no API token on the command line"
+      run_once: true
+
+    - name: Look for the API token file on the control node
+      ansible.builtin.stat:
+        path: "{{ cf_api_token_file }}"
+      register: cf_tok_file
+      delegate_to: localhost
+      run_once: true
+      check_mode: false
+
+    - name: Refuse a token file anyone but you can read
+      ansible.builtin.assert:
+        that: (not cf_tok_file.stat.exists) or (cf_tok_file.stat.mode in ['0600', '0400'])
+        fail_msg: >-
+          {{ cf_api_token_file }} is mode {{ cf_tok_file.stat.mode | default('?') }}. chmod 600
+          it: it is an API token with write access to every tunnel in this fleet.
+        success_msg: >-
+          {{ ('API token file present, mode ' ~ cf_tok_file.stat.mode)
+             if cf_tok_file.stat.exists else 'no API token file; will prompt' }}
+      run_once: true
+
+    - name: Read the API token from the file
+      ansible.builtin.set_fact:
+        cf_api_token: "{{ lookup('file', cf_api_token_file) | trim }}"
+      no_log: true
+      when: cf_tok_file.stat.exists
+
+    - name: Ask for the API token, there being no file
+      # A TASK, not vars_prompt: a task always runs and has no variable name for -e to
+      # pre-empt. no_log because the registered result holds what was typed verbatim.
+      ansible.builtin.pause:
+        prompt: >-
+          Cloudflare API token, not echoed (no file at {{ cf_api_token_file }}; see
+          ansible/README.md to stop being asked). An API token from My Profile -> API
+          Tokens, NOT an Access service token
+        echo: false
+      register: cf_tok_in
+      no_log: true
+      when: not cf_tok_file.stat.exists
+
+    - name: Keep what was typed
+      ansible.builtin.set_fact:
+        cf_api_token: "{{ cf_tok_in.user_input | trim }}"
+      no_log: true
+      when: not cf_tok_file.stat.exists
+
+    - name: Refuse an empty token
+      ansible.builtin.assert:
+        that: cf_api_token | length > 0
+        fail_msg: "no API token: {{ cf_api_token_file }} is empty, or nothing was typed"
+        success_msg: "API token in hand"
+      run_once: true
+
     # ── the flag that used to mean delete-and-recreate ──────────────────────
     # It named an operation Cloudflare will not perform on a provisioned container: a
     # service token an Access policy references cannot be deleted (400 / 12139), and
@@ -139,7 +212,7 @@
         success_msg: "no retired flags"
 
     # ── 0  the token, the zone and the account ─────────────────────────────
-    # `check_mode: false` on every read, the same reason generate-fleet-inventory.yml
+    # `check_mode: false` on every read, the same reason server-generate-fleet-inventory.yml
     # carries it: under --check a task is skipped by default, so a dry run would resolve
     # nothing and then fail on every id it needed. A read is safe in check mode by
     # definition. The writes below carry no such line, so --check skips exactly those.
@@ -341,7 +414,7 @@
           name: "{{ cf_hostname }}"
           content: "{{ cf_tunnel_id | default(cf_unknown_id, true) }}.cfargotunnel.com"
           proxied: true
-          comment: "{{ cf_name }} container tunnel — ansible/playbooks/create-dev-tunnel.yml"
+          comment: "{{ cf_name }} container tunnel — ansible/playbooks/_dev-container-tunnel.yml"
       register: cf_dns_w
       delegate_to: localhost
       when: not cf_dns_ok
@@ -528,7 +601,7 @@
       # created a credential nobody can use. Everything else on the wire stays masked.
       #
       # changed_when: true is a display decision and not a lie about state — the same one
-      # install-system-files.yml documents. ansible.cfg sets display_ok_hosts = False and a debug
+      # server-install-system-files.yml documents. ansible.cfg sets display_ok_hosts = False and a debug
       # task reports ok, so without it THIS BANNER DOES NOT PRINT: the play mints a
       # credential Cloudflare will never show again and says nothing. Found 2026-08-24.
       ansible.builtin.debug:
@@ -546,7 +619,7 @@
 
           Hand them to the client play, which is the only thing that should store them:
 
-              ansible-playbook playbooks/configure-client-dev.yml{{ ' -e replace_token=true' if cf_st_verb == 'rotated' else '' }}
+              ansible-playbook playbooks/client-home-ssh-config.yml -e only={{ cf_name }}{{ ' -e replace_token=true' if cf_st_verb == 'rotated' else '' }}
 
           It prompts for both — the secret is read from the terminal and CANNOT be
           passed with -e, so it reaches neither your shell history nor the process
@@ -691,7 +764,19 @@
           - "creds     {{ inventory_hostname }}:{{ infra_secrets }}/tunnel.json"
           - "access    application + one non_identity policy, no identity provider"
           - ""
-          - "Set DEV_TUNNEL_HOSTNAME={{ cf_hostname }} in dev/.env, then `make up`"
-          - "on {{ inventory_hostname }} — NOT restart: the entrypoint reads it at start."
+          - "{{ 'infra-dev: the host half writes DEV_TUNNEL_HOSTNAME=' ~ cf_hostname ~ ' into dev/.env next.'
+                if cf_name == 'infra-dev' else
+                cf_name ~ ' lives in its own repo: set DEV_TUNNEL_HOSTNAME=' ~ cf_hostname ~ ' in ITS .env.' }}"
+          - "Then `make up` on {{ inventory_hostname }} — NOT restart: the entrypoint reads it at start."
       changed_when: true
+
+    - name: Hand the hostname to the host half
+      # A host fact survives into the next play of the same run, and that is the only
+      # way the host half learns it: _dev-container-host.yml keeps `tunnel_hostname`
+      # explicit on its own command line, because there an absent value means "preserve
+      # what dev/.env already says" (CLAUDE.md § Repo invariants). Here the value is not
+      # absent — this play just created or confirmed the tunnel it names — so deriving is
+      # right, and it is derived from the one expression that builds the CNAME.
+      ansible.builtin.set_fact:
+        dev_tunnel_hostname_from_edge: "{{ cf_hostname }}"
 

@@ -93,7 +93,7 @@ _require-secrets:
 	@dir=$$(grep -E '^INFRA_SECRETS=' $(CURDIR)/.env | cut -d= -f2-); \
 	[ -n "$$dir" ] || { echo "INFRA_SECRETS is not set in .env" >&2; exit 1; }; \
 	[ -d "$$dir" ] || { echo "INFRA_SECRETS=$$dir does not exist. From a control node:" >&2; \
-	  echo "  cd ../ansible && ansible-playbook playbooks/prepare-dev-host.yml" >&2; exit 1; }; \
+	  echo "  cd ../ansible && ansible-playbook playbooks/server-create-dev-container.yml" >&2; exit 1; }; \
 	missing=; \
 	for f in authorized_keys id_ed25519_infra_deploy; do \
 	  [ -s "$$dir/$$f" ] || missing="$$missing $$f"; \
@@ -101,7 +101,7 @@ _require-secrets:
 	[ -z "$$missing" ] || { \
 	  echo "WARNING — missing or empty in $$dir:$$missing" >&2; \
 	  echo "          The container will start; whatever needs those will not work." >&2; \
-	  echo "          ansible/playbooks/prepare-dev-host.yml writes both." >&2; }; \
+	  echo "          ansible/playbooks/server-create-dev-container.yml writes both." >&2; }; \
 	[ -s "$$dir/id_ed25519_fleet" ] || \
 	  echo "note: no fleet access configured (the default) — the container has no route" >&2; \
 	[ ! -s "$$dir/id_ed25519_fleet" ] || \

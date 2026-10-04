@@ -2,8 +2,18 @@
 # EVERY SSH BLOCK THIS REPO OWNS, ON THE MACHINE YOU RUN IT FROM. One command.
 #
 #     cd ansible
-#     ansible-playbook playbooks/configure-client.yml --check --diff
-#     ansible-playbook playbooks/configure-client.yml
+#     ansible-playbook playbooks/client-home-ssh-config.yml --check --diff
+#     ansible-playbook playbooks/client-home-ssh-config.yml
+#
+# ONE CONTAINER, by name — the token-rotation path, and the way to add a token for a
+# container whose tunnel has only just been created:
+#
+#     ansible-playbook playbooks/client-home-ssh-config.yml -e only=or3-dev -e replace_token=true
+#
+# `only`, NOT `alias`. Each import below pins `alias:` for its container; an `-e alias=`
+# would outrank all four (extra vars win) and configure the same container four times.
+# `only` is read by the `when:` on each import and nowhere else. With it the fleet half is
+# skipped too, so the run touches exactly one block and one token.
 #
 # Run it from THIS DIRECTORY — ansible.cfg is read from the cwd and is the only thing
 # pointing at ./inventory. _assert-inventory.yml, imported by both halves below, turns a
@@ -37,9 +47,9 @@
 # one of them was the alias with the zone appended — four more spellings of a fact the
 # edge already derives that way. A dev container's tunnel hostname IS
 # `<alias>.<dns_zone>`, `dns_zone` lives in group_vars/all.yml, and both halves derive it:
-# create-dev-tunnel.yml when it creates the CNAME, configure-client-dev.yml when it writes
+# _dev-container-tunnel.yml when it creates the CNAME, _client-dev-ssh.yml when it writes
 # the block that names it. A container that wants a hostname off the pattern passes
-# `-e hostname=` to configure-client-dev.yml directly; nothing in this table has to.
+# `-e hostname=` to _client-dev-ssh.yml directly; nothing in this table has to.
 #
 # THIS TABLE IS STILL THE PORT REGISTRY, and it is worth saying what that is now worth.
 # It used to be a comment in or3's compose file — docs/management-plane.md's drift table
@@ -66,8 +76,8 @@
 #
 # THE TWO HALVES ARE TAGGED, so either runs alone:
 #
-#     ansible-playbook playbooks/configure-client.yml --tags ssh       # never prompts
-#     ansible-playbook playbooks/configure-client.yml --tags access    # tokens only
+#     ansible-playbook playbooks/client-home-ssh-config.yml --tags ssh       # never prompts
+#     ansible-playbook playbooks/client-home-ssh-config.yml --tags access    # tokens only
 #
 # `-e prompt_for_token=false` still works and means: every block, plus no new tokens.
 #
@@ -80,50 +90,54 @@
 # A row above and an import below — but only after the edge and the host halves exist,
 # because a client block is the third of three:
 #
-#     ansible-playbook playbooks/create-dev-tunnel.yml -e name=<c> -e secrets_dir=<its mount>
-#     ansible-playbook playbooks/prepare-dev-host.yml -e tunnel_hostname=<c>.gsrpi.uk
-#     ansible-playbook playbooks/configure-client.yml
+#     ansible-playbook playbooks/server-create-dev-container.yml -e name=<c> -e secrets_dir=<its mount>
+#     ansible-playbook playbooks/client-home-ssh-config.yml
 #
-# `tunnel_hostname` on the middle line is STILL SPELLED OUT, and that is not an oversight.
-# It is a different variable with different semantics: prepare-dev-host.yml rewrites
-# dev/.env wholesale, and its absent-preserves / given-wins-even-if-empty rule is what
-# stops a plain re-run blanking a hostname a previous run set. Giving it a derived default
-# would make "no -e" mean "turn the tunnel on" for a container deliberately reached on its
-# loopback port. Deriving is right where the value is a NAME; it is wrong where absence is
-# itself a setting.
+# The first line is the edge half for any container and, for infra-dev only, the host
+# half as well — the other containers' host side lives in their own repos. The host half
+# learns the hostname from the edge half within that one run; on its own command line
+# `tunnel_hostname` stays explicit, because there an absent value means "preserve what
+# dev/.env already says" rather than "turn the tunnel on" (CLAUDE.md § Repo invariants).
 #
 # NO NEW COLLECTIONS, and no tasks of its own: this file is composition and a table.
 # Everything it runs belongs to the two plays it imports.
 
 # ── the servers: the fleet, the mesh, and the LAN and cross-box rescue paths ────
 - name: The fleet
-  ansible.builtin.import_playbook: configure-client-fleet.yml
+  ansible.builtin.import_playbook: _client-fleet-ssh.yml
   # Tagged `ssh` here, not task by task inside it: the fleet play is ssh config and nothing
   # else — no Access token is read or written — so the whole of it is the `ssh` half.
   tags: [ssh]
+  # `when` on an import applies to every task the import brings in, which is what makes
+  # -e only=<container> a one-container run rather than a whole one.
+  when: only is not defined
 
 # ── the dev containers ─────────────────────────────────────────────────────────
-# One import each rather than a loop over the table above, deliberately. configure-client-dev.yml
+# One import each rather than a loop over the table above, deliberately. _client-dev-ssh.yml
 # prompts for a credential and writes it at 0600; a loop would put those prompts and
 # those writes inside `loop:` results, where `no_log` hides which iteration is which and
 # a mistake becomes a mistake about a secret. Static imports keep the reviewed
 # single-alias play exactly as it is, and each stanza reads as the fact it asserts.
 - name: infra-dev
-  ansible.builtin.import_playbook: configure-client-dev.yml
+  ansible.builtin.import_playbook: _client-dev-ssh.yml
   vars:
     alias: infra-dev
+  when: only is not defined or only == 'infra-dev'
 
 - name: or3-dev
-  ansible.builtin.import_playbook: configure-client-dev.yml
+  ansible.builtin.import_playbook: _client-dev-ssh.yml
   vars:
     alias: or3-dev
+  when: only is not defined or only == 'or3-dev'
 
 - name: dd-dev
-  ansible.builtin.import_playbook: configure-client-dev.yml
+  ansible.builtin.import_playbook: _client-dev-ssh.yml
   vars:
     alias: dd-dev
+  when: only is not defined or only == 'dd-dev'
 
 - name: ds-dev
-  ansible.builtin.import_playbook: configure-client-dev.yml
+  ansible.builtin.import_playbook: _client-dev-ssh.yml
   vars:
     alias: ds-dev
+  when: only is not defined or only == 'ds-dev'

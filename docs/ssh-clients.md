@@ -13,7 +13,7 @@ Everything that is background rather than emergency is here.
 
 ```sh
 cd ~/infra/ansible
-ansible-playbook playbooks/configure-client.yml
+ansible-playbook playbooks/client-home-ssh-config.yml
 ```
 
 Run it **wherever the client is** — the phone, or WSL on the laptop, where the same run
@@ -25,8 +25,8 @@ Two blocks land in `~/.ssh/config`, each edited in place on re-runs:
 
 | Marker | Written by | Holds |
 |---|---|---|
-| `# BEGIN infra-fleet` | `configure-client-fleet.yml` → `templates/ssh-fleet-block.j2` | the three Pis, three ways each |
-| `# BEGIN <container>` | `configure-client-dev.yml` → `templates/ssh-dev-block.j2` | one dev container, two ways |
+| `# BEGIN infra-fleet` | `client-home-ssh-config.yml` (its fleet half) → `templates/ssh-fleet-block.j2` | the three Pis, three ways each |
+| `# BEGIN <container>` | `client-home-ssh-config.yml` (its dev half, once per container) → `templates/ssh-dev-block.j2` | one dev container, two ways |
 
 Do not hand-edit between the markers. Change the template and re-run — a hand edit
 survives until the next run and then vanishes, which is the worst of both.
@@ -96,7 +96,7 @@ command-line and remote command*) and scp/sftp to it unreliable; `<c>-sh` existe
 A client not yet re-run still has that block and keeps working: its `RemoteCommand` arrives
 at the forced door as a command, and the door runs it — `in-workspace` then starts the door
 again, which this time sees a login. `<c>-sh` is kept as a name so tools that use it
-(`authorize-client-key.yml`, or3's phone tunnel) need no change, and goes once nothing does.
+(`server-add-authorised-keys.yml`, or3's phone tunnel) need no change, and goes once nothing does.
 
 ### Break glass by hand — there is no third alias
 
@@ -107,7 +107,7 @@ there. Only the alias went:
 
 ```sh
 ssh <host>                              # zero today; the container's host, whichever it is
-ssh -p <port> dev@127.0.0.1             # from that shell. Ports: ansible/playbooks/configure-client.yml
+ssh -p <port> dev@127.0.0.1             # from that shell. Ports: ansible/playbooks/client-home-ssh-config.yml
 ```
 
 **Why an alias was the wrong shape for it.** The generated block had `ProxyCommand ssh
@@ -254,8 +254,8 @@ browser login, which these apps do not admit (service tokens only) and which is 
 from Termux anyway. The split is in the playbook too, as tags:
 
 ```sh
-ansible-playbook playbooks/configure-client.yml --tags ssh      # every block, no prompts
-ansible-playbook playbooks/configure-client.yml --tags access   # tokens only
+ansible-playbook playbooks/client-home-ssh-config.yml --tags ssh      # every block, no prompts
+ansible-playbook playbooks/client-home-ssh-config.yml --tags access   # tokens only
 ```
 
 At the prompt, **leave both the Client ID and the Client Secret blank to skip that
@@ -303,7 +303,7 @@ processes per session, which is the cost.
 **The wrapper is CRLF and ASCII-only, and both are load-bearing.** cmd.exe seeks by byte
 offset between commands in a batch file and miscounts on an LF-only one, resuming mid-line
 and running fragments of the comments as commands; and it reads the file in the console
-codepage, so an em dash arrives as several bytes of something else. `configure-client-dev.yml` writes
+codepage, so an em dash arrives as several bytes of something else. `_client-dev-ssh.yml` writes
 it with `newline_sequence: "\r\n"`.
 
 **The laptop's `ssh_config` is the opposite on endings — LF — and ASCII like the
@@ -344,10 +344,10 @@ Windows.
 ## Letting a new client in
 
 Two halves. The ssh block and the service token are things a client *holds*;
-`configure-client.yml` writes those. The key that admits it is a fact about the **container**:
+`client-home-ssh-config.yml` writes those. The key that admits it is a fact about the **container**:
 
 ```sh
-ansible-playbook playbooks/authorize-configure-client-dev.yml -e client_pubkey_file=~/laptop.pub
+ansible-playbook playbooks/server-add-authorised-keys.yml -e client_pubkey_file=~/laptop.pub
 ```
 
 `Permission denied (publickey)` with a key visible in `ssh -v` means the client half is
@@ -373,7 +373,7 @@ connector behind its own hostname and token, they are a second door to each — 
 door with a different trust story.
 
 No client alias points at them. `dd-dev` and `ds-dev` are not running until they are
-deployed with a connector of their own, at which point `configure-client-dev.yml` gives them the
+deployed with a connector of their own, at which point `client-home-ssh-config.yml` gives them the
 same block every other container has, one route under two names — so an alias for the old door would name a
 hostname with nothing behind it, which fails exactly like a container being down.
 

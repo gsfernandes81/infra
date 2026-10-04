@@ -7,11 +7,11 @@ the boxes being managed. Every command in this file is typed in Termux. `fish: U
 command: ansible-playbook` on a Pi means you are on the wrong machine, not that something
 is missing from it.
 
-**The two client plays are the exception, and only because they target the client.**
-`configure-client-fleet.yml` and `configure-client-dev.yml` write `~/.ssh/config` on whatever machine runs them
-and reach no host at all, so they are run wherever that client is — the phone, or WSL on
-the laptop, where one run also configures Windows. See *The laptop is two clients* below.
-That is not a second control plane: neither play can touch a Pi.
+**The `client-` play is the exception, and only because it targets the client.**
+`client-home-ssh-config.yml` writes `~/.ssh/config` on whatever machine runs it and reaches
+no host at all, so it is run wherever that client is — the phone, or WSL on the laptop,
+where one run also configures Windows. See *The laptop is two clients* below. That is not
+a second control plane: it cannot touch a Pi.
 
 The design and the reasoning are in
 [`../docs/management-plane.md`](../docs/management-plane.md); this file is how to run it.
@@ -22,49 +22,61 @@ cd ~/infra/ansible
 # transport works
 ansible fleet -m ping
 # what runs where -> docs/fleet-inventory.md
-ansible-playbook playbooks/generate-fleet-inventory.yml -K
+ansible-playbook playbooks/server-generate-fleet-inventory.yml -K
 ```
 
-**Not everything here is read-only any more, and the list is longer than it looks.**
-`generate-fleet-inventory.yml` still is. Everything below changes something:
+## The playbooks, by what you want to do
 
-| play | what it can change |
-|---|---|
-| `install-packages.yml` | installs and removes packages on all three hosts |
-| `install-system-files.yml` | writes tracked `/etc` copies — **boot-path files** — on all three |
-| `update-cloudflared.yml` | replaces the cloudflared binary and cycles the connector (marked NOT IN USE; it refuses while a host autoupdates) |
-| `create-host-tunnel.yml` | creates a Cloudflare tunnel and writes credentials at 0600 |
-| `cutover-host-tunnel.yml` | **cycles a connector and repoints DNS** — there is a deliberate outage in it |
-| `retire-host-tunnel.yml` | **deletes a tunnel. Irreversible** |
-| `create-dev-tunnel.yml` | creates edge objects and prints a secret that cannot be re-fetched |
-| the `*-client.yml` plays | write ssh config and a 0600 token on the client, not on a host |
-| `authorize-configure-client-dev.yml` | writes `authorized_keys` on `zero` and refreshes it inside containers |
+Two prefixes. **`client-`** runs on the machine you type on and changes only it.
+**`server-`** changes a Pi, or the Cloudflare edge in front of one, and runs from the
+phone. A leading **`_`** is a half that one of these imports — not a thing you run.
 
-Most take `--check`, and running that first is the habit: it is what caught the `docs`
-metapackage before it landed on a 1 GB Pi. **The tunnel plays are the exception** —
-`create-host-tunnel.yml` cannot be rehearsed that way at all, because the API create is
-skipped in check mode and everything after it dies on undefined.
+| I want to… | Run | Needs |
+|---|---|---|
+| set up this phone or laptop: every ssh alias, every dev-container token, Windows too from WSL | `client-home-ssh-config.yml` | prompts for Access tokens it does not already hold |
+| rotate one dev container's token on this client, or add it once its tunnel exists | `client-home-ssh-config.yml -e only=or3-dev -e replace_token=true` | the same |
+| let a new phone or laptop into the dev containers | `server-add-authorised-keys.yml -e client_pubkey_file=~/laptop.pub` | a route to `zero` |
+| create a dev container: its tunnel, DNS, Access, and (for `infra-dev`) its host side | `server-create-dev-container.yml` · `-e name=or3-dev` for another | the [API token](#the-cloudflare-api-token) |
+| see what runs where, read-only, into `docs/fleet-inventory.md` | `server-generate-fleet-inventory.yml -K` | sudo |
+| install the packages each Pi should have | `server-install-packages.yml -K` · `--limit <host>` | sudo |
+| install the tracked `/etc` files, without restarting anything | `server-install-system-files.yml -K` · `-l <host>` · `-e only=<file>` | sudo |
+| create a tunnel for a Pi (nothing serves through it yet) | `server-create-tunnel.yml -e target=<host> -K` | sudo, the API token |
+| move a Pi onto a new tunnel — **a deliberate outage** | `server-cutover-tunnel.yml -e target=<host> -K` | sudo, the API token |
+| delete a Pi's tunnel — **irreversible** | `server-delete-tunnel.yml -e target=<host> -K` | sudo, the API token |
+| update cloudflared on a Pi, deliberately | `server-update-cloudflared.yml -e target=<host> -e version=… -e sha256=… -K` | sudo; refuses while that host autoupdates, which today is all of them |
 
-## The playbooks
+`--check --diff` first is the habit; it is what caught the `docs` metapackage before it
+landed on a 1 GB Pi. **The tunnel plays are the exception** — `server-create-tunnel.yml`
+cannot be rehearsed that way at all, because the API create is skipped in check mode and
+everything after it dies on undefined; `server-create-dev-container.yml --check` does
+every read for real and skips every write, which proves the token and shows what exists.
+
+**Only `server-generate-fleet-inventory.yml` is read-only.** Every other `server-` play
+changes something: packages, **boot-path `/etc` files**, the cloudflared binary, tunnels
+and DNS, `authorized_keys` on `zero`. `server-create-dev-container.yml` prints a secret
+that cannot be fetched again. `client-home-ssh-config.yml` writes ssh config and a 0600
+token on the client.
+
+The halves, for reading rather than running:
 
 | | |
 |---|---|
-| `generate-fleet-inventory.yml` | read-only; what runs where → `docs/fleet-inventory.md` |
-| `install-packages.yml` | the declared package set on all three hosts |
-| `prepare-dev-host.yml` | the **host** side of `infra-dev` on zero — secrets dir, deploy key, authorized_keys, `dev/.env` |
-| `create-dev-tunnel.yml` | the **edge** side — tunnel, DNS, Access application and policy |
-| `configure-client-dev.yml` | the **client** side — one dev container's service token and `~/.ssh/config` block, **and the Windows half of the same laptop when run from WSL** |
-| `configure-client-fleet.yml` | the fleet's aliases in this client's `~/.ssh/config`, Windows included |
-| **`configure-client.yml`** | **the one you actually run** — the two above, composed: every ssh block this repo owns, and the dev-container registry |
-| `authorize-configure-client-dev.yml` | adds one client's **public** key to the dev containers' `authorized_keys` on `zero` — the host half of letting a new laptop or phone in |
-| `_assert-inventory.yml` | not run directly — imported by the client plays so a run with no inventory fails instead of exiting 0 |
+| `_client-fleet-ssh.yml` | the fleet's aliases in this client's `~/.ssh/config`, Windows included |
+| `_client-dev-ssh.yml` | one dev container's service token and `~/.ssh/config` block, imported once per container |
+| `_dev-container-tunnel.yml` | the **edge** side — tunnel, DNS, Access application and policy |
+| `_dev-container-host.yml` | the **host** side of `infra-dev` on zero — secrets dir, deploy key, authorized_keys, `dev/.env` |
+| `_assert-inventory.yml` | imported above every play that targets `control` or `fleet`, so a run with no inventory fails instead of exiting 0 |
 
-**`prepare-dev-host.yml`, `create-dev-tunnel.yml` and `configure-client-dev.yml` are one job split
-three ways, and the split is not arbitrary.** They
-hold state in three different places, need three different credentials — sudo on zero, a
-Cloudflare API token, an Access service token — and change at three different rates. A
-single play would demand all three credentials to do any of it, and re-running it to add
-a second client would put an API token back on the command line for no reason.
+**`server-create-dev-container.yml` runs the edge half, then the host half, in one go.**
+Until 2026-10-04 they were three separately-run plays (the client half is still separate,
+because it runs on each client), defended on the grounds that each needed a different
+credential. Neither server half needs sudo, so the only credential the combined play asks
+for is the API token — from a file now, see below — and the owner wanted one command. The
+host half runs for `infra-dev` only, because it writes `dev/.env` in this checkout; the
+other containers' host side lives in their own repos, and the play says so.
+
+**`client-home-ssh-config.yml` is also the registry.** Its header table is where the dev
+containers' loopback ports are recorded.
 
 ### One command, for whichever client you are on
 
@@ -75,16 +87,15 @@ run it.
 
 ```sh
 cd ~/infra/ansible
-ansible-playbook playbooks/configure-client.yml --check --diff   # see it first
-ansible-playbook playbooks/configure-client.yml
+ansible-playbook playbooks/client-home-ssh-config.yml --check --diff   # see it first
+ansible-playbook playbooks/client-home-ssh-config.yml
 ```
 
 That is the fleet block, plus a block for every dev container, plus — from WSL — the
 Windows side of the same laptop. It prompts once per container that has no service token
 on this client, and not at all when they all do.
 
-**`configure-client.yml` is also the registry.** Its header table is where the dev
-containers' loopback ports are recorded. It used to be a comment in or3's compose file —
+The registry used to be a comment in or3's compose file —
 `../docs/management-plane.md` opens its drift table with that as the worked example — and
 it moved here because this file consumed the numbers to build each `<alias>-lan` block.
 Those aliases were dropped on 2026-08-31, so the table is documentation now rather than
@@ -97,18 +108,18 @@ anyway, and `ssh <c>` says the token is missing rather than failing obscurely. T
 blocks and the tokens are separate halves, tagged `ssh` and `access`:
 
 ```sh
-ansible-playbook playbooks/configure-client.yml --tags ssh      # every block, never prompts
-ansible-playbook playbooks/configure-client.yml --tags access   # tokens only
-ansible-playbook playbooks/configure-client.yml -e prompt_for_token=false   # blocks, plus tokens already held
+ansible-playbook playbooks/client-home-ssh-config.yml --tags ssh      # every block, never prompts
+ansible-playbook playbooks/client-home-ssh-config.yml --tags access   # tokens only
+ansible-playbook playbooks/client-home-ssh-config.yml -e prompt_for_token=false   # blocks, plus tokens already held
 ```
 
-### A new client needs two halves, and only one of them is `configure-client.yml`
+### A new client needs two halves, and only one of them is `client-home-ssh-config.yml`
 
 The ssh block and the service token are things a client *holds*. The key that admits it
 is a fact about the **container**, and lives on `zero`:
 
 ```sh
-ansible-playbook playbooks/authorize-configure-client-dev.yml \
+ansible-playbook playbooks/server-add-authorised-keys.yml \
   -e client_pubkey_file=~/laptop.pub
 ```
 
@@ -126,19 +137,21 @@ refuses a secrets directory that is not there rather than creating one nothing m
 `ssh-ed25519` — a truncation that still looks like a key. Use the file form above, or
 JSON: `-e '{"client_pubkey": "ssh-ed25519 AAAA... you@host"}'`.
 
-`configure-client-dev.yml` still runs on its own for one container, which is the rotation path:
+One container at a time is `-e only=`, which is the rotation path:
 
 ```sh
-ansible-playbook playbooks/configure-client-dev.yml -e alias=or3-dev -e replace_token=true
+ansible-playbook playbooks/client-home-ssh-config.yml -e only=or3-dev -e replace_token=true
 ```
 
-The hostname is not passed. A dev container's is `<alias>.<dns_zone>`, and `dns_zone` is
-in `group_vars/all.yml` so that this play and `create-dev-tunnel.yml` cannot disagree
-about it. Pass `-e hostname=` only for a container that does not follow the standard.
+`only`, not `alias`: each import inside the play pins its own `alias`, and an `-e alias=`
+would outrank all four and configure one container four times. The hostname is not
+passed. A dev container's is `<alias>.<dns_zone>`, and `dns_zone` is in
+`group_vars/all.yml` so that this play and `server-create-dev-container.yml` cannot
+disagree about it. Pass `-e hostname=` only for a container that does not follow the standard.
 
 ### The laptop is two clients, and one run in WSL configures both
 
-`configure-client-dev.yml` and `configure-client-fleet.yml` both write `~/.ssh/config` on the machine they run
+Both halves of `client-home-ssh-config.yml` write `~/.ssh/config` on the machine they run
 on. On the laptop that is not one machine: Windows' `ssh.exe` and WSL's `ssh` read two
 different configs, from two different homes, and neither can use the other's.
 
@@ -148,13 +161,13 @@ both sides**:
 
 ```sh
 # in WSL, in this directory
-ansible-playbook playbooks/configure-client.yml      # everything, both sides
+ansible-playbook playbooks/client-home-ssh-config.yml      # everything, both sides
 ```
 
 | | WSL writes, for itself | WSL writes, for Windows |
 |---|---|---|
-| `configure-client-fleet.yml` | `~/.ssh/config` | `C:\Users\gavin\.ssh\config` |
-| `configure-client-dev.yml` | `~/.ssh/config`, `~/.config/<alias>/token` (0600) | `…\.ssh\config`, `…\.config\<alias>\token`, `…\.ssh\cf-access-<alias>.cmd` |
+| the fleet half | `~/.ssh/config` | `C:\Users\gavin\.ssh\config` |
+| the dev half, per container | `~/.ssh/config`, `~/.config/<alias>/token` (0600) | `…\.ssh\config`, `…\.config\<alias>\token`, `…\.ssh\cf-access-<alias>.cmd` |
 
 Three things that are not obvious and have each cost a run:
 
@@ -206,14 +219,100 @@ told to go somewhere else:
 ssh -t zero 'cd ~/infra/dev && make up'      # or dev, restart, status, verify, logs
 ```
 
-`-t` because `make` sudos and sudo wants a tty. `prepare-dev-host.yml` prints exactly this
+`-t` because `make` sudos and sudo wants a tty. `server-create-dev-container.yml` prints exactly this
 line, filled in, when it finishes.
 
-**`prepare-dev-host.yml` replaced `dev/seed-secrets.sh`, which is deleted.** Three of that
+**The host half of `server-create-dev-container.yml` replaced `dev/seed-secrets.sh`, which is deleted.** Three of that
 script's five steps were fleet access, which went with the control-node question being
 deferred; what was left did not justify a bespoke script. That is the third time this
 repo has traded hand-rolled shell for stock tooling — after `bin/compose` and after a
 `cf-provision.sh` that lasted twenty minutes.
+
+## The Cloudflare API token
+
+One token, for every `server-` play that talks to Cloudflare. It lives on the phone at
+`~/.config/cloudflare/api-token`, mode 600, and each of those plays reads it from there —
+or, if the file is absent, prompts for it with echo off, as they all did before
+2026-10-04. It is never accepted on the command line (`-e cf_api_token=` is refused), never
+in this repo gitignored or not (the checkout is bind-mounted into `infra-dev`, whose point
+is having no route out), and never in `$INFRA_SECRETS` (mounted into the container).
+
+**It must be a USER token, from My Profile — not an "Account API Token" from Manage
+Account.** Every tunnel play proves the token first with `GET /user/tokens/verify`, and
+an account-owned token fails that call outright even when its permissions are right.
+
+### Minting it
+
+In the Cloudflare dashboard, logged in as the account's owner:
+
+1. Click the **profile icon** (top right) → **My Profile** → **API Tokens** in the left
+   menu → **Create Token**.
+2. Scroll past the templates to **Custom token** → **Get started**.
+3. **Token name**: `infra-ansible` (anything; this is how you recognise it later).
+4. **Permissions** — one row each, using **Add more** for the extra rows. Each row is
+   three dropdowns, left to right:
+
+   | Scope | Permission group | Level |
+   |---|---|---|
+   | Account | Cloudflare Tunnel | Edit |
+   | Account | Access: Apps and Policies | Edit |
+   | Account | Access: Service Tokens | Edit |
+   | Zone | Zone | Read |
+   | Zone | DNS | Edit |
+
+5. **Account Resources**: Include → **Specific account** → your account.
+6. **Zone Resources**: Include → **Specific zone** → `gsrpi.uk`.
+7. Leave **Client IP Address Filtering** empty — the phone's address changes. Leave
+   **TTL** unset, or set a long one and expect to re-mint when it lapses.
+8. **Continue to summary**, check the five rows read back as above, **Create Token**.
+9. **Copy the token now.** Cloudflare shows it once; after this page it cannot be
+   fetched again, only rolled.
+
+Then on the phone, in fish, without the token touching history or a process list:
+
+```fish
+mkdir -p ~/.config/cloudflare; chmod 700 ~/.config/cloudflare
+umask 077; read -s -P 'Paste the token, then Enter: ' tok; printf '%s\n' $tok > ~/.config/cloudflare/api-token; set -e tok
+chmod 600 ~/.config/cloudflare/api-token
+```
+
+`read -s` reads without echo and without writing history; `printf` is a fish builtin, so
+the value never appears in a process list. Then prove it, with a run that only reads:
+
+```sh
+cd ~/infra/ansible
+ansible-playbook playbooks/server-create-dev-container.yml --check
+```
+
+It verifies the token first and names the cause if it fails: *not accepted at all* means
+the paste is truncated, the token is expired or not yet active, or it is an account token
+rather than a user one; *cannot read zone gsrpi.uk* means a permission row is missing.
+
+### What the names mean, and why the dashboard and the API disagree
+
+The dashboard's third dropdown says **Edit**; the API, and the per-endpoint "accepted
+permissions" in Cloudflare's API reference, call the same permission **Write** (`Cloudflare
+Tunnel Write`, `DNS Write`, `Access: Service Tokens Write`). They are one thing. Checked
+2026-10-04 against three sources: the *Create API token* guide (the dashboard path and the
+three dropdowns), the *API token permissions* reference (the group names, with their
+Account/Zone scope), and the API reference pages for every endpoint the plays call
+(`cfd_tunnel`, `teamnet/routes`, `access/service_tokens`, `access/apps` and their
+`policies`, `zones`, `dns_records`). The union of what those pages list is the five rows
+above, and nothing else: the plays never list accounts (the id comes from the zone, or
+from a credentials file already on the box), and `/user/tokens/verify` needs no permission.
+
+Which play uses which, so a 403 can be read: `server-create-dev-container.yml` needs all
+five. `server-create-tunnel.yml` needs Cloudflare Tunnel alone. `server-cutover-tunnel.yml`
+and `server-delete-tunnel.yml` need Cloudflare Tunnel, Zone Read and DNS. The service-token
+and Access-application rows exist for the dev containers only.
+
+### Rotating or revoking it
+
+**My Profile → API Tokens → the token's `⋯` menu → Roll** gives a new secret under the same
+permissions; **Delete** kills it. Either way nothing already built stops working — tunnels,
+DNS records, Access applications and service tokens do not authenticate with this token —
+so the only follow-up is overwriting the file with the new value, by the same three lines
+as above. A token that was ever on screen in a shared place is one to roll, not to keep.
 
 ## Layout
 
@@ -225,7 +324,7 @@ repo has traded hand-rolled shell for stock tooling — after `bin/compose` and 
 | `group_vars/fleet.yml` | the container CLI |
 | `host_vars/` | four files: the three hosts' container runtimes, plus `localhost.yml`'s Termux fixes — see below |
 | `playbooks/` | the ones above; `_assert-inventory.yml` is imported, never run |
-| `playbooks/configure-client.yml` | the dev-container registry lives in its header |
+| `playbooks/client-home-ssh-config.yml` | the dev-container registry lives in its header |
 | `templates/` | the report, the two ssh blocks, and the Windows ProxyCommand wrapper |
 
 ## `-K`, and why it is not a wart
@@ -258,7 +357,7 @@ reaching for things that were not there:
 - `stdout_callback = yaml` lives in `community.general`, and core's `result_format = yaml`
   does the same job — so that one was a core setting all along.
 - `ansible.builtin.apk` **does not exist and never did**; apk has always been
-  `community.general.apk`. `playbooks/install-packages.yml` failed at its first task.
+  `community.general.apk`. `playbooks/server-install-packages.yml` failed at its first task.
 
 **The cost argument that shaped this was wrong, and correcting it changed a decision.**
 The apk task was first rewritten by hand rather than adding a collection, on the belief
@@ -275,7 +374,7 @@ than this file used to claim.
 
 ## Where "prefer the standard tool" loses — the inventory's `docker inspect`
 
-`playbooks/generate-fleet-inventory.yml` reads containers with a hand-rolled
+`playbooks/server-generate-fleet-inventory.yml` reads containers with a hand-rolled
 `docker inspect --format`, not `community.docker.docker_container_info`, and that is
 deliberate rather than left over. It is the first case where the rule recorded in
 `docs/management-plane.md` does not win, so the reason is here rather than assumed.
@@ -315,7 +414,7 @@ this repo was going to do anyway.
 
 ## The two things in here that are easy to break
 
-**The `{% raw %}` guard in `generate-fleet-inventory.yml`.** Docker's `--format` is Go
+**The `{% raw %}` guard in `server-generate-fleet-inventory.yml`.** Docker's `--format` is Go
 template syntax and uses the same `{{ }}` delimiters as Jinja. Without the guard, Ansible
 tries to resolve `.Name` as an Ansible variable and the task dies before Docker ever sees
 the string.

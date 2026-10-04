@@ -1,10 +1,13 @@
 ---
-# The CLIENT half: configures the machine you ssh FROM — the phone, or the laptop — to
-# reach a dev container through its Cloudflare tunnel. Targets the control node itself.
+# NOT A PLAYBOOK YOU RUN — the underscore says so, as it does for _assert-inventory.yml.
+# client-home-ssh-config.yml imports this once per dev container; run THAT. This file is
+# the dev-container half of it: it configures the machine you ssh FROM — the phone, or the
+# laptop — to reach ONE dev container through its Cloudflare tunnel. Targets the control
+# node itself.
 #
 #     cd ansible
-#     ansible-playbook playbooks/configure-client-dev.yml --check --diff
-#     ansible-playbook playbooks/configure-client-dev.yml
+#     ansible-playbook playbooks/client-home-ssh-config.yml --check --diff
+#     ansible-playbook playbooks/client-home-ssh-config.yml -e only=or3-dev    # this half, one container
 #
 # RUN IT FROM THIS DIRECTORY. ansible.cfg is read from the cwd and is the only thing that
 # points at ./inventory; from anywhere else `hosts: control` matches nothing and the play
@@ -12,12 +15,12 @@
 # that silence into a failure — it is imported for exactly this reason and the reasoning
 # is in that file.
 #
-# ONE RUN PER CONTAINER, and the defaults are infra-dev's. For a second one, name it:
-#
-#     ansible-playbook playbooks/configure-client-dev.yml -e alias=or3-dev
+# ONE IMPORT PER CONTAINER, and the defaults are infra-dev's. The wrapper names each one
+# with `alias:` on the import; `-e only=<alias>` on the wrapper is how you reach a single
+# container from the command line (an `-e alias=` would override every import at once).
 #
 # THE HOSTNAME IS NOT PASSED. It is `<alias>.<dns_zone>` — the repo standard, derived
-# below from the same two values create-dev-tunnel.yml derives it from. `-e hostname=`
+# below from the same two values _dev-container-tunnel.yml derives it from. `-e hostname=`
 # still wins, for a container that does not follow the pattern.
 #
 # Everything a run writes is keyed on `alias` — the token file, the ssh block's marker,
@@ -39,8 +42,8 @@
 # Windows cannot be an Ansible target without sshd on it, which is a lot of machinery for
 # two files. But under WSL the laptop's Windows home is mounted at /mnt/c/Users/gavin, so
 # the play run *in WSL* manages *Windows'* ssh config and token directly — the same trick
-# configure-client-fleet.yml already uses for the infra-fleet block, and the reason a WSL control node
-# is worth having at all. So a single `ansible-playbook playbooks/configure-client-dev.yml` in WSL
+# _client-fleet-ssh.yml already uses for the infra-fleet block, and the reason a WSL control node
+# is worth having at all. So a single `ansible-playbook playbooks/_client-dev-ssh.yml` in WSL
 # writes, on the Linux side:
 #
 #     ~/.ssh/config                         the block, POSIX ProxyCommand
@@ -67,7 +70,7 @@
 # THE ONE THING THIS PLAY CANNOT PROMISE ON WINDOWS IS A FILE MODE. /mnt/c is drvfs and
 # carries no Unix permissions, so `mode: "0600"` there either fails or silently does
 # nothing — and a task that pretends to have set a mode is worse than one that does not
-# try (configure-client-fleet.yml's Windows task says the same thing about the same mount). What
+# try (_client-fleet-ssh.yml's Windows task says the same thing about the same mount). What
 # protects the Windows token is the NTFS ACL C:\Users\gavin hands down. The play PRINTS
 # that ACL when it writes the file. It does not assert on it: this repo's own rule is that
 # a check is calibrated against known-good state before its verdict is trusted, and
@@ -109,7 +112,7 @@
 
   vars:
     dev_alias: "{{ alias | default('infra-dev') }}"
-    # DERIVED, and it is the same expression create-dev-tunnel.yml uses to CREATE the
+    # DERIVED, and it is the same expression _dev-container-tunnel.yml uses to CREATE the
     # hostname — so a client block cannot name something the edge was never provisioned
     # under. The old default was the literal `infra-dev.gsrpi.uk`, which meant every
     # caller for every OTHER container had to pass a hostname that was, in all four
@@ -121,7 +124,7 @@
     # the override failing for the sake of a value it does not need. The conditional
     # form never evaluates the branch it does not take, so the escape hatch works on a
     # control node where the variable is missing, which is the one situation somebody
-    # reaches for it. (`create-dev-tunnel.yml`'s `zone | default(dns_zone)` does not
+    # reaches for it. (`_dev-container-tunnel.yml`'s `zone | default(dns_zone)` does not
     # have the problem: a bare undefined passes through untouched when `zone` is set.)
     dev_hostname: "{{ hostname if hostname is defined else dev_alias ~ '.' ~ dns_zone }}"
     # lookup('env','HOME'), never ~. On Termux the passwd entry reports /data, which is
@@ -150,7 +153,7 @@
     # TWO SPELLINGS OF EVERY PATH, STATED RATHER THAN DERIVED. One is how WSL reaches the
     # file, the other is how Windows names it inside the config and the wrapper. A
     # replace() chain over backslashes is clever, and clever is what put a bare
-    # `cloudflared` into a ProxyCommand in the first place; configure-client-fleet.yml made the same
+    # `cloudflared` into a ProxyCommand in the first place; _client-fleet-ssh.yml made the same
     # call for the same reason.
     windows_home_wsl: "{{ windows_home | default('/mnt/c/Users/gavin') }}"
     windows_home_win: 'C:\Users\gavin'
@@ -198,7 +201,7 @@
     # The templates, not the rendered text: that would check only the branches this
     # client's vars select, and the Windows-only ones are the ones that matter. Here,
     # before the token prompt, so a failure costs nothing typed and leaves nothing written.
-    # "\r" is admitted for the reason configure-client-fleet.yml gives, and the paste
+    # "\r" is admitted for the reason _client-fleet-ssh.yml gives, and the paste
     # file's own wrapper lines are ASCII by hand, not by this.
     - name: Refuse a template that is not ASCII
       tags: [ssh]
@@ -233,7 +236,7 @@
       #
       # `shell`, not `command`: `command -v` is a SHELL BUILTIN, so the command module
       # has nothing to exec and reports cloudflared missing even where it is plainly on
-      # PATH — the same bug fixed in configure-client-fleet.yml on 2026-08-23.
+      # PATH — the same bug fixed in _client-fleet-ssh.yml on 2026-08-23.
       ansible.builtin.shell: command -v cloudflared
       register: cfd_path
       changed_when: false
@@ -279,7 +282,7 @@
 
     - name: Settle on a path — an override wins, discovery is the fallback
       tags: [always]
-      # Mirrors configure-client-fleet.yml. -e cloudflared_path=... beats detection, and the assert
+      # Mirrors _client-fleet-ssh.yml. -e cloudflared_path=... beats detection, and the assert
       # below is on the RESULT either way, so a wrong override cannot slip through.
       ansible.builtin.set_fact:
         cfd_resolved: >-
@@ -310,7 +313,7 @@
           -e cloudflared_path=/data/data/com.termux/files/usr/bin/cloudflared
 
     # ── are we in WSL, with the laptop's Windows home in reach? ──────────────
-    # THE HOME DIRECTORY, NOT ITS ssh/config. configure-client-fleet.yml probes the config file
+    # THE HOME DIRECTORY, NOT ITS ssh/config. _client-fleet-ssh.yml probes the config file
     # itself, which means a laptop that has never had one falls through to the paste
     # path even though the play could plainly have written it. Probing the home directory
     # and letting blockinfile create the file is strictly more correct, and it is now what
@@ -404,8 +407,8 @@
           {{ dev_alias }}: no Access token at {{ token_file }}, and this run was told not
           to ask (-e prompt_for_token=false). Its ssh block is still written; `ssh
           {{ dev_alias }}` will say the token is missing until a run without the flag (or
-          with configure-client-dev.yml --tags access -e alias={{ dev_alias }}) is given one. A container that has
-          no tunnel yet gets one from playbooks/create-dev-tunnel.yml -e name={{ dev_alias }}.
+          with client-home-ssh-config.yml --tags access -e only={{ dev_alias }}) is given one. A container that has
+          no tunnel yet gets one from playbooks/server-create-dev-container.yml -e name={{ dev_alias }}.
       changed_when: true
       when:
         - setting_token | bool
@@ -434,7 +437,7 @@
       # prompt is a cursor sitting there with no explanation. This task says what is
       # wanted; the prompts just take it.
       #
-      # IT NAMES THE CONTAINER, AND SO DO THE PROMPTS AND THE PLAY BANNER. configure-client.yml
+      # IT NAMES THE CONTAINER, AND SO DO THE PROMPTS AND THE PLAY BANNER. client-home-ssh-config.yml
       # imports this play once per container, so without the alias in them you get four
       # identical banners and four identical `Client Secret` cursors and no way to tell
       # which one is being asked for — reported from the laptop, 2026-08-28. A prompt for
@@ -487,7 +490,7 @@
 
     - name: Settle what was typed — both blank is a skip, not a mistake
       tags: [access]
-      # A CONTAINER THAT IS NOT UP HAS NO TOKEN TO GIVE, and configure-client.yml asks for
+      # A CONTAINER THAT IS NOT UP HAS NO TOKEN TO GIVE, and client-home-ssh-config.yml asks for
       # all four in one run. Pressing Enter twice is the answer available at that prompt,
       # so it means "skip this one": no token is written, the run goes on to the next
       # container, and the ssh block is written regardless (it says so when used). Asked
@@ -507,7 +510,7 @@
           SKIPPED {{ dev_alias }}'s Access token — both halves left blank. Nothing written
           to {{ token_file }}{{ ' (the token already there is kept)' if tf.stat.exists | default(false) else '' }};
           the ssh block is still written. Once its tunnel exists:
-          configure-client-dev.yml --tags access -e alias={{ dev_alias }}.
+          client-home-ssh-config.yml --tags access -e only={{ dev_alias }}.
       changed_when: true
       when: (asking_for_token | bool) and (token_blank | bool)
 
@@ -572,7 +575,7 @@
         mode: "0600"
         content: |
           # Cloudflare Access service token for {{ dev_hostname }}.
-          # Written by ansible/playbooks/configure-client-dev.yml. Sourced by ~/.ssh/config's
+          # Written by ansible/playbooks/client-home-ssh-config.yml. Sourced by ~/.ssh/config's
           # ProxyCommand for host `{{ dev_alias }}`. POSIX sh — not fish.
           TUNNEL_SERVICE_TOKEN_ID={{ token_id_typed }}
           TUNNEL_SERVICE_TOKEN_SECRET={{ secret_in.user_input | trim }}
@@ -606,7 +609,7 @@
         dest: "{{ win_token_file_wsl }}"
         content: |
           # Cloudflare Access service token for {{ dev_hostname }}.
-          # Written by ansible/playbooks/configure-client-dev.yml, running in WSL. Read by
+          # Written by ansible/playbooks/client-home-ssh-config.yml, running in WSL. Read by
           # {{ win_wrapper }} — this file is NOT a shell script and is not sourced.
           #
           # PERMISSIONS HERE ARE NTFS, NOT A UNIX MODE. Ansible cannot set a mode on
@@ -755,7 +758,7 @@
       # against marker + "\n"), so it writes a second block under the first and ssh reads
       # the stale one. Why LF and not CRLF, why grep and sed rather than `replace`, and
       # why grep's "\r$" must stay double-quoted: the same tasks in
-      # configure-client-fleet.yml.
+      # _client-fleet-ssh.yml.
       ansible.builtin.command:
         argv: [grep, -qs, "\r$", "{{ ssh_config }}"]
       register: posix_crlf
@@ -781,16 +784,19 @@
         - ansible_check_mode
         - posix_crlf.rc == 0
 
-    - name: Drop the {{ dev_alias }} block this play wrote before it was renamed
+    - name: Drop the {{ dev_alias }} blocks written under markers this play no longer uses
       tags: [ssh]
-      # THE MARKER NAMES THE PLAYBOOK, so the 2026-08-29 rename (dev-client.yml ->
-      # configure-client-dev.yml) changed the key blockinfile finds its block by. Every
-      # client provisioned before then kept the old block, and the next run did not edit
-      # it — it inserted a second one BELOW it, above `Host *`. ssh takes the first value
-      # it obtains, so the stale block's RemoteCommand (`abduco -A claude claude`) and its
-      # ProxyCommand, which never checked the token was there, won — while the config
-      # visibly held the right ones further down. Found on the phone 2026-10-03, as
-      # `ssh infra-dev` never showing the door.
+      # THE MARKER NAMES THE PLAYBOOK, so every rename changes the key blockinfile finds
+      # its block by: dev-client.yml -> configure-client-dev.yml on 2026-08-29, and
+      # configure-client-dev.yml -> client-home-ssh-config.yml (the play you actually
+      # run) on 2026-10-04. After the first one, every client provisioned before it kept
+      # the old block, and the next run did not edit it — it inserted a second one BELOW
+      # it, above `Host *`. ssh takes the first value it obtains, so the stale block's
+      # RemoteCommand (`abduco -A claude claude`) and its ProxyCommand, which never
+      # checked the token was there, won — while the config visibly held the right ones
+      # further down. Found on the phone 2026-10-03, as `ssh infra-dev` never showing
+      # the door. CLAUDE.md § Repo invariants: a rename carries an absent row for its
+      # old marker, and the list only grows.
       #
       # `create: true` creates nothing here: with state=absent and no file, blockinfile
       # returns "File not present". Without it, a fresh client fails rc=257 on a removal.
@@ -798,7 +804,10 @@
         path: "{{ ssh_config }}"
         create: true
         state: absent
-        marker: "# {mark} {{ dev_alias }} (ansible/playbooks/dev-client.yml)"
+        marker: "{{ item }}"
+      loop:
+        - "# {mark} {{ dev_alias }} (ansible/playbooks/dev-client.yml)"
+        - "# {mark} {{ dev_alias }} (ansible/playbooks/configure-client-dev.yml)"
 
     - name: The {{ dev_alias }} block in ~/.ssh/config
       tags: [ssh]
@@ -816,7 +825,7 @@
       # title and its ORDERING RULE, the thing you read first when something is wrong with
       # this file — ended up below two generated blocks, and every dev container
       # provisioned after that would have pushed it down again. `Host *` is the anchor
-      # configure-client-fleet.yml has always used; both plays now agree, and a hand-kept header stays
+      # _client-fleet-ssh.yml has always used; both plays now agree, and a hand-kept header stays
       # where its author put it.
       #
       # If `Host *` is absent, blockinfile appends, which is correct for a file that has
@@ -826,7 +835,10 @@
         mode: "0600"
         create: true
         insertbefore: '^Host \*\s*$'
-        marker: "# {mark} {{ dev_alias }} (ansible/playbooks/configure-client-dev.yml)"
+        # The marker names the play you RE-RUN, not this imported half: it is what a
+        # person reading ~/.ssh/config needs, and it is the key the absent task above has
+        # to be told about the next time it changes.
+        marker: "# {mark} {{ dev_alias }} (ansible/playbooks/client-home-ssh-config.yml)"
         block: "{{ lookup('template', '../templates/ssh-dev-block.j2') }}"
       vars:
         # identity_named, NOT identity_usable, and the rename is the whole fix.
@@ -885,7 +897,7 @@
     - name: Does the laptop's Windows ssh config have CRLF line endings
       tags: [ssh]
       # The same conversion as for ~/.ssh/config above, for the laptop's Windows file;
-      # what drvfs prints while it runs is in configure-client-fleet.yml.
+      # what drvfs prints while it runs is in _client-fleet-ssh.yml.
       ansible.builtin.command:
         argv: [grep, -qs, "\r$", "{{ win_ssh_config }}"]
       register: win_crlf
@@ -924,7 +936,10 @@
         path: "{{ win_ssh_config }}"
         create: true
         state: absent
-        marker: "# {mark} {{ dev_alias }} (ansible/playbooks/dev-client.yml)"
+        marker: "{{ item }}"
+      loop:
+        - "# {mark} {{ dev_alias }} (ansible/playbooks/dev-client.yml)"
+        - "# {mark} {{ dev_alias }} (ansible/playbooks/configure-client-dev.yml)"
       when: on_windows_client | bool
 
     - name: The {{ dev_alias }} block in the laptop's Windows ssh config
@@ -936,7 +951,7 @@
         path: "{{ win_ssh_config }}"
         create: true
         insertbefore: '^Host \*\s*$'
-        marker: "# {mark} {{ dev_alias }} (ansible/playbooks/configure-client-dev.yml)"
+        marker: "# {mark} {{ dev_alias }} (ansible/playbooks/client-home-ssh-config.yml)"
         block: "{{ lookup('template', '../templates/ssh-dev-block.j2') }}"
       vars:
         windows: true
@@ -966,7 +981,7 @@
         mode: "0600"
         content: |
           # The Windows half of `{{ dev_alias }}`, for a laptop this control node cannot see.
-          # Generated by ansible/playbooks/configure-client-dev.yml - edit the templates, not this.
+          # Generated by ansible/playbooks/client-home-ssh-config.yml - edit the templates, not this.
           #
           # RUNNING THIS PLAY FROM WSL DOES ALL OF IT FOR YOU, and checks the cloudflared
           # path first. This file exists for when that is not possible. The paths below
@@ -994,9 +1009,9 @@
           # ---8<--- end ---8<---
           #
           # -- 3. this block, in %USERPROFILE%\.ssh\config, ABOVE its `Host *` ----
-          # BEGIN {{ dev_alias }} (ansible/playbooks/configure-client-dev.yml)
+          # BEGIN {{ dev_alias }} (ansible/playbooks/client-home-ssh-config.yml)
           {{ lookup('template', '../templates/ssh-dev-block.j2') }}
-          # END {{ dev_alias }} (ansible/playbooks/configure-client-dev.yml)
+          # END {{ dev_alias }} (ansible/playbooks/client-home-ssh-config.yml)
       vars:
         windows: true
         identity_named: "{{ win_identity_usable }}"
@@ -1026,7 +1041,7 @@
     - name: Is there a block now
       tags: [always]
       ansible.builtin.command:
-        argv: [grep, -qF, "# BEGIN {{ dev_alias }} (ansible/playbooks/configure-client-dev.yml)", "{{ ssh_config }}"]
+        argv: [grep, -qF, "# BEGIN {{ dev_alias }} (ansible/playbooks/client-home-ssh-config.yml)", "{{ ssh_config }}"]
       register: block_now
       changed_when: false
       failed_when: false
@@ -1048,9 +1063,9 @@
           - "ssh {{ dev_alias }} <cmd>   runs it in ~ (in-workspace <cmd> for /workspace); scp/sftp/Zed too"
           - "ssh -t {{ dev_alias }} in-workspace   a login shell in /workspace"
           - "    no -lan alias: break glass by hand with `ssh <host>` and then"
-          - "    `ssh -p <port> dev@127.0.0.1`, ports in configure-client.yml."
+          - "    `ssh -p <port> dev@127.0.0.1`, ports in client-home-ssh-config.yml."
           - ""
-          - "wsl/posix: block {{ ('in ' ~ ssh_config) if block_now.rc == 0 else ('NOT in ' ~ ssh_config ~ ' — run with --tags ssh') }}; token {{ ('at ' ~ token_file ~ ' (0600), sourced by the ProxyCommand, so it reaches one cloudflared and no other environment') if token_now.stat.exists | default(false) else ('NOT on this client, so ssh ' ~ dev_alias ~ ' says so and stops: configure-client-dev.yml --tags access -e alias=' ~ dev_alias ~ ' adds it') }}."
+          - "wsl/posix: block {{ ('in ' ~ ssh_config) if block_now.rc == 0 else ('NOT in ' ~ ssh_config ~ ' — run with --tags ssh') }}; token {{ ('at ' ~ token_file ~ ' (0600), sourced by the ProxyCommand, so it reaches one cloudflared and no other environment') if token_now.stat.exists | default(false) else ('NOT on this client, so ssh ' ~ dev_alias ~ ' says so and stops: client-home-ssh-config.yml --tags access -e only=' ~ dev_alias ~ ' adds it') }}."
           - ""
           - >-
             windows: {{ 'managed directly — block in ' ~ win_ssh_config ~ ', wrapper at '

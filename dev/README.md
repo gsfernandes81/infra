@@ -61,7 +61,7 @@ been consciously postponed rather than an omission.
 | `status.sh` | on the host: the readouts — `make status`, `verify`, `fleet`, `collections` |
 | `in-workspace` | in the image, on PATH: run a command where the work is, so no client names the path |
 | `claude-sessions-door` | in the image, on PATH, and sshd's `ForceCommand`: what every ssh session runs — the `claude-sessions` menu at a terminal, a forwarded command as given, a login shell for anything else or if the menu fails (see *claude-sessions*) |
-| *(no setup script)* | the host side is `ansible/playbooks/prepare-dev-host.yml`, run from a control node |
+| *(no setup script)* | the host side is `ansible/playbooks/server-create-dev-container.yml`, run from a control node |
 | `sshd_config` / `ssh_config` | the in-container daemon, and the baked half of how it reaches out |
 | `config.fish` | fish's config, baked in — puts every login shell in `/workspace` |
 | `.env.example` | copy to `.env` on zero and edit |
@@ -78,8 +78,8 @@ zero should have a script for:
 ```sh
 # on the phone
 cd ~/infra/ansible
-ansible-playbook playbooks/prepare-dev-host.yml --check --diff    # prove first
-ansible-playbook playbooks/prepare-dev-host.yml
+ansible-playbook playbooks/server-create-dev-container.yml --check --diff    # prove first
+ansible-playbook playbooks/server-create-dev-container.yml                  # edge + host halves, one run
 ```
 
 That creates the secrets directory, generates the GitHub deploy key, authorises **this
@@ -187,7 +187,7 @@ does, not a second one.
 
 ```sh
 ansible fleet -m ping                      # from any directory — see below
-ansible-playbook playbooks/generate-fleet-inventory.yml -K
+ansible-playbook playbooks/server-generate-fleet-inventory.yml -K
 ```
 
 **`ANSIBLE_CONFIG` is set in the image** to `/workspace/ansible/ansible.cfg`. On the
@@ -437,34 +437,36 @@ way back to a session after a disconnect is the rest.
 
 ## Cloudflare
 
-### The order, and why it is this way round
+### The order
 
-**Stand the container up first, with no tunnel, and provision from inside it.** The
-tunnel is not a prerequisite for the container; the container is a prerequisite for
-provisioning the tunnel comfortably, because **there is no ansible on zero and there
-should not be.** zero is the box being managed — installing a control plane on it is the
-wrong direction, and this container is what zero's control node is *for*.
-
-All three playbooks run from the phone. **One per side**, because the three sides hold
-different state, need different credentials and change at different rates:
+Both playbooks run from the phone — **there is no ansible on zero and there should not
+be.** zero is the box being managed; installing a control plane on it is the wrong
+direction, and this container is what zero's control node is *for*.
 
 ```sh
 cd ~/infra/ansible
 
-# 1. the EDGE — tunnel, DNS, Access application and its policy.
-#    Prompts for a Cloudflare API token, which it never writes anywhere.
-ansible-playbook playbooks/create-dev-tunnel.yml --check
-ansible-playbook playbooks/create-dev-tunnel.yml
+# 1. the SERVER side, one run: the EDGE (tunnel, DNS, Access application, service token,
+#    whose secret is printed once) and then the HOST (secrets dir, deploy key,
+#    authorized_keys, dev/.env with the hostname). Reads the Cloudflare API token from
+#    ~/.config/cloudflare/api-token, or prompts — ../ansible/README.md § The Cloudflare API token.
+ansible-playbook playbooks/server-create-dev-container.yml --check
+ansible-playbook playbooks/server-create-dev-container.yml
 
-# 2. the HOST — re-run with the hostname, which rewrites dev/.env
-ansible-playbook playbooks/prepare-dev-host.yml -e tunnel_hostname=infra-dev.gsrpi.uk
+# 2. start it, with the tunnel already in dev/.env
+ssh -t zero 'cd ~/infra/dev && make up'
 
 # 3. the CLIENT — the machine you ssh FROM. Prompts for the service token, once.
 #    The secret CANNOT be passed with -e; the play refuses it. See below.
-#    configure-client.yml does every dev container and the fleet in one run; configure-client-dev.yml
-#    on its own does one container, which is the rotation path.
-ansible-playbook playbooks/configure-client.yml
+#    Every dev container and the fleet in one run; -e only=<alias> for one container,
+#    which is also the rotation path (-e replace_token=true).
+ansible-playbook playbooks/client-home-ssh-config.yml
 ```
+
+Until 2026-10-04 this was three plays and the container was started between them, so
+the host half ran twice; the edge half now runs first and hands the hostname to the
+host half inside the one run. The host half is for `infra-dev` only — the other
+containers keep theirs in their own repos — and the play says so for any other `-e name=`.
 
 **Step 3 is per client, and the laptop counts as two of them.** Windows' `ssh.exe` and
 WSL's `ssh` read different configs from different homes. Run this play *in WSL* and it
@@ -476,7 +478,7 @@ why the Windows token's permissions are printed rather than asserted, are in
 
 ### The service token cannot be given on the command line
 
-`configure-client-dev.yml` reads it with `ansible.builtin.pause`, and a first task asserts that
+`client-home-ssh-config.yml` reads it with `ansible.builtin.pause`, and a first task asserts that
 `st_client_secret` is undefined — which it can only be if somebody passed it.
 
 That is not belt-and-braces, it replaces something that did not work. The obvious spelling
@@ -618,7 +620,7 @@ Each of those "must never" is a specific failure, not tidiness:
   reason the container did it first still stands: it is `host-setup.md`'s token-in-argv
   leak and `management-plane.md`'s *secrets never go in `command_args`*. There is no
   `supervise-daemon` in a container, but `docker inspect` shows argv **and** env, and
-  `.Config.Env` is exactly what `generate-fleet-inventory.yml` refuses to read because it
+  `.Config.Env` is exactly what `server-generate-fleet-inventory.yml` refuses to read because it
   holds live secrets. A read-only credentials file is the spelling that is in neither.
 - **The service token must not be in the container**, because it authorises *reaching*
   the container — putting it inside is the same mistake in the other direction. On the
@@ -1117,7 +1119,7 @@ read-only at `/run/infra-secrets`:
 | `id_ed25519_fleet` | **not built** — would reach all three as `gavin`; see the deferred question above |
 | `ssh_config.fleet` | **not built** — the three `Host` blocks |
 | `known_hosts.fleet` | **not built** — their host keys |
-| `tunnel.json` | Cloudflare tunnel credentials — written by `create-dev-tunnel.yml` |
+| `tunnel.json` | Cloudflare tunnel credentials — written by `server-create-dev-container.yml` |
 
 **There is no `credentials.json`, not even behind a flag.** or3-dev keeps one as a
 documented bad idea: copying the phone's Claude login in does not work — claude

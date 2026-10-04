@@ -1,15 +1,18 @@
 ---
-# Write the fleet's ssh aliases into this control node's ~/.ssh/config.
+# NOT A PLAYBOOK YOU RUN — the underscore says so. client-home-ssh-config.yml imports it;
+# run that. This is its fleet half: the fleet's ssh aliases, into this control node's
+# ~/.ssh/config.
 #
-# Companion to configure-client-dev.yml, which owns the `infra-dev` block in the same file. Two
-# markers, two blocks, neither aware of the other — blockinfile edits its own block in
-# place, so re-running either one cannot disturb the other or append a duplicate.
+# Companion to _client-dev-ssh.yml, which owns the dev-container blocks in the same file.
+# Separate markers, separate blocks, neither aware of the other — blockinfile edits its
+# own block in place, so re-running either one cannot disturb the other or append a
+# duplicate.
 #
 # THIS PLAY WRITES ONE FILE ON THE CONTROL NODE. It touches no host in the fleet, needs
 # no become, and reaches nothing over the network except `command -v cloudflared`. It is
 # safe to re-run at any time, including from a rescue.
 #
-#   ansible-playbook playbooks/configure-client-fleet.yml
+#   ansible-playbook playbooks/client-home-ssh-config.yml --tags ssh
 #
 # FROM THIS DIRECTORY. ansible.cfg is read from the cwd and is the only thing pointing at
 # ./inventory; run from anywhere else, `hosts: control` matches nothing and the play is
@@ -55,7 +58,7 @@
     # THE PROBE IS THE HOME DIRECTORY, NOT THE CONFIG FILE. It used to be the config, which
     # meant a laptop that had never had one fell through to the paste path even though the
     # play could plainly have written it — `create: true` on the blockinfile below closes
-    # that, and configure-client-dev.yml probes the same way for the same reason.
+    # that, and _client-dev-ssh.yml probes the same way for the same reason.
     windows_home: "/mnt/c/Users/gavin"
     windows_ssh_config: "{{ windows_home }}/.ssh/config"
 
@@ -92,7 +95,7 @@
     #
     # `shell`, not `command`: `command -v` is a SHELL BUILTIN, so the command module has
     # nothing to exec and reports cloudflared missing on a host where it is plainly on
-    # PATH. That is what failed on Termux, 2026-08-23. configure-client-dev.yml had the same task
+    # PATH. That is what failed on Termux, 2026-08-23. _client-dev-ssh.yml had the same task
     # with the failure hidden behind `| default('cloudflared', true)` until 2026-08-24,
     # when it was fixed to this same resolve-then-stat pattern — detection is still not
     # to be trusted anywhere; the stat on the result is the guard.
@@ -202,7 +205,7 @@
     # CRLF too, on 2026-10-03, by the dry run's diff adding an infra-dev block under the
     # one already there. LF, not CRLF, because LF is the only ending blockinfile can
     # write, and every ssh here, Windows OpenSSH included, reads it; the .cmd wrapper is
-    # the one file that must be CRLF, and configure-client-dev.yml says why.
+    # the one file that must be CRLF, and _client-dev-ssh.yml says why.
     #
     # grep and sed, not `replace`: that module opens the file with universal newlines,
     # never sees a "\r", and reports ok. rc 2 is a missing or unreadable file: missing only
@@ -248,14 +251,19 @@
     # inserted a second fleet block instead of editing the first, and ssh, taking the
     # first value it obtains, kept reading the old one. Harmless for the Pis, whose
     # stanzas match; not for anything the template has since changed or dropped — the
-    # `zero-dev-*` aliases lived on in the old block. configure-client-dev.yml carries
-    # the same task for its own blocks, where the stale one hid the claude-sessions door.
-    - name: Drop the fleet block this play wrote before it was renamed
+    # `zero-dev-*` aliases lived on in the old block. The 2026-10-04 rename to
+    # client-home-ssh-config.yml (the play you run; this half is imported by it) adds the
+    # second entry. _client-dev-ssh.yml carries the same task for its own blocks, where
+    # the stale one hid the claude-sessions door.
+    - name: Drop the fleet blocks written under markers this play no longer uses
       ansible.builtin.blockinfile:
         path: "{{ ssh_config }}"
         create: true
         state: absent
-        marker: "# {mark} infra-fleet (ansible/playbooks/ssh-client.yml)"
+        marker: "{{ item }}"
+      loop:
+        - "# {mark} infra-fleet (ansible/playbooks/ssh-client.yml)"
+        - "# {mark} infra-fleet (ansible/playbooks/configure-client-fleet.yml)"
 
     # insertbefore, NOT the default append. `Host *` carries the defaults and must stay
     # last: ssh takes the first value it obtains, so a fleet block placed after it would
@@ -265,7 +273,8 @@
       ansible.builtin.blockinfile:
         path: "{{ ssh_config }}"
         create: true
-        marker: "# {mark} infra-fleet (ansible/playbooks/configure-client-fleet.yml)"
+        # Names the play you RE-RUN, not this imported half — see _client-dev-ssh.yml.
+        marker: "# {mark} infra-fleet (ansible/playbooks/client-home-ssh-config.yml)"
         insertbefore: '^Host \*\s*$'
         block: "{{ lookup('template', '../templates/ssh-fleet-block.j2') }}"
         mode: "0600"
@@ -358,6 +367,7 @@
         marker: "{{ item }}"
       loop:
         - "# {mark} infra-fleet (ansible/playbooks/ssh-client.yml)"
+        - "# {mark} infra-fleet (ansible/playbooks/configure-client-fleet.yml)"
         - "# {mark} infra-fleet"
       when: on_windows_client | bool
 
@@ -370,7 +380,7 @@
       ansible.builtin.blockinfile:
         path: "{{ windows_ssh_config }}"
         create: true
-        marker: "# {mark} infra-fleet (ansible/playbooks/configure-client-fleet.yml)"
+        marker: "# {mark} infra-fleet (ansible/playbooks/client-home-ssh-config.yml)"
         insertbefore: '^Host \*\s*$'
         block: "{{ lookup('template', '../templates/ssh-fleet-block.j2') }}"
       vars:
@@ -388,14 +398,14 @@
         mode: "0600"
         content: |
           # Paste this into the laptop's ~/.ssh/config, ABOVE its `Host *` block.
-          # Generated by ansible/playbooks/configure-client-fleet.yml - edit the template, not this.
+          # Generated by ansible/playbooks/client-home-ssh-config.yml - edit the template, not this.
           #
           # The cloudflared path below is NOT verified: this control node cannot see the
           # laptop's filesystem. Run this play from WSL and it manages that file directly,
           # checking the path first.
-          # BEGIN infra-fleet (ansible/playbooks/configure-client-fleet.yml)
+          # BEGIN infra-fleet (ansible/playbooks/client-home-ssh-config.yml)
           {{ lookup('template', '../templates/ssh-fleet-block.j2') }}
-          # END infra-fleet (ansible/playbooks/configure-client-fleet.yml)
+          # END infra-fleet (ansible/playbooks/client-home-ssh-config.yml)
       vars:
         cloudflared: "{{ windows_cloudflared }}"
         adb_jump: true

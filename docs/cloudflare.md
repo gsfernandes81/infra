@@ -49,9 +49,9 @@ So each host gets a **new** tunnel created with `config_src: local`, and its CNA
 repointed. Three playbooks, by blast radius:
 
 ```
-ansible-playbook playbooks/create-host-tunnel.yml     -e target=<host> -K
-ansible-playbook playbooks/cutover-host-tunnel.yml -e target=<host> -e ansible_host=<host>-two -K
-ansible-playbook playbooks/retire-host-tunnel.yml  -e target=<host> -K
+ansible-playbook playbooks/server-create-tunnel.yml     -e target=<host> -K
+ansible-playbook playbooks/server-cutover-tunnel.yml -e target=<host> -e ansible_host=<host>-two -K
+ansible-playbook playbooks/server-delete-tunnel.yml  -e target=<host> -K
 ```
 
 **`ansible_host` is not optional on the cutover.** It cycles the target's connector, so a
@@ -153,7 +153,7 @@ on any of them.
 ## Landmines
 
 - **A tunnel with private network routes cannot be deleted** (`1023`), and those routes
-  are not shown anywhere you would look. `retire-host-tunnel.yml -e drop_routes=true`
+  are not shown anywhere you would look. `server-delete-tunnel.yml -e drop_routes=true`
   deletes them (the `./2g` wrapper that shortened this is gone with 2g); it is
   opt-in because dropping a route someone relies on is not undone by re-running.
 - **Deleting a Public Hostname in the UI deletes its DNS record.** The CNAMEs are
@@ -168,8 +168,9 @@ on any of them.
 - **Leave infra-dev's Access application, policy and service token alone.** They are the
   way into the container. Different tunnel; confirm which you are looking at.
 - **An Access service token is not an API token is not a tunnel token.** Three unrelated
-  credentials sharing a word. `create-dev-tunnel.yml` prompts for the right one by
-  saying which it is not.
+  credentials sharing a word. The tunnel plays read the API token from
+  `~/.config/cloudflare/api-token` or prompt for it, saying which one it is not; the
+  token itself is minted once, per `ansible/README.md` § *The Cloudflare API token*.
 - **A service token in a policy cannot be deleted — rotate it.** `400`, code `12139`,
   `service_token_in_use`. Every token this fleet uses is named by an Access policy, so
   this is the normal case, not an edge one. `POST …/service_tokens/{id}/rotate` keeps the

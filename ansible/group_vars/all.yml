@@ -10,13 +10,13 @@ fleet_inventory_report: "{{ playbook_dir }}/../../docs/fleet-inventory.md"
 
 # The DNS zone every hostname this repo writes lives in.
 #
-# ONE HOME, because two plays have to agree about it: create-dev-tunnel.yml CREATES
-# `<alias>.<dns_zone>` at the edge, and configure-client-dev.yml writes the client block
+# ONE HOME, because two plays have to agree about it: server-create-dev-container.yml
+# CREATES `<alias>.<dns_zone>` at the edge, and client-home-ssh-config.yml writes the client block
 # that NAMES it. Spelled as a literal in both, they are a pair that can drift, and the
 # drift presents as a client reaching a hostname nothing was provisioned under — which
 # reads exactly like the container being down.
 #
-# Here rather than in fleet.yml because configure-client-dev.yml targets `control`, which
+# Here rather than in fleet.yml because client-home-ssh-config.yml targets `control`, which
 # is localhost, and fleet.yml would not reach it. Same reason fleet_inventory_report is
 # here.
 #

@@ -34,7 +34,7 @@
 # working. That container exports ANSIBLE_CONFIG, which Ansible reads before it looks at
 # the cwd — so the inventory is found from any directory in here. The clients this guard
 # is actually for are Termux and WSL, where nothing exports it and the cwd is the whole
-# story. Test it the way it will be met: `cd /tmp && ansible-playbook <repo>/ansible/playbooks/configure-client-fleet.yml`
+# story. Test it the way it will be met: `cd /tmp && ansible-playbook <repo>/ansible/playbooks/_client-fleet-ssh.yml`
 # with ANSIBLE_CONFIG unset.
 #
 # NO NEW COLLECTIONS: ansible.builtin throughout.

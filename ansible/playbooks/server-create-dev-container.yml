@@ -1,0 +1,73 @@
+---
+# CREATE A DEV CONTAINER'S TUNNEL AND HOST SIDE, in one run, from the phone.
+#
+#     cd ansible
+#     ansible-playbook playbooks/server-create-dev-container.yml --check          # prove
+#     ansible-playbook playbooks/server-create-dev-container.yml                  # infra-dev
+#     ansible-playbook playbooks/server-create-dev-container.yml -e name=or3-dev  # another container
+#
+# Then, in that order:
+#
+#     ssh -t zero 'cd ~/infra/dev && make up'          # start it (-t: make sudos)
+#     ansible-playbook playbooks/client-home-ssh-config.yml -e only=<name>   # on EACH client
+#
+# No -K: nothing here needs root. It needs the Cloudflare API token, read from
+# ~/.config/cloudflare/api-token on the phone or prompted for — ansible/README.md § "The
+# Cloudflare API token" is where that is minted and what it must carry.
+#
+# TWO HALVES, imported in the order that lets one run do it all:
+#
+#   1. _dev-container-tunnel.yml  the EDGE: tunnel, CNAME, Access service token (its
+#                                 secret printed ONCE), Access application and policy.
+#                                 Idempotent — re-run after a partial failure to finish.
+#   2. _dev-container-host.yml    the HOST, infra-dev ONLY: secrets dir, deploy key,
+#                                 authorized_keys, and dev/.env with the hostname the edge
+#                                 half just created. Other containers keep their host side
+#                                 in their own repos (decisions.md, "Claude dev containers
+#                                 stay in their own app repos"), so for them this play
+#                                 does the edge half and says so.
+#
+# WHY ONE PLAY NOW, when the README spent a paragraph defending three. Until 2026-10-04
+# the sequence was host half → make up → edge half → host half again with -e
+# tunnel_hostname, and the defence was credentials: sudo, an API token and an Access
+# service token, one per half. It was already half untrue — neither half here needs sudo —
+# and the owner asked for the task to be one command. The Access token is still a
+# different half (client-home-ssh-config.yml, run on each client), and the API token is
+# still never on a command line. The decision is a row in docs/decisions.md.
+#
+# The edge half runs first so the host half can write the hostname into dev/.env in the
+# same run, and so the first `make up` brings the container up WITH its tunnel. The handoff
+# is one host fact (dev_tunnel_hostname_from_edge); on its own, _dev-container-host.yml
+# still wants -e tunnel_hostname= spelled out, because there an absent value means
+# "preserve what dev/.env says", not "turn the tunnel on" (CLAUDE.md § Repo invariants).
+#
+# NO TASKS OF ITS OWN beyond one message: this file is composition. Everything it runs
+# belongs to the two halves.
+
+- name: Guard — refuse to run with no inventory
+  ansible.builtin.import_playbook: _assert-inventory.yml
+  vars:
+    required_group: fleet
+
+- name: The edge — tunnel, DNS, Access application and service token
+  ansible.builtin.import_playbook: _dev-container-tunnel.yml
+
+- name: Say so when the host half does not apply
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: "{{ name | default('infra-dev') }} keeps its host side in its own repo"
+      ansible.builtin.debug:
+        msg: >-
+          The host half (secrets dir, deploy key, authorized_keys, dev/.env) runs for
+          infra-dev only, because it writes dev/.env in THIS repo's checkout.
+          {{ name | default('infra-dev') }}'s is in its own repo: set DEV_TUNNEL_HOSTNAME
+          there to the hostname printed above, then `make up` in that repo's dev/.
+      changed_when: true
+      when: (name | default('infra-dev')) != 'infra-dev'
+
+- name: The host — secrets dir, deploy key, authorized_keys, dev/.env (infra-dev only)
+  ansible.builtin.import_playbook: _dev-container-host.yml
+  # `when` on an import applies to every task it brings in. The play still gathers facts
+  # on zero, which is cheap and harmless.
+  when: (name | default('infra-dev')) == 'infra-dev'

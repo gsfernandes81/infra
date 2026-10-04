@@ -1,10 +1,16 @@
 ---
-# The HOST half of infra-dev's setup: everything on `zero` that has to exist before
-# `make up` can work. Run from Termux, or from any control node.
+# NOT A PLAYBOOK YOU RUN — the underscore says so. server-create-dev-container.yml
+# imports it as its second half, for infra-dev only; run that. This half is the HOST side
+# of infra-dev's setup: everything on `zero` that has to exist before `make up` can work.
 #
 #     cd ansible
-#     ansible-playbook playbooks/prepare-dev-host.yml --check --diff   # prove, no -K needed
-#     ansible-playbook playbooks/prepare-dev-host.yml
+#     ansible-playbook playbooks/server-create-dev-container.yml --check --diff   # prove, no -K needed
+#     ansible-playbook playbooks/server-create-dev-container.yml
+#
+# INFRA-DEV ONLY, because this half writes dev/.env in THIS repo's checkout. The other
+# dev containers keep their host side in their own app repos (decisions.md, "Claude dev
+# containers stay in their own app repos"); for them the wrapper runs the edge half and
+# says so.
 #
 # This REPLACES dev/seed-secrets.sh, which is deleted. Three of that script's five steps
 # were the fleet key and its ssh fragments, and those went with the control-node question
@@ -68,7 +74,13 @@
     # empty -e as absent, so `-e tunnel_hostname=` would preserve the old value instead of
     # clearing it — leaving no way to turn the tunnel back off. Given-wins-even-if-empty,
     # absent-preserves, is the semantics that has both directions.
-    dev_tunnel_hostname: "{{ tunnel_hostname if tunnel_hostname is defined else env_tunnel_hostname }}"
+    # Three sources, in order: an explicit -e; the hostname the edge half of
+    # server-create-dev-container.yml just created or confirmed in this same run (a host
+    # fact, so it is defined only then); else whatever dev/.env already says.
+    dev_tunnel_hostname: >-
+      {{ tunnel_hostname if tunnel_hostname is defined
+         else (dev_tunnel_hostname_from_edge if dev_tunnel_hostname_from_edge is defined
+               else env_tunnel_hostname) }}
     # The key that will be allowed to ssh INTO the container. Defaults to the control
     # node's own — run this from the phone and the phone authorises itself, which beats
     # a paste. Override with -e to authorise a laptop as well; the module appends.
@@ -198,7 +210,7 @@
         dest: "{{ infra_src }}/dev/.env"
         mode: "0600"
         content: |
-          # Written by ansible/playbooks/prepare-dev-host.yml. Gitignored.
+          # Written by ansible/playbooks/server-create-dev-container.yml. Gitignored.
           # Re-run that playbook rather than hand-editing, or the next run overwrites you.
           INFRA_SRC={{ infra_src }}
           INFRA_SECRETS={{ infra_secrets }}

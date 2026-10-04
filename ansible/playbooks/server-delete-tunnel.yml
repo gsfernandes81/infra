@@ -1,7 +1,7 @@
 ---
 # 2g, phase 3 of 3: delete the old tunnel.
 #
-#   ansible-playbook playbooks/retire-host-tunnel.yml -e target=one -K
+#   ansible-playbook playbooks/server-delete-tunnel.yml -e target=one -K
 #
 # WHY THIS MATTERS BEYOND TIDINESS. Deleting the tunnel kills its credential outright.
 # `one`'s token has been assumed disclosed since it sat world-readable in a 755 init
@@ -17,13 +17,11 @@
   hosts: "{{ target | default('one') }}"
   gather_facts: false
 
-  vars_prompt:
-    - name: cf_api_token
-      prompt: "Cloudflare API token — Account>Cloudflare Tunnel>Edit, Zone>Zone>Read, Zone>DNS>Edit (last two on gsrpi.uk)"
-      private: true
-
   vars:
     cf_api: "https://api.cloudflare.com/client/v4"
+    # The one Cloudflare API token, on the control node. ansible/README.md § "The Cloudflare
+    # API token". -e cf_api_token_file= points at another; absent, the play prompts.
+    cf_api_token_file: "{{ lookup('env', 'HOME') }}/.config/cloudflare/api-token"
     zone_name: "gsrpi.uk"
     cred_file: "/etc/cloudflared/{{ inventory_hostname }}.json"
     old_cred_file: "/etc/cloudflared/{{ inventory_hostname }}.json.pre-2g"
@@ -39,6 +37,79 @@
     drop_routes: false
 
   tasks:
+    # ── the API token: a file on the control node, else a prompt ─────────────
+    # ONE token for every tunnel play, the union of what they need, kept at
+    # {{ cf_api_token_file }} at mode 600 on the phone. ansible/README.md § "The Cloudflare
+    # API token" is where it is minted and exactly which permissions it carries. Absent
+    # the file, the play asks, echo off, as it always did — so nothing here is required.
+    # NEVER inside the repo checkout: that is bind-mounted into infra-dev, which has no
+    # route to the fleet by decision and must not get one to the edge by accident. And
+    # never in $INFRA_SECRETS, which is mounted into the container.
+    - name: Refuse an API token supplied on the command line
+      # `-e cf_api_token=` would silently beat both the file and the prompt — extra vars
+      # win — after the value had already been through your shell. The same refusal
+      # _client-dev-ssh.yml makes for the Access secret, for the same reason.
+      ansible.builtin.assert:
+        that: cf_api_token is not defined
+        fail_msg: >-
+          cf_api_token was passed as a variable. It is read from {{ cf_api_token_file }}
+          or prompted for, never taken from the command line: an -e value is in your
+          shell history and was in the process list. Re-run without it, then in fish
+          `history delete --contains cf_api_token`.
+        success_msg: "no API token on the command line"
+      run_once: true
+
+    - name: Look for the API token file on the control node
+      ansible.builtin.stat:
+        path: "{{ cf_api_token_file }}"
+      register: cf_tok_file
+      delegate_to: localhost
+      run_once: true
+      check_mode: false
+
+    - name: Refuse a token file anyone but you can read
+      ansible.builtin.assert:
+        that: (not cf_tok_file.stat.exists) or (cf_tok_file.stat.mode in ['0600', '0400'])
+        fail_msg: >-
+          {{ cf_api_token_file }} is mode {{ cf_tok_file.stat.mode | default('?') }}. chmod 600
+          it: it is an API token with write access to every tunnel in this fleet.
+        success_msg: >-
+          {{ ('API token file present, mode ' ~ cf_tok_file.stat.mode)
+             if cf_tok_file.stat.exists else 'no API token file; will prompt' }}
+      run_once: true
+
+    - name: Read the API token from the file
+      ansible.builtin.set_fact:
+        cf_api_token: "{{ lookup('file', cf_api_token_file) | trim }}"
+      no_log: true
+      when: cf_tok_file.stat.exists
+
+    - name: Ask for the API token, there being no file
+      # A TASK, not vars_prompt: a task always runs and has no variable name for -e to
+      # pre-empt. no_log because the registered result holds what was typed verbatim.
+      ansible.builtin.pause:
+        prompt: >-
+          Cloudflare API token, not echoed (no file at {{ cf_api_token_file }}; see
+          ansible/README.md to stop being asked). An API token from My Profile -> API
+          Tokens, NOT an Access service token
+        echo: false
+      register: cf_tok_in
+      no_log: true
+      when: not cf_tok_file.stat.exists
+
+    - name: Keep what was typed
+      ansible.builtin.set_fact:
+        cf_api_token: "{{ cf_tok_in.user_input | trim }}"
+      no_log: true
+      when: not cf_tok_file.stat.exists
+
+    - name: Refuse an empty token
+      ansible.builtin.assert:
+        that: cf_api_token | length > 0
+        fail_msg: "no API token: {{ cf_api_token_file }} is empty, or nothing was typed"
+        success_msg: "API token in hand"
+      run_once: true
+
     # ── is this token even a token? ──────────────────────────────────────────
     # FIRST, before anything reads a box or the API. Cloudflare answers a token it will
     # not accept with `9109 Invalid access token` on whatever endpoint you happened to
@@ -315,7 +386,7 @@
 
     # no_log HIDES THE HEADERS, WHICH CARRY THE TOKEN — but it also hides the response,
     # and on this task the response IS the diagnostic. That is the failure
-    # create-dev-tunnel.yml already records: a no_log'd 201 censored the only copy of
+    # _dev-container-tunnel.yml already records: a no_log'd 201 censored the only copy of
     # a secret. So the task never fails on its own; the check below reads the registered
     # result and prints only the API's own error list, which contains nothing sensitive.
     - name: Delete the old tunnel
