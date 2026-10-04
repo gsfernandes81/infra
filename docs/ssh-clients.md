@@ -98,17 +98,18 @@ at the forced door as a command, and the door runs it — `in-workspace` then st
 again, which this time sees a login. `<c>-sh` is kept as a name so tools that use it
 (`server-add-authorised-keys.yml`, or3's phone tunnel) need no change, and goes once nothing does.
 
-### Break glass by hand — there is no third alias
+### Break glass by hand — there is no third alias, and no port
 
-**Dropped 2026-08-31.** Every container used to get a `<c>-lan` that reached its sshd on
-`127.0.0.1:<port>` through the host's own sshd, independent of that container's tunnel,
-Access application and token — the set of things that actually breaks. The path is still
-there. Only the alias went:
+**The `<c>-lan` alias was dropped 2026-08-31 and the loopback port it reached on
+2026-10-04.** The way in that survives a broken tunnel, Access application or token is
+`docker exec` on the container's host, through the host's own ssh:
 
 ```sh
-ssh <host>                              # zero today; the container's host, whichever it is
-ssh -p <port> dev@127.0.0.1             # from that shell. Ports: ansible/playbooks/client-home-ssh-config.yml
+ssh -t <host> 'cd ~/infra/dev && make shell'     # zero today; the container's host, whichever it is
 ```
+
+`-t` because `make` sudos and sudo asks. `make claude` lands on the claude-sessions menu
+the same way. The other containers' repos have their own `make`.
 
 **Why an alias was the wrong shape for it.** The generated block had `ProxyCommand ssh
 zero nc %h %p` with `zero` written in, because a client-side alias must name the host the
@@ -123,17 +124,9 @@ The paths that survive that are the LAN ones — `<host>-local`, below. An earli
 of this text claimed otherwise, and a comment that names the wrong failure is read at the
 moment there is no time to check it.
 
-**If you want it in one line from a client**, `ProxyJump` will not do it: the target is
-`127.0.0.1:<port>` on the host, which `PermitOpen` deliberately does not include, so the
-jump is refused. A session channel running `nc` is not governed by `AllowTcpForwarding` at
-all, which is what the old alias exploited:
-
-```sh
-ssh -o ProxyCommand='ssh zero nc %h %p' -p 2225 dev@127.0.0.1
-```
-
-`nc` is busybox's on Alpine; `nc host port` is the one form busybox and openbsd-nc agree
-on, and `ssh <host> nc …` is the same line on every client, Windows included.
+**There is no one-line form from a client any more.** The old `ProxyCommand='ssh zero nc
+%h %p' -p 2225` trick reached the published port; with nothing published, the host hop
+and `make shell` above are the whole of it.
 
 ## The fleet: three named paths to each Pi
 
@@ -277,14 +270,15 @@ The file is POSIX `sh`, because `ProxyCommand` runs under `/bin/sh` whatever you
 shell is. fish syntax there fails with a message about `set` that names neither the file
 nor ssh.
 
-**The playbook will not accept the secret on the command line** — not "should not", it
-refuses. `-e st_client_secret=…` silently *replaces* a `vars_prompt` rather than colliding
-with it, so the play reads it with `ansible.builtin.pause`, which is a task and has no
-variable name for `-e` to pre-empt. The Client ID is treated differently on purpose: it is
-the username half, is not secret, and `-e st_client_id=…` is accepted.
+**Nothing is typed.** Since 2026-10-04 the play mints this client's own service token over
+the Cloudflare API — named `<container>-<client>`, added to the container's Access policy,
+written straight to the file — using the API token at `~/.config/cloudflare/api-token`
+(`ansible/README.md` § *The Cloudflare API token*). A lost laptop is one token to delete
+in Zero Trust → Access → Service credentials; no other client notices.
 
-Re-running does not ask again. `-e replace_token=true` is the rotation path; delete and
-recreate is refused by Cloudflare while a policy references the token.
+Re-running leaves an existing file alone. `-e replace_token=true` rotates this client's
+token and rewrites the file; delete and recreate is refused by Cloudflare while a policy
+references a token, and is never needed.
 
 ## Windows has no `sh`
 

@@ -25,3 +25,40 @@ fleet_inventory_report: "{{ playbook_dir }}/../../docs/fleet-inventory.md"
 # variable exists to remove it from, and they would silently be the fallback's value
 # rather than the fleet's. Same call as `${VAR:?message}` over `:-` in CLAUDE.md.
 dns_zone: gsrpi.uk
+
+# ── the Cloudflare API token ─────────────────────────────────────────────────
+# One USER token, the union of what every play that talks to Cloudflare needs, in a file
+# on the machine running the play — the phone, WSL, any client. Every such play reads it
+# from here, refuses it on the command line, and when the file is missing prints the text
+# below and stops. Nothing is ever prompted for: a prompt is a paste. The reasoning and the
+# dashboard path are ansible/README.md § "The Cloudflare API token"; this is the one copy
+# of the instructions the plays print, so the two must agree.
+cf_api_token_file: "{{ lookup('env', 'HOME') }}/.config/cloudflare/api-token"
+cf_api_token_howto: |
+  NO CLOUDFLARE API TOKEN at {{ cf_api_token_file }} on this machine.
+
+  Mint one — a separate one per machine you run playbooks on is fine and preferred
+  (same permissions, named for the machine, revocable on its own). It must be a USER
+  token from My Profile, not an Account API Token.
+
+    1. Cloudflare dashboard -> profile icon (top right) -> My Profile -> API Tokens
+       -> Create Token -> scroll to "Custom token" -> Get started.
+    2. Token name: infra-ansible-<this machine>.
+    3. Permissions, one row each ("Add more" for the extra rows), left to right:
+         Account | Cloudflare Tunnel           | Edit
+         Account | Access: Apps and Policies   | Edit
+         Account | Access: Service Tokens      | Edit
+         Zone    | Zone                        | Read
+         Zone    | DNS                         | Edit
+    4. Account Resources: Include -> Specific account -> yours.
+       Zone Resources:    Include -> Specific zone    -> {{ dns_zone }}.
+    5. Continue to summary -> Create Token -> copy it NOW; it is shown once.
+
+  Then, in fish, so it reaches neither history nor a process list:
+
+    mkdir -p ~/.config/cloudflare; chmod 700 ~/.config/cloudflare
+    umask 077; read -s -P 'Paste the token, then Enter: ' tok; printf '%s\n' $tok > ~/.config/cloudflare/api-token; set -e tok
+    chmod 600 ~/.config/cloudflare/api-token
+
+  Re-run the same command. The play verifies the token first and names a missing
+  permission if there is one.

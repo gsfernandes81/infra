@@ -98,7 +98,7 @@ exists, and the first run of it found exactly that on `one`.
 | Host | |
 |---|---|
 | `one` | **8080** qBittorrent (via gluetun) · ~~**7777** ionic-traces~~ — **stopped**, see [2c](docs/management-plane.md#sequencing-and-where-podman-fits) · **3001** send2ereader · **8384/22000** syncthing |
-| `zero` | **2283** Immich · **8384/22000** syncthing · **127.0.0.1:2224-2225** the `or3-dev` and `infra-dev` containers |
+| `zero` | **2283** Immich · **8384/22000** syncthing · **127.0.0.1:2224** the `or3-dev` container (`infra-dev` publishes nothing — its tunnel, or `make shell`) |
 | `two` | **none published** — the bot's web UI (8080) and break-glass sshd (2222) exist inside the container and are deliberately not mapped. See the commented `ports:` block in `deployments/destiny-director/compose.yaml` |
 
 Both Syncthings and `torrent` are on **host or shared networking**, so `docker ps` shows
@@ -116,7 +116,7 @@ and each holds live sessions and uncommitted worktrees. See
 | `dd-dev` (+ `dd-mysql`) | `destiny-director` | 2222 | that repo |
 | `ds-dev` | `dossier` | 2223 | that repo |
 | `or3-dev` | `or3` | `127.0.0.1:2224` | that repo |
-| `infra-dev` | **this one** | `127.0.0.1:2225` | [`dev/`](dev/README.md) |
+| `infra-dev` | **this one** | none published — `infra-dev.gsrpi.uk`, or `make shell` on zero | [`dev/`](dev/README.md) |
 
 **`infra-dev` is the exception to "dev containers stay in their own repo", and it is not
 one.** That rule says a dev container belongs to the repo it develops; this one develops

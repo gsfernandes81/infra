@@ -33,7 +33,7 @@ phone. A leading **`_`** is a half that one of these imports — not a thing you
 
 | I want to… | Run | Needs |
 |---|---|---|
-| set up this phone or laptop: every ssh alias, every dev-container token, Windows too from WSL | `client-home-ssh-config.yml` | prompts for Access tokens it does not already hold |
+| set up this phone or laptop: every ssh alias, every dev-container token, Windows too from WSL | `client-home-ssh-config.yml` | the [API token](#the-cloudflare-api-token) on this machine; it mints the Access tokens itself |
 | rotate one dev container's token on this client, or add it once its tunnel exists | `client-home-ssh-config.yml -e only=or3-dev -e replace_token=true` | the same |
 | let a new phone or laptop into the dev containers | `server-add-authorised-keys.yml -e client_pubkey_file=~/laptop.pub` | a route to `zero` |
 | create a dev container: its tunnel, DNS, Access, and (for `infra-dev`) its host side | `server-create-dev-container.yml` · `-e name=or3-dev` for another | the [API token](#the-cloudflare-api-token) |
@@ -75,8 +75,9 @@ for is the API token — from a file now, see below — and the owner wanted one
 host half runs for `infra-dev` only, because it writes `dev/.env` in this checkout; the
 other containers' host side lives in their own repos, and the play says so.
 
-**`client-home-ssh-config.yml` is also the registry.** Its header table is where the dev
-containers' loopback ports are recorded.
+**`client-home-ssh-config.yml` is also the registry** of which dev containers exist and
+which repo each lives in. No ports: since 2026-10-04 nothing is published on the host, and
+break-glass is `ssh -t zero 'cd ~/infra/dev && make shell'`.
 
 ### One command, for whichever client you are on
 
@@ -92,26 +93,25 @@ ansible-playbook playbooks/client-home-ssh-config.yml
 ```
 
 That is the fleet block, plus a block for every dev container, plus — from WSL — the
-Windows side of the same laptop. It prompts once per container that has no service token
-on this client, and not at all when they all do.
+Windows side of the same laptop. **Nothing is typed.** For every container whose token this
+client does not hold, the play mints one — this client's own, named `<container>-<client>`
+— over the Cloudflare API, adds it to the container's Access policy and writes it to
+`~/.config/<container>/token`. The only thing it needs for that is the
+[API token](#the-cloudflare-api-token) at `~/.config/cloudflare/api-token` on this
+machine; if that is missing it prints how to mint one and stops.
 
-The registry used to be a comment in or3's compose file —
-`../docs/management-plane.md` opens its drift table with that as the worked example — and
-it moved here because this file consumed the numbers to build each `<alias>-lan` block.
-Those aliases were dropped on 2026-08-31, so the table is documentation now rather than
-an input: the ports are what you need for the manual break-glass hop, and nothing but a
-person will notice if one goes stale.
-
-**When a container's tunnel does not exist yet:** press Enter at both of its prompts.
-Both blank skips that container's token and the run carries on; its ssh block is written
-anyway, and `ssh <c>` says the token is missing rather than failing obscurely. The ssh
-blocks and the tokens are separate halves, tagged `ssh` and `access`:
+**When a container's tunnel does not exist yet** it has no Access application, so its
+token is skipped with a message and the run carries on; its ssh block is written anyway,
+and `ssh <c>` says the token is missing rather than failing obscurely. The ssh blocks and
+the tokens are separate halves, tagged `ssh` and `access`:
 
 ```sh
-ansible-playbook playbooks/client-home-ssh-config.yml --tags ssh      # every block, never prompts
+ansible-playbook playbooks/client-home-ssh-config.yml --tags ssh      # every block; needs no API token
 ansible-playbook playbooks/client-home-ssh-config.yml --tags access   # tokens only
-ansible-playbook playbooks/client-home-ssh-config.yml -e prompt_for_token=false   # blocks, plus tokens already held
 ```
+
+`-e client=<name>` sets the name this machine's tokens carry; the default is `phone` on
+Termux and `uname -n` elsewhere. It matters only at minting.
 
 ### A new client needs two halves, and only one of them is `client-home-ssh-config.yml`
 
@@ -183,9 +183,9 @@ Three things that are not obvious and have each cost a run:
   deliberately does not assert on it. See `../docs/decisions.md`.
 
 From Termux `/mnt/c` does not exist, the Windows half is skipped, and the block and the
-wrapper are rendered to `~/ssh-dev-block-windows-<alias>.txt` to paste. **The token is
-never rendered to that file** — a secret in something you open and copy out of is a secret
-in scrollback.
+wrapper are rendered to `~/ssh-dev-block-windows-<alias>.txt` for reference. **The laptop's
+token cannot be made from there**: it is minted per client, so run the play in WSL, which
+writes both of the laptop's sides.
 
 ### Run them from this directory, or they do nothing at all
 
@@ -230,12 +230,19 @@ repo has traded hand-rolled shell for stock tooling — after `bin/compose` and 
 
 ## The Cloudflare API token
 
-One token, for every `server-` play that talks to Cloudflare. It lives on the phone at
-`~/.config/cloudflare/api-token`, mode 600, and each of those plays reads it from there —
-or, if the file is absent, prompts for it with echo off, as they all did before
-2026-10-04. It is never accepted on the command line (`-e cf_api_token=` is refused), never
-in this repo gitignored or not (the checkout is bind-mounted into `infra-dev`, whose point
-is having no route out), and never in `$INFRA_SECRETS` (mounted into the container).
+One token per machine that runs playbooks — the phone, WSL, any client — at
+`~/.config/cloudflare/api-token`, mode 600. Every play that talks to Cloudflare reads it
+from there: the four `server-` tunnel plays, and `client-home-ssh-config.yml`, which uses
+it to mint this client's Access service tokens. If the file is missing the play prints the
+steps below (they live once, in `group_vars/all.yml`) and stops; nothing is ever prompted
+for, because a prompt is a paste. It is never accepted on the command line
+(`-e cf_api_token=` is refused), never in this repo gitignored or not (the checkout is
+bind-mounted into `infra-dev`, whose point is having no route out), and never in
+`$INFRA_SECRETS` (mounted into the container).
+
+**One per machine, not one copied around.** Any token with the five permissions below
+works, so mint a separate one on each machine, named for it: a lost laptop is then one API
+token and one set of service tokens to delete, and the phone notices nothing.
 
 **It must be a USER token, from My Profile — not an "Account API Token" from Manage
 Account.** Every tunnel play proves the token first with `GET /user/tokens/verify`, and
@@ -248,7 +255,7 @@ In the Cloudflare dashboard, logged in as the account's owner:
 1. Click the **profile icon** (top right) → **My Profile** → **API Tokens** in the left
    menu → **Create Token**.
 2. Scroll past the templates to **Custom token** → **Get started**.
-3. **Token name**: `infra-ansible` (anything; this is how you recognise it later).
+3. **Token name**: `infra-ansible-<machine>` (anything; this is how you recognise it later).
 4. **Permissions** — one row each, using **Add more** for the extra rows. Each row is
    three dropdowns, left to right:
 
@@ -301,10 +308,21 @@ Account/Zone scope), and the API reference pages for every endpoint the plays ca
 above, and nothing else: the plays never list accounts (the id comes from the zone, or
 from a credentials file already on the box), and `/user/tokens/verify` needs no permission.
 
-Which play uses which, so a 403 can be read: `server-create-dev-container.yml` needs all
-five. `server-create-tunnel.yml` needs Cloudflare Tunnel alone. `server-cutover-tunnel.yml`
-and `server-delete-tunnel.yml` need Cloudflare Tunnel, Zone Read and DNS. The service-token
-and Access-application rows exist for the dev containers only.
+Which play uses which, so a 403 can be read: `client-home-ssh-config.yml` needs Zone Read
+and both Access rows (it mints service tokens and edits policies); `server-create-dev-container.yml`
+needs Cloudflare Tunnel, Zone Read, DNS and Access: Apps and Policies; `server-create-tunnel.yml`
+needs Cloudflare Tunnel alone; `server-cutover-tunnel.yml` and `server-delete-tunnel.yml`
+need Cloudflare Tunnel, Zone Read and DNS. One token carrying all five is the point.
+
+### The Access service tokens are minted, not pasted
+
+Each client mints its own, per container, named `<container>-<client>`, when
+`client-home-ssh-config.yml` runs there, and adds it to the container's `non_identity`
+policy without disturbing the tokens already in it. Nothing is shown. To revoke one client:
+Zero Trust → Access → Service credentials → Service Tokens → delete `<container>-<client>`
+(remove it from the application's policy first if Cloudflare refuses). The shared
+`<container>` tokens of the old design stay valid until removed the same way; do that once
+every client has re-run the play.
 
 ### Rotating or revoking it
 

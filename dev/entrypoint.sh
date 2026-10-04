@@ -461,7 +461,7 @@ fi
 # ── the tunnel — INERT unless asked for ─────────────────────────────────────
 # Two things must both be true or nothing starts: DEV_TUNNEL_HOSTNAME is set, and a
 # credentials file exists in the read-only secrets mount. That is deliberate — the
-# container must come up and be usable over the loopback port on a box that has never
+# container must come up and be usable through `docker exec` on a box that has never
 # had a tunnel created for it, which is every box before the tunnel playbook is run.
 #
 # LOCALLY-MANAGED, not token-based, and that is the whole reason this is shaped the way
@@ -487,7 +487,7 @@ if [ -n "${DEV_TUNNEL_HOSTNAME:-}" ] && [ -s "$TUNNEL_CREDS" ]; then
 
     if [ -z "$TUNNEL_ID" ]; then
         say "WARNING: $TUNNEL_CREDS has no TunnelID — not starting the tunnel."
-        say "         Re-run ansible/playbooks/server-create-dev-container.yml; loopback works."
+        say "         Re-run ansible/playbooks/server-create-dev-container.yml; make shell works."
     else
         # metrics on 20241 to match what the host tunnels use, because that is the probe
         # recovery.md already trusts: /ready with readyConnections >= 1 was chosen there
@@ -537,14 +537,14 @@ EOF
             done
             echo "[tunnel] GAVE UP: six consecutive failures, none lasting 60s. That is a"
             echo "[tunnel] configuration or credentials problem, not a flaky link."
-            echo "[tunnel] The container is unaffected and the loopback port still works:"
-            echo "[tunnel]   ssh zero, then ssh -p <DEV_SSH_PORT> dev@127.0.0.1"
+            echo "[tunnel] The container is unaffected; the way in is on the host:"
+            echo "[tunnel]   ssh -t zero 'cd ~/infra/dev && make shell'"
         ' </dev/null >>"$HOME/.local/share/tunnel.log" 2>&1 &
         say "tunnel starting for $DEV_TUNNEL_HOSTNAME (log: ~/.local/share/tunnel.log)"
     fi
 elif [ -n "${DEV_TUNNEL_HOSTNAME:-}" ]; then
     say "DEV_TUNNEL_HOSTNAME is set but $TUNNEL_CREDS is missing — no tunnel."
-    say "    Run ansible/playbooks/server-create-dev-container.yml. Loopback is unaffected."
+    say "    Run ansible/playbooks/server-create-dev-container.yml. make shell is unaffected."
 else
     say "no tunnel (DEV_TUNNEL_HOSTNAME unset — see dev/README.md § Cloudflare)"
 fi

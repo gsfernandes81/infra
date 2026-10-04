@@ -43,7 +43,7 @@ netstat -tln | grep -E '2283|8384|22000'            # expect all three
 ```
 
 **Neither grep covers the dev containers, deliberately** — nothing here starts them, so
-their ports (2222, 2223, `127.0.0.1:2224`, `127.0.0.1:2225`) are *expected* to be absent
+their ports (2222, 2223, `127.0.0.1:2224`; `infra-dev` publishes none) are *expected* to be absent
 after a reboot. An earlier version of the `zero` line grepped for `2222`; it never
 matched, because the only dev container usually up is `or3-dev` and it binds
 `127.0.0.1:2224`. A check that can only fail teaches you to ignore it.

@@ -59,7 +59,7 @@ services:
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
 
       # The tunnel's hostname, and the ONLY switch it has: unset means no tunnel at
-      # all, and the container is reached over the loopback port as before. The
+      # all, and the container is reached with `make shell` on the host as before. The
       # credentials arrive separately, through the secrets mount, written there by
       # ansible/playbooks/server-create-dev-container.yml — so a hostname set with no
       # credentials present is a warning at start, not a failure to come up.
@@ -140,26 +140,6 @@ services:
     # and this all say the same word.
     extra_hosts:
       - "${DEV_HOST_ALIAS:-zero}:host-gateway"
-
-    ports:
-      # 2222 is dd-dev, 2223 is ds-dev and 2224 is or3-dev on this same box, so this
-      # one is 2225. The port is this container's identity on zero; do not renumber it
-      # casually — README.md's port table and recovery.md both name it.
-      #
-      # DEV_SSH_BIND is the ADDRESS it is published on, and it defaults to 127.0.0.1
-      # because that default is the whole of this port's protection. sshd behind it is
-      # key-only, but what a key gets you here is a shell in a container holding a
-      # read-write GitHub deploy key and an ssh key that reaches zero, one and two as
-      # an account in `wheel`. That is a larger prize than or3-dev's, so the default
-      # matters more, not less. The phone arrives through zero's own sshd, which is
-      # already an authenticated hop, and a cloudflared running on zero ITSELF reaches
-      # 127.0.0.1:2225 with no change here.
-      #
-      # Widen it only for a cloudflared that cannot — one in a container of its own,
-      # which needs the docker bridge gateway address — and not to 0.0.0.0, which also
-      # puts it on the home LAN. Publishing is create-time: it lands on `make up`,
-      # never on `make restart`.
-      - "${DEV_SSH_BIND:-127.0.0.1}:${DEV_SSH_PORT:-2225}:2222"
 
 volumes:
   infra-claude:

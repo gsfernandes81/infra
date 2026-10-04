@@ -43,7 +43,7 @@
 # two files. But under WSL the laptop's Windows home is mounted at /mnt/c/Users/gavin, so
 # the play run *in WSL* manages *Windows'* ssh config and token directly — the same trick
 # _client-fleet-ssh.yml already uses for the infra-fleet block, and the reason a WSL control node
-# is worth having at all. So a single `ansible-playbook playbooks/_client-dev-ssh.yml` in WSL
+# is worth having at all. So a single `ansible-playbook playbooks/client-home-ssh-config.yml` in WSL
 # writes, on the Linux side:
 #
 #     ~/.ssh/config                         the block, POSIX ProxyCommand
@@ -55,10 +55,11 @@
 #     C:\Users\gavin\.config\<alias>\token  NTFS permissions — see the warning below
 #     C:\Users\gavin\.ssh\cf-access-<alias>.cmd
 #
-# From Termux, /mnt/c does not exist, the Windows half is skipped, and the ssh block plus
-# the wrapper are rendered to a paste file instead. The TOKEN is never rendered to a paste
-# file: a secret in a file the owner will open, read and copy out of is a secret in
-# scrollback, and this repo's root CLAUDE.md forbids exactly that.
+# From Termux, /mnt/c does not exist and the Windows half is skipped; the ssh block and
+# the wrapper are rendered to a paste file for reference. The TOKEN cannot be: it is
+# minted per client, so the laptop's is minted by running this play IN WSL, which writes
+# both of the laptop's sides. A secret in a paste file would be a secret in scrollback,
+# which this repo's root CLAUDE.md forbids anyway.
 #
 # WINDOWS NEEDS A WRAPPER BECAUSE IT HAS NO `sh`. Every POSIX client loads the token in
 # one ssh_config line, `ProxyCommand sh -c '. token; exec cloudflared …'`. Win32-OpenSSH
@@ -77,23 +78,23 @@
 # nothing here can see that laptop to calibrate against. Read the output once, then trust
 # the file.
 #
-# THE SECRET CANNOT BE PASSED ON THE COMMAND LINE. Not "should not" — the play refuses.
+# NOTHING IS PASTED. The Access service token this client presents is MINTED HERE, by
+# this play, over the Cloudflare API: one token per client per container, named
+# `<alias>-<client>`, added to the container's Access policy, and written straight to the
+# token file. The secret is never on screen, never on a command line, and never shared
+# between clients — so a lost laptop is one token to delete in Zero Trust, and no other
+# client notices. The only credential this needs is the Cloudflare API token at
+# {{ cf_api_token_file }} (group_vars/all.yml); without it the play prints how to mint
+# one and stops. Until 2026-10-04 the edge play minted ONE token per container and its
+# secret was typed into every client; docs/decisions.md has the row.
 #
-# This started as vars_prompt with private: true, which is the obvious spelling and has a
-# hole in it: `-e st_client_secret=...` does not collide with the prompt, it SILENTLY
-# REPLACES it. Extra vars are the highest-precedence source in Ansible, so the prompt
-# never appears, the run looks completely normal, and a live credential is now in fish's
-# history and in the process list. A safeguard that is bypassed by the shortest path
-# somebody might type is not a safeguard.
+# `client` is the name this machine's tokens carry: -e client=laptop, else `phone` on
+# Termux (whose hostname is `localhost`), else `uname -n`. It matters once, at minting;
+# after that the token file is the whole record, and its header says which token it is.
 #
-# So the secret is read by `ansible.builtin.pause` — a TASK, which always runs and has no
-# variable name for -e to override — and a first task asserts that `st_client_secret` is
-# undefined, which it can only be if somebody passed it. Between them there is no command
-# line that gets a secret into this play.
-#
-# The client ID is a different thing and is treated differently: it is not secret (it is
-# the username half), so -e is fine for it and it is prompted for only when absent.
-#
+# A CONTAINER WITH NO ACCESS APPLICATION YET is one whose tunnel has not been created
+# (server-create-dev-container.yml). Its token is skipped with a message and its ssh
+# block is written anyway: the ProxyCommand names this play when the token is missing.
 #
 # THE REASONING BEHIND THE ALIASES THIS WRITES IS docs/ssh-clients.md. It moved there on
 # 2026-08-28: it had been inline in the templates, which meant a client's ssh config
@@ -134,6 +135,14 @@
     # Keyed on the alias, NOT a literal — one directory per container, so provisioning
     # or3-dev does not overwrite the token that reaches infra-dev.
     token_file: "{{ home }}/.config/{{ dev_alias }}/token"
+    # ── minting the service token ────────────────────────────────────────────
+    cf_api: https://api.cloudflare.com/client/v4
+    dev_zone: "{{ zone | default(dns_zone) }}"
+    client_name: >-
+      {{ client if client is defined
+         else ('phone' if (lookup('env', 'TERMUX_VERSION') | length) > 0
+               else lookup('pipe', 'uname -n')) }}
+    st_name: "{{ dev_alias }}-{{ client_name }}"
     ssh_config: "{{ home }}/.ssh/config"
     ssh_key: "{{ identity | default('~/.ssh/id_ed25519') }}"
     # The verified path, set by the tasks below. No bare-name fallback: a bare
@@ -172,37 +181,27 @@
     windows_out: "{{ home }}/ssh-dev-block-windows-{{ dev_alias }}.txt"
 
   tasks:
-    # ── refuse a secret that arrived on the command line ────────────────────
-    # FIRST, before anything is read or written. `st_client_secret` is never defined by
-    # this play, so if it is defined at all it came from -e (or, less likely, from
-    # inventory) — and either way it has already been through a shell. Failing here is
-    # the only moment at which saying so is still useful.
-    - name: Refuse a secret supplied on the command line
+    # ── refuse a credential, or a retired flag, on the command line ──────────
+    # FIRST, before anything is read or written. None of these names is defined by this
+    # play, so one that is defined came from -e — and a secret passed that way has already
+    # been through a shell. Failing here is the only moment at which saying so is useful.
+    - name: Refuse a credential, or a retired flag, on the command line
       tags: [always]
       ansible.builtin.assert:
-        that: st_client_secret is not defined
+        that:
+          - cf_api_token is not defined
+          - st_client_secret is not defined
+          - st_client_id is not defined
+          - prompt_for_token is not defined
         fail_msg: |
-          The service token secret was passed as a variable. This play will not accept it
-          that way, and the reason is not style: an -e value has already been through
-          your shell, so it is in fish's history and was visible in the process list for
-          the life of the run.
+          One of cf_api_token, st_client_secret, st_client_id or prompt_for_token was passed.
+          Nothing is pasted or prompted for any more: the API token is read from
+          {{ cf_api_token_file }} and this client's service token is minted by this play.
+          If a secret was typed on the command line it is in fish's history — close your
+          other fish sessions, then `history delete --contains <its name>`, and rotate it.
+          A container whose tunnel is not up yet is skipped with a message; no flag needed.
+        success_msg: "nothing on the command line that should not be"
 
-          Re-run with no -e for it. The play prompts, with echo off, and reads from the
-          terminal — nothing about that reaches history or argv.
-
-          Since it has now been typed once: close your other fish sessions (each holds
-          its own in-memory history and writes it back on exit), then
-              history delete --contains TUNNEL_SERVICE_TOKEN
-          and grep the value itself out of ~/.local/share/fish/fish_history to confirm.
-          If you would rather be certain than tidy, mint a new service token — it costs
-          two playbook runs and nothing on zero or in the container ever held this one.
-        success_msg: "no secret on the command line"
-
-    # The templates, not the rendered text: that would check only the branches this
-    # client's vars select, and the Windows-only ones are the ones that matter. Here,
-    # before the token prompt, so a failure costs nothing typed and leaves nothing written.
-    # "\r" is admitted for the reason _client-fleet-ssh.yml gives, and the paste
-    # file's own wrapper lines are ASCII by hand, not by this.
     - name: Refuse a template that is not ASCII
       tags: [ssh]
       ansible.builtin.assert:
@@ -358,7 +357,7 @@
           Windows, or set -e windows_home="" to skip the Windows half.
       when: on_windows_client | bool
 
-    # ── the service token ────────────────────────────────────────────────────
+    # ── the service token: minted here, per client ───────────────────────────
     - name: Does a token file already exist
       tags: [access]
       ansible.builtin.stat:
@@ -374,52 +373,19 @@
       check_mode: false
       when: on_windows_client | bool
 
-    - name: Decide whether a token is being set this run
+    - name: Decide whether a token is minted this run
       tags: [access]
-      # Set one when either client is missing it. Otherwise leave both alone, so
-      # re-running to fix an ssh block does not demand the secret again — which matters,
-      # because a play that asks for a credential every time trains you to keep it
-      # somewhere pasteable. -e replace_token=true is the deliberate override, for a
-      # rotation.
+      # Mint when either client is missing it, or on -e replace_token=true (a rotation,
+      # of THIS client's token only). Otherwise leave both alone: re-running to fix an ssh
+      # block must not touch a working credential.
       #
       # `| default(true)` on the Windows stat is what makes a Termux run behave: the task
       # above is skipped there, and a missing file must not be inferred from a skip.
       ansible.builtin.set_fact:
-        setting_token: >-
+        minting: >-
           {{ (not tf.stat.exists)
              or ((on_windows_client | bool) and not (win_tf.stat.exists | default(true)))
              or (replace_token | default(false) | bool) }}
-
-    # ── the escape hatch, for a container whose tunnel is not up yet ─────────
-    - name: Say which container's token is being skipped, and why
-      tags: [access]
-      # changed_when: true for ansible.cfg's display_ok_hosts = False — a debug reports
-      # ok, and this is the one line explaining why an alias has no token on this client.
-      #
-      # IT SKIPS THE TOKEN, NOT THE CONTAINER. Until 2026-10-02 this was followed by a
-      # `meta: end_play`, because the ssh block's ProxyCommand sourced the token file
-      # unconditionally and failed as "Connection closed" without it. The ProxyCommand now
-      # checks for the file and names this play when it is missing, so the block is safe to
-      # write without a token and is written either way — ssh config for every container,
-      # Access credentials for the ones that have them.
-      ansible.builtin.debug:
-        msg: >-
-          {{ dev_alias }}: no Access token at {{ token_file }}, and this run was told not
-          to ask (-e prompt_for_token=false). Its ssh block is still written; `ssh
-          {{ dev_alias }}` will say the token is missing until a run without the flag (or
-          with client-home-ssh-config.yml --tags access -e only={{ dev_alias }}) is given one. A container that has
-          no tunnel yet gets one from playbooks/server-create-dev-container.yml -e name={{ dev_alias }}.
-      changed_when: true
-      when:
-        - setting_token | bool
-        - not (prompt_for_token | default(true) | bool)
-
-    - name: Settle whether this run asks for a token
-      tags: [access]
-      ansible.builtin.set_fact:
-        asking_for_token: >-
-          {{ (setting_token | bool) and (prompt_for_token | default(true) | bool)
-             and not ansible_check_mode }}
 
     - name: Nothing to do for the token
       tags: [access]
@@ -427,122 +393,268 @@
         msg: >-
           keeping the token already at {{ token_file }}{{
           ' and ' ~ win_token_file if on_windows_client | bool else '' }} — pass
-          -e replace_token=true to replace it after a rotation.
+          -e replace_token=true to mint a fresh secret for this client.
       changed_when: true
-      when: not (setting_token | bool)
+      when: not (minting | bool)
 
-    - name: What is about to be asked for
+    # ── the API token this needs ─────────────────────────────────────────────
+    # The same file every server play reads; group_vars/all.yml names it and holds the
+    # instructions printed when it is missing. A client without one cannot mint, so it
+    # stops here — the fleet half has already written its blocks, and --tags ssh writes
+    # the dev blocks without touching tokens at all.
+    - name: Look for the API token file
       tags: [access]
-      # Printed separately because the two prompts below carry no_log, and a suppressed
-      # prompt is a cursor sitting there with no explanation. This task says what is
-      # wanted; the prompts just take it.
-      #
-      # IT NAMES THE CONTAINER, AND SO DO THE PROMPTS AND THE PLAY BANNER. client-home-ssh-config.yml
-      # imports this play once per container, so without the alias in them you get four
-      # identical banners and four identical `Client Secret` cursors and no way to tell
-      # which one is being asked for — reported from the laptop, 2026-08-28. A prompt for
-      # a credential has to say which credential.
+      ansible.builtin.stat:
+        path: "{{ cf_api_token_file }}"
+      register: cf_tok_file
+      check_mode: false
+      when: minting | bool
+
+    - name: How to get one, when there is none
+      tags: [access]
       ansible.builtin.debug:
-        msg:
-          - "───────────────────────────────────────────────────────────────────────"
-          - "{{ dev_alias | upper }} — the Access service token for {{ dev_hostname }}."
-          - ""
-          - "It is per CONTAINER, not per client, so it is the same pair every other"
-          - "client already presents. Read it off one that has it:"
-          - "    cat ~/.config/{{ dev_alias }}/token"
-          - "Or from the Zero Trust dashboard, the token named {{ dev_alias }} — but the"
-          - "secret is shown only at creation, so the dashboard cannot give it back."
-          - ""
-          - "The ID is not secret and will echo. The secret will not echo."
-          - "LEAVE BOTH BLANK to skip it: no token is written, and its ssh block still is."
-          - "Neither reaches your shell history: these are read from the terminal, not"
-          - "from the command line."
-          - "{{ 'Written for BOTH sides of this laptop: WSL and Windows.'
-                if on_windows_client | bool else 'Written for this client only.' }}"
-          - "───────────────────────────────────────────────────────────────────────"
+        msg: "{{ cf_api_token_howto }}"
       changed_when: true
-      when: asking_for_token | bool
+      when: (minting | bool) and not cf_tok_file.stat.exists
 
-    - name: Read {{ dev_alias }}'s Client ID
+    - name: Stop without one
       tags: [access]
-      # echo on — the ID is the username half and is not a credential. It can also come
-      # from -e st_client_id=..., which is why this is skipped when it is already set.
-      ansible.builtin.pause:
-        prompt: "  {{ dev_alias }}  Client ID"
-        echo: true
-      register: id_in
-      when: (asking_for_token | bool) and st_client_id is not defined
+      ansible.builtin.assert:
+        that: cf_tok_file.stat.exists
+        fail_msg: >-
+          {{ dev_alias }}: no API token at {{ cf_api_token_file }}, so no service token can
+          be minted for this client. The instructions are above. --tags ssh writes the ssh
+          blocks without one.
+        success_msg: "API token file present"
+      when: minting | bool
 
-    - name: Read {{ dev_alias }}'s Client Secret
+    - name: Refuse a token file anyone but you can read
       tags: [access]
-      # THE ONE THAT CANNOT COME FROM THE COMMAND LINE. `pause` is a task, so it always
-      # runs and there is no variable name for -e to pre-empt — which is exactly what
-      # vars_prompt could not promise. echo: false so it is not on screen either.
-      #
-      # no_log because the registered result holds user_input verbatim, and `-v` would
-      # otherwise print it. That is the same leak in a different costume.
-      ansible.builtin.pause:
-        prompt: "  {{ dev_alias }}  Client Secret (not echoed)"
-        echo: false
-      register: secret_in
-      no_log: true
-      when: asking_for_token | bool
+      ansible.builtin.assert:
+        that: cf_tok_file.stat.mode in ['0600', '0400']
+        fail_msg: "{{ cf_api_token_file }} is mode {{ cf_tok_file.stat.mode }}; chmod 600 it"
+        success_msg: "API token file is mode {{ cf_tok_file.stat.mode }}"
+      when: minting | bool
 
-    - name: Settle what was typed — both blank is a skip, not a mistake
+    - name: Read the API token
       tags: [access]
-      # A CONTAINER THAT IS NOT UP HAS NO TOKEN TO GIVE, and client-home-ssh-config.yml asks for
-      # all four in one run. Pressing Enter twice is the answer available at that prompt,
-      # so it means "skip this one": no token is written, the run goes on to the next
-      # container, and the ssh block is written regardless (it says so when used). Asked
-      # for on 2026-10-02, after a composed run stopped at a blank prompt for a container
-      # that is not up.
       ansible.builtin.set_fact:
-        token_id_typed: "{{ st_client_id | default(id_in.user_input | default(''), true) | trim }}"
-        token_blank: >-
-          {{ (st_client_id | default(id_in.user_input | default(''), true) | trim | length == 0)
-             and (secret_in.user_input | default('') | trim | length == 0) }}
-      when: asking_for_token | bool
+        cf_api_token: "{{ lookup('file', cf_api_token_file) | trim }}"
+      no_log: true
+      when: minting | bool
 
-    - name: Say that it was skipped
+    # ── where it goes: the account, the application, its policy ──────────────
+    # Reads carry check_mode: false so --check can say what a real run would do.
+    - name: Resolve the zone and its account
+      tags: [access]
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/zones?name={{ dev_zone }}"
+        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+      register: cf_zone_q
+      check_mode: false
+      changed_when: false
+      no_log: true
+      when: minting | bool
+
+    - name: Refuse an API token that cannot see the zone
+      tags: [access]
+      ansible.builtin.assert:
+        that:
+          - cf_zone_q.json.success | default(false)
+          - (cf_zone_q.json.result | default([])) | length > 0
+        fail_msg: >-
+          The API token could not read zone {{ dev_zone }}: it is wrong, or missing
+          Zone:Read on that zone. ansible/README.md § "The Cloudflare API token".
+        success_msg: "zone {{ dev_zone }} is visible to this token"
+      when: minting | bool
+
+    - name: List the account's Access applications
+      tags: [access]
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_zone_q.json.result[0].account.id }}/access/apps"
+        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+      register: cf_apps
+      check_mode: false
+      changed_when: false
+      no_log: true
+      when: minting | bool
+
+    - name: Remember the account, and the application for {{ dev_hostname }}
+      tags: [access]
+      ansible.builtin.set_fact:
+        cf_account_id: "{{ cf_zone_q.json.result[0].account.id }}"
+        cf_app: "{{ cf_apps.json.result | default([]) | selectattr('domain', 'eq', dev_hostname) | list | first | default({}) }}"
+      when: minting | bool
+
+    - name: Say so when the container has no Access application yet
+      tags: [access]
+      # The one skip left in this play, and it is a state rather than a mistake: dd-dev and
+      # ds-dev have no tunnel today. Its ssh block is still written, and `ssh {{ dev_alias }}`
+      # names this play until the token exists.
+      ansible.builtin.debug:
+        msg: >-
+          {{ dev_alias }}: no Access application for {{ dev_hostname }}, so its tunnel has
+          not been created — server-create-dev-container.yml -e name={{ dev_alias }} does
+          that. No token for it on this client; its ssh block is written anyway, and
+          re-running this play once the application exists mints one.
+      changed_when: true
+      when: (minting | bool) and (cf_app | default({}) | length == 0)
+
+    - name: Settle whether a token is minted after all
+      tags: [access]
+      ansible.builtin.set_fact:
+        minting: "{{ (minting | bool) and ((cf_app | default({})) | length > 0) }}"
+
+    - name: List the account's service tokens
+      tags: [access]
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/service_tokens"
+        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+      register: cf_st_q
+      check_mode: false
+      changed_when: false
+      no_log: true
+      when: minting | bool
+
+    - name: List the application's policies
+      tags: [access]
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ cf_app.id }}/policies"
+        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+      register: cf_pol_q
+      check_mode: false
+      changed_when: false
+      no_log: true
+      when: minting | bool
+
+    - name: Remember this client's token and the policy, where they exist
+      tags: [access]
+      # The token BY NAME, `<alias>-<client>`; the policy by decision, because the one the
+      # edge play used to write was called "service token" and a new one is called
+      # "service tokens" — the name is not the identity, non_identity is.
+      ansible.builtin.set_fact:
+        cf_st_existing: "{{ cf_st_q.json.result | default([]) | selectattr('name', 'eq', st_name) | list | first | default({}) }}"
+        cf_pol: "{{ cf_pol_q.json.result | default([]) | selectattr('decision', 'eq', 'non_identity') | list | first | default({}) }}"
+      when: minting | bool
+
+    - name: What a real run would do here
       tags: [access]
       ansible.builtin.debug:
         msg: >-
-          SKIPPED {{ dev_alias }}'s Access token — both halves left blank. Nothing written
-          to {{ token_file }}{{ ' (the token already there is kept)' if tf.stat.exists | default(false) else '' }};
-          the ssh block is still written. Once its tunnel exists:
-          client-home-ssh-config.yml --tags access -e only={{ dev_alias }}.
+          --check: would {{ 'rotate' if cf_st_existing else 'mint' }} service token
+          "{{ st_name }}" and {{ 'add it to' if cf_pol else 'create' }} the non_identity
+          policy on {{ dev_hostname }}, then write {{ token_file }}{{
+          ' and ' ~ win_token_file if on_windows_client | bool else '' }}. Nothing done.
       changed_when: true
-      when: (asking_for_token | bool) and (token_blank | bool)
+      when: (minting | bool) and ansible_check_mode
 
-    - name: One half blank is a mistake — refuse it
+    - name: Mint this client's service token, or rotate the one it lost
       tags: [access]
-      # An empty secret writes a file that fails Access with no clue why, and the failure
-      # presents as the tunnel being broken. Catch it here, where the cause is on screen.
-      # BOTH blank is the skip above; exactly one blank is a slip of the finger.
+      # Rotate when it exists: Cloudflare returns a secret at creation and at rotation and
+      # never otherwise, and a client that is minting has no secret for it. Rotation cuts
+      # off only this client's previous copy — nobody else holds a token of this name.
+      # Create and rotate return the same shape, so one task and one write below.
+      #
+      # failed_when: false + print the body + assert, the pattern CLAUDE.md records for a
+      # no_log call that can be refused: no_log is for the Authorization header in the
+      # invocation and the secret in the response, and it would censor the reason too.
+      ansible.builtin.uri:
+        url: >-
+          {{ cf_api }}/accounts/{{ cf_account_id }}/access/service_tokens{{
+             ('/' ~ cf_st_existing.id ~ '/rotate') if cf_st_existing else '' }}
+        method: POST
+        status_code: [200, 201]
+        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        body_format: json
+        body: "{{ omit if cf_st_existing else {'name': st_name} }}"
+      register: cf_st_w
+      failed_when: false
+      no_log: true
+      when: (minting | bool) and not ansible_check_mode
+
+    - name: What Cloudflare said, if it refused
+      tags: [access]
+      ansible.builtin.debug:
+        msg: >-
+          service token "{{ st_name }}": HTTP {{ cf_st_w.status | default('?') }}:
+          {{ cf_st_w.json.errors | default(cf_st_w.msg) | default('no detail') }}
+      changed_when: true
+      when:
+        - cf_st_w is not skipped
+        - cf_st_w.status | default(0) not in [200, 201]
+
+    - name: Stop if no token was produced
+      tags: [access]
       ansible.builtin.assert:
-        that:
-          - token_id_typed | length > 0
-          - (secret_in.user_input | default('') | trim) | length > 0
+        that: cf_st_w.status | default(0) in [200, 201]
         fail_msg: >-
-          {{ dev_alias }}: one of the Client ID and the Client Secret was blank and the other
-          was not. Nothing has been written. Leave BOTH blank to skip this container.
-          Cloudflare shows a service token's secret only at creation; if it is lost, mint a
-          new token rather than guessing.
-        success_msg: "both halves present"
-      when: (asking_for_token | bool) and not (token_blank | bool)
-      # NO no_log HERE, deliberately, and it used to be on. `assert` is an action plugin:
-      # it evaluates `that` itself and never templates those values into module args, so
-      # the registered result holds the expression TEXT and a boolean — no secret. What
-      # no_log did instead was censor this task's own fail_msg, replacing the message
-      # written for the moment a blank secret is typed with "the output has been hidden".
-      # That is the trap CLAUDE.md records from the service-token play, in a smaller
-      # costume: a no_log that hides the failure it exists to explain. It stays on the
-      # `pause` and on both `copy` tasks, where it guards an actual value.
+          No service token for "{{ st_name }}"; nothing written. A 403 means the API token
+          lacks Account : Access: Service Tokens : Edit — ansible/README.md § "The
+          Cloudflare API token".
+        success_msg: "{{ st_name }} {{ 'rotated' if cf_st_existing else 'minted' }}"
+      when: cf_st_w is not skipped
+
+    - name: Admit it in the application's policy
+      tags: [access]
+      # Read-modify-write, so every token already admitted stays admitted: the phone's
+      # survives the laptop being set up, and the shared `<alias>` token every client held
+      # before 2026-10-04 keeps working until it is removed by hand. decision:
+      # non_identity, not `allow` — `allow` still expects an identity and sends a headless
+      # client to a login page, which presents as the tunnel being broken.
+      ansible.builtin.uri:
+        url: >-
+          {{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ cf_app.id }}/policies{{
+             ('/' ~ cf_pol.id) if cf_pol else '' }}
+        method: "{{ 'PUT' if cf_pol else 'POST' }}"
+        status_code: [200, 201]
+        headers: { Authorization: "Bearer {{ cf_api_token }}" }
+        body_format: json
+        body:
+          name: "{{ cf_pol.name | default('service tokens') }}"
+          decision: non_identity
+          precedence: "{{ cf_pol.precedence | default(1) }}"
+          exclude: "{{ cf_pol.exclude | default([]) }}"
+          require: "{{ cf_pol.require | default([]) }}"
+          include: >-
+            {{ (cf_pol.include | default([]))
+               + ([{'service_token': {'token_id': cf_st_w.json.result.id}}]
+                  if cf_st_w.json.result.id not in
+                     ((cf_pol.include | default([])) | selectattr('service_token', 'defined')
+                      | map(attribute='service_token.token_id') | list)
+                  else []) }}
+      register: cf_pol_w
+      failed_when: false
+      no_log: true
+      when: cf_st_w is not skipped
+
+    - name: What Cloudflare said, if it refused the policy
+      tags: [access]
+      ansible.builtin.debug:
+        msg: >-
+          policy on {{ dev_hostname }}: HTTP {{ cf_pol_w.status | default('?') }}:
+          {{ cf_pol_w.json.errors | default(cf_pol_w.msg) | default('no detail') }}
+      changed_when: true
+      when:
+        - cf_pol_w is not skipped
+        - cf_pol_w.status | default(0) not in [200, 201]
+
+    - name: Stop if the token was not admitted
+      tags: [access]
+      # The token exists but admits nothing, so the file is still written below: a re-run
+      # finds the token by name, rotates it, and tries the policy again.
+      ansible.builtin.assert:
+        that: cf_pol_w.status | default(0) in [200, 201]
+        fail_msg: >-
+          "{{ st_name }}" was minted but the policy on {{ dev_hostname }} was not updated,
+          so it admits nothing yet. A 403 means the API token lacks Account : Access: Apps
+          and Policies : Edit. Re-running rotates the token and retries the policy.
+        success_msg: "{{ dev_hostname }} admits {{ st_name }}"
+      when: cf_pol_w is not skipped
 
     - name: Settle whether a token is written this run
       tags: [access]
       ansible.builtin.set_fact:
-        writing_token: "{{ (asking_for_token | bool) and not (token_blank | bool) }}"
+        writing_token: "{{ cf_st_w is not skipped }}"
 
     - name: The directory for it
       tags: [access]
@@ -574,11 +686,12 @@
         dest: "{{ token_file }}"
         mode: "0600"
         content: |
-          # Cloudflare Access service token for {{ dev_hostname }}.
-          # Written by ansible/playbooks/client-home-ssh-config.yml. Sourced by ~/.ssh/config's
-          # ProxyCommand for host `{{ dev_alias }}`. POSIX sh — not fish.
-          TUNNEL_SERVICE_TOKEN_ID={{ token_id_typed }}
-          TUNNEL_SERVICE_TOKEN_SECRET={{ secret_in.user_input | trim }}
+          # Cloudflare Access service token "{{ st_name }}" for {{ dev_hostname }} — this
+          # client's own. Minted by ansible/playbooks/client-home-ssh-config.yml; delete the
+          # token in Zero Trust -> Access -> Service credentials to revoke this client alone.
+          # Sourced by ~/.ssh/config's ProxyCommand for host `{{ dev_alias }}`. POSIX sh — not fish.
+          TUNNEL_SERVICE_TOKEN_ID={{ cf_st_w.json.result.client_id }}
+          TUNNEL_SERVICE_TOKEN_SECRET={{ cf_st_w.json.result.client_secret }}
           export TUNNEL_SERVICE_TOKEN_ID TUNNEL_SERVICE_TOKEN_SECRET
       when: writing_token | bool
       no_log: true
@@ -599,7 +712,8 @@
       # A DIFFERENT FILE FROM THE WSL ONE, because %USERPROFILE% and WSL's $HOME are two
       # different homes on two different filesystems. Two copies of the secret on one
       # laptop is the cost of Windows ssh not being able to read the Linux one, and it is
-      # stated here rather than discovered later.
+      # stated here rather than discovered later. One token for both: the laptop is one
+      # client, whichever of its two sshes is asking.
       #
       # No `export`, and comments the wrapper's findstr will skip: this file is read by
       # cf-access-<alias>.cmd, not sourced by a shell. LF endings — findstr emits its own
@@ -608,15 +722,15 @@
       ansible.builtin.copy:
         dest: "{{ win_token_file_wsl }}"
         content: |
-          # Cloudflare Access service token for {{ dev_hostname }}.
-          # Written by ansible/playbooks/client-home-ssh-config.yml, running in WSL. Read by
-          # {{ win_wrapper }} — this file is NOT a shell script and is not sourced.
+          # Cloudflare Access service token "{{ st_name }}" for {{ dev_hostname }} — this
+          # laptop's own. Minted by ansible/playbooks/client-home-ssh-config.yml, running in
+          # WSL. Read by {{ win_wrapper }} — this file is NOT a shell script and is not sourced.
           #
           # PERMISSIONS HERE ARE NTFS, NOT A UNIX MODE. Ansible cannot set a mode on
           # /mnt/c and does not pretend to; what protects this file is the ACL that
           # C:\Users\gavin hands down. The play prints that ACL when it writes this file.
-          TUNNEL_SERVICE_TOKEN_ID={{ token_id_typed }}
-          TUNNEL_SERVICE_TOKEN_SECRET={{ secret_in.user_input | trim }}
+          TUNNEL_SERVICE_TOKEN_ID={{ cf_st_w.json.result.client_id }}
+          TUNNEL_SERVICE_TOKEN_SECRET={{ cf_st_w.json.result.client_secret }}
       when: (on_windows_client | bool) and (writing_token | bool)
       no_log: true
 
@@ -972,10 +1086,10 @@
       # file sitting beside a managed one, inviting somebody to paste the older of the
       # two.
       #
-      # THE TOKEN IS NOT IN HERE, and that is not an omission. A secret in a file the
-      # owner will open, read and copy out of is a secret in scrollback, which is the one
-      # place CLAUDE.md says it must never be. The steps below have them type it into the
-      # file directly instead.
+      # THE TOKEN IS NOT IN HERE, and cannot be: it is minted per client, and the laptop's
+      # is minted by running this play in WSL. A secret in a file the owner will open, read
+      # and copy out of would be a secret in scrollback anyway, which is the one place
+      # CLAUDE.md says it must never be.
       ansible.builtin.copy:
         dest: "{{ windows_out }}"
         mode: "0600"
@@ -987,21 +1101,9 @@
           # path first. This file exists for when that is not possible. The paths below
           # are NOT verified: this machine cannot see that filesystem.
           #
-          # -- 1. the token, typed rather than pasted from here -------------------
-          # In PowerShell. Do NOT put the secret in this file or in a command argument.
-          #
-          #     mkdir -Force "$env:USERPROFILE\.config\{{ dev_alias }}" | Out-Null
-          #     mkdir -Force "$env:USERPROFILE\.ssh" | Out-Null
-          #     notepad "{{ win_token_file }}"
-          #
-          # Two lines, no quotes, no `export`:
-          #
-          #     TUNNEL_SERVICE_TOKEN_ID=<the id>
-          #     TUNNEL_SERVICE_TOKEN_SECRET=<the secret>
-          #
-          # Then read who can see it, and expect only you, Administrators and SYSTEM:
-          #
-          #     icacls "{{ win_token_file }}"
+          # -- 1. the token: NOT here. Run this play from WSL ----------------------
+          # It mints the laptop's own service token and writes it to
+          # {{ win_token_file }} itself. There is no way to do that from this machine.
           #
           # -- 2. the wrapper, at {{ win_wrapper }} -------------------
           # ---8<--- cf-access-{{ dev_alias }}.cmd ---8<---
@@ -1062,10 +1164,9 @@
           - "ssh {{ dev_alias }}         the claude-sessions menu, over Cloudflare"
           - "ssh {{ dev_alias }} <cmd>   runs it in ~ (in-workspace <cmd> for /workspace); scp/sftp/Zed too"
           - "ssh -t {{ dev_alias }} in-workspace   a login shell in /workspace"
-          - "    no -lan alias: break glass by hand with `ssh <host>` and then"
-          - "    `ssh -p <port> dev@127.0.0.1`, ports in client-home-ssh-config.yml."
+          - "    break glass: ssh -t <host> 'cd ~/infra/dev && make shell' (sudo asks)"
           - ""
-          - "wsl/posix: block {{ ('in ' ~ ssh_config) if block_now.rc == 0 else ('NOT in ' ~ ssh_config ~ ' — run with --tags ssh') }}; token {{ ('at ' ~ token_file ~ ' (0600), sourced by the ProxyCommand, so it reaches one cloudflared and no other environment') if token_now.stat.exists | default(false) else ('NOT on this client, so ssh ' ~ dev_alias ~ ' says so and stops: client-home-ssh-config.yml --tags access -e only=' ~ dev_alias ~ ' adds it') }}."
+          - "wsl/posix: block {{ ('in ' ~ ssh_config) if block_now.rc == 0 else ('NOT in ' ~ ssh_config ~ ' — run with --tags ssh') }}; token {{ ('at ' ~ token_file ~ ' (0600), sourced by the ProxyCommand, so it reaches one cloudflared and no other environment') if token_now.stat.exists | default(false) else ('NOT on this client, so ssh ' ~ dev_alias ~ ' says so and stops: client-home-ssh-config.yml --tags access -e only=' ~ dev_alias ~ ' mints it once the tunnel exists') }}."
           - ""
           - >-
             windows: {{ 'managed directly — block in ' ~ win_ssh_config ~ ', wrapper at '
@@ -1075,6 +1176,6 @@
             else ('skipped — windows_home is empty' if windows_home_wsl | length == 0
                   else 'not reachable from here — follow ' ~ windows_out) }}
           - ""
-          - "the fleet block is still worth running first on a new client, on both sides"
-          - "of a laptop: `ssh <host>` is the first half of the break-glass hop."
+          - "the fleet block is still worth having on a new client, on both sides of a"
+          - "laptop: `ssh <host>` is the first half of the break-glass hop."
       changed_when: true

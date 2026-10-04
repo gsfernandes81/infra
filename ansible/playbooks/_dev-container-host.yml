@@ -60,7 +60,6 @@
     # that only works on the older one is a trap rather than a warning.
     infra_src: "{{ src_dir | default(ansible_facts['env']['HOME'] ~ '/infra') }}"
     infra_secrets: "{{ secrets_dir | default(ansible_facts['env']['HOME'] ~ '/.infra-dev-secrets') }}"
-    dev_ssh_port: "{{ ssh_port | default(2225) }}"
     # Where the public half is fetched to on the CONTROL NODE, for the gh command below.
     # lookup('env','HOME') because ~ does not expand on Termux — host_vars/localhost.yml
     # documents that trap for remote_tmp and it is the same one here.
@@ -205,7 +204,7 @@
       #
       # DEV_TUNNEL_HOSTNAME is empty unless -e tunnel_hostname=... is given, which is the
       # switch that turns the Cloudflare tunnel on. Empty means the container is reached
-      # over the loopback port, which is the default and works with none of that set up.
+      # with `make shell` on the host, which is the default and works with none of that set up.
       ansible.builtin.copy:
         dest: "{{ infra_src }}/dev/.env"
         mode: "0600"
@@ -214,8 +213,6 @@
           # Re-run that playbook rather than hand-editing, or the next run overwrites you.
           INFRA_SRC={{ infra_src }}
           INFRA_SECRETS={{ infra_secrets }}
-          DEV_SSH_PORT={{ dev_ssh_port }}
-          DEV_SSH_BIND=127.0.0.1
           DEV_HOSTNAME=infra-dev
           DEV_MEM_LIMIT=1024m
           DEV_MEMSWAP_LIMIT=1536m
@@ -231,7 +228,7 @@
           - "deploy    {{ infra_secrets }}/id_ed25519_infra_deploy"
           - "authorised {{ infra_secrets }}/authorized_keys"
           - "env       {{ infra_src }}/dev/.env"
-          - "tunnel    {{ dev_tunnel_hostname | default('', true) | ternary(dev_tunnel_hostname, 'none — reached on the loopback port') }}"
+          - "tunnel    {{ dev_tunnel_hostname | default('', true) | ternary(dev_tunnel_hostname, 'none — reach it with make shell on the host') }}"
           - ""
           - "TWO THINGS LEFT, and neither can be done from here:"
           - ""

@@ -54,7 +54,7 @@ been consciously postponed rather than an omission.
 | | |
 |---|---|
 | `Makefile` | **the management interface** — `make up`, `make login`, `make status`, … |
-| `compose.yaml` | the stack — `name: infra-dev`, one service, loopback-only port 2225 |
+| `compose.yaml` | the stack — `name: infra-dev`, one service, nothing published |
 | `Dockerfile` | Debian slim + Node 22 + Claude Code + gh + screen/abduco + sshd + **ansible** |
 | `entrypoint.sh` | ssh material → Claude config → `git pull` → **sshd(fg)** |
 | `login.sh` | in the image: the interactive logins, idempotent — `make login` |
@@ -91,15 +91,15 @@ own terminal — `gavin` is not in the docker group, so this half is never an an
 cd ~/infra/dev && make dev             # build, start, then walk the two logins
 ```
 
-That gives you a container reachable from the phone — `ssh zero`, then
-`ssh -p 2225 dev@127.0.0.1` until its tunnel is provisioned — and
-`make claude` from a terminal on zero. The two optional additions, each with its own
+That gives you a container reachable from zero — `make claude` or `make shell` there,
+`ssh -t zero 'cd ~/infra/dev && make shell'` from the phone — and over its own tunnel
+once that is provisioned. The two optional additions, each with its own
 section below and each safe to skip indefinitely:
 
 | | What it adds | Why it is off |
 |---|---|---|
 | *(not built)* | ssh to zero, one and two | makes this a control node on a box it controls — deferred |
-| `DEV_TUNNEL_HOSTNAME=…` + the playbook | reach it without `ssh zero` first | needs a Cloudflare API token and four objects |
+| `DEV_TUNNEL_HOSTNAME=…` + the playbook | reach it without `ssh zero` first | needs a Cloudflare API token and three objects, plus a token per client |
 
 `make dev` is `make up` followed by `make login`, which is the walkthrough in
 `login.sh`: the deploy key, the fleet (reported as not configured, which is the default),
@@ -165,11 +165,13 @@ Host infra-dev                     # normal — no dependency on zero's sshd
   ProxyCommand cloudflared access ssh --hostname %h
 ```
 
-The break-glass one is the loopback port through zero, typed rather than aliased —
-`ssh zero`, then `ssh -p 2225 dev@127.0.0.1`. It had an alias until 2026-08-31 and lost
-it because a client-side alias must name the host the container sits on, which a movable
-container does not have; [`../docs/ssh-clients.md`](../docs/ssh-clients.md) has the
-reasoning and the one-line form. See *Cloudflare* below for why keeping the second way in
+The break-glass one is `docker exec` through zero's own ssh, typed rather than aliased:
+`ssh -t zero 'cd ~/infra/dev && make shell'`. It had an alias until 2026-08-31 and a
+published loopback port until 2026-10-04; the alias went because a client-side alias must
+name the host the container sits on, which a movable container does not have, and the
+port went because it only ever bought a passwordless hop through the same sshd.
+[`../docs/ssh-clients.md`](../docs/ssh-clients.md) has the reasoning. See *Cloudflare*
+below for why keeping the second way in
 at all is not belt-and-braces.
 
 Reaching that port from a client is a `ProxyCommand` running `nc`, never a `ProxyJump`,
@@ -476,26 +478,19 @@ writes both — the Linux block and token, and Windows' block, token and the
 why the Windows token's permissions are printed rather than asserted, are in
 [`../ansible/README.md`](../ansible/README.md) § *The laptop is two clients*.
 
-### The service token cannot be given on the command line
+### The service token is minted, not typed
 
-`client-home-ssh-config.yml` reads it with `ansible.builtin.pause`, and a first task asserts that
-`st_client_secret` is undefined — which it can only be if somebody passed it.
+Since 2026-10-04 `client-home-ssh-config.yml` mints this client's own Access service token
+over the Cloudflare API — named `<container>-<client>`, added to the container's Access
+policy, written straight to `~/.config/<container>/token` at mode 600 — using the API token
+at `~/.config/cloudflare/api-token` on the same machine. Nothing is shown and nothing is
+pasted. If that file is missing the play prints how to mint one and stops;
+[`../ansible/README.md`](../ansible/README.md) § *The Cloudflare API token* is the same text.
 
-That is not belt-and-braces, it replaces something that did not work. The obvious spelling
-is `vars_prompt` with `private: true`, and it has a hole: **`-e st_client_secret=…` does
-not collide with the prompt, it silently replaces it.** Extra vars are the
-highest-precedence source in Ansible, so the prompt never appears, the run looks entirely
-normal, and a live credential is now in fish's history and was in the process list for the
-length of the run. A safeguard bypassed by the shortest thing somebody might type is not
-one. `pause` is a *task*: it always runs, and there is no variable name for `-e` to
-pre-empt.
-
-The Client ID is treated differently on purpose — it is the username half and is not
-secret, so `-e st_client_id=…` is accepted and the prompt for it is skipped.
-
-Re-running does not ask again: a token already at `~/.config/infra-dev/token` is left
-alone unless you pass `-e replace_token=true`, which is the rotation path. A play that
-demands a credential on every run teaches you to keep it somewhere pasteable.
+One token per client means a lost laptop is one token to delete in Zero Trust and no other
+client notices. Re-running leaves an existing file alone; `-e replace_token=true` rotates
+this client's token and rewrites the file. The edge play creates the Access application
+with no policy, so a freshly created container admits nobody until a client has run.
 
 Then on zero: `cd ~/infra/dev && make up` — **not** `restart`, which does not re-read
 `compose.yaml`. After that `ssh infra-dev` works from the phone with no `ssh zero` hop.
@@ -514,16 +509,15 @@ discipline, and an API token that becomes a Vault variable at Phase 4 with no re
 
 ### It is additive, and that is load-bearing
 
-`DEV_TUNNEL_HOSTNAME` unset means **no tunnel at all** and the container is reached over
-`127.0.0.1:2225` exactly as if none of this existed. Set but with no credentials present
-is a warning at start, not a failure to come up.
+`DEV_TUNNEL_HOSTNAME` unset means **no tunnel at all** and the container is reached with
+`make shell` on zero exactly as if none of this existed. Set but with no credentials
+present is a warning at start, not a failure to come up.
 
-**Keep the loopback publish even once the tunnel works.** It is tempting to drop it and
-be rid of the port bookkeeping, and that would leave `docker exec` on zero — needing
-sudo, on a box you may be trying to reach *because* something is wrong — as the only
-fallback. The two failure modes are independent: Cloudflare being down or the token
-being wrong does not touch `ssh zero`, and zero's sshd being wedged does not touch the
-tunnel. Having both is the only reason neither is a single point of failure.
+**⚠︎ The loopback publish went on 2026-10-04.** This section used to argue for keeping
+it so that `docker exec` — needing sudo — was not the only fallback. Both paths ran
+through zero's sshd, so the port was never an independent route, only a passwordless one;
+the owner traded that for no port bookkeeping. Cloudflare being down still does not touch
+`ssh zero`, and `make shell` is what you run once there.
 
 ### Reaching it from Termux — measured, not assumed
 
@@ -561,30 +555,28 @@ This cost a round of confusion, so it is worth stating flatly before anything el
 
 | | Where | What it is | Who holds it |
 |---|---|---|---|
-| **API token** | My Profile → API Tokens | authorises the *playbook* to call the Cloudflare API | nobody — prompted, in memory, one run; **disposable** |
-| **Access service token** | Zero Trust → Access → Service Auth | a `client_id`/`client_secret` a *machine* presents to get **through** Access | the phone, at `~/.config/infra-dev/token` |
+| **API token** | My Profile → API Tokens | authorises the *playbook* to call the Cloudflare API | each machine that runs playbooks, at `~/.config/cloudflare/api-token` (0600); one per machine |
+| **Access service token** | Zero Trust → Access → Service credentials | a `client_id`/`client_secret` a *machine* presents to get **through** Access | each client, at `~/.config/infra-dev/token`; one per client, named `infra-dev-<client>`, minted by the client play |
 
 They are different objects with different lifetimes and different homes, and naming an
 API token "service_token" — which is an entirely reasonable thing to do — makes them look
-like the same thing. `-e service_token_name=` refers to the **second** one, and should be
-left unset unless you minted one by hand: the play creates it and prints its secret once.
+like the same thing.
 
-**If the phone does not have that secret, rotate — do not delete.**
-`-e rotate_service_token=true` mints a fresh secret for the *same* token, prints it, and
-kills the old pair on the spot; hand it to the client play with `-e replace_token=true`,
-which is the flag that lets it overwrite a token file it already has. Delete-and-recreate
-is not an option Cloudflare offers here: it refuses to delete a service token an Access
-policy references (`400`, `service_token_in_use`), and the policy this play writes *is*
-that reference.
+**A lost service-token secret is recovered by rotation, never by delete-and-recreate.**
+The client play does this itself: `-e replace_token=true` on the client that lost it
+rotates that client's own token and rewrites its file, and nobody else's token is touched.
+Delete-and-recreate is not an option Cloudflare offers while a policy references the
+token (`400`, `service_token_in_use`), and the policy the client play writes *is* that
+reference.
 
-**Delete the API token when you are done provisioning.** Nothing stores it — not the
-repo, not the container, not `$INFRA_SECRETS` — so deleting it breaks nothing and there
-is no config to update. Everything already built keeps working: the tunnel, the DNS
-record, the Access application and the service token do not authenticate with it. Mint a
-fresh one next time you provision. That is one browser visit per provisioning session,
-and it is the only manual step in the whole arrangement — **the API token is the one
-thing that cannot be minted from the command line**, because Cloudflare's own
-`POST /user/tokens` needs an existing token to call it.
+**The API token is a file, one per machine.** `~/.config/cloudflare/api-token` on each
+machine that runs playbooks, mode 600, outside the repo (the checkout is bind-mounted into
+this container) and outside `$INFRA_SECRETS` (mounted into it). Rolling or deleting it in
+the dashboard breaks nothing already built — the tunnel, the DNS record, the Access
+application and the service tokens do not authenticate with it — so rotation is: roll it,
+overwrite the file. **It is the one thing that cannot be minted from the command line**,
+because Cloudflare's own `POST /user/tokens` needs an existing token to call it; the
+instructions the plays print when the file is missing are the whole of the manual surface.
 
 ### No identity provider is configured, and none will be
 
@@ -714,9 +706,8 @@ builds it has to maintain all three:
 - **It cannot escalate unattended.** sudo wants a password on all three hosts and this
   repo refuses NOPASSWD. Read the fleet freely; change it only with someone present.
 
-The published port is `127.0.0.1:2225` for the same reason, and the loopback default is
-the whole of that port's protection — sshd behind it is key-only, but what a key gets
-you here is a shell holding all three of the above.
+Nothing is published on the host for the same reason: a shell in here holds all three of
+the above, and the ways to one are the tunnel's Access policy and `docker exec` on zero.
 
 ## The socket line somebody will add
 

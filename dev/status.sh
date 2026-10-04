@@ -106,13 +106,13 @@ fleet_files_line() {
 
 # ── tunnel ──────────────────────────────────────────────────────────────────
 # Three distinguishable answers, because they mean three different things and a single
-# up/down would collapse them: not configured at all (normal — the loopback port is the
+# up/down would collapse them: not configured at all (normal — `make shell` is the
 # way in), configured but not connected (the interesting failure), and serving.
 tunnel_line() {
     local host ready
     host="$(d exec "$CONTAINER" printenv DEV_TUNNEL_HOSTNAME 2>/dev/null || true)"
     if [ -z "$host" ]; then
-        echo 'off (DEV_TUNNEL_HOSTNAME unset — reached on the loopback port)'
+        echo 'off (DEV_TUNNEL_HOSTNAME unset — make shell is the way in)'
         return
     fi
     ready="$(d exec "$CONTAINER" curl -fsS --max-time 3 http://127.0.0.1:20241/ready 2>/dev/null || true)"

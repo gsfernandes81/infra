@@ -25,10 +25,10 @@
 # browser login. Never that: these apps admit service tokens only, and that flow is no use
 # from Termux.
 #
-# THERE IS NO `-lan` ALIAS, and the way in it named is still open. Break glass by hand:
-# `ssh <host>`, then `ssh -p <port> dev@127.0.0.1` on that box. The ports are in
-# ansible/playbooks/client-home-ssh-config.yml. An alias for that hop had to hard-code which
-# host the container sits on, which is the one fact a movable container does not have.
+# THERE IS NO `-lan` ALIAS AND NO PUBLISHED PORT. Break glass by hand, on the host:
+# `ssh -t <host> 'cd ~/infra/dev && make shell'` (docker exec; sudo asks). An alias for
+# that hop had to hard-code which host the container sits on, which is the one fact a
+# movable container does not have.
 Host {{ dev_alias }} {{ dev_alias }}-sh
   HostName {{ dev_hostname }}
   User dev

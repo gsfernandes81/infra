@@ -240,8 +240,11 @@ Tailscale; a preference for not adding a second overlay.
 Settled with the owner, and `infra-dev` is the first and so far only one built.
 
 **Provisioning is a playbook**, `ansible/playbooks/server-create-dev-container.yml` (its
-edge half, `_dev-container-tunnel.yml`), creating four objects over the Cloudflare API:
-the tunnel, the CNAME, an Access service token and an Access application with one policy. It was written as a shell script first and that
+edge half, `_dev-container-tunnel.yml`), creating three objects over the Cloudflare API:
+the tunnel, the CNAME and an Access application; each client then adds its own service
+token to that application's policy when `client-home-ssh-config.yml` runs there (since
+2026-10-04 — before that this play minted one shared token and printed its secret). It
+was written as a shell script first and that
 was the wrong instinct — the same one that put `bin/compose` in this repo, and the second
 time the owner has had to point at it. Being in the plane rather than beside it buys
 parsed JSON instead of a hand-rolled extractor, a real `--check`, `no_log` as a mechanism
@@ -273,13 +276,15 @@ builds — was the real question and was measured rather than assumed on 2026-08
 segment and no dynamic section. It is hash-pinned in `dev/Dockerfile` and the 35.7 MiB is
 priced in or3's `docs/data-ledger.md`.
 
-**The loopback publish stays.** Dropping `127.0.0.1:222x` once the tunnel works would
-leave `docker exec` on zero — needing sudo, on a box you may be trying to reach because
-something is wrong — as the only fallback. The two paths fail independently, which is the
-only reason neither is a single point of failure.
+**⚠︎ The loopback publish is gone (2026-10-04).** This paragraph used to argue for keeping
+`127.0.0.1:222x` so that `docker exec` on zero — needing sudo — was not the only fallback.
+The owner weighed the sudo prompt against the port bookkeeping and chose `make shell`
+over `ssh zero`: both paths went through zero's sshd anyway, so the port never bought an
+independent route, only a passwordless one. See [`decisions.md`](decisions.md).
 
-**Three secrets, three homes, and the rules are asymmetric.** The API token goes nowhere
-— prompted, in memory, for one run — and specifically NOT into the secrets directory,
+**Three secrets, three homes, and the rules are asymmetric.** The API token lives in
+`~/.config/cloudflare/api-token` on each machine that runs playbooks (since 2026-10-04;
+before that prompted, in memory, for one run) and specifically NOT into the secrets directory,
 because that directory is mounted into the container and a container able to rewrite the
 Access policy in front of itself is not protected by it. The tunnel credentials are a
 read-only file rather than `--token`, which is the containerised form of the rule
@@ -397,23 +402,14 @@ same pull on one working tree — "there is nothing that can drift", per its REA
 movable container gives that up and owns its own clone. That is a real trade and it should
 be made knowingly, in or3, not implied by a placement decision made here.
 
-**Ports stop being a registry problem** once addressing is by tunnel hostname: nothing is
-published on a host, so nothing collides. That is the destination, not the present — every
-dev container still publishes an sshd on zero's loopback, and that port is the
-break-glass path that reaches it — typed by hand since the `-lan` aliases were dropped. The allocation is: `zero` — 2283 Immich, 8384/22000
-Syncthing, **2222 `dd-dev`, 2223 `ds-dev`, 2224 `or3-dev`, 2225 `infra-dev`**; `one` — 8080
-qBittorrent, ~~7777 ionic-traces~~ (stopped, 2c), 3001 send2ereader, 8384/22000 Syncthing;
-`two` — none published.
-
-**Since 2026-08-28 that list is a copy, not the record.** The registry is the table in
-[`../ansible/playbooks/client-home-ssh-config.yml`](../ansible/playbooks/client-home-ssh-config.yml), which is
-the file that *consumed* the numbers — every `<alias>-lan` block written onto every client
-was built from them. ⚠︎ Those aliases were dropped on 2026-08-31 and that consumer went
-with them, so the table is documentation again; it stays there because it is still where
-a container is added and where the break-glass ports are read. This closes the drift row at the top
-of this document, whose worked example was exactly these ports living in or3's compose
-file where nothing here could contradict them. **2225 was missing from this paragraph
-until the registry moved** — which is the argument, made by the paragraph itself.
+**Ports stopped being a registry problem on 2026-10-04**, when addressing became tunnel
+hostname only: `infra-dev` publishes nothing on zero, the break-glass path is `ssh -t zero
+'cd ~/infra/dev && make shell'`, and the registry in
+[`../ansible/playbooks/client-home-ssh-config.yml`](../ansible/playbooks/client-home-ssh-config.yml)
+lists containers and repos, no ports. The other three containers' repos still publish
+`2222 dd-dev`, `2223 ds-dev`, `2224 or3-dev`; dropping those is each repo's own change.
+The drift row at the top of this document, whose worked example was these ports living in
+or3's compose file, closes by there being nothing left to drift.
 
 ## Dev containers: what the credential experiment established
 
@@ -526,10 +522,10 @@ dev container (the underscore-prefixed halves beside it), and carries the regist
 ports. Their hostnames are not in it: a dev container's is `<alias>.<dns_zone>`, derived
 at both ends from `group_vars/all.yml` rather than spelled beside the alias it is built
 from (see [`decisions.md`](decisions.md)). It runs on the phone and in WSL, writes both
-sides of the laptop from the latter, and takes `-e prompt_for_token=false` so a container
-whose tunnel is not provisioned yet is skipped by name instead of stopping the run with a
-prompt for a credential nobody can produce. **Since 2026-10-02 that skips the token, not
-the container** — every block is written, a blank pair at the prompt is also a skip, and
+sides of the laptop from the latter, and skips a container whose Access application does
+not exist yet by name instead of stopping the run. **Since 2026-10-02 that skips the token, not
+the container** — every block is written — and since 2026-10-04 there is no prompt at all:
+the play mints this client's own token over the API, and
 the two halves run separately as `--tags ssh` and `--tags access`
 ([`ssh-clients.md`](ssh-clients.md)).
 

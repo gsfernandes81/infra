@@ -1,6 +1,7 @@
 # In-container sshd, baked into gsrpi-dev-base and shared by every container built on
-# it. Runs as the unprivileged `dev` user on port 2222, which each repo's compose
-# publishes on a loopback port of its host — 2225 for infra-dev, 2224 for or3-dev.
+# it. Runs as the unprivileged `dev` user on port 2222 inside the container. infra-dev
+# publishes no port since 2026-10-04 — its tunnel reaches 2222 from inside, and `make
+# shell` on the host is the break-glass; or3-dev's repo still publishes 2224.
 #
 # What it is FOR differs between those two, and the difference is the whole point of
 # each. or3-dev's sshd is also a tunnel endpoint — the phone terminates a reverse

@@ -25,65 +25,38 @@
 #
 # ── THE REGISTRY ────────────────────────────────────────────────────────────────
 #
-# Four dev containers run on `zero`. The design is one tunnel per container, with its own
-# Access service token and a connector inside it — the tunnel's identity travels with the
+# Four dev containers run on `zero`, one tunnel each, with its own hostname
+# (`<alias>.<dns_zone>`) and a connector inside it — the tunnel's identity travels with the
 # container, so moving one to `one` changes no ingress rule anywhere
-# (docs/management-plane.md § Addressing).
+# (docs/management-plane.md § Addressing). `infra-dev` and `or3-dev` have tunnels; `dd-dev`
+# and `ds-dev` do not yet (Phase 5) and are not running. Every one gets its ssh block; a
+# container with no Access application yet gets no token, and `ssh <c>` says so.
 #
-# TWO OF THE FOUR ARE THERE. `infra-dev` and `or3-dev` have their own hostnames and
-# tokens. `dd-dev` and `ds-dev` do not yet — that is Phase 5 — and they are not running;
-# until then they are reached through `ssh zero` and the published loopback ports. The
-# table below lists all four because it is the registry. Every one gets its ssh block;
-# a container with no token on this client gets no token, and `ssh <c>` says so.
+#   container   image lives in
+#   ─────────   ──────────────────
+#   infra-dev   this repo, dev/
+#   or3-dev     or3
+#   dd-dev      destiny-director
+#   ds-dev      dossier
 #
-#   container   loopback port on zero   image lives in
-#   ─────────   ─────────────────────   ──────────────────
-#   infra-dev   2225                    this repo, dev/
-#   or3-dev     2224                    or3
-#   dd-dev      2222                    destiny-director
-#   ds-dev      2223                    dossier
+# NO PORT COLUMN since 2026-10-04: nothing is published on the host any more. The way in
+# is the tunnel; break glass is `ssh -t <host> 'cd ~/infra/dev && make shell'` (docker
+# exec, sudo asks). docs/decisions.md has the row.
 #
-# THE HOSTNAME COLUMN IS GONE, AND SO ARE THE FOUR `hostname:` IMPORT VARS BELOW. Every
-# one of them was the alias with the zone appended — four more spellings of a fact the
-# edge already derives that way. A dev container's tunnel hostname IS
-# `<alias>.<dns_zone>`, `dns_zone` lives in group_vars/all.yml, and both halves derive it:
-# _dev-container-tunnel.yml when it creates the CNAME, _client-dev-ssh.yml when it writes
-# the block that names it. A container that wants a hostname off the pattern passes
-# `-e hostname=` to _client-dev-ssh.yml directly; nothing in this table has to.
+# ── TOKENS ARE MINTED, NOT PASTED ──────────────────────────────────────────────
 #
-# THIS TABLE IS STILL THE PORT REGISTRY, and it is worth saying what that is now worth.
-# It used to be a comment in or3's compose file — docs/management-plane.md's drift table
-# opens with that as its worked example of a fact recorded in the newest claimant's app
-# repo, where nothing in this repo could contradict it. It moved here on 2026-08-28
-# because this file CONSUMED the numbers: every `<alias>-lan` block was built from them,
-# so a wrong one was found by somebody using the rescue path.
-#
-# **That consumer is gone.** The `-lan` aliases were dropped on 2026-08-31, so nothing
-# generated is built from these numbers any more and the argument that put them here is
-# weaker than it was. They stay because this is still the file you open to add a
-# container, and because the ports are what you need for the break-glass hop —
-# `ssh <host>`, then `ssh -p <port> dev@127.0.0.1` on that box — which is now typed
-# rather than aliased. Read that as: this table is documentation again, and documentation
-# drifts. If a number here is ever wrong, nothing will notice but a person.
-#
-# ── WHEN A CONTAINER'S TUNNEL IS NOT UP YET ─────────────────────────────────────
-#
-# Press Enter at both of its prompts. A blank Client ID AND a blank Client Secret skip
-# that container's TOKEN, by name, and the run carries on; one blank and one not is
-# refused as a slip. Its ssh block is written either way — the ProxyCommand checks for the
-# token and, without one, stops before cloudflared starts and names the run that fixes it.
-# Until 2026-10-02 a blank stopped the whole run, and a skipped container got no block.
+# Each import below mints THIS client's own Access service token for its container,
+# named `<alias>-<client>`, over the Cloudflare API, and adds it to the container's
+# policy. It needs the API token at ~/.config/cloudflare/api-token on this machine and
+# prints how to mint one if it is missing. A container with no Access application yet is
+# skipped with a message, blocks still written.
 #
 # THE TWO HALVES ARE TAGGED, so either runs alone:
 #
-#     ansible-playbook playbooks/client-home-ssh-config.yml --tags ssh       # never prompts
+#     ansible-playbook playbooks/client-home-ssh-config.yml --tags ssh       # blocks only, no API token needed
 #     ansible-playbook playbooks/client-home-ssh-config.yml --tags access    # tokens only
 #
-# `-e prompt_for_token=false` still works and means: every block, plus no new tokens.
-#
-# The order below is deliberate: the two oldest tunnels first, so a partially provisioned
-# fleet configures the containers you are most likely to need before it reaches the ones
-# it may have to skip.
+# The order below is deliberate: the two containers with tunnels first.
 #
 # ── ADDING A FIFTH ──────────────────────────────────────────────────────────────
 #

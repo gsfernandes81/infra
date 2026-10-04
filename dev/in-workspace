@@ -26,7 +26,7 @@
 # down here as needing sftp and $SSH_ORIGINAL_COMMAND special-cased, as boot-path-ish
 # config on the only way in, and for the care CLAUDE.md asks with the thing you are
 # connected through. The door already handled the command; sftp became a real binary
-# (dev/sshd_config); `docker exec` and the loopback port were always other ways in; and
+# (dev/sshd_config); `docker exec` was always another way in; and
 # the care governs the rollout, not the design. The full reckoning is in
 # docs/decisions.md. What changed here: the forced command is the DOOR, which cds itself
 # for a login, and forwarded commands stay in $HOME — so this is no longer on every
