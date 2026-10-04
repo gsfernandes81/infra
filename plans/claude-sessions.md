@@ -647,7 +647,7 @@ at 6 columns, the right edge marked:
    and `reconcile` run by the entrypoint — `BASE_TAG` `2026.10.02`. The consent question is
    now a bring-up check, below. **Superseded the same day by v0.2.0 at `2026.10.02.1`** (step 4).
 4. ✔ **DONE 2026-10-02 — released in claude-sessions v0.2.0, pinned in the base at
-   `BASE_TAG` `2026.10.02.1`; v0.3.1 at `2026.10.03`, then v0.3.2 at `2026.10.03.1` (infra#2), then v0.3.3 at `2026.10.03.2` (infra#3), then v0.3.4 at `2026.10.03.3` (infra#4), all 2026-10-03.** The TUI, to the approved mockups. Rendering tested at 40×24 and 80×24 against a test
+   `BASE_TAG` `2026.10.02.1`; v0.3.1 at `2026.10.03`, then v0.3.2 at `2026.10.03.1` (infra#2), then v0.3.3 at `2026.10.03.2` (infra#3), then v0.3.4 at `2026.10.03.3` (infra#4), all 2026-10-03; v0.3.6 at `2026.10.04` (infra#5, 2026-10-04).** The TUI, to the approved mockups. Rendering tested at 40×24 and 80×24 against a test
    backend; the zero-idle-bytes property tested under a pty; ordering and the guards
    unit-tested.
 5. **`claude-sessions offload`** replaces `offload-idle-claude.sh` (deleted in the same commit). The
@@ -662,13 +662,14 @@ at 6 columns, the right edge marked:
      ✔ **`2026.10.03.1` (v0.3.2) was brought up on infra-dev on 2026-10-03** and passed steps
      2–4b: no approval dialog, the menu, titles and `/clear` checked by the owner, the rest from
      inside the container. Its one finding became claude-sessions#5, fixed in v0.3.3–v0.3.4.
-     `2026.10.03.2` (v0.3.3) was never rolled out. For `2026.10.03.3`, repeat steps 1, 2 and
-     4b — 4a and 3 are unchanged.
-     1. Wait for `dev-base.yml` to publish `2026.10.03.3` (v0.3.4; it supersedes
-        `2026.10.03.1` and the unrolled `2026.10.03.2`), then
+     `2026.10.03.2` (v0.3.3) was never rolled out. `2026.10.03.3` (v0.3.4) has run on
+     infra-dev since 2026-10-03 17:56; its 4b checks were not reported. For `2026.10.04`, repeat
+     steps 1, 2 and 4b — 4a and 3 are unchanged.
+     1. Wait for `dev-base.yml` to publish `2026.10.04` (v0.3.6; it supersedes
+        `2026.10.03.3`), then
         recreate infra-dev:
         `ssh -t zero 'cd ~/infra/dev && make up'`.
-     2. `make verify` reads `sessions  : claude-sessions 0.3.4`, a `hooks` line naming six
+     2. `make verify` reads `sessions  : claude-sessions 0.3.6`, a `hooks` line naming six
         events and a `door` line naming `/usr/local/bin/claude-sessions-door`; `make boot-log` has the `claude-sessions reconcile:` and `DRY RUN` lines.
      3. **Start `claude` in the container and confirm no approval dialog appears** — the
         managed-settings consent question, so far settled from the docs only.
@@ -684,7 +685,7 @@ at 6 columns, the right edge marked:
         failed resume shows its error) — on that first start, check nothing interactive
         went missing into it. And an idle menu sends **zero bytes**: worth a glance at the
         phone's link meter, ages ticking at most once a minute.
-     4b. **What v0.3.0–v0.3.4 changed, by hand** (from claude-sessions' handoff, adjusted
+     4b. **What v0.3.0–v0.3.6 changed, by hand** (from claude-sessions' handoff, adjusted
         for Stage A):
         - *Titles:* send one prompt in a slot and let it finish — the row shows a short title,
           the one Claude Code's `/resume` picker shows, never a reply. Then `/rename something`,
@@ -719,6 +720,15 @@ at 6 columns, the right edge marked:
           has no transcript); `/resume` an old conversation into a slot and leave it,
           and it says `would offload` instead — `make offload-log`'s *WOULD have stopped* half. **Not `offload.log`, and nothing
           is stopped**: that is the handoff's check as Stage B will read it.
+        - *Headings* (v0.3.5): labelled rules with a count; rows indented at 80 columns, not
+          at 40.
+        - *The archive* (v0.3.5): `c` on a `Closed` row moves it under `Archived · N` and
+          `~/.local/share/claude-sessions/archive/<id>` appears; `c` on it there brings it back.
+          Conversations in `/workspace` older than 30 days sit behind `Archived` at start, and
+          `claude --resume <id>` still finds an archived one — the archive is the menu's only.
+        - *The spinner* (v0.3.6): closing a running session shows it on that row and `closing
+          session` on the status line until done (up to 5 s), and it draws as braille dots on
+          the phone (Termux) and in Windows Terminal, not as boxes.
         - *The sweep:* `grep 'sweep:' ~/.local/share/claude-sessions/offload.log | tail`. With
           the agent view off, expect nothing, or `WOULD KILL` / `would keep, too young` lines
           only (v0.3.4 applies the live age check to the dry run). A `killed` line in
@@ -748,7 +758,13 @@ at 6 columns, the right edge marked:
        Stage B: it would mean the eight v0.2.0 lines were not all `/clear`/`/resume` races, and
        whatever held the lock against a `SessionEnd` can hold it against a `Stop` or a prompt.
        `SessionEnd (clear)` or `(resume)` takes no lock in v0.3.2, so one appearing
-       means the box is not running it. **Read after a day of the v0.3.2 dry run** (infra#2) —
+       means the box is not running it. **First reading, 2026-10-04** on v0.3.4 (19 h, 380
+       passes): **not enough data** — no slot was alive at any pass, so nothing was judged —
+       and one `SessionEnd (other) dropped` at 01:40:46 that no pass saw the slot of, unexplained
+       unless the owner did a `c` close then. The menu also dumped core into `/workspace` at
+       01:56:44 when its terminal went away ([claude-sessions#6](https://github.com/gsfernandes81/claude-sessions/issues/6)),
+       which may be the same episode. **Needs a day with slots in use, then a second reading.**
+       **Read after a day of the v0.3.2 dry run** (infra#2) —
        it also makes up for the 33 hours infra-dev had on v0.2.0.
      - **`claude.exe` counts as foreign work** ([#2](https://github.com/gsfernandes81/claude-sessions/issues/2)). `foreign_descendant` exempts only `claude`;
        the old script measured `claude.exe` helpers in live trees. If they reappear, every

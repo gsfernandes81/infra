@@ -946,8 +946,9 @@ see the next section.
 [`gsfernandes81/claude-sessions`](https://github.com/gsfernandes81/claude-sessions) is the
 session registry [`../plans/claude-sessions.md`](../plans/claude-sessions.md) designs: one
 JSON file per abduco session under `~/.local/share/claude-sessions/` (on the volume, so it
-outlives the container), kept current by Claude Code's own hooks. The base installs
-**v0.3.4** — a static binary, pinned by tag and SHA-256 per architecture, at
+outlives the container), kept current by Claude Code's own hooks — and, since v0.3.5, an
+`archive/` beside them, one small file per conversation the menu has put away. The base installs
+**v0.3.6** — a static binary, pinned by tag and SHA-256 per architecture, at
 `/usr/local/bin/claude-sessions`.
 
 **The menu is in this release, and it is where `ssh infra-dev` lands.** `claude-sessions`
@@ -969,7 +970,17 @@ not a conversation, and piped `list` still leaves the group out. `Enter` on one 
 --resume <id>` in a new abduco slot from the directory Claude Code filed it under — refused, with `which is
 gone`, when that directory no longer exists, as for a deleted worktree (or through the slot
 whose record names it). Closed slot records are no longer a list source, so a new slot may
-reuse a closed one's name. **A row's title is what Claude Code's own
+reuse a closed one's name. **Since v0.3.5** each group's heading is a labelled rule with a
+count (`── Closed · 7 ────`), rows are indented under it from 60 columns, and there is an
+**`Archived` group**, last and shut at every start, that `Enter` on its heading folds open:
+`c` on a `Closed` row archives it without asking, and 30 days since a conversation's last
+entry archives it on its own; `c` or `Enter` on an archived row takes it out again for 30
+days. **The archive is the menu's only** — it writes `archive/<id>` in the registry and never
+touches Claude Code's files, so `claude --resume` still finds everything. **Since v0.3.6**
+anything slower than a quarter second shows Docker Compose's braille spinner on the row being
+worked on and says what on the status line (`closing session`, `resuming session`, …), keys
+other than `q`, Ctrl-C and a resize wait for it, and only changed lines are written, so an
+idle menu still sends nothing. **A row's title is what Claude Code's own
 `/resume` picker shows** (v0.3.1): the `/rename` name, else Claude Code's generated title,
 else the first prompt — read from the transcript by the hook at `SessionStart` and `Stop`.
 A recreate ends every slot anyway, and each one takes its new title when it is resumed. **`claude-sessions-door`**
