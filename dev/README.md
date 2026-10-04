@@ -950,7 +950,7 @@ outlives the container), kept current by Claude Code's own hooks — and, since 
 `archive/` beside them: one small file per conversation `c` has put away (`archived <ms>`)
 or taken back out (`kept <ms>`) — age-archiving writes nothing, being worked out as the
 list is read. The base installs
-**v0.3.6** — a static binary, pinned by tag and SHA-256 per architecture, at
+**v0.3.7** — a static binary, pinned by tag and SHA-256 per architecture, at
 `/usr/local/bin/claude-sessions`.
 
 **The menu is in this release, and it is where `ssh infra-dev` lands.** `claude-sessions`
@@ -982,7 +982,13 @@ touches Claude Code's files, so `claude --resume` still finds everything. **Sinc
 anything slower than a quarter second shows Docker Compose's braille spinner on the row being
 worked on and says what on the status line (`closing session`, `resuming session`, …), keys
 other than `q`, Ctrl-C and a resize are ignored meanwhile, and only changed lines are written, so an
-idle menu still sends nothing. **A row's title is what Claude Code's own
+idle menu still sends nothing. **Since v0.3.7** the menu exits **129** and writes nothing
+when its terminal goes away (a dropped ssh link), where v0.3.6 and earlier panicked and
+dumped core into their working directory — `/workspace`, the repo
+([claude-sessions#6](https://github.com/gsfernandes81/claude-sessions/issues/6)); a closed
+output pipe no longer aborts any subcommand, and a real bug unwinds and exits 101 with no
+core. The door's fallback after a 129 prints to, and starts a shell on, a terminal that is
+gone; both fail quietly, which is why the door is unchanged. **A row's title is what Claude Code's own
 `/resume` picker shows** (v0.3.1): the `/rename` name, else Claude Code's generated title,
 else the first prompt — read from the transcript by the hook at `SessionStart` and `Stop`.
 A recreate ends every slot anyway, and each one takes its new title when it is resumed. **`claude-sessions-door`**

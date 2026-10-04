@@ -647,7 +647,7 @@ at 6 columns, the right edge marked:
    and `reconcile` run by the entrypoint — `BASE_TAG` `2026.10.02`. The consent question is
    now a bring-up check, below. **Superseded the same day by v0.2.0 at `2026.10.02.1`** (step 4).
 4. ✔ **DONE 2026-10-02 — released in claude-sessions v0.2.0, pinned in the base at
-   `BASE_TAG` `2026.10.02.1`; v0.3.1 at `2026.10.03`, then v0.3.2 at `2026.10.03.1` (infra#2), then v0.3.3 at `2026.10.03.2` (infra#3), then v0.3.4 at `2026.10.03.3` (infra#4), all 2026-10-03; v0.3.6 at `2026.10.04` (infra#5, 2026-10-04).** The TUI, to the approved mockups. Rendering tested at 40×24 and 80×24 against a test
+   `BASE_TAG` `2026.10.02.1`; v0.3.1 at `2026.10.03`, then v0.3.2 at `2026.10.03.1` (infra#2), then v0.3.3 at `2026.10.03.2` (infra#3), then v0.3.4 at `2026.10.03.3` (infra#4), all 2026-10-03; v0.3.6 at `2026.10.04` (infra#5), then v0.3.7 at `2026.10.04.1` (infra#6), both 2026-10-04.** The TUI, to the approved mockups. Rendering tested at 40×24 and 80×24 against a test
    backend; the zero-idle-bytes property tested under a pty; ordering and the guards
    unit-tested.
 5. **`claude-sessions offload`** replaces `offload-idle-claude.sh` (deleted in the same commit). The
@@ -663,13 +663,13 @@ at 6 columns, the right edge marked:
      2–4b: no approval dialog, the menu, titles and `/clear` checked by the owner, the rest from
      inside the container. Its one finding became claude-sessions#5, fixed in v0.3.3–v0.3.4.
      `2026.10.03.2` (v0.3.3) was never rolled out. `2026.10.03.3` (v0.3.4) has run on
-     infra-dev since 2026-10-03 17:56; its 4b checks were not reported. For `2026.10.04`, repeat
-     steps 1, 2 and 4b — 4a and 3 are unchanged.
-     1. Wait for `dev-base.yml` to publish `2026.10.04` (v0.3.6; it supersedes
-        `2026.10.03.3`), then
+     infra-dev since 2026-10-03 17:56; its 4b checks were not reported. `2026.10.04` (v0.3.6) was
+     never rolled out. For `2026.10.04.1`, repeat steps 1, 2 and 4b — 4a and 3 are unchanged.
+     1. Wait for `dev-base.yml` to publish `2026.10.04.1` (v0.3.7; it supersedes
+        `2026.10.03.3` and the unrolled `2026.10.04`), then
         recreate infra-dev:
         `ssh -t zero 'cd ~/infra/dev && make up'`.
-     2. `make verify` reads `sessions  : claude-sessions 0.3.6`, a `hooks` line naming six
+     2. `make verify` reads `sessions  : claude-sessions 0.3.7`, a `hooks` line naming six
         events and a `door` line naming `/usr/local/bin/claude-sessions-door`; `make boot-log` has the `claude-sessions reconcile:` and `DRY RUN` lines.
      3. **Start `claude` in the container and confirm no approval dialog appears** — the
         managed-settings consent question, so far settled from the docs only.
@@ -685,7 +685,7 @@ at 6 columns, the right edge marked:
         failed resume shows its error) — on that first start, check nothing interactive
         went missing into it. And an idle menu sends **zero bytes**: worth a glance at the
         phone's link meter, ages ticking at most once a minute.
-     4b. **What v0.3.0–v0.3.6 changed, by hand** (from claude-sessions' handoff, adjusted
+     4b. **What v0.3.0–v0.3.7 changed, by hand** (from claude-sessions' handoff, adjusted
         for Stage A):
         - *Titles:* send one prompt in a slot and let it finish — the row shows a short title,
           the one Claude Code's `/resume` picker shows, never a reply. Then `/rename something`,
@@ -730,6 +730,15 @@ at 6 columns, the right edge marked:
           session` on the status line until done (5 s for TERM, up to about 10 s if it needs
           KILL and abduco's teardown), and it draws as braille dots on
           the phone (Termux) and in Windows Terminal, not as boxes.
+        - *A dropped link* (v0.3.7, claude-sessions#6): open the menu over ssh from the phone and
+          kill the connection (airplane mode, or kill the ssh client). No `core` appears in
+          `/workspace`, and `~/.local/share/claude-sessions/` shows nothing new beyond normal
+          hook lines.
+        - *A closed pipe* (v0.3.7): `bash -c 'claude-sessions --help | true; echo
+          ${PIPESTATUS[0]}'` prints `0`. **Not `| head -1`**, which passes on v0.3.6 too: the
+          help fits the pipe buffer, so the reader only closes after the write. With `| true`
+          the reader is gone first, and v0.3.6 exits 134 every time (calibrated 2026-10-04,
+          five runs each).
         - *The sweep:* `grep 'sweep:' ~/.local/share/claude-sessions/offload.log | tail`. With
           the agent view off, expect nothing, or `WOULD KILL` / `would keep, too young` lines
           only (v0.3.4 applies the live age check to the dry run). A `killed` line in
@@ -769,7 +778,13 @@ at 6 columns, the right edge marked:
        and no shell history; and the menu dumped core into `/workspace` at 01:56:44 when its
        terminal went away ([claude-sessions#6](https://github.com/gsfernandes81/claude-sessions/issues/6)).
        The owner is asked what was started at ~01:41 and through which path — anything a
-       Stage B offloader cannot see is the more important half. **Needs a day with slots in
+       Stage B offloader cannot see is the more important half. *claude-sessions' reading*
+       (infra#6): the 13 s claude fits `n` then `c` (v0.3.4 reused the free name `claude-1`; a
+       close holds the slot lock across the stop, so that `SessionEnd` is always dropped — the
+       expected case), and the 650 MB fits a `claude` or a build started in the menu's `s`
+       shell, which is not in abduco, **is invisible to the registry and the offloader by
+       design**, and died with the link at 01:56. A reading, not proof; if the owner did
+       something else, it is worth an issue upstream. **Needs a day with slots in
        use, then a second reading** (that day also makes up for the 33 hours on v0.2.0).
      - **`claude.exe` counts as foreign work** ([#2](https://github.com/gsfernandes81/claude-sessions/issues/2)). `foreign_descendant` exempts only `claude`;
        the old script measured `claude.exe` helpers in live trees. If they reappear, every
