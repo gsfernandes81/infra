@@ -951,7 +951,8 @@ list is read. The base installs
 with no arguments, at a terminal, lists the live and offloaded slots, any zmx session it
 did not start, and under
 `Closed` every workspace conversation on disk —
-**grouped by state** under `Needs you`, `Working`, `Idle`, `Offloaded` and `Closed` (v0.3.3;
+**grouped by state** under `Needs you`, `Working`, `Idle`, `Offloaded` and `Closed` (an
+Esc-interrupted row is `Idle` since v0.4.2; v0.3.3;
 an empty group is not drawn, and an unregistered session counts as idle). There are no marks
 and no numbers: an unread title is bold, a session attached elsewhere is dim, amber is the
 Needs-you heading, and status lines name a session by its quoted title. `Enter` attaches or resumes, `n` starts a new slot in `/workspace`, `c` closes, `s`
@@ -1033,7 +1034,12 @@ cloud sessions, and the slot reads `kept — background work running: …`),
 it is not mid-turn — **except a turn you ended with Esc** (v0.4.2: an Esc fires no hook, so
 the transcript's trailing `[Request interrupted by user…]` marker is read as the end of the
 turn, and the ten minutes run from it; a prompt or a reply after the marker means it is
-not the end) —
+not the end, and a marker older than the hooks' last event is an earlier turn's; a
+permission prompt the Esc dismissed no longer counts as waiting on you either. **Known gap,
+[claude-sessions#10](https://github.com/gsfernandes81/claude-sessions/issues/10):** background
+agents, workflows or cloud sessions *started in the turn you Esc'd* are not on the slot's
+background list — only `Stop` writes it — so they hold the slot only by their own
+transcript writes; keep such a slot attached) —
 nothing waits on you (a permission prompt), no timer is pending
 (`ScheduleWakeup`/`CronCreate`, whoever set it), nothing but `claude` (and its
 `claude.exe` helpers) runs under it, and
