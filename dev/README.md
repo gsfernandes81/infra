@@ -55,7 +55,7 @@ been consciously postponed rather than an omission.
 |---|---|
 | `Makefile` | **the management interface** — `make up`, `make login`, `make status`, … |
 | `compose.yaml` | the stack — `name: infra-dev`, one service, nothing published |
-| `Dockerfile` | Debian slim + Node 22 + Claude Code + gh + screen/abduco + sshd + **ansible** |
+| `Dockerfile` | Debian slim + Node 22 + Claude Code + gh + zmx + screen/abduco + sshd + **ansible** |
 | `entrypoint.sh` | ssh material → Claude config → `git pull` → **sshd(fg)** |
 | `login.sh` | in the image: the interactive logins, idempotent — `make login` |
 | `status.sh` | on the host: the readouts — `make status`, `verify`, `fleet`, `collections` |
@@ -135,8 +135,8 @@ program this image lacks. `infra-dev-sh` is the same alias under its old name.
 to `/workspace` and execs whatever it was handed — the directory and nothing else. *Where
 the work is* is the container's business: it is the container's bind mount, and no client
 should have to name the path. *Whether to hold the session across a dropped link* is the
-menu's: what it opens is an abduco session, because ssh dies at the phone's lock screen,
-while a laptop running a one-shot command wants no abduco at all.
+menu's: what it opens is a zmx session, because ssh dies at the phone's lock screen,
+while a laptop running a one-shot command wants no session holder at all.
 
 The `cd` is needed for a reason worth knowing, because the symptom is baffling: sshd runs
 a remote command as `$SHELL -c '…'`, which is **not a login shell**, so `config.fish`'s
@@ -148,9 +148,15 @@ and `in-workspace` is how one asks for the repo. And it matters
 because the entrypoint seeds Claude Code's trust dialog for `/workspace`: a session started
 in `/home/dev` asks you to trust a directory that is not the repo.
 
-`abduco -A NAME CMD` attaches the session called `NAME`, creating it if it is not
-there — so the same command starts the work and comes back to it. **Ctrl-\\** detaches;
-what is under it keeps running, and a dropped connection costs nothing. A claude
+Each slot is a **zmx** session (since claude-sessions v0.4.0; abduco before). The menu
+starts it and attaches it; **Ctrl-\\** detaches; what is under it keeps running, and a
+dropped connection costs nothing. zmx replays the session's recent history on every
+attach — about 1.08× the bytes, capped near 10,000 lines (≈120 KB after ssh compression
+at 80 columns), so one lock-screen drop on the phone costs one replay — and, unlike
+abduco, never switches the terminal to the alternate screen, which is what lets a wheel
+or a swipe scroll the terminal's own buffer instead of arriving in claude as arrow keys.
+Detaching sends `ESC c`, which clears Termux's scrollback; the history comes back with
+the next attach. A claude
 started *outside* a session dies with the ssh link that carried it, which on a phone
 means dies at the first lock screen.
 
@@ -844,7 +850,7 @@ same warning branch as a failure; `DEV_CHILD_INIT_TIMEOUT` moves it.
 The shape as originally designed, kept for the reasoning:
 
 - **`infra` owns a base image.** One `Dockerfile` here, built on the host as
-  `gsrpi-dev-base:<tag>` — Debian slim, Node, Claude Code, gh, screen/abduco, sshd,
+  `gsrpi-dev-base:<tag>` — Debian slim, Node, Claude Code, gh, zmx, screen/abduco, sshd,
   fish, the `dev` user, the ENV block. That is the 700 shared lines, in one place.
 - **Each repo's `dev/Dockerfile` becomes three lines**: `FROM gsrpi-dev-base:<tag>`
   plus whatever that repo needs on top — nothing for or3, `ansible-core` and the
@@ -945,7 +951,7 @@ see the next section.
 
 [`gsfernandes81/claude-sessions`](https://github.com/gsfernandes81/claude-sessions) is the
 session registry [`../plans/claude-sessions.md`](../plans/claude-sessions.md) designs: one
-JSON file per abduco session under `~/.local/share/claude-sessions/` (on the volume, so it
+JSON file per slot under `~/.local/share/claude-sessions/` (on the volume, so it
 outlives the container), kept current by Claude Code's own hooks — and, since v0.3.5, an
 `archive/` beside them: one small file per conversation `c` has put away (`archived <ms>`)
 or taken back out (`kept <ms>`) — age-archiving writes nothing, being worked out as the
@@ -954,8 +960,8 @@ list is read. The base installs
 `/usr/local/bin/claude-sessions`.
 
 **The menu is in this release, and it is where `ssh infra-dev` lands.** `claude-sessions`
-with no arguments, at a terminal, lists the live and offloaded slots, any abduco session it
-did not start (which is what the old `abduco -A claude claude` logins are), and under
+with no arguments, at a terminal, lists the live and offloaded slots, any zmx session it
+did not start, and under
 `Closed` every workspace conversation on disk —
 **grouped by state** under `Needs you`, `Working`, `Idle`, `Offloaded` and `Closed` (v0.3.3;
 an empty group is not drawn, and an unregistered session counts as idle). There are no marks
@@ -969,7 +975,7 @@ and is not running — whoever started it: a slot, a `claude` run by hand, the o
 claude claude` path, or what a slot held before a `/clear`. A slot's *current* conversation
 is not repeated there, a transcript with no reply and no typed prompt (a bare `/clear`) is
 not a conversation, and piped `list` still leaves the group out. `Enter` on one runs `claude
---resume <id>` in a new abduco slot from the directory Claude Code filed it under — refused, with `which is
+--resume <id>` in a new zmx slot from the directory Claude Code filed it under — refused, with `which is
 gone`, when that directory no longer exists, as for a deleted worktree (or through the slot
 whose record names it). Closed slot records are no longer a list source, so a new slot may
 reuse a closed one's name. **Since v0.3.5** each group's heading is a labelled rule with a
@@ -1015,7 +1021,7 @@ with a plain login shell until its repo bumps (*How this container is used*).
 | Piece | Where | What it does |
 |---|---|---|
 | the hooks | `/etc/claude-code/managed-settings.d/claude-sessions.json`, 0644 | `SessionStart`, `UserPromptSubmit`, `Stop`, `Notification`, `SessionEnd`, and `PostToolUse` on the three timer tools, each calling `claude-sessions hook`, which always exits 0 — a bug in it cannot block a prompt |
-| `reconcile` | the entrypoint, before the offloaders and sshd | marks slots whose process died with the last container, and sweeps sockets dead abduco servers left in `~/.abduco` |
+| `reconcile` | the entrypoint, before the offloaders and sshd | marks slots whose process died with the last container; since v0.4.0 it sweeps no sockets — `zmx list` clears a dead daemon's own, and zmx's socket directory, `/tmp/zmx-<uid>`, empties with the container |
 | `offload --dry-run` | the entrypoint, every 3 minutes | **Stage A**: decides, prints, stops nothing, and since v0.2.0 takes no lock either; since v0.3.0 it also writes the sweep's `WOULD KILL` (and since v0.3.4 `would keep, too young`) lines to `offload.log`. The old offloader still does the stopping. **A bare `claude-sessions offload` by hand is live** — it stops slots and kills orphans; `make idle` passes `--dry-run` |
 
 **The hooks file is generated by the binary at build time and is not in this repo.**
@@ -1137,13 +1143,13 @@ Nothing infra-dev needs originates on the phone except one public key.
 Nothing you type can end the container — `exit` closes an ssh session, `/exit` closes a
 claude, and PID 1 has not moved.
 
-**A session that is not in `abduco` dies with the link that carried it.** On a phone
-that is not a corner case: the ssh session ends at the lock screen, and an unwrapped
-claude ends with it, mid-edit. The menu is the habit — every session it opens is an
-abduco session, and `make claude` and `ssh infra-dev` both land on it, so they list
-the same sessions whichever way you came in. `screen` is also in the image and is better for ordinary shell
-work; abduco is what you want under a full-screen program, because it is detach/attach
-and nothing else, so every key goes through to what is underneath.
+**A session that is not held dies with the link that carried it.** On a phone that is
+not a corner case: the ssh session ends at the lock screen, and an unwrapped claude ends
+with it, mid-edit. The menu is the habit — every session it opens is a zmx session, and
+`make claude` and `ssh infra-dev` both land on it, so they list the same sessions
+whichever way you came in. `screen` is also in the image and is better for ordinary shell
+work. abduco is still installed, but only because Stage A's `offload-idle-claude.sh`
+lists abduco sessions (infra#9); nothing the menu starts is one any more.
 
 **`/workspace` is a bind mount of the host's clone, not a second checkout.** A `git
 pull` in the container and one on zero are the same pull, on one working tree — there
@@ -1163,7 +1169,7 @@ make verify       # status + the tools + the collections + the fleet
 make login        # the logins, again
 make fleet        # ssh to each host, then `ansible fleet -m ping`
 make collections  # the image's collections vs ansible/requirements.yml
-make claude       # attach (or start) the `claude` abduco session
+make claude       # the claude-sessions menu, as `ssh infra-dev` lands on it
 make shell        # a fish shell in the container
 make logs         # follow the container log (= sshd's)
 make boot-log     # the entrypoint's lines, from the top, ANSI stripped
@@ -1180,7 +1186,7 @@ at uid 0 writes root-owned files into the bind-mounted clone. It refuses to buil
 rather than doing it.
 
 `restart` is `stop`/`start` deliberately — `up -d` re-evaluates the config and may
-recreate the container, throwing away every live abduco session in it. The corollary: a
+recreate the container, throwing away every live session in it. The corollary: a
 change to `compose.yaml` only lands on `up`. This is the same rule
 [`../CLAUDE.md`](../CLAUDE.md) states for the stacks, for the same reason.
 

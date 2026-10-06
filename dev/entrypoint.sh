@@ -10,7 +10,7 @@
 #
 # **sshd is the FOREGROUND process, and that is the whole design.** This container is
 # used by ssh-ing into it — from Termux on the phone, or from a PC — and running
-# claude inside an `abduco` session there. The thing whose lifetime the container's
+# claude inside a session there (a zmx session, since claude-sessions v0.4.0). The thing whose lifetime the container's
 # lifetime should equal is therefore the door. Nothing you type can end the container:
 # `exit` closes an ssh session, `/exit` closes a claude, and PID 1 has not moved.
 set -u
@@ -28,7 +28,7 @@ set -u
 #   DEV_IDLE_OFFLOAD_SECONDS / DEV_IDLE_POLL_SECONDS — offload-idle-claude.sh's own
 #
 # DEV_REMOTE_CONTROL IS GONE, 2026-08-25. Every container on this fleet is now reached the
-# same way — ssh in, work in an abduco session — and none of them ships a remote-control
+# same way — ssh in, work in a held session — and none of them ships a remote-control
 # daemon for this to start. A variable that names a thing no image contains is a variable
 # somebody sets and then wonders about, so it is removed rather than left inert.
 #
@@ -397,14 +397,14 @@ mkdir -p "$HOME/.local/share"
 chmod 600 "$HOME/.ssh/environment"
 
 # ── claude-sessions reconcile — before anything reads the registry ──────────
-# The registry (~/.local/share/claude-sessions, one JSON file per abduco session) is on a
-# volume, so it outlives the container while every process it names does not. reconcile
-# marks the slots whose pid and start time are gone, and removes the sockets dead abduco
-# servers left in ~/.abduco — which would otherwise answer `abduco -A` with a corpse.
-# Here because it must come before the offloader below and before sshd lets a session
-# in, and as `dev` because that is who runs claude. Safe to run at any time: since v0.2.0
-# it reads abduco's flags getopt-style (`-fA` included), and sweeps nothing at all while
-# any live abduco's session cannot be named. Non-zero only
+# The registry (~/.local/share/claude-sessions, one JSON file per slot) is on a volume, so
+# it outlives the container while every process it names does not. reconcile marks the
+# slots whose pid and start time are gone. Since v0.4.0 a slot is a zmx session and
+# reconcile sweeps no sockets: `zmx list` removes a dead daemon's socket itself when the
+# connection is refused, and zmx's socket directory is /tmp/zmx-<uid>, which a recreate
+# empties anyway. Its line reads `reconcile: N slot(s) offloaded, M zmx session(s), K not
+# answering`. Here because it must come before the offloader below and before sshd lets a
+# session in, and as `dev` because that is who runs claude. Non-zero only
 # on a real error, which is printed and does not stop the door. Time-bounded for the
 # reason child-init.sh is: anything ahead of sshd that hangs costs the door.
 if out=$(timeout 30 claude-sessions reconcile 2>&1); then

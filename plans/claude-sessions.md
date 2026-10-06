@@ -669,12 +669,13 @@ at 6 columns, the right edge marked:
      forced-door bring-up, which the same recreate delivers. **`2026.10.04.4` supersedes
      `.3` before it was rolled out** (2026-10-04: no claude-sessions change, only the
      entrypoint, login and sshd_config text that followed the published port out); read
-     `.4` wherever this step says `.3`.
-     1. Wait for `dev-base.yml` to publish `2026.10.04.3` (v0.3.8 and the forced door; it
-        supersedes `2026.10.03.3` and every tag since), then
+     `.4` wherever this step says `.3`. **`2026.10.06` (claude-sessions v0.4.0 and zmx 0.8.1,
+     infra#9) supersedes both** if neither has been rolled out; it is the tag below.
+     1. Wait for `dev-base.yml` to publish `2026.10.06` (v0.4.0, zmx, v0.3.8's scrollback and
+        the forced door; it supersedes `2026.10.03.3` and every tag since), then
         recreate infra-dev:
         `ssh -t zero 'cd ~/infra/dev && make up'`.
-     2. `make verify` reads `sessions  : claude-sessions 0.3.8` and `scrollvars: 3 of 3`, a `hooks` line naming six
+     2. `make verify` reads `sessions  : claude-sessions 0.4.0`, `zmx       : zmx 0.8.1` and `scrollvars: 3 of 3`, a `hooks` line naming six
         events and a `door` line naming `/usr/local/bin/claude-sessions-door`; `make boot-log` has the `claude-sessions reconcile:` and `DRY RUN` lines.
      3. **Start `claude` in the container and confirm no approval dialog appears** — the
         managed-settings consent question, so far settled from the docs only.
@@ -690,7 +691,7 @@ at 6 columns, the right edge marked:
         failed resume shows its error) — on that first start, check nothing interactive
         went missing into it. And an idle menu sends **zero bytes**: worth a glance at the
         phone's link meter, ages ticking at most once a minute.
-     4b. **What v0.3.0–v0.3.8 changed, by hand** (from claude-sessions' handoff, adjusted
+     4b. **What v0.3.0–v0.4.0 changed, by hand** (from claude-sessions' handoff, adjusted
         for Stage A):
         - *Titles:* send one prompt in a slot and let it finish — the row shows a short title,
           the one Claude Code's `/resume` picker shows, never a reply. Then `/rename something`,
@@ -757,6 +758,20 @@ at 6 columns, the right edge marked:
           hand in a shell (`s`, then `claude`) shows only `CLAUDE_CODE_DISABLE_AGENT_VIEW=1`,
           the image's own, and none of the three. Then on the phone, in a slot after a long
           reply, a swipe scrolls Termux's buffer at once with no repaint, and long-press selects.
+        - *zmx holds the slots* (v0.4.0, infra#9) — **the regression this release exists for:**
+          in a slot after a long reply, the laptop's wheel and the phone's swipe scroll the
+          terminal's own buffer and do NOT step through prompt history; long-press selects on
+          the phone. **Calibrate first** on the abduco base you are leaving (`2026.10.03.3` or
+          `.4`): the same gesture there recalls prompt history, so the check can tell them apart.
+        - *Replay:* detach with Ctrl-\, then `Enter` on the row — the conversation's recent
+          output is back on screen and scrollable.
+        - *Attach state:* `zmx list` shows `name=claude-1 … clients=0` while detached and
+          `clients=1` while attached.
+        - *Binding:* for a slot's claude, `tr '\0' '\n' < /proc/<pid>/environ | grep
+          CLAUDE_CODE_DISABLE_` still shows all three `=1`, and `cat /proc/$(ps -o ppid= -p
+          <pid>)/comm` prints `zmx` — a parent under any other name means a slot that never
+          binds.
+        - *`make status`'s `sessions` line* names zmx sessions (`sessions  : zmx — claude-1 …`).
         - *The sweep:* `grep 'sweep:' ~/.local/share/claude-sessions/offload.log | tail`. With
           the agent view off, expect nothing, or `WOULD KILL` / `would keep, too young` lines
           only (v0.3.4 applies the live age check to the dry run). A `killed` line in

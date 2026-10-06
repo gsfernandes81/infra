@@ -18,7 +18,7 @@
 # baked in abduco and the session name. That was one concern too many. WHERE THE WORK IS
 # belongs to the container — it is the container's bind mount and nothing outside knows
 # the path. WHETHER TO HOLD THE SESSION ACROSS A DROPPED LINK belongs to the client: the
-# phone wants abduco because ssh dies at the lock screen, and a laptop running
+# phone wants a held session (zmx) because ssh dies at the lock screen, and a laptop running
 # `ssh … 'git log'`, a cron, or a one-shot `claude -p` all want no such thing. Wrapping
 # both meant a client could not have the second without the first.
 #

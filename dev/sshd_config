@@ -6,7 +6,7 @@
 # What it is FOR differs between those two, and the difference is the whole point of
 # each. or3-dev's sshd is also a tunnel endpoint — the phone terminates a reverse
 # forward on it to reach the vessel LAN. infra-dev's is a DOOR AND NOTHING ELSE: you
-# ssh in from the phone or a PC and work in an abduco session, and the model traffic
+# ssh in from the phone or a PC and work in a zmx session, and the model traffic
 # that used to cross the phone's metered radio goes out over zero's home connection
 # instead. Nothing tunnels back through infra-dev.
 #
@@ -100,7 +100,7 @@ PermitUserEnvironment yes
 Compression yes
 
 # Drop a wedged session rather than leaving one that accepts input and never answers:
-# 3 x 30s of silence and it is gone. abduco is what makes that free — the work is not
+# 3 x 30s of silence and it is gone. The session holder (zmx) is what makes that free — the work is not
 # in the ssh session, so losing the session loses nothing.
 ClientAliveInterval 30
 ClientAliveCountMax 3

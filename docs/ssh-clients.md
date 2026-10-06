@@ -79,7 +79,7 @@ and the identity. So:
 | `ssh -T <c>` | a login shell with no terminal |
 | `ssh -N -L/-R …` | the forward, untouched — `-N` opens no session, so the door never runs |
 
-Each session the menu opens is an abduco session, so it outlives the link: an ssh session
+Each session the menu opens is a zmx session (abduco before claude-sessions v0.4.0), so it outlives the link: an ssh session
 from a phone dies at the lock screen, and the work must not. The door never locks you out:
 a menu that cannot run (too narrow a terminal, a missing binary) says why and drops to a
 login shell.
@@ -351,7 +351,7 @@ right and this one has not been run.
 `authorized_keys` out of the read-only secrets mount at start-up, and `sshd_config` names
 that copy — so the play refreshes the copy inside each container over its `-sh` alias.
 Restarting sshd would be the wrong tool: sshd is **exec'd as PID 1**, so restarting it
-restarts the container and every detached abduco session goes with it. It is also
+restarts the container and every detached session goes with it. It is also
 unnecessary — sshd reads `AuthorizedKeysFile` on each authentication attempt, not at
 start-up.
 

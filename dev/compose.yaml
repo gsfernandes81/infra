@@ -23,7 +23,7 @@ services:
       # `base` — the FROM pulls the tag from ghcr — so a tag bumped here and not yet
       # built by dev-base.yml fails on the pull until `make base` builds it locally.
       args:
-        BASE_TAG: ${BASE_TAG:-2026.10.04.4}
+        BASE_TAG: ${BASE_TAG:-2026.10.06}
     image: infra-dev
     container_name: infra-dev
     hostname: ${DEV_HOSTNAME:-infra-dev}  # Claude Code shows this as the machine title
@@ -70,7 +70,7 @@ services:
       # NO remote-control switch, and as of 2026-08-25 there is no such switch to set:
       # DEV_REMOTE_CONTROL is gone from the base along with the hook that read it, and no
       # dev container on this fleet ships a remote-control daemon. Every one of them is
-      # reached the same way — ssh in, hold the work in an abduco session — which is what
+      # reached the same way — ssh in, hold the work in a zmx session — which is what
       # this container was built to be in the first place.
       #
       # THE IDLE OFFLOADER IS ON BY DEFAULT and needs nothing here. It stops a claude that

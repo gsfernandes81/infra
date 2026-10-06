@@ -62,7 +62,7 @@ fi
 # whatever the child exited with — so a ^C in the menu's start-up window (it reads /proc
 # and the registry before it puts the terminal in raw mode) or between a detach and the
 # redraw ended the login instead of reaching the shell below. A handler, not `trap ''`: an
-# ignored signal is inherited across exec, and the menu, abduco and every claude under it
+# ignored signal is inherited across exec, and the menu, zmx and every claude under it
 # would then ignore ^C too. A handler resets to the default in the child, so a ^C still
 # stops a menu caught before raw mode — exit 130, and the shell below. bash is no fix
 # either: it exits the same way when the child died OF the SIGINT, the common case.

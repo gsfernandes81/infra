@@ -7,7 +7,7 @@
 #   make dev-login   re-run the logins
 #   make dev-fleet   prove zero, one and two answer
 #   make dev-shell   a fish shell in it
-#   make dev-claude  attach its `claude` abduco session
+#   make dev-claude  the claude-sessions menu, as ssh lands on it
 #   make dev-tunnel-log  what cloudflared is saying, if the tunnel is on
 #   make dev-logs / dev-boot-log / dev-restart / dev-down
 #

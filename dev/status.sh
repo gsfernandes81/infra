@@ -43,17 +43,19 @@ status() {
         && echo 'running in the foreground (the way in)' \
         || echo 'NOT running — nothing to ssh into; see: make boot-log')"
 
-    # The sessions are the work: this is where a claude lives. Read as the SOCKET
-    # DIRECTORY rather than by running `abduco` — abduco's own listing carries a header
-    # and wants a terminal, and a status check must be able to tell "no sessions" from
-    # "the listing did not work". One socket, one session; abduco removes it when the
-    # session ends.
+    # The sessions are the work: this is where a claude lives — a zmx session per slot since
+    # claude-sessions v0.4.0. Read as the SOCKET DIRECTORY rather than by running `zmx list`,
+    # which connects to every session and writes a line into each one's log: a status check
+    # should not churn what it reads. One socket, one session. The directory is zmx's own
+    # answer (`zmx version` prints it; it is /tmp/zmx-<uid> with no ZMX_DIR set), and zmx
+    # creates it just to report it, which is harmless here. A socket can outlive a killed
+    # daemon until the next `zmx list` clears it, so this can name one dead session.
     local sessions
-    sessions="$(d exec "$CONTAINER" sh -c 'ls -1 "$HOME/.abduco" 2>/dev/null' 2>/dev/null)"
+    sessions="$(d exec "$CONTAINER" sh -c 'z=$(zmx version 2>/dev/null | sed -n "s/^socket_dir[[:space:]]*//p"); [ -n "$z" ] && find "$z" -maxdepth 1 -type s -printf "%f\n" 2>/dev/null' 2>/dev/null)"
     if [ -n "$sessions" ]; then
-        printf 'sessions  : abduco — %s\n' "$(tr '\n' ' ' <<<"$sessions" | sed 's/ *$//')"
+        printf 'sessions  : zmx — %s\n' "$(sort <<<"$sessions" | tr '\n' ' ' | sed 's/ *$//')"
     else
-        printf 'sessions  : %s\n' 'no abduco sessions (make claude, or ssh in and start one)'
+        printf 'sessions  : %s\n' 'no zmx sessions (make claude, or ssh in and start one)'
     fi
 
     # The offloaders are excluded by name, or their own argv would read as a claude:
@@ -195,7 +197,8 @@ verify() {
     # a floor nobody can see from outside the container, and a `FROM` line that gets
     # reverted by a careless edit would show up nowhere else in this readout.
     tool libc   'no ldd, which a Debian image always has' ldd --version
-    tool abduco 'the abduco-build stage did not reach the image (it is built from source: trixie has no abduco package, proved by a failed build 2026-09-21)' abduco -v
+    tool zmx    'the pinned zmx tarball did not reach /usr/local/bin' zmx version
+    tool abduco 'the abduco-build stage did not reach the image (it is built from source: trixie has no abduco package, proved by a failed build 2026-09-21; kept for Stage A offload-idle-claude.sh, infra#9)' abduco -v
     tool gh     'the release tarball did not unpack to /usr/local/bin' gh --version
     tool screen 'no screen in the image' screen --version
     tool claude 'no claude in the image at all — not an update that failed' claude --version

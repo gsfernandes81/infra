@@ -111,7 +111,7 @@ cat <<'EOF'
       ssh infra-dev                                  the session menu
       ssh -t infra-dev in-workspace                  a shell in /workspace
 
-  Every session the menu opens is an abduco session: Ctrl-\ detaches and the menu
+  Every session the menu opens is a zmx session: Ctrl-\ detaches and the menu
   comes back, and a dropped connection costs nothing — ssh in again and press Enter.
 
   The point of working in here rather than from the phone: the model traffic goes out

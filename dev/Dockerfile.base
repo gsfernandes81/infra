@@ -6,7 +6,7 @@
 # ds-dev, or3-dev and infra-dev agreed on, in one place. Debian trixie slim (glibc 2.41
 # since 2026-09-21; bookworm and its 2.36 before that), Node + Claude Code (with the agent
 # view off by baked managed settings), claude-sessions and the hooks that feed it, gh,
-# abduco, sshd, fish, the dev user, cloudflared, the entrypoint and every dotfile. A repo's own dev/Dockerfile becomes a FROM line
+# zmx (what a slot lives in) and abduco (Stage A's offloader still reads it), sshd, fish, the dev user, cloudflared, the entrypoint and every dotfile. A repo's own dev/Dockerfile becomes a FROM line
 # plus whatever that repo needs on top — see dev/Dockerfile here for the shape
 # (ansible), or or3's for the other one (uv, and its own ssh identity).
 #
@@ -46,12 +46,12 @@
 # REMOTE CONTROL LEFT THE FLEET on 2026-08-25, and with it a seam that used to be listed
 # here: a child baked an rc-supervisor.sh, set DEV_REMOTE_CONTROL=1, and the
 # entrypoint started it. Every container
-# is now reached one way — ssh in, hold the work in an abduco session — so no child ships
+# is now reached one way — ssh in, hold the work in a session (abduco until v0.4.0, zmx since) — so no child ships
 # an rc-supervisor.sh and nothing here starts one. What the entrypoint runs in its place
 # is the opposite job: offload-idle-claude.sh, which STOPS a claude that nobody has spoken
 # to for longer than a claude can schedule its own wake-up, and leaves the conversation on
-# disk for `claude --resume`. abduco is what makes a session survive a dropped link, and
-# was therefore also what made an abandoned one hold a gigabyte of RAM for days.
+# disk for `claude --resume`. The session holder is what makes a session survive a dropped
+# link, and was therefore also what made an abandoned one hold a gigabyte of RAM for days.
 #
 # THAT SCRIPT IS BEING REPLACED by `claude-sessions offload`, from the pinned binary below,
 # in two stages (plans/claude-sessions.md, Phase 5). Stage A, now: the entrypoint runs the
@@ -154,9 +154,12 @@ ARG USERNAME=dev
 ARG USER_UID=1000
 ARG USER_GID=1000
 
-# screen and abduco are what the sessions you start over ssh live in — and since
-# ssh IS the way this container is used, abduco is not an accessory here: a claude
-# started outside one dies with the ssh session that carried it. It is the one to
+# screen and abduco were what the sessions you start over ssh lived in. SINCE
+# claude-sessions v0.4.0 A SLOT IS A zmx SESSION (zmx is installed below, beside
+# claude-sessions), and abduco stays only because offload-idle-claude.sh — Stage A's
+# acting offloader — lists abduco sessions; whether it and abduco go before Stage B is
+# infra#9's open question. The reasoning that made abduco central still holds for zmx: a
+# claude started outside a session dies with the ssh session that carried it. It is the one to
 # reach for whenever the session is a full-screen program, claude included:
 # it is a detach/attach and nothing else — no key handling of its own beyond
 # Ctrl-\ , no status line, no window management — so the TUI underneath keeps
@@ -456,7 +459,7 @@ RUN chmod 0644 /etc/claude-code/managed-settings.json
 # ── claude-sessions: the session registry, and the hooks that feed it ───────
 # One static binary from github.com/gsfernandes81/claude-sessions (public, AGPL-3.0) —
 # plans/claude-sessions.md is the design, and docs/decisions.md has why it is its own repo.
-# It keeps one JSON file per abduco session under ~/.local/share/claude-sessions, and
+# It keeps one JSON file per slot (a zmx session since v0.4.0) under ~/.local/share/claude-sessions, and
 # Claude Code's own hooks keep that up to date by calling `claude-sessions hook`.
 #
 # A PINNED RELEASE, HASH-CHECKED PER ARCHITECTURE — the cloudflared shape above, and for
@@ -492,9 +495,9 @@ RUN chmod 0644 /etc/claude-code/managed-settings.json
 #
 # 0644 IS LOAD-BEARING: every session runs as `dev`, and a file it cannot read means
 # sessions start with no hooks and nothing on screen says so.
-ARG CLAUDE_SESSIONS_VERSION=0.3.8
-ARG CLAUDE_SESSIONS_SHA256_arm64=d40e685b9e9dff4d0c3866b74a33c462f7130bc4c9e8d49b9bf525af9d7ee589
-ARG CLAUDE_SESSIONS_SHA256_amd64=f1ff3eb92d387357460770e454e66953475cd0974561aa5af796617cc0fdbd87
+ARG CLAUDE_SESSIONS_VERSION=0.4.0
+ARG CLAUDE_SESSIONS_SHA256_arm64=be0fdc1f0d982cb3df8c7a6c497bc4b7141abc1ead8b34399d671337feb9e9ae
+ARG CLAUDE_SESSIONS_SHA256_amd64=3c573a769641b888ed5436daf1442fe6618b210962bb9c27ad930932de823502
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
@@ -513,6 +516,51 @@ RUN set -eux; \
     chmod 0644 /etc/claude-code/managed-settings.d/claude-sessions.json; \
     python3 -c 'import json, sys; h = json.load(open(sys.argv[1]))["hooks"]; assert h, "no hooks"; print("claude-sessions hooks:", " ".join(sorted(h)))' \
       /etc/claude-code/managed-settings.d/claude-sessions.json
+
+# ── zmx: what a claude-sessions slot lives in (since claude-sessions v0.4.0) ──────
+# Each slot is a zmx session: it holds claude across a dropped link, as abduco did, and
+# unlike abduco it sends NO alternate-screen switch on attach — abduco's client did
+# (`\e[?1049h`, every attach), and on the alternate screen Windows Terminal and Termux
+# turn a wheel or a swipe into Up/Down keys, which claude reads as prompt history. That
+# undid claude-sessions v0.3.8's own-scrollback fix; zmx is the owner's choice of
+# replacement (2026-10-06, infra#9, claude-sessions' docs/design.md § "zmx, measured").
+# zmx keeps a terminal emulator per session and replays its history on attach — about
+# 1.08x the bytes, capped near 10,000 lines — which is the cost, measured and accepted.
+#
+# A PINNED RELEASE, HASH-CHECKED PER ARCHITECTURE, like claude-sessions above: static
+# binaries from zmx's author, not in Debian. The hashes are of the TARBALLS, as
+# claude-sessions' CI checks them; each holds one file, `zmx`.
+#
+# INSTALLED AS `zmx` AND NOTHING ELSE: a slot binds only when its claude's parent process
+# is named `zmx`, and that name is the executable's file name — a copy under another name
+# starts sessions that never bind (claude-sessions' own tests proved it by accident).
+#
+# ONLY EVER CHANGED BY A BASE BUMP: zmx's README says a version that changes its internal
+# protocol ends running sessions, so an in-place upgrade is the wrong shape here; a
+# recreate ends them anyway. Sockets land in /tmp/zmx-<uid> (gone with the container),
+# logs in ~/.local/state/zmx/logs (2 MB a session, then wiped) — no volume either needs.
+#
+# `zmx version` IS FATAL and compared exactly, the claude-sessions reasoning: a static
+# binary has no excuse not to answer. Pointed at a throwaway ZMX_DIR because it creates
+# its socket directory just to report it, and an empty /tmp/zmx-0 in the image would be a
+# root-owned directory nobody asked for.
+ARG ZMX_VERSION=0.8.1
+ARG ZMX_SHA256_arm64=943eb44c812333fd450da12097521afd3339436e86f8c2ac618b905c4c9ece68
+ARG ZMX_SHA256_amd64=dfd75720b942466f28870731cc86dbc07afa72fb8f3bd5eeb4ff707e4eecebe8
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      arm64) zarch=aarch64; sha="${ZMX_SHA256_arm64}" ;; \
+      amd64) zarch=x86_64;  sha="${ZMX_SHA256_amd64}" ;; \
+      *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSLo /tmp/zmx.tar.gz "https://zmx.sh/a/zmx-${ZMX_VERSION}-linux-${zarch}.tar.gz"; \
+    echo "${sha}  /tmp/zmx.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/zmx.tar.gz -C /tmp zmx; \
+    install -m 0755 /tmp/zmx /usr/local/bin/zmx; \
+    rm -f /tmp/zmx /tmp/zmx.tar.gz; \
+    test "$(ZMX_DIR=/tmp/zmx-build-check zmx version | awk '$1 == "zmx" { print $2 }')" = "${ZMX_VERSION}"; \
+    rm -rf /tmp/zmx-build-check
 
 # THE DOOR — what every ssh session runs, as sshd_config's ForceCommand (2026-10-04): the
 # claude-sessions menu at a terminal, a forwarded command as given, a login shell for

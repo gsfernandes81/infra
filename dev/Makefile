@@ -27,7 +27,7 @@
 # wants a password. This is for your own terminal on zero.
 #
 # The container is USED over ssh, not from here — `ssh infra-dev` from Termux or a PC,
-# and `abduco` to hold the session. These targets stand it up and tell you what state
+# and a zmx session (abduco's, before claude-sessions v0.4.0) to hold the work. These targets stand it up and tell you what state
 # it is in; they are not the daily interface. dev/README.md.
 
 CONTAINER := infra-dev
@@ -64,7 +64,7 @@ DOCKER  := $(SUDO) docker
 # is bump, push, wait (about five minutes — see dev/README.md, where that number is
 # measured rather than guessed), then `make up`. Or `make base` below, which builds the
 # same image locally and waits for nobody.
-BASE_TAG := 2026.10.04.4
+BASE_TAG := 2026.10.06
 
 .PHONY: help dev base up restart down down-volumes status verify collections logs \
 	boot-log tunnel-log idle offload-log sessions login claude claude-update shell fleet \
@@ -142,7 +142,7 @@ dev: up
 	@$(MAKE) --no-print-directory login
 
 # stop + start, deliberately NOT `up -d`. `up` re-evaluates compose.yaml and may
-# recreate the container, which drops every abduco session in it. The corollary: a
+# recreate the container, which drops every session in it. The corollary: a
 # change to compose.yaml — ports, limits, environment — lands only on `up`.
 restart:
 	$(DOCKER) stop  $(CONTAINER)
@@ -212,7 +212,7 @@ login:
 
 # The door — the same claude-sessions menu the phone's `ssh infra-dev` lands on, so it
 # lists the same sessions whichever way you came in: Enter attaches or resumes one, `n`
-# starts another, `q` leaves. Each session is an abduco session: Ctrl-\ detaches, the
+# starts another, `q` leaves. Each session is a zmx session: Ctrl-\ detaches, the
 # menu comes back, and the claude keeps running, container and all.
 #
 # No `in-workspace` here, and that is not an inconsistency: `docker exec` honours the

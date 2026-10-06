@@ -208,7 +208,7 @@
     # once the copy is refreshed.
     #
     # DO NOT RESTART TO ACHIEVE THAT. sshd is exec'd as PID 1, so restarting it is
-    # restarting the container, and every detached abduco session goes with it. sshd reads
+    # restarting the container, and every detached session goes with it. sshd reads
     # AuthorizedKeysFile on each authentication attempt, not at start-up, so refreshing
     # the copy is enough and costs nothing.
     #
