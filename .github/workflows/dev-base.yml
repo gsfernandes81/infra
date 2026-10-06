@@ -50,6 +50,35 @@ name: dev-base
 # bumped tag is not pullable the moment the push lands — `make up` on zero fails on the
 # pull until the run finishes, and `make base` is the way through if you cannot wait.
 #
+# LAYERS ARE CACHED ACROSS RUNS, AND SHIPPED AS zstd, since 2026.10.06.3. Before that,
+# every run started on a fresh runner with no cache, so every layer came out with a new
+# digest. 2026.10.06.1 -> .2 changed one ARG (claude-sessions, ~4 MiB), yet only the
+# four python layers were shared and every Pi downloaded 264 MiB of the 306. Then dockerd
+# decompressed it with Immich running, which is what made `make up` on zero take minutes
+# and drop the ssh session. Now:
+#
+#   cache          type=registry, in this same package under the `buildcache` tag,
+#                  mode=max, both platforms. A step whose instruction and inputs are
+#                  unchanged reuses the cached blob as-is, so the layer keeps its digest
+#                  and a Pi that has it pulls nothing. `buildcache` is a cache manifest,
+#                  not an image: nothing pulls or pins it, and deleting it costs one
+#                  uncached run, nothing else.
+#   zstd           both the cache and the image, OCI media types. The cache must be
+#                  zstd too, or every run would re-compress gzip cache blobs into fresh
+#                  zstd ones, and nothing guarantees those come out byte-identical. The
+#                  python layers stay gzip (no force-compression); they are shared
+#                  anyway. zstd needs Docker 23 or newer on whatever pulls this: zero,
+#                  one and any laptop.
+#   the base       pinned by digest in Dockerfile.base. A floating FROM would change
+#                  under the cache every few weeks and turn a small bump into a full
+#                  pull. Moving that digest is how the image gets fresh Debian packages
+#                  and a fresh Claude Code on purpose; nothing else re-runs apt now.
+#
+# Proven locally on 2026-10-06 against a throwaway registry, with a fresh buildx builder
+# for every build, as a CI runner has. Changing a late ARG kept every earlier layer's
+# digest, and changing the pinned-base stand-in replaced everything below it. The first
+# run with these settings has no cache to read, so it publishes an all-new image once.
+#
 # THE PACKAGE IS PUBLIC (one manual visibility flip after the first push). Decided
 # 2026-08-24: the base is pure toolchain, the same information as the Dockerfile, and
 # public means the Pis pull with no credential — no new token class on the boxes, in
@@ -261,11 +290,15 @@ jobs:
           context: dev
           file: dev/Dockerfile.base
           platforms: linux/arm64,linux/amd64
-          push: true
           build-args: |
             USER_UID=1001
             USER_GID=1001
           tags: ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
+          # `outputs` replaces `push: true`; the tag above names the image. See the header
+          # for why both the cache and the image are zstd.
+          outputs: type=image,push=true,compression=zstd,oci-mediatypes=true
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max,compression=zstd,oci-mediatypes=true
 
       - name: Where it landed
         if: steps.decide.outputs.build == 'true'

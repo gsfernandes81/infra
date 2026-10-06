@@ -120,7 +120,25 @@
 # (clone3 and friends) are already in use by 2.36 on these same boxes under this same
 # docker — so a seccomp refusal would have shown up long before this bump, not because
 # of it.
-FROM python:3.13-slim-trixie
+#
+# PINNED BY DIGEST since 2026.10.06.3, and the reason is the build cache, not
+# reproducibility for its own sake. dev-base.yml reuses every layer whose step and inputs
+# are unchanged, so a bump that only moves claude-sessions ships a few MiB instead of
+# ~265 MiB to every Pi. A bare tag defeats that: Docker Hub rebuilds this one every few
+# weeks, and the cache key of every layer below hangs off whatever the tag resolved to
+# on build day. So a bump weeks after the last one would quietly be a full download
+# again.
+#
+# MOVING THIS DIGEST IS THE REFRESH, and the only one. With the cache, the apt layer,
+# NodeSource and the npm install of Claude Code never re-run on their own. Debian
+# security updates reach this image only when this line moves, and so do the fresher
+# Claude Code (it updates itself anyway, so that part matters little) and apt's package
+# set. Bump it on purpose, with a BASE_TAG bump, roughly monthly or on a Debian
+# security notice: every Pi then pulls the whole image once. The digest is the
+# MULTI-ARCH INDEX, not one platform's manifest, so it serves both legs of the build. Read
+# the current one with `docker buildx imagetools inspect python:3.13-slim-trixie`, the
+# `Digest:` line at the top.
+FROM python:3.13-slim-trixie@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c
 
 ARG USERNAME=dev
 ARG USER_UID=1000

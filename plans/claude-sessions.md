@@ -686,8 +686,11 @@ at 6 columns, the right edge marked:
      Esc-ended turn reads idle from the Esc, v0.4.2; the memory figure is the working set,
      claude-sessions#7) supersedes it**, and **`2026.10.06.2` (v0.4.4: an agent started in an
      Esc'd turn holds its slot, claude-sessions#10; two new hooks, `SubagentStart` and
-     `SubagentStop`) supersedes that, and is the tag below**: repeat step 0's fast-forward,
-     then steps 1 and 2.
+     `SubagentStop`) supersedes that**. **`2026.10.06.3` is the same v0.4.4 with no change
+     inside the container** — the python base pinned by digest, and the layers now cached and
+     zstd-compressed in CI — **and is the tag below**: repeat step 0's fast-forward, then steps
+     1 and 2. This recreate pulls the whole base once more; later bumps that only move
+     claude-sessions should pull a few MiB.
      0. **Before anything is recreated** — these need the old state:
         - **Calibrate the scroll check on or3-dev, before or3 bumps** (it is on `2026.10.04.4`,
           v0.3.8 on abduco): in a slot after a long reply, a swipe or the wheel there recalls
@@ -707,12 +710,12 @@ at 6 columns, the right edge marked:
           git -C /workspace pull --ff-only
           grep '^BASE_TAG' /workspace/dev/Makefile
           ```
-          The second must read `2026.10.06.2` (`2026.10.06` for the first bring-up). Skip it
+          The second must read `2026.10.06.3` (`2026.10.06` for the first bring-up). Skip it
           and step 1 recreates onto the stale tag — every slot ended twice.
         - **Keep or remove the Stage A evidence by hand, once read**:
           `~/.local/share/claude-sessions-dry-run.log` and the old script's
           `~/.local/share/claude-offload.log` stay on the volume; nothing deletes them.
-     1. Wait for `dev-base.yml` to publish `2026.10.06.2` (v0.4.4; `2026.10.06` carried v0.4.1,
+     1. Wait for `dev-base.yml` to publish `2026.10.06.3` (v0.4.4; `2026.10.06` carried v0.4.1,
         zmx, the live offloader, v0.3.8's scrollback and the forced door), then recreate
         infra-dev — which ends every slot, this agent's included:
         `ssh -t zero 'cd ~/infra/dev && make up'`. (No `make base` from an earlier commit

@@ -806,6 +806,28 @@ automatic one, on 2026-09-21. The number mattered because it was the argument fo
 reaching for `make base`, and at five minutes that argument is much weaker. Measured
 from the run timestamps, which is the artefact; the sentence in the docs was the guess.
 
+**What a Pi pulls on a bump is only the layers that changed, since `2026.10.06.3`.**
+Before that, CI built every tag from scratch, so every layer got a new digest. The
+`.06.1` → `.06.2` bump changed one `ARG` (claude-sessions), and zero still downloaded
+264 MiB of a 306 MiB image, then decompressed it alongside Immich. That is the
+`make up` that took minutes and dropped the ssh session. `dev-base.yml` now keeps a
+registry build cache (the `buildcache` tag in the same package) and pushes zstd layers.
+`Dockerfile.base` pins its python base by digest so the cache cannot be pulled out from
+under it. A bump that moves only something near the bottom of the file
+(claude-sessions, zmx, the copied scripts) should ship a few MiB, and the child's
+ansible layers still build on the Pi as before. Two things follow:
+
+- **Moving the python digest is the refresh.** Nothing re-runs `apt-get` or reinstalls
+  Claude Code otherwise, so Debian security updates arrive only when that line moves.
+  The comment above `FROM` in `Dockerfile.base` says how to read the current digest. It
+  costs one full pull on every host, which is the price of fresh packages.
+- **To check that a bump really was small**, watch the pull in `make up`: shared layers
+  print `Already exists`, and only the moved ones download. If the whole image downloads
+  on a bump that did not move the python digest, the cache missed. That is worth a look
+  before it becomes normal again.
+
+zstd needs Docker 23 or newer on whatever pulls the image.
+
 **The tag is whatever `dev/Makefile`'s `BASE_TAG` line says — `2026.10.01` as this is
 written — and naming it a second time here is how it goes stale, which it had: this
 sentence said `2026.09.21.1` for two bumps.** Read the Makefile, not this. The genealogy,
