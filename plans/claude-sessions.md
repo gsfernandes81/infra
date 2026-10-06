@@ -684,7 +684,9 @@ at 6 columns, the right edge marked:
      `claude-1`, the loop live). Still open: step 0's client grep (the owner will do it with
      Ansible), steps 3, 4a and 4b by hand. **`2026.10.06.1` (claude-sessions v0.4.3: an
      Esc-ended turn reads idle from the Esc, v0.4.2; the memory figure is the working set,
-     claude-sessions#7) supersedes it, and is the tag below**: repeat step 0's fast-forward,
+     claude-sessions#7) supersedes it**, and **`2026.10.06.2` (v0.4.4: an agent started in an
+     Esc'd turn holds its slot, claude-sessions#10; two new hooks, `SubagentStart` and
+     `SubagentStop`) supersedes that, and is the tag below**: repeat step 0's fast-forward,
      then steps 1 and 2.
      0. **Before anything is recreated** — these need the old state:
         - **Calibrate the scroll check on or3-dev, before or3 bumps** (it is on `2026.10.04.4`,
@@ -705,21 +707,21 @@ at 6 columns, the right edge marked:
           git -C /workspace pull --ff-only
           grep '^BASE_TAG' /workspace/dev/Makefile
           ```
-          The second must read `2026.10.06.1` (`2026.10.06` for the first bring-up). Skip it
+          The second must read `2026.10.06.2` (`2026.10.06` for the first bring-up). Skip it
           and step 1 recreates onto the stale tag — every slot ended twice.
         - **Keep or remove the Stage A evidence by hand, once read**:
           `~/.local/share/claude-sessions-dry-run.log` and the old script's
           `~/.local/share/claude-offload.log` stay on the volume; nothing deletes them.
-     1. Wait for `dev-base.yml` to publish `2026.10.06.1` (v0.4.3; `2026.10.06` carried v0.4.1,
+     1. Wait for `dev-base.yml` to publish `2026.10.06.2` (v0.4.4; `2026.10.06` carried v0.4.1,
         zmx, the live offloader, v0.3.8's scrollback and the forced door), then recreate
         infra-dev — which ends every slot, this agent's included:
         `ssh -t zero 'cd ~/infra/dev && make up'`. (No `make base` from an earlier commit
         should have left a local image of the tag being rolled out on zero: Docker prefers a
         local image over the published one.)
-     2. `make verify` reads `sessions  : claude-sessions 0.4.3` (`0.3.8` or `0.4.1` means the
+     2. `make verify` reads `sessions  : claude-sessions 0.4.4` (an older version means the
         checkout was stale — back to step 0), `make idle`'s `memory:` line ends `(N MB of it
         reclaimable page cache)` (v0.4.3's working set), `zmx       : zmx 0.8.1` and `scrollvars: 3 of 3`, a
-        `hooks` line naming six events and a `door` line naming
+        `hooks` line naming eight events (`SubagentStart` and `SubagentStop` since v0.4.4) and a `door` line naming
         `/usr/local/bin/claude-sessions-door`; `make status` has `offloader : live, last pass
         Nm ago`; `make boot-log` has the `claude-sessions reconcile:` line and `claude-sessions
         offload: every 3m — stops detached, idle claudes …`.

@@ -944,7 +944,7 @@ outlives the container), kept current by Claude Code's own hooks — and, since 
 `archive/` beside them: one small file per conversation `c` has put away (`archived <ms>`)
 or taken back out (`kept <ms>`) — age-archiving writes nothing, being worked out as the
 list is read. The base installs
-**v0.4.3** — a static binary, pinned by tag and SHA-256 per architecture, at
+**v0.4.4** — a static binary, pinned by tag and SHA-256 per architecture, at
 `/usr/local/bin/claude-sessions`.
 
 **The menu is in this release, and it is where `ssh infra-dev` lands.** `claude-sessions`
@@ -1011,7 +1011,7 @@ with a plain login shell until its repo bumps (*How this container is used*).
 
 | Piece | Where | What it does |
 |---|---|---|
-| the hooks | `/etc/claude-code/managed-settings.d/claude-sessions.json`, 0644 | `SessionStart`, `UserPromptSubmit`, `Stop`, `Notification`, `SessionEnd`, and `PostToolUse` on the three timer tools, each calling `claude-sessions hook`, which always exits 0 — a bug in it cannot block a prompt |
+| the hooks | `/etc/claude-code/managed-settings.d/claude-sessions.json`, 0644 | `SessionStart`, `UserPromptSubmit`, `Stop`, `Notification`, `SessionEnd`, `PostToolUse` on the three timer tools, and (v0.4.4) `SubagentStart` and `SubagentStop`, which keep a slot's background list between `Stop`s, each calling `claude-sessions hook`, which always exits 0 — a bug in it cannot block a prompt, or keep a subagent running (`SubagentStop` is a blocking hook) |
 | `reconcile` | the entrypoint, before the offloader and sshd | marks slots whose process died with the last container; since v0.4.0 it sweeps no sockets — `zmx list` clears a dead daemon's own, and zmx's socket directory, `/tmp/zmx-<uid>`, empties with a recreate (a `make restart` keeps /tmp; a stale socket there is cleared by the next `zmx list`) |
 | `offload` | the entrypoint, every 3 minutes | stops a detached, idle slot and runs the orphan sweep — live from base `2026.10.06` (a dry run before it, as Stage A). Each pass's verdicts, and any failed pass with its exit code, go timestamped to `~/.local/share/claude-sessions-passes.log` (capped near 4 MB); stops and sweep lines also go to `offload.log`. `make idle` is `--dry-run`: verdicts, nothing stopped |
 
@@ -1035,11 +1035,11 @@ it is not mid-turn — **except a turn you ended with Esc** (v0.4.2: an Esc fire
 the transcript's trailing `[Request interrupted by user…]` marker is read as the end of the
 turn, and the ten minutes run from it; a prompt or a reply after the marker means it is
 not the end, and a marker older than the hooks' last event is an earlier turn's; a
-permission prompt the Esc dismissed no longer counts as waiting on you either. **Known gap,
-[claude-sessions#10](https://github.com/gsfernandes81/claude-sessions/issues/10):** background
-agents, workflows or cloud sessions *started in the turn you Esc'd* are not on the slot's
-background list — only `Stop` writes it — so they hold the slot only by their own
-transcript writes; keep such a slot attached) —
+permission prompt the Esc dismissed no longer counts as waiting on you either. A background
+agent started in the turn you Esc'd still holds the slot until it is done (v0.4.4,
+[claude-sessions#10](https://github.com/gsfernandes81/claude-sessions/issues/10):
+`SubagentStart`/`SubagentStop` keep the background list between `Stop`s), and the marker must
+be the whole entry, so a typed prompt beginning with the phrase is a prompt) —
 nothing waits on you (a permission prompt), no timer is pending
 (`ScheduleWakeup`/`CronCreate`, whoever set it), nothing but `claude` (and its
 `claude.exe` helpers) runs under it, and
