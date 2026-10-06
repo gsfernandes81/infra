@@ -55,6 +55,10 @@ beyond the ssh config the client play already writes.
 
 ## Design
 
+*(Since claude-sessions v0.4.0, 2026-10-06, a slot is a **zmx** session: read "abduco" in the
+design below as the session holder, whose details are now zmx's. claude-sessions' own
+`docs/design.md` is the current description; this is kept as the design as first written.)*
+
 ### 1. The agent view is off fleet-wide
 
 `disableAgentView: true` in **managed settings** baked into the base at
@@ -720,12 +724,12 @@ at 6 columns, the right edge marked:
           And `make sessions` shows that slot with only its new `SessionStart` — v0.3.4 starts a
           new conversation's event times afresh, where v0.3.2 kept the prompt and `Stop` from
           before the `/clear` (what misled infra's first §3 check, infra#3).
-        - *Idle from the prompt:* open a slot, detach without prompting, leave it. Within about
-          13 minutes (10 idle plus the 3-minute loop) the **dry-run log** says
-          `would close, idle Nm — no conversation on disk to resume` (a new slot never prompted
-          has no transcript); `/resume` an old conversation into a slot and leave it,
-          and it says `would offload` instead — `make offload-log`'s *WOULD have stopped* half. **Not `offload.log`, and nothing
-          is stopped**: that is the handoff's check as Stage B will read it.
+        - *Idle from the prompt — LIVE since Stage B:* open a slot, detach without prompting,
+          leave it. Within about 13 minutes (10 idle plus the 3-minute loop) `make offload-log`
+          shows it `closed … no conversation on disk to resume` (a new slot never prompted has
+          no transcript) and the row is gone. `/resume` an old conversation into a slot, detach
+          and leave it: it is **offloaded**, and `Enter` on its row resumes it. **Keep a slot
+          you care about attached** while this is new — attached is never stopped.
         - *Headings* (v0.3.5): labelled rules with a count; rows indented at 80 columns, not
           at 40.
         - *The archive* (v0.3.5): `c` on a `Closed` row moves it under `Archived · N` and
@@ -772,10 +776,11 @@ at 6 columns, the right edge marked:
           <pid>)/comm` prints `zmx` — a parent under any other name means a slot that never
           binds.
         - *`make status`'s `sessions` line* names zmx sessions (`sessions  : zmx — claude-1 …`).
-        - *The sweep:* `grep 'sweep:' ~/.local/share/claude-sessions/offload.log | tail`. With
-          the agent view off, expect nothing, or `WOULD KILL` / `would keep, too young` lines
-          only (v0.3.4 applies the live age check to the dry run). A `killed` line in
-          Stage A means the loop is not running `--dry-run` — report it before anything else.
+        - *The sweep, live:* `grep 'sweep:' ~/.local/share/claude-sessions/offload.log | tail`.
+          With the agent view off, expect nothing. A `killed` line names the daemon tree it
+          ended; one you cannot account for goes to claude-sessions.
+        - *The loop's failures:* `~/.local/share/claude-sessions-offload-failures.log` is absent
+          or empty. A line there is a pass that exited non-zero (124 = it timed out).
      5. Read `make offload-log` over a few days. A day after rollout, `make sessions` again.
      6. The other dev repos pick this up when they bump `BASE_TAG`.
    - **Stage B gate — found in review of Stage A, 2026-10-02. All three are FIXED in v0.2.0**
@@ -873,6 +878,11 @@ at 6 columns, the right edge marked:
        with combined abduco flags (`-fA`) ([#3](https://github.com/gsfernandes81/claude-sessions/issues/3)). It now reads flags
        getopt-style and sweeps nothing while any live abduco's session cannot be named; the
        entrypoint's "safe at any time" caveat is gone.
+   - ✔ **Stage B LANDED 2026-10-06 at `2026.10.06`, with zmx** (infra#9, owner's word; the
+     evidence and the zmx-attach reasoning are in `decisions.md`, the two-stage row). Done as
+     listed below, plus abduco and its build stage, whose last user the script was; the loop
+     records failed passes in `~/.local/share/claude-sessions-offload-failures.log`, with no
+     pipe after the command. What it was:
    - **Stage B — the swap, one commit:** the entrypoint loop drops `--dry-run` and its log
      (the binary keeps `offload.log` itself; delete `~/.local/share/claude-sessions-dry-run.log`,
      which grows unbounded until then), `offload-idle-claude.sh` is deleted with its

@@ -58,10 +58,10 @@ status() {
         printf 'sessions  : %s\n' 'no zmx sessions (make claude, or ssh in and start one)'
     fi
 
-    # The offloaders are excluded by name, or their own argv would read as a claude:
-    # claude-sessions' dry-run loop is a `bash -c` carrying the word, every pass, forever.
+    # The offloader is excluded by name, or its own argv would read as a claude: its
+    # entrypoint loop is a `bash -c` whose arguments name claude-sessions files, forever.
     printf 'claude    : %s\n' "$(grep 'claude' <<<"$procs" \
-        | grep -vE 'offload-idle-claude|claude-sessions|/proc/' | grep -q . \
+        | grep -vE 'claude-sessions|/proc/' | grep -q . \
         && echo 'a claude is running in this container' || echo 'no claude running')"
 
     # `claude auth status`, not "is there a credentials file" — a file holding empty
@@ -178,8 +178,9 @@ verify() {
     # exists to tell you the truth about the container.
     #
     # `command -v` RUNS FIRST, IN THE SAME EXEC, and that is what makes the fallback
-    # mean what it says. Exit status cannot answer "is it in the image": `abduco -v` is
-    # the kind of tool that prints its version and exits non-zero, and a readout calling
+    # mean what it says. Exit status cannot answer "is it in the image": `abduco -v`, which
+    # this image carried until 2026-10-06, was the kind of tool that prints its version and
+    # exits non-zero, and a readout calling
     # that MISSING would be the other failure this repo keeps recording — a check wrong
     # about a healthy system. So: binary absent, nothing is run and nothing is printed,
     # and the message fires. Binary present, its own first line is printed whatever it
@@ -198,7 +199,6 @@ verify() {
     # reverted by a careless edit would show up nowhere else in this readout.
     tool libc   'no ldd, which a Debian image always has' ldd --version
     tool zmx    'the pinned zmx tarball did not reach /usr/local/bin' zmx version
-    tool abduco 'the abduco-build stage did not reach the image (it is built from source: trixie has no abduco package, proved by a failed build 2026-09-21; kept for Stage A offload-idle-claude.sh, infra#9)' abduco -v
     tool gh     'the release tarball did not unpack to /usr/local/bin' gh --version
     tool screen 'no screen in the image' screen --version
     tool claude 'no claude in the image at all — not an update that failed' claude --version

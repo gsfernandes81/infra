@@ -15,8 +15,8 @@
 #   make logs        follow the container log (= sshd's)
 #   make boot-log    the entrypoint's start-up lines, from the top
 #   make tunnel-log  what cloudflared has been saying, if the tunnel is on
-#   make idle        what both offloaders would do to each claude session, right now
-#   make offload-log what they have offloaded (or would have), and how to resume it
+#   make idle        what the offloader would do to each slot, right now (stops nothing)
+#   make offload-log what it has offloaded or swept, and any pass that failed
 #   make sessions    claude-sessions doctor: the registry, and whether the hooks fire
 #   make down        stop and remove the container (volumes stay)
 #   make down-volumes  also drop the volumes — logins and host key go with them
@@ -177,26 +177,18 @@ logs:
 	$(DOCKER) logs -f --tail 100 $(CONTAINER)
 
 # The offloader's own two questions. `idle` is a DRY RUN — it prints its verdict on every
-# abduco session and stops nothing, which is also how you check the thing is reasoning the
-# way you expect before trusting it with a session you care about.
-#
-# TWO OFFLOADERS UNTIL STAGE B of plans/claude-sessions.md's Phase 5: the old script, which
-# acts, and `claude-sessions offload`, which only says what it would do. Both are asked
-# here, and both logs are shown, because comparing them is what Stage A is for. Stage B
-# deletes the old script and its half of each target.
+# slot and stops nothing, which is also how you check the thing is reasoning the way you
+# expect before trusting it with a session you care about. `offload-log` is what it has
+# actually done: real stops and the orphan sweep (the binary's own log), then any pass
+# that failed (the entrypoint loop's).
 idle:
-	@echo '── offload-idle-claude.sh (acting) ──'
-	-$(DOCKER) exec $(CONTAINER) bash /home/dev/offload-idle-claude.sh --dry-run
-	@echo '── claude-sessions offload (dry run until Stage B) ──'
 	$(DOCKER) exec $(CONTAINER) claude-sessions offload --dry-run
 
 offload-log:
-	@echo '── offload-idle-claude.sh: what it stopped ──'
-	@$(DOCKER) exec $(CONTAINER) sh -c 'tail -n 40 /home/dev/.local/share/claude-offload.log 2>/dev/null || echo "nothing offloaded yet"'
-	@echo '── claude-sessions: what it WOULD have stopped (dry run) ──'
-	@$(DOCKER) exec $(CONTAINER) sh -c 'grep -hE "would (offload|close)" /home/dev/.local/share/claude-sessions-dry-run.log 2>/dev/null | tail -n 40 | grep . || echo "nothing yet"'
 	@echo '── claude-sessions: offload.log (real stops, and the orphan sweep) ──'
-	@$(DOCKER) exec $(CONTAINER) sh -c 'tail -n 40 /home/dev/.local/share/claude-sessions/offload.log 2>/dev/null || echo "empty"'
+	@$(DOCKER) exec $(CONTAINER) sh -c 'tail -n 40 /home/dev/.local/share/claude-sessions/offload.log 2>/dev/null || echo "nothing offloaded yet"'
+	@echo '── failed passes ──'
+	@$(DOCKER) exec $(CONTAINER) sh -c 'tail -n 20 /home/dev/.local/share/claude-sessions-offload-failures.log 2>/dev/null || echo "none"'
 
 # Read-only. "events: none seen" on a slot means the hooks are not firing — the first
 # thing to check after a rebuild, since a hooks file Claude Code ignored says nothing.

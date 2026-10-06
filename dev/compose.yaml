@@ -73,20 +73,17 @@ services:
       # reached the same way — ssh in, hold the work in a zmx session — which is what
       # this container was built to be in the first place.
       #
-      # THE IDLE OFFLOADER IS ON BY DEFAULT and needs nothing here. It stops a claude that
-      # has been detached, silent and not working for 90 minutes — longer than a claude
-      # can schedule its own wake-up for — and leaves the conversation on disk for `claude
-      # --resume`. `make idle` prints its verdict without acting; `make offload-log` says
-      # what it has taken. Three knobs, none of them usually worth setting:
+      # THE IDLE OFFLOADER IS ON BY DEFAULT and needs nothing here. `claude-sessions
+      # offload` stops a slot that has been detached and at its prompt for 10 minutes, with
+      # nothing waiting on you, no timer pending and nothing but Claude Code running under it,
+      # and leaves the conversation resumable from the menu (dev/README.md § claude-sessions).
+      # `make idle` prints its verdicts without acting; `make offload-log` says what it took.
+      # One knob, rarely worth setting:
       #
       #   DEV_IDLE_OFFLOAD: "0"            # keep idle sessions resident
-      #   DEV_IDLE_OFFLOAD_SECONDS: "7200" # a longer leash (3600 is the floor it refuses under)
-      #   DEV_IDLE_POLL_SECONDS: "600"     # look less often
       #
-      # Its replacement, `claude-sessions offload`, runs beside it as a DRY RUN until Stage B
-      # of plans/claude-sessions.md's Phase 5 (dev/README.md § claude-sessions). The first
-      # switch governs both; the other two are the old script's only — the new one keys on
-      # 10 minutes after a `Stop`, fixed, and has no floor to refuse under.
+      # DEV_IDLE_OFFLOAD_SECONDS and DEV_IDLE_POLL_SECONDS went with the old script on
+      # 2026-10-06 (Stage B); the new rules are fixed and have no floor to refuse under.
 
       # CLAUDE CODE UPDATES ITSELF, and nothing here switches that on: it is the image's
       # npm prefix being writable by `dev` that does (dev/Dockerfile.base's node block).

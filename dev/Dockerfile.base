@@ -6,7 +6,7 @@
 # ds-dev, or3-dev and infra-dev agreed on, in one place. Debian trixie slim (glibc 2.41
 # since 2026-09-21; bookworm and its 2.36 before that), Node + Claude Code (with the agent
 # view off by baked managed settings), claude-sessions and the hooks that feed it, gh,
-# zmx (what a slot lives in) and abduco (Stage A's offloader still reads it), sshd, fish, the dev user, cloudflared, the entrypoint and every dotfile. A repo's own dev/Dockerfile becomes a FROM line
+# zmx (what a slot lives in), sshd, fish, the dev user, cloudflared, the entrypoint and every dotfile. A repo's own dev/Dockerfile becomes a FROM line
 # plus whatever that repo needs on top — see dev/Dockerfile here for the shape
 # (ansible), or or3's for the other one (uv, and its own ssh identity).
 #
@@ -48,15 +48,12 @@
 # entrypoint started it. Every container
 # is now reached one way — ssh in, hold the work in a session (abduco until v0.4.0, zmx since) — so no child ships
 # an rc-supervisor.sh and nothing here starts one. What the entrypoint runs in its place
-# is the opposite job: offload-idle-claude.sh, which STOPS a claude that nobody has spoken
-# to for longer than a claude can schedule its own wake-up, and leaves the conversation on
-# disk for `claude --resume`. The session holder is what makes a session survive a dropped
-# link, and was therefore also what made an abandoned one hold a gigabyte of RAM for days.
-#
-# THAT SCRIPT IS BEING REPLACED by `claude-sessions offload`, from the pinned binary below,
-# in two stages (plans/claude-sessions.md, Phase 5). Stage A, now: the entrypoint runs the
-# new one as a --dry-run beside the old one, which still does the stopping. Stage B swaps
-# them and deletes offload-idle-claude.sh in the same commit.
+# is the opposite job: `claude-sessions offload`, from the pinned binary below, which STOPS
+# a detached claude that has sat idle at its prompt, and leaves the conversation resumable.
+# The session holder is what makes a session survive a dropped link, and was therefore
+# also what made an abandoned one hold a gigabyte of RAM for days. (Until 2026-10-06 that
+# was offload-idle-claude.sh, with the new one as a dry run beside it — Stage A of
+# plans/claude-sessions.md's Phase 5; Stage B swapped them and deleted the script.)
 #
 # Built and pushed to ghcr.io/gsfernandes81/gsrpi-dev-base (PUBLIC — pure toolchain,
 # the same information as this file) by .github/workflows/dev-base.yml, **automatically,
@@ -93,36 +90,11 @@
 # deprecation clock makes a slow deadline, becomes one ARG here instead of four
 # copies in four repos.
 
-# ── abduco, built from source ───────────────────────────────────────────────
-# BUILT BECAUSE DEBIAN DOES NOT SHIP IT — not in bookworm, and **not in trixie either**,
-# which is the correction this file owes. The line that used to sit here said Debian had
-# abduco "in trixie and sid only", the libc bump moved this image to trixie, and dropping
-# the stage for an `apt-get install abduco` looked like free simplification. It is not
-# there: the build failed on both architectures with `E: Unable to locate package abduco`
-# against trixie/main, trixie-updates and trixie-security (2026-09-21, and that is the
-# whole of the evidence — this was a claim carried in a comment for a month, never once
-# executed, and the first execution refuted it).
-#
-# So the stage stays, and it is not a workaround for an old base any more: it is how this
-# image gets abduco at all. Upstream's own release tarball, one C file with no dependency
-# beyond libc, in a throwaway stage holding a compiler that costs the final image
-# nothing. If a Debian package ever appears, `apt-cache policy abduco` inside the
-# container is the check, and it is a check rather than a comment for the reason above.
-FROM python:3.13-slim-trixie AS abduco-build
-ARG ABDUCO_VERSION=0.6
-# Upstream's own release tarball, pinned by hash. The mismatch must FAIL the build
-# rather than be retried: this stage compiles what it downloads and the result is
-# then run, as the dev user, in a container holding ssh keys to all three hosts.
-ARG ABDUCO_SHA256=c90909e13fa95770b5afc3b59f311b3d3d2fdfae23f9569fa4f96a3e192a35f4
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        gcc libc6-dev make curl ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSLo /tmp/abduco.tar.gz \
-        "https://www.brain-dump.org/projects/abduco/abduco-${ABDUCO_VERSION}.tar.gz" \
-    && echo "${ABDUCO_SHA256}  /tmp/abduco.tar.gz" | sha256sum -c - \
-    && tar xzf /tmp/abduco.tar.gz -C /tmp \
-    && make -C "/tmp/abduco-${ABDUCO_VERSION}" \
-    && install -m 0755 "/tmp/abduco-${ABDUCO_VERSION}/abduco" /usr/local/bin/abduco
+# ── abduco WAS BUILT FROM SOURCE HERE until 2026-10-06 ───────────────────────
+# Trixie does not package it, so it was a compile stage. It went with Stage B: a slot is
+# a zmx session since claude-sessions v0.4.0, and the one thing still listing abduco
+# sessions, offload-idle-claude.sh, was deleted in the same change. dev/README.md has
+# the history.
 
 # ── the container itself ────────────────────────────────────────────────────
 # TRIXIE, AND THE POINT OF IT IS THE LIBC. Debian 13 carries glibc 2.41; bookworm
@@ -154,17 +126,10 @@ ARG USERNAME=dev
 ARG USER_UID=1000
 ARG USER_GID=1000
 
-# screen and abduco were what the sessions you start over ssh lived in. SINCE
-# claude-sessions v0.4.0 A SLOT IS A zmx SESSION (zmx is installed below, beside
-# claude-sessions), and abduco stays only because offload-idle-claude.sh — Stage A's
-# acting offloader — lists abduco sessions; whether it and abduco go before Stage B is
-# infra#9's open question. The reasoning that made abduco central still holds for zmx: a
-# claude started outside a session dies with the ssh session that carried it. It is the one to
-# reach for whenever the session is a full-screen program, claude included:
-# it is a detach/attach and nothing else — no key handling of its own beyond
-# Ctrl-\ , no status line, no window management — so the TUI underneath keeps
-# every key it expects. screen stays because its scrollback and its status line
-# are worth having for ordinary shell work. abduco comes from the stage above.
+# A SLOT IS A zmx SESSION (installed below, beside claude-sessions; abduco until
+# 2026-10-06): a claude started outside one dies with the ssh session that carried it.
+# screen stays because its scrollback and its status line are worth having for ordinary
+# shell work.
 # openssh-server is the in-container sshd, which here is simply the door — nothing
 # tunnels back through it, unlike or3-dev's. openssh-client is what carries every
 # ansible connection to zero, one and two, and is also what git needs for
@@ -175,7 +140,7 @@ ARG USER_GID=1000
 #
 # procps IS ALREADY HERE WITHOUT THIS LINE, and that is exactly why the line exists:
 # openssh-server and fish both hard-depend on it, so `pgrep` and `ps` arrive as an
-# auto-installed dependency of something else. offload-idle-claude.sh and status.sh both
+# auto-installed dependency of something else. The bring-up checks and anyone debugging
 # need `pgrep`, and a tool present only because an unrelated package happens to pull it
 # is the shape CLAUDE.md § *Landmines* records for iptables on `two`: it went missing days
 # later, for a reason nobody would connect back. Naming it costs nothing and makes the
@@ -185,8 +150,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl gnupg ca-certificates tzdata less iproute2 \
     && rm -rf /var/lib/apt/lists/* \
     && if ! grep -qx /usr/bin/fish /etc/shells; then echo /usr/bin/fish >> /etc/shells; fi
-
-COPY --from=abduco-build /usr/local/bin/abduco /usr/local/bin/abduco
 
 # ── Node 22 LTS, and a Claude Code that can replace itself ──────────────────
 # Claude Code is NOT pinned here and never was: `npm install -g` takes whatever the
@@ -268,8 +231,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # remapping is needed. Bump GH_VERSION to upgrade; the pin matches dd's, so the two
 # containers answer `gh --version` the same way.
 #
-# Not hash-pinned, unlike abduco above, and the difference is deliberate: that
-# stage COMPILES what it downloads, this unpacks a signed release from the vendor's
+# Not hash-pinned, unlike cloudflared and the binaries below, and the difference is
+# deliberate: those run as what they download, this unpacks a signed release from the vendor's
 # own host over TLS. What guards this one is the pin — an unpinned `latest` is a
 # different binary on every rebuild with nothing to compare against.
 ARG GH_VERSION=2.96.0
@@ -288,7 +251,7 @@ RUN set -eux; \
 # for the same reason the collections are: a start that needs the network is a start
 # that fails when the network is down.
 #
-# Hash-pinned per architecture, like abduco and unlike gh. The difference from gh is not
+# Hash-pinned per architecture, like zmx and claude-sessions and unlike gh. The difference from gh is not
 # the vendor, it is what the binary does: this one holds the credentials that put an ssh
 # endpoint on the public internet, and it is the process that puts it there. A pin alone
 # says "the same version"; a hash says "the same bytes".
@@ -349,9 +312,6 @@ RUN if ! getent group "${USER_GID}" >/dev/null; then \
 # would die with "Directory '/run/screen' must have mode 777". Deliberately NOT on
 # a volume — a socket that outlived its container is a stale session `screen -r`
 # would try, and fail, to attach to.
-# ABDUCO_CMD: abduco's compiled-in default command is `dvtm`, which is not
-# installed here, so `abduco -c work` with no command would fail rather than give
-# you a shell. It names fish for the same reason the passwd entry does.
 #
 # ANSIBLE_CONFIG WAS HERE AND IS NOT ANY MORE — it moved to dev/Dockerfile, this
 # repo's own child, on 2026-08-24. It names a path inside /workspace, and /workspace is
@@ -372,7 +332,6 @@ RUN if ! getent group "${USER_GID}" >/dev/null; then \
 # applies from where it is written. What they are for is the whole of that block's
 # comment: they are what lets Claude Code update itself.
 ENV TZ=Etc/UTC \
-    ABDUCO_CMD=/usr/bin/fish \
     CLAUDE_CONFIG_DIR=/home/dev/.claude \
     CLAUDE_CODE_DISABLE_AGENT_VIEW=1 \
     GH_CONFIG_DIR=/home/dev/.config/gh \
@@ -410,8 +369,8 @@ RUN chmod 0755 /usr/local/bin/in-workspace
 # 2026-10-01 against Claude Code 2.1.286, in a pty with a throwaway config: an idle
 # session goes from ~250 MB RSS to ~1,260 MB on that one keypress, is still at ~1,250 MB
 # a minute later at the prompt, and leaves ~690 MB running after the session itself
-# exits. The leftovers are invisible to offload-idle-claude.sh, which walks down from
-# abduco and finds nothing above them. On a 4 GB Pi carrying four of these containers,
+# exits. The leftovers were invisible to the old offload-idle-claude.sh, which walked down
+# from abduco and found nothing above them. On a 4 GB Pi carrying four of these containers,
 # that is the budget, spent by a keystroke nobody meant to press — or3-dev was holding
 # ~700 MB of daemon and spares on 2026-10-01 for exactly this reason.
 #
@@ -577,8 +536,8 @@ WORKDIR /workspace
 # Pre-create every directory compose mounts a named volume onto, AS the dev user.
 # A volume that is empty on first use inherits the ownership of the directory it
 # covers; created by root here, claude and ssh could not write to their own state.
-# .screen and .abduco are not volumes — they are here so the 700 both daemons
-# insist on is set once, rather than left to the umask of whoever runs one first.
+# .screen is not a volume — it is here so the 700 screen insists on is set once,
+# rather than left to the umask of whoever runs it first.
 # .ssh/cp is ansible.cfg's ControlPath directory: ssh does NOT create it, and every
 # task fails with "unix_listener: cannot bind" if it is missing.
 #
@@ -593,9 +552,9 @@ WORKDIR /workspace
 # use it rather than the npm prefix.
 RUN mkdir -p /home/dev/.claude /home/dev/.config/gh /home/dev/.config/fish \
         /home/dev/.ssh-host /home/dev/.ssh/cp /home/dev/.local/share /home/dev/.local/bin \
-        /home/dev/.screen /home/dev/.abduco /home/dev/sshd_config.d \
+        /home/dev/.screen /home/dev/sshd_config.d \
     && chmod 700 /home/dev/.ssh-host /home/dev/.ssh /home/dev/.ssh/cp \
-        /home/dev/.screen /home/dev/.abduco
+        /home/dev/.screen
 
 # THE BUILD'S OWN CHECK THAT CLAUDE CODE CAN STILL UPDATE ITSELF, run as `dev` because
 # that is the account whose answer counts — it is the same question Claude Code asks
@@ -641,13 +600,6 @@ COPY --chown=${USER_UID}:${USER_GID} config.fish /home/dev/.config/fish/config.f
 # It lives in the IMAGE rather than in the Makefile because every step of it needs
 # a tty and the credential stores it fills are all in here.
 COPY --chown=${USER_UID}:${USER_GID} login.sh /home/dev/login.sh
-
-# The idle-claude offloader, started in the background by the entrypoint unless
-# DEV_IDLE_OFFLOAD=0. Baked rather than left to each repo because it is fleet policy about
-# a shared 4 GB Pi, not a repo's preference — and because the number it keys on (how long
-# a claude can schedule its own wake-up for) is a fact about Claude Code, the same in
-# every container.
-COPY --chown=${USER_UID}:${USER_GID} offload-idle-claude.sh /home/dev/offload-idle-claude.sh
 
 COPY --chown=${USER_UID}:${USER_GID} entrypoint.sh /home/dev/entrypoint.sh
 
