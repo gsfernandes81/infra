@@ -3,7 +3,7 @@
 # sessions' orphans get reaped).
 #
 # Order matters and is not arbitrary:
-#   ssh -> claude state -> pull -> sshd host key -> reconcile -> [offloaders(bg)]
+#   ssh -> claude state -> pull -> sshd host key -> reconcile -> [offloader (bg)]
 #   -> [tunnel(bg)] -> sshd(fg)
 # Everything that could block on a prompt is settled first, because nothing in here
 # can answer one.
@@ -401,7 +401,8 @@ chmod 600 "$HOME/.ssh/environment"
 # reconcile sweeps no sockets: `zmx list` removes a dead daemon's socket itself when the
 # connection is refused, and zmx's socket directory is /tmp/zmx-<uid>, which a recreate
 # empties anyway. Its line reads `reconcile: N slot(s) offloaded, M zmx session(s), K not
-# answering`. Here because it must come before the offloader below and before sshd lets a
+# answering`, or plain `reconcile: N slot(s) offloaded` with a warning when zmx cannot be
+# asked. Here because it must come before the offloader below and before sshd lets a
 # session in, and as `dev` because that is who runs claude. Non-zero only
 # on a real error, which is printed and does not stop the door. Time-bounded for the
 # reason child-init.sh is: anything ahead of sshd that hangs costs the door.
@@ -422,46 +423,51 @@ fi
 # touched since Tuesday is still resident: measured on infra-dev, one idle session's
 # process tree held 1,146 MB. `claude-sessions offload` stops those every three minutes and
 # leaves each conversation resumable from the menu. It stops a slot only when it is
-# detached, has sat at its prompt for 10 minutes, waits on nobody, has no timer pending,
-# runs nothing but Claude Code under it, and has a conversation to resume — anything it
-# cannot see is a reason to keep it; a slot with nothing to resume is closed instead. The
-# same pass runs the orphan sweep, which kills a transient `claude daemon` tree that has
-# outlived its claude by ten minutes — safe only with the agent view off, which this image
-# enforces. dev/README.md § claude-sessions has the rules in full.
+# detached at the pass and has sat at its prompt for 10 minutes since its last `Stop` (or
+# since the newest write to its transcript or a subagent's), with no background work
+# listed at that `Stop`, nothing waiting on you, no timer pending, nothing but Claude Code
+# under it, and a conversation to resume — anything it cannot see keeps the slot, and a
+# slot with nothing to resume is closed instead. The same pass runs the orphan sweep,
+# which kills a transient `claude daemon` tree whose claude has gone — safe only with the
+# agent view off, which this image enforces. dev/README.md § claude-sessions has the rules.
 #
-# STAGE B OF plans/claude-sessions.md's PHASE 5, 2026-10-06. Until then this ran with
-# --dry-run beside the old offload-idle-claude.sh, which did the stopping; the swap deletes
-# that script, and its abduco with it, because a slot is a zmx session now and the script
-# could see only abduco's. The evidence it was gated on is in the plan.
+# STAGE B OF plans/claude-sessions.md's PHASE 5, in base 2026.10.06: live from each
+# container's recreate onto it. It was a dry run beside offload-idle-claude.sh before
+# (Stage A); that script is deleted, and abduco with it — a slot is a zmx session since
+# claude-sessions v0.4.0 and the script could see only abduco's. Armed on v0.4.1, which
+# fixed claude-sessions#9: a slot running background subagents, forks, Workflow or
+# Monitor used to read as idle ten minutes after its parent's `Stop`. The evidence and the
+# reproduction are in docs/decisions.md.
 #
-# THE LOOP REPORTS FAILURES, AND ONLY FAILURES. The binary logs every stop and every sweep
-# line to its own ~/.local/share/claude-sessions/offload.log, so the verdicts on stdout are
-# discarded. A pass that exits non-zero — 124 is the timeout below — is written, with its
-# stderr, to ~/.local/share/claude-sessions-offload-failures.log: outside the registry
-# directory, which is the tool's own. No pipe after the command, so `$?` is its status;
-# the Stage A loop piped through a timestamping sed, and no failure of it was ever seen.
-# Backgrounded with setsid and its own output discarded, like every daemon here. Each pass
-# is time-bounded, so a hang costs one pass and not the rest of the container's life.
-#
-# Stage A's dry-run log goes once, here: it grew without bound and nothing reads it now.
+# EVERY PASS IS KEPT, TIMESTAMPED, in ~/.local/share/claude-sessions-passes.log — its
+# verdicts, so an offloader that keeps everything (zmx not answering, say) still leaves a
+# trace, and a pass that exits non-zero (124 is the timeout) gets a line of its own. Real
+# stops and sweep lines are also in the binary's own ~/.local/share/claude-sessions/
+# offload.log. The output is captured, not piped, so `$?` is the command's own status: the
+# Stage A loop piped through sed and lost every exit status. Past 4 MB the log keeps its
+# newest 2 MB, from the first whole line, through a temp file and a rename, never a
+# redirection onto itself. Stage A's ~/.local/share/claude-sessions-dry-run.log is left
+# alone — it is the evidence Stage B was read against; plans/claude-sessions.md says when
+# to remove it. Backgrounded with setsid and its own output discarded, like every daemon
+# here; each pass is time-bounded, so a hang costs one pass.
 if [ "${DEV_IDLE_OFFLOAD:-1}" = "1" ]; then
-    rm -f "$HOME/.local/share/claude-sessions-dry-run.log" "$HOME/.local/share/claude-offload.log"
     setsid bash -c '
         while :; do
-            timeout 120 claude-sessions offload >/dev/null 2>"$1"
+            stamp=$(date -u "+%Y-%m-%dT%H:%M:%SZ")
+            out=$(timeout 120 claude-sessions offload 2>&1)
             rc=$?
+            [ -n "$out" ] && printf "%s\n" "$out" | sed "s/^/$stamp /" >> "$1"
             if [ "$rc" -ne 0 ]; then
-                {
-                    printf "%s offload pass failed: exit %s%s\n" "$(date -u "+%Y-%m-%dT%H:%M:%SZ")" "$rc" \
-                        "$([ "$rc" -eq 124 ] && echo " (timed out after 120 s)")"
-                    sed "s/^/    /" "$1"
-                } >> "$2"
+                printf "%s offload pass failed: exit %s%s\n" "$stamp" "$rc" \
+                    "$([ "$rc" -eq 124 ] && echo " (timed out after 120 s)")" >> "$1"
+            fi
+            if [ "$(stat -c %s "$1" 2>/dev/null || echo 0)" -gt 4194304 ]; then
+                tail -c 2097152 "$1" | tail -n +2 > "$1.tmp" && mv -f "$1.tmp" "$1"
             fi
             sleep 180
-        done' _ "$HOME/.local/share/.claude-sessions-offload.stderr" \
-              "$HOME/.local/share/claude-sessions-offload-failures.log" </dev/null >/dev/null 2>&1 &
-    say "claude-sessions offload: every 3m — stops detached, idle claudes, leaves them resumable"
-    say "    stops and sweeps: ~/.local/share/claude-sessions/offload.log; failed passes: ~/.local/share/claude-sessions-offload-failures.log"
+        done' _ "$HOME/.local/share/claude-sessions-passes.log" </dev/null >/dev/null 2>&1 &
+    say "claude-sessions offload: every 3m — stops detached, idle claudes and leaves them resumable"
+    say "    every pass: ~/.local/share/claude-sessions-passes.log; stops and sweep: ~/.local/share/claude-sessions/offload.log"
 else
     say "idle-claude offloader off (DEV_IDLE_OFFLOAD=0) — idle sessions keep their memory"
 fi

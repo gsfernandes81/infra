@@ -42,7 +42,15 @@ if [ -n "${SSH_ORIGINAL_COMMAND:-}" ]; then
     # and the door it reaches must see a login, not that same command again.
     cmd=$SSH_ORIGINAL_COMMAND
     unset SSH_ORIGINAL_COMMAND
-    exec "$shell" -c "$cmd"
+    case $cmd in
+        # A client block from before 2026-10-02 still sends `abduco -A claude claude`, and
+        # abduco left the image on 2026-10-06 — run as given it is "Unknown command" and the
+        # login ends. Say so and give that client the menu it would have had.
+        "abduco "*)
+            echo "claude-sessions-door: this client's ssh block predates 2026-10-02 and abduco is gone; re-run client-home-ssh-config.yml; carrying on as an ordinary login." >&2
+            ;;
+        *) exec "$shell" -c "$cmd" ;;
+    esac
 fi
 
 # Where the work is, for the menu and both shells — what `in-workspace` did when it ran

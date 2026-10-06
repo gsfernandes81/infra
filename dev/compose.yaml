@@ -66,6 +66,7 @@ services:
       #
       # Read by the entrypoint at start, so it lands on `make up`, never on `restart`.
       DEV_TUNNEL_HOSTNAME: ${DEV_TUNNEL_HOSTNAME:-}
+      DEV_IDLE_OFFLOAD: ${DEV_IDLE_OFFLOAD:-1}   # 0 in dev/.env, then make up: the offloader does not start
 
       # NO remote-control switch, and as of 2026-08-25 there is no such switch to set:
       # DEV_REMOTE_CONTROL is gone from the base along with the hook that read it, and no
@@ -73,14 +74,15 @@ services:
       # reached the same way — ssh in, hold the work in a zmx session — which is what
       # this container was built to be in the first place.
       #
-      # THE IDLE OFFLOADER IS ON BY DEFAULT and needs nothing here. `claude-sessions
-      # offload` stops a slot that has been detached and at its prompt for 10 minutes, with
-      # nothing waiting on you, no timer pending and nothing but Claude Code running under it,
-      # and leaves the conversation resumable from the menu (dev/README.md § claude-sessions).
-      # `make idle` prints its verdicts without acting; `make offload-log` says what it took.
-      # One knob, rarely worth setting:
-      #
-      #   DEV_IDLE_OFFLOAD: "0"            # keep idle sessions resident
+      # THE IDLE OFFLOADER IS ON BY DEFAULT. `claude-sessions offload` stops, every three
+      # minutes, a slot at its prompt for 10 minutes since its last `Stop` (or its newest
+      # transcript or subagent write) and detached at the pass, with no background work
+      # running, nothing waiting on you, no timer pending and nothing but Claude Code under
+      # it, and leaves the conversation resumable from the menu (dev/README.md §
+      # claude-sessions). The clock does NOT start at the detach: lock the phone after
+      # reading a long reply for ten minutes and the slot goes at the next pass. `make idle`
+      # asks it what it would do now; `make offload-log` shows what it did. DEV_IDLE_OFFLOAD,
+      # above, is its switch: `DEV_IDLE_OFFLOAD=0` in dev/.env and a `make up`.
       #
       # DEV_IDLE_OFFLOAD_SECONDS and DEV_IDLE_POLL_SECONDS went with the old script on
       # 2026-10-06 (Stage B); the new rules are fixed and have no floor to refuse under.

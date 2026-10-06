@@ -64,6 +64,12 @@ status() {
         | grep -vE 'claude-sessions|/proc/' | grep -q . \
         && echo 'a claude is running in this container' || echo 'no claude running')"
 
+    # The offloader's loop, by the age of the log it writes every pass. Read by file age,
+    # not by matching argv — `pgrep -f` on the loop's own words is the self-match trap
+    # CLAUDE.md records.
+    printf 'offloader : %s\n' "$(d exec "$CONTAINER" sh -c 'f=$HOME/.local/share/claude-sessions-passes.log; [ -f "$f" ] || { echo "no pass log — off (DEV_IDLE_OFFLOAD=0), or not started: make boot-log"; exit 0; }; a=$(( $(date +%s) - $(stat -c %Y "$f") )); if [ "$a" -le 600 ]; then echo "live, last pass $((a / 60))m ago (make offload-log)"; else echo "NO PASS in $((a / 60))m — the loop has stopped; see make boot-log"; fi' 2>/dev/null \
+        || echo 'could not ask the container')"
+
     # `claude auth status`, not "is there a credentials file" — a file holding empty
     # tokens exists and reports logged out, so the file's presence proves nothing.
     printf 'auth      : %s\n' "$(d exec "$CONTAINER" claude auth status 2>/dev/null | grep -q '"loggedIn": *true' \
@@ -189,7 +195,7 @@ verify() {
         local label=$1 fallback=$2; shift 2
         local out
         out="$(d exec "$CONTAINER" sh -c 'command -v "$1" >/dev/null 2>&1 || exit 0; exec "$@"' \
-                 sh "$@" 2>&1 | head -1)"
+                 sh "$@" 2>&1 | head -1 | tr -s '\t' ' ')"
         printf '%-10s: %s\n' "$label" "${out:-MISSING — $fallback}"
     }
 

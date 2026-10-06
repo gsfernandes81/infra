@@ -150,7 +150,7 @@ never without evidence — with the hook state replacing the transcript clock:
 - **Orphan sweep:** `daemon run --origin transient` trees whose spawning pid + start time
   is gone, with their `bg-pty-host`/`bg-spare` children. **Calibrated before it is armed**
   (CLAUDE.md, *Verifying changes*): it shipped log-only, and was armed in claude-sessions
-  v0.3.0 (2026-10-03) on the owner's word; here it stays dry until Stage B.
+  v0.3.0 (2026-10-03) on the owner's word; live here from base `2026.10.06` (Stage B).
 
 ### 4. The launcher, `claude-sessions` — a Rust TUI
 
@@ -656,7 +656,7 @@ at 6 columns, the right edge marked:
    unit-tested.
 5. **`claude-sessions offload`** replaces `offload-idle-claude.sh` (deleted in the same commit). The
    orphan sweep shipped dry-run, logging, and was armed in v0.3.0 on 2026-10-03 on the
-   owner's word (`decisions.md`, the sweep row) — live only once Stage B drops `--dry-run`.
+   owner's word (`decisions.md`, the sweep row) — live from base `2026.10.06`, with Stage B.
    **Written, in v0.1.0. Two stages** (`decisions.md` row, 2026-10-02):
    - ✔ **Stage A, landed 2026-10-02 — dry run beside the old script.** The entrypoint runs
      `claude-sessions offload --dry-run` every 3 minutes into
@@ -674,19 +674,41 @@ at 6 columns, the right edge marked:
      `.3` before it was rolled out** (2026-10-04: no claude-sessions change, only the
      entrypoint, login and sshd_config text that followed the published port out); read
      `.4` wherever this step says `.3`. **`2026.10.06` (claude-sessions v0.4.0 and zmx 0.8.1,
-     infra#9) supersedes both** if neither has been rolled out; it is the tag below.
-     1. Wait for `dev-base.yml` to publish `2026.10.06` (v0.4.0, zmx, v0.3.8's scrollback and
-        the forced door; it supersedes `2026.10.03.3` and every tag since), then
-        recreate infra-dev:
+     infra#9) supersedes both** if neither has been rolled out; it is the tag below, and it
+     carries claude-sessions **v0.4.1** and **Stage B — the live offloader**.
+     0. **Before anything is recreated** — these need the old state:
+        - **Calibrate the scroll check on or3-dev, before or3 bumps** (it is on `2026.10.04.4`,
+          v0.3.8 on abduco): in a slot after a long reply, a swipe or the wheel there recalls
+          prompt history. infra-dev's `2026.10.03.3` (v0.3.4) cannot show it — it predates the
+          mouse switches — and after the recreate abduco is gone.
+        - **Grep every client for an abduco-era block**: `grep -n 'RemoteCommand' ~/.ssh/config`
+          (and the laptop's Windows config). A block still saying `abduco -A claude claude` is
+          from before 2026-10-02; the forced door now catches it and gives a login with a
+          re-run hint, but re-run `client-home-ssh-config.yml` there anyway.
+        - **Fast-forward zero's checkout**, which `make up` builds from — infra-dev's
+          /workspace IS that checkout, so from inside infra-dev: `git -C /workspace pull
+          --ff-only`, then `grep '^BASE_TAG' /workspace/dev/Makefile` must read `2026.10.06`.
+          Skip it and step 1 recreates onto the stale tag — the regression, and every slot
+          ended twice.
+        - **Keep or remove the Stage A evidence by hand, once read**: `~/.local/share/
+          claude-sessions-dry-run.log` and the old script's `~/.local/share/claude-offload.log`
+          stay on the volume; nothing deletes them.
+     1. Wait for `dev-base.yml` to publish `2026.10.06` (v0.4.1, zmx, the live offloader,
+        v0.3.8's scrollback and the forced door; it supersedes `2026.10.03.3` and every tag
+        since), then recreate infra-dev — which ends every slot, this agent's included:
         `ssh -t zero 'cd ~/infra/dev && make up'`.
-     2. `make verify` reads `sessions  : claude-sessions 0.4.0`, `zmx       : zmx 0.8.1` and `scrollvars: 3 of 3`, a `hooks` line naming six
-        events and a `door` line naming `/usr/local/bin/claude-sessions-door`; `make boot-log` has the `claude-sessions reconcile:` and `DRY RUN` lines.
+     2. `make verify` reads `sessions  : claude-sessions 0.4.1` (`0.3.8` means the checkout
+        was stale — back to step 0), `zmx       : zmx 0.8.1` and `scrollvars: 3 of 3`, a
+        `hooks` line naming six events and a `door` line naming
+        `/usr/local/bin/claude-sessions-door`; `make status` has `offloader : live, last pass
+        Nm ago`; `make boot-log` has the `claude-sessions reconcile:` line and `claude-sessions
+        offload: every 3m — stops detached, idle claudes …`.
      3. **Start `claude` in the container and confirm no approval dialog appears** — the
         managed-settings consent question, so far settled from the docs only.
      4. Prompt it once, then `make sessions`: the slot shows events. "events: none seen"
         means the hooks are not firing.
      4a. **The menu, by hand, before any client points at it.** From `make shell` (or `ssh -t infra-dev in-workspace`),
-        run `claude-sessions-door`. Press `n`, then detach (abduco's key): the menu comes back
+        run `claude-sessions-door`. Press `n`, then detach (`Ctrl-\`, zmx's key): the menu comes back
         with `detached · it is still running` (v0.3.3 names no session there), and `make sessions` shows that slot
         with a pid and recent `SessionStart`/`UserPromptSubmit`. That proves a slot binds;
         it depends on claude's process name being `claude`, so **a slot with no pid is
@@ -695,8 +717,7 @@ at 6 columns, the right edge marked:
         failed resume shows its error) — on that first start, check nothing interactive
         went missing into it. And an idle menu sends **zero bytes**: worth a glance at the
         phone's link meter, ages ticking at most once a minute.
-     4b. **What v0.3.0–v0.4.0 changed, by hand** (from claude-sessions' handoff, adjusted
-        for Stage A):
+     4b. **What v0.3.0–v0.4.1 changed, by hand** (from claude-sessions' handoffs):
         - *Titles:* send one prompt in a slot and let it finish — the row shows a short title,
           the one Claude Code's `/resume` picker shows, never a reply. Then `/rename something`,
           prompt again, and the row reads `something`. The recreate ends every slot; each
@@ -724,7 +745,7 @@ at 6 columns, the right edge marked:
           And `make sessions` shows that slot with only its new `SessionStart` — v0.3.4 starts a
           new conversation's event times afresh, where v0.3.2 kept the prompt and `Stop` from
           before the `/clear` (what misled infra's first §3 check, infra#3).
-        - *Idle from the prompt — LIVE since Stage B:* open a slot, detach without prompting,
+        - *Idle from the prompt — live from this base:* open a slot, detach without prompting,
           leave it. Within about 13 minutes (10 idle plus the 3-minute loop) `make offload-log`
           shows it `closed … no conversation on disk to resume` (a new slot never prompted has
           no transcript) and the row is gone. `/resume` an old conversation into a slot, detach
@@ -738,7 +759,7 @@ at 6 columns, the right edge marked:
           `claude --resume <id>` still finds an archived one — the archive is the menu's only.
         - *The spinner* (v0.3.6): closing a running session shows it on that row and `closing
           session` on the status line until done (5 s for TERM, up to about 10 s if it needs
-          KILL and abduco's teardown), and it draws as braille dots on
+          KILL and zmx's teardown), and it draws as braille dots on
           the phone (Termux) and in Windows Terminal, not as boxes.
         - *A dropped link* (v0.3.7, claude-sessions#6): open the menu over ssh from the phone and
           kill the connection (airplane mode, or kill the ssh client). **Wait two minutes**, or
@@ -765,22 +786,35 @@ at 6 columns, the right edge marked:
         - *zmx holds the slots* (v0.4.0, infra#9) — **the regression this release exists for:**
           in a slot after a long reply, the laptop's wheel and the phone's swipe scroll the
           terminal's own buffer and do NOT step through prompt history; long-press selects on
-          the phone. **Calibrate first** on the abduco base you are leaving (`2026.10.03.3` or
-          `.4`): the same gesture there recalls prompt history, so the check can tell them apart.
-        - *Replay:* detach with Ctrl-\, then `Enter` on the row — the conversation's recent
+          the phone. Calibrated in step 0, on or3-dev, where the same gesture recalls prompt
+          history — so the check can tell the two apart.
+        - *Replay:* detach with `Ctrl-\`, then `Enter` on the row — the conversation's recent
           output is back on screen and scrollable.
         - *Attach state:* `zmx list` shows `name=claude-1 … clients=0` while detached and
           `clients=1` while attached.
-        - *Binding:* for a slot's claude, `tr '\0' '\n' < /proc/<pid>/environ | grep
-          CLAUDE_CODE_DISABLE_` still shows all three `=1`, and `cat /proc/$(ps -o ppid= -p
-          <pid>)/comm` prints `zmx` — a parent under any other name means a slot that never
+        - *Binding:* for a slot's claude (its pid from `make sessions`), these, one line each,
+          from a shell in the container:
+          ```
+          tr '\0' '\n' < /proc/PID/environ | grep CLAUDE_CODE_DISABLE_
+          ps -o comm= -p $(ps -o ppid= -p PID | tr -d ' ')
+          ```
+          — all three `=1`, and `zmx`; a parent under any other name means a slot that never
           binds.
         - *`make status`'s `sessions` line* names zmx sessions (`sessions  : zmx — claude-1 …`).
         - *The sweep, live:* `grep 'sweep:' ~/.local/share/claude-sessions/offload.log | tail`.
           With the agent view off, expect nothing. A `killed` line names the daemon tree it
           ended; one you cannot account for goes to claude-sessions.
-        - *The loop's failures:* `~/.local/share/claude-sessions-offload-failures.log` is absent
-          or empty. A line there is a pass that exited non-zero (124 = it timed out).
+        - *The loop:* `make offload-log`'s *failed passes* half says `none`; a `pass failed`
+          line in `~/.local/share/claude-sessions-passes.log` is a pass that exited non-zero
+          (124 = it timed out). Its *last pass* half shows the verdicts — a slot running
+          background agents reads `kept — background work running: subagent: …` (v0.4.1).
+     4c. **Rollback, should it be needed.** Stop the offloader now, without a recreate: in
+        `make shell`, `ps -eo pid,pgid,args | grep claude-sessions-passes`, then `kill --
+        -<pgid>` — it is a setsid group; never `pkill -f` (CLAUDE.md, shell traps). It comes
+        back at the next start. Off for good: `DEV_IDLE_OFFLOAD=0` in `dev/.env`, then `make
+        up`. Off zmx and v0.4.x altogether: a commit setting `BASE_TAG` back to `2026.10.04.4`
+        (abduco, v0.3.8, the old script and the Stage A dry run) and `make up` — it ends the
+        zmx slots, and their conversations stay resumable from the `Closed` group.
      5. Read `make offload-log` over a few days. A day after rollout, `make sessions` again.
      6. The other dev repos pick this up when they bump `BASE_TAG`.
    - **Stage B gate — found in review of Stage A, 2026-10-02. All three are FIXED in v0.2.0**
@@ -878,11 +912,15 @@ at 6 columns, the right edge marked:
        with combined abduco flags (`-fA`) ([#3](https://github.com/gsfernandes81/claude-sessions/issues/3)). It now reads flags
        getopt-style and sweeps nothing while any live abduco's session cannot be named; the
        entrypoint's "safe at any time" caveat is gone.
-   - ✔ **Stage B LANDED 2026-10-06 at `2026.10.06`, with zmx** (infra#9, owner's word; the
-     evidence and the zmx-attach reasoning are in `decisions.md`, the two-stage row). Done as
-     listed below, plus abduco and its build stage, whose last user the script was; the loop
-     records failed passes in `~/.local/share/claude-sessions-offload-failures.log`, with no
-     pipe after the command. What it was:
+   - ✔ **Stage B is in base `2026.10.06`, with zmx and claude-sessions v0.4.1** (infra#9,
+     owner's word, 2026-10-06), live on each container from its recreate onto it. The
+     evidence, the zmx-attach reasoning and claude-sessions#9 — found by the review council
+     against v0.4.0, fixed in v0.4.1, reproduced here before arming — are in `decisions.md`,
+     the two-stage row. Done as listed below, plus abduco and its build stage, whose last
+     user the script was, with two deliberate departures: **the loop keeps every pass's
+     verdicts** in `~/.local/share/claude-sessions-passes.log` (failed passes marked, no
+     pipe after the command), and **the dry-run log is not deleted** — it is the evidence;
+     remove it by hand once read (bring-up step 0). What the checklist was:
    - **Stage B — the swap, one commit:** the entrypoint loop drops `--dry-run` and its log
      (the binary keeps `offload.log` itself; delete `~/.local/share/claude-sessions-dry-run.log`,
      which grows unbounded until then), `offload-idle-claude.sh` is deleted with its
@@ -896,8 +934,9 @@ at 6 columns, the right edge marked:
      `timeout` kill (124) or a silent non-zero exit leaves nothing — and `$?` after the pipe
      would be `sed`'s anyway.
    - ✔ **The orphan sweep was armed in claude-sessions v0.3.0** on 2026-10-03, earlier than
-     the week of `offload.log` it was waiting on; here it stays dry until Stage B (gate
-     above). The owner's 2026-10-08 reminder is now for reading those `WOULD KILL` lines.
+     the week of `offload.log` it was waiting on, and is live here with Stage B. The owner's
+     2026-10-08 reminder (reading the `WOULD KILL` lines) is moot: or3-dev's reading had
+     none, and `sweep: killed` lines in `offload.log` are now what to read.
 6. **Switch the door** — `ansible/templates/ssh-dev-block.j2`'s RemoteCommand becomes
    `in-workspace claude-sessions-door`; the owner runs the client play from each client. Then
    **delete this plan.**

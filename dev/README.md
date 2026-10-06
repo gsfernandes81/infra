@@ -55,7 +55,7 @@ been consciously postponed rather than an omission.
 |---|---|
 | `Makefile` | **the management interface** — `make up`, `make login`, `make status`, … |
 | `compose.yaml` | the stack — `name: infra-dev`, one service, nothing published |
-| `Dockerfile` | Debian slim + Node 22 + Claude Code + gh + zmx + screen/abduco + sshd + **ansible** |
+| `Dockerfile` | Debian slim + Node 22 + Claude Code + gh + zmx + screen + sshd + **ansible** |
 | `entrypoint.sh` | ssh material → Claude config → `git pull` → **sshd(fg)** |
 | `login.sh` | in the image: the interactive logins, idempotent — `make login` |
 | `status.sh` | on the host: the readouts — `make status`, `verify`, `fleet`, `collections` |
@@ -271,7 +271,7 @@ below the 6.x on `zero` and `one`, and the syscalls a newer glibc reaches for (`
 and friends) were already being made by 2.36 on those same boxes under that same docker,
 so a seccomp refusal would have arrived long before this bump rather than because of it.
 
-**What the bump did *not* make free: the abduco build stage stays.** It was there because
+**What the bump did *not* make free: the abduco build stage stayed** (until abduco left the image on 2026-10-06). It was there because
 bookworm had no `abduco` package, and this repo's comment had said for a month that
 Debian had it "in trixie and sid only" — so moving to trixie looked like it ended the
 need for a compiler stage. It did not. `apt-get install abduco` fails on trixie with
@@ -282,14 +282,14 @@ time the claim was ever executed rather than repeated.
 The lesson is the repo's own and keeps recurring: **a fact nobody has run is not a
 measurement, however long it has sat in a comment.** The five-minute CI build is what
 turned it over, which is an argument for the automatic build rather than against the
-change. The stage is now the way this image gets abduco at all, not a workaround for an
-old base, and `Dockerfile.base` says so.
+change. The stage was then the way this image got abduco at all, not a workaround for an
+old base — until 2026-10-06, when zmx replaced abduco and the stage went.
 
 **Verifying the bump is `make verify`.** It now opens with a `libc` line — `ldd
 --version` from inside the container — because the floor is otherwise invisible from
 outside it, and a `FROM` line reverted by a careless edit would show up nowhere else in
 that readout. The rest of the list is the same one that already mattered: `claude`, `gh`,
-`abduco`, `screen`, `cloudflared` and the collections are each printed, and every one of
+`zmx` (abduco until 2026-10-06), `screen`, `cloudflared` and the collections are each printed, and every one of
 them is a thing a distro bump can break.
 
 ## Claude Code updates itself
@@ -851,7 +851,7 @@ same warning branch as a failure; `DEV_CHILD_INIT_TIMEOUT` moves it.
 The shape as originally designed, kept for the reasoning:
 
 - **`infra` owns a base image.** One `Dockerfile` here, built on the host as
-  `gsrpi-dev-base:<tag>` — Debian slim, Node, Claude Code, gh, zmx, screen/abduco, sshd,
+  `gsrpi-dev-base:<tag>` — Debian slim, Node, Claude Code, gh, zmx, screen, sshd,
   fish, the `dev` user, the ENV block. That is the 700 shared lines, in one place.
 - **Each repo's `dev/Dockerfile` becomes three lines**: `FROM gsrpi-dev-base:<tag>`
   plus whatever that repo needs on top — nothing for or3, `ansible-core` and the
@@ -915,11 +915,15 @@ transient daemon, and 819 MB across four `bg-pty-host`/`bg-spare` helpers. Four 
 containers on a 4 GB Pi that also runs Immich cannot each hold a gigabyte for a
 conversation that ended.
 
-So the entrypoint runs **`claude-sessions offload` every three minutes** (since 2026-10-06,
-Stage B of [`../plans/claude-sessions.md`](../plans/claude-sessions.md)). It stops a slot
-that is detached and idle at its prompt and leaves the conversation resumable from the
-menu; nothing is closed that has a conversation, and the memory is what is reclaimed. The
-rules, and what it refuses, are in [claude-sessions](#claude-sessions) below.
+**From base `2026.10.06` the entrypoint runs `claude-sessions offload` every three
+minutes, live** — Stage B of [`../plans/claude-sessions.md`](../plans/claude-sessions.md),
+in force on each container from its recreate onto that base. It stops a slot that is
+detached and idle at its prompt and leaves the conversation resumable from the menu;
+nothing with a conversation is closed, and the memory is what is reclaimed. The rules are
+in [claude-sessions](#claude-sessions) below. It was armed on claude-sessions v0.4.1, which
+fixed [#9](https://github.com/gsfernandes81/claude-sessions/issues/9): a slot running
+background subagents, forks, Workflow or Monitor fires no hook while they work, and used
+to read as idle ten minutes after its parent's `Stop`.
 
 **It replaced `offload-idle-claude.sh`**, which stopped a claude after 90 minutes of
 transcript silence — an hour's worth of a claude's longest self-scheduled wake-up plus
@@ -929,7 +933,7 @@ no transcript. Two things retired it. The new hooks *see* a pending `ScheduleWak
 **newest** transcript in the shared workspace directory, so one active slot kept every
 other slot alive: on or3-dev it stopped nothing in 2.7 days while a slot sat idle for
 about 16 hours (infra#9). It could also see only abduco sessions, and a slot is a zmx
-session since claude-sessions v0.4.0. It and abduco were deleted in the same change.
+session since claude-sessions v0.4.0. It and abduco were deleted in the same base.
 
 ## claude-sessions
 
@@ -1005,8 +1009,8 @@ with a plain login shell until its repo bumps (*How this container is used*).
 | Piece | Where | What it does |
 |---|---|---|
 | the hooks | `/etc/claude-code/managed-settings.d/claude-sessions.json`, 0644 | `SessionStart`, `UserPromptSubmit`, `Stop`, `Notification`, `SessionEnd`, and `PostToolUse` on the three timer tools, each calling `claude-sessions hook`, which always exits 0 — a bug in it cannot block a prompt |
-| `reconcile` | the entrypoint, before the offloader and sshd | marks slots whose process died with the last container; since v0.4.0 it sweeps no sockets — `zmx list` clears a dead daemon's own, and zmx's socket directory, `/tmp/zmx-<uid>`, empties with the container |
-| `offload` | the entrypoint, every 3 minutes | stops a detached, idle slot and runs the orphan sweep (since 2026-10-06; a dry run before, as Stage A). Stops and sweep lines go to `offload.log`; a pass that fails goes, with its exit code and stderr, to `~/.local/share/claude-sessions-offload-failures.log`. `make idle` is `--dry-run`: verdicts, nothing stopped |
+| `reconcile` | the entrypoint, before the offloader and sshd | marks slots whose process died with the last container; since v0.4.0 it sweeps no sockets — `zmx list` clears a dead daemon's own, and zmx's socket directory, `/tmp/zmx-<uid>`, empties with a recreate (a `make restart` keeps /tmp; a stale socket there is cleared by the next `zmx list`) |
+| `offload` | the entrypoint, every 3 minutes | stops a detached, idle slot and runs the orphan sweep — live from base `2026.10.06` (a dry run before it, as Stage A). Each pass's verdicts, and any failed pass with its exit code, go timestamped to `~/.local/share/claude-sessions-passes.log` (capped near 4 MB); stops and sweep lines also go to `offload.log`. `make idle` is `--dry-run`: verdicts, nothing stopped |
 
 **The hooks file is generated by the binary at build time and is not in this repo.**
 `claude-sessions hooks-config` prints exactly the events its code handles, so the hooks
@@ -1019,7 +1023,11 @@ docs, not yet from a box: the first `claude` in a rebuilt container is the check
 
 **The rules.** `claude-sessions offload` stops a slot only when it is detached, it has sat at its prompt for at least **10
 minutes** — since a `Stop`, or (v0.3.0) since a `SessionStart` that opened or resumed it and
-was never followed by a prompt; a compaction never counts, because it can land mid-turn —
+was never followed by a prompt, or (v0.4.1) since the newest write to its transcript or to a
+subagent's under `<conversation>/subagents/`, whichever is latest; a compaction never
+counts, because it can land mid-turn — no background work was listed at its last `Stop`
+(v0.4.1: Claude Code's `Stop` carries its running subagents, workflows, shells, monitors and
+cloud sessions, and the slot reads `kept — background work running: …`),
 nothing waits on you (a permission prompt), no timer is pending
 (`ScheduleWakeup`/`CronCreate`, whoever set it), nothing but `claude` (and its
 `claude.exe` helpers) runs under it, and
@@ -1033,17 +1041,18 @@ hooks recorded, or for a record older than v0.3.3 one derived from `$CLAUDE_CONF
 which is the image's `ENV`, `/home/dev/.claude`, for the loop and every slot alike, and must
 stay so. Anything it cannot
 see is a reason to keep the slot. **There is no one-hour floor** — a pending timer is now
-*seen*, so the floor's reason is gone — and today's `ssh` sessions feed the registry too:
-once a hook has fired they are listed like any other slot, marked `(not ours)` in
-`make sessions`, and judged by the same rules. So expect idle sessions to go after ten
-minutes, not ninety. Attached means zmx reports a client (`clients=` in `zmx list`); a zmx
+*seen*, so the floor's reason is gone. Only a claude whose parent is a zmx session is
+judged at all: one started in the menu's `s` shell, by a forwarded command or in `screen`
+is never registered and never offloaded. **The ten minutes do not start at the detach:**
+read a long reply for longer than that, lock the phone, and the slot goes at the next pass.
+Keep a slot you care about attached; `Enter` on its row brings it back if it went. Attached means zmx reports a client (`clients=` in `zmx list`); a zmx
 daemon that does not answer keeps its slot, because attached cannot be ruled out.
 
 Reading it:
 
 ```
 make idle          the offloader's verdict on every slot, now — a dry run, nothing stopped
-make offload-log   what it stopped or swept (offload.log), and any pass that failed
+make offload-log   what it stopped or swept, failed passes, and the last pass's verdicts
 make sessions      claude-sessions doctor — per slot, how long since each hook event
 make verify        the binary's version, and the hooks file parsed as dev
 ```
@@ -1058,9 +1067,10 @@ cannot appear at all: those ends change nothing, so v0.3.2 takes no lock for the
 used to race their own `SessionStart` for it, which is what infra-dev's eight `busy for
 400ms` lines on v0.2.0 most likely were. `offload.log` beside it gets every real stop and every line
 of the orphan sweep (stray `daemon run --origin transient` trees whose parent is no longer
-a `claude`). **The sweep is live since 2026-10-06:** it logs `sweep: killed …`, or
-`sweep: kept, too young …` for a tree under ten minutes old. A dry run (`make idle`) logs
-`sweep: WOULD KILL …` and `would keep, too young` with the same age check. **The sweep is only safe with the agent view off** ([above](#the-agent-view-is-off-and-cannot-be-turned-back-on-in-here)):
+a `claude`). **The sweep is live with the offloader**: it logs `sweep: killed …`, or
+`sweep: kept, too young (Ns)` for a daemon under ten minutes old — the daemon's own age, so
+an old one goes on the first pass after its claude exits. A dry run (`make idle`) logs
+`sweep: WOULD KILL …` and `would keep, too young` with the same check. **The sweep is only safe with the agent view off** ([above](#the-agent-view-is-off-and-cannot-be-turned-back-on-in-here)):
 agent view's supervisor outlives its session by design, and this rule would kill it.
 **"events: none seen"** in `make sessions` means the hooks are not firing.
 
@@ -1068,8 +1078,10 @@ agent view's supervisor outlives its session by design, and this rule would kill
 menu: `claude-sessions doctor` prints each slot's session id, then `claude --resume <id>`
 in its directory.
 
-`DEV_IDLE_OFFLOAD=0` turns off the offloader. Overrides, neither normally worth setting:
-`CLAUDE_SESSIONS_DIR` (the registry) and zmx's own `ZMX_DIR` (its sockets) — each must be
+`DEV_IDLE_OFFLOAD=0` in `dev/.env` (compose passes it through) and a `make up` turn off
+the offloader. Overrides, neither normally worth setting: `CLAUDE_SESSIONS_DIR` (the
+registry) and zmx's own `ZMX_DIR` (its sockets, and its logs — `$ZMX_DIR/logs` instead of
+`~/.local/state/zmx/logs`) — each must be
 the same for every login and the offload loop, so set one in compose or not at all. Never
 set `ZMX_SESSION_PREFIX`: claude-sessions strips it, and slot names would disagree. Do not put a source checkout
 at `~/.local/share/claude-sessions` — that is the registry; dev containers check the source

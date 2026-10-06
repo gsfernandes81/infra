@@ -454,9 +454,9 @@ RUN chmod 0644 /etc/claude-code/managed-settings.json
 #
 # 0644 IS LOAD-BEARING: every session runs as `dev`, and a file it cannot read means
 # sessions start with no hooks and nothing on screen says so.
-ARG CLAUDE_SESSIONS_VERSION=0.4.0
-ARG CLAUDE_SESSIONS_SHA256_arm64=be0fdc1f0d982cb3df8c7a6c497bc4b7141abc1ead8b34399d671337feb9e9ae
-ARG CLAUDE_SESSIONS_SHA256_amd64=3c573a769641b888ed5436daf1442fe6618b210962bb9c27ad930932de823502
+ARG CLAUDE_SESSIONS_VERSION=0.4.1
+ARG CLAUDE_SESSIONS_SHA256_arm64=d0edecafe4c50b93d4ab82fe2084bbbf11e1996c7eeac66027b1a8a059bc44e6
+ARG CLAUDE_SESSIONS_SHA256_amd64=6f01dae6fba58e26c8c1c7ada441a1f8b530e35cc170bd54e5ffde36519b2dc5
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
@@ -496,8 +496,9 @@ RUN set -eux; \
 #
 # ONLY EVER CHANGED BY A BASE BUMP: zmx's README says a version that changes its internal
 # protocol ends running sessions, so an in-place upgrade is the wrong shape here; a
-# recreate ends them anyway. Sockets land in /tmp/zmx-<uid> (gone with the container),
-# logs in ~/.local/state/zmx/logs (2 MB a session, then wiped) — no volume either needs.
+# recreate ends them anyway. With no ZMX_DIR set, as here, sockets land in /tmp/zmx-<uid>
+# (gone with a recreate) and logs in ~/.local/state/zmx/logs (2 MB a session, then wiped);
+# a ZMX_DIR moves both. No volume either needs.
 #
 # `zmx version` IS FATAL and compared exactly, the claude-sessions reasoning: a static
 # binary has no excuse not to answer. Pointed at a throwaway ZMX_DIR because it creates

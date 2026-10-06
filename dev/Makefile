@@ -16,7 +16,7 @@
 #   make boot-log    the entrypoint's start-up lines, from the top
 #   make tunnel-log  what cloudflared has been saying, if the tunnel is on
 #   make idle        what the offloader would do to each slot, right now (stops nothing)
-#   make offload-log what it has offloaded or swept, and any pass that failed
+#   make offload-log what it has stopped or swept, failed passes, and the last pass
 #   make sessions    claude-sessions doctor: the registry, and whether the hooks fire
 #   make down        stop and remove the container (volumes stay)
 #   make down-volumes  also drop the volumes — logins and host key go with them
@@ -176,11 +176,11 @@ status verify collections boot-log tunnel-log fleet:
 logs:
 	$(DOCKER) logs -f --tail 100 $(CONTAINER)
 
-# The offloader's own two questions. `idle` is a DRY RUN — it prints its verdict on every
-# slot and stops nothing, which is also how you check the thing is reasoning the way you
-# expect before trusting it with a session you care about. `offload-log` is what it has
-# actually done: real stops and the orphan sweep (the binary's own log), then any pass
-# that failed (the entrypoint loop's).
+# The offloader's own two questions. `idle` is a DRY RUN — its verdict on every slot now,
+# nothing stopped (a dry run's sweep still writes its `WOULD KILL` / `would keep` lines to
+# offload.log). `offload-log` is what the live loop has done: real stops and the sweep
+# (the binary's own offload.log), then failed passes and the last pass's verdicts (the
+# loop's own claude-sessions-passes.log).
 idle:
 	$(DOCKER) exec $(CONTAINER) claude-sessions offload --dry-run
 
@@ -188,7 +188,9 @@ offload-log:
 	@echo '── claude-sessions: offload.log (real stops, and the orphan sweep) ──'
 	@$(DOCKER) exec $(CONTAINER) sh -c 'tail -n 40 /home/dev/.local/share/claude-sessions/offload.log 2>/dev/null || echo "nothing offloaded yet"'
 	@echo '── failed passes ──'
-	@$(DOCKER) exec $(CONTAINER) sh -c 'tail -n 20 /home/dev/.local/share/claude-sessions-offload-failures.log 2>/dev/null || echo "none"'
+	@$(DOCKER) exec $(CONTAINER) sh -c 'grep -h "pass failed" /home/dev/.local/share/claude-sessions-passes.log 2>/dev/null | tail -n 10 | grep . || echo "none"'
+	@echo '── the last pass ──'
+	@$(DOCKER) exec $(CONTAINER) sh -c 'f=/home/dev/.local/share/claude-sessions-passes.log; [ -f "$$f" ] && grep -F "$$(tail -n 1 "$$f" | cut -d" " -f1)" "$$f" || echo "no pass yet"'
 
 # Read-only. "events: none seen" on a slot means the hooks are not firing — the first
 # thing to check after a rebuild, since a hooks file Claude Code ignored says nothing.
