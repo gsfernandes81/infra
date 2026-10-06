@@ -1028,18 +1028,26 @@ docs, not yet from a box: the first `claude` in a rebuilt container is the check
 minutes** — since a `Stop`, or (v0.3.0) since a `SessionStart` that opened or resumed it and
 was never followed by a prompt, or (v0.4.1) since the newest write to its transcript or to a
 subagent's under `<conversation>/subagents/`, whichever is latest; a compaction never
-counts, because it can land mid-turn — no background work was listed at its last `Stop`
+counts, because it can land mid-turn — no background work is on its background list
 (v0.4.1: Claude Code's `Stop` carries its running subagents, workflows, shells, monitors and
-cloud sessions, and the slot reads `kept — background work running: …`),
+cloud sessions, and the slot reads `kept — background work running: …`; since v0.4.4
+`SubagentStart` and `SubagentStop` keep the list between `Stop`s too. **Two things are
+deliberately not background work** in v0.4.4: Claude Code's own housekeeping — a dream, an
+auto-mode scan, a memory import — and its **watch on an artifact it published**, so a
+detached slot that published one is offloaded ten minutes after its `Stop`, and comments
+sent to it from the phone while it is detached get no answer until it is resumed),
 it is not mid-turn — **except a turn you ended with Esc** (v0.4.2: an Esc fires no hook, so
 the transcript's trailing `[Request interrupted by user…]` marker is read as the end of the
 turn, and the ten minutes run from it; a prompt or a reply after the marker means it is
-not the end, and a marker older than the hooks' last event is an earlier turn's; a
+not the end, and a marker older than the slot's latest activity is an earlier turn's; a
 permission prompt the Esc dismissed no longer counts as waiting on you either. A background
 agent started in the turn you Esc'd still holds the slot until it is done (v0.4.4,
 [claude-sessions#10](https://github.com/gsfernandes81/claude-sessions/issues/10):
 `SubagentStart`/`SubagentStop` keep the background list between `Stop`s), and the marker must
-be the whole entry, so a typed prompt beginning with the phrase is a prompt) —
+be the whole entry, so a typed prompt beginning with the phrase is a prompt. Still open: work
+started in an Esc'd turn with no agent behind it — a cloud session — is held only by its own
+writes, as before; and a foreground agent cut off by Esc never sends its `SubagentStop`, so
+its entry keeps the slot until your next turn, a memory cost only (claude-sessions#11) —
 nothing waits on you (a permission prompt), no timer is pending
 (`ScheduleWakeup`/`CronCreate`, whoever set it), nothing but `claude` (and its
 `claude.exe` helpers) runs under it, and

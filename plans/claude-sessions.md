@@ -828,6 +828,12 @@ at 6 columns, the right edge marked:
         - *The sweep, live:* `grep 'sweep:' ~/.local/share/claude-sessions/offload.log | tail`.
           With the agent view off, expect nothing. A `killed` line names the daemon tree it
           ended; one you cannot account for goes to claude-sessions.
+        - *Esc and agents* (v0.4.4): in a slot, start an agent in the background, Esc the
+          turn, detach, and run `make idle` — `kept — background work running: subagent:
+          general-purpose` (an entry named by agent type comes from `SubagentStart`). Then Esc a
+          *foreground* agent and watch `make idle` for a minute: its entry should clear when
+          Claude Code's own `SubagentStop` arrives, about 30 s later; if it never does, the
+          slot is held until your next turn (memory only — report it on claude-sessions#11).
         - *The loop:* `make offload-log`'s *failed passes* half says `none`; a `pass failed`
           line in `~/.local/share/claude-sessions-passes.log` is a pass that exited non-zero
           (124 = it timed out). Its *last pass* half shows the verdicts — a slot running
