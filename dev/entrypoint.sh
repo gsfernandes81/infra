@@ -423,8 +423,10 @@ fi
 # touched since Tuesday is still resident: measured on infra-dev, one idle session's
 # process tree held 1,146 MB. `claude-sessions offload` stops those every three minutes and
 # leaves each conversation resumable from the menu. It stops a slot only when it is
-# detached at the pass and has sat at its prompt for 10 minutes since its last `Stop` (or
-# since the newest write to its transcript or a subagent's), with no background work
+# detached at the pass and has sat at its prompt for 10 minutes since its last `Stop` or
+# the newest write to its transcript or a subagent's, whichever is later — the ten minutes
+# do NOT start at the detach, so a slot read for longer than that and then left goes at
+# the next pass — with no background work
 # listed at that `Stop`, nothing waiting on you, no timer pending, nothing but Claude Code
 # under it, and a conversation to resume — anything it cannot see keeps the slot, and a
 # slot with nothing to resume is closed instead. The same pass runs the orphan sweep,
@@ -469,7 +471,7 @@ if [ "${DEV_IDLE_OFFLOAD:-1}" = "1" ]; then
     say "claude-sessions offload: every 3m — stops detached, idle claudes and leaves them resumable"
     say "    every pass: ~/.local/share/claude-sessions-passes.log; stops and sweep: ~/.local/share/claude-sessions/offload.log"
 else
-    say "idle-claude offloader off (DEV_IDLE_OFFLOAD=0) — idle sessions keep their memory"
+    say "idle-claude offloader off (DEV_IDLE_OFFLOAD=${DEV_IDLE_OFFLOAD}, and only 1 turns it on) — idle sessions keep their memory"
 fi
 
 # ── the tunnel — INERT unless asked for ─────────────────────────────────────

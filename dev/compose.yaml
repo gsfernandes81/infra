@@ -75,14 +75,15 @@ services:
       # this container was built to be in the first place.
       #
       # THE IDLE OFFLOADER IS ON BY DEFAULT. `claude-sessions offload` stops, every three
-      # minutes, a slot at its prompt for 10 minutes since its last `Stop` (or its newest
-      # transcript or subagent write) and detached at the pass, with no background work
-      # running, nothing waiting on you, no timer pending and nothing but Claude Code under
-      # it, and leaves the conversation resumable from the menu (dev/README.md §
-      # claude-sessions). The clock does NOT start at the detach: lock the phone after
-      # reading a long reply for ten minutes and the slot goes at the next pass. `make idle`
-      # asks it what it would do now; `make offload-log` shows what it did. DEV_IDLE_OFFLOAD,
-      # above, is its switch: `DEV_IDLE_OFFLOAD=0` in dev/.env and a `make up`.
+      # minutes, a slot at its prompt for 10 minutes since its last `Stop` or its newest
+      # transcript or subagent write, whichever is later, and detached at the pass, with no
+      # background work running, nothing waiting on you, no timer pending and nothing but
+      # Claude Code under it, and leaves the conversation resumable from the menu
+      # (dev/README.md § claude-sessions). The ten minutes do NOT start at the detach: read
+      # a long reply for longer than that, lock the phone, and the slot goes at the next
+      # pass. `make idle` asks it what it would do now; `make offload-log` shows what it
+      # did. DEV_IDLE_OFFLOAD, above, is its switch: `DEV_IDLE_OFFLOAD=0` in dev/.env and a
+      # `make up` — which recreates the container and ends every slot.
       #
       # DEV_IDLE_OFFLOAD_SECONDS and DEV_IDLE_POLL_SECONDS went with the old script on
       # 2026-10-06 (Stage B); the new rules are fixed and have no floor to refuse under.

@@ -944,7 +944,7 @@ outlives the container), kept current by Claude Code's own hooks — and, since 
 `archive/` beside them: one small file per conversation `c` has put away (`archived <ms>`)
 or taken back out (`kept <ms>`) — age-archiving writes nothing, being worked out as the
 list is read. The base installs
-**v0.4.0** — a static binary, pinned by tag and SHA-256 per architecture, at
+**v0.4.1** — a static binary, pinned by tag and SHA-256 per architecture, at
 `/usr/local/bin/claude-sessions`.
 
 **The menu is in this release, and it is where `ssh infra-dev` lands.** `claude-sessions`
@@ -1003,7 +1003,9 @@ A recreate ends every slot anyway, and each one takes its new title when it is r
 is what every ssh session runs — sshd's `ForceCommand` since 2026-10-04, and `make
 claude` — the menu at a terminal; a login shell when there is no terminal or the menu
 exits non-zero (it has said why on stderr by then); a forwarded `SSH_ORIGINAL_COMMAND`
-run as given, in `~`. A container whose base predates the forced door answers `ssh <it>`
+run as given, in `~` — except an abduco-era client block's `abduco -A claude claude`, with
+or without `in-workspace`, which gets a re-run hint and the menu at a terminal, exit 127
+without one, because abduco left the image on 2026-10-06. A container whose base predates the forced door answers `ssh <it>`
 with a plain login shell until its repo bumps (*How this container is used*).
 
 | Piece | Where | What it does |
@@ -1054,9 +1056,13 @@ Reading it:
 make idle          the offloader's verdict on every slot, now — a dry run, nothing stopped
 make offload-log   what it stopped or swept, failed passes, and the last pass's verdicts
 make sessions      claude-sessions doctor — per slot, how long since each hook event
+make status        includes `offloader : live, last pass Nm ago`, or why not
 make verify        the binary's version, and the hooks file parsed as dev
 ```
 
+Stage A's `~/.local/share/claude-sessions-dry-run.log` and the old script's
+`~/.local/share/claude-offload.log` stay on the volume — the evidence Stage B was read
+against; nothing deletes them, so remove them by hand once read.
 `~/.local/share/claude-sessions/hook.log` is the hook's own failures. Since v0.3.2 a lock
 failure names its event and, for a `SessionEnd`, its reason — `claude-1: SessionEnd (logout)
 dropped, lock: … busy for 400ms` — so `grep dropped` answers which events were lost. A

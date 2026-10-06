@@ -673,7 +673,7 @@ at 6 columns, the right edge marked:
      forced-door bring-up, which the same recreate delivers. **`2026.10.04.4` supersedes
      `.3` before it was rolled out** (2026-10-04: no claude-sessions change, only the
      entrypoint, login and sshd_config text that followed the published port out); read
-     `.4` wherever this step says `.3`. **`2026.10.06` (claude-sessions v0.4.0 and zmx 0.8.1,
+     `.4` wherever this step says `.3`. **`2026.10.06` (claude-sessions v0.4.1 and zmx 0.8.1,
      infra#9) supersedes both** if neither has been rolled out; it is the tag below, and it
      carries claude-sessions **v0.4.1** and **Stage B — the live offloader**.
      0. **Before anything is recreated** — these need the old state:
@@ -681,22 +681,31 @@ at 6 columns, the right edge marked:
           v0.3.8 on abduco): in a slot after a long reply, a swipe or the wheel there recalls
           prompt history. infra-dev's `2026.10.03.3` (v0.3.4) cannot show it — it predates the
           mouse switches — and after the recreate abduco is gone.
-        - **Grep every client for an abduco-era block**: `grep -n 'RemoteCommand' ~/.ssh/config`
-          (and the laptop's Windows config). A block still saying `abduco -A claude claude` is
-          from before 2026-10-02; the forced door now catches it and gives a login with a
-          re-run hint, but re-run `client-home-ssh-config.yml` there anyway.
-        - **Fast-forward zero's checkout**, which `make up` builds from — infra-dev's
-          /workspace IS that checkout, so from inside infra-dev: `git -C /workspace pull
-          --ff-only`, then `grep '^BASE_TAG' /workspace/dev/Makefile` must read `2026.10.06`.
-          Skip it and step 1 recreates onto the stale tag — the regression, and every slot
-          ended twice.
-        - **Keep or remove the Stage A evidence by hand, once read**: `~/.local/share/
-          claude-sessions-dry-run.log` and the old script's `~/.local/share/claude-offload.log`
-          stay on the volume; nothing deletes them.
+        - **Grep every client for an abduco-era block** (and the laptop's Windows config too):
+          ```
+          grep -n 'RemoteCommand' ~/.ssh/config
+          ```
+          A block still naming `abduco -A claude claude` (with or without `in-workspace`) is
+          from before 2026-10-02. The forced door catches it — the menu at a terminal, exit
+          127 without one, and a re-run hint either way — but re-run
+          `client-home-ssh-config.yml` there anyway.
+        - **Fast-forward zero's checkout, after this change is merged and pushed** — `make up`
+          builds from it, and infra-dev's /workspace IS that checkout. From inside infra-dev:
+          ```
+          git -C /workspace pull --ff-only
+          grep '^BASE_TAG' /workspace/dev/Makefile
+          ```
+          The second must read `2026.10.06`. Skip it and step 1 recreates onto the stale tag —
+          the regression, and every slot ended twice.
+        - **Keep or remove the Stage A evidence by hand, once read**:
+          `~/.local/share/claude-sessions-dry-run.log` and the old script's
+          `~/.local/share/claude-offload.log` stay on the volume; nothing deletes them.
      1. Wait for `dev-base.yml` to publish `2026.10.06` (v0.4.1, zmx, the live offloader,
         v0.3.8's scrollback and the forced door; it supersedes `2026.10.03.3` and every tag
         since), then recreate infra-dev — which ends every slot, this agent's included:
-        `ssh -t zero 'cd ~/infra/dev && make up'`.
+        `ssh -t zero 'cd ~/infra/dev && make up'`. (No `make base` from an earlier commit
+        should have left a local `gsrpi-dev-base:2026.10.06` on zero: Docker prefers a local
+        image, and the tag carried three contents on its branch before it was published.)
      2. `make verify` reads `sessions  : claude-sessions 0.4.1` (`0.3.8` means the checkout
         was stale — back to step 0), `zmx       : zmx 0.8.1` and `scrollvars: 3 of 3`, a
         `hooks` line naming six events and a `door` line naming
@@ -738,8 +747,8 @@ at 6 columns, the right edge marked:
         - *`Enter` on a conversation that never ran in a slot* (one from before the hooks, or
           from `abduco -A claude claude`): a new `claude-N` starts running `claude --resume
           <id>`, and `make sessions` shows its `SessionStart` binding it.
-        - *`/clear` takes no lock* (v0.3.2): `/clear` in a slot, then `grep dropped
-          ~/.local/share/claude-sessions/hook.log` stays empty while `make sessions` shows the
+        - *`/clear` takes no lock* (v0.3.2): `/clear` in a slot, then
+          `grep dropped ~/.local/share/claude-sessions/hook.log` stays empty while `make sessions` shows the
           slot's new `SessionStart`. **Then leave that cleared slot idle** (v0.3.4): a `/clear`-only
           transcript is no conversation, so expect `would close`, and closing it leaves no row.
           And `make sessions` shows that slot with only its new `SessionStart` — v0.3.4 starts a
@@ -768,8 +777,10 @@ at 6 columns, the right edge marked:
           30` × `ClientAliveCountMax 3`, about 90 s — reading sooner passes on v0.3.6 too. Then
           no `core` is in `/workspace`, and `~/.local/share/claude-sessions/` shows nothing new
           beyond normal hook lines.
-        - *A closed pipe* (v0.3.7): `bash -c 'claude-sessions --help | true; echo
-          ${PIPESTATUS[0]}'` prints `0`. **Not `| head -1`**, which passes on v0.3.6 too: the
+        - *A closed pipe* (v0.3.7): this prints `0`:
+          ```
+          bash -c 'claude-sessions --help | true; echo ${PIPESTATUS[0]}'
+          ``` **Not `| head -1`**, which passes on v0.3.6 too: the
           help fits the pipe buffer, so the reader only closes after the write. With `| true`
           the reader is gone first, and v0.3.6 exits 134 every time (calibrated 2026-10-04,
           five runs each).
@@ -798,7 +809,7 @@ at 6 columns, the right edge marked:
           tr '\0' '\n' < /proc/PID/environ | grep CLAUDE_CODE_DISABLE_
           ps -o comm= -p $(ps -o ppid= -p PID | tr -d ' ')
           ```
-          — all three `=1`, and `zmx`; a parent under any other name means a slot that never
+          — the three `=1` (beside the image's own `CLAUDE_CODE_DISABLE_AGENT_VIEW=1`), and `zmx`; a parent under any other name means a slot that never
           binds.
         - *`make status`'s `sessions` line* names zmx sessions (`sessions  : zmx — claude-1 …`).
         - *The sweep, live:* `grep 'sweep:' ~/.local/share/claude-sessions/offload.log | tail`.
@@ -808,15 +819,26 @@ at 6 columns, the right edge marked:
           line in `~/.local/share/claude-sessions-passes.log` is a pass that exited non-zero
           (124 = it timed out). Its *last pass* half shows the verdicts — a slot running
           background agents reads `kept — background work running: subagent: …` (v0.4.1).
-     4c. **Rollback, should it be needed.** Stop the offloader now, without a recreate: in
-        `make shell`, `ps -eo pid,pgid,args | grep claude-sessions-passes`, then `kill --
-        -<pgid>` — it is a setsid group; never `pkill -f` (CLAUDE.md, shell traps). It comes
-        back at the next start. Off for good: `DEV_IDLE_OFFLOAD=0` in `dev/.env`, then `make
-        up`. Off zmx and v0.4.x altogether: a commit setting `BASE_TAG` back to `2026.10.04.4`
-        (abduco, v0.3.8, the old script and the Stage A dry run) and `make up` — it ends the
-        zmx slots, and their conversations stay resumable from the `Closed` group.
+     4c. **Rollback, should it be needed.**
+        - **Stop the offloader now, without a recreate** (it comes back at the next start). In
+          `make shell`, find the loop's process group and any pass in flight — `timeout` runs
+          each pass in a group of its own, so killing the loop's group alone lets a running
+          pass finish, stops included:
+          ```
+          ps -eo pid,pgid,args | grep '[c]laude-sessions-passes'
+          ps -eo pid,args | grep '[t]imeout 120 claude-sessions'
+          ```
+          then `kill -- -PGID` with the first's pgid, and `kill PID` with the second's pid, if
+          there is one. Never `pkill -f` (CLAUDE.md, shell traps).
+        - **Off for good:** `DEV_IDLE_OFFLOAD=0` in `dev/.env`, then `make up` — which
+          recreates the container and ends every slot.
+        - **Off zmx and v0.4.x altogether:** a commit setting `BASE_TAG` back to `2026.10.04.4`
+          (abduco, v0.3.8, the old script and the Stage A dry run) and `make up` — it ends
+          the zmx slots, and their conversations stay resumable from the `Closed` group.
      5. Read `make offload-log` over a few days. A day after rollout, `make sessions` again.
      6. The other dev repos pick this up when they bump `BASE_TAG`.
+   - ✔ **The gate below was read on or3-dev, 2026-10-06, and passed** — `decisions.md`, the
+     two-stage row; Stage B is in base `2026.10.06`. Kept as the record of what was checked.
    - **Stage B gate — found in review of Stage A, 2026-10-02. All three are FIXED in v0.2.0**
      (issues closed upstream; #4 checked here against the very state that showed it — pid
      161 drops out of `doctor` while `/proc/161` still opens). **The checks below stay the
@@ -934,9 +956,10 @@ at 6 columns, the right edge marked:
      `timeout` kill (124) or a silent non-zero exit leaves nothing — and `$?` after the pipe
      would be `sed`'s anyway.
    - ✔ **The orphan sweep was armed in claude-sessions v0.3.0** on 2026-10-03, earlier than
-     the week of `offload.log` it was waiting on, and is live here with Stage B. The owner's
-     2026-10-08 reminder (reading the `WOULD KILL` lines) is moot: or3-dev's reading had
-     none, and `sweep: killed` lines in `offload.log` are now what to read.
+     the week of `offload.log` it was waiting on, and is live with Stage B, on each container
+     from its recreate onto `2026.10.06`. The owner's 2026-10-08 reminder (reading the
+     `WOULD KILL` lines) is moot: or3-dev's reading had none, and `sweep: killed` lines in
+     `offload.log` are then what to read.
 6. **Switch the door** — `ansible/templates/ssh-dev-block.j2`'s RemoteCommand becomes
    `in-workspace claude-sessions-door`; the owner runs the client play from each client. Then
    **delete this plan.**

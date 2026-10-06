@@ -67,7 +67,7 @@ status() {
     # The offloader's loop, by the age of the log it writes every pass. Read by file age,
     # not by matching argv — `pgrep -f` on the loop's own words is the self-match trap
     # CLAUDE.md records.
-    printf 'offloader : %s\n' "$(d exec "$CONTAINER" sh -c 'f=$HOME/.local/share/claude-sessions-passes.log; [ -f "$f" ] || { echo "no pass log — off (DEV_IDLE_OFFLOAD=0), or not started: make boot-log"; exit 0; }; a=$(( $(date +%s) - $(stat -c %Y "$f") )); if [ "$a" -le 600 ]; then echo "live, last pass $((a / 60))m ago (make offload-log)"; else echo "NO PASS in $((a / 60))m — the loop has stopped; see make boot-log"; fi' 2>/dev/null \
+    printf 'offloader : %s\n' "$(d exec "$CONTAINER" sh -c '[ "${DEV_IDLE_OFFLOAD:-1}" = 1 ] || { echo "off (DEV_IDLE_OFFLOAD=$DEV_IDLE_OFFLOAD)"; exit 0; }; f=$HOME/.local/share/claude-sessions-passes.log; [ -f "$f" ] || { echo "no pass log — off (DEV_IDLE_OFFLOAD=0), or not started: make boot-log"; exit 0; }; a=$(( $(date +%s) - $(stat -c %Y "$f") )); if [ "$a" -le 600 ]; then echo "live, last pass $((a / 60))m ago (make offload-log)"; else echo "NO PASS in $((a / 60))m — the loop has stopped; see make boot-log"; fi' 2>/dev/null \
         || echo 'could not ask the container')"
 
     # `claude auth status`, not "is there a credentials file" — a file holding empty
@@ -296,6 +296,14 @@ print("managed settings say off" if v is True else
     # proves a name is PRESENT, not that it is read — each also sits in an allowlist and a
     # string table — which is as far as a strings check goes; fewer than three is the alarm.
     printf 'scrollvars: %s\n' "$(d exec "$CONTAINER" sh -c 'c=$(command -v claude) || { echo "no claude on PATH"; exit 0; }; b=$(readlink -f "$c"); v=$(claude --version 2>/dev/null | cut -d" " -f1); n=$(grep -aowE "CLAUDE_CODE_DISABLE_(ALTERNATE_SCREEN|MOUSE|VIRTUAL_SCROLL)" "$b" | sort -u | wc -l); if [ "$n" -eq 3 ]; then echo "3 of 3 names present in $v"; else echo "ONLY $n of 3 names present in $v — renamed, or the binary is no longer plain text; tell claude-sessions"; fi' 2>/dev/null \
+        || echo 'could not ask the container')"
+    # The field claude-sessions v0.4.1 keeps a slot alive by (claude-sessions#9): `Stop`'s
+    # `background_tasks`, the running subagents, workflows, shells, monitors and cloud
+    # sessions. v0.4.1 reads a missing field as "no background work", so a rename in a
+    # self-updated Claude Code would fail OPEN — slots running background agents read as
+    # idle and are stopped. The same check, for the same reason, as scrollvars above.
+    # Calibrated 2026-10-06 on 2.1.291: the name is present, built into the Stop payload.
+    printf 'bgtasks   : %s\n' "$(d exec "$CONTAINER" sh -c 'c=$(command -v claude) || { echo "no claude on PATH"; exit 0; }; b=$(readlink -f "$c"); v=$(claude --version 2>/dev/null | cut -d" " -f1); if grep -aqowF background_tasks "$b"; then echo "Stop carries background_tasks in $v"; else echo "background_tasks NOT FOUND in $v — the offloader cannot see background agents; tell claude-sessions, and DEV_IDLE_OFFLOAD=0 until it is answered"; fi' 2>/dev/null \
         || echo 'could not ask the container')"
     tool cloudflared 'the hash-pinned download did not land' cloudflared --version
     tool sessions 'no claude-sessions — this image predates it (rebuild: make up)' claude-sessions --version

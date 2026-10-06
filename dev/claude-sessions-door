@@ -16,7 +16,9 @@
 #     sshd put it — exactly as it ran before the door was forced, so nothing that worked
 #     then moves. That includes sftp: dev/sshd_config names a real sftp-server binary
 #     for this branch to run, because the `internal-sftp` it used to name is not one.
-#     `ssh <c> in-workspace cmd` runs a command in /workspace instead;
+#     `ssh <c> in-workspace cmd` runs a command in /workspace instead. ONE EXCEPTION: an
+#     abduco-era client block's `abduco -A claude claude` (abduco left the image
+#     2026-10-06) is caught below and becomes a login — the menu at a terminal;
 #   - no terminal on stdin or stdout means a plain login shell;
 #   - a terminal and no command is the menu, in /workspace.
 #
@@ -43,11 +45,16 @@ if [ -n "${SSH_ORIGINAL_COMMAND:-}" ]; then
     cmd=$SSH_ORIGINAL_COMMAND
     unset SSH_ORIGINAL_COMMAND
     case $cmd in
-        # A client block from before 2026-10-02 still sends `abduco -A claude claude`, and
-        # abduco left the image on 2026-10-06 — run as given it is "Unknown command" and the
-        # login ends. Say so and give that client the menu it would have had.
-        "abduco "*)
-            echo "claude-sessions-door: this client's ssh block predates 2026-10-02 and abduco is gone; re-run client-home-ssh-config.yml; carrying on as an ordinary login." >&2
+        # A client block from before 2026-10-02 still sends `in-workspace abduco -A claude
+        # claude` (the dev block's form) or `abduco -A claude claude` (the older fleet one),
+        # and abduco left the image on 2026-10-06 — run as given it is "Unknown command" and
+        # the login ends. Say so and give that client what it was asking for: the menu at a
+        # terminal. Without one it was a script, which should fail rather than sit at a
+        # login shell waiting on stdin, so it gets 127, the shell's "not found".
+        "abduco "*|"in-workspace abduco "*)
+            echo "claude-sessions-door: this client's ssh block predates 2026-10-02 and abduco is gone; re-run client-home-ssh-config.yml there." >&2
+            if [ ! -t 0 ] || [ ! -t 1 ]; then exit 127; fi
+            echo "claude-sessions-door: opening the menu instead." >&2
             ;;
         *) exec "$shell" -c "$cmd" ;;
     esac

@@ -188,7 +188,7 @@ offload-log:
 	@echo '── claude-sessions: offload.log (real stops, and the orphan sweep) ──'
 	@$(DOCKER) exec $(CONTAINER) sh -c 'tail -n 40 /home/dev/.local/share/claude-sessions/offload.log 2>/dev/null || echo "nothing offloaded yet"'
 	@echo '── failed passes ──'
-	@$(DOCKER) exec $(CONTAINER) sh -c 'grep -h "pass failed" /home/dev/.local/share/claude-sessions-passes.log 2>/dev/null | tail -n 10 | grep . || echo "none"'
+	@$(DOCKER) exec $(CONTAINER) sh -c 'f=/home/dev/.local/share/claude-sessions-passes.log; t=$$(grep -h "pass failed" "$$f" 2>/dev/null | tail -n 5 | cut -d" " -f1); [ -n "$$t" ] || { echo "none"; exit 0; }; for s in $$t; do grep -F "$$s" "$$f"; done'
 	@echo '── the last pass ──'
 	@$(DOCKER) exec $(CONTAINER) sh -c 'f=/home/dev/.local/share/claude-sessions-passes.log; [ -f "$$f" ] && grep -F "$$(tail -n 1 "$$f" | cut -d" " -f1)" "$$f" || echo "no pass yet"'
 
