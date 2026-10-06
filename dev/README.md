@@ -944,7 +944,7 @@ outlives the container), kept current by Claude Code's own hooks — and, since 
 `archive/` beside them: one small file per conversation `c` has put away (`archived <ms>`)
 or taken back out (`kept <ms>`) — age-archiving writes nothing, being worked out as the
 list is read. The base installs
-**v0.4.1** — a static binary, pinned by tag and SHA-256 per architecture, at
+**v0.4.3** — a static binary, pinned by tag and SHA-256 per architecture, at
 `/usr/local/bin/claude-sessions`.
 
 **The menu is in this release, and it is where `ssh infra-dev` lands.** `claude-sessions`
@@ -1030,6 +1030,10 @@ subagent's under `<conversation>/subagents/`, whichever is latest; a compaction 
 counts, because it can land mid-turn — no background work was listed at its last `Stop`
 (v0.4.1: Claude Code's `Stop` carries its running subagents, workflows, shells, monitors and
 cloud sessions, and the slot reads `kept — background work running: …`),
+it is not mid-turn — **except a turn you ended with Esc** (v0.4.2: an Esc fires no hook, so
+the transcript's trailing `[Request interrupted by user…]` marker is read as the end of the
+turn, and the ten minutes run from it; a prompt or a reply after the marker means it is
+not the end) —
 nothing waits on you (a permission prompt), no timer is pending
 (`ScheduleWakeup`/`CronCreate`, whoever set it), nothing but `claude` (and its
 `claude.exe` helpers) runs under it, and
@@ -1078,7 +1082,12 @@ a `claude`). **The sweep is live with the offloader**: it logs `sweep: killed �
 an old one goes on the first pass after its claude exits. A dry run (`make idle`) logs
 `sweep: WOULD KILL …` and `would keep, too young` with the same check. **The sweep is only safe with the agent view off** ([above](#the-agent-view-is-off-and-cannot-be-turned-back-on-in-here)):
 agent view's supervisor outlives its session by design, and this rule would kill it.
-**"events: none seen"** in `make sessions` means the hooks are not firing.
+**"events: none seen"** in `make sessions` means the hooks are not firing. Each pass's
+`memory:` line is the container's free memory by **working set** since v0.4.3 —
+`memory.max` minus `memory.current` plus `inactive_file`, with the reclaimable page cache
+named, `578 MB free … (99 MB of it reclaimable page cache)` — and the menu's room check uses
+the same figure, so a burst of file I/O no longer reads as a session's worth of RAM
+(claude-sessions#7).
 
 **Resuming an offloaded or closed session is `Enter` on its row in the menu.** Without the
 menu: `claude-sessions doctor` prints each slot's session id, then `claude --resume <id>`

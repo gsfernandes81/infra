@@ -675,7 +675,12 @@ at 6 columns, the right edge marked:
      entrypoint, login and sshd_config text that followed the published port out); read
      `.4` wherever this step says `.3`. **`2026.10.06` (claude-sessions v0.4.1 and zmx 0.8.1,
      infra#9) supersedes both** if neither has been rolled out; it is the tag below, and it
-     carries claude-sessions **v0.4.1** and **Stage B — the live offloader**.
+     carries claude-sessions **v0.4.1** and **Stage B — the live offloader**. ✔ **Brought up on
+     infra-dev on 2026-10-06** (09:48 UTC; checked from inside: 0.4.1, zmx 0.8.1, the forced door,
+     scrollvars and bgtasks, this session bound to zmx in `claude-1`, the loop live).
+     **`2026.10.06.1` (claude-sessions v0.4.3: Esc-ended turns read idle from the Esc, and the
+     memory figure is the working set, claude-sessions#7) supersedes it**: repeat steps 0's
+     fast-forward, 1 and 2 for it.
      0. **Before anything is recreated** — these need the old state:
         - **Calibrate the scroll check on or3-dev, before or3 bumps** (it is on `2026.10.04.4`,
           v0.3.8 on abduco): in a slot after a long reply, a swipe or the wheel there recalls
@@ -695,18 +700,18 @@ at 6 columns, the right edge marked:
           git -C /workspace pull --ff-only
           grep '^BASE_TAG' /workspace/dev/Makefile
           ```
-          The second must read `2026.10.06`. Skip it and step 1 recreates onto the stale tag —
+          The second must read `2026.10.06.1` (it read `2026.10.06` for the first bring-up). Skip it and step 1 recreates onto the stale tag —
           the regression, and every slot ended twice.
         - **Keep or remove the Stage A evidence by hand, once read**:
           `~/.local/share/claude-sessions-dry-run.log` and the old script's
           `~/.local/share/claude-offload.log` stay on the volume; nothing deletes them.
-     1. Wait for `dev-base.yml` to publish `2026.10.06` (v0.4.1, zmx, the live offloader,
+     1. Wait for `dev-base.yml` to publish `2026.10.06.1` (v0.4.3; `2026.10.06` was v0.4.1, zmx, the live offloader,
         v0.3.8's scrollback and the forced door; it supersedes `2026.10.03.3` and every tag
         since), then recreate infra-dev — which ends every slot, this agent's included:
         `ssh -t zero 'cd ~/infra/dev && make up'`. (No `make base` from an earlier commit
         should have left a local `gsrpi-dev-base:2026.10.06` on zero: Docker prefers a local
         image, and the tag carried three contents on its branch before it was published.)
-     2. `make verify` reads `sessions  : claude-sessions 0.4.1` (`0.3.8` means the checkout
+     2. `make verify` reads `sessions  : claude-sessions 0.4.3` (`0.3.8` or `0.4.1` means the checkout
         was stale — back to step 0), `zmx       : zmx 0.8.1` and `scrollvars: 3 of 3`, a
         `hooks` line naming six events and a `door` line naming
         `/usr/local/bin/claude-sessions-door`; `make status` has `offloader : live, last pass
@@ -880,7 +885,7 @@ at 6 columns, the right edge marked:
          line (every claude fires the managed hooks, so none ran outside a slot) and nothing
          else was written. The line is `memory.max − memory.current`, which counts cache (now
          892 MB "used", 515 MB of it `file`). Filed upstream as
-         [claude-sessions#7](https://github.com/gsfernandes81/claude-sessions/issues/7),
+         [claude-sessions#7](https://github.com/gsfernandes81/claude-sessions/issues/7) (fixed in v0.4.3),
          because `room_for` uses the same figure and Stage B would act on it.
        - **The menu dumped core into `/workspace` at 01:56:44** when its terminal went away
          ([claude-sessions#6](https://github.com/gsfernandes81/claude-sessions/issues/6), fixed
