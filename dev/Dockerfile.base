@@ -476,7 +476,7 @@ RUN chmod 0644 /etc/claude-code/managed-settings.json \
 #
 # A DROP-IN, managed-settings.d/, not managed-settings.json: Claude Code reads the .json
 # first and then every .d/*.json in name order, so this tool owns a file of its own and
-# the agent-view policy above stays the one-line file it is. Managed settings because a
+# the agent-view and update-channel policy above stays its own file. Managed settings because a
 # user's `disableAllHooks` cannot switch these off, and a repo's .claude/ does not have to
 # know about them. The FILE-based kind deliberately: server-managed settings (the claude.ai
 # admin console) put hooks behind an approval dialog, and would replace this file outright
@@ -485,11 +485,16 @@ RUN chmod 0644 /etc/claude-code/managed-settings.json \
 # docs/design.md § "Where the hooks live"); the first `claude` in a rebuilt container is the
 # check, and it is a bring-up step in plans/claude-sessions.md.
 #
+# THE SAME FILE CARRIES A STATUS LINE since v0.4.5 — `claude-sessions statusline`, RAM and
+# load in yellow and red, refreshed every minute; the owner asked for it upstream. As
+# managed settings it outranks any user `statusLine`, and none is set in this repo or
+# on the volume today. `make verify`'s `hooks` line names it.
+#
 # 0644 IS LOAD-BEARING: every session runs as `dev`, and a file it cannot read means
 # sessions start with no hooks and nothing on screen says so.
-ARG CLAUDE_SESSIONS_VERSION=0.4.4
-ARG CLAUDE_SESSIONS_SHA256_arm64=00d82cb39f1d97c995d9b7ea6b2b44deb2d996c97da1c971ef750f3f5adba5b2
-ARG CLAUDE_SESSIONS_SHA256_amd64=f6ace5369908201b82f02792de14a8a9f26bfea8c79ff89fb6749e6075617562
+ARG CLAUDE_SESSIONS_VERSION=0.4.6
+ARG CLAUDE_SESSIONS_SHA256_arm64=753d7ff848e56fa02237a0cf113593c74432c2ae7b0f443865da319e179a612c
+ARG CLAUDE_SESSIONS_SHA256_amd64=2408e672bb08224ab262c3360e458cadc343a33940e645887d6372d8134d5d49
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \

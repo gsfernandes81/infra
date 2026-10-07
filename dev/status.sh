@@ -313,20 +313,24 @@ print("managed settings say off" if v is True else
     # The hooks that feed claude-sessions, read the way Claude Code reads them: parsed, and
     # as `dev`, because a file that is malformed or unreadable to the session's account is
     # ignored whole and silently — sessions start with no hooks. Whether they actually FIRE
-    # is a different question, answered by `make sessions` ("events: none seen").
+    # is a different question, answered by `make sessions` ("events: none seen"). The status
+    # line the same file installs (v0.4.5) is named after them when it is there.
     local hooks_file
     hooks_file="$(d exec "$CONTAINER" python3 -c '
 import json, sys
 p = "/etc/claude-code/managed-settings.d/claude-sessions.json"
 try:
-    h = json.load(open(p)).get("hooks") or {}
+    f = json.load(open(p))
+    h = f.get("hooks") or {}
+    s = (f.get("statusLine") or {}).get("command")
 except FileNotFoundError:
     sys.exit("NO " + p + " — this image predates it (rebuild: make up)")
 except ValueError as e:
     sys.exit("NOT VALID JSON, so Claude Code ignores the whole file — %s" % e)
 except OSError as e:
     sys.exit("UNREADABLE as dev, so sessions start with no hooks — %s" % e)
-print(" ".join(sorted(h)) if h else "PRESENT BUT EMPTY — no hooks in it")
+print((" ".join(sorted(h)) if h else "PRESENT BUT EMPTY — no hooks in it")
+      + ("; status line: " + s if s else ""))
 ' 2>&1)"
     printf 'hooks     : %s\n' "${hooks_file:-could not ask the container — see the container line above}"
     # `ssh <c> in-workspace <cmd>` and `ssh -t <c> in-workspace` name it; an image without
