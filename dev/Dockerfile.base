@@ -523,6 +523,14 @@ RUN set -eux; \
 # binaries from zmx's author, not in Debian. The hashes are of the TARBALLS, as
 # claude-sessions' CI checks them; each holds one file, `zmx`.
 #
+# FETCHED FROM THE GITHUB RELEASE, NOT zmx.sh (2026-10-07). The author publishes the same
+# tarballs both places — GitHub's asset digests are these hashes exactly — but zmx.sh
+# began answering 404 for the aarch64 one from GitHub's runners while still serving it
+# to zero, and its `s-maxage=604800` lets a shared cache hold an answer for a week, so a
+# build could stay broken that long for nothing in this repo. The hash is what makes the
+# source interchangeable; the release is GitHub's own copy, served by GitHub, not a mirror
+# with a week-long cache in front of it.
+#
 # INSTALLED AS `zmx` AND NOTHING ELSE: a slot binds only when its claude's parent process
 # is named `zmx`, and that name is the executable's file name — a copy under another name
 # starts sessions that never bind (claude-sessions' own tests proved it by accident).
@@ -547,7 +555,7 @@ RUN set -eux; \
       amd64) zarch=x86_64;  sha="${ZMX_SHA256_amd64}" ;; \
       *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
     esac; \
-    curl -fsSLo /tmp/zmx.tar.gz "https://zmx.sh/a/zmx-${ZMX_VERSION}-linux-${zarch}.tar.gz"; \
+    curl -fsSLo /tmp/zmx.tar.gz "https://github.com/neurosnap/zmx/releases/download/v${ZMX_VERSION}/zmx-${ZMX_VERSION}-linux-${zarch}.tar.gz"; \
     echo "${sha}  /tmp/zmx.tar.gz" | sha256sum -c -; \
     tar -xzf /tmp/zmx.tar.gz -C /tmp zmx; \
     install -m 0755 /tmp/zmx /usr/local/bin/zmx; \
