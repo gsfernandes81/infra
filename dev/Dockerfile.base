@@ -433,14 +433,20 @@ RUN chmod 0755 /usr/local/bin/in-workspace
 #
 # THE SAME FILE PUTS CLAUDE CODE ON THE STABLE UPDATE CHANNEL (2026-10-07):
 # `"autoUpdatesChannel": "stable"` — about a week behind `latest`, skipping releases with
-# major regressions (code.claude.com/docs/en/setup). Claude Code updates itself here, so
-# the channel is the only say this image has in WHICH version a container runs. Managed
+# major regressions (code.claude.com/docs/en/setup). It is FORWARD-ONLY, and that is
+# accepted (owner, 2026-10-07): the install above takes the build day's `latest`, and the
+# updater never steps down — a container stays on that version until stable passes it, then
+# follows stable. Checked in 2.1.292: the background updater and `claude update` both skip a
+# channel version at or below the running one. Managed
 # settings because it is one line in a file that already exists, and because nothing else
 # baked survives: ~/.claude is a volume, and a default written into it would be hidden from
 # every container after the one that created it. The cost, chosen: a container cannot be
 # switched back to `latest` from inside it — that is an edit here and a base bump.
 COPY claude-managed-settings.json /etc/claude-code/managed-settings.json
-RUN chmod 0644 /etc/claude-code/managed-settings.json
+# Parsed here because it is hand-edited and Claude Code ignores a malformed settings file
+# WHOLE and says nothing — the agent view would be back on and the channel back on latest.
+RUN chmod 0644 /etc/claude-code/managed-settings.json \
+    && python3 -c 'import json, sys; json.load(open(sys.argv[1]))' /etc/claude-code/managed-settings.json
 
 # ── claude-sessions: the session registry, and the hooks that feed it ───────
 # One static binary from github.com/gsfernandes81/claude-sessions (public, AGPL-3.0) —

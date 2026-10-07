@@ -346,7 +346,7 @@ rule cares about the destination, and this one is free.
 | what it started with, and when | `make boot-log` — the entrypoint prints the version at every start |
 | update now, without waiting | `make claude-update` |
 | stop updating | `DISABLE_AUTOUPDATER: "1"` in `compose.yaml`'s `environment:`, then `make up` |
-| which channel it follows | **`stable`**, from the base's managed settings since 2026-10-07 — about a week behind `latest`, skipping releases with major regressions; `make verify`'s `autoupdate` line names it. Back to `latest`: edit `dev/claude-managed-settings.json` and bump `BASE_TAG` — managed settings outrank `~/.claude/settings.json`, so it cannot be changed from inside a container |
+| which channel it follows | **`stable`**, from the base's managed settings since 2026-10-07 — about a week behind `latest`, skipping releases with major regressions; `make verify`'s `autoupdate` line names it. **Forward only:** a new container starts on the build day's `latest` and stays there until stable passes it — the updater never steps down, and that is accepted. Back to `latest`: edit `dev/claude-managed-settings.json` and bump `BASE_TAG` — managed settings outrank `~/.claude/settings.json`, so it cannot be changed from inside a container |
 
 **The `autoupdate` line does not read the field you would expect, and that is the point.**
 `claude doctor` has an `Auto-updates:` field, and it says `enabled` **whether or not an

@@ -94,16 +94,18 @@ services:
       # on its own, in the background, taking effect at the next `claude`. `make verify`
       # prints whether it can — the `autoupdate:` line — and `make claude-update` does it
       # now rather than waiting. It follows the STABLE channel, set in the base's managed
-      # settings (dev/claude-managed-settings.json), not here.
+      # settings (dev/claude-managed-settings.json), not here — forward only: a new
+      # container starts on the build day's `latest` and stays there until stable passes it.
       #
       # To STOP it, and stay on exactly what the image shipped:
       #
       #   DISABLE_AUTOUPDATER: "1"
       #
       # Claude Code's own variable, not a DEV_* of ours. The release CHANNEL is not a
-      # variable at all — `autoUpdatesChannel` in ~/.claude/settings.json, which is the
-      # infra-claude volume and so survives rebuilds: "stable" is roughly a week behind
-      # and skips releases with known major regressions, "latest" (the default) is not.
+      # variable at all, and not this file's: it is `autoUpdatesChannel` in the base's
+      # managed settings, which outrank ~/.claude/settings.json, so setting it there changes
+      # nothing. "stable" is roughly a week behind and skips releases with known major
+      # regressions.
 
     volumes:
       # The host clone. `git pull` in the container and on the host are the same
