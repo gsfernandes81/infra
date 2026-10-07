@@ -178,7 +178,8 @@ logs:
 
 # The offloader's own two questions. `idle` is a DRY RUN — its verdict on every slot now,
 # nothing stopped (a dry run's sweep still writes its `WOULD KILL` / `would keep` lines to
-# offload.log). `offload-log` is what the live loop has done: real stops and the sweep
+# offload.log, and since v0.4.5 it writes the activity state as a live pass does, so the
+# loop's next window may be too short to count). `offload-log` is what the live loop has done: real stops and the sweep
 # (the binary's own offload.log), then failed passes and the last pass's verdicts (the
 # loop's own claude-sessions-passes.log).
 idle:

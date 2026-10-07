@@ -487,8 +487,8 @@ RUN chmod 0644 /etc/claude-code/managed-settings.json \
 #
 # THE SAME FILE CARRIES A STATUS LINE since v0.4.5 — `claude-sessions statusline`, RAM and
 # load in yellow and red, refreshed every minute; the owner asked for it upstream. As
-# managed settings it outranks any user `statusLine`, and none is set in this repo or
-# on the volume today. `make verify`'s `hooks` line names it.
+# managed settings it outranks any user `statusLine` — none in this repo or on
+# infra-dev's volume; the other children's volumes are checked at their bump. `make verify`'s `hooks` line names it.
 #
 # 0644 IS LOAD-BEARING: every session runs as `dev`, and a file it cannot read means
 # sessions start with no hooks and nothing on screen says so.

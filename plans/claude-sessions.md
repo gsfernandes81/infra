@@ -296,7 +296,9 @@ payload. Three corrections the event table needs:
 Also: common fields include `agent_id`/`agent_type` **on subagents only** — a cheaper
 nested-subagent test than the `/proc` walk, though a `claude -p` from a Bash call still
 needs the walk. `Stop` carries `last_assistant_message` and `stop_hook_active`.
-`UserPromptSubmit` and `Stop` are the two **blocking** events among the ones we use —
+`UserPromptSubmit` and `Stop` are the two **blocking** events among the ones we use (⚠︎ no
+longer, since claude-sessions v0.4.6 runs both async; `SessionStart` and `SessionEnd` are the
+synchronous ones) —
 `SessionStart`, `SessionEnd`, `Notification` and `PostToolUse` are observational and
 ignore the exit code entirely, so the always-exit-0 test should pin those two by name.
 And **`SessionEnd` hooks share a 1.5-second budget**: a lock timeout on that path must be
@@ -735,9 +737,18 @@ at 6 columns, the right edge marked:
         offload: every 3m — stops detached, idle claudes …`.
      3. **Start `claude` in the container and confirm no approval dialog appears** — the
         managed-settings consent question, so far settled from the docs only — and that the
-        status line along the bottom reads `RAM: …, Load: …, infra-dev`.
+        status line along the bottom reads `RAM: …, Load: …, infra-dev`. **Each other child
+        (or3-dev, dd, dossier), before its bump:** `grep -c statusLine ~/.claude/settings.json`
+        in it — a user status line there is outranked from 2026.10.07.1, silently.
      4. Prompt it once, then `make sessions`: the slot shows events. "events: none seen"
         means the hooks are not firing.
+     - **Follow-up, not a gate (filed 2026-10-07, v0.4.6):** claude-sessions' design §
+       Activity, measured asks infra's checks on Claude Code's binary to cover the timer
+       field "as they cover `background_tasks`", because the hook-read timer hold fails the
+       wrong way — a payload that loses it drops the hold without a word. Which field is
+       unclear: the hook reads timers from `PostToolUse` on the timer tools' `tool_input` /
+       `tool_response`, not from `Stop` as the design says. Asked upstream; a `make verify`
+       line follows the answer.
      4a. **The menu, by hand, before any client points at it.** From `make shell` (or `ssh -t infra-dev in-workspace`),
         run `claude-sessions-door`. Press `n`, then detach (`Ctrl-\`, zmx's key): the menu comes back
         with `detached · it is still running` (v0.3.3 names no session there), and `make sessions` shows that slot

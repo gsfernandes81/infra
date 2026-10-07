@@ -446,12 +446,15 @@ fi
 # trace, and a pass that exits non-zero (124 is the timeout) gets a line of its own. Real
 # stops and sweep lines are also in the binary's own ~/.local/share/claude-sessions/
 # offload.log. The output is captured, not piped, so `$?` is the command's own status: the
-# Stage A loop piped through sed and lost every exit status. Past 4 MB the log keeps its
-# newest 2 MB, from the first whole line, through a temp file and a rename, never a
-# redirection onto itself. Stage A's ~/.local/share/claude-sessions-dry-run.log is left
-# alone — it is the evidence Stage B was read against; plans/claude-sessions.md says when
-# to remove it. Backgrounded with setsid and its own output discarded, like every daemon
-# here; each pass is time-bounded, so a hang costs one pass.
+# Stage A loop piped through sed and lost every exit status. Past 16 MB the log keeps its
+# newest 8 MB (raised from 4 and 2 on 2026-10-07: since v0.4.5 each pass adds a measured
+# line per slot, about 110 KB a day each, and upstream reads days of them before the owner
+# decides on the activity rule — 4 MB would have kept three days on a five-slot box), from
+# the first whole line, through a temp file and a rename, never a redirection onto itself.
+# Stage A's ~/.local/share/claude-sessions-dry-run.log is left alone — it is the evidence
+# Stage B was read against; plans/claude-sessions.md says when to remove it. Backgrounded
+# with setsid and its own output discarded, like every daemon here; each pass is
+# time-bounded, so a hang costs one pass.
 if [ "${DEV_IDLE_OFFLOAD:-1}" = "1" ]; then
     setsid bash -c '
         while :; do
@@ -463,8 +466,8 @@ if [ "${DEV_IDLE_OFFLOAD:-1}" = "1" ]; then
                 printf "%s offload pass failed: exit %s%s\n" "$stamp" "$rc" \
                     "$([ "$rc" -eq 124 ] && echo " (timed out after 120 s)")" >> "$1"
             fi
-            if [ "$(stat -c %s "$1" 2>/dev/null || echo 0)" -gt 4194304 ]; then
-                tail -c 2097152 "$1" | tail -n +2 > "$1.tmp" && mv -f "$1.tmp" "$1"
+            if [ "$(stat -c %s "$1" 2>/dev/null || echo 0)" -gt 16777216 ]; then
+                tail -c 8388608 "$1" | tail -n +2 > "$1.tmp" && mv -f "$1.tmp" "$1"
             fi
             sleep 180
         done' _ "$HOME/.local/share/claude-sessions-passes.log" </dev/null >/dev/null 2>&1 &
