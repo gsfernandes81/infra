@@ -23,7 +23,7 @@ services:
       # `base` — the FROM pulls the tag from ghcr — so a tag bumped here and not yet
       # built by dev-base.yml fails on the pull until `make base` builds it locally.
       args:
-        BASE_TAG: ${BASE_TAG:-2026.10.06.3}
+        BASE_TAG: ${BASE_TAG:-2026.10.07}
     image: infra-dev
     container_name: infra-dev
     hostname: ${DEV_HOSTNAME:-infra-dev}  # Claude Code shows this as the machine title
@@ -93,7 +93,8 @@ services:
       # The container starts on the version its BASE_TAG was built with and moves past it
       # on its own, in the background, taking effect at the next `claude`. `make verify`
       # prints whether it can — the `autoupdate:` line — and `make claude-update` does it
-      # now rather than waiting.
+      # now rather than waiting. It follows the STABLE channel, set in the base's managed
+      # settings (dev/claude-managed-settings.json), not here.
       #
       # To STOP it, and stay on exactly what the image shipped:
       #

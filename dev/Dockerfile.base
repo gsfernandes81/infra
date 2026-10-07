@@ -430,6 +430,15 @@ RUN chmod 0755 /usr/local/bin/in-workspace
 # no longer a `claude` once it is ten minutes old — and agent view's supervisor outlives
 # the session that started it ON PURPOSE, so with the view on, the sweep would kill working
 # supervisors. Turning the view back on anywhere means stopping the offloader there first.
+#
+# THE SAME FILE PUTS CLAUDE CODE ON THE STABLE UPDATE CHANNEL (2026-10-07):
+# `"autoUpdatesChannel": "stable"` — about a week behind `latest`, skipping releases with
+# major regressions (code.claude.com/docs/en/setup). Claude Code updates itself here, so
+# the channel is the only say this image has in WHICH version a container runs. Managed
+# settings because it is one line in a file that already exists, and because nothing else
+# baked survives: ~/.claude is a volume, and a default written into it would be hidden from
+# every container after the one that created it. The cost, chosen: a container cannot be
+# switched back to `latest` from inside it — that is an edit here and a base bump.
 COPY claude-managed-settings.json /etc/claude-code/managed-settings.json
 RUN chmod 0644 /etc/claude-code/managed-settings.json
 

@@ -724,7 +724,8 @@ at 6 columns, the right edge marked:
      2. `make verify` reads `sessions  : claude-sessions 0.4.4` (an older version means the
         checkout was stale — back to step 0), `make idle`'s `memory:` line ends `(N MB of it
         reclaimable page cache)` (v0.4.3's working set), `zmx       : zmx 0.8.1` and `scrollvars: 3 of 3`, a
-        `hooks` line naming eight events (`SubagentStart` and `SubagentStop` since v0.4.4) and a `door` line naming
+        `hooks` line naming eight events (`SubagentStart` and `SubagentStop` since v0.4.4), an
+        `autoupdate` line naming the `stable` channel (from `2026.10.07`), and a `door` line naming
         `/usr/local/bin/claude-sessions-door`; `make status` has `offloader : live, last pass
         Nm ago`; `make boot-log` has the `claude-sessions reconcile:` line and `claude-sessions
         offload: every 3m — stops detached, idle claudes …`.

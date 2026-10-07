@@ -226,17 +226,20 @@ verify() {
     # `Last update attempt` is the corroboration: `success -> <version> (<date>)` is an
     # update that actually happened in this container, which no amount of reading
     # settings can fake.
-    local doctor autoupdate blocked attempt
+    local doctor autoupdate blocked attempt channel
     doctor="$(d exec "$CONTAINER" sh -c 'timeout 30 claude doctor 2>/dev/null' 2>/dev/null)"
     autoupdate="$(printf '%s\n' "$doctor" | sed -n 's/^Auto-updates: *//p' | head -1)"
     blocked="$(printf '%s\n' "$doctor" | grep -o "Can't auto-update.*" | head -1)"
     attempt="$(printf '%s\n' "$doctor" | sed -n 's/^Last update attempt: *//p' | head -1)"
+    # The channel, which the image's managed settings put on `stable` (2026-10-07); `latest`
+    # here means an image from before that, or a settings file Claude Code ignored.
+    channel="$(printf '%s\n' "$doctor" | sed -n 's/^Auto-update channel: *//p' | head -1)"
     if [ -z "$doctor" ]; then
         printf 'autoupdate: %s\n' 'could not read `claude doctor` — run it in the container'
     elif [ -n "$blocked" ]; then
         printf 'autoupdate: %s\n' "BLOCKED — $blocked (see dev/README.md)"
     else
-        printf 'autoupdate: %s\n' "$autoupdate, nothing blocking it; last attempt: ${attempt:-unknown}"
+        printf 'autoupdate: %s\n' "$autoupdate, ${channel:-unknown} channel, nothing blocking it; last attempt: ${attempt:-unknown}"
     fi
     # AGENT VIEW OFF, PRINTED AS TWO SWITCHES rather than one verdict. The managed
     # settings file is the authority — no project or user settings file can override it —

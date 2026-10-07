@@ -1,3 +1,4 @@
 {
-  "disableAgentView": true
+  "disableAgentView": true,
+  "autoUpdatesChannel": "stable"
 }
