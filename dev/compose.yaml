@@ -95,7 +95,10 @@ services:
       # prints whether it can — the `autoupdate:` line — and `make claude-update` does it
       # now rather than waiting. It follows the STABLE channel, set in the base's managed
       # settings (dev/claude-managed-settings.json), not here — forward only: a new
-      # container starts on the build day's `latest` and stays there until stable passes it.
+      # container starts on the version the image carries (whatever `latest` was when its
+      # cached npm layer last ran) and stays there until stable passes it. A claude left
+      # running across an update reinstalls every 30 minutes until it is restarted — the
+      # base's node block has the measurement.
       #
       # To STOP it, and stay on exactly what the image shipped:
       #

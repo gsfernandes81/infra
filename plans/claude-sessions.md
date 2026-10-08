@@ -735,23 +735,25 @@ at 6 columns, the right edge marked:
         `/usr/local/bin/claude-sessions-door`; `make status` has `offloader : live, last pass
         Nm ago`; `make boot-log` has the `claude-sessions reconcile:` line and `claude-sessions
         offload: every 3m — stops detached, idle claudes …`.
-     2a. **An hour after the recreate, check the updater has stopped reinstalling.** On
-        2026-10-08 infra-dev's claude, on `latest` with an npm global install, rewrote its
-        whole package every 30 minutes while already current at 2.1.293: 4.69 GB of
-        `write_bytes` in 8.6 h from one claude, about 13 GB a day onto zero's disk, and a
-        moment each time when `claude` reads "native binary not installed"
-        (claude-sessions#14). **Not a property of the base:** or3-dev, on the same base
-        family and still on 2.1.292, was not doing it that day. Whether it is 2.1.293's
-        updater, or any updater that has just installed, is open, and so is whether two
-        claudes in one container each do it. Stable should end it, since the updater skips a
-        channel version at or below the running one; that is expected, not yet seen. In the
-        container:
+     2a. **Know the reinstall loop, and that a recreate does not end it for good.** On
+        2026-10-08 infra-dev's claude, started on 2.1.292, reinstalled 2.1.293 every 30
+        minutes — 13 GB a day of `write_bytes` onto zero's disk, and a moment each time
+        when `claude` reads "native binary not installed" (claude-sessions#14). The cause is
+        the running process's version: the updater compares it, not the file on disk, with
+        the channel's, so any claude left running across an update loops until it exits.
+        After the recreate the container is on 2.1.291 and stable is below it, so nothing
+        installs and nothing loops — until stable passes 2.1.291, when every claude still
+        running from before does it again. To see whether one is looping, in the container
+        (fish; each claude's running version, then the installed one):
         ```
-        stat -c '%y' /opt/npm-global/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
+        for p in (pgrep -x claude); echo $p (grep -aom1 'VERSION:"[0-9.]*"' /proc/$p/exe); end
+        claude --version
         ```
-        The time must not move across an hour with a slot open. If it does, it is a Claude
-        Code bug for the owner to report, and the volume of writes is a reason to switch
-        auto-update off in the managed settings until it is fixed.
+        A claude whose version is below the installed one reinstalls every half hour;
+        resuming it (exit, then reopen the slot) ends that. `(deleted)` on `/proc/<pid>/exe`
+        is not the test — every claude shows it after any reinstall, current ones included.
+        Calibrated on infra-dev on 2026-10-08: pid 18724 read `VERSION:"2.1.292"` against
+        2.1.293 installed, while it was looping.
      3. **Start `claude` in the container and confirm no approval dialog appears** — the
         managed-settings consent question, so far settled from the docs only — and that the
         status line along the bottom reads `RAM: …, Load: …, infra-dev`. **Each other child
