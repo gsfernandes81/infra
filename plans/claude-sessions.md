@@ -735,6 +735,19 @@ at 6 columns, the right edge marked:
         `/usr/local/bin/claude-sessions-door`; `make status` has `offloader : live, last pass
         Nm ago`; `make boot-log` has the `claude-sessions reconcile:` line and `claude-sessions
         offload: every 3m — stops detached, idle claudes …`.
+     2a. **An hour after the recreate, check the updater has stopped reinstalling.** On
+        `latest` with an npm global install, Claude Code 2.1.292–2.1.293 rewrote its whole
+        package every 30 minutes while already current — ~250 MB written each time, about
+        12 GB a day per running claude onto zero's disk, and a moment each time when `claude`
+        reads "native binary not installed" (claude-sessions#14 has the measurement). Stable
+        should end it, because the updater skips a channel version at or below the running
+        one; that is expected, not yet seen. In the container:
+        ```
+        stat -c '%y' /opt/npm-global/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
+        ```
+        The time must not move across an hour with a slot open. If it does, it is a Claude
+        Code bug for the owner to report, and the volume of writes is a reason to switch
+        auto-update off in the managed settings until it is fixed.
      3. **Start `claude` in the container and confirm no approval dialog appears** — the
         managed-settings consent question, so far settled from the docs only — and that the
         status line along the bottom reads `RAM: …, Load: …, infra-dev`. **Each other child
