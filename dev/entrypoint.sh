@@ -3,7 +3,8 @@
 # sessions' orphans get reaped).
 #
 # Order matters and is not arbitrary:
-#   ssh -> claude state -> pull -> sshd host key -> reconcile -> [offloader (bg)]
+#   ssh -> claude state -> pull -> sshd host key -> reconcile -> keep-alive skill
+#   -> [offloader (bg)]
 #   -> [tunnel(bg)] -> sshd(fg)
 # Everything that could block on a prompt is settled first, because nothing in here
 # can answer one.
@@ -422,17 +423,26 @@ fi
 # at every start, which also brings it up to date with a new pin. Through a temp file and
 # a rename, never a redirection onto the target: `>` truncates before the command runs and
 # follows a symlink, so a failed `skill` would leave an empty file, and a re-pointed path
-# would be written through. A failure is said and does not stop the door — the cost is a
+# would be written through; the temp path is cleared first for the same reason, and `mv -T`
+# refuses to move INTO a directory (or a link to one) where the file should be.
+# ONLY WHILE THE OFFLOADER RUNS, and removed otherwise: with DEV_IDLE_OFFLOAD=0 nothing honours
+# a keep-alive, and a binary that cannot print the skill (a rollback past v0.4.7) has no
+# `keepalive` either — a stale file would tell every claude to run a command that does
+# nothing or does not exist. A failure is said and does not stop the door; the cost is a
 # claude that does not know to ask, so a quiet wait in a detached slot can be offloaded.
-skill_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/keepalive"
-if mkdir -p "$skill_dir" \
+skill_dir="$CFG/skills/keepalive"
+rm -f "$skill_dir/.SKILL.md.tmp"
+if [ "${DEV_IDLE_OFFLOAD:-1}" != "1" ]; then
+    rm -f "$skill_dir/SKILL.md"
+    say "claude-sessions keep-alive skill not installed — the offloader is off, so nothing needs one"
+elif mkdir -p "$skill_dir" \
     && timeout 10 claude-sessions skill > "$skill_dir/.SKILL.md.tmp" \
     && [ -s "$skill_dir/.SKILL.md.tmp" ] \
-    && mv -f "$skill_dir/.SKILL.md.tmp" "$skill_dir/SKILL.md"; then
+    && mv -fT "$skill_dir/.SKILL.md.tmp" "$skill_dir/SKILL.md"; then
     say "claude-sessions keep-alive skill: $skill_dir/SKILL.md"
 else
-    rm -f "$skill_dir/.SKILL.md.tmp"
-    say "claude-sessions keep-alive skill NOT installed — claude will not know to ask for time before a quiet wait"
+    rm -f "$skill_dir/.SKILL.md.tmp" "$skill_dir/SKILL.md"
+    say "claude-sessions keep-alive skill NOT installed (and any old copy removed) — claude will not know to ask for time before a quiet wait"
 fi
 
 # ── the idle-claude offloader ───────────────────────────────────────────────
@@ -482,6 +492,7 @@ fi
 if [ "${DEV_IDLE_OFFLOAD:-1}" = "1" ]; then
     setsid bash -c '
         while :; do
+            start=$(date +%s)
             stamp=$(date -u "+%Y-%m-%dT%H:%M:%SZ")
             out=$(timeout 120 claude-sessions offload 2>&1)
             rc=$?
@@ -493,7 +504,10 @@ if [ "${DEV_IDLE_OFFLOAD:-1}" = "1" ]; then
             if [ "$(stat -c %s "$1" 2>/dev/null || echo 0)" -gt 16777216 ]; then
                 tail -c 8388608 "$1" | tail -n +2 > "$1.tmp" && mv -f "$1.tmp" "$1"
             fi
-            sleep 180
+            # Fixed-rate, not fixed-sleep: the window between readings is what the CPU
+            # budget is per, so a slow pass must not stretch the next one past 3 minutes.
+            elapsed=$(( $(date +%s) - start ))
+            sleep $(( elapsed < 179 ? 180 - elapsed : 1 ))
         done' _ "$HOME/.local/share/claude-sessions-passes.log" </dev/null >/dev/null 2>&1 &
     say "claude-sessions offload: every 3m — stops detached, idle claudes and leaves them resumable"
     say "    every pass: ~/.local/share/claude-sessions-passes.log; stops and sweep: ~/.local/share/claude-sessions/offload.log"

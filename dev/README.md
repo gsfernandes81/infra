@@ -951,8 +951,9 @@ to read as idle ten minutes after its parent's `Stop`.
 **It replaced `offload-idle-claude.sh`**, which stopped a claude after 90 minutes of
 transcript silence — an hour's worth of a claude's longest self-scheduled wake-up plus
 margin — and refused attached sessions, sessions with work under them, and sessions with
-no transcript. Two things retired it. The new hooks *see* a pending `ScheduleWakeup` or
-`CronCreate`, so the 90-minute floor's reason was gone. And it timed every session by the
+no transcript. Two things retired it. The new hooks *saw* a pending `ScheduleWakeup` or
+`CronCreate`, so the 90-minute floor's reason was gone (and since v0.4.7 nothing reads
+timers at all: a quiet wait asks for a keep-alive). And it timed every session by the
 **newest** transcript in the shared workspace directory, so one active slot kept every
 other slot alive: on or3-dev it stopped nothing in 2.7 days while a slot sat idle for
 about 16 hours (infra#9). It could also see only abduco sessions, and a slot is a zmx
@@ -1065,8 +1066,10 @@ still counts during a keep-alive, so a slot still quiet when it ends goes at the
 **The 3-minute cadence is load-bearing**: the CPU budget per window is fixed, so a slower
 timer would read an idle claude's own CPU as activity. What a busy-but-not-working slot
 looks like is in [claude-sessions#14](https://github.com/gsfernandes81/claude-sessions/issues/14):
-a background poller, or Claude Code's 30-minute reinstall after an update, reads as activity
-and keeps the slot — the safe way.
+a background poller every few minutes reads as activity and keeps the slot — the safe
+way. Claude Code's 30-minute reinstall after an update does **not**: one busy window every
+half hour leaves the rest quiet, so the slot is still offloaded once detached — and that
+offload is what ends the reinstall loop (the base's node block).
 
 Unchanged from before: **a slot with no conversation** — nothing typed or replied in its
 transcript, a new slot left before its first prompt or a `/clear`ed one — **is closed
@@ -1086,7 +1089,7 @@ make idle          the offloader's verdict on every slot, now — a dry run, not
 make offload-log   what it stopped or swept, failed passes, and the last pass's verdicts
 make sessions      claude-sessions doctor — per slot, how long since each hook event
 make status        includes `offloader : live, last pass Nm ago`, or why not
-make verify        the binary's version, and the hooks file parsed as dev
+make verify        the binary's version, the hooks file parsed as dev, and the keep-alive skill as installed
 ```
 
 Stage A's `~/.local/share/claude-sessions-dry-run.log` and the old script's
@@ -1100,8 +1103,8 @@ since v0.4.6 so is one dropped behind an async hook stalled on the box's load wh
 the lock: `SessionEnd` waits only 400 ms, so the record stays live with a dead process, the
 menu shows it offloaded, and `reconcile` settles it. Any other event waits 15 s for the lock
 (a `SessionStart` that cannot bind, 2 s), so any other drop means that wait ran out — a
-fault worth an issue on claude-sessions, since a dropped prompt can make a working claude
-read as idle. A `SessionEnd (clear)` or `(resume)`
+fault worth an issue on claude-sessions. Since v0.4.7 the hooks feed the menu only, so a
+dropped event costs a wrong title or busy mark there, not an offload. A `SessionEnd (clear)` or `(resume)`
 cannot appear at all: those ends change nothing, so v0.3.2 takes no lock for them — they
 used to race their own `SessionStart` for it, which is what infra-dev's eight `busy for
 400ms` lines on v0.2.0 most likely were. `offload.log` beside it gets every real stop and every line

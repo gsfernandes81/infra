@@ -328,6 +328,14 @@ print((" ".join(sorted(h)) if h else "PRESENT BUT EMPTY — no hooks in it")
       + ("; status line: " + s if s else ""))
 ' 2>&1)"
     printf 'hooks     : %s\n' "${hooks_file:-could not ask the container — see the container line above}"
+    # The keep-alive skill (claude-sessions v0.4.7): the only thing that tells claude to hold
+    # its slot through a quiet wait, now that the offloader reads nothing from Claude Code.
+    # The entrypoint writes it to the config volume at every start; this compares it with what
+    # the pinned binary prints, so a missing, stale or hand-edited copy says so here rather
+    # than as a CI poll offloaded mid-wait. Whether Claude Code still FINDS skills there is
+    # not something a file check can answer — `/skills` in a claude is.
+    printf 'skill     : %s\n' "$(d exec "$CONTAINER" sh -c 'f="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/keepalive/SKILL.md"; if [ ! -f "$f" ]; then echo "NO $f — claude will not ask for time before a quiet wait (boot-log says why)"; elif claude-sessions skill 2>/dev/null | cmp -s - "$f"; then echo "keepalive, matching claude-sessions $(claude-sessions --version | cut -d" " -f2)"; else echo "$f DIFFERS from what claude-sessions prints — restart the container to rewrite it"; fi' 2>/dev/null \
+        || echo 'could not ask the container')"
     # `ssh <c> in-workspace <cmd>` and `ssh -t <c> in-workspace` name it; an image without
     # it answers "in-workspace: not found" from the login shell.
     printf 'in-workspace: %s\n' "$(d exec "$CONTAINER" sh -c 'command -v in-workspace' 2>/dev/null \

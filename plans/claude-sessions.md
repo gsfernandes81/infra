@@ -744,7 +744,8 @@ at 6 columns, the right edge marked:
         `autoupdate` line naming the `stable` channel (from `2026.10.07`), and a `door` line naming
         `/usr/local/bin/claude-sessions-door`; `make status` has `offloader : live, last pass
         Nm ago`; `make boot-log` has the `claude-sessions reconcile:` line, `claude-sessions
-        keep-alive skill: /home/dev/.claude/skills/keepalive/SKILL.md` (v0.4.7), and `claude-sessions
+        keep-alive skill: /home/dev/.claude/skills/keepalive/SKILL.md` (v0.4.7) — and `make
+        verify` a `skill      : keepalive, matching claude-sessions 0.4.7` line — and `claude-sessions
         offload: every 3m — stops detached, idle claudes …`.
      2a. **Know the reinstall loop, and that a recreate does not end it for good.** On
         2026-10-08 infra-dev's claude, started on 2.1.292, reinstalled 2.1.293 every 30
@@ -872,15 +873,18 @@ at 6 columns, the right edge marked:
           With the agent view off, expect nothing. A `killed` line names the daemon tree it
           ended; one you cannot account for goes to claude-sessions.
         - *A quiet wait under a keep-alive* (v0.4.7): in a slot, have claude run
-          `claude-sessions keepalive 15m` then `sleep 600`, detach, and watch `make idle`
-          each pass — `kept` while the keep-alive holds, and offloadable once it ends and the
-          slot has been quiet 10 minutes. Then the same without the keep-alive: the slot goes
+          `claude-sessions keepalive 15m` then `sleep 600`, detach, and read the live loop's
+          verdicts in `~/.local/share/claude-sessions-passes.log` (`tail -f` from another
+          slot or `make shell`) — **not** `make idle`, whose dry run writes the activity state
+          and leaves the next live pass a window too short to count. `kept — kept alive for
+          …` while it holds, and offloaded once it ends and the slot has been quiet 10 minutes. Then the same without the keep-alive: the slot goes
           about 10 minutes after its last activity, sleep and all — the cost the skill exists
           to prevent.
         - *The loop:* `make offload-log`'s *failed passes* half says `none`; a `pass failed`
           line in `~/.local/share/claude-sessions-passes.log` is a pass that exited non-zero
-          (124 = it timed out). Its *last pass* half shows the verdicts — a slot running
-          background agents reads `kept — background work running: subagent: …` (v0.4.1).
+          (124 = it timed out). Its *last pass* half shows the verdicts — since v0.4.7 a
+          `measured — …` line per slot and then `kept — …` with the reason (`attached`,
+          `kept alive for …`, `not quiet long enough, offloadable in Ns`), or `offloaded`.
      4c. **Rollback, should it be needed.**
         - **Stop the offloader now, without a recreate** (it comes back at the next start). In
           `make shell`, find the loop's process group and any pass in flight — `timeout` runs
@@ -1141,8 +1145,8 @@ transcript, read by the hook.)
 
 ## Deferred — maybe not needed
 
-**A long-interval wake tool.** ScheduleWakeup clamps at an hour, and with timers pinning a
-slot, a loop that wants to wait longer holds its RAM the whole time. A tool Claude could
+**A long-interval wake tool.** ScheduleWakeup clamps at an hour, and with a keep-alive holding a
+slot through the wait (v0.4.7; timers pinned it before), a loop that wants to wait longer holds its RAM the whole time. A tool Claude could
 call in place of ScheduleWakeup — "wake me in six hours with this prompt" — would let
 `claude-sessions offload` stop the slot and resume it when due, replaying the prompt. Only worth
 building if long waits turn out to be common; it needs Phase 0 to show a resumed session

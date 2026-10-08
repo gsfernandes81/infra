@@ -75,15 +75,13 @@ services:
       # this container was built to be in the first place.
       #
       # THE IDLE OFFLOADER IS ON BY DEFAULT. `claude-sessions offload` stops, every three
-      # minutes, a slot detached at the pass, not under a keep-alive, and measured quiet by
-      # the kernel — its bytes and CPU — for 10 minutes (v0.4.7; nothing read from Claude
-      # Code holds a slot, so one waiting on you goes too), and leaves the conversation
-      # resumable from the menu (dev/README.md § claude-sessions). A quiet wait is held by
-      # `claude-sessions keepalive <duration>`. The ten minutes do NOT start at the detach: read
-      # a long reply for longer than that, lock the phone, and the slot goes at the next
-      # pass. `make idle` asks it what it would do now; `make offload-log` shows what it
-      # did. DEV_IDLE_OFFLOAD, above, is its switch: `DEV_IDLE_OFFLOAD=0` in dev/.env and a
-      # `make up` — which recreates the container and ends every slot.
+      # minutes, a detached slot that has been quiet long enough, and leaves the
+      # conversation resumable from the menu; the rule — measured, with
+      # `claude-sessions keepalive` for quiet waits — is dev/README.md § claude-sessions,
+      # *The rules*, and is not restated here. `make idle` asks it what it would do now;
+      # `make offload-log` shows what it did. DEV_IDLE_OFFLOAD, above, is its switch:
+      # `DEV_IDLE_OFFLOAD=0` in dev/.env and a `make up` — which recreates the container,
+      # ends every slot, and (since v0.4.7) leaves the keep-alive skill uninstalled.
       #
       # DEV_IDLE_OFFLOAD_SECONDS and DEV_IDLE_POLL_SECONDS went with the old script on
       # 2026-10-06 (Stage B); the new rules are fixed and have no floor to refuse under.

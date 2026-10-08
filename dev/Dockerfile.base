@@ -49,7 +49,7 @@
 # is now reached one way — ssh in, hold the work in a session (abduco until v0.4.0, zmx since) — so no child ships
 # an rc-supervisor.sh and nothing here starts one. What the entrypoint runs in its place
 # is the opposite job: `claude-sessions offload`, from the pinned binary below, which STOPS
-# a detached claude that has sat idle at its prompt, and leaves the conversation resumable.
+# a detached claude measured quiet for 10 minutes, and leaves the conversation resumable.
 # The session holder is what makes a session survive a dropped link, and was therefore
 # also what made an abandoned one hold a gigabyte of RAM for days. (Until 2026-10-06 that
 # was offload-idle-claude.sh, with the new one as a dry run beside it — Stage A of
