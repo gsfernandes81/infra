@@ -940,7 +940,8 @@ conversation that ended.
 **From base `2026.10.06` the entrypoint runs `claude-sessions offload` every three
 minutes, live** — Stage B of [`../plans/claude-sessions.md`](../plans/claude-sessions.md),
 in force on each container from its recreate onto that base. It stops a slot that is
-detached and idle at its prompt and leaves the conversation resumable from the menu;
+detached and idle — since v0.4.7 (base `2026.10.08`) *measured* quiet by the kernel, with
+a keep-alive for quiet waits — and leaves the conversation resumable from the menu;
 nothing with a conversation is closed, and the memory is what is reclaimed. The rules are
 in [claude-sessions](#claude-sessions) below. It was armed on claude-sessions v0.4.1, which
 fixed [#9](https://github.com/gsfernandes81/claude-sessions/issues/9): a slot running
@@ -966,7 +967,7 @@ outlives the container), kept current by Claude Code's own hooks — and, since 
 `archive/` beside them: one small file per conversation `c` has put away (`archived <ms>`)
 or taken back out (`kept <ms>`) — age-archiving writes nothing, being worked out as the
 list is read. The base installs
-**v0.4.6** — a static binary, pinned by tag and SHA-256 per architecture, at
+**v0.4.7** — a static binary, pinned by tag and SHA-256 per architecture, at
 `/usr/local/bin/claude-sessions`.
 
 **The menu is in this release, and it is where `ssh infra-dev` lands.** `claude-sessions`
@@ -1033,10 +1034,11 @@ with a plain login shell until its repo bumps (*How this container is used*).
 
 | Piece | Where | What it does |
 |---|---|---|
-| the hooks | `/etc/claude-code/managed-settings.d/claude-sessions.json`, 0644 | `SessionStart`, `UserPromptSubmit`, `Stop`, `Notification`, `SessionEnd`, `PostToolUse` on the three timer tools, and (v0.4.4) `SubagentStart` and `SubagentStop`, which keep a slot's background list between `Stop`s, each calling `claude-sessions hook`, which always exits 0 and prints nothing. Since v0.4.6 every event but `SessionStart` (30 s timeout) and `SessionEnd` (1 s) runs **async** — Claude Code neither waits for it nor kills it, so no hook of ours can hold a prompt or a subagent any more — because a millisecond hook stalled past its 5 s timeout on a loaded box (or3's), holding the prompt and then losing the event; events that land late are applied in the order Claude Code forked them. The two synchronous hooks are why exit 0 and silence still matter: a `SessionStart` failure is shown to you, and its output would reach claude as context |
+| the hooks | `/etc/claude-code/managed-settings.d/claude-sessions.json`, 0644 | `SessionStart`, `UserPromptSubmit`, `Stop`, `Notification` and `SessionEnd` — five since v0.4.7, which feed the **menu only** (titles, who is busy); no offload rule reads them, so `PostToolUse`, `SubagentStart` and `SubagentStop` went. Each calls `claude-sessions hook`, which always exits 0 and prints nothing. Every event but `SessionStart` (30 s timeout) and `SessionEnd` (1 s) runs **async** (v0.4.6) — Claude Code neither waits for it nor kills it, so no hook of ours can hold a prompt — because a millisecond hook stalled past its 5 s timeout on a loaded box (or3's); late events are applied in the order Claude Code forked them. Exit 0 and silence still matter for the two synchronous hooks: a `SessionStart` failure is shown to you, and its output would reach claude as context |
+| the keep-alive skill | `~/.claude/skills/keepalive/SKILL.md`, written by the entrypoint at every start (v0.4.7) | `claude-sessions skill`'s text: when to run `claude-sessions keepalive`, and for how short. On the config volume, so the image cannot carry it; a failed write says so in the boot log and leaves the old file |
 | the status line | the same file's `statusLine` (v0.4.5) | `claude-sessions statusline` every minute: the container's RAM and load, yellow then red as they rise, and its name. Managed settings, so it outranks a user `statusLine` — Claude Code's `/statusline` command writes one that never shows here; `make verify`'s `hooks` line names it |
 | `reconcile` | the entrypoint, before the offloader and sshd | marks slots whose process died with the last container; since v0.4.0 it sweeps no sockets — `zmx list` clears a dead daemon's own, and zmx's socket directory, `/tmp/zmx-<uid>`, empties with a recreate (a `make restart` keeps /tmp; a stale socket there is cleared by the next `zmx list`) |
-| `offload` | the entrypoint, every 3 minutes | stops a detached, idle slot and runs the orphan sweep — live from base `2026.10.06` (a dry run before it, as Stage A). Each pass's verdicts, and any failed pass with its exit code, go timestamped to `~/.local/share/claude-sessions-passes.log` (capped near 16 MB, trimmed to the newest 8 MB — weeks at today's slots); stops and sweep lines also go to `offload.log`. Since v0.4.5 each pass also prints, per slot, what a kernel-measured activity rule *would* do (v0.4.6 adds every TCP socket's bytes and a freeze of claude alone) — reported only, and only on stdout, so this log is the sole record upstream will read before the owner decides on that rule; keep it. `make idle` is `--dry-run`: verdicts, nothing stopped — though since v0.4.5 it writes the activity state as a live pass does, so a hand pass just before the loop's leaves the loop a window too short to count, and the next one counts it |
+| `offload` | the entrypoint, every 3 minutes | stops a detached slot measured quiet for 10 minutes (v0.4.7, *The rules* below) and runs the orphan sweep — live from base `2026.10.06` (a dry run before it, as Stage A). Each pass's verdicts, and any failed pass with its exit code, go timestamped to `~/.local/share/claude-sessions-passes.log` (capped near 16 MB, trimmed to the newest 8 MB — weeks at today's slots); stops and sweep lines also go to `offload.log`. Each pass prints, per slot, its measured line — bytes (TCP included), CPU, its line and how long it has been quiet — which since v0.4.7 is the offloader's own reason, and only on stdout: this log is the record to read when a slot was stopped that should not have been. `make idle` is `--dry-run`: verdicts, nothing stopped — though since v0.4.5 it writes the activity state as a live pass does, so a hand pass just before the loop's leaves the loop a window too short to count, and the next one counts it |
 
 **The hooks file is generated by the binary at build time and is not in this repo.**
 `claude-sessions hooks-config` prints exactly the events its code handles, so the hooks
@@ -1047,49 +1049,35 @@ claude.ai admin console** — server-managed settings put hooks behind an approv
 replace this file outright. That a root-written file raises no dialog is from the vendor's
 docs, not yet from a box: the first `claude` in a rebuilt container is the check.
 
-**The rules.** `claude-sessions offload` stops a slot only when it is detached, it has sat at its prompt for at least **10
-minutes** — since a `Stop`, or (v0.3.0) since a `SessionStart` that opened or resumed it and
-was never followed by a prompt, or (v0.4.1) since the newest write to its transcript or to a
-subagent's under `<conversation>/subagents/`, whichever is latest; a compaction never
-counts, because it can land mid-turn — no background work is on its background list
-(v0.4.1: Claude Code's `Stop` carries its running subagents, workflows, shells, monitors and
-cloud sessions, and the slot reads `kept — background work running: …`; since v0.4.4
-`SubagentStart` and `SubagentStop` keep the list between `Stop`s too. **Two things are
-deliberately not background work** in v0.4.4: Claude Code's own housekeeping — a dream, an
-auto-mode scan, a memory import — and its **watch on an artifact it published**, so a
-detached slot that published one is offloaded ten minutes after its `Stop`, and comments
-sent to it from the phone while it is detached get no answer until it is resumed),
-it is not mid-turn — **except a turn you ended with Esc** (v0.4.2: an Esc fires no hook, so
-the transcript's trailing `[Request interrupted by user…]` marker is read as the end of the
-turn, and the ten minutes run from it; a prompt or a reply after the marker means it is
-not the end, and a marker older than the slot's latest activity is an earlier turn's; a
-permission prompt the Esc dismissed no longer counts as waiting on you either. A background
-agent started in the turn you Esc'd still holds the slot until it is done (v0.4.4,
-[claude-sessions#10](https://github.com/gsfernandes81/claude-sessions/issues/10):
-`SubagentStart`/`SubagentStop` keep the background list between `Stop`s), and the marker must
-be the whole entry, so a typed prompt beginning with the phrase is a prompt. Still open: work
-started in an Esc'd turn with no agent behind it — a cloud session — is held only by its own
-writes, as before; and a foreground agent cut off by Esc never sends its `SubagentStop`, so
-its entry keeps the slot until your next turn, a memory cost only (claude-sessions#11) —
-nothing waits on you (a permission prompt), no timer is pending
-(`ScheduleWakeup`/`CronCreate`, whoever set it), nothing but `claude` (and its
-`claude.exe` helpers) runs under it, and
-its conversation id and directory are recorded so it can be resumed. **A slot with no
-conversation** — no reply and no typed prompt in its transcript: a new slot closed or
-left before its first prompt (Claude Code writes a new session's transcript only then), or a
-`/clear`ed slot left idle (a `/clear` writes a file at once, with nothing in it) — **is closed
-instead** (v0.3.3–v0.3.4, claude-sessions#5): the offloader logs `closed … no conversation on disk to resume`, and a dry run says
-`would close, idle Nm — …`. The transcript is the path the
-hooks recorded, or for a record older than v0.3.3 one derived from `$CLAUDE_CONFIG_DIR` —
-which is the image's `ENV`, `/home/dev/.claude`, for the loop and every slot alike, and must
-stay so. Anything it cannot
-see is a reason to keep the slot. **There is no one-hour floor** — a pending timer is now
-*seen*, so the floor's reason is gone. Only a claude whose parent is a zmx session is
-judged at all: one started in the menu's `s` shell, by a forwarded command or in `screen`
-is never registered and never offloaded. **The ten minutes do not start at the detach:**
-read a long reply for longer than that, lock the phone, and the slot goes at the next pass.
-Keep a slot you care about attached; `Enter` on its row brings it back if it went. Attached means zmx reports a client (`clients=` in `zmx list`); a zmx
-daemon that does not answer keeps its slot, because attached cannot be ruled out.
+**The rules (v0.4.7, owner, 2026-10-08): measured, not read from Claude Code.**
+`claude-sessions offload` stops a slot when it is **detached** at the pass, **not under a
+keep-alive**, and **measured quiet for 10 minutes** — no 3-minute window over its byte
+budget (a minute's worth at its learned line) or over 3000 ms of CPU — judged only on
+readings the pass took itself, of the slot's current claude. Nothing that reads Claude Code
+holds a slot any more: not a pending timer, not background agents or shells, not the
+idle-since-`Stop` clock, not a permission prompt — **a slot waiting on you is offloaded
+too**. Busy work holds a slot by being busy; work that waits quietly (a `sleep` before a
+check, CI, a `ScheduleWakeup`, a server waiting for a request) is held by
+**`claude-sessions keepalive <duration>`** — required, at most 12h, `0` ends it, belonging to
+the process that asked — and the keep-alive skill the entrypoint installs at every start
+(`~/.claude/skills/keepalive/SKILL.md`) tells claude when and for how short. Quiet time
+still counts during a keep-alive, so a slot still quiet when it ends goes at the next pass.
+**The 3-minute cadence is load-bearing**: the CPU budget per window is fixed, so a slower
+timer would read an idle claude's own CPU as activity. What a busy-but-not-working slot
+looks like is in [claude-sessions#14](https://github.com/gsfernandes81/claude-sessions/issues/14):
+a background poller, or Claude Code's 30-minute reinstall after an update, reads as activity
+and keeps the slot — the safe way.
+
+Unchanged from before: **a slot with no conversation** — nothing typed or replied in its
+transcript, a new slot left before its first prompt or a `/clear`ed one — **is closed
+instead** (v0.3.3), logged `closed … no conversation on disk to resume`. Only a claude whose
+parent is a zmx session is judged at all: one started in the menu's `s` shell, by a
+forwarded command or in `screen` is never registered and never offloaded. **The ten minutes
+do not start at the detach:** read a long reply for longer than that, lock the phone, and
+the slot goes at the next pass. Keep a slot you care about attached, or ask for time;
+`Enter` on its row brings it back if it went. Attached means zmx reports a client
+(`clients=` in `zmx list`); a zmx daemon that does not answer keeps its slot, because
+attached cannot be ruled out.
 
 Reading it:
 

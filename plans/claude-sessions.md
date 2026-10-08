@@ -133,6 +133,12 @@ keeps today's transcript-clock rule (and the hour floor) for those.
 
 ### 3. The offloader, rewritten as `claude-sessions offload`
 
+> **⚠︎ The rules below are superseded (owner, 2026-10-08, claude-sessions v0.4.7, base
+> `2026.10.08`):** a slot is offloaded when it is detached, not under a keep-alive, and
+> measured quiet by the kernel — no window over its byte budget or 3000 ms of CPU — for 10
+> minutes. Nothing here that reads Claude Code (`Stop`, `needs_you`, timers, descendants)
+> holds a slot any more. Kept as how the design got there; `dev/README.md` has the rule.
+
 Same contract as today — never an attached slot, never one with work running under it,
 never without evidence — with the hook state replacing the transcript clock:
 
@@ -694,7 +700,10 @@ at 6 columns, the right edge marked:
      fetched from its GitHub release) and then `2026.10.07.1` (v0.4.6: hooks but
      `SessionStart` and `SessionEnd` run async, a RAM and load status line, and every pass
      measures each slot's activity from the kernel — reported, never acted on) supersede it,
-     and `2026.10.07.1` is the tag below**: repeat step 0's fast-forward, then steps 1 and 2. This recreate pulls the whole base once more; later bumps that only move
+     and infra-dev was recreated onto `2026.10.07.1` on 2026-10-08. **`2026.10.08` (v0.4.7:
+     the offloader acts on measured activity alone, `claude-sessions keepalive` and its skill
+     for quiet waits, five hooks that feed the menu only) supersedes that, and is the tag
+     below**: repeat step 0's fast-forward, then steps 1 and 2. This recreate pulls the whole base once more; later bumps that only move
      claude-sessions should pull a few MiB.
      0. **Before anything is recreated** — these need the old state:
         - **Calibrate the scroll check on or3-dev, before or3 bumps** (it is on `2026.10.04.4`,
@@ -726,14 +735,16 @@ at 6 columns, the right edge marked:
         `ssh -t zero 'cd ~/infra/dev && make up'`. (No `make base` from an earlier commit
         should have left a local image of the tag being rolled out on zero: Docker prefers a
         local image over the published one.)
-     2. `make verify` reads `sessions  : claude-sessions 0.4.6` (an older version means the
+     2. `make verify` reads `sessions  : claude-sessions 0.4.7` (an older version means the
         checkout was stale — back to step 0), `make idle`'s `memory:` line ends `(N MB of it
         reclaimable page cache)` (v0.4.3's working set), `zmx       : zmx 0.8.1` and `scrollvars: 3 of 3`, a
-        `hooks` line naming eight events (`SubagentStart` and `SubagentStop` since v0.4.4) and
-        ending `; status line: /usr/local/bin/claude-sessions statusline` (since v0.4.5), an
+        `hooks` line naming five events (`PostToolUse`, `SubagentStart` and `SubagentStop` went
+        in v0.4.7) and ending `; status line: /usr/local/bin/claude-sessions statusline`, no
+        `bgtasks` line (gone with v0.4.7), an
         `autoupdate` line naming the `stable` channel (from `2026.10.07`), and a `door` line naming
         `/usr/local/bin/claude-sessions-door`; `make status` has `offloader : live, last pass
-        Nm ago`; `make boot-log` has the `claude-sessions reconcile:` line and `claude-sessions
+        Nm ago`; `make boot-log` has the `claude-sessions reconcile:` line, `claude-sessions
+        keep-alive skill: /home/dev/.claude/skills/keepalive/SKILL.md` (v0.4.7), and `claude-sessions
         offload: every 3m — stops detached, idle claudes …`.
      2a. **Know the reinstall loop, and that a recreate does not end it for good.** On
         2026-10-08 infra-dev's claude, started on 2.1.292, reinstalled 2.1.293 every 30
@@ -761,13 +772,6 @@ at 6 columns, the right edge marked:
         in it — a user status line there is outranked from 2026.10.07.1, silently.
      4. Prompt it once, then `make sessions`: the slot shows events. "events: none seen"
         means the hooks are not firing.
-     - **Follow-up, not a gate (filed 2026-10-07, v0.4.6):** claude-sessions' design §
-       Activity, measured asks infra's checks on Claude Code's binary to cover the timer
-       field "as they cover `background_tasks`", because the hook-read timer hold fails the
-       wrong way — a payload that loses it drops the hold without a word. Which field is
-       unclear: the hook reads timers from `PostToolUse` on the timer tools' `tool_input` /
-       `tool_response`, not from `Stop` as the design says. Asked upstream; a `make verify`
-       line follows the answer.
      4a. **The menu, by hand, before any client points at it.** From `make shell` (or `ssh -t infra-dev in-workspace`),
         run `claude-sessions-door`. Press `n`, then detach (`Ctrl-\`, zmx's key): the menu comes back
         with `detached · it is still running` (v0.3.3 names no session there), and `make sessions` shows that slot
@@ -867,12 +871,12 @@ at 6 columns, the right edge marked:
         - *The sweep, live:* `grep 'sweep:' ~/.local/share/claude-sessions/offload.log | tail`.
           With the agent view off, expect nothing. A `killed` line names the daemon tree it
           ended; one you cannot account for goes to claude-sessions.
-        - *Esc and agents* (v0.4.4): in a slot, start an agent in the background, Esc the
-          turn, detach, and run `make idle` — `kept — background work running: subagent:
-          general-purpose` (an entry named by agent type comes from `SubagentStart`). Then Esc a
-          *foreground* agent and watch `make idle` for a minute: its entry should clear when
-          Claude Code's own `SubagentStop` arrives, about 30 s later; if it never does, the
-          slot is held until your next turn (memory only — report it on claude-sessions#11).
+        - *A quiet wait under a keep-alive* (v0.4.7): in a slot, have claude run
+          `claude-sessions keepalive 15m` then `sleep 600`, detach, and watch `make idle`
+          each pass — `kept` while the keep-alive holds, and offloadable once it ends and the
+          slot has been quiet 10 minutes. Then the same without the keep-alive: the slot goes
+          about 10 minutes after its last activity, sleep and all — the cost the skill exists
+          to prevent.
         - *The loop:* `make offload-log`'s *failed passes* half says `none`; a `pass failed`
           line in `~/.local/share/claude-sessions-passes.log` is a pass that exited non-zero
           (124 = it timed out). Its *last pass* half shows the verdicts — a slot running
@@ -1077,12 +1081,14 @@ agent view and must change with them:
 unregistered session is now a row in `Idle`. The decisions themselves stand.)*
 
 - The source lives in its own repo; the base pulls a pinned release.
-- Offload threshold: 10 minutes after `Stop`, once timers are visible.
+- Offload threshold: 10 minutes after `Stop`, once timers are visible. *(⚠︎ Superseded
+  2026-10-08 by v0.4.7: 10 minutes measured quiet, no timer hold — see the next item.)*
 - No learning-material commenting requirement; ordinary comment density.
 - The tool is called `claude-sessions`.
 - Menu ages tick at most once a minute; otherwise the menu is silent.
 - A slot with a pending timer is **never offloaded**, whoever set the timer; the menu marks
-  it, so a forgotten `/loop` is visible and closable.
+  it, so a forgotten `/loop` is visible and closable. *(⚠︎ Superseded 2026-10-08, owner: the
+  offloader reads no timers; a quiet wait is held by `claude-sessions keepalive`.)*
 
 From the mockup review, same day — the three questions under `## Mockups`, each answered
 *yes*, plus the glyphs:

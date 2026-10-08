@@ -23,7 +23,7 @@ services:
       # `base` — the FROM pulls the tag from ghcr — so a tag bumped here and not yet
       # built by dev-base.yml fails on the pull until `make base` builds it locally.
       args:
-        BASE_TAG: ${BASE_TAG:-2026.10.07.1}
+        BASE_TAG: ${BASE_TAG:-2026.10.08}
     image: infra-dev
     container_name: infra-dev
     hostname: ${DEV_HOSTNAME:-infra-dev}  # Claude Code shows this as the machine title
@@ -75,11 +75,11 @@ services:
       # this container was built to be in the first place.
       #
       # THE IDLE OFFLOADER IS ON BY DEFAULT. `claude-sessions offload` stops, every three
-      # minutes, a slot at its prompt for 10 minutes since its last `Stop` or its newest
-      # transcript or subagent write, whichever is later, and detached at the pass, with no
-      # background work running, nothing waiting on you, no timer pending and nothing but
-      # Claude Code under it, and leaves the conversation resumable from the menu
-      # (dev/README.md § claude-sessions). The ten minutes do NOT start at the detach: read
+      # minutes, a slot detached at the pass, not under a keep-alive, and measured quiet by
+      # the kernel — its bytes and CPU — for 10 minutes (v0.4.7; nothing read from Claude
+      # Code holds a slot, so one waiting on you goes too), and leaves the conversation
+      # resumable from the menu (dev/README.md § claude-sessions). A quiet wait is held by
+      # `claude-sessions keepalive <duration>`. The ten minutes do NOT start at the detach: read
       # a long reply for longer than that, lock the phone, and the slot goes at the next
       # pass. `make idle` asks it what it would do now; `make offload-log` shows what it
       # did. DEV_IDLE_OFFLOAD, above, is its switch: `DEV_IDLE_OFFLOAD=0` in dev/.env and a

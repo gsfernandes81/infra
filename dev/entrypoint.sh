@@ -413,6 +413,28 @@ else
     printf '%s\n' "$out" | sed 's/^/[entrypoint]     /'
 fi
 
+# ── claude-sessions' keep-alive skill — at every start, into the config volume ──
+# Since v0.4.7 the offloader stops a detached slot that is measured quiet for 10 minutes,
+# and nothing it reads can tell a quiet WAIT (a sleep before a check, CI, a ScheduleWakeup)
+# from an idle session. `claude-sessions keepalive <duration>` holds the slot, and this
+# skill, printed by the pinned binary, is what tells claude to use it and for how short.
+# Claude Code's config directory is a volume, so the image cannot carry the file; written
+# at every start, which also brings it up to date with a new pin. Through a temp file and
+# a rename, never a redirection onto the target: `>` truncates before the command runs and
+# follows a symlink, so a failed `skill` would leave an empty file, and a re-pointed path
+# would be written through. A failure is said and does not stop the door — the cost is a
+# claude that does not know to ask, so a quiet wait in a detached slot can be offloaded.
+skill_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/keepalive"
+if mkdir -p "$skill_dir" \
+    && timeout 10 claude-sessions skill > "$skill_dir/.SKILL.md.tmp" \
+    && [ -s "$skill_dir/.SKILL.md.tmp" ] \
+    && mv -f "$skill_dir/.SKILL.md.tmp" "$skill_dir/SKILL.md"; then
+    say "claude-sessions keep-alive skill: $skill_dir/SKILL.md"
+else
+    rm -f "$skill_dir/.SKILL.md.tmp"
+    say "claude-sessions keep-alive skill NOT installed — claude will not know to ask for time before a quiet wait"
+fi
+
 # ── the idle-claude offloader ───────────────────────────────────────────────
 # WHAT USED TO BE HERE was the Claude Remote Control hook: a child baked an
 # rc-supervisor.sh, set DEV_REMOTE_CONTROL=1, and this started it. Remote control is off
@@ -422,14 +444,15 @@ fi
 # WHAT REPLACES IT IS THE OPPOSITE JOB. A held session is why a conversation nobody has
 # touched since Tuesday is still resident: measured on infra-dev, one idle session's
 # process tree held 1,146 MB. `claude-sessions offload` stops those every three minutes and
-# leaves each conversation resumable from the menu. It stops a slot only when it is
-# detached at the pass and has sat at its prompt for 10 minutes since its last `Stop` or
-# the newest write to its transcript or a subagent's, whichever is later — the ten minutes
-# do NOT start at the detach, so a slot read for longer than that and then left goes at
-# the next pass — with no background work
-# listed at that `Stop`, nothing waiting on you, no timer pending, nothing but Claude Code
-# under it, and a conversation to resume — anything it cannot see keeps the slot, and a
-# slot with nothing to resume is closed instead. The same pass runs the orphan sweep,
+# leaves each conversation resumable from the menu. SINCE v0.4.7 IT READS THE KERNEL, NOT
+# CLAUDE CODE: a slot is stopped when it is detached at the pass, not under a keep-alive,
+# and measured quiet — no window over its byte budget or 3000 ms of CPU — for 10 minutes,
+# by its own readings of the slot's current claude. Timers, background work, waiting on
+# you and the idle-since-`Stop` clock no longer hold a slot; a slot waiting on the owner is
+# offloaded too (owner, 2026-10-08). A slot with nothing to resume is closed instead. THE
+# 3-MINUTE CADENCE IS LOAD-BEARING: the CPU budget per window is fixed, so a slower timer
+# lets an idle claude's own CPU read as activity — much past 4 minutes no slot would ever
+# go (claude-sessions' design, § How offload reads those rules). The same pass runs the orphan sweep,
 # which kills a transient `claude daemon` tree whose claude has gone — safe only with the
 # agent view off, which this image enforces. dev/README.md § claude-sessions has the rules.
 #
@@ -447,9 +470,10 @@ fi
 # stops and sweep lines are also in the binary's own ~/.local/share/claude-sessions/
 # offload.log. The output is captured, not piped, so `$?` is the command's own status: the
 # Stage A loop piped through sed and lost every exit status. Past 16 MB the log keeps its
-# newest 8 MB (raised from 4 and 2 on 2026-10-07: since v0.4.5 each pass adds a measured
-# line per slot, about 110 KB a day each, and upstream reads days of them before the owner
-# decides on the activity rule — 4 MB would have kept three days on a five-slot box), from
+# newest 8 MB (raised from 4 and 2 on 2026-10-07, when each pass gained a measured line per
+# slot, about 110 KB a day each; kept at that since v0.4.7 because those lines are now the
+# offloader's own reasons — the record to read when a slot was stopped that should not
+# have been — and 4 MB would have kept three days on a five-slot box), from
 # the first whole line, through a temp file and a rename, never a redirection onto itself.
 # Stage A's ~/.local/share/claude-sessions-dry-run.log is left alone — it is the evidence
 # Stage B was read against; plans/claude-sessions.md says when to remove it. Backgrounded
