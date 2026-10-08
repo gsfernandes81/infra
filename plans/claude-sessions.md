@@ -736,12 +736,16 @@ at 6 columns, the right edge marked:
         Nm ago`; `make boot-log` has the `claude-sessions reconcile:` line and `claude-sessions
         offload: every 3m — stops detached, idle claudes …`.
      2a. **An hour after the recreate, check the updater has stopped reinstalling.** On
-        `latest` with an npm global install, Claude Code 2.1.292–2.1.293 rewrote its whole
-        package every 30 minutes while already current — ~250 MB written each time, about
-        12 GB a day per running claude onto zero's disk, and a moment each time when `claude`
-        reads "native binary not installed" (claude-sessions#14 has the measurement). Stable
-        should end it, because the updater skips a channel version at or below the running
-        one; that is expected, not yet seen. In the container:
+        2026-10-08 infra-dev's claude, on `latest` with an npm global install, rewrote its
+        whole package every 30 minutes while already current at 2.1.293: 4.69 GB of
+        `write_bytes` in 8.6 h from one claude, about 13 GB a day onto zero's disk, and a
+        moment each time when `claude` reads "native binary not installed"
+        (claude-sessions#14). **Not a property of the base:** or3-dev, on the same base
+        family and still on 2.1.292, was not doing it that day. Whether it is 2.1.293's
+        updater, or any updater that has just installed, is open, and so is whether two
+        claudes in one container each do it. Stable should end it, since the updater skips a
+        channel version at or below the running one; that is expected, not yet seen. In the
+        container:
         ```
         stat -c '%y' /opt/npm-global/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
         ```
