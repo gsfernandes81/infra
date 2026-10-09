@@ -754,7 +754,9 @@ at 6 columns, the right edge marked:
         the running process's version: the updater compares it, not the file on disk, with
         the channel's, so any claude left running across an update loops until it exits.
         After the recreate the container is on 2.1.291 and stable is below it, so nothing
-        installs and nothing loops — until stable passes 2.1.291, when every claude still
+        installs and nothing loops — seen on infra-dev over 2026-10-08/09: 20.5 MB of
+        `write_bytes` from one claude in 24 h, the binary untouched since the image — until
+        stable passes 2.1.291, when every claude still
         running from before does it again. To see whether one is looping, in the container
         (fish; each claude's running version, then the installed one):
         ```
