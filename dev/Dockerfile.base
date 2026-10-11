@@ -6,7 +6,7 @@
 # ds-dev, or3-dev and infra-dev agreed on, in one place. Debian trixie slim (glibc 2.41
 # since 2026-09-21; bookworm and its 2.36 before that), Node + Claude Code (with the agent
 # view off by baked managed settings), claude-sessions and the hooks that feed it, gh,
-# zmx (what a slot lives in), sshd, fish, the dev user, cloudflared, the entrypoint and every dotfile. A repo's own dev/Dockerfile becomes a FROM line
+# zmx (what a slot lives in), Crush (on trial, the latest at build), sshd, fish, the dev user, cloudflared, the entrypoint and every dotfile. A repo's own dev/Dockerfile becomes a FROM line
 # plus whatever that repo needs on top — see dev/Dockerfile here for the shape
 # (ansible), or or3's for the other one (uv, and its own ssh identity).
 #
@@ -63,8 +63,9 @@
 # and FAILS on a push that changed one without bumping BASE_TAG — because the tag below
 # is a contract and main would otherwise describe an image that does not exist.
 # Children FROM the ghcr name, so there is no cross-repo build order: no host needs this
-# repo checked out to run a dev container. `make base` builds the identical image
-# locally under the same name, as the offline fallback — and is also the way to have the
+# repo checked out to run a dev container. `make base` builds the identical image —
+# but for Crush, which is that day's release (the Crush layer) — locally under the same
+# name, as the offline fallback — and is also the way to have the
 # image without waiting the ~5 minutes the workflow takes. infra owns
 # the source because infra is where fleet-wide decisions live.
 #
@@ -129,8 +130,10 @@
 # on build day. So a bump weeks after the last one would quietly be a full download
 # again.
 #
-# MOVING THIS DIGEST IS THE REFRESH, and the only one. With the cache, the apt layer,
-# NodeSource and the npm install of Claude Code never re-run on their own. Debian
+# MOVING THIS DIGEST IS THE REFRESH, and the only one for Debian and Claude Code. With the
+# cache, the apt layer, NodeSource and the npm install of Claude Code never re-run on their
+# own. (Crush is the one exception, and it is scoped to itself: its layer re-runs when
+# Charm releases, ~25 MB, and refreshes nothing else — the Crush layer says how.) Debian
 # security updates reach this image only when this line moves, and so do the fresher
 # Claude Code (it updates itself anyway, so that part matters little) and apt's package
 # set. Bump it on purpose, with a BASE_TAG bump, roughly monthly or on a Debian
@@ -294,6 +297,73 @@ RUN set -eux; \
     echo "${sha}  /usr/local/bin/cloudflared" | sha256sum -c -; \
     chmod 0755 /usr/local/bin/cloudflared; \
     cloudflared --version
+
+# ── Crush: a second agent harness, on trial (owner, 2026-10-11) ──────────────────
+# charmbracelet/crush, reached the plain way: `ssh -t <c> in-workspace`, then `crush`. No
+# slot, no hooks, no environment — the provider key is typed at its first start and kept
+# in ~/.local/share/crush, which every child already mounts a volume over. It is NOT in a
+# zmx session, so a dropped link ends it; the claude-sessions menu knows nothing about it.
+# Checked at 0.98.1: a plain `crush` leaves no process behind when it exits, although the
+# binary has a `crush server` mode — a release that starts detaching one by default would
+# be a process the offloader cannot see, so that is worth a look on each new version.
+#
+# THE LATEST, NOT A PIN IN THIS FILE — the owner's call — and CRUSH_VERSION is what makes
+# that true. Crush has no updater, and Docker caches a layer by its instruction, not by what
+# the instruction fetched, so an unpinned install would carry the first version it ever
+# installed, forever (the npm layer above does exactly that to Claude Code, which gets away
+# with it only by replacing itself). So the version is RESOLVED OUTSIDE THE BUILD — by
+# dev/crush-latest, which CI and `make base` both run — and passed in: the layer misses the
+# cache when Charm releases and only then, a bump that moves nothing else here costs no
+# Crush download, and both architecture legs install the same version. What a tag carries
+# is the release current when it was built; a forced rebuild or a local `make base` of the
+# same tag later takes that later day's release. Placed above the dev user, claude-sessions
+# and zmx so their bumps never rebuild this; a Crush release rebuilds them, all small.
+#
+# `CRUSH_VERSION=none` BUILDS WITHOUT IT — the escape for a day repo.charm.sh or GitHub is
+# down and a base must still ship (`make base CRUSH_VERSION=none`). Unset, the build refuses
+# rather than guessing. `crush --version` must then name exactly that version: it is a Go
+# binary, which runs under the arm64 leg's QEMU, and it puts the version in CI's log.
+#
+# FROM CHARM'S SIGNED APT REPOSITORY, which is what lets it be unpinned here and still
+# verified: apt checks the repository's signature, so the trust anchor is Charm's signing
+# key rather than a per-version hash, and that key is what is pinned. ONLY THE PINNED KEY
+# REACHES THE KEYRING: gpg.key is imported into a scratch home and the one certificate with
+# that fingerprint exported — comparing the file's first fingerprint and keeping the whole
+# file would also trust any key appended after it (found in review, reproduced). Not the npm
+# package (@charmland/crush), a Node launcher whose postinstall fetches the binary unsigned;
+# not a release tarball, whose checksums.txt vouches only for itself. The key expires
+# 2027-07-13; an extension keeps the fingerprint, a new key fails here.
+#
+# apt READS ONLY charm.list, never the image's other sources: a Debian or NodeSource
+# index that fails to fetch or verify must not fail a Crush layer, and nothing else here
+# should be refreshed by it. The source and key are removed afterwards, so a child's own
+# `apt-get update` never depends on repo.charm.sh either. The package, measured at 0.98.1:
+# one static binary (86 MB on arm64, 25 MB as a .deb), no Depends, a man page and bash,
+# fish and zsh completions.
+ARG CRUSH_VERSION
+ARG CHARM_APT_KEY_FPR=ED927B38BE981E53CA09153D03BBF595D4DFD35C
+RUN set -eux; \
+    case "${CRUSH_VERSION:-}" in \
+      '') echo "CRUSH_VERSION is unset — pass --build-arg CRUSH_VERSION=\$(dev/crush-latest), or none (dev/Makefile's base target and dev-base.yml do)" >&2; exit 1 ;; \
+      none) echo "CRUSH_VERSION=none: building without Crush"; exit 0 ;; \
+      *[!0-9.]*) echo "CRUSH_VERSION=${CRUSH_VERSION} is not a version" >&2; exit 1 ;; \
+    esac; \
+    GNUPGHOME="$(mktemp -d)"; \
+    export GNUPGHOME; \
+    curl -fsSLo /tmp/charm.asc https://repo.charm.sh/apt/gpg.key; \
+    gpg --batch --quiet --import /tmp/charm.asc; \
+    install -d -m 0755 /etc/apt/keyrings; \
+    gpg --batch --export "${CHARM_APT_KEY_FPR}" > /etc/apt/keyrings/charm.gpg; \
+    test "$(gpg --batch --show-keys --with-colons /etc/apt/keyrings/charm.gpg | awk -F: '$1 == "fpr" && !seen++ { print $10 }')" = "${CHARM_APT_KEY_FPR}" \
+      || { echo "repo.charm.sh/apt/gpg.key does not hold the pinned key ${CHARM_APT_KEY_FPR}" >&2; exit 1; }; \
+    echo 'deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *' > /etc/apt/sources.list.d/charm.list; \
+    charm="-o Dir::Etc::SourceList=/etc/apt/sources.list.d/charm.list -o Dir::Etc::SourceParts=-"; \
+    apt-get $charm update; \
+    apt-get $charm install -y --no-install-recommends "crush=${CRUSH_VERSION}"; \
+    rm -f /etc/apt/sources.list.d/charm.list /etc/apt/keyrings/charm.gpg /tmp/charm.asc; \
+    rm -rf /var/lib/apt/lists/* "$GNUPGHOME"; \
+    test "$(crush --version)" = "crush version v${CRUSH_VERSION}"; \
+    crush --version
 
 # Create the dev user at the HOST owner's uid/gid, passed by the Makefile as build
 # args, so the bind-mounted /workspace stays writable from both sides. Guard against a

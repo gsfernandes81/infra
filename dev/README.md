@@ -191,6 +191,47 @@ The Makefile is how the container is stood up and looked at, not how it is used.
 zero instead — `make claude` attaches the *same* `claude` session the ssh line above
 does, not a second one.
 
+## Crush, on trial
+
+[Crush](https://github.com/charmbracelet/crush) is in the base since `2026.10.11`, so every
+container on that base or later has it. The way in is the plain one, with nothing built
+around it:
+
+```sh
+ssh -t infra-dev in-workspace  # a login shell in the repo
+crush                          # first start asks for a provider and its key
+```
+
+A client whose ssh block still carries a `RemoteCommand` (one from before 2026-10-04 that
+has not re-run `client-home-ssh-config.yml`) refuses that first line client-side with
+*Cannot execute command-line and remote command*; `ssh -t infra-dev-sh in-workspace` gives
+the same shell there, or re-run the play ([`../docs/ssh-clients.md`](../docs/ssh-clients.md)).
+
+- **No slot.** The claude-sessions menu, its hooks and the offloader know nothing about
+  Crush. It is not in a zmx session, so a dropped connection ends it — on the phone that
+  means the first lock screen. `crush --continue` picks up the last session in this
+  directory. Checked at 0.98.1: it leaves no process behind when it exits.
+- **Its state.** The provider key and global settings go under `~/.local/share/crush`
+  (the `~/.local/share` volume, so they survive a recreate, and `make down-volumes` takes
+  them — see *Secrets*); per-project sessions go in `.crush/` in the working directory,
+  which here is the repo. Crush writes a `*` `.gitignore` inside it, and the repo ignores
+  `.crush/` as well. `crush dirs` prints both. `~/.config/crush` is not a volume — anything
+  written there is gone at the next recreate.
+- **Context it reads.** `CLAUDE.md` and `AGENTS.md` among others, so the repo's rules
+  reach it as they reach Claude. **Decline "Initialize Project"** — it writes an
+  `AGENTS.md` into the repo, which would be a second copy of `CLAUDE.md`.
+- **Usage metrics are Crush's default, which is on** (pseudonymous events to Charm). Left
+  as it is, not chosen against: turning them off is `"options": {"disable_metrics": true}`
+  in a Crush config, or `CRUSH_DISABLE_METRICS=1` — the owner's call, not yet made.
+- **The version is the latest release when the base was built, not a pin**, and nothing
+  inside a container updates it. CI resolves it (`crush-latest`) and the run's summary
+  names it; `make verify`'s `crush` line reads it off a running container. The layer
+  re-downloads only when Charm has released since the last tag (~25 MB), not on every
+  bump. `make base` takes that day's release, so a local build of a tag can be newer than
+  CI's; with GitHub or `repo.charm.sh` down, `make base CRUSH_VERSION=none` builds without
+  it. `Dockerfile.base` (the Crush layer) and
+  [`../docs/decisions.md`](../docs/decisions.md) have the reasons.
+
 ## Ansible from in here
 
 ```sh
@@ -289,7 +330,7 @@ old base — until 2026-10-06, when zmx replaced abduco and the stage went.
 --version` from inside the container — because the floor is otherwise invisible from
 outside it, and a `FROM` line reverted by a careless edit would show up nowhere else in
 that readout. The rest of the list is the same one that already mattered: `claude`, `gh`,
-`zmx` (abduco until 2026-10-06), `screen`, `cloudflared` and the collections are each printed, and every one of
+`zmx` (abduco until 2026-10-06), `screen`, `cloudflared`, `crush` (since `2026.10.11`) and the collections are each printed, and every one of
 them is a thing a distro bump can break.
 
 ## Claude Code updates itself
@@ -764,6 +805,7 @@ runs itself on any push to `main` touching `dev/` rather than waiting to be
 dispatched), and
 this repo's `Dockerfile` is now a thin child — `FROM` the ghcr name plus the ansible
 layer. There is no build order: the FROM pulls. `make base` builds the identical image
+(Crush aside: it takes that day's release, or none — *Crush, on trial*)
 locally under the same name as the offline fallback — docker prefers local over pull,
 so a GitHub outage means building on the host, children none the wiser. **All four are
 converted as of 2026-08-24**; each conversion was, in that repo:
@@ -815,15 +857,19 @@ registry build cache (the `buildcache` tag in the same package) and pushes zstd 
 `Dockerfile.base` pins its python base by digest so the cache cannot be pulled out from
 under it. A bump that moves only something near the bottom of the file
 (claude-sessions, zmx, the copied scripts) should ship a few MiB, and the child's
-ansible layers still build on the Pi as before. Two things follow:
+ansible layers still build on the Pi as before — **plus ~25 MB when Crush has released
+since the last tag**, because its layer is keyed on the version CI resolves and sits above
+those (*Crush, on trial*). Two things follow:
 
-- **Moving the python digest is the refresh.** Nothing re-runs `apt-get` or reinstalls
-  Claude Code otherwise, so Debian security updates arrive only when that line moves.
+- **Moving the python digest is the refresh.** Nothing re-runs Debian's `apt-get` or
+  reinstalls Claude Code otherwise, so Debian security updates arrive only when that line
+  moves. The Crush layer re-runs on its own release and refreshes nothing but Crush.
   The comment above `FROM` in `Dockerfile.base` says how to read the current digest. It
   costs one full pull on every host, which is the price of fresh packages.
 - **To check that a bump really was small**, watch the pull in `make up`: shared layers
-  print `Already exists`, and only the moved ones download. If the whole image downloads
-  on a bump that did not move the python digest, the cache missed. That is worth a look
+  print `Already exists`, and only the moved ones download. A Crush layer and the few
+  below it downloading is a Crush release — the run's summary names the version. If the
+  whole image downloads on a bump that did not move the python digest, the cache missed. That is worth a look
   before it becomes normal again.
 
 zstd needs Docker 23 or newer on whatever pulls the image.
@@ -1148,6 +1194,10 @@ read-only at `/run/infra-secrets`:
 | `ssh_config.fleet` | **not built** — the three `Host` blocks |
 | `known_hosts.fleet` | **not built** — their host keys |
 | `tunnel.json` | Cloudflare tunnel credentials — written by `server-create-dev-container.yml` |
+
+**Two credentials live on volumes, not here**, and `make down-volumes` takes both: the
+Claude login (`infra-claude`) and **Crush's provider API key**, typed at its first start
+and kept in `~/.local/share/crush/` on `infra-local-share`.
 
 **There is no `credentials.json`, not even behind a flag.** or3-dev keeps one as a
 documented bad idea: copying the phone's Claude login in does not work — claude

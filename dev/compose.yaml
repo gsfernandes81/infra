@@ -23,7 +23,7 @@ services:
       # `base` — the FROM pulls the tag from ghcr — so a tag bumped here and not yet
       # built by dev-base.yml fails on the pull until `make base` builds it locally.
       args:
-        BASE_TAG: ${BASE_TAG:-2026.10.08}
+        BASE_TAG: ${BASE_TAG:-2026.10.11}
     image: infra-dev
     container_name: infra-dev
     hostname: ${DEV_HOSTNAME:-infra-dev}  # Claude Code shows this as the machine title
@@ -122,7 +122,7 @@ services:
       - infra-claude:/home/dev/.claude           # login + config (CLAUDE_CONFIG_DIR points here)
       - infra-gh:/home/dev/.config/gh            # `gh auth login` (GH_CONFIG_DIR points here)
       - infra-ssh-host:/home/dev/.ssh-host       # sshd host key -> stable known_hosts across rebuilds
-      - infra-local-share:/home/dev/.local/share # shell history
+      - infra-local-share:/home/dev/.local/share # shell history, claude-sessions' state, Crush's provider key
 
       # NO /var/run/docker.sock, and this is the one line most likely to be added by
       # someone in a hurry. decisions.md: the docker group is root-equivalent, because

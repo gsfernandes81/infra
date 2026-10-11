@@ -64,7 +64,7 @@ DOCKER  := $(SUDO) docker
 # is bump, push, wait (about five minutes — see dev/README.md, where that number is
 # measured rather than guessed), then `make up`. Or `make base` below, which builds the
 # same image locally and waits for nobody.
-BASE_TAG := 2026.10.08
+BASE_TAG := 2026.10.11
 
 .PHONY: help dev base up restart down down-volumes status verify collections logs \
 	boot-log tunnel-log idle offload-log sessions login claude claude-update shell fleet \
@@ -114,11 +114,21 @@ _require-secrets:
 # FROM names ghcr.io/gsfernandes81/gsrpi-dev-base, public, built by
 # .github/workflows/dev-base.yml. This target builds the identical image locally UNDER
 # THE GHCR NAME — docker prefers a local image over a pull, so after `make base` the
-# child builds with no network and no GitHub. Use it when GitHub is down, the month is
-# metered, or this host's uid differs from the 1001 the CI image bakes.
+# child builds with no GitHub. Use it when GitHub is down, the month is metered, or this
+# host's uid differs from the 1001 the CI image bakes.
+#
+# IDENTICAL BUT FOR CRUSH, which is the latest release on the day it is built, not a pin:
+# crush-latest asks GitHub which one, and the build fetches it from repo.charm.sh. So a
+# `make base` days after CI built the same tag can carry a newer Crush, and with either of
+# those down this needs `make base CRUSH_VERSION=none`, which builds without it.
+# Dockerfile.base, the Crush layer, has the reasons.
 base: _require-uid
+	@ver='$(CRUSH_VERSION)'; \
+	if [ -z "$$ver" ]; then ver=$$($(CURDIR)/crush-latest) || exit 1; fi; \
+	echo "base $(BASE_TAG), crush $$ver"; \
 	$(DOCKER) build -f $(CURDIR)/Dockerfile.base \
 	  --build-arg USER_UID=$(HOST_UID) --build-arg USER_GID=$(HOST_GID) \
+	  --build-arg CRUSH_VERSION="$$ver" \
 	  -t ghcr.io/gsfernandes81/gsrpi-dev-base:$(BASE_TAG) $(CURDIR)
 
 # No `base` dependency: the FROM pulls from ghcr when the tag is absent locally, so
@@ -153,14 +163,15 @@ restart:
 down:
 	$(COMPOSE) down
 
-# The volumes hold the claude login, the gh login, the sshd HOST key and the shell
-# history. Dropping them means logging in again and every client being asked to accept
+# The volumes hold the claude login, the gh login, the sshd HOST key, the shell
+# history and Crush's provider key. Dropping them means logging in again and every client being asked to accept
 # a changed host key — which is the moment a real key change would be waved through.
 # So it takes a word on the command line, not just a target name.
 down-volumes:
 	@[ "$(CONFIRM)" = yes ] || { \
 	  echo "This drops infra-claude, infra-gh, infra-ssh-host and infra-local-share:" >&2; \
 	  echo "  - claude and gh logins go, and must be done again (make login)" >&2; \
+	  echo "  - Crush's provider key goes; its first start asks again" >&2; \
 	  echo "  - the sshd host key goes, so the phone and any PC will be asked to" >&2; \
 	  echo "    accept a new one — clear their known_hosts entry yourself" >&2; \
 	  echo "Say you mean it:  make down-volumes CONFIRM=yes" >&2; exit 1; }
