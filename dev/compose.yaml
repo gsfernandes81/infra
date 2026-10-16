@@ -123,6 +123,7 @@ services:
       - infra-gh:/home/dev/.config/gh            # `gh auth login` (GH_CONFIG_DIR points here)
       - infra-ssh-host:/home/dev/.ssh-host       # sshd host key -> stable known_hosts across rebuilds
       - infra-local-share:/home/dev/.local/share # shell history, claude-sessions' state, Crush's provider key
+      - infra-jcode:/home/dev/.jcode            # jcode's state, builds and provider login (so its updater works)
 
       # NO /var/run/docker.sock, and this is the one line most likely to be added by
       # someone in a hurry. decisions.md: the docker group is root-equivalent, because
@@ -150,3 +151,4 @@ volumes:
   infra-gh:
   infra-ssh-host:
   infra-local-share:
+  infra-jcode:

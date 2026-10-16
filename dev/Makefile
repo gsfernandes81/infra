@@ -164,14 +164,15 @@ down:
 	$(COMPOSE) down
 
 # The volumes hold the claude login, the gh login, the sshd HOST key, the shell
-# history and Crush's provider key. Dropping them means logging in again and every client being asked to accept
+# history, Crush's provider key and jcode's state. Dropping them means logging in again and every client being asked to accept
 # a changed host key — which is the moment a real key change would be waved through.
 # So it takes a word on the command line, not just a target name.
 down-volumes:
 	@[ "$(CONFIRM)" = yes ] || { \
-	  echo "This drops infra-claude, infra-gh, infra-ssh-host and infra-local-share:" >&2; \
+	  echo "This drops infra-claude, infra-gh, infra-ssh-host, infra-local-share and infra-jcode:" >&2; \
 	  echo "  - claude and gh logins go, and must be done again (make login)" >&2; \
 	  echo "  - Crush's provider key goes; its first start asks again" >&2; \
+	  echo "  - jcode's state and provider login go; its first start asks again" >&2; \
 	  echo "  - the sshd host key goes, so the phone and any PC will be asked to" >&2; \
 	  echo "    accept a new one — clear their known_hosts entry yourself" >&2; \
 	  echo "Say you mean it:  make down-volumes CONFIRM=yes" >&2; exit 1; }

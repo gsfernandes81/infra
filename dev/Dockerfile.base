@@ -683,6 +683,54 @@ RUN mkdir -p /home/dev/.claude /home/dev/.config/gh /home/dev/.config/fish \
     && chmod 700 /home/dev/.ssh-host /home/dev/.ssh /home/dev/.ssh/cp \
         /home/dev/.screen
 
+# ── Jcode: a third agent harness, alongside Crush (owner, 2026-10-16) ─────────────────
+# 1jehuang/jcode, a Rust CLI agent, reached the same plain way: `ssh -t <c> in-workspace`,
+# then `jcode`. It is NOT offloaded and is not in a zmx session — like Crush, the
+# claude-sessions menu and offloader know nothing about it. Unlike Crush that is a decision
+# made on purpose: jcode is light enough not to need offloading, and its own 5-minute idle
+# timeout reaps the background server it detaches (setsid()) when a session runs.
+#
+# PINNED AND HASH-PINNED, the cloudflared model, because jcode has no signed repository —
+# only unsigned GitHub release tarballs with a self-vouching SHA256SUMS. A pin means a
+# manual bump per release: JCODE_VERSION and the two per-arch hashes below. The tarball is
+# one static ELF on arm64; on amd64 the `jcode-linux-x86_64` entry is a wrapper script that
+# execs the real static binary, `jcode-linux-x86_64.bin`, which is what is installed.
+#
+# INSTALLED THE WAY JCODE ITSELF INSTALLS, so its own updater works. `jcode update` (and
+# `--auto-update`, on by default) downloads a new release into ~/.jcode/builds/versions/
+# and repoints the `stable` symlink; the launcher on PATH follows it. That only works when
+# the launcher and ~/.jcode are writable by `dev` — a root-owned /usr/local/bin copy makes
+# `jcode update` fail — which is why this layer runs as `dev` (it is past the USER line) and
+# why the binary is not in /usr/local/bin. ~/.jcode is a volume (infra-jcode in compose.yaml),
+# so an update and the provider login under config/jcode survive a recreate; the launcher at
+# ~/.local/bin/jcode is in the image, first on PATH.
+ARG JCODE_VERSION=0.98.1
+ARG JCODE_SHA256_arm64=571917f4029b2f72c4045423871c40f30f93064f9938eb9f1910ea8f14797100
+ARG JCODE_SHA256_amd64=449a8ed50aa9ac75e6afe9b8e916814172ff7cc63913c7ae1f9abd5b1bc5323c
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      arm64) sha="${JCODE_SHA256_arm64}"; jarch=aarch64; src=jcode-linux-aarch64 ;; \
+      amd64) sha="${JCODE_SHA256_amd64}"; jarch=x86_64;   src=jcode-linux-x86_64.bin ;; \
+      *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSLo /tmp/jcode.tar.gz \
+      "https://github.com/1jehuang/jcode/releases/download/v${JCODE_VERSION}/jcode-linux-${jarch}.tar.gz"; \
+    echo "${sha}  /tmp/jcode.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/jcode.tar.gz -C /tmp "$src"; \
+    mkdir -p "/home/dev/.jcode/builds/versions/${JCODE_VERSION}" \
+             "/home/dev/.jcode/builds/stable"; \
+    install -m 0755 "/tmp/$src" "/home/dev/.jcode/builds/versions/${JCODE_VERSION}/jcode"; \
+    ln -sfn "../versions/${JCODE_VERSION}/jcode" "/home/dev/.jcode/builds/stable/jcode"; \
+    printf '%s\n' "${JCODE_VERSION}" > "/home/dev/.jcode/builds/stable-version"; \
+    ln -sfn "/home/dev/.jcode/builds/stable/jcode" "/home/dev/.local/bin/jcode"; \
+    rm -f /tmp/jcode.tar.gz "/tmp/$src"; \
+    case "$(jcode --version)" in \
+      "jcode v${JCODE_VERSION}"*) : ;; \
+      *) echo "jcode --version does not name ${JCODE_VERSION}" >&2; exit 1 ;; \
+    esac; \
+    jcode --version
+
 # THE BUILD'S OWN CHECK THAT CLAUDE CODE CAN STILL UPDATE ITSELF, run as `dev` because
 # that is the account whose answer counts — it is the same question Claude Code asks
 # before every background update, asked at build time where a wrong answer is a failed

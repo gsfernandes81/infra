@@ -232,6 +232,47 @@ the same shell there, or re-run the play ([`../docs/ssh-clients.md`](../docs/ssh
   it. `Dockerfile.base` (the Crush layer) and
   [`../docs/decisions.md`](../docs/decisions.md) have the reasons.
 
+## Jcode, on trial
+
+[Jcode](https://jcode.sh) (`1jehuang/jcode`, MIT, Rust) is in the base since `2026.10.16`,
+alongside Crush. Same plain way in:
+
+```sh
+ssh -t infra-dev in-workspace  # a login shell in the repo
+jcode                          # first start offers provider OAuth or a key
+```
+
+- **No slot, and not offloaded on purpose.** Like Crush, jcode is not in a zmx session and
+  the claude-sessions menu and offloader know nothing about it. Unlike Crush, that is a
+  choice made deliberately: jcode is light enough not to need offloading. Running `jcode`
+  auto-starts a detached background server (`setsid()`); jcode's own 5-minute idle timeout
+  reaps it, so nothing else is asked to.
+- **Its state.** Everything — config, sessions, skills, and the provider login — lives
+  under `~/.jcode`, mounted as its own `infra-jcode` volume (the login lands in
+  `config/jcode/` beneath it), so it survives a recreate and `make down-volumes` takes it.
+  Per-project session state is `.jcode/` in the working directory; the repo ignores it.
+- **Context it reads.** `CLAUDE.md` and `AGENTS.md`, so the repo's rules reach it. Decline
+  any offer to initialise a project — that writes an `AGENTS.md`, a second copy of
+  `CLAUDE.md`.
+- **The version is a hash-pin, not a release, and it is bumped by hand.** jcode has no
+  signed repository — only unsigned tarballs with a self-vouching `SHA256SUMS` — so there
+  is no signature to vouch for "latest". `Dockerfile.base` pins a version and a per-arch
+  SHA-256 (the cloudflared model); a new jcode release is a one-line bump there, not a
+  `dev/jcode-latest` run.
+- **It updates itself, and the install is laid out so that works.** jcode auto-updates by
+  default (`jcode update`, `--auto-update`): it downloads a new release into
+  `~/.jcode/builds/versions/` and repoints the `stable` symlink, and the launcher on PATH
+  follows it. That is why the binary is **not** in root-owned `/usr/local/bin` — it is
+  installed the way jcode's own installer does, as `dev`, with the real binary in
+  `~/.jcode/builds` and a launcher symlink at `~/.local/bin/jcode` (first on PATH). An
+  update lands on the `infra-jcode` volume, so it survives a recreate; a fresh container
+  still starts on the pinned version the image carries.
+- **Telemetry.** The official `curl | bash` installer phones home to `telemetry.jcode.sh`;
+  this image fetches the tarball directly, so that path is not taken. Any runtime usage
+  metrics ship at jcode's own default — left as it is, not chosen against. `make verify`'s
+  `jcode` line reads the version off a running container. `Dockerfile.base` (the Jcode
+  layer) and [`../docs/decisions.md`](../docs/decisions.md) have the reasons.
+
 ## Ansible from in here
 
 ```sh

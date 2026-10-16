@@ -309,6 +309,7 @@ print("managed settings say off" if v is True else
     # container has once CI's log has expired. MISSING is also what a base built with
     # CRUSH_VERSION=none looks like.
     tool crush 'no crush — a base before 2026.10.11, or one built with CRUSH_VERSION=none' crush --version
+    tool jcode 'no jcode — a base before 2026.10.16' jcode --version
     # The hooks that feed claude-sessions, read the way Claude Code reads them: parsed, and
     # as `dev`, because a file that is malformed or unreadable to the session's account is
     # ignored whole and silently — sessions start with no hooks. Whether they actually FIRE
