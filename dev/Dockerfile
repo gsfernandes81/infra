@@ -15,7 +15,7 @@
 # metered month means building on the host with children none the wiser. Identical but
 # for Crush, which is the latest release on the day it is built; with GitHub or
 # repo.charm.sh down, `make base CRUSH_VERSION=none` builds without it.
-ARG BASE_TAG=2026.10.11
+ARG BASE_TAG=2026.10.16
 FROM ghcr.io/gsfernandes81/gsrpi-dev-base:${BASE_TAG}
 
 # The base ends as the dev user; the installs below write system paths.
