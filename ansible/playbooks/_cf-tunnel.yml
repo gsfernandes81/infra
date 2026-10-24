@@ -54,7 +54,7 @@
 # carries it: under --check a task is skipped by default, so a dry run would resolve
 # nothing and then fail on every id it needed. A read is safe in check mode by
 # definition. The writes below carry no such line, so --check skips exactly those.
-- name: Resolve the zone and its account
+- name: Read the {{ cf_zone }} zone and its account
   ansible.builtin.uri:
     url: "{{ cf_api }}/zones?name={{ cf_zone }}"
     headers: { Authorization: "Bearer {{ cf_token }}" }
@@ -64,7 +64,7 @@
   changed_when: false
   no_log: true
 
-- name: Fail clearly if the token cannot see the zone
+- name: Check the API token can see the {{ cf_zone }} zone
   # Cloudflare answers 200 with success:false for an auth failure, so the status code
   # is not the check — `.json.success` is. A play that read the status alone would
   # carry on and fail later on an empty id, several tasks from the real cause.
@@ -77,12 +77,12 @@
       it is missing Zone:Zone:Read on that zone. Nothing has been created.
     success_msg: "zone {{ cf_zone }} is visible to this token"
 
-- name: Remember the zone and account ids
+- name: Note the {{ cf_zone }} zone and account ids
   ansible.builtin.set_fact:
     cf_zone_id: "{{ cf_zone_q.json.result[0].id }}"
     cf_account_id: "{{ cf_zone_q.json.result[0].account.id }}"
 
-- name: Which account this play is working in
+- name: Print the zone and account ids in use
   # Printed because it is the answer to the question that actually comes up: "why
   # can it not see the object I made?" This id is derived from whoever owns the ZONE,
   # and Access objects live under an ACCOUNT — if you have more than one, a token
@@ -96,7 +96,7 @@
 # Locally-managed (config_src: local), so ingress lives in a tracked config.yml rather
 # than in the dashboard, and what this hostname answers on is reviewable in the repo
 # instead of being a screen someone clicked once.
-- name: Look for an existing credentials file on the host
+- name: Read any existing tunnel credentials on {{ inventory_hostname }}
   # ABSENT IS THE ONLY FAILURE THAT MEANS "NO TUNNEL YET". Until 2026-10-24 this carried a
   # bare `failed_when: false`, which was safe only while the ssh user owned the file. A
   # sidecar's credentials belong to uid 65532 at 0600, so read without root they come back
@@ -113,13 +113,13 @@
     - "'file not found' not in (cf_creds_existing.msg | default('') | lower)"
   check_mode: false
 
-- name: Remember the tunnel id if there already is one
+- name: "Existing tunnel only: note the tunnel id"
   ansible.builtin.set_fact:
     cf_tunnel_id: "{{ (cf_creds_existing.content | b64decode | from_json).TunnelID }}"
   when: cf_creds_existing.content is defined
   no_log: true
 
-- name: Confirm an existing tunnel is still live on this account
+- name: "Existing tunnel only: read the tunnel at Cloudflare"
   # A credentials file naming a deleted tunnel is the nastiest state here: the
   # connector starts, cloudflared fails, and the hostname resolves to nothing — which
   # looks exactly like the service being down. Catch it now, not at 03:00.
@@ -134,7 +134,7 @@
   changed_when: false
   no_log: true
 
-- name: Refuse to continue on a credentials file naming a dead tunnel
+- name: "Existing tunnel only: check the tunnel is live"
   ansible.builtin.assert:
     that:
       # Three conditions, in this order, because `result` arrives in four shapes and
@@ -162,7 +162,7 @@
     success_msg: "tunnel {{ cf_tunnel_id }} already exists and is live"
   when: cf_tunnel_id is defined
 
-- name: Generate a tunnel secret
+- name: "New tunnel only: create a tunnel secret"
   # 32 random bytes, base64. Generated here because Cloudflare never sends a tunnel
   # secret back — this is the only moment it exists in the clear, which is why the
   # credentials file is written two tasks later and not at some more convenient point.
@@ -171,7 +171,7 @@
   when: cf_tunnel_id is not defined
   no_log: true
 
-- name: Create the tunnel
+- name: "New tunnel only: create the {{ cf_name }} tunnel"
   ansible.builtin.uri:
     url: "{{ cf_api }}/accounts/{{ cf_account_id }}/cfd_tunnel"
     method: POST
@@ -197,7 +197,7 @@
   failed_when: false
   no_log: true
 
-- name: What Cloudflare said, if it refused the tunnel
+- name: "If the tunnel was refused: print why"
   ansible.builtin.debug:
     msg: >-
       tunnel {{ cf_name }}: HTTP {{ cf_tunnel_new.status | default('?') }}:
@@ -207,7 +207,7 @@
     - cf_tunnel_new is not skipped
     - (cf_tunnel_new.status | default(0) not in [200, 201]) or not (cf_tunnel_new.json.success | default(false))
 
-- name: Stop if no tunnel was made
+- name: "New tunnel only: check the tunnel was created"
   ansible.builtin.assert:
     that:
       - cf_tunnel_new.status | default(0) in [200, 201]
@@ -220,12 +220,12 @@
     quiet: true
   when: cf_tunnel_new is not skipped
 
-- name: Remember the new tunnel id
+- name: "New tunnel only: note the new tunnel id"
   ansible.builtin.set_fact:
     cf_tunnel_id: "{{ cf_tunnel_new.json.result.id }}"
   when: cf_tunnel_new is not skipped
 
-- name: Write the credentials file
+- name: "New tunnel only: write the credentials on {{ inventory_hostname }}"
   # 0600, and the content never reaches a log. This is the one artefact of the whole
   # play that lands on a host, and it is what lets anything claim to be this tunnel.
   # owner/group are omitted unless the caller names them, so a dev container's file is
@@ -244,7 +244,7 @@
   no_log: true
 
 # ── 2  the DNS record ───────────────────────────────────────────────────
-- name: Look for an existing record for the hostname
+- name: Read the CNAME record for {{ cf_hostname }}
   # &type=CNAME, not name alone. Cloudflare's name filter returns every record type at
   # that name, so a stale A or AAAA left over from something else would come back
   # first and the PUT below would rewrite THAT record's id into a CNAME — converting
@@ -258,7 +258,7 @@
   changed_when: false
   no_log: true
 
-- name: Is the record already pointing at this tunnel
+- name: Note whether the CNAME already points at the tunnel
   # So a converged run reports changed=0. That matters more here than tidiness: this
   # repo reads the recap to tell a no-op from a real one, and a play that always says
   # "changed" is a play whose recap nobody reads.
@@ -272,13 +272,13 @@
          and cf_dns_q.json.result[0].content == ((cf_tunnel_id | default('', true)) ~ '.cfargotunnel.com')
          and (cf_dns_q.json.result[0].proxied | default(false) | bool) }}
 
-- name: The record is already correct
+- name: "If correct: print that the CNAME is left as it is"
   ansible.builtin.debug:
     msg: "{{ cf_hostname }} already CNAMEs to this tunnel, proxied — leaving it"
   changed_when: true
   when: cf_dns_ok
 
-- name: Point the record at this tunnel
+- name: "If wrong or missing: write the tunnel's CNAME"
   # PUT when it exists rather than skipping. A record left pointing at a PREVIOUS
   # tunnel resolves perfectly and reaches nothing — the same failure as above, wearing
   # the same disguise. Making it match costs one call; assuming it matches is the bug.
@@ -303,7 +303,7 @@
   failed_when: false
   no_log: true
 
-- name: What Cloudflare said, if it refused the record
+- name: "If the CNAME was refused: print why"
   ansible.builtin.debug:
     msg: >-
       {{ cf_hostname }}: HTTP {{ cf_dns_w.status | default('?') }}:
@@ -313,7 +313,7 @@
     - cf_dns_w is not skipped
     - (cf_dns_w.status | default(0) not in [200, 201]) or not (cf_dns_w.json.success | default(false))
 
-- name: Stop if the record was not written
+- name: "If wrong or missing: check the CNAME was written"
   ansible.builtin.assert:
     that:
       - cf_dns_w.status | default(0) in [200, 201]

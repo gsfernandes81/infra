@@ -55,7 +55,7 @@
 
   tasks:
     # ── the API token: read, checked and verified, in one shared file ─────────
-    - name: The Cloudflare API token
+    - name: Read and verify the Cloudflare API token
       ansible.builtin.import_tasks: _cf-api-token.yml
 
     # ── are we standing on the thing we are about to stop? ───────────────────
@@ -66,7 +66,7 @@
     # A session arriving via the local connector shows a LOOPBACK client address,
     # because cloudflared connects to sshd on localhost. Anything else — a LAN address
     # from a jump host — is safe.
-    - name: Establish how Ansible is reaching this host
+    - name: Read the address Ansible reaches {{ inventory_hostname }} from
       ansible.builtin.shell: echo "$SSH_CONNECTION"
       register: sshconn
       # A read. Without this it is skipped under --check, stdout comes back empty, and the
@@ -79,7 +79,7 @@
     # standing position cannot be established at all, and '?' passing a not-in-loopback
     # test would read as safe. Unknown refuses, the same as loopback — flagged by the
     # batch-1 review agent, 2026-08-24.
-    - name: Refuse to cycle the tunnel we are connected through
+    - name: Check the ssh session avoids {{ inventory_hostname }}'s tunnel
       ansible.builtin.assert:
         that:
           - sshconn.stdout | trim | length > 0
@@ -97,13 +97,13 @@
     # CLAUDE.md and hosts/<host>/setup/README.md — both of which describe how a box was
     # BUILT, not what it currently is. `two` was documented at /srv/infra and is not
     # there. The box is the authority; this asks it before anything is written.
-    - name: Is the host's clone where host_repo says
+    - name: Read whether {{ host_repo }} is a git checkout
       ansible.builtin.stat:
         path: "{{ host_repo }}/.git"
       register: repo_stat
       become: true
 
-    - name: Refuse a host_repo that is not a checkout
+    - name: Check {{ host_repo }} on {{ inventory_hostname }} is a git checkout
       ansible.builtin.assert:
         that: repo_stat.stat.exists | default(false)
         fail_msg: >-
@@ -115,7 +115,7 @@
         success_msg: "{{ host_repo }} is a checkout"
 
     # ── what we are moving from, and to ──────────────────────────────────────
-    - name: Both credentials files have to be there
+    - name: Read whether both tunnel credentials files exist
       # The slurp below is no_log, so its failure is "the output has been hidden" — on a
       # host where phase 1 never ran, or on a re-run after the Done message's own
       # `rm {{ new_cred_file }}` cleanup. The read stays censored; the refusal says which
@@ -127,7 +127,7 @@
       become: true
       check_mode: false
 
-    - name: Say which one
+    - name: Check both tunnel credentials files exist
       ansible.builtin.assert:
         that: item.stat.exists
         fail_msg: >-
@@ -139,7 +139,7 @@
       loop_control:
         label: "{{ item.item }}"
 
-    - name: Read both credentials files
+    - name: Read both tunnel credentials files
       ansible.builtin.slurp:
         src: "{{ item }}"
       register: creds
@@ -149,14 +149,14 @@
 
     # The REPO CONFIG is what we are cutting over to — it is the reviewed artefact, and
     # the only thing here that survives a half-finished run unambiguously.
-    - name: Identify the tunnels
+    - name: Note the live, new and reviewed tunnel ids
       ansible.builtin.set_fact:
         live_tunnel: "{{ (creds.results[0].content | b64decode | from_json).TunnelID }}"
         new_tunnel: "{{ (creds.results[1].content | b64decode | from_json).TunnelID }}"
         cf_account: "{{ (creds.results[0].content | b64decode | from_json).AccountTag }}"
         target_tunnel: "{{ (lookup('file', repo_cfg) | from_yaml).tunnel }}"
 
-    - name: The new credentials and the reviewed config must name the same tunnel
+    - name: Check the new credentials match the reviewed config
       ansible.builtin.assert:
         that: new_tunnel == target_tunnel
         fail_msg: >-
@@ -170,13 +170,13 @@
     # no-op that left config.yml naming the OLD tunnel, the credentials were then swapped
     # to the NEW one, and cloudflared could not authenticate a tunnel its config did not
     # name. It surfaced as a 503 with zero ready connections and looked like a slow box.
-    - name: Read the reviewed config from the HOST's own clone
+    - name: Read the reviewed config from {{ inventory_hostname }}'s clone
       ansible.builtin.slurp:
         src: "{{ host_repo }}/hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
       register: host_repo_cfg
       become: true
 
-    - name: The host's clone has to carry the reviewed config too
+    - name: Check {{ inventory_hostname }}'s clone has this checkout's config
       ansible.builtin.assert:
         # BYTE-EQUAL, not just the tunnel id. Comparing one key passes a clone that has
         # the right tunnel and a stale INGRESS — a hostname added on the control node
@@ -201,11 +201,11 @@
     # — installed, swapped, cycled — and re-running it would achieve nothing while the
     # backup step actively destroyed the rollback. That is not hypothetical: the run on
     # 2026-08-23 lost its connection between the swap and the cycle.
-    - name: Has the host already been swapped over?
+    - name: Note whether {{ inventory_hostname }} is already on the new tunnel
       ansible.builtin.set_fact:
         swap_done: "{{ live_tunnel == target_tunnel }}"
 
-    - name: Say which half is left
+    - name: "Print which is left: host and DNS, or DNS only"
       ansible.builtin.debug:
         msg: >-
           {{ 'host already on ' ~ target_tunnel ~ ' — skipping to DNS'
@@ -215,13 +215,13 @@
     # The hostnames come from the REPO config, not from the old tunnel's ingress. That
     # is the point of the review step: ionic-traces was removed there deliberately, and
     # taking the list from the edge would quietly resurrect it.
-    - name: Read the reviewed config to learn which hostnames move
+    - name: Note which hostnames the reviewed config moves
       ansible.builtin.set_fact:
         move_hosts: >-
           {{ (lookup('file', repo_cfg) | from_yaml).ingress
              | selectattr('hostname', 'defined') | map(attribute='hostname') | list }}
 
-    - name: Confirm the plan
+    - name: Print the cutover plan
       ansible.builtin.debug:
         msg:
           - "host      : {{ inventory_hostname }}"
@@ -237,7 +237,7 @@
     # which case "baseline" captures the OUTAGE and the final check then confirms the
     # hostnames still match it. That happened on 2026-08-23 — the cutover succeeded and
     # the check that said so proved nothing.
-    - name: Look for the baseline phase 1 saved
+    - name: Read whether phase 1 saved a baseline
       ansible.builtin.stat:
         path: "{{ baseline_file }}"
       register: bl_saved
@@ -252,7 +252,7 @@
     # login before the origin is ever reached. Access binds to the HOSTNAME, not to the
     # tunnel, so it should survive this unchanged — and comparing to baseline is what
     # will show whether it did.
-    - name: Baseline each hostname through the edge
+    - name: "If no saved baseline: probe each hostname"
       ansible.builtin.uri:
         url: "https://{{ item }}"
         method: HEAD
@@ -264,7 +264,7 @@
       delegate_to: localhost
       when: not bl_saved.stat.exists
 
-    - name: Use the saved baseline, or the one just taken
+    - name: Note each hostname's baseline status
       ansible.builtin.set_fact:
         baseline_status: >-
           {{ (lookup('file', baseline_file) | from_json) if bl_saved.stat.exists
@@ -273,7 +273,7 @@
     # A hostname added to the reviewed config after phase 1 saved the baseline has no
     # entry here, and the final wait would only discover that as a missing-key error —
     # mid-cutover, after DNS had already moved. Refuse now, while nothing has changed.
-    - name: Every hostname that moves must have a baseline entry
+    - name: Check every hostname that moves has a baseline
       ansible.builtin.assert:
         that: move_hosts | difference(baseline_status.keys() | list) | length == 0
         fail_msg: >-
@@ -282,7 +282,7 @@
           saved. Delete {{ baseline_file }} and re-run phase 1, or remove them from
           the config.
 
-    - name: Warn if the baseline is this run's own
+    - name: "If no saved baseline: print the resumed-run warning"
       ansible.builtin.debug:
         msg: >-
           No saved baseline at {{ baseline_file }} — using one taken just now. If this is
@@ -291,7 +291,7 @@
       changed_when: true
       when: not bl_saved.stat.exists
 
-    - name: Baseline
+    - name: Print each hostname's baseline status
       ansible.builtin.debug:
         var: baseline_status
       changed_when: true
@@ -304,7 +304,7 @@
     # bare `no_log`, so a 403 arrived as `Status code was 403` with the response censored —
     # and the response body is the only place Cloudflare says WHICH permission is missing.
     # Cost a run on `two`, 2026-08-28.
-    - name: Find the zone
+    - name: Read the {{ zone_name }} zone from Cloudflare
       ansible.builtin.uri:
         url: "{{ cf_api }}/zones?name={{ zone_name }}"
         headers: "{{ api_hdr }}"
@@ -313,7 +313,7 @@
       no_log: true
       failed_when: false
 
-    - name: Say what Cloudflare refused, if it did
+    - name: "If the zone read failed: print Cloudflare's reason"
       # The body only. NEVER `zone` whole, and never the invocation: that is where the
       # Authorization header lives.
       ansible.builtin.debug:
@@ -323,7 +323,7 @@
       changed_when: true
       when: (zone.status | default(0)) != 200
 
-    - name: The token has to be able to see the zone
+    - name: Check the token can read the {{ zone_name }} zone
       ansible.builtin.assert:
         that:
           - (zone.status | default(0)) == 200
@@ -337,11 +337,11 @@
           changed on {{ inventory_hostname }} or at the edge.
         success_msg: "token can see {{ zone_name }}"
 
-    - name: Keep the zone id
+    - name: Note the zone id for {{ zone_name }}
       ansible.builtin.set_fact:
         zone_id: "{{ zone.json.result[0].id }}"
 
-    - name: Find each hostname's DNS record
+    - name: Read each moving hostname's DNS record
       ansible.builtin.uri:
         url: "{{ cf_api }}/zones/{{ zone_id }}/dns_records?name={{ item }}"
         headers: "{{ api_hdr }}"
@@ -351,7 +351,7 @@
       no_log: true
       failed_when: false
 
-    - name: The token has to be able to read those records
+    - name: Check the token can read each hostname's DNS record
       ansible.builtin.assert:
         that: item.status | default(0) == 200
         fail_msg: >-
@@ -371,7 +371,7 @@
     # with no DNS record died on `object has no element 0` two tasks before reaching the
     # message written for it. Nothing has changed at that point either way; the
     # difference is whether you get a traceback or a sentence at 3am.
-    - name: Refuse if any hostname has no record, or more than one
+    - name: Check each hostname has a single DNS record
       ansible.builtin.assert:
         that: item.json.result | length == 1
         fail_msg: >-
@@ -381,7 +381,7 @@
       loop_control:
         label: "{{ item.item }}"
 
-    - name: Record where each one points now — WRITE THIS DOWN
+    - name: Print each record's current target, to write down
       ansible.builtin.debug:
         msg: >-
           {{ dict(move_hosts | zip(recs.results
@@ -396,12 +396,12 @@
     # This is not hypothetical. zero's ingress carries torrents.gsrpi.uk, whose CNAME has
     # always pointed at ONE's tunnel; copied blindly into zero's new config it would have
     # moved one's torrent UI onto zero to fix a rule that had never done anything.
-    - name: Where the records point today
+    - name: Note which tunnels the records point at today
       ansible.builtin.set_fact:
         current_targets: >-
           {{ recs.results | map(attribute='json.result.0.content') | list | unique }}
 
-    - name: Refuse if they do not all point at one tunnel that is not the target
+    - name: "Full cutover: check all records share one old tunnel"
       ansible.builtin.assert:
         that:
           - current_targets | length == 1
@@ -422,7 +422,7 @@
     # task's fail_msg and never rendered. The rescue performs the restore instead of
     # describing it. The DNS tasks stay outside the block, so a rescued run has moved
     # nothing at the edge.
-    - name: Swap the host onto the new tunnel — rescued as one unit
+    - name: "Full cutover: move {{ inventory_hostname }} onto the new tunnel"
       when: not swap_done
       block:
         # become: true, because install-system-file shells out to sudo for the backup
@@ -439,7 +439,7 @@
         #
         # `-f` guard, same reason as the credentials: never overwrite an existing backup,
         # or a second run erases the only copy of the pre-2g config.
-        - name: Clear any stale rollback marker
+        - name: "Full cutover: delete any stale rollback marker"
           # /tmp survives a failed run. A marker left behind by a rescue that died
           # mid-way would arm a pointless cycle in some later run's rescue.
           ansible.builtin.file:
@@ -447,7 +447,7 @@
             state: absent
           become: true
 
-        - name: Back up the live config before replacing it
+        - name: "Full cutover: write config.yml.pre-2g if missing"
           ansible.builtin.shell: |
             set -e
             [ -f {{ cfg_file }}.pre-2g ] || {
@@ -457,7 +457,7 @@
           become: true
           changed_when: true
 
-        - name: Install the reviewed config
+        - name: "Full cutover: install the reviewed config.yml"
           ansible.builtin.command:
             cmd: bin/install-system-file cloudflared-config.yml --commit --allow-content-change
             chdir: "{{ host_repo }}"
@@ -472,13 +472,13 @@
         # The installed artefact, not the repo copy — this is the file cloudflared opens.
         # Placed BEFORE the credential swap so a mismatch is a clean abort with the host
         # still on its old tunnel, rather than a rescue after an outage.
-        - name: Prove the installed config now names the new tunnel
+        - name: "Full cutover: read the installed config.yml"
           ansible.builtin.slurp:
             src: "{{ cfg_file }}"
           register: installed_cfg
           become: true
 
-        - name: Refuse to swap credentials the installed config does not match
+        - name: "Full cutover: check config.yml names the new tunnel"
           ansible.builtin.assert:
             that: (installed_cfg.content | b64decode | from_yaml).tunnel == new_tunnel
             fail_msg: >-
@@ -488,7 +488,7 @@
               Nothing has been swapped and the host is still on its old tunnel.
             success_msg: "installed config names {{ new_tunnel }}"
 
-        - name: Back up the old credentials, then put the new ones in place
+        - name: "Full cutover: back up, then replace the credentials"
           ansible.builtin.shell: |
             set -e
             [ -f {{ cred_file }}.pre-2g ] || {
@@ -503,7 +503,7 @@
         # stop, poll until the metrics port clears, start. `rc-service restart` does
         # not wait and cloudflared's grace period is 30s — that killed six respawns on
         # zero.
-        - name: Cycle the connector onto the new tunnel
+        - name: "Full cutover: restart cloudflared on the new tunnel"
           ansible.builtin.shell: |
             rc-service cloudflared stop >/dev/null 2>&1
             i=0
@@ -516,7 +516,7 @@
           become: true
           changed_when: true
 
-        - name: Wait for the NEW connector to register
+        - name: "Full cutover: wait for the new connector to register"
           ansible.builtin.uri:
             url: "{{ probe }}/ready"
             return_content: true
@@ -529,13 +529,13 @@
           retries: "{{ ready_retries | default(24) }}"
           delay: 5
 
-        - name: Check it is serving the reviewed rules, not the old ones
+        - name: "Full cutover: read the rules the connector serves"
           ansible.builtin.uri:
             url: "{{ probe }}/config"
             return_content: true
           register: now_cfg
 
-        - name: The rules in force must match the file we reviewed
+        - name: "Full cutover: check served rules match config.yml"
           ansible.builtin.assert:
             # reject the EMPTY hostname, not just undefined ones. The connector reports
             # the catch-all as `"hostname": ""` — a defined key — while the YAML omits
@@ -556,7 +556,7 @@
         # that — install-system-file refusing the diff, say — leaves the live
         # credentials untouched, and an unconditional cp would turn that clean abort
         # into a broken rescue.
-        - name: Restore the pre-2g credentials
+        - name: "On failure: write back the pre-2g credentials"
           ansible.builtin.shell: |
             set -e
             if [ -f {{ cred_file }}.pre-2g ] && ! cmp -s {{ cred_file }}.pre-2g {{ cred_file }}; then
@@ -582,7 +582,7 @@
         # between `touch` and this task cannot arm a later run's rescue.
         # The other half of the restore. Without it the box comes back with the old
         # credentials and the new config, which do not name the same tunnel.
-        - name: Restore the pre-2g config
+        - name: "On failure: write back the pre-2g config.yml"
           ansible.builtin.shell: |
             set -e
             if [ -f {{ cfg_file }}.pre-2g ] && ! cmp -s {{ cfg_file }}.pre-2g {{ cfg_file }}; then
@@ -593,7 +593,7 @@
           become: true
           changed_when: true
 
-        - name: Cycle the connector back onto the old tunnel
+        - name: "If restored: restart cloudflared on the old tunnel"
           ansible.builtin.shell: |
             [ -f /tmp/.cutover-restored ] || exit 0
             rm -f /tmp/.cutover-restored
@@ -611,7 +611,7 @@
         # A ROLLBACK THAT IS NOT VERIFIED IS A CLAIM. The rescue said the host was back
         # on the old tunnel without ever asking the connector, so a failed cycle-back
         # read exactly like a successful one.
-        - name: Did the old connector actually come back
+        - name: "On failure: wait for the old connector to register"
           ansible.builtin.uri:
             url: "{{ probe }}/ready"
             return_content: true
@@ -621,7 +621,7 @@
           delay: 5
           failed_when: false
 
-        - name: Say so if it did not
+        - name: "If rollback left the tunnel down: print what to do"
           ansible.builtin.debug:
             msg: >-
               THE ROLLBACK RESTORED THE FILES BUT THE CONNECTOR IS NOT SERVING —
@@ -632,7 +632,7 @@
           changed_when: true
           when: (back_ready.content | default('{}') | from_json).readyConnections | default(0) | int == 0
 
-        - name: Stop here — rolled back, DNS never touched
+        - name: "On failure: end the run, rolled back, DNS untouched"
           ansible.builtin.fail:
             msg: >-
               The new connector never came up serving the reviewed rules, so
@@ -646,7 +646,7 @@
     # verify, re-run as a sanity check. No rescue here: this run changed nothing on
     # the host, so there is nothing to roll back, and the fail_msg says what to do
     # by hand.
-    - name: Wait for the connector to register (resumed run)
+    - name: "Resumed run: wait for the connector to register"
       ansible.builtin.uri:
         url: "{{ probe }}/ready"
         return_content: true
@@ -659,14 +659,14 @@
       delay: 5
       when: swap_done
 
-    - name: Check it is serving the reviewed rules, not the old ones (resumed run)
+    - name: "Resumed run: read the rules the connector serves"
       ansible.builtin.uri:
         url: "{{ probe }}/config"
         return_content: true
       register: now_cfg
       when: swap_done
 
-    - name: The rules in force must match the file we reviewed (resumed run)
+    - name: "Resumed run: check served rules match config.yml"
       ansible.builtin.assert:
         that: >-
           ((now_cfg.content | from_json).config.ingress
@@ -679,7 +679,7 @@
           {{ cred_file }}.pre-2g over {{ cred_file }} and cycle to go back.
       when: swap_done
 
-    - name: The new tunnel is live and no DNS has moved yet
+    - name: Print that the new tunnel is live and DNS is next
       ansible.builtin.debug:
         msg: >-
           connector on {{ new_tunnel }} is serving {{ move_hosts | length }} rules.
@@ -687,7 +687,7 @@
       changed_when: true
 
     # ── move DNS, one record at a time ───────────────────────────────────────
-    - name: Repoint each hostname at the new tunnel
+    - name: Write each hostname's DNS record to the new tunnel
       register: moved
       ansible.builtin.uri:
         url: "{{ cf_api }}/zones/{{ zone_id }}/dns_records/{{ item.json.result[0].id }}"
@@ -710,7 +710,7 @@
       # — the only place Cloudflare names the missing permission — censored.
       failed_when: false
 
-    - name: Say what Cloudflare refused, per record
+    - name: "If a DNS write was refused: print Cloudflare's reason"
       ansible.builtin.debug:
         msg: >-
           {{ item.item.item }}: HTTP {{ item.status | default('?') }}
@@ -721,7 +721,7 @@
       changed_when: true
       when: (item.status | default(0)) not in [200, 201]
 
-    - name: Every record has to have moved
+    - name: Check every DNS record moved to the new tunnel
       # DNS can end PARTIALLY moved — the loop continues past a failure — so the message
       # has to say which did and which did not, and where the map back is.
       ansible.builtin.assert:
@@ -735,7 +735,7 @@
           "WRITE THIS DOWN" output earlier in this run, which is the map back.
         success_msg: "all {{ moved.results | length }} records moved"
 
-    - name: Wait for each hostname to answer as it did before
+    - name: Wait for each hostname to match its baseline status
       ansible.builtin.uri:
         url: "https://{{ item }}"
         method: HEAD
@@ -764,7 +764,7 @@
       loop: "{{ move_hosts }}"
       delegate_to: localhost
 
-    - name: Done
+    - name: Print the cutover result and cleanup steps
       ansible.builtin.debug:
         msg:
           - "every hostname answers as it did before the cutover"

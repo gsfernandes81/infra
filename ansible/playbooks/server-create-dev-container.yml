@@ -45,19 +45,19 @@
 # NO TASKS OF ITS OWN beyond one message: this file is composition. Everything it runs
 # belongs to the two halves.
 
-- name: Guard — refuse to run with no inventory
+- name: Check the inventory is loaded
   ansible.builtin.import_playbook: _assert-inventory.yml
   vars:
     required_group: fleet
 
-- name: The edge — tunnel, DNS, Access application and service token
+- name: Create the container's tunnel, DNS and Access app
   ansible.builtin.import_playbook: _dev-container-tunnel.yml
 
-- name: Say so when the host half does not apply
+- name: "If not infra-dev: print where the host side lives"
   hosts: localhost
   gather_facts: false
   tasks:
-    - name: "{{ name | default('infra-dev') }} keeps its host side in its own repo"
+    - name: "If not infra-dev: print the {{ name | default('infra-dev') }} next steps"
       ansible.builtin.debug:
         msg: >-
           The host half (secrets dir, deploy key, authorized_keys, dev/.env) runs for
@@ -67,7 +67,7 @@
       changed_when: true
       when: (name | default('infra-dev')) != 'infra-dev'
 
-- name: The host — secrets dir, deploy key, authorized_keys, dev/.env (infra-dev only)
+- name: "infra-dev only: create the host side on zero"
   ansible.builtin.import_playbook: _dev-container-host.yml
   # `when` on an import applies to every task it brings in. The play still gathers facts
   # on zero, which is cheap and harmless.

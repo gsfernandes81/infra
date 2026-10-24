@@ -21,13 +21,13 @@
 # skipped by default, so a `--check` run of a read-only playbook would report nothing and
 # look like success. A read is safe in check mode by definition.
 
-- name: Inventory what runs on the fleet
+- name: Read what runs on the fleet and write the report
   hosts: fleet
   gather_facts: true
   become: false
 
   tasks:
-    - name: Listening TCP sockets
+    - name: Read the listening TCP sockets on {{ inventory_hostname }}
       # The authoritative answer to "what is published here" — better than any compose
       # file, because it is what the kernel thinks. -p needs root for process names; the
       # socket list itself does not, so a failed become still leaves useful output.
@@ -54,7 +54,7 @@
       failed_when: false
       become: true
 
-    - name: Containers, with restart policy and published ports
+    - name: "If containerized: read containers and their ports"
       # One inspect per host rather than ps + inspect merged in Jinja. `xargs -r` is what
       # stops a host with no containers running a bare `docker inspect` and failing.
       #
@@ -99,7 +99,7 @@
       become: true
       when: inventory_hostname in groups['containerized'] | default([])
 
-    - name: Named volumes
+    - name: "If containerized: read the named volumes"
       # Here because a dev container's volume IS its login and its history — 22 MB of
       # transcripts in or3-dev's case — so a volume nobody has listed is a thing nobody
       # knows they would lose. See docs/management-plane.md.
@@ -113,7 +113,7 @@
       become: true
       when: inventory_hostname in groups['containerized'] | default([])
 
-    - name: Report what could not be read
+    - name: "If a read failed: print what could not be read"
       # A partial inventory that looks complete is the wrong-reason pass this repo keeps
       # designing against. If a read failed, say so on the host it failed on.
       ansible.builtin.debug:
@@ -127,7 +127,7 @@
         audit_sockets.rc | default(1) != 0
         or (audit_containers.rc | default(0)) not in [0]
 
-    - name: Write the report
+    - name: Write docs/fleet-inventory.md
       # In THIS play, delegated, rather than a second play against localhost. A second
       # play is the obvious shape and it has a trap: `--limit zero` excludes localhost
       # too, so the play matches no hosts, the report is silently never written, and the

@@ -30,7 +30,7 @@
 # of configuration. The blocks now keep what you need mid-rescue; the doc keeps the rest.
 # NO NEW COLLECTIONS: ansible.builtin throughout.
 
-- name: Guard — refuse to run with no inventory
+- name: Check the inventory is loaded
   ansible.builtin.import_playbook: _assert-inventory.yml
   vars:
     required_group: control
@@ -99,14 +99,14 @@
     # with the failure hidden behind `| default('cloudflared', true)` until 2026-08-24,
     # when it was fixed to this same resolve-then-stat pattern — detection is still not
     # to be trusted anywhere; the stat on the result is the guard.
-    - name: Try to find cloudflared on this control node
+    - name: Read where cloudflared is on PATH
       ansible.builtin.shell: command -v cloudflared
       register: cfd_path
       changed_when: false
       failed_when: false
       check_mode: false
 
-    - name: Settle on a path — an override wins, discovery is the fallback
+    - name: Note which cloudflared path the fleet block uses
       ansible.builtin.set_fact:
         cfd_resolved: >-
           {{ cloudflared_path | default(cfd_path.stdout | trim, true) }}
@@ -117,13 +117,13 @@
     # that matters. An absolute path, not a bare name: ssh runs ProxyCommand through
     # /bin/sh, whose PATH is not your interactive one, so a bare name resolves in your
     # shell and then fails inside ssh — which presents as the tunnel being down.
-    - name: Check the path we are about to write
+    - name: Probe the chosen cloudflared path
       ansible.builtin.stat:
         path: "{{ cfd_resolved }}"
       register: cfd_stat
       when: cfd_resolved | length > 0
 
-    - name: Refuse to write a block naming a cloudflared that is not there
+    - name: Check the chosen cloudflared exists and is executable
       ansible.builtin.assert:
         that:
           - cfd_resolved | length > 0
@@ -143,7 +143,7 @@
     # LF anyway (the Jinja lexer normalises newlines), so refusing it would blame a dash
     # that is not there. NOT GUARDED: the paste file's own wrapper lines further down,
     # which are ASCII by hand.
-    - name: Refuse a fleet template that is not ASCII
+    - name: Check the fleet ssh template is plain ASCII
       ansible.builtin.assert:
         that: lookup('file', '../templates/ssh-fleet-block.j2') is not search('[^\t\n\r -~]')
         fail_msg: >-
@@ -153,7 +153,7 @@
           something else. Use -, --, or a row of - instead (docs/ssh-clients.md).
         quiet: true
 
-    - name: Ensure ~/.ssh exists
+    - name: Create ~/.ssh if missing, mode 700
       ansible.builtin.file:
         path: "{{ home }}/.ssh"
         state: directory
@@ -161,7 +161,7 @@
 
     # ControlPath sockets. Absent, every multiplexed connection fails with an opaque
     # `unix_listener: cannot bind` that reads like a network problem.
-    - name: Ensure ANSIBLE's ControlPath directory exists
+    - name: Create ~/.ssh/cp for Ansible's ControlPath sockets
       # ~/.ssh/cp, and it is NOT the same directory as ~/.ssh/cm below. Two multiplexing
       # configs coexist and each needs its own socket directory:
       #
@@ -182,13 +182,13 @@
         state: directory
         mode: "0700"
 
-    - name: Ensure the fleet block's ControlPath directory exists
+    - name: Create ~/.ssh/cm for the fleet block's ControlPath
       ansible.builtin.file:
         path: "{{ home }}/.ssh/cm"
         state: directory
         mode: "0700"
 
-    - name: Ensure ~/.ssh/config exists before we edit a block inside it
+    - name: Create ~/.ssh/config if missing, mode 600
       ansible.builtin.file:
         path: "{{ ssh_config }}"
         state: touch
@@ -219,7 +219,7 @@
     # Only a CR at the end of a line is stripped; a lone one is text, and stays. The grep
     # asks exactly that question, "\r$" and not "\r", or a lone CR would make the sed
     # report changed, and the --check notice fire, on every run forever.
-    - name: Does ~/.ssh/config have CRLF line endings
+    - name: Probe ~/.ssh/config for CRLF line endings
       ansible.builtin.command:
         argv: [grep, -qs, "\r$", "{{ ssh_config }}"]
       register: posix_crlf
@@ -227,7 +227,7 @@
       failed_when: false
       check_mode: false
 
-    - name: Convert ~/.ssh/config to LF, so blockinfile can find its markers
+    - name: "If CRLF: convert ~/.ssh/config to LF"
       ansible.builtin.command:
         argv: [sed, -i, --follow-symlinks, 's/\r$//', "{{ ssh_config }}"]
       when: posix_crlf.rc == 0
@@ -235,7 +235,7 @@
     # The sed above does not run under --check, so neither do its consequences: the
     # removals find nothing and the diff shows a second block under the stale one. Said
     # here because the play comment is not what the person running --check is reading.
-    - name: Say that a --check diff of a CRLF ~/.ssh/config is not what the real run writes
+    - name: "--check, CRLF: print why the diff is wrong"
       ansible.builtin.debug:
         msg: >-
           {{ ssh_config }} has CRLF line endings. A real run converts it to LF first; this
@@ -255,7 +255,7 @@
     # client-home-ssh-config.yml (the play you run; this half is imported by it) adds the
     # second entry. _client-dev-ssh.yml carries the same task for its own blocks, where
     # the stale one hid the claude-sessions door.
-    - name: Drop the fleet blocks written under markers this play no longer uses
+    - name: Delete old-marker fleet blocks from ~/.ssh/config
       ansible.builtin.blockinfile:
         path: "{{ ssh_config }}"
         create: true
@@ -269,7 +269,7 @@
     # last: ssh takes the first value it obtains, so a fleet block placed after it would
     # silently lose to it. If `Host *` is absent the block appends, which is correct for
     # a file that has no defaults section yet.
-    - name: Write the fleet block above the `Host *` defaults
+    - name: Write the fleet block in ~/.ssh/config above Host *
       ansible.builtin.blockinfile:
         path: "{{ ssh_config }}"
         create: true
@@ -285,7 +285,7 @@
     # Under WSL, C:\Users\gavin\.ssh\config is a real writable file at /mnt/c/... So
     # from there the block is MANAGED rather than pasted, and the host list cannot
     # diverge between the two clients by anyone forgetting to paste.
-    - name: Is the laptop's Windows home reachable from here (i.e. are we in WSL)?
+    - name: Probe for the laptop's Windows home through WSL
       ansible.builtin.stat:
         path: "{{ windows_home }}"
       register: win_home
@@ -294,7 +294,7 @@
         - windows_home | length > 0
         - windows_ssh_config | length > 0
 
-    - name: Settle whether the Windows half runs at all
+    - name: Note whether the laptop's Windows side is written
       ansible.builtin.set_fact:
         on_windows_client: >-
           {{ (windows_home | length > 0)
@@ -304,13 +304,13 @@
 
     # Checkable after all, because WSL can see it. This was the one string in this play
     # nobody had verified; from Termux it still is, and the paste file says so.
-    - name: Check the Windows cloudflared, as WSL sees it
+    - name: "WSL only: probe for the Windows cloudflared.exe"
       ansible.builtin.stat:
         path: "{{ windows_cloudflared_wsl }}"
       register: win_cfd
       when: on_windows_client | bool
 
-    - name: Refuse to write a Windows block naming a cloudflared that is not there
+    - name: "WSL only: check Windows has cloudflared.exe"
       ansible.builtin.assert:
         that: win_cfd.stat.exists | default(false)
         fail_msg: >-
@@ -324,7 +324,7 @@
     # LF, for the reasons given where ~/.ssh/config gets the same three tasks above.
     # Under drvfs, sed -i can also print "preserving permissions ... Operation not
     # permitted" and still exit 0: the refusal that keeps `mode:` off these tasks.
-    - name: Does the laptop's ssh config have CRLF line endings
+    - name: "WSL only: probe the Windows ssh config for CRLF"
       ansible.builtin.command:
         argv: [grep, -qs, "\r$", "{{ windows_ssh_config }}"]
       register: win_crlf
@@ -333,14 +333,14 @@
       check_mode: false
       when: on_windows_client | bool
 
-    - name: Convert the laptop's ssh config to LF, so blockinfile can find its markers
+    - name: "WSL, if CRLF: convert the Windows ssh config to LF"
       ansible.builtin.command:
         argv: [sed, -i, --follow-symlinks, 's/\r$//', "{{ windows_ssh_config }}"]
       when:
         - on_windows_client | bool
         - win_crlf.rc | default(1) == 0
 
-    - name: Say that a --check diff of a CRLF file is not what the real run writes
+    - name: "--check, Windows CRLF: print why the diff is wrong"
       ansible.builtin.debug:
         msg: >-
           {{ windows_ssh_config }} has CRLF line endings. A real run converts it to LF
@@ -359,7 +359,7 @@
     #
     # `create: true` creates nothing on a removal — with no file, blockinfile returns
     # "File not present" — but without it a missing file fails rc=257.
-    - name: Drop the fleet blocks the laptop got under markers this play no longer writes
+    - name: "WSL only: delete old-marker Windows fleet blocks"
       ansible.builtin.blockinfile:
         path: "{{ windows_ssh_config }}"
         create: true
@@ -376,7 +376,7 @@
     # pretends to have set a mode is worse than one that does not try.
     #
     # LF, and the whole file is LF by now: see the conversion above.
-    - name: Write the fleet block into the laptop's ssh config
+    - name: "WSL only: write the Windows fleet ssh block"
       ansible.builtin.blockinfile:
         path: "{{ windows_ssh_config }}"
         create: true
@@ -392,7 +392,7 @@
     # Fallback for a control node that cannot see the laptop — Termux. Only written when
     # the direct write did not happen, so there is never a stale paste file sitting next
     # to a managed one, inviting someone to paste the older of the two.
-    - name: Otherwise render the Windows block to a file, to paste
+    - name: "If not WSL: write the Windows block to a paste file"
       ansible.builtin.copy:
         dest: "{{ windows_out }}"
         mode: "0600"
@@ -418,7 +418,7 @@
         - windows_ssh_config | length > 0
         - not (on_windows_client | bool)
 
-    - name: Say what happened
+    - name: Print where the fleet block was written
       ansible.builtin.debug:
         msg:
           - "wrote the infra-fleet block into {{ ssh_config }}"

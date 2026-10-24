@@ -25,7 +25,7 @@
 # `run_once` and `delegate_to: localhost` because the importing play may be targeting a
 # Pi: the file is on the control node, and one host's read is every host's read.
 
-- name: Refuse an API token supplied on the command line
+- name: Check no API token was passed on the command line
   # `-e cf_api_token=` is the highest-precedence source there is and would silently beat
   # the file, after the value had already been through your shell.
   ansible.builtin.assert:
@@ -37,7 +37,7 @@
     success_msg: "no API token on the command line"
   run_once: true
 
-- name: Look for the API token file on this machine
+- name: Find the Cloudflare API token file
   ansible.builtin.stat:
     path: "{{ cf_api_token_file }}"
   register: cf_tok_file
@@ -45,21 +45,21 @@
   run_once: true
   check_mode: false
 
-- name: How to get one, when there is none
+- name: "If no token file: print how to make one"
   ansible.builtin.debug:
     msg: "{{ cf_api_token_howto }}"
   changed_when: true
   run_once: true
   when: not cf_tok_file.stat.exists
 
-- name: Stop without one
+- name: Check a Cloudflare API token file exists
   ansible.builtin.assert:
     that: cf_tok_file.stat.exists
     fail_msg: "no API token file; the instructions are above"
     success_msg: "API token file present"
   run_once: true
 
-- name: Refuse a token file anyone but you can read
+- name: Check only you can read the API token file
   ansible.builtin.assert:
     that: cf_tok_file.stat.mode in ['0600', '0400']
     fail_msg: >-
@@ -73,7 +73,7 @@
     cf_token: "{{ lookup('file', cf_api_token_file) | trim }}"
   no_log: true
 
-- name: Refuse an empty token file
+- name: Check the API token file is not empty
   ansible.builtin.assert:
     that: cf_token | length > 0
     fail_msg: "{{ cf_api_token_file }} is empty"
@@ -91,7 +91,7 @@
 # failed_when: false + print the body + assert — the pattern CLAUDE.md records for a
 # no_log call that can be refused. The body is the only thing that names the cause; the
 # invocation is never printed, because that is where the Authorization header is.
-- name: Verify the API token before using it
+- name: Read Cloudflare's verdict on the API token
   ansible.builtin.uri:
     url: "{{ cf_api }}/user/tokens/verify"
     headers: { Authorization: "Bearer {{ cf_token }}" }
@@ -102,7 +102,7 @@
   failed_when: false
   check_mode: false
 
-- name: Say what Cloudflare said about the token
+- name: "If the API token was rejected: print why"
   ansible.builtin.debug:
     msg: >-
       token verify: HTTP {{ tok.status | default('?') }},
@@ -112,7 +112,7 @@
   run_once: true
   when: (tok.status | default(0)) != 200 or (tok.json.result.status | default('')) != 'active'
 
-- name: Refuse a token Cloudflare will not accept
+- name: Check Cloudflare accepts the API token as active
   ansible.builtin.assert:
     that:
       - (tok.status | default(0)) == 200

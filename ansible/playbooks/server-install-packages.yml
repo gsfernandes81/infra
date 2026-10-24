@@ -35,7 +35,7 @@
 #   that branch is what makes its Listening section a reading rather than an UNREADABLE.
 #   Packages remove the need to *rely* on a fallback, not the need to *have* one.
 
-- name: Bring every host up to the declared package set
+- name: Install the declared packages on the fleet
   hosts: fleet
   gather_facts: true
   become: false
@@ -44,7 +44,7 @@
     declared_packages: "{{ base_packages + (extra_packages | default([])) }}"
 
   tasks:
-    - name: Install the base set and this host's runtime
+    - name: Install the declared packages on {{ inventory_hostname }}
       # state: present, never latest. `latest` would turn a package playbook into an
       # unscheduled upgrade of whatever it names, on boxes where a kernel or docker bump
       # is something you do while watching, not a side effect of adding lsusb.
@@ -65,7 +65,7 @@
       become: "{{ not ansible_check_mode }}"
       register: pkg
 
-    - name: Name what changed
+    - name: Print the packages installed, if any
       # The module returns the packages it acted on, so say them. "Something changed on
       # zero" is not actionable when you cannot see zero; a list of names is.
       ansible.builtin.debug:
@@ -75,7 +75,7 @@
              else 'already complete, nothing to do' }}
       changed_when: true
 
-    - name: Re-read the installed set
+    - name: Read which declared packages are still absent
       # Not redundant with the module, and not distrust of it: the module reports that its
       # transaction ran, this reports that the packages are present, and those are
       # different claims. CLAUDE.md's rule is to verify from output or by re-reading state
@@ -89,7 +89,7 @@
       check_mode: false
       become: false
 
-    - name: Fail if anything declared is still absent
+    - name: Check every package is installed
       # Skipped under --check, where the install has deliberately not happened yet and the
       # re-read is only telling you what a real run would install.
       ansible.builtin.assert:
@@ -101,7 +101,7 @@
         success_msg: "{{ inventory_hostname }}: all declared packages present"
       when: not ansible_check_mode
 
-    - name: Under --check, say what a real run would install
+    - name: "--check only: print what a real run would install"
       ansible.builtin.debug:
         msg: >-
           {{ inventory_hostname }}: would install —

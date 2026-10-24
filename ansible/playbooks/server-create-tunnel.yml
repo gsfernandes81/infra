@@ -26,7 +26,7 @@
 # control node so it is never sent to a Pi. management-plane.md: "The API token goes
 # nowhere — prompted, in memory, for one run."
 
-- name: Create a locally-managed tunnel for one host
+- name: Create a host's new locally-managed tunnel
   hosts: "{{ target | default('one') }}"
   gather_facts: false
 
@@ -43,11 +43,11 @@
 
   tasks:
     # ── the API token: read, checked and verified, in one shared file ─────────
-    - name: The Cloudflare API token
+    - name: Read and verify the Cloudflare API token
       ansible.builtin.import_tasks: _cf-api-token.yml
 
     # ── read where we are, from the box rather than from anyone's memory ──────
-    - name: Read the existing credentials
+    - name: Read {{ inventory_hostname }}'s current tunnel credentials
       ansible.builtin.slurp:
         src: "{{ cred_file }}"
       register: cred_raw
@@ -59,13 +59,13 @@
     # overwrites ~/.infra-2g-baseline-<host>.json with CURRENT state, which after a
     # cutover records the outage as the baseline: the exact corruption the baseline
     # exists to prevent.
-    - name: Check whether phase 1 already left credentials here
+    - name: Read whether phase 1 already ran on {{ inventory_hostname }}
       ansible.builtin.stat:
         path: "{{ new_cred_file }}"
       register: new_cred_stat
       become: true
 
-    - name: Refuse a re-run unless it was asked for by name
+    - name: "If phase 1 already ran: check force=true was given"
       ansible.builtin.assert:
         that: force | default(false) | bool
         fail_msg: >-
@@ -76,12 +76,12 @@
           Override with -e force=true.
       when: new_cred_stat.stat.exists
 
-    - name: Pull out the account and the OLD tunnel id
+    - name: Note the account and the current tunnel id
       ansible.builtin.set_fact:
         cf_account: "{{ (cred_raw.content | b64decode | from_json).AccountTag }}"
         old_tunnel: "{{ (cred_raw.content | b64decode | from_json).TunnelID }}"
 
-    - name: Show what we are working from
+    - name: Print the account and the current tunnel id
       ansible.builtin.debug:
         msg: "account {{ cf_account }}, existing tunnel {{ old_tunnel }}"
       changed_when: true
@@ -90,7 +90,7 @@
     # From the connector, not from the dashboard and not from this repo. On zero the
     # repo's idea of the ingress was wrong for most of a day and nothing caught it,
     # because a local copy that is ignored looks identical to one that is in force.
-    - name: Capture the live ingress from the running connector
+    - name: Read the rules the running connector serves
       ansible.builtin.uri:
         url: "{{ metrics_probe }}/config"
         return_content: true
@@ -99,11 +99,11 @@
     # `.content | from_json`, NOT `.json`. The uri module only populates `.json` when the
     # response carries a JSON content-type, and cloudflared's metrics endpoint does not
     # set one — so `.json` is simply absent and the error names the wrong thing.
-    - name: Parse what the connector is serving
+    - name: Note the connector's ingress rules
       ansible.builtin.set_fact:
         live_ingress: "{{ (live_cfg.content | from_json).config.ingress }}"
 
-    - name: Refuse to proceed on a connector that is not serving rules
+    - name: Check the connector serves more than the catch-all
       ansible.builtin.assert:
         that: live_ingress | length > 1
         fail_msg: >-
@@ -117,7 +117,7 @@
     # breaks the service after cutover with nothing in the diff to show why. The
     # catch-all's originRequest IS the tunnel default, so any rule differing from it
     # carries per-rule settings the rendered config cannot represent.
-    - name: Compare each rule's originRequest against the catch-all's
+    - name: Note rules whose originRequest differs from default
       ansible.builtin.set_fact:
         origin_mismatches: >-
           {%- set ns = namespace(base={}, bad=[]) -%}
@@ -137,7 +137,7 @@
           {%- endfor -%}
           {{ ns.bad | join('; ') }}
 
-    - name: Refuse an ingress the template cannot represent
+    - name: Check every rule uses the default originRequest
       ansible.builtin.assert:
         that: origin_mismatches | length == 0
         fail_msg: >-
@@ -147,7 +147,7 @@
           cutting over would silently change how these are served. Extend the template
           to carry them before proceeding.
 
-    - name: Say what will be carried across
+    - name: Print the hostnames that will be carried across
       ansible.builtin.debug:
         msg: >-
           {{ live_ingress | rejectattr('hostname', 'equalto', '')
@@ -157,7 +157,7 @@
     # ── create the new tunnel ─────────────────────────────────────────────────
     # 32 random bytes, base64, generated HERE. The secret never has to survive a
     # copy-paste out of a browser, and if any later step fails we still hold it.
-    - name: Generate the new tunnel secret
+    - name: Note a random secret for the new tunnel
       ansible.builtin.set_fact:
         new_secret: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') | b64encode }}"
       no_log: true
@@ -165,7 +165,7 @@
     # status 200 AND 201: Cloudflare answers 201 on some creates, `uri` accepts 200 by
     # default, and that combination once failed a task that had actually succeeded — with
     # the response no_log'd, so the secret it carried was censored and lost.
-    - name: Create the tunnel, locally-managed
+    - name: Create the tunnel {{ inventory_hostname }}-local at Cloudflare
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account }}/cfd_tunnel"
         method: POST
@@ -181,11 +181,11 @@
       delegate_to: localhost
       no_log: true
 
-    - name: Keep the new tunnel id where the rest of the play can see it
+    - name: Note the new tunnel's id
       ansible.builtin.set_fact:
         new_tunnel: "{{ created.json.result.id }}"
 
-    - name: The new tunnel exists and nothing points at it yet
+    - name: Print that the new tunnel exists with no DNS yet
       ansible.builtin.debug:
         msg:
           - "new tunnel: {{ new_tunnel }}  (name: {{ inventory_hostname }}-local)"
@@ -196,7 +196,7 @@
     # ── write the credentials, under a NEW name ───────────────────────────────
     # Not over the live one. The running connector reads that file, and phase 2 is where
     # the swap happens under a watched cycle — not as a side effect of a preparation step.
-    - name: Write the new credentials file
+    - name: Write the new tunnel's credentials file
       ansible.builtin.copy:
         dest: "{{ new_cred_file }}"
         content: |
@@ -211,7 +211,7 @@
     # Into the repo, never into /etc. The rule is that the bytes reaching /etc are bytes
     # someone read in a diff; generating them into the repo for review is a different act
     # from generating them onto the boot path, which stays rejected.
-    - name: Render the candidate config.yml into the repo, for review
+    - name: Write the candidate config.yml into this checkout
       ansible.builtin.template:
         src: ../templates/cloudflared-local-config.yml.j2
         dest: "{{ repo_root }}/hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
@@ -225,7 +225,7 @@
     # a half-finished cutover where the hostnames are already down; a baseline taken
     # then captures the outage, and the check that compares against it proves nothing.
     # Taken here, while the OLD tunnel is still serving, it is the real thing.
-    - name: Baseline every hostname while the old tunnel still serves
+    - name: Probe each hostname while the old tunnel serves
       ansible.builtin.uri:
         url: "https://{{ item }}"
         method: HEAD
@@ -238,7 +238,7 @@
            | map(attribute='hostname') | reject('equalto', '') | list }}
       delegate_to: localhost
 
-    - name: Save it for the cutover
+    - name: Write the hostname baseline for the cutover
       ansible.builtin.copy:
         dest: "{{ lookup('env', 'HOME') }}/.infra-2g-baseline-{{ inventory_hostname }}.json"
         content: >-
@@ -247,7 +247,7 @@
         mode: "0644"
       delegate_to: localhost
 
-    - name: What to do next
+    - name: Print the next steps
       ansible.builtin.debug:
         msg:
           - "1. read the diff: git -C {{ repo_root }} diff hosts/{{ inventory_hostname }}/system/"

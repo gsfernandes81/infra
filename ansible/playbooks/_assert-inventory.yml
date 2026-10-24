@@ -23,7 +23,7 @@
 #
 # Import it above the real play and name the group it needs:
 #
-#     - name: Guard — refuse to run with no inventory
+#     - name: Check the inventory is loaded
 #       ansible.builtin.import_playbook: _assert-inventory.yml
 #       vars:
 #         required_group: control
@@ -39,7 +39,7 @@
 #
 # NO NEW COLLECTIONS: ansible.builtin throughout.
 
-- name: Refuse to run without the inventory that defines `{{ required_group }}`
+- name: Check the inventory is loaded
   hosts: localhost
   gather_facts: false
   # No `connection:` here on purpose. With the inventory loaded, host_vars/localhost.yml
@@ -49,7 +49,7 @@
   # live.
 
   tasks:
-    - name: The inventory has to be loaded, and it has to have this group in it
+    - name: Check the inventory has the `{{ required_group }}` group
       # `always`, because a guard that `--tags ssh` skips is no guard: the client plays
       # are split by tag, and this is the one task that must run whichever half is asked for.
       tags: [always]

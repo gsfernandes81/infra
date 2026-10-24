@@ -13,7 +13,7 @@
 # UUID, so anything still pointing at it is broken permanently rather than for a minute.
 # Hence the two guards below, and hence its own file.
 
-- name: Retire a host's old tunnel
+- name: Delete a host's old tunnel
   hosts: "{{ target | default('one') }}"
   gather_facts: false
 
@@ -35,10 +35,10 @@
 
   tasks:
     # ── the API token: read, checked and verified, in one shared file ─────────
-    - name: The Cloudflare API token
+    - name: Read and verify the Cloudflare API token
       ansible.builtin.import_tasks: _cf-api-token.yml
 
-    - name: Read the tunnel we are on now, and the one we left
+    - name: Read the current and the pre-cutover credentials
       ansible.builtin.slurp:
         src: "{{ item }}"
       register: creds
@@ -46,13 +46,13 @@
       become: true
       no_log: true
 
-    - name: Name them
+    - name: Note the live and the old tunnel ids
       ansible.builtin.set_fact:
         live_tunnel: "{{ (creds.results[0].content | b64decode | from_json).TunnelID }}"
         doomed_tunnel: "{{ (creds.results[1].content | b64decode | from_json).TunnelID }}"
         cf_account: "{{ (creds.results[0].content | b64decode | from_json).AccountTag }}"
 
-    - name: Refuse to delete the tunnel we are currently running
+    - name: Check the old and live tunnels are different
       ansible.builtin.assert:
         that: live_tunnel != doomed_tunnel
         fail_msg: >-
@@ -61,13 +61,13 @@
           would delete the tunnel {{ inventory_hostname }} is serving from.
 
     # ── guard 1: the connector we are keeping must be healthy ────────────────
-    - name: The live connector must be serving
+    - name: Read the live connector's ready connections
       ansible.builtin.uri:
         url: "{{ probe }}/ready"
         return_content: true
       register: ready
 
-    - name: Refuse if the replacement is not actually up
+    - name: Check the live connector has ready connections
       ansible.builtin.assert:
         that: (ready.content | from_json).readyConnections | default(0) > 0
         fail_msg: >-
@@ -81,7 +81,7 @@
     # the token is ACTIVE, not that it is SCOPED. A token without Zone -> Zone -> Read
     # fails here, and a bare `no_log` read reports that as `Status code was 403` with the
     # body — the only place Cloudflare names the missing permission — censored.
-    - name: Find the zone
+    - name: Read the {{ zone_name }} zone from Cloudflare
       ansible.builtin.uri:
         url: "{{ cf_api }}/zones?name={{ zone_name }}"
         headers: "{{ api_hdr }}"
@@ -90,7 +90,7 @@
       no_log: true
       failed_when: false
 
-    - name: List every record in the zone
+    - name: "If the zone was found: read all {{ zone_name }} records"
       ansible.builtin.uri:
         url: "{{ cf_api }}/zones/{{ zone.json.result[0].id | default('') }}/dns_records?per_page=500"
         headers: "{{ api_hdr }}"
@@ -100,7 +100,7 @@
       failed_when: false
       when: (zone.status | default(0)) == 200
 
-    - name: Say what Cloudflare refused, if it did
+    - name: "If either read failed: print Cloudflare's reason"
       ansible.builtin.debug:
         msg: >-
           zone lookup HTTP {{ zone.status | default('?') }} {{ zone.json.errors | default([]) }};
@@ -109,7 +109,7 @@
       changed_when: true
       when: (zone.status | default(0)) != 200 or (allrecs.status | default(0)) != 200
 
-    - name: The token has to be able to read the zone and its records
+    - name: Check the token can read {{ zone_name }} and its records
       ansible.builtin.assert:
         that:
           - (zone.status | default(0)) == 200
@@ -128,21 +128,21 @@
     # With the assert above, that path is now unreachable rather than merely defended —
     # kept because the defence costs nothing and the next endpoint added here may not be
     # guarded.
-    - name: Which records still aim at the doomed tunnel
+    - name: Note which DNS records still point at the old tunnel
       ansible.builtin.set_fact:
         stragglers: >-
           {{ allrecs.json.result | default([], true)
              | selectattr('content', 'equalto', doomed_tunnel ~ '.cfargotunnel.com')
              | map(attribute='name') | list }}
 
-    - name: Show them
+    - name: Print which records still point at the old tunnel
       ansible.builtin.debug:
         msg: >-
           {{ 'still pointing at ' ~ doomed_tunnel ~ ': ' ~ (stragglers | join(', '))
              if stragglers else 'nothing points at ' ~ doomed_tunnel ~ ' any more' }}
       changed_when: true
 
-    - name: Refuse unless every straggler was named as abandoned
+    - name: Check every leftover record is named in abandon
       ansible.builtin.assert:
         that: stragglers | difference(abandon.split(',') | map('trim') | reject('equalto', '') | list) | length == 0
         fail_msg: >-
@@ -151,7 +151,7 @@
           Either repoint them, or acknowledge losing them with
           -e abandon="{{ stragglers | join(',') }}"
 
-    - name: Note what is being given up
+    - name: "If abandon is set: print the hostnames given up"
       ansible.builtin.debug:
         msg: >-
           ABANDONING {{ abandon }} — these will stop resolving to anything once the
@@ -169,7 +169,7 @@
     # these behind pointing at a tunnel with no connector, so WARP access to the LAN was
     # silently broken and no probe we had would have noticed. They are listed here
     # because listing them is the only way anyone finds out.
-    - name: List private network routes on the doomed tunnel
+    - name: Read the old tunnel's private network routes
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account }}/teamnet/routes?tunnel_id={{ doomed_tunnel }}&is_deleted=false"
         headers: "{{ api_hdr }}"
@@ -178,7 +178,7 @@
       delegate_to: localhost
       no_log: true
 
-    - name: Show the private network routes
+    - name: Print the old tunnel's private network routes
       ansible.builtin.debug:
         msg: >-
           {{ (routes.json.result | default([], true))
@@ -191,7 +191,7 @@
     # left over from an experiment with WARP VPN to zero and/or WARP-based Access auth.
     # Moving them onto the new tunnel would carry an unused experiment forward; deleting
     # them ends it. If WARP is ever wanted, a route is one API call to recreate.
-    - name: Drop the private network routes
+    - name: "If drop_routes: delete the private network routes"
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account }}/teamnet/routes/{{ item.id }}"
         method: DELETE
@@ -212,7 +212,7 @@
     #
     # A guard that disarms itself when its opt-in is absent is worse than no guard: it
     # reports "All assertions passed" over exactly the condition it exists to catch.
-    - name: Re-read the routes after dropping them
+    - name: "If drop_routes: read the routes left after deleting"
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account }}/teamnet/routes?tunnel_id={{ doomed_tunnel }}&is_deleted=false"
         headers: "{{ api_hdr }}"
@@ -222,13 +222,13 @@
       no_log: true
       when: drop_routes | bool
 
-    - name: What is left, from whichever listing is the real one
+    - name: Note which private network routes remain
       ansible.builtin.set_fact:
         routes_left: >-
           {{ ((routes_after.json.result if (drop_routes | bool) else routes.json.result)
               | default([], true)) }}
 
-    - name: Refuse while private network routes still point here
+    - name: Check the old tunnel has no private network routes
       ansible.builtin.assert:
         that: routes_left | length == 0
         fail_msg: >-
@@ -243,7 +243,7 @@
     # Clean up connection records first. Cloudflare refuses to delete a tunnel that still
     # has them, and they outlive the connector — stopping cloudflared does not clear them
     # immediately. Harmless if there are none.
-    - name: Clear any lingering connection records
+    - name: Delete the old tunnel's lingering connection records
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account }}/cfd_tunnel/{{ doomed_tunnel }}/connections"
         method: DELETE
@@ -268,7 +268,7 @@
       delegate_to: localhost
       no_log: true
 
-    - name: Say what Cloudflare said, if it refused
+    - name: "If the delete was refused: print Cloudflare's reason"
       ansible.builtin.debug:
         msg: >-
           DELETE returned {{ deleted.status | default('?') }}:
@@ -276,7 +276,7 @@
       changed_when: true
       when: deleted.status | default(0) not in [200, 202, 204]
 
-    - name: Fail if the tunnel is still there
+    - name: Check the old tunnel was deleted
       ansible.builtin.assert:
         that: deleted.status | default(0) in [200, 202, 204]
         fail_msg: >-
@@ -284,7 +284,7 @@
           is serving from {{ live_tunnel }} either way, and an undeleted old tunnel with
           no DNS and no connector costs nothing. Read the error above before retrying.
 
-    - name: Done
+    - name: Print the deletion result and cleanup steps
       ansible.builtin.debug:
         msg:
           - "tunnel {{ doomed_tunnel }} is gone, and every credential for it is now worthless"

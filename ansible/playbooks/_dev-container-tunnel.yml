@@ -68,7 +68,7 @@
 # `cloudflared tunnel login` would not avoid it: it is also a browser round trip, and it
 # would cover only the tunnel and DNS, leaving Access to be clicked.
 
-- name: Provision a dev container's Cloudflare tunnel and Access application
+- name: Create a dev container's tunnel and Access app
   # zero, because the ONLY thing that lands on a host is the credentials file. Every
   # Cloudflare call is delegated to the control node — they are HTTPS to a public API and
   # have no business being made from the box being configured.
@@ -121,13 +121,13 @@
 
   tasks:
     # ── the API token: read, checked and verified, in one shared file ─────────
-    - name: The Cloudflare API token
+    - name: Read and check the Cloudflare API token
       ansible.builtin.import_tasks: _cf-api-token.yml
 
     # ── flags this play no longer has ────────────────────────────────────────
     # Someone typing one from a note or from scrollback should be told what changed, not
     # silently handed a run that does something else.
-    - name: Refuse the retired service-token flags
+    - name: Check no retired service-token flags were given
       ansible.builtin.assert:
         that:
           - replace_service_token is not defined
@@ -147,7 +147,7 @@
     # word for word; what changed in the move is listed in its header. Section 3, the
     # Access application, stays here: it is this play's own, and a stack opts into a
     # different one or none at all.
-    - name: The tunnel and its DNS record
+    - name: Create the {{ cf_name }} tunnel and its DNS record
       ansible.builtin.import_tasks: _cf-tunnel.yml
       vars:
         cf_creds_path: "{{ infra_secrets }}/tunnel.json"
@@ -157,7 +157,7 @@
           still works.
 
     # ── 3  the Access application, and deliberately no policy ───────────────
-    - name: List the account's Access applications
+    - name: Read the account's Access applications
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps"
         headers: { Authorization: "Bearer {{ cf_token }}" }
@@ -167,12 +167,12 @@
       changed_when: false
       no_log: true
 
-    - name: Remember an existing application for this hostname
+    - name: "If found: note the existing Access app id"
       ansible.builtin.set_fact:
         cf_app_id: "{{ (cf_app_q.json.result | selectattr('domain', 'defined') | selectattr('domain', 'eq', cf_hostname) | list | first).id }}"
       when: (cf_app_q.json.result | default([]) | selectattr('domain', 'defined') | selectattr('domain', 'eq', cf_hostname) | list) | length > 0
 
-    - name: Create or update the Access application
+    - name: Write the Access app for {{ cf_hostname }}
       # THIS ONE PUTS UNCONDITIONALLY AND SO ALWAYS REPORTS CHANGED, unlike the DNS record
       # above. Deliberate, and the reason is that Cloudflare normalises what it returns —
       # session_duration, allowed_idps and the launcher flags come back in forms that do
@@ -206,13 +206,13 @@
       changed_when: cf_app_w.json.success | default(false)
       no_log: true
 
-    - name: Remember the application id
+    - name: Note the Access app id
       ansible.builtin.set_fact:
         cf_app_id: "{{ cf_app_w.json.result.id }}"
       when: cf_app_w is not skipped
 
     # ── what to do next ─────────────────────────────────────────────────────
-    - name: What a --check run can and cannot tell you
+    - name: "--check only: print what a dry run can show"
       ansible.builtin.debug:
         msg: >-
           --check: every read ran for real and every write was skipped, so what this
@@ -222,7 +222,7 @@
       changed_when: true
       when: ansible_check_mode
 
-    - name: What was provisioned
+    - name: Print the {{ cf_name }} tunnel, app and next steps
       ansible.builtin.debug:
         msg:
           - "tunnel    {{ cf_tunnel_id | default('(not created — --check)', true) }}"
@@ -238,7 +238,7 @@
           - "Then `make up` on {{ inventory_hostname }} — NOT restart: the entrypoint reads it at start."
       changed_when: true
 
-    - name: Hand the hostname to the host half
+    - name: Note {{ cf_hostname }} for dev/.env
       # A host fact survives into the next play of the same run, and that is the only
       # way the host half learns it: _dev-container-host.yml keeps `tunnel_hostname`
       # explicit on its own command line, because there an absent value means "preserve

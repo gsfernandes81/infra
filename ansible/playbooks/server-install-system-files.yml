@@ -62,7 +62,7 @@
 
   tasks:
     # ── the review anchor: what the person running this actually has ─────────
-    - name: The control node's HEAD
+    - name: Read the commit this checkout is on
       ansible.builtin.command:
         cmd: git rev-parse HEAD
         chdir: "{{ local_repo }}"
@@ -74,7 +74,7 @@
 
     # A dirty hosts/ tree means the files reviewed locally are not the files the commit
     # contains — the diff on screen and the diff that deploys would differ.
-    - name: Refuse if hosts/ has uncommitted changes on the control node
+    - name: Check this checkout has no uncommitted hosts/ edits
       ansible.builtin.command:
         cmd: git status --porcelain -- hosts/
         chdir: "{{ local_repo }}"
@@ -90,7 +90,7 @@
     # check_mode false so --check also pulls; a dry run against a stale checkout would
     # diff the wrong bytes. No -q: changed_when matches "Already up to date" in stdout,
     # and -q suppresses exactly that line, so every no-op pull would report changed.
-    - name: Pull the host's clone, fast-forward only
+    - name: Pull {{ repo }} on {{ inventory_hostname }}, fast-forward only
       ansible.builtin.command:
         cmd: git pull --ff-only
         chdir: "{{ repo }}"
@@ -102,7 +102,7 @@
     # `pull --ff-only` succeeds straight over local edits it does not touch — a dirty
     # working tree deploys modified bytes under a green assert. Same hole the
     # control-node dirty check closes, on the side that actually feeds the tool.
-    - name: The host clone's uncommitted changes, if any
+    - name: Read {{ inventory_hostname }}'s uncommitted hosts/ and bin/ edits
       ansible.builtin.command:
         cmd: git status --porcelain -- hosts/ bin/
         chdir: "{{ repo }}"
@@ -110,7 +110,7 @@
       changed_when: false
       check_mode: false
 
-    - name: Refuse if the host clone has uncommitted changes
+    - name: Check {{ inventory_hostname }} has no uncommitted hosts/ or bin/ edits
       ansible.builtin.assert:
         that: host_dirty.stdout | length == 0
         fail_msg: >-
@@ -120,7 +120,7 @@
           would install bytes nobody reviewed. Commit, push and re-pull, or discard
           them on the host. Nothing was installed.
 
-    - name: The host's HEAD
+    - name: Read the commit {{ inventory_hostname }} is on
       ansible.builtin.command:
         cmd: git rev-parse HEAD
         chdir: "{{ repo }}"
@@ -128,7 +128,7 @@
       changed_when: false
       check_mode: false
 
-    - name: Refuse unless the host is on exactly the reviewed commit
+    - name: Check {{ inventory_hostname }} is on the same commit as this checkout
       ansible.builtin.assert:
         that: host_head.stdout | trim == ctl_head.stdout | trim
         fail_msg: >-
@@ -137,7 +137,7 @@
           If origin moved past your review: `git pull` here, re-read the diff, re-run.
           If you have unpushed commits: `git push`. Nothing was installed.
 
-    - name: Which files this host tracks
+    - name: Read the tracked system files for {{ inventory_hostname }}
       ansible.builtin.find:
         paths: "{{ local_repo }}/hosts/{{ inventory_hostname }}/system"
         file_type: file
@@ -146,7 +146,7 @@
       delegate_to: localhost
       check_mode: false
 
-    - name: Narrow to one file if asked
+    - name: Note which files to install, narrowed by -e only
       ansible.builtin.set_fact:
         files: >-
           {{ tracked.files | map(attribute='path') | map('basename')
@@ -161,7 +161,7 @@
     # 2026-08-24: the cloudflared init script sat undeployed with a green recap. The
     # human-review purpose of the flag is served by the pushed git diff and by the
     # preview below; the tool's refusal exists for interactive use, not this path.
-    - name: Dry run each file
+    - name: Read the dry-run diff of each tracked file
       ansible.builtin.command:
         cmd: "{{ tool }} {{ item }} --new --allow-content-change"
         chdir: "{{ repo }}"
@@ -176,7 +176,7 @@
     # display_ok_hosts = False, and a debug task reports ok — so without this, the
     # play's entire preview is invisible, which on 2026-08-24 hid both a pending diff
     # and a refusal behind a quiet recap. These two debugs ARE the play's output.
-    - name: What would change
+    - name: Print the diff for each file that would change
       ansible.builtin.debug:
         # Joined into ONE string, deliberately: a list of lines renders under
         # result_format=yaml as quoted, escaped list items — unreadable on a phone,
@@ -205,7 +205,7 @@
       become: true
       changed_when: true
 
-    - name: Files the dry run REFUSED — not installed, look at them
+    - name: Print each file the dry run refused to install
       ansible.builtin.debug:
         msg: "{{ item.item }}: {{ (item.stderr_lines | default([]) | last) | default('refused') }}"
       changed_when: true
@@ -215,7 +215,7 @@
       when: item.rc != 0
 
     # ── say what needs a human now ───────────────────────────────────────────
-    - name: Services to cycle by hand
+    - name: "If anything installed: print what to restart by hand"
       ansible.builtin.debug:
         msg: >-
           {{ inventory_hostname }}: installed

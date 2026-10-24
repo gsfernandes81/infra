@@ -37,12 +37,12 @@
 # Re-running is the intended way to finish after a partial failure; every step looks before
 # it acts. Nothing here rebuilds the image unless its tag (in compose.yaml) is absent.
 
-- name: The stack's tunnel — server-create-stack-tunnel.yml, unchanged
+- name: Create the garmin-mcp tunnel and DNS record
   ansible.builtin.import_playbook: server-create-stack-tunnel.yml
   vars:
     stack: garmin-mcp
 
-- name: Deploy garmin-mcp and prove it
+- name: Install and start garmin-mcp, then probe it
   hosts: stack_target
   gather_facts: false
   become: false
@@ -101,12 +101,12 @@
     probe_delay: 15
 
   tasks:
-    - name: The ssh user's home
+    - name: Read the ssh user's home directory on {{ inventory_hostname }}
       ansible.builtin.setup:
         gather_subset: ['!all']
 
     # ── 1  .env, and no Garmin password in it ───────────────────────────────
-    - name: Read .env
+    - name: Read the {{ stack }} .env on {{ inventory_hostname }}
       # The stack play has just created it. Under --check on a fresh host it has not, so a
       # missing file is tolerated here and reported as missing keys further down.
       ansible.builtin.slurp:
@@ -118,13 +118,13 @@
         - "'file not found' not in (garmin_env_raw.msg | default('') | lower)"
       no_log: true
 
-    - name: Remember which keys .env has
+    - name: Note which settings .env already has
       ansible.builtin.set_fact:
         garmin_env_present: >-
           {{ (garmin_env_raw.content | default('') | b64decode).splitlines()
              | reject('match', '^\s*(#|$)') | map('regex_replace', '=.*$', '') | list }}
 
-    - name: Refuse a Garmin email or password in .env
+    - name: Check .env has no Garmin email or password
       ansible.builtin.assert:
         that:
           - "'GARMIN_EMAIL' not in garmin_env_present"
@@ -139,7 +139,7 @@
         success_msg: "no Garmin credentials in .env"
 
     # ── 2  the four .env lines this play owns ───────────────────────────────
-    - name: The consent secret, kept on this phone
+    - name: Read or create the consent secret
       ansible.builtin.set_fact:
         # Lower-case hex only, written as generated. `hexdigits` would include A-F, and any
         # case-folding between the phone file and .env makes the pasted secret a mismatch.
@@ -147,7 +147,7 @@
       when: not ansible_check_mode
       no_log: true
 
-    - name: Write the consent secret into .env — every run, so deleting the phone file rotates it
+    - name: Write the consent secret into .env
       ansible.builtin.lineinfile:
         path: "{{ garmin_stack_dir }}/.env"
         regexp: '^MCP_CONSENT_SECRET='
@@ -157,7 +157,7 @@
       when: not ansible_check_mode
       no_log: true
 
-    - name: Write a bearer token into .env — only if there is none, so deleting its line rotates it
+    - name: "If no bearer token: write a token into .env"
       ansible.builtin.lineinfile:
         path: "{{ garmin_stack_dir }}/.env"
         regexp: '^MCP_BEARER_TOKEN='
@@ -169,7 +169,7 @@
         - "'MCP_BEARER_TOKEN' not in garmin_env_present"
       no_log: true
 
-    - name: Write SRC_ROOT and PUBLIC_BASE_URL into .env
+    - name: "If .env exists: write SRC_ROOT and PUBLIC_BASE_URL"
       ansible.builtin.lineinfile:
         path: "{{ garmin_stack_dir }}/.env"
         regexp: "^{{ item.key }}="
@@ -184,13 +184,13 @@
       when: garmin_env_raw.content is defined
 
     # ── 3  the source, at the pinned sha ────────────────────────────────────
-    - name: The directory the checkouts live in
+    - name: Create the source checkout directory on {{ inventory_hostname }}
       ansible.builtin.file:
         path: "{{ garmin_home }}/src"
         state: directory
         mode: "0755"
 
-    - name: Check out {{ garmin_source[1][:7] }} into {{ garmin_src }}
+    - name: Pull the {{ stack }} source at commit {{ garmin_source[1][:7] }}
       # force: false refuses a checkout with local modifications; a clean one is moved to the
       # pinned sha, so a reviewed bump needs no step by hand. $SRC_ROOT/garmin-mcp is the path
       # bin/check-sources looks for.
@@ -200,14 +200,14 @@
         version: "{{ garmin_source[1] }}"
         force: false
 
-    - name: What the checkout is at
+    - name: Read the commit the {{ stack }} source is on
       ansible.builtin.command: git -C {{ garmin_src }} rev-parse HEAD
       register: garmin_head
       changed_when: false
       check_mode: false
       failed_when: false
 
-    - name: The checkout is at the sha SOURCE pins
+    - name: Check the {{ stack }} source is on the pinned commit
       ansible.builtin.assert:
         that: garmin_head.stdout == garmin_source[1]
         fail_msg: >-
@@ -217,7 +217,7 @@
       when: not (ansible_check_mode and garmin_head.rc != 0)
 
     # ── 4  every key compose needs, before compose runs ─────────────────────
-    - name: Read .env again
+    - name: Read the {{ stack }} .env after the writes
       ansible.builtin.slurp:
         src: "{{ garmin_stack_dir }}/.env"
       register: garmin_env_raw2
@@ -225,7 +225,7 @@
       failed_when: false
       no_log: true
 
-    - name: Remember what .env has now
+    - name: Note the bearer token and any settings .env lacks
       ansible.builtin.set_fact:
         garmin_env_missing: >-
           {{ garmin_env_keys | difference((garmin_env_raw2.content | default('') | b64decode).splitlines()
@@ -236,14 +236,14 @@
              | first | default('') }}
       no_log: true
 
-    - name: Every key compose.yaml requires is in .env
+    - name: Check .env has every required setting
       ansible.builtin.assert:
         that: garmin_env_missing | length == 0
         fail_msg: "{{ garmin_stack_dir }}/.env lacks {{ garmin_env_missing }}. Nothing has been started."
         success_msg: "{{ garmin_env_keys | length }} keys present"
       when: not ansible_check_mode
 
-    - name: Under --check, what a real run would still have to write
+    - name: "--check only: print what .env still lacks"
       ansible.builtin.debug:
         msg: ".env lacks {{ garmin_env_missing }} — written by a real run before compose starts"
       changed_when: true
@@ -252,7 +252,7 @@
         - garmin_env_missing | length > 0
 
     # ── 5  up ───────────────────────────────────────────────────────────────
-    - name: Bring the stack up — built only if garmin-mcp-remote:{{ garmin_source[1][:7] }} is absent
+    - name: "If .env is complete: start {{ stack }}"
       community.docker.docker_compose_v2:
         project_src: "{{ garmin_stack_dir }}"
         build: policy
@@ -265,7 +265,7 @@
     # module's own failure, and is followed by an assert that says what it means. Both
     # failed_when: false AND ignore_errors: true, as in server-create-stack-tunnel.yml: -1 (no
     # answer) fails `uri` whatever failed_when says, and exhausted retries mark a task failed.
-    - name: Probe — /healthz answers through the tunnel
+    - name: Wait for /healthz through the tunnel
       ansible.builtin.uri:
         url: "{{ garmin_url }}/healthz"
         status_code: [200]
@@ -278,7 +278,7 @@
       delegate_to: localhost
       when: not ansible_check_mode
 
-    - name: The tunnel and nginx are up
+    - name: Check the tunnel and nginx are up
       ansible.builtin.assert:
         that: garmin_p_health.status | default(0) == 200
         fail_msg: >-
@@ -288,7 +288,7 @@
         success_msg: "{{ garmin_url }}/healthz → 200"
       when: not ansible_check_mode
 
-    - name: Probe — /mcp without a token
+    - name: Probe /mcp without a token
       ansible.builtin.uri:
         url: "{{ garmin_url }}/mcp"
         status_code: [401]
@@ -298,7 +298,7 @@
       delegate_to: localhost
       when: not ansible_check_mode
 
-    - name: Probe — the OAuth metadata names this hostname
+    - name: Probe the OAuth metadata document
       ansible.builtin.uri:
         url: "{{ garmin_url }}/.well-known/oauth-protected-resource"
         return_content: true
@@ -308,7 +308,7 @@
       delegate_to: localhost
       when: not ansible_check_mode
 
-    - name: nginx gates /mcp, and PUBLIC_BASE_URL took effect
+    - name: Check /mcp gate and PUBLIC_BASE_URL
       # The 401 cannot prove PUBLIC_BASE_URL: nginx builds its WWW-Authenticate from $host.
       # Only the shim's metadata reads that variable.
       ansible.builtin.assert:
@@ -323,7 +323,7 @@
         success_msg: "/mcp → 401 without a token; metadata names {{ garmin_url }}/mcp"
       when: not ansible_check_mode
 
-    - name: Probe — is the Garmin login live
+    - name: Wait for the Garmin login to settle
       # Login runs in the background after a start, so `pending` is waited out. 200 is ready;
       # 503 carries pending or failed.
       ansible.builtin.uri:
@@ -341,7 +341,7 @@
       when: not ansible_check_mode
       no_log: true
 
-    - name: The Garmin login has not happened yet — this is the one step by hand
+    - name: "If not logged in: print the Garmin login step"
       ansible.builtin.debug:
         msg:
           - "/readyz says {{ (garmin_p_ready.content | default('{}', true) | from_json).status | default('nothing') }}. No Garmin login has been made, or it was refused at this start (expired tokens, ~6 months, or a Garmin 429). /readyz is decided once, at start-up. The fix is the same:"
@@ -358,14 +358,14 @@
         - not ansible_check_mode
         - (garmin_p_ready.content | default('{}', true) | from_json).status | default('') != 'ready'
 
-    - name: The Garmin login is live
+    - name: Check the Garmin login is live
       ansible.builtin.assert:
         that: (garmin_p_ready.content | default('{}', true) | from_json).status | default('') == 'ready'
         fail_msg: "Not ready — the block above is what to do. Nothing else is wrong yet."
         success_msg: "/readyz → ready"
       when: not ansible_check_mode
 
-    - name: Probe — the tools the server serves
+    - name: Probe the tools {{ stack }} serves
       ansible.builtin.uri:
         url: "{{ garmin_url }}/mcp"
         method: POST
@@ -382,19 +382,19 @@
       when: not ansible_check_mode
       no_log: true
 
-    - name: tools/list answered
+    - name: Check tools/list answered 200
       ansible.builtin.assert:
         that: garmin_p_tools.status | default(0) == 200
         fail_msg: "tools/list answered {{ garmin_p_tools.status | default('nothing') }}: {{ (garmin_p_tools.content | default(''))[:300] }}"
         quiet: true
       when: not ansible_check_mode
 
-    - name: Keep the reply
+    - name: Note the tools/list reply
       ansible.builtin.set_fact:
         garmin_tools_body: "{{ garmin_p_tools.content }}"
       when: not ansible_check_mode
 
-    - name: It is a tool list, not an error
+    - name: Check tools/list is not an error
       ansible.builtin.assert:
         that: garmin_rpc.error is not defined
         # default(''): an assert's messages are rendered BEFORE its test, so on a good reply,
@@ -403,7 +403,7 @@
         quiet: true
       when: not ansible_check_mode
 
-    - name: Every served tool is a read tool or an allowed write, and all of the allowlist is served
+    - name: Check served tools match the allowlist
       ansible.builtin.assert:
         that:
           - garmin_tool_offenders | length == 0
@@ -421,7 +421,7 @@
       when: not ansible_check_mode
 
     # ── 7  the record ───────────────────────────────────────────────────────
-    - name: What the two containers use
+    - name: Read {{ stack }} memory use
       ansible.builtin.command: >-
         docker stats --no-stream --format '{{ '{{' }}.Name{{ '}}' }} {{ '{{' }}.MemUsage{{ '}}' }}'
         garmin-mcp garmin-mcp-cloudflared
@@ -431,7 +431,7 @@
       failed_when: false
       when: not ansible_check_mode
 
-    - name: Done
+    - name: Print the connector URL and summary
       ansible.builtin.debug:
         msg:
           - "connector URL  {{ garmin_url }}/mcp  (claude.ai → custom connector; leave the OAuth fields blank)"

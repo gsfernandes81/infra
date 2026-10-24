@@ -34,7 +34,7 @@
 # the argument: "A pin alone says 'the same version'; a hash says 'the same bytes'."
 # Download it once, check it, and put the value on the command line where it is reviewed.
 
-- name: Update cloudflared on one host
+- name: Install a pinned cloudflared on the target host
   hosts: "{{ target }}"
   gather_facts: false
 
@@ -63,7 +63,7 @@
     bin: /usr/bin/cloudflared
 
   tasks:
-    - name: Require a version and a hash
+    - name: Check -e version and -e sha256 are given
       ansible.builtin.assert:
         that:
           - version is defined and version | length > 0
@@ -75,7 +75,7 @@
           by a person before it is installed.
 
     # ── the gate ─────────────────────────────────────────────────────────────
-    - name: Check every predecessor is still serving
+    - name: Probe /ready on each earlier stage of the rollout
       ansible.builtin.uri:
         url: "{{ probe }}/ready"
         return_content: true
@@ -83,7 +83,7 @@
       loop: "{{ predecessors[inventory_hostname] }}"
       delegate_to: "{{ item }}"
 
-    - name: Refuse while an earlier stage is unhealthy
+    - name: Check each earlier stage is serving
       ansible.builtin.assert:
         that: (item.content | from_json).readyConnections | default(0) > 0
         fail_msg: >-
@@ -94,7 +94,7 @@
       loop_control:
         label: "{{ item.item }}"
 
-    - name: When each predecessor was last updated
+    - name: Read when each earlier stage was last updated
       ansible.builtin.stat:
         path: "{{ state_dir }}/{{ item }}"
       register: pred_state
@@ -107,7 +107,7 @@
     # soak time simply is not known here. The assert below silently skips missing files
     # (selectattr on stat.exists), so without this gate an unknown soak passes as if it
     # had elapsed.
-    - name: Refuse while any predecessor's soak time is unknown here
+    - name: "If not overridden: check each soak time is known"
       ansible.builtin.assert:
         that: >-
           (pred_state.results | selectattr('stat.exists') | list | length)
@@ -122,7 +122,7 @@
           -e accept_unknown_soak=true.
       when: not (accept_unknown_soak | default(false) | bool)
 
-    - name: Refuse until each predecessor has soaked
+    - name: Check each earlier stage has soaked {{ soak_days }} days
       ansible.builtin.assert:
         that: >-
           (now(utc=true).strftime('%s') | int - item.stat.mtime | int)
@@ -140,7 +140,7 @@
     # ── refuse to fight autoupdate ───────────────────────────────────────────
     # If the running process still has --autoupdate-freq, whatever we install here gets
     # replaced within a day and the rollout means nothing.
-    - name: Is autoupdate still enabled
+    - name: Read whether cloudflared runs with autoupdate
       ansible.builtin.shell: |
         pid=$(cat /var/run/cloudflared.pid)
         xargs -0 -n1 echo < /proc/$pid/cmdline | grep -c autoupdate-freq || true
@@ -148,7 +148,7 @@
       changed_when: false
       become: true
 
-    - name: Refuse while autoupdate would overwrite this
+    - name: Check cloudflared is not set to autoupdate
       ansible.builtin.assert:
         that: au.stdout | trim | int == 0
         fail_msg: >-
@@ -158,12 +158,12 @@
           bin/install-system-file cloudflared --commit --allow-content-change
 
     # ── what is there now ────────────────────────────────────────────────────
-    - name: What this host actually is
+    - name: Read the CPU architecture of {{ inventory_hostname }}
       ansible.builtin.command: uname -m
       register: uname_m
       changed_when: false
 
-    - name: Which asset to install, and what would have been native
+    - name: Note the chosen and the native cloudflared build
       ansible.builtin.set_fact:
         cfd_arch: "{{ asset | default(fleet_asset) }}"
         native_arch: >-
@@ -174,7 +174,7 @@
     # kernel's AArch32 support — a dependency nobody chose and arm64 distributions have
     # been drifting away from. If it ever goes, cloudflared stops starting at the next
     # reboot, on the box everything is reached through.
-    - name: Note where the asset differs from the machine
+    - name: "If the build is not native: print a warning"
       ansible.builtin.debug:
         msg: >-
           {{ inventory_hostname }} is {{ uname_m.stdout | trim }} (native asset
@@ -183,14 +183,14 @@
       changed_when: true
       when: cfd_arch != native_arch
 
-    - name: Record what is installed before we touch it
+    - name: Read the checksum of the installed cloudflared
       ansible.builtin.stat:
         path: "{{ bin }}"
         checksum_algorithm: sha256
       register: before
       become: true
 
-    - name: Say what is about to change
+    - name: Print the installed and the new cloudflared hash
       ansible.builtin.debug:
         msg:
           - "host {{ inventory_hostname }} is {{ uname_m.stdout | trim }} -> asset {{ cfd_arch }}"
@@ -204,7 +204,7 @@
     # {{ bin }} --version would answer for the new file, not the process, which is
     # exactly the case this exists to catch; /proc/<pid>/exe IS that inode, so ask it.
     # Empty output (no pidfile, dead pid) counts as needing a cycle.
-    - name: What version the running process actually is
+    - name: Read the version of the running cloudflared
       ansible.builtin.shell: |
         pid=$(cat /var/run/cloudflared.pid 2>/dev/null) || exit 0
         [ -n "$pid" ] && [ -d "/proc/$pid" ] || exit 0
@@ -215,7 +215,7 @@
 
     # Two separate questions: does the FILE need replacing, does the PROCESS need
     # cycling. After an interrupted run the answers differ.
-    - name: Decide what this run still has to do
+    - name: Note whether to install, restart or both
       ansible.builtin.set_fact:
         needs_install: "{{ (before.stat.checksum | default('')) != sha256 }}"
         needs_cycle: "{{ version not in (runver.stdout | default('')) }}"
@@ -223,7 +223,7 @@
     # Confirmed on target on disk AND in the running process: record it before ending,
     # because the next stage's soak gate reads this file and a rollout finished from
     # another angle (or re-run) would otherwise never write it.
-    - name: Make sure the state directory exists (already on target)
+    - name: "If already on target: create the soak state directory"
       ansible.builtin.file:
         path: "{{ state_dir }}"
         state: directory
@@ -235,7 +235,7 @@
     # mtime of one that exists. The mtime IS the soak clock, and a no-op re-run that
     # touched it would restart the next stage's soak for no reason. (Flagged by the
     # batch-2 agent as a literal-instruction artefact, fixed in review.)
-    - name: Note this host is confirmed on target
+    - name: "If already on target: write a soak time if missing"
       ansible.builtin.file:
         path: "{{ state_dir }}/{{ inventory_hostname }}"
         state: touch
@@ -245,11 +245,11 @@
       delegate_to: localhost
       when: not needs_install and not needs_cycle
 
-    - name: Nothing to do if disk and running process are both already that version
+    - name: "If already on target: end with nothing to do"
       ansible.builtin.meta: end_host
       when: not needs_install and not needs_cycle
 
-    - name: Warn when the disk is on target but the process is not
+    - name: "If only the process is old: print a restart-only note"
       ansible.builtin.debug:
         msg: >-
           {{ bin }} on disk already matches {{ sha256 }} but the running process is not
@@ -262,7 +262,7 @@
     # get_url verifies the checksum itself and refuses to write a mismatch. Downloaded
     # ON THE HOST: the control node is a phone on a metered radio, and 36 MiB there is a
     # spend or3's data-ledger.md tracks. The Pis are on the house connection.
-    - name: Fetch the new binary beside the old one
+    - name: "If the binary differs: pull cloudflared {{ version }}"
       ansible.builtin.get_url:
         url: "https://github.com/cloudflare/cloudflared/releases/download/{{ version }}/cloudflared-linux-{{ cfd_arch }}"
         dest: "{{ bin }}.new"
@@ -275,7 +275,7 @@
 
     # A binary of the right arch that still cannot execute here is the failure this
     # catches — and the one the fleet has been living with, in reverse, for six months.
-    - name: Prove it actually runs on this machine
+    - name: "If the binary differs: check the new binary runs"
       ansible.builtin.command: "{{ bin }}.new --version"
       register: newver
       changed_when: false
@@ -288,9 +288,9 @@
     # versions, and on the versions where it does, the old conditional "Put the old
     # binary back" never ran — the play just stopped with the new, dead binary in
     # place. rescue runs on a failure however it is signalled.
-    - name: Swap and cycle, rolling back if the new version does not serve
+    - name: Install and restart cloudflared, or roll back
       block:
-        - name: Back up the running one, then swap
+        - name: "If the binary differs: install {{ version }} with a backup"
           ansible.builtin.shell: |
             set -e
             cp -a {{ bin }} {{ bin }}.pre-{{ version }}
@@ -300,7 +300,7 @@
           changed_when: true
           when: needs_install | bool
 
-        - name: Cycle the connector
+        - name: Restart cloudflared on {{ inventory_hostname }}
           ansible.builtin.shell: |
             rc-service cloudflared stop >/dev/null 2>&1
             i=0
@@ -313,7 +313,7 @@
           become: true
           changed_when: true
 
-        - name: Wait for it to register
+        - name: Wait for cloudflared to report ready connections
           ansible.builtin.uri:
             url: "{{ probe }}/ready"
             return_content: true
@@ -326,7 +326,7 @@
         # The assert is the real gate: if the exhausted retries above were swallowed by
         # failed_when:false, this still fails into the rescue; if they were not, the
         # rescue already has it. Either way the rollback runs.
-        - name: Require the new version to be serving
+        - name: Check cloudflared {{ version }} is serving
           ansible.builtin.assert:
             that: (ready.content | default('{}') | from_json).readyConnections | default(0) > 0
             fail_msg: >-
@@ -337,7 +337,7 @@
         # earlier interrupted run's backup was already cleaned up; then restoring is
         # impossible and cycling back is all that can be done — the fail below still
         # says what state the host is in.
-        - name: Put the old binary back
+        - name: "On failure: reinstall the old binary and restart"
           ansible.builtin.shell: |
             set -e
             if [ -f {{ bin }}.pre-{{ version }} ]; then
@@ -354,7 +354,7 @@
           become: true
           changed_when: true
 
-        - name: Report the rollback and stop
+        - name: "On failure: print the rollback and fail the run"
           ansible.builtin.fail:
             msg: >-
               {{ version }} did not come up on {{ inventory_hostname }}. The previous
@@ -363,21 +363,21 @@
               would have caught this anyway, which is the point of it.
 
     # ── record, for the next stage's soak ────────────────────────────────────
-    - name: Make sure the state directory exists
+    - name: Create the soak state directory
       ansible.builtin.file:
         path: "{{ state_dir }}"
         state: directory
         mode: "0755"
       delegate_to: localhost
 
-    - name: Note when this host was updated
+    - name: Write the soak start time for {{ inventory_hostname }}
       ansible.builtin.file:
         path: "{{ state_dir }}/{{ inventory_hostname }}"
         state: touch
         mode: "0644"
       delegate_to: localhost
 
-    - name: Done
+    - name: Print the version now running and the next step
       ansible.builtin.debug:
         msg:
           # newver is skipped on the cycle-only path (no download happened); the cycle

@@ -102,12 +102,12 @@
 # of configuration. The blocks now keep what you need mid-rescue; the doc keeps the rest.
 # NO NEW COLLECTIONS: ansible.builtin throughout.
 
-- name: Guard — refuse to run with no inventory
+- name: Check the inventory is loaded
   ansible.builtin.import_playbook: _assert-inventory.yml
   vars:
     required_group: control
 
-- name: Configure this client to reach {{ dev_alias }} over Cloudflare
+- name: Write ssh block and token for {{ dev_alias }}
   hosts: control
   gather_facts: false
 
@@ -185,7 +185,7 @@
     # FIRST, before anything is read or written. None of these names is defined by this
     # play, so one that is defined came from -e — and a secret passed that way has already
     # been through a shell. Failing here is the only moment at which saying so is useful.
-    - name: Refuse a credential, or a retired flag, on the command line
+    - name: Check no secret or retired flag was passed with -e
       tags: [always]
       ansible.builtin.assert:
         that:
@@ -202,7 +202,7 @@
           A container whose tunnel is not up yet is skipped with a message; no flag needed.
         success_msg: "nothing on the command line that should not be"
 
-    - name: Refuse a template that is not ASCII
+    - name: Check the ssh templates are plain ASCII
       tags: [ssh]
       ansible.builtin.assert:
         that: lookup('file', '../templates/' ~ item) is not search('[^\t\n\r -~]')
@@ -218,7 +218,7 @@
         - cf-access.cmd.j2
 
     # ── cloudflared has to be here, and it is the one thing this cannot install ──
-    - name: Is cloudflared installed
+    - name: Read the cloudflared version on this client
       tags: [always]
       ansible.builtin.command: cloudflared --version
       register: cfd
@@ -226,7 +226,7 @@
       failed_when: false
       check_mode: false
 
-    - name: Where cloudflared is
+    - name: Read where cloudflared is on PATH
       tags: [always]
       # An absolute path in the ProxyCommand rather than a bare name. ssh runs it through
       # /bin/sh, which inherits ssh's environment — and ssh is not always started from a
@@ -242,7 +242,7 @@
       failed_when: false
       check_mode: false
 
-    - name: Fail early and usefully if it is not
+    - name: Check cloudflared is installed on this client
       tags: [always]
       # Before anything is written, so a client without the binary is not left holding a
       # token file and an ssh block that cannot work. Not installed by this play on
@@ -279,7 +279,7 @@
           into ~/.ssh/config runs under WSL's /bin/sh, not under Windows.
         success_msg: "{{ cfd.stdout_lines[0] | default('cloudflared present') }}"
 
-    - name: Settle on a path — an override wins, discovery is the fallback
+    - name: Note which cloudflared path the {{ dev_alias }} block uses
       tags: [always]
       # Mirrors _client-fleet-ssh.yml. -e cloudflared_path=... beats detection, and the assert
       # below is on the RESULT either way, so a wrong override cannot slip through.
@@ -287,14 +287,14 @@
         cfd_resolved: >-
           {{ cloudflared_path | default(cfd_path.stdout | trim, true) }}
 
-    - name: Check the path we are about to write
+    - name: Probe the chosen cloudflared path
       tags: [always]
       ansible.builtin.stat:
         path: "{{ cfd_resolved }}"
       register: cfd_stat
       when: cfd_resolved | length > 0
 
-    - name: Refuse to write a block naming a cloudflared that is not there
+    - name: Check the chosen cloudflared exists and is executable
       tags: [always]
       # Asserting that detection succeeded proves nothing about the string it produced;
       # asserting the file is there and executable proves the thing the ProxyCommand
@@ -317,7 +317,7 @@
     # path even though the play could plainly have written it. Probing the home directory
     # and letting blockinfile create the file is strictly more correct, and it is now what
     # both plays do.
-    - name: Is the laptop's Windows home reachable from here (i.e. are we in WSL)?
+    - name: Probe for the laptop's Windows home through WSL
       tags: [always]
       ansible.builtin.stat:
         path: "{{ windows_home_wsl }}"
@@ -325,7 +325,7 @@
       check_mode: false
       when: windows_home_wsl | length > 0
 
-    - name: Settle whether the Windows half runs at all
+    - name: Note whether the laptop's Windows side is written
       tags: [always]
       ansible.builtin.set_fact:
         on_windows_client: >-
@@ -333,7 +333,7 @@
              and (win_home.stat.exists | default(false))
              and (win_home.stat.isdir | default(false)) }}
 
-    - name: Check the Windows cloudflared, as WSL sees it
+    - name: "WSL only: probe for the Windows cloudflared.exe"
       tags: [always]
       # Checkable, because WSL can see it. From Termux it is not, and the paste file
       # says so rather than implying the path was verified.
@@ -343,7 +343,7 @@
       check_mode: false
       when: on_windows_client | bool
 
-    - name: Refuse to write a Windows block naming a cloudflared that is not there
+    - name: "WSL only: check Windows has cloudflared.exe"
       tags: [always]
       # Before any Windows write, same as the POSIX assert above: a client left holding a
       # token and a wrapper that cannot run is worse than one left untouched.
@@ -358,14 +358,14 @@
       when: on_windows_client | bool
 
     # ── the service token: minted here, per client ───────────────────────────
-    - name: Does a token file already exist
+    - name: Probe for this client's {{ dev_alias }} token file
       tags: [access]
       ansible.builtin.stat:
         path: "{{ token_file }}"
       register: tf
       check_mode: false
 
-    - name: Does the Windows token file already exist
+    - name: "WSL only: probe for the Windows {{ dev_alias }} token file"
       tags: [access]
       ansible.builtin.stat:
         path: "{{ win_token_file_wsl }}"
@@ -373,7 +373,7 @@
       check_mode: false
       when: on_windows_client | bool
 
-    - name: Decide whether a token is minted this run
+    - name: Note whether to create a new {{ dev_alias }} token
       tags: [access]
       # Mint when either client is missing it, or on -e replace_token=true (a rotation,
       # of THIS client's token only). Otherwise leave both alone: re-running to fix an ssh
@@ -387,7 +387,7 @@
              or ((on_windows_client | bool) and not (win_tf.stat.exists | default(true)))
              or (replace_token | default(false) | bool) }}
 
-    - name: Nothing to do for the token
+    - name: "If keeping the token: print how to replace it"
       tags: [access]
       ansible.builtin.debug:
         msg: >-
@@ -401,14 +401,14 @@
     # The same file every server play reads, through the same tasks file. A client without
     # one cannot mint, so it stops here — the fleet half has already written its blocks,
     # and --tags ssh writes the dev blocks without touching tokens at all.
-    - name: The Cloudflare API token
+    - name: "New token only: read the Cloudflare API token"
       ansible.builtin.import_tasks: _cf-api-token.yml
       tags: [access]
       when: minting | bool
 
     # ── where it goes: the account, the application, its policy ──────────────
     # Reads carry check_mode: false so --check can say what a real run would do.
-    - name: Resolve the zone and its account
+    - name: "New token only: read the account for {{ dev_zone }}"
       tags: [access]
       ansible.builtin.uri:
         url: "{{ cf_api }}/zones?name={{ dev_zone }}"
@@ -419,7 +419,7 @@
       no_log: true
       when: minting | bool
 
-    - name: Refuse an API token that cannot see the zone
+    - name: "New token only: check the API token can see {{ dev_zone }}"
       tags: [access]
       ansible.builtin.assert:
         that:
@@ -431,7 +431,7 @@
         success_msg: "zone {{ dev_zone }} is visible to this token"
       when: minting | bool
 
-    - name: List the account's Access applications
+    - name: "New token only: read the Access applications list"
       tags: [access]
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_zone_q.json.result[0].account.id }}/access/apps"
@@ -442,14 +442,14 @@
       no_log: true
       when: minting | bool
 
-    - name: Remember the account, and the application for {{ dev_hostname }}
+    - name: "New token only: note {{ dev_alias }}'s Access app"
       tags: [access]
       ansible.builtin.set_fact:
         cf_account_id: "{{ cf_zone_q.json.result[0].account.id }}"
         cf_app: "{{ cf_apps.json.result | default([]) | selectattr('domain', 'defined') | selectattr('domain', 'eq', dev_hostname) | list | first | default({}) }}"
       when: minting | bool
 
-    - name: Say so when the container has no Access application yet
+    - name: "If no Access app: print that {{ dev_alias }} gets no token"
       tags: [access]
       # The one skip left in this play, and it is a state rather than a mistake: dd-dev and
       # ds-dev have no tunnel today. Its ssh block is still written, and `ssh {{ dev_alias }}`
@@ -463,12 +463,12 @@
       changed_when: true
       when: (minting | bool) and (cf_app | default({}) | length == 0)
 
-    - name: Settle whether a token is minted after all
+    - name: Note whether {{ dev_alias }} still gets a new token
       tags: [access]
       ansible.builtin.set_fact:
         minting: "{{ (minting | bool) and ((cf_app | default({})) | length > 0) }}"
 
-    - name: List the account's service tokens
+    - name: "New token only: read the account's service tokens"
       tags: [access]
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/service_tokens"
@@ -479,7 +479,7 @@
       no_log: true
       when: minting | bool
 
-    - name: List the application's policies
+    - name: "New token only: read the Access app's policies"
       tags: [access]
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ cf_app.id }}/policies"
@@ -490,7 +490,7 @@
       no_log: true
       when: minting | bool
 
-    - name: Remember this client's token and the policy, where they exist
+    - name: "New token only: note any existing token and policy"
       tags: [access]
       # The token BY NAME, `<alias>-<client>`; the policy by decision, because the one the
       # edge play used to write was called "service token" and a new one is called
@@ -500,7 +500,7 @@
         cf_pol: "{{ cf_pol_q.json.result | default([]) | selectattr('decision', 'eq', 'non_identity') | list | first | default({}) }}"
       when: minting | bool
 
-    - name: What a real run would do here
+    - name: "--check, new token: print what a real run would do"
       tags: [access]
       ansible.builtin.debug:
         msg: >-
@@ -511,7 +511,7 @@
       changed_when: true
       when: (minting | bool) and ansible_check_mode
 
-    - name: Mint this client's service token, or rotate the one it lost
+    - name: "New token only: create or rotate {{ st_name }}"
       tags: [access]
       # Rotate when it exists: Cloudflare returns a secret at creation and at rotation and
       # never otherwise, and a client that is minting has no secret for it. Rotation cuts
@@ -535,7 +535,7 @@
       no_log: true
       when: (minting | bool) and not ansible_check_mode
 
-    - name: What Cloudflare said, if it refused
+    - name: "On failure: print Cloudflare's token error"
       tags: [access]
       ansible.builtin.debug:
         msg: >-
@@ -546,7 +546,7 @@
         - cf_st_w is not skipped
         - cf_st_w.status | default(0) not in [200, 201]
 
-    - name: Stop if no token was produced
+    - name: "New token only: check Cloudflare returned a token"
       tags: [access]
       ansible.builtin.assert:
         that: cf_st_w.status | default(0) in [200, 201]
@@ -557,7 +557,7 @@
         success_msg: "{{ st_name }} {{ 'rotated' if cf_st_existing else 'minted' }}"
       when: cf_st_w is not skipped
 
-    - name: Admit it in the application's policy
+    - name: "New token only: write the token into the policy"
       tags: [access]
       # Read-modify-write, so every token already admitted stays admitted: the phone's
       # survives the laptop being set up, and the shared `<alias>` token every client held
@@ -590,7 +590,7 @@
       no_log: true
       when: cf_st_w is not skipped
 
-    - name: What Cloudflare said, if it refused the policy
+    - name: "On failure: print Cloudflare's policy error"
       tags: [access]
       ansible.builtin.debug:
         msg: >-
@@ -601,7 +601,7 @@
         - cf_pol_w is not skipped
         - cf_pol_w.status | default(0) not in [200, 201]
 
-    - name: Stop if the token was not admitted
+    - name: "New token only: check the policy admits the token"
       tags: [access]
       # Stopping here leaves the token minted but admitting nothing, and NOT written to
       # the file — so the next run, finding no file, finds the token by name, rotates it,
@@ -616,12 +616,12 @@
         success_msg: "{{ dev_hostname }} admits {{ st_name }}"
       when: cf_pol_w is not skipped
 
-    - name: Settle whether a token is written this run
+    - name: Note whether a token file is written
       tags: [access]
       ansible.builtin.set_fact:
         writing_token: "{{ cf_st_w is not skipped }}"
 
-    - name: The directory for it
+    - name: "New token only: create the {{ dev_alias }} token directory"
       tags: [access]
       ansible.builtin.file:
         path: "{{ token_file | dirname }}"
@@ -629,7 +629,7 @@
         mode: "0700"
       when: writing_token | bool
 
-    - name: Write the token, mode 600
+    - name: "New token only: write the {{ dev_alias }} token, mode 600"
       tags: [access]
       # A SOURCEABLE FILE, not a shell profile and not the ssh config, and the choice is
       # the point of this play:
@@ -662,7 +662,7 @@
       no_log: true
 
     # ── the same token, on the Windows side of the same laptop ───────────────
-    - name: The Windows directory for it
+    - name: "New token, WSL: create the Windows token directory"
       tags: [access]
       ansible.builtin.file:
         path: "{{ win_token_file_wsl | dirname }}"
@@ -672,7 +672,7 @@
       # pretends to have set a mode is worse than one that does not try.
       when: (on_windows_client | bool) and (writing_token | bool)
 
-    - name: Write the Windows token
+    - name: "New token, WSL: write the Windows token file"
       tags: [access]
       # A DIFFERENT FILE FROM THE WSL ONE, because %USERPROFILE% and WSL's $HOME are two
       # different homes on two different filesystems. Two copies of the secret on one
@@ -699,7 +699,7 @@
       when: (on_windows_client | bool) and (writing_token | bool)
       no_log: true
 
-    - name: Read the Windows ACL on the token we just wrote
+    - name: "New token, WSL: read the Windows token file's ACL"
       tags: [access]
       # Windows' own tool, reached through WSL interop. `command`, so the path is an
       # argument and no shell is involved — and nothing secret is on this command line,
@@ -717,7 +717,7 @@
       check_mode: false
       when: (on_windows_client | bool) and (writing_token | bool)
 
-    - name: Who can read the Windows token
+    - name: "New token, WSL: print who can read the Windows token"
       tags: [access]
       # A DISPLAY, NOT A VERDICT, and the distinction is deliberate. This repo's rule is
       # that a check is calibrated against known-good state before its verdict is
@@ -749,7 +749,7 @@
     # left ssh nothing to offer and the container answered "Permission denied (publickey)".
     #
     # Either half is enough: ssh can use the .pub alone to ask the agent for that identity.
-    - name: Is there a private key at the path the block would name
+    - name: Probe for the private key {{ ssh_key }}
       tags: [ssh]
       ansible.builtin.stat:
         path: "{{ ssh_key | regex_replace('^~', home) }}"
@@ -757,7 +757,7 @@
       check_mode: false
       when: ssh_key | length > 0
 
-    - name: Is there at least a public key there
+    - name: Probe for the public key {{ ssh_key }}.pub
       tags: [ssh]
       ansible.builtin.stat:
         path: "{{ (ssh_key | regex_replace('^~', home)) ~ '.pub' }}"
@@ -765,7 +765,7 @@
       check_mode: false
       when: ssh_key | length > 0
 
-    - name: Refuse an identity that was named explicitly and is not there
+    - name: "If -e identity: check the named key file exists"
       tags: [ssh]
       # An explicit -e identity=... that does not resolve is a typo, not an agent client.
       # Guessing past it would write a block that cannot authenticate and say nothing.
@@ -781,7 +781,7 @@
 
     # The same question for the WINDOWS side, which is a different file: `~` there is
     # C:\Users\gavin, not WSL's home, and the two have different keys on this laptop.
-    - name: Is there a key on the Windows side
+    - name: "WSL only: probe for the Windows private key"
       tags: [ssh]
       ansible.builtin.stat:
         path: "{{ windows_home_wsl }}/.ssh/{{ ssh_key | basename }}"
@@ -791,7 +791,7 @@
         - on_windows_client | bool
         - ssh_key | length > 0
 
-    - name: Is there at least a public key on the Windows side
+    - name: "WSL only: probe for the Windows public key"
       tags: [ssh]
       ansible.builtin.stat:
         path: "{{ windows_home_wsl }}/.ssh/{{ ssh_key | basename }}.pub"
@@ -801,7 +801,7 @@
         - on_windows_client | bool
         - ssh_key | length > 0
 
-    - name: Settle whether either block names an identity at all
+    - name: Note whether each ssh block names a key file
       tags: [ssh]
       ansible.builtin.set_fact:
         identity_usable: >-
@@ -811,7 +811,7 @@
           {{ (ssh_key | length > 0)
              and ((win_idf.stat.exists | default(false)) or (win_idpub.stat.exists | default(false))) }}
 
-    - name: Say so when it does not
+    - name: "If no key: print why {{ dev_alias }}'s block names no key"
       tags: [ssh]
       ansible.builtin.debug:
         msg: >-
@@ -823,14 +823,14 @@
       when: not (identity_usable | bool)
 
     # ── the ssh config block, on this client ─────────────────────────────────
-    - name: Make sure ~/.ssh exists
+    - name: Create ~/.ssh if missing, mode 700
       tags: [ssh]
       ansible.builtin.file:
         path: "{{ home }}/.ssh"
         state: directory
         mode: "0700"
 
-    - name: Does ~/.ssh/config have CRLF line endings
+    - name: Probe ~/.ssh/config for CRLF line endings
       tags: [ssh]
       # LF throughout, before any blockinfile below touches the file, on both sides of a
       # laptop. In a CRLF file blockinfile cannot match its own markers (it compares
@@ -845,13 +845,13 @@
       failed_when: false
       check_mode: false
 
-    - name: Convert ~/.ssh/config to LF, so blockinfile can find its markers
+    - name: "If CRLF: convert ~/.ssh/config to LF"
       tags: [ssh]
       ansible.builtin.command:
         argv: [sed, -i, --follow-symlinks, 's/\r$//', "{{ ssh_config }}"]
       when: posix_crlf.rc == 0
 
-    - name: Say that a --check diff of a CRLF ~/.ssh/config is not what the real run writes
+    - name: "--check, CRLF: print why the diff is wrong"
       tags: [ssh]
       ansible.builtin.debug:
         msg: >-
@@ -863,7 +863,7 @@
         - ansible_check_mode
         - posix_crlf.rc == 0
 
-    - name: Drop the {{ dev_alias }} blocks written under markers this play no longer uses
+    - name: Delete old-marker {{ dev_alias }} blocks from ~/.ssh/config
       tags: [ssh]
       # THE MARKER NAMES THE PLAYBOOK, so every rename changes the key blockinfile finds
       # its block by: dev-client.yml -> configure-client-dev.yml on 2026-08-29, and
@@ -888,7 +888,7 @@
         - "# {mark} {{ dev_alias }} (ansible/playbooks/dev-client.yml)"
         - "# {mark} {{ dev_alias }} (ansible/playbooks/configure-client-dev.yml)"
 
-    - name: The {{ dev_alias }} block in ~/.ssh/config
+    - name: Write the {{ dev_alias }} block in ~/.ssh/config
       tags: [ssh]
       # blockinfile, so re-running edits the block in place instead of appending a second
       # copy — which ssh would not error on, it would just silently use the first.
@@ -934,7 +934,7 @@
         identity_path: "{{ ssh_key }}"
 
     # ── and on the Windows side of the same laptop ───────────────────────────
-    - name: Make sure the laptop's %USERPROFILE%\.ssh exists
+    - name: "WSL only: create the Windows .ssh directory"
       tags: [ssh]
       # `template` DOES NOT CREATE PARENT DIRECTORIES, and this task runs before the
       # blockinfile that would. Without it, a laptop that has never had an ssh config
@@ -949,7 +949,7 @@
         state: directory
       when: on_windows_client | bool
 
-    - name: The ProxyCommand wrapper Windows needs instead of `sh -c`
+    - name: "WSL only: write cf-access-{{ dev_alias }}.cmd"
       tags: [ssh]
       # newline_sequence IS THE POINT OF THIS TASK. cmd.exe seeks by byte offset between
       # commands in a batch file and miscounts on an LF-only one, resuming mid-line and
@@ -973,7 +973,7 @@
       # file that does — so inherited ACLs are the right protection for it anyway.
       when: on_windows_client | bool
 
-    - name: Does the laptop's Windows ssh config have CRLF line endings
+    - name: "WSL only: probe the Windows ssh config for CRLF"
       tags: [ssh]
       # The same conversion as for ~/.ssh/config above, for the laptop's Windows file;
       # what drvfs prints while it runs is in _client-fleet-ssh.yml.
@@ -985,7 +985,7 @@
       check_mode: false
       when: on_windows_client | bool
 
-    - name: Convert the laptop's Windows ssh config to LF, so blockinfile can find its markers
+    - name: "WSL, if CRLF: convert the Windows ssh config to LF"
       tags: [ssh]
       ansible.builtin.command:
         argv: [sed, -i, --follow-symlinks, 's/\r$//', "{{ win_ssh_config }}"]
@@ -993,7 +993,7 @@
         - on_windows_client | bool
         - win_crlf.rc | default(1) == 0
 
-    - name: Say that a --check diff of a CRLF file is not what the real run writes
+    - name: "--check, Windows CRLF: print why the diff is wrong"
       tags: [ssh]
       # The sed above is skipped under --check, so the diffs below are of the CRLF file.
       ansible.builtin.debug:
@@ -1007,7 +1007,7 @@
         - on_windows_client | bool
         - win_crlf.rc | default(1) == 0
 
-    - name: Drop the pre-rename {{ dev_alias }} block from the laptop's Windows ssh config
+    - name: "WSL only: delete old-marker {{ dev_alias }} Windows blocks"
       tags: [ssh]
       # The same stale block, the same reason, the same first-value-wins loss — see the
       # task that drops it from ~/.ssh/config above.
@@ -1021,7 +1021,7 @@
         - "# {mark} {{ dev_alias }} (ansible/playbooks/configure-client-dev.yml)"
       when: on_windows_client | bool
 
-    - name: The {{ dev_alias }} block in the laptop's Windows ssh config
+    - name: "WSL only: write the {{ dev_alias }} Windows ssh block"
       tags: [ssh]
       # Same marker as the WSL block, in a different file. Two clients, two configs,
       # neither aware of the other — and the same insertbefore rule, because Windows ssh
@@ -1045,7 +1045,7 @@
       when: on_windows_client | bool
 
     # ── fallback for a control node that cannot see the laptop — Termux ──────
-    - name: Otherwise render the Windows block and wrapper to a file, to paste
+    - name: "If not WSL: write Windows ssh setup to a paste file"
       tags: [ssh]
       # Only written when the direct write did not happen, so there is never a stale paste
       # file sitting beside a managed one, inviting somebody to paste the older of the
@@ -1093,7 +1093,7 @@
         - windows_home_wsl | length > 0
         - not (on_windows_client | bool)
 
-    - name: Is there a token now — the answer the summary below gives
+    - name: Probe the {{ dev_alias }} token file for the summary
       tags: [always]
       # Read again rather than inferred from this run's choices: under --tags ssh none of
       # those ran, and the file may have come from an earlier run. Same for the block and
@@ -1105,7 +1105,7 @@
       register: token_now
       check_mode: false
 
-    - name: Is there a block now
+    - name: Probe ~/.ssh/config for the {{ dev_alias }} block
       tags: [always]
       ansible.builtin.command:
         argv: [grep, -qF, "# BEGIN {{ dev_alias }} (ansible/playbooks/client-home-ssh-config.yml)", "{{ ssh_config }}"]
@@ -1114,7 +1114,7 @@
       failed_when: false
       check_mode: false
 
-    - name: Is there a Windows token now
+    - name: "WSL only: probe the Windows token for the summary"
       tags: [always]
       ansible.builtin.stat:
         path: "{{ win_token_file_wsl }}"
@@ -1122,7 +1122,7 @@
       check_mode: false
       when: on_windows_client | bool
 
-    - name: How to use it
+    - name: Print how to reach {{ dev_alias }}, and what is on disk
       tags: [always]
       ansible.builtin.debug:
         msg:

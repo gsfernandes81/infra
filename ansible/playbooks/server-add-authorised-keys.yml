@@ -49,12 +49,12 @@
 # NO NEW COLLECTIONS: ansible.builtin, plus ansible.posix.authorized_key, which
 # requirements.yml already carries and already explains.
 
-- name: Guard — refuse to run with no inventory
+- name: Check the inventory is loaded
   ansible.builtin.import_playbook: _assert-inventory.yml
   vars:
     required_group: fleet
 
-- name: Authorise a client key on the dev containers that read one
+- name: Write a client's public key to the dev containers
   hosts: "{{ dev_host | default('zero') }}"
   gather_facts: true
   become: false
@@ -85,7 +85,7 @@
     host_home: "{{ ansible_facts['env']['HOME'] }}"
 
   tasks:
-    - name: One of the two forms has to be given
+    - name: Check client_pubkey or client_pubkey_file is given
       ansible.builtin.assert:
         that: (client_pubkey_file is defined) or (client_pubkey is defined)
         fail_msg: |
@@ -98,7 +98,7 @@
           whitespace and everything after the first space is thrown away.
         success_msg: "a key was given"
 
-    - name: The key file has to be readable ON THE CONTROL NODE
+    - name: "Key file only: probe for the file on the control node"
       # delegate_to: localhost, and that is not a detail. This play targets `zero`, so an
       # undelegated stat would look for the key on ZERO — where it is not, and never was.
       # The lookup that reads it runs on the control node like every lookup does, so the
@@ -111,7 +111,7 @@
       check_mode: false
       when: client_pubkey_file is defined
 
-    - name: Say where it looked, when it is not there
+    - name: "Key file only: check the control node has the file"
       ansible.builtin.assert:
         that: pkf.stat.exists | default(false)
         fail_msg: >-
@@ -122,7 +122,7 @@
         success_msg: "key file readable at {{ pubkey_file }}"
       when: client_pubkey_file is defined
 
-    - name: A public key has to be given, and has to look like one
+    - name: Check the given key looks like a public key
       # No default. Authorising "" would be a no-op that reports changed, and authorising
       # a private key by mistake is the accident worth spending an assert on: the two
       # differ by one word at the front, and this play's argument is pasted by hand.
@@ -154,13 +154,13 @@
           not leave the machine it is on.
         success_msg: "public key looks like one"
 
-    - name: Where each container's secrets directory is
+    - name: Note each dev container's secrets directory
       ansible.builtin.set_fact:
         resolved_dirs: >-
           {{ dict(dev_clients | zip(dev_clients | map('regex_replace', '^(.*)$',
              host_home ~ '/.\1-secrets'))) | combine(dev_secrets_overrides) }}
 
-    - name: Each one has to exist already
+    - name: Probe each dev container's secrets directory on {{ inventory_hostname }}
       # Never created here. An existing secrets directory is the evidence that this is
       # the path the container actually mounts; creating one would put an authorized_keys
       # somewhere nothing reads and report success.
@@ -170,7 +170,7 @@
       loop: "{{ dev_clients }}"
       check_mode: false
 
-    - name: Refuse a directory that is not there
+    - name: Check each secrets directory exists on {{ inventory_hostname }}
       ansible.builtin.assert:
         that: item.stat.isdir | default(false)
         fail_msg: >-
@@ -182,7 +182,7 @@
       loop_control:
         label: "{{ item.item }}"
 
-    - name: Create authorized_keys where there is none
+    - name: Create authorized_keys where missing, mode 600
       # force: false, so this only ever creates. The append is the next task's job, and a
       # copy that could overwrite is one bad re-run away from locking every client out.
       ansible.builtin.copy:
@@ -192,7 +192,7 @@
         force: false
       loop: "{{ dev_clients }}"
 
-    - name: Authorise the key
+    - name: Write the client key into each authorized_keys
       ansible.posix.authorized_key:
         user: "{{ ansible_facts['user_id'] }}"
         key: "{{ pubkey }}"
@@ -219,7 +219,7 @@
     # 2026-10-04: a client block from before then still gives the bare alias a
     # RemoteCommand, which makes `ssh <alias> <cmd>` an error, while `-sh` works under both
     # the old block and the new one, where the two names are one Host block.
-    - name: Refresh the copy sshd reads, inside each container
+    - name: Write sshd's authorized_keys copy in each container
       ansible.builtin.command:
         # expand_argument_vars: false OR THE SCRIPT IS RESOLVED ON THE WRONG MACHINE.
         # `command` expands environment variables in its arguments by default, so `$HOME`
@@ -262,7 +262,7 @@
       failed_when: false
       loop: "{{ dev_clients }}"
 
-    - name: What now
+    - name: Print where the key was authorised and refreshed
       ansible.builtin.debug:
         msg: >-
           {{ ['Authorised on: ' ~ (dev_clients | join(', '))]

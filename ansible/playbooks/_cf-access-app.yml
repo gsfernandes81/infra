@@ -23,7 +23,7 @@
 #   acc_emails         optional: with `allow`, the read-back also checks these addresses
 #   acc_if_refused     what a refusal means for this application, for the fail message
 
-- name: "Create or update the Access application: {{ acc_name }}"
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: write the Access application"
   # allowed_idps left out: every login method the account has. auto_redirect off, so the
   # method picker shows. PUT unconditionally when it exists — the reason is beside the same
   # choice in _dev-container-tunnel.yml § 3.
@@ -48,7 +48,7 @@
   changed_when: acc_app_w.json.success | default(false)
   no_log: true
 
-- name: "What Cloudflare said, if it refused the application: {{ acc_name }}"
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: if the app was refused, print why"
   ansible.builtin.debug:
     msg: >-
       {{ acc_domain }}: HTTP {{ acc_app_w.status | default('?') }}:
@@ -58,7 +58,7 @@
     - acc_app_w is not skipped
     - (acc_app_w.status | default(0) not in [200, 201]) or not (acc_app_w.json.success | default(false))
 
-- name: "Stop if the application was not made: {{ acc_name }}"
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: check the application was written"
   ansible.builtin.assert:
     that:
       - acc_app_w.status | default(0) in [200, 201]
@@ -69,7 +69,7 @@
     quiet: true
   when: acc_app_w is not skipped
 
-- name: "Remember the application's id: {{ acc_name }}"
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: note the application's id"
   # ALWAYS SET, to '' when there is none. This file is imported twice in one play, so a
   # fact left over from the first import would hand the second the FIRST application's id,
   # and its policy reads and writes would land on the wrong application.
@@ -78,7 +78,7 @@
       {{ acc_app_w.json.result.id if (acc_app_w is not skipped)
          else (acc_existing.id | default('')) }}
 
-- name: "List the application's policies: {{ acc_name }}"
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: read the application's policies"
   ansible.builtin.uri:
     url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ acc_app_id }}/policies"
     headers: { Authorization: "Bearer {{ cf_token }}" }
@@ -89,7 +89,7 @@
   no_log: true
   when: acc_app_id | length > 0
 
-- name: "Write its {{ acc_decision }} policy: {{ acc_name }}"
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: write the {{ acc_decision }} policy"
   ansible.builtin.uri:
     url: >-
       {{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{
@@ -116,7 +116,7 @@
   changed_when: acc_pol_w.json.success | default(false)
   no_log: true
 
-- name: "What Cloudflare said, if it refused the policy: {{ acc_name }}"
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: if the policy was refused, print why"
   ansible.builtin.debug:
     msg: >-
       {{ acc_decision }} policy on {{ acc_domain }}: HTTP {{ acc_pol_w.status | default('?') }}:
@@ -126,7 +126,7 @@
     - acc_pol_w is not skipped
     - (acc_pol_w.status | default(0) not in [200, 201]) or not (acc_pol_w.json.success | default(false))
 
-- name: "Stop if the policy was not written: {{ acc_name }}"
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: check the policy was written"
   ansible.builtin.assert:
     that:
       - acc_pol_w.status | default(0) in [200, 201]
@@ -137,7 +137,7 @@
     quiet: true
   when: acc_pol_w is not skipped
 
-- name: "Read the policies back: {{ acc_name }}"
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: read the policies back"
   ansible.builtin.uri:
     url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ acc_app_id }}/policies"
     headers: { Authorization: "Bearer {{ cf_token }}" }
@@ -147,7 +147,7 @@
   no_log: true
   when: not ansible_check_mode
 
-- name: "It carries exactly that one policy: {{ acc_name }}"
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: check {{ acc_decision }} is the only policy"
   ansible.builtin.assert:
     that:
       - acc_pol_r.json.success | default(false)

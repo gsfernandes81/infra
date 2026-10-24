@@ -446,6 +446,12 @@ alike.
 
 ## Conventions
 
+- **Task and play names are read as a running narrative**, one line per task as it starts,
+  skipped tasks included (`ansible.cfg` § the look). So: verb first (Read, Check, Write,
+  Create, Probe, Print, Note); a step that may not apply leads with its condition (`If no
+  token file:`, `Access login:`, `--check only:`); no pronoun that needs the previous line;
+  the real name over a generic noun, and *deployment* where a noun is unavoidable; at most
+  53 characters rendered, 50 for a play.
 - Match the surrounding style: prose comments that say *why*, file headers that say what
   the file is for and what not to do to it, `make help` that is the Makefile's own header.
 - A script that refuses is better than one that guesses — `bin/compose` refusing

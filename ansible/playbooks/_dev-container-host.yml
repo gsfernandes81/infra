@@ -45,7 +45,7 @@
 # already in requirements.yml and is there for exactly this: appending a key to an
 # authorized_keys file without rewriting it.
 
-- name: Prepare the host for the infra-dev container
+- name: Create the infra-dev secrets, key and dev/.env
   hosts: "{{ dev_host | default('zero') }}"
   gather_facts: true
   become: false
@@ -93,7 +93,7 @@
          else lookup('file', lookup('env', 'HOME') ~ '/.ssh/id_ed25519.pub') }}
 
   tasks:
-    - name: Read the existing dev/.env, if there is one
+    - name: Read the existing dev/.env, if present
       # So the rewrite below can preserve settings this run was not asked to change.
       ansible.builtin.slurp:
         src: "{{ infra_src }}/dev/.env"
@@ -101,7 +101,7 @@
       failed_when: false
       check_mode: false
 
-    - name: Carry forward the tunnel hostname already set
+    - name: Note the tunnel hostname dev/.env already has
       # Parsed rather than pattern-matched into the template, so the value that survives
       # is exactly the one that was there. Empty when the file is absent, which is the
       # first-run case and is correct — no tunnel until one is provisioned.
@@ -111,7 +111,7 @@
               | select('match', '^DEV_TUNNEL_HOSTNAME=') | list | first
               | default('=')).split('=', 1)[1] | trim }}
 
-    - name: The secrets directory
+    - name: Create the secrets directory at mode 0700
       # 700, outside the repo. Everything the container reads at start lives here and is
       # mounted read-only, so nothing in the container can write back into it.
       ansible.builtin.file:
@@ -119,7 +119,7 @@
         state: directory
         mode: "0700"
 
-    - name: The GitHub deploy key
+    - name: "If no deploy key: create the GitHub deploy key"
       # `creates:` is what makes this idempotent, and it must never be dropped: a second
       # run without it silently mints a new key, the old public half stays registered on
       # GitHub, and pushes start failing for a reason that looks like GitHub's fault.
@@ -130,7 +130,7 @@
           -N '' -C infra-dev-{{ inventory_hostname }}
         creates: "{{ infra_secrets }}/id_ed25519_infra_deploy"
 
-    - name: Is the deploy key there yet
+    - name: Read whether the deploy key exists
       # Registered before the mode fixup and the authorized_keys work, because those
       # three tasks all need files that a --check run has not created. Without this the
       # first dry run on a fresh host dies at the mode task with "file ... is absent,
@@ -140,7 +140,7 @@
       register: deploy_key
       check_mode: false
 
-    - name: Note that a first --check cannot go further
+    - name: "--check, no deploy key: print why later steps skip"
       # Said out loud rather than left as three silent skips. A dry run of a bootstrap
       # genuinely cannot show you the second half: you cannot chmod a key that a check
       # run declined to create. What --check IS good for here is the second run onward,
@@ -154,7 +154,7 @@
       changed_when: true
       when: ansible_check_mode and not deploy_key.stat.exists
 
-    - name: The deploy key's modes
+    - name: "If the deploy key exists: write its mode as 0600"
       # ssh refuses a private key it considers group- or world-readable, and the umask
       # that ssh-keygen inherited is not something to rely on being 077.
       #
@@ -167,7 +167,7 @@
         state: file
       when: not ansible_check_mode or deploy_key.stat.exists
 
-    - name: Bring the deploy key's public half to the control node
+    - name: "If the deploy key exists: write its .pub to the phone"
       # So the gh command below can name a local FILE. The obvious alternative — printing
       # the key inline and using process substitution — is bash syntax, and every shell
       # on this fleet is fish, where `<(...)` is a syntax error. A command that cannot be
@@ -178,7 +178,7 @@
         flat: true
       when: not ansible_check_mode or deploy_key.stat.exists
 
-    - name: Create authorized_keys if it is not there
+    - name: "If the deploy key exists: create authorized_keys"
       # force: false so this only ever creates. The append is the next task's job, and a
       # `copy` that could overwrite would be one bad re-run away from locking every
       # client out of the container at once.
@@ -189,7 +189,7 @@
         force: false
       when: not ansible_check_mode or deploy_key.stat.exists
 
-    - name: Authorise the client key
+    - name: "If the deploy key exists: install the client ssh key"
       # ansible.posix.authorized_key rather than lineinfile, and requirements.yml already
       # says why in its own words: "append-never-rewrite for authorized_keys (which is
       # right, because a botched rewrite on a tunnel-only box is unrecoverable)". Same
@@ -203,7 +203,7 @@
         state: present
       when: not ansible_check_mode or deploy_key.stat.exists
 
-    - name: dev/.env
+    - name: "If the deploy key exists: write dev/.env on {{ inventory_hostname }}"
       # Written rather than copied from .env.example, because .env holds host-specific
       # absolute paths and .env.example holds the explanation of them. Two files, two
       # jobs. The example stays as the documentation; this is the instance.
@@ -227,7 +227,7 @@
           DEV_TUNNEL_HOSTNAME={{ dev_tunnel_hostname }}
       when: not ansible_check_mode or deploy_key.stat.exists
 
-    - name: What is set up, and what is left
+    - name: Print what is set up and the two steps left
       ansible.builtin.debug:
         msg:
           - "secrets   {{ infra_secrets }} (0700)"
