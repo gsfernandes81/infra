@@ -31,10 +31,13 @@ services:
     build:
       context: ${SRC_ROOT:?run ansible/playbooks/server-deploy-garmin-mcp.yml — it writes SRC_ROOT}/garmin-mcp
     image: garmin-mcp-remote:0cf102c
-    # Built from the pinned checkout and never pulled. Without this, Compose first tries the
-    # tag on Docker Hub — a warning on every first build, and a same-named image published
-    # there would be preferred over the reviewed source.
-    pull_policy: build
+    # Never pulled, built only when the tag is absent. The default (`missing`) first tries
+    # the tag on Docker Hub, warning on every first build, and would PREFER a same-named
+    # image published there over the reviewed source. Not `build`: that rebuilds on every
+    # `up` (compose v5.6.1, pkg/compose/build.go:85), re-resolving upstream's unpinned
+    # Python dependencies whenever the build cache is gone, which is the drift the sha tag
+    # exists to prevent.
+    pull_policy: never
     container_name: garmin-mcp
     restart: unless-stopped
     # EXPLICIT environment, never `env_file:`. env_file would hand the container every line
