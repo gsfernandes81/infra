@@ -549,7 +549,7 @@ left out on purpose**: it works on arm64 (linuxserver's docs say otherwise; thei
 says not), and if wanted it is a derived image with Calibre's hash-pinned arm64 tarball,
 never the `DOCKER_MODS` line, which installs at every container start.
 
-## garmin-mcp — a read-only Garmin MCP for claude.ai, on `one`
+## garmin-mcp — a Garmin MCP for claude.ai, on `one` (read-only; five writes added, amended below)
 
 **Decided 2026-10-24** with the owner, after a security audit of the upstream and nine
 alternatives. It builds on § *Sidecar, not baked-in* above and does not restate it.

@@ -1,4 +1,4 @@
-# garmin-mcp on `one` — a READ-ONLY Garmin Connect MCP server that claude.ai reaches as a
+# garmin-mcp on `one` — a Garmin Connect MCP server (its read tools plus five chosen writes, below) that claude.ai reaches as a
 # custom connector. Reached ONLY through the cloudflared sidecar below, on its own tunnel;
 # nothing is published on the host. Deploy, the MFA step, rotation: README.md beside this.
 # Why it is shaped this way: plans/garmin-mcp.md until it is retired, then docs/decisions.md.
