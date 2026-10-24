@@ -636,6 +636,9 @@ change on a box that is fine; do it only when one of those stacks is being rebui
 
 ## Ansible output: one title line per task, as it starts — ON TRIAL
 
+⚠︎ **SUPERSEDED 2026-10-24, the same day, by § "Ansible output: this repo's own callback"
+below.** The look stayed; the `diy` templates did not. Kept for why `diy` was tried first.
+
 **Decided 2026-10-24, on trial with the owner.** `ansible.cfg` sets `stdout_callback =
 community.general.diy` with templates in its `[callback_diy]` section: a ━━ banner per play,
 one ▸ line per task **as it starts** (cut to 56 columns, a phone in portrait) so a long run
@@ -658,7 +661,38 @@ the Done block in `server-deploy-garmin-mcp.yml` would print as a bare "changed"
 ansible-core 2.23 removes (management-plane.md has the item), and prints two deprecation lines
 per run until community.general updates it.
 
+## Ansible output: this repo's own callback
+
+**Decided 2026-10-24 by the owner**, after trying `community.general.diy`.
+`ansible/callback_plugins/infra.py` is the stdout callback (`ansible.cfg`). It keeps the
+look above and adds what `diy`'s templates could not do:
+
+- **The terminal's real width,** measured on every line, with long lines wrapped under their
+  own indent (the owner's ask was Helix's soft-wrap) and nothing cut off with "…".
+- **A timer ticking at the end of the running step's title,** with the final time left there.
+- **No trace of a skipped step.** On a terminal its title is drawn, then erased once every host
+  has skipped it; in a log the title is printed only with a first result.
+
+**Why our own code, against "prefer the interface an outsider already knows".** Each of those
+three needs state between events, and `diy` renders one template per event with none. The
+stock live-progress callback, `community.general.dense`, writes terminal escapes into logs and
+pasted transcripts. roots/ansible-output-prettify was the model for measuring the terminal and
+timing steps, but it prints nothing until a step ends, and it has no licence, so nothing was
+copied from it. The plugin is about 250 lines and uses only `CallbackBase`. Leaving `diy` also
+removed its two deprecation lines per run and the ansible-core 2.23 risk filed for it.
+
+**What makes redrawing safe.** The plugin redraws or erases only while its own title is the
+last thing on screen. It wraps `Display.display`, which every other line Ansible prints goes
+through (warnings, deprecations, errors, prompts, and worker output proxied to the main
+process), and that wrapper commits the title with a newline first. So a redraw can never land
+on top of anything else. A test run had a real warning appear while a title was live; it
+printed below the committed title and stayed. On anything that is not a terminal the plugin
+writes plain, append-only lines.
+
+**The escape hatch is unchanged:** `ANSIBLE_STDOUT_CALLBACK=default` for one run.
+
 ## The lesson worth keeping
+
 
 **A check that can pass for the wrong reason is worse than no check**, because it stops
 you looking. The port-forward check originally asked only "did the port change" and
