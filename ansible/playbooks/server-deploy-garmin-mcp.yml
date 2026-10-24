@@ -22,7 +22,8 @@
 # Ansible drives stacks through community.docker. garmin-mcp is the first stack it drives.
 #
 # TWO HALVES:
-#   1. server-create-stack-tunnel.yml, imported unchanged with stack=garmin-mcp. It makes the
+#   1. server-create-stack-tunnel.yml, imported unchanged with stack=garmin-mcp. It pulls the
+#      host's checkout to this control node's commit (and refuses if it cannot), makes the
 #      tunnel and the CNAME, writes the credentials outside the checkout, proves the host's
 #      compose.yaml, edge.yml and cloudflared.yml match this phone's, writes TUNNEL_ID and
 #      TUNNEL_CREDENTIALS into .env (creating it at 0600), and leaves the host in the

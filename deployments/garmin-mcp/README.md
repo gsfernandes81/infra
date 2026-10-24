@@ -57,7 +57,7 @@ What the play does, in order:
    - `/mcp` returns 401 without the token;
    - the OAuth metadata names this hostname;
    - `/readyz` says `ready`;
-   - `tools/list` returns read tools only.
+   - `tools/list` returns only read tools and the allowed writes.
 
 ## Connecting claude.ai
 

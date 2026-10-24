@@ -205,7 +205,15 @@
       register: stack_ctl_dirty
       changed_when: false
       check_mode: false
-      failed_when: stack_ctl_dirty.stdout | length > 0
+
+    - name: Stop on uncommitted changes to the stack here
+      ansible.builtin.assert:
+        that: stack_ctl_dirty.stdout | length == 0
+        fail_msg: >-
+          This checkout has uncommitted changes under deployments/{{ stack }}/:
+          {{ stack_ctl_dirty.stdout_lines | default([]) | join('; ') }}. The host runs the commit,
+          not these edits — commit and push them, or discard them, then re-run. Nothing has
+          been touched on any host.
 
     - name: Put the host in the group the next play runs on
       # With the reviewed commit, and the checksums of the files the host will run, so the
