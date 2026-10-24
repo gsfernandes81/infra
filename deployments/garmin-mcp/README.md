@@ -15,8 +15,9 @@ tunnel's `cloudflared` sidecar, and publishes nothing on the host.
   `compose.yaml`). Every deploy asks the live server for its tool list and stops if a single
   one is not a read tool.
 
-Why it is shaped this way, including the security audit: [`plans/garmin-mcp.md`](../../plans/garmin-mcp.md)
-until that plan is retired, then [`docs/decisions.md`](../../docs/decisions.md) § *garmin-mcp*.
+Why it is shaped this way, including the security audit: [`docs/decisions.md`](../../docs/decisions.md)
+§ *garmin-mcp*. The full design and audit table were in `plans/garmin-mcp.md`, retired once the
+first deploy passed every probe (2026-10-24); `git log --all -- plans/garmin-mcp.md` finds it.
 
 ## Deploying — from the phone
 

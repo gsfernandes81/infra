@@ -132,8 +132,7 @@ rule's `ref` is `infra_calibre_web_request_headers`, and it is the only object i
 transform rules this repo manages. Made by `ansible/playbooks/server-create-stack-tunnel.yml`; the pattern is
 [`decisions.md`](decisions.md) § *Sidecar, not baked-in*.
 
-`garmin-mcp.gsrpi.uk` is not here either (committed 2026-10-24; the tunnel and hostname exist
-once `ansible/playbooks/server-deploy-garmin-mcp.yml` has run): its own tunnel and sidecar, the
+`garmin-mcp.gsrpi.uk` is not here either (deployed 2026-10-24, tunnel `efa6e10e`): its own tunnel and sidecar, the
 same play underneath, routing in
 [`deployments/garmin-mcp/cloudflared.yml`](../deployments/garmin-mcp/cloudflared.yml). **No
 Access, by design**: its only client is claude.ai's custom connector, which cannot pass Access,

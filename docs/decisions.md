@@ -459,7 +459,7 @@ pattern first. See the next section.
 ## Sidecar, not baked-in — what a stack's own tunnel is
 
 **Decided 2026-10-24**, building `calibre-web` on `one`, and agreed with the session
-planning `garmin-mcp` ([`plans/garmin-mcp.md`](../plans/garmin-mcp.md)), which builds on
+planning `garmin-mcp` (§ *garmin-mcp* below; its plan is retired), which builds on
 the same pieces.
 
 **A second compose service, because an upstream application image is not ours to build.**
