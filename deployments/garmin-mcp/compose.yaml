@@ -70,10 +70,15 @@ services:
     # it look so: the auth step leaves the token directory 0700 and owned by `app`, and the
     # entrypoint's `chown -R` (as root, under set -e) cannot read into it without this cap —
     # so the container would crash-loop only AFTER the first successful login.
+    #
+    # KILL, because supervisord and nginx's master run as root and their children as `app`:
+    # root without CAP_KILL cannot signal another uid, so every stop or restart would hang
+    # for Docker's 10 s and end in SIGKILL, logging `kill() failed (1: Operation not
+    # permitted)` — on the restart the MFA step itself asks for.
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]
-    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE, KILL]
     # `one` has 1 GB beside qBittorrent, gluetun, Syncthing and calibre-web. Set once, not
     # "tightened later": the play prints real usage on every run as a record.
     mem_limit: 512m

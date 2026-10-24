@@ -1,6 +1,6 @@
 # Plan — garmin-mcp on `one`, behind its own tunnel
 
-**Approved design, not yet built.** Agreed with the owner on 2026-10-24, after a security
+**Approved design, built in `1322e4a`, not yet deployed.** Agreed with the owner on 2026-10-24, after a security
 audit of the upstream repo and nine alternatives. Nothing here is deployed. When the stack is
 running and the probe below passes, the reasoning moves to `docs/decisions.md` and this file
 is deleted, as the three-folder rule says.

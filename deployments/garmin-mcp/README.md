@@ -33,12 +33,13 @@ automated: Garmin asks for the MFA code inside the same process that started the
 ssh -t one
 # then, inside that shell:
 cd ~/infra/deployments/garmin-mcp
-sudo docker compose run --rm garmin-mcp garmin-mcp-auth; and sudo docker compose restart garmin-mcp
+sudo docker compose run --rm --name garmin-mcp-auth garmin-mcp garmin-mcp-auth; and sudo docker compose restart garmin-mcp
 ```
 
 It asks for your Garmin email, then your password (not echoed and never stored; only the
-resulting tokens are kept, in the `garmin-tokens` volume), then the code Garmin sends you. **The
-restart is not optional**: a failed login is final for the running server. Then **run the play
+resulting tokens are kept, in the `garmin-tokens` volume), then the code Garmin sends you. `--name`,
+because `compose run` would otherwise reuse the running server's container name and fail on
+the conflict. **The restart is not optional**: a failed login is final for the running server. Then **run the play
 again**. It finishes with every probe passing and prints the connector URL.
 
 What the play does, in order:
@@ -66,8 +67,11 @@ and never prints it. You do this once; the connector refreshes itself after that
 ## Day two
 
 - **The Garmin login expires** after about six months. Tools start failing while `/healthz` stays
-  green. Re-run the play: `/readyz` reads `failed`, and the play prints the same login block.
-  **Nothing alerts on this**; it is filed in `docs/management-plane.md`.
+  green. **`/readyz` does not notice**: it is decided once, at start-up, so a running server reads
+  `ready` with dead tokens, and a re-run of the play passes. So run
+  `sudo docker compose restart garmin-mcp` first, then re-run the play: now `/readyz` reads
+  `failed`, and the play prints the login block. Or go straight to that block. **Nothing alerts on this**; it is filed in
+  `docs/management-plane.md`.
 - **Rotating, after a suspected leak.**
   - The consent secret: delete `~/.config/garmin-mcp/consent-secret` on the phone.
   - The bearer token: delete the `MCP_BEARER_TOKEN=` line from `.env` on `one`.

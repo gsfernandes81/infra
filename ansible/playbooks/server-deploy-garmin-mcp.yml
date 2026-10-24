@@ -59,7 +59,8 @@
           | reject('match', '^\s*(#|$)') | first).split() }}
 
     # The consent secret lives on THIS phone, beside the Cloudflare API token file. The
-    # password lookup creates it the first time (48 hex chars) and reads it afterwards.
+    # password lookup creates it the first time (48 hex chars, the file 0600 in a 0700
+    # directory — the lookup's own modes) and reads it afterwards.
     # Rotation: delete the file and re-run.
     garmin_consent_file: "{{ lookup('env', 'HOME') }}/.config/garmin-mcp/consent-secret"
 
@@ -138,13 +139,6 @@
         garmin_consent: "{{ lookup('ansible.builtin.password', garmin_consent_file, length=48, chars=['0123456789abcdef']) }}"
       when: not ansible_check_mode
       no_log: true
-
-    - name: Keep the consent secret's file private
-      ansible.builtin.file:
-        path: "{{ garmin_consent_file }}"
-        mode: "0600"
-      delegate_to: localhost
-      when: not ansible_check_mode
 
     - name: Write the consent secret into .env — every run, so deleting the phone file rotates it
       ansible.builtin.lineinfile:
@@ -261,7 +255,9 @@
 
     # ── 6  the probes, from this phone, end to end ──────────────────────────
     # Each retries (a new tunnel's DNS, a first boot, a background login), never stops on the
-    # module's own failure, and is followed by an assert that says what it means.
+    # module's own failure, and is followed by an assert that says what it means. Both
+    # failed_when: false AND ignore_errors: true, as in server-create-stack-tunnel.yml: -1 (no
+    # answer) fails `uri` whatever failed_when says, and exhausted retries mark a task failed.
     - name: Probe — /healthz answers through the tunnel
       ansible.builtin.uri:
         url: "{{ garmin_url }}/healthz"
@@ -271,6 +267,7 @@
       retries: "{{ probe_retries }}"
       delay: "{{ probe_delay }}"
       failed_when: false
+      ignore_errors: true
       delegate_to: localhost
       when: not ansible_check_mode
 
@@ -290,6 +287,7 @@
         status_code: [401]
       register: garmin_p_noauth
       failed_when: false
+      ignore_errors: true
       delegate_to: localhost
       when: not ansible_check_mode
 
@@ -299,6 +297,7 @@
         return_content: true
       register: garmin_p_meta
       failed_when: false
+      ignore_errors: true
       delegate_to: localhost
       when: not ansible_check_mode
 
@@ -326,10 +325,11 @@
         status_code: [200, 503]
         return_content: true
       register: garmin_p_ready
-      until: (garmin_p_ready.content | default('{}') | from_json).status | default('') not in ['', 'pending']
+      until: (garmin_p_ready.content | default('{}', true) | from_json).status | default('') not in ['', 'pending']
       retries: "{{ probe_retries }}"
       delay: "{{ probe_delay }}"
       failed_when: false
+      ignore_errors: true
       delegate_to: localhost
       when: not ansible_check_mode
       no_log: true
@@ -337,22 +337,23 @@
     - name: The Garmin login has not happened yet — this is the one step by hand
       ansible.builtin.debug:
         msg:
-          - "/readyz says {{ (garmin_p_ready.content | default('{}') | from_json).status | default('nothing') }}. Either no Garmin login has been made, or its tokens expired (~6 months), or Garmin rate-limited it (429). The fix is the same:"
+          - "/readyz says {{ (garmin_p_ready.content | default('{}', true) | from_json).status | default('nothing') }}. No Garmin login has been made, or it was refused at this start (expired tokens, ~6 months, or a Garmin 429). /readyz is decided once, at start-up. The fix is the same:"
           - "1. ssh -t {{ inventory_hostname }}"
           - "2. paste, inside that shell (fish):"
           - "     cd {{ garmin_stack_dir }}"
-          - "     sudo docker compose run --rm garmin-mcp garmin-mcp-auth; and sudo docker compose restart garmin-mcp"
+          - "     sudo docker compose run --rm --name garmin-mcp-auth garmin-mcp garmin-mcp-auth; and sudo docker compose restart garmin-mcp"
           - "   It asks for your Garmin email, your password (not echoed, never stored) and the MFA code Garmin sends."
+          - "   --name, because `compose run` would otherwise reuse the running server's container name."
           - "   The restart is not optional: a failed login is final for the running server."
           - "3. re-run this play."
       changed_when: true
       when:
         - not ansible_check_mode
-        - (garmin_p_ready.content | default('{}') | from_json).status | default('') != 'ready'
+        - (garmin_p_ready.content | default('{}', true) | from_json).status | default('') != 'ready'
 
     - name: The Garmin login is live
       ansible.builtin.assert:
-        that: (garmin_p_ready.content | default('{}') | from_json).status | default('') == 'ready'
+        that: (garmin_p_ready.content | default('{}', true) | from_json).status | default('') == 'ready'
         fail_msg: "Not ready — the block above is what to do. Nothing else is wrong yet."
         success_msg: "/readyz → ready"
       when: not ansible_check_mode
@@ -369,6 +370,7 @@
         return_content: true
       register: garmin_p_tools
       failed_when: false
+      ignore_errors: true
       delegate_to: localhost
       when: not ansible_check_mode
       no_log: true

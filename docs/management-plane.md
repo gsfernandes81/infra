@@ -525,9 +525,11 @@ first such stack and `garmin-mcp` (committed 2026-10-24) the second. Not built.
 
 **Filed 2026-10-24, no phase number — nothing alerts when `garmin-mcp`'s Garmin login lapses.**
 The cached Garmin session lasts about six months. When it ends, the tools fail while `/healthz`
-stays green, and the only signal is a failed tool call in claude.ai. `/readyz` (behind the
-bearer token) already answers it. What is missing is anything that asks. Same class as the
-missing uptime monitoring in 2h's row.
+stays green, and the only signal is a failed tool call in claude.ai. **`/readyz` cannot answer
+it**: upstream decides login state once, at start-up, so a running server reads `ready` with
+dead tokens. The signal has to be a real Garmin call (an authorised `tools/call get_full_name`),
+or a scheduled restart followed by `/readyz`. Same class as the missing uptime monitoring in
+2h's row.
 
 **Filed 2026-10-24, no phase number — revisit `garmin-mcp`'s backend on Garmin's Personal API.**
 Garmin's official, key-based, read-only Personal API launched on 2026-10-21. It lost to Taxuspt
