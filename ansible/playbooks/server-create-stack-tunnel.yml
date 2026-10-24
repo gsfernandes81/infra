@@ -318,7 +318,7 @@
     # --ff-only: a diverged host checkout is a situation to look at, not merge through.
     # check_mode false so --check pulls too; a dry run against a stale checkout would
     # check the wrong bytes. No -q: changed_when reads "Already up to date" from stdout.
-    - name: Pull ~/infra on {{ inventory_hostname }}, fast-forward only
+    - name: Pull {{ infra_checkout }} on {{ inventory_hostname }}, fast-forward only
       ansible.builtin.command:
         cmd: git pull --ff-only
         chdir: "{{ infra_checkout }}"

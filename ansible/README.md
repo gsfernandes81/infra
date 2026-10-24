@@ -159,7 +159,7 @@ One container at a time is `-e container=`, which is the rotation path:
 ansible-playbook playbooks/client-home-ssh-config.yml -e container=or3-dev -e replace_token=true
 ```
 
-`only`, not `alias`: each import inside the play pins its own `alias`, and an `-e alias=`
+`container`, not `alias`: each import inside the play pins its own `alias`, and an `-e alias=`
 would outrank all four and configure one container four times. The hostname is not
 passed. A dev container's is `<alias>.<dns_zone>`, and `dns_zone` is in
 `group_vars/all.yml` so that this play and `server-create-dev-container.yml` cannot

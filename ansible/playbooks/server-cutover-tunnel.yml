@@ -38,15 +38,11 @@
     # `infra-path`/`infra-name` header. Named here so the rescue can put the old one back:
     # restoring the credentials alone leaves this file naming a different tunnel.
     cfg_file: "/etc/cloudflared/config.yml"
-    repo_cfg: "{{ playbook_dir }}/../../hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
+    repo_cfg: "{{ control_checkout }}/hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
 
-    # The checkout ON THE HOST. Absolute, and not `~`: the install task runs with become,
-    # where `~` is root's home and `~/infra` does not exist there.
-    # NOT hardcoded. Every host's checkout is ~gavin/infra, including `two` — CLAUDE.md said
-    # /srv/infra for that box and the box says otherwise, which is how this variable came
-    # to exist. `infra_checkout` in host_vars overrides it for any host that ever differs;
-    # no host sets it today, and adding one back for `two` would abort its cutover.
-    # The guard below stats the result rather than trusting either source.
+    # The checkout ON THE HOST is `infra_checkout`, from group_vars/fleet.yml: absolute, not
+    # `~`, because the install task runs with become, where `~` is root's home. The guard
+    # below stats it rather than trusting it.
     probe: "http://127.0.0.1:20241"
     baseline_file: "{{ lookup('env', 'HOME') }}/.infra-2g-baseline-{{ inventory_hostname }}.json"
     api_hdr:
