@@ -537,6 +537,17 @@ on coverage alone (decisions.md § *garmin-mcp*). The trigger is a server for it
 **and** returns set-level strength data (the API's FIT download carries the sets). Switching
 changes only `deployments/garmin-mcp/`; the tunnel and the play stay.
 
+**Filed 2026-10-24, no phase number — Ansible output should wrap long lines preserving their indent, the way Helix soft-wraps.**
+The owner's ask: a long task title or message line continues on the next line at the same
+indent as where it started (under the ▸, under the host column), never at column 0 and never
+cut off — like Helix's soft-wrap with indent preservation. Today the `[callback_diy]` templates
+cut titles at a fixed 56 columns, because a `diy` template cannot see the terminal's width:
+Ansible's display measures it but does not hand it to templates, and fish and bash both keep
+`COLUMNS` unexported. Jinja's `wordwrap` with an indented wrapstring can do the wrapping; the
+width is the open part — exported `COLUMNS` (a fish wrapper: `COLUMNS=$COLUMNS command
+ansible-playbook $argv`), falling back to 79. Owner chose 2026-10-24 to leave the plugin's
+own deprecation lines alone.
+
 **Filed 2026-10-24, no phase number — `community.general.diy`, this repo's output callback, uses APIs ansible-core 2.23 removes.**
 It implements `v2_on_any` (harmless when removed: our templates do not use it) and passes
 `convert_data` to `template` (likely fatal: the callback's template call would fail). Upstream
