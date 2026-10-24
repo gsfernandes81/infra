@@ -1,6 +1,6 @@
 # garmin-mcp
 
-A **read-only** [Garmin Connect](https://connect.garmin.com) MCP server that claude.ai reaches
+A [Garmin Connect](https://connect.garmin.com) MCP server that claude.ai reaches
 as a custom connector: ask Claude about your runs, gym sessions, sleep, HRV, training status
 and the rest. Upstream is [`gabrielkpo/garmin-mcp-remote`](https://github.com/gabrielkpo/garmin-mcp-remote)
 at the sha in `SOURCE`. That is nginx, plus a small OAuth 2.1 shim, in front of
@@ -11,9 +11,13 @@ tunnel's `cloudflared` sidecar, and publishes nothing on the host.
 - **The OAuth shim.** nginx refuses every request without the bearer token. The shim releases
   that token only to someone who types the **consent secret** on its consent page, and only to
   claude.ai's callback.
-- **Read-only.** The server registers only Taxuspt's read tools (`GARMIN_ENABLED_TOOLS` in
-  `compose.yaml`). Every deploy asks the live server for its tool list and stops if a single
-  one is not a read tool.
+- **Reads, plus five writes you chose.** The server registers only what `GARMIN_ENABLED_TOOLS` in
+  `compose.yaml` lists: Taxuspt's 108 read tools, and `upload_workout`, `upload_workouts`,
+  `schedule_workout`, `unschedule_workout` and `set_activity_description` (added 2026-10-24).
+  Nothing that deletes activities, weigh-ins or health data. Every deploy asks the live server
+  for its tool list and stops if one is neither a read tool nor in the play's
+  `garmin_allowed_writes`. A leaked token could add workouts, change the calendar and overwrite
+  activity notes, and read everything.
 
 Why it is shaped this way, including the security audit: [`docs/decisions.md`](../../docs/decisions.md)
 § *garmin-mcp*. The full design and audit table were in `plans/garmin-mcp.md`, retired once the

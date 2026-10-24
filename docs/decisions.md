@@ -574,6 +574,14 @@ for what the owner does, running and lifting:
 Read-only on Taxuspt is `GARMIN_ENABLED_TOOLS` (its 108 read tools). The deploy proves it
 against the live server, not the config. The revisit trigger is filed in management-plane.md.
 
+**Amended 2026-10-24, the same day: five writes, chosen by the owner** — `upload_workout`,
+`upload_workouts`, `schedule_workout`, `unschedule_workout`, `set_activity_description`, so
+Claude can plan training onto the calendar and annotate sessions. Each is in
+`GARMIN_ENABLED_TOOLS` and in the play's `garmin_allowed_writes`, and the probe fails on any
+other non-read name. None takes a file path; `set_activity_description` int()s its id before
+building the URL, so no path injection. Still nothing that deletes recorded data. A leaked
+bearer now also costs junk workouts, calendar changes and overwritten activity notes.
+
 **What a leaked bearer token costs:** read access to health and location history until it is
 rotated. Accepted.
 

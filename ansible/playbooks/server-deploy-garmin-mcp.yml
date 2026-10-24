@@ -1,4 +1,5 @@
-# DEPLOY garmin-mcp — a read-only Garmin Connect MCP server for claude.ai, on whichever host
+# DEPLOY garmin-mcp — a Garmin Connect MCP server for claude.ai (its read tools plus five chosen
+# writes; garmin_allowed_writes below), on whichever host
 # hosts/<host>/garmin-mcp places it (`one`). Run from the phone:
 #
 #     cd ansible
@@ -72,12 +73,13 @@
     # is the stack play's.
     garmin_env_keys: [SRC_ROOT, PUBLIC_BASE_URL, MCP_CONSENT_SECRET, MCP_BEARER_TOKEN, TUNNEL_ID, TUNNEL_CREDENTIALS]
 
-    # ── the read-only proof ─────────────────────────────────────────────────
+    # ── the read-and-allowed-writes proof ─────────────────────────────────────────────────
     # Every read tool at the pinned Taxuspt sha matches this, and no write tool does (the
     # derivation is in compose.yaml beside GARMIN_ENABLED_TOOLS). A write tool enabled later
     # goes in compose.yaml AND here, in one commit — that is the whole procedure.
     garmin_read_prefix: '^(get|count|search)_'
-    garmin_allowed_writes: []
+    # The owner's five, 2026-10-24 — the same names compose.yaml appends to the allowlist.
+    garmin_allowed_writes: [schedule_workout, set_activity_description, unschedule_workout, upload_workout, upload_workouts]
     # The single copy of the allowlist, read from compose.yaml rather than repeated.
     garmin_enabled_count: >-
       {{ (lookup('file', repo_root ~ '/deployments/garmin-mcp/compose.yaml') | from_yaml)
@@ -400,7 +402,7 @@
         quiet: true
       when: not ansible_check_mode
 
-    - name: READ-ONLY — every served tool is a read tool, and all of the allowlist is served
+    - name: Every served tool is a read tool or an allowed write, and all of the allowlist is served
       ansible.builtin.assert:
         that:
           - garmin_tool_offenders | length == 0
@@ -414,7 +416,7 @@
              | difference(garmin_served_tools) }}.
           STOP THE STACK if anything is listed as outside: sudo docker compose stop, in
           {{ garmin_stack_dir }}.
-        success_msg: "{{ garmin_served_tools | length }} tools served, every one a read tool"
+        success_msg: "{{ garmin_served_tools | length }} tools served, {{ garmin_allowed_writes | length }} of them the allowed writes"
       when: not ansible_check_mode
 
     # ── 7  the record ───────────────────────────────────────────────────────
@@ -433,7 +435,7 @@
         msg:
           - "connector URL  {{ garmin_url }}/mcp  (claude.ai → custom connector; leave the OAuth fields blank)"
           - "consent secret {{ garmin_consent_file }} on this phone — paste it on the consent page"
-          - "tools          {{ garmin_served_tools | length }}, read-only"
+          - "tools          {{ garmin_served_tools | length }}: reads, plus {{ garmin_allowed_writes | join(', ') }}"
           - "memory         {{ garmin_stats.stdout_lines | default(['(not read)']) | join(' · ') }}"
       changed_when: true
       when: not ansible_check_mode

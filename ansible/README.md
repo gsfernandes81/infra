@@ -42,7 +42,7 @@ phone. A leading **`_`** is a half that one of these imports — not a thing you
 | install the tracked `/etc` files, without restarting anything | `server-install-system-files.yml -K` · `-l <host>` · `-e only=<file>` | sudo |
 | create a tunnel for a Pi (nothing serves through it yet) | `server-create-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | give a compose stack its own tunnel, for a `cloudflared` sidecar — plus an Access login if its `edge.yml` asks | `server-create-stack-tunnel.yml -e stack=calibre-web -K` · **never `-l`**: the host comes from the stack's symlink | sudo, the API token, and `~/.config/cloudflare/access-emails` for a login |
-| deploy `garmin-mcp` — its tunnel (the play above), `.env`, the pinned checkout, `docker compose up`, then end-to-end probes including the read-only check | `server-deploy-garmin-mcp.yml -K` · **never `-l`** · stops once at the Garmin login, whose block it prints | sudo, the API token |
+| deploy `garmin-mcp` — its tunnel (the play above), `.env`, the pinned checkout, `docker compose up`, then end-to-end probes including the served-tools check (reads plus the allowed writes) | `server-deploy-garmin-mcp.yml -K` · **never `-l`** · stops once at the Garmin login, whose block it prints | sudo, the API token |
 | move a Pi onto a new tunnel — **a deliberate outage** | `server-cutover-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | delete a Pi's tunnel — **irreversible** | `server-delete-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | update cloudflared on a Pi, deliberately | `server-update-cloudflared.yml -e target=<host> -e version=… -e sha256=… -K` | sudo; refuses while that host autoupdates, which today is all of them |
