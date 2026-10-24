@@ -390,7 +390,9 @@
     - name: It is a tool list, not an error
       ansible.builtin.assert:
         that: garmin_rpc.error is not defined
-        fail_msg: "tools/list returned an error: {{ garmin_rpc.error }}"
+        # default(''): an assert's messages are rendered BEFORE its test, so on a good reply,
+        # which has no `error`, a bare reference throws instead of passing.
+        fail_msg: "tools/list returned an error: {{ garmin_rpc.error | default('') }}"
         quiet: true
       when: not ansible_check_mode
 
