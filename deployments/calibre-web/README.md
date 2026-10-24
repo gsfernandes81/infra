@@ -48,27 +48,45 @@ anywhere near the free space, stop here — torrents live on the same disk.
 
 ### 2. Storage — two subvolumes, behind the mount guards
 
-The same two layers as every other `/media` mount (`CLAUDE.md` § *Mount guards*): `nofail`
-in fstab, and `chattr +i` on the bare mountpoint so a missing array can never be written
-into. `hosts/one/system/fstab` already carries the two new lines, by `subvol=` name.
+Named the way this array's subvolumes are: **`media-calibre-<name>` at the top level,
+mounted at `/media/calibre/<name>`**.
+
+| Subvolume | Mountpoint | Holds |
+|---|---|---|
+| `media-calibre-library` | `/media/calibre/library` | the Calibre library — `metadata.db` and every book |
+| `media-calibre-config` | `/media/calibre/config` | Calibre-Web's own state — users, settings, Kobo sync tokens |
+
+The same two guard layers as every other `/media` mount (`CLAUDE.md` § *Mount guards*):
+`nofail` in fstab, and `chattr +i` on each bare mountpoint, so a missing array can never be
+written into. `hosts/one/system/fstab` already carries both lines, by `subvol=` name.
+`/media/calibre` itself is a plain directory on the root filesystem and stays writable — it
+is never mounted on and nothing writes into it, and leaving it mutable is what lets a third
+`media-calibre-*` be added beside these later.
 
 ```fish
+cd ~/infra                                         # step 1 left you in deployments/calibre-web
 sudo mount /mnt                                    # the array's top level (noauto in fstab)
 sudo btrfs subvolume get-default /mnt              # must say ID 5 — or /mnt is not the top level,
                                                    # and subvol= in fstab would not find these
-sudo btrfs subvolume create /mnt/calibre-library
-sudo btrfs subvolume create /mnt/calibre-web-config
+sudo btrfs subvolume create /mnt/media-calibre-library
+sudo btrfs subvolume create /mnt/media-calibre-config
 sudo umount /mnt
 
-sudo mkdir /media/calibre-library /media/calibre-web-config
-sudo chattr +i /media/calibre-library /media/calibre-web-config
-sudo touch /media/calibre-library/x; and echo 'GUARD FAILED — stop'      # both must say
-sudo touch /media/calibre-web-config/x; and echo 'GUARD FAILED — stop'   # Operation not permitted
+sudo mkdir -p /media/calibre                       # the parent may exist; the mountpoints must not:
+sudo mkdir /media/calibre/library /media/calibre/config   # a failure here means a bare dir is already
+                                                   # there — check it is empty (ls -A) before going on,
+                                                   # or +i would freeze whatever got written into it
+grep -E '^CALIBRE_' deployments/calibre-web/.env  # must read /media/calibre/library and /media/calibre/config;
+                                                   # an .env copied before 2026-10-24 has the old paths, and
+                                                   # Docker would create those itself, unguarded, on the SD card
+sudo chattr +i /media/calibre/library /media/calibre/config
+sudo touch /media/calibre/library/x; and echo 'GUARD FAILED — stop'   # both must say
+sudo touch /media/calibre/config/x; and echo 'GUARD FAILED — stop'    # Operation not permitted
 
 bin/install-system-file fstab                      # dry run: the diff is the two new lines, nothing else
 sudo bin/install-system-file fstab --commit --allow-content-change
-sudo mount /media/calibre-library; sudo mount /media/calibre-web-config
-sudo chown (id -u):(id -g) /media/calibre-library /media/calibre-web-config
+sudo mount /media/calibre/library; sudo mount /media/calibre/config
+sudo chown (id -u):(id -g) /media/calibre/library /media/calibre/config
 sudo bin/check-mount-guards                        # all six /media mounts: nofail and +i
 ```
 
@@ -79,8 +97,8 @@ a half-written change. In Calibre, *Library → Library maintenance → Check li
 fix what it reports; Calibre-Web has no repair of its own. Then, from that machine:
 
 ```fish
-rsync -a --info=progress2 "<path to Calibre Library>/" one:/media/calibre-library/
-rsync -a --checksum --dry-run --itemize-changes "<path to Calibre Library>/" one:/media/calibre-library/
+rsync -a --info=progress2 "<path to Calibre Library>/" one:/media/calibre/library/
+rsync -a --checksum --dry-run --itemize-changes "<path to Calibre Library>/" one:/media/calibre/library/
 ```
 
 The second command must print **nothing** — that is the proof the copy is byte-identical.
@@ -89,7 +107,7 @@ relative to it. Your desktop copy is untouched; after this, **the server copy is
 library** — keep the desktop one as a backup, and do not edit both.
 
 *No library yet?* Calibre-Web ships an empty one: `library/metadata.db` at the release this
-image is (`0.6.27`) — copy it into `/media/calibre-library` instead.
+image is (`0.6.27`) — copy it into `/media/calibre/library` instead.
 
 ### 4. The tunnel and the login — from the phone
 
