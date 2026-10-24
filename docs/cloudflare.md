@@ -126,7 +126,10 @@ the tunnel and hostname exist once its setup's step 4 has run): it has its own t
 served by a `cloudflared` sidecar in its compose project, and its routing is
 [`deployments/calibre-web/cloudflared.yml`](../deployments/calibre-web/cloudflared.yml).
 **Behind Access**, except `/kobo/`, which a second, more specific application bypasses for
-the Kobo's sync. Made by `ansible/playbooks/server-create-stack-tunnel.yml`; the pattern is
+the Kobo's sync. One **Request Header Transform Rule** sets `X-Scheme: https` on requests to
+it — Calibre-Web needs it to build the Kobo's download links (its `edge.yml` says why); the
+rule's `ref` is `infra_calibre_web_request_headers`, and it is the only object in the zone's
+transform rules this repo manages. Made by `ansible/playbooks/server-create-stack-tunnel.yml`; the pattern is
 [`decisions.md`](decisions.md) § *Sidecar, not baked-in*.
 
 `ionic-traces.gsrpi.uk` was retired 2026-08-23. Its DNS record still exists and points at

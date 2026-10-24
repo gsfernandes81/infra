@@ -169,8 +169,8 @@
 
     - name: Remember an existing application for this hostname
       ansible.builtin.set_fact:
-        cf_app_id: "{{ (cf_app_q.json.result | selectattr('domain', 'eq', cf_hostname) | list | first).id }}"
-      when: (cf_app_q.json.result | default([]) | selectattr('domain', 'eq', cf_hostname) | list) | length > 0
+        cf_app_id: "{{ (cf_app_q.json.result | selectattr('domain', 'defined') | selectattr('domain', 'eq', cf_hostname) | list | first).id }}"
+      when: (cf_app_q.json.result | default([]) | selectattr('domain', 'defined') | selectattr('domain', 'eq', cf_hostname) | list) | length > 0
 
     - name: Create or update the Access application
       # THIS ONE PUTS UNCONDITIONALLY AND SO ALWAYS REPORTS CHANGED, unlike the DNS record

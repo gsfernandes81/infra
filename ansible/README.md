@@ -41,7 +41,7 @@ phone. A leading **`_`** is a half that one of these imports — not a thing you
 | install the packages each Pi should have | `server-install-packages.yml -K` · `--limit <host>` | sudo |
 | install the tracked `/etc` files, without restarting anything | `server-install-system-files.yml -K` · `-l <host>` · `-e only=<file>` | sudo |
 | create a tunnel for a Pi (nothing serves through it yet) | `server-create-tunnel.yml -e target=<host> -K` | sudo, the API token |
-| give a compose stack its own tunnel, for a `cloudflared` sidecar — plus an Access login if its `edge.yml` asks | `server-create-stack-tunnel.yml -e stack=calibre-web -K` | sudo, the API token, and `~/.config/cloudflare/access-emails` for a login |
+| give a compose stack its own tunnel, for a `cloudflared` sidecar — plus an Access login if its `edge.yml` asks | `server-create-stack-tunnel.yml -e stack=calibre-web -K` · **never `-l`**: the host comes from the stack's symlink | sudo, the API token, and `~/.config/cloudflare/access-emails` for a login |
 | move a Pi onto a new tunnel — **a deliberate outage** | `server-cutover-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | delete a Pi's tunnel — **irreversible** | `server-delete-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | update cloudflared on a Pi, deliberately | `server-update-cloudflared.yml -e target=<host> -e version=… -e sha256=… -K` | sudo; refuses while that host autoupdates, which today is all of them |
@@ -68,6 +68,7 @@ The halves, for reading rather than running:
 | `_client-dev-ssh.yml` | one dev container's service token and `~/.ssh/config` block, imported once per container |
 | `_dev-container-tunnel.yml` | the **edge** side — tunnel, DNS, Access application and policy |
 | `_cf-tunnel.yml` | tasks, shared by the two plays that give something its own tunnel: zone and account, the tunnel with its dead-tunnel assert, the CNAME. **No Access** — each caller adds its own or none |
+| `_cf-access-app.yml` | tasks: one Access application and its one policy, read back after writing — imported once per application by `server-create-stack-tunnel.yml` |
 | `_dev-container-host.yml` | the **host** side of `infra-dev` on zero — secrets dir, deploy key, authorized_keys, `dev/.env` |
 | `_assert-inventory.yml` | imported above every play that targets `control` or `fleet`, so a run with no inventory fails instead of exiting 0 |
 | `_cf-api-token.yml` | tasks, imported by every play that talks to Cloudflare: reads the API token file, refuses it on the command line, prints the minting steps when it is missing, verifies it |
@@ -245,7 +246,7 @@ for, because a prompt is a paste. It is never accepted on the command line
 bind-mounted into `infra-dev`, whose point is having no route out), and never in
 `$INFRA_SECRETS` (mounted into the container).
 
-**One per machine, not one copied around.** Any token with the five permissions below
+**One per machine, not one copied around.** Any token with the six permissions below
 works, so mint a separate one on each machine, named for it: a lost laptop is then one API
 token and one set of service tokens to delete, and the phone notices nothing.
 
@@ -271,12 +272,13 @@ In the Cloudflare dashboard, logged in as the account's owner:
    | Account | Access: Service Tokens | Edit |
    | Zone | Zone | Read |
    | Zone | DNS | Edit |
+   | Zone | Transform Rules | Edit |
 
 5. **Account Resources**: Include → **Specific account** → your account.
 6. **Zone Resources**: Include → **Specific zone** → `gsrpi.uk`.
 7. Leave **Client IP Address Filtering** empty — the phone's address changes. Leave
    **TTL** unset, or set a long one and expect to re-mint when it lapses.
-8. **Continue to summary**, check the five rows read back as above, **Create Token**.
+8. **Continue to summary**, check the six rows read back as above, **Create Token**.
 9. **Copy the token now.** Cloudflare shows it once; after this page it cannot be
    fetched again, only rolled.
 
@@ -309,16 +311,22 @@ Tunnel Write`, `DNS Write`, `Access: Service Tokens Write`). They are one thing.
 three dropdowns), the *API token permissions* reference (the group names, with their
 Account/Zone scope), and the API reference pages for every endpoint the plays call
 (`cfd_tunnel`, `teamnet/routes`, `access/service_tokens`, `access/apps` and their
-`policies`, `zones`, `dns_records`). The union of what those pages list is the five rows
-above, and nothing else: the plays never list accounts (the id comes from the zone, or
+`policies`, `zones`, `dns_records`). The union of what those pages list is the first five
+rows above, and nothing else: the plays never list accounts (the id comes from the zone, or
 from a credentials file already on the box), and `/user/tokens/verify` needs no permission.
+**The sixth, Transform Rules, arrived 2026-10-24** with `server-create-stack-tunnel.yml`: a
+stack whose `edge.yml` names `request_headers` gets one rule in the zone's
+`http_request_late_transform` phase (`rulesets`; Cloudflare's *Request Header Transform
+Rules* guide lists Transform Rules : Edit). A token minted before then lacks it — **edit the
+existing token and add the row**; the play stops with exactly that instruction on a 403.
 
 Which play uses which, so a 403 can be read: `client-home-ssh-config.yml` needs Zone Read
 and both Access rows (it mints service tokens and edits policies); `server-create-dev-container.yml`
 needs Cloudflare Tunnel, Zone Read, DNS and Access: Apps and Policies, and so does
-`server-create-stack-tunnel.yml` (the Access row only for a stack with a login); `server-create-tunnel.yml`
+`server-create-stack-tunnel.yml` (the Access row only for a stack with a login, plus Transform
+Rules for one with `request_headers`); `server-create-tunnel.yml`
 needs Cloudflare Tunnel alone; `server-cutover-tunnel.yml` and `server-delete-tunnel.yml`
-need Cloudflare Tunnel, Zone Read and DNS. One token carrying all five is the point.
+need Cloudflare Tunnel, Zone Read and DNS. One token carrying all six is the point.
 
 ### The Access service tokens are minted, not pasted
 

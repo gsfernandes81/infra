@@ -22,7 +22,10 @@
 #   - the credentials can be read and written as root, with an owner, for a sidecar;
 #   - the read of an existing credentials file now fails on anything but "not found".
 #     The reason is beside that task, and it is the one change a dev container can see:
-#     only when its own tunnel.json is unreadable, which used to mint a second tunnel.
+#     only when its own tunnel.json is unreadable, which used to mint a second tunnel;
+#   - the two no_log writes — the tunnel and the record — print Cloudflare's reason and
+#     stop when refused (CLAUDE.md § Verifying changes), where before the refusal was
+#     censored along with the token. They still accept 200 and 201, and only those.
 #
 # Every object is looked up before it is created, so a re-run after a partial failure is
 # the intended way to finish. The API token is the caller's: import _cf-api-token.yml
@@ -187,7 +190,35 @@
   register: cf_tunnel_new
   delegate_to: localhost
   when: cf_tunnel_id is not defined
+  # failed_when: false + print the body + assert — CLAUDE.md's pattern for a no_log write
+  # that can be refused. no_log is for the Authorization header and the secret in the
+  # body; without this it would censor the refusal's reason too, and the likeliest
+  # refusal here has a reason worth reading: a tunnel of this name already exists.
+  failed_when: false
   no_log: true
+
+- name: What Cloudflare said, if it refused the tunnel
+  ansible.builtin.debug:
+    msg: >-
+      tunnel {{ cf_name }}: HTTP {{ cf_tunnel_new.status | default('?') }}:
+      {{ cf_tunnel_new.json.errors | default(cf_tunnel_new.msg) | default('no detail') }}
+  changed_when: true
+  when:
+    - cf_tunnel_new is not skipped
+    - (cf_tunnel_new.status | default(0) not in [200, 201]) or not (cf_tunnel_new.json.success | default(false))
+
+- name: Stop if no tunnel was made
+  ansible.builtin.assert:
+    that:
+      - cf_tunnel_new.status | default(0) in [200, 201]
+      - cf_tunnel_new.json.success | default(false)
+    fail_msg: >-
+      No tunnel was created, so nothing was written to {{ cf_creds_path }}. If the reason
+      above is that the name is in use, a tunnel called {{ cf_name }} exists whose
+      credentials are no longer on {{ inventory_hostname }} — delete it in the dashboard
+      (Networks -> Tunnels) and re-run. A 403 is a missing Cloudflare Tunnel : Edit.
+    quiet: true
+  when: cf_tunnel_new is not skipped
 
 - name: Remember the new tunnel id
   ansible.builtin.set_fact:
@@ -269,4 +300,27 @@
   delegate_to: localhost
   when: not cf_dns_ok
   changed_when: cf_dns_w.json.success | default(false)
+  failed_when: false
   no_log: true
+
+- name: What Cloudflare said, if it refused the record
+  ansible.builtin.debug:
+    msg: >-
+      {{ cf_hostname }}: HTTP {{ cf_dns_w.status | default('?') }}:
+      {{ cf_dns_w.json.errors | default(cf_dns_w.msg) | default('no detail') }}
+  changed_when: true
+  when:
+    - cf_dns_w is not skipped
+    - (cf_dns_w.status | default(0) not in [200, 201]) or not (cf_dns_w.json.success | default(false))
+
+- name: Stop if the record was not written
+  ansible.builtin.assert:
+    that:
+      - cf_dns_w.status | default(0) in [200, 201]
+      - cf_dns_w.json.success | default(false)
+    fail_msg: >-
+      {{ cf_hostname }} does not point at this tunnel. The tunnel and its credentials
+      exist; a re-run picks them up and tries the record again. A 403 is a missing
+      DNS : Edit; "record already exists" means an A/AAAA at that name to remove first.
+    quiet: true
+  when: cf_dns_w is not skipped

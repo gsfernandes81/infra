@@ -10,7 +10,7 @@ reasoning is [`docs/decisions.md`](../../docs/decisions.md) § *Sidecar, not bak
 | `compose.yaml` | the app and the sidecar; images pinned by tag and digest; no `ports:` |
 | `cloudflared.yml` | the sidecar's ingress — this file **is** the routing |
 | `edge.yml` | Access login on the whole hostname, except `/kobo/` |
-| `.env.example` | copy to `.env` on `one`; the play writes the two tunnel lines itself |
+| `.env.example` | copied to `.env` on `one` at step 1, **before** the play, which then appends the two tunnel lines |
 
 ## What the Kobo sync does, and does not do
 
@@ -30,12 +30,18 @@ reasoning is [`docs/decisions.md`](../../docs/decisions.md) § *Sidecar, not bak
 In order. Every privileged step is a block for **`ssh one` first, then paste inside**,
 written for fish. Nothing here restarts anything already running on `one`.
 
-### 1. The checkout on `one`, and the space
+### 1. The checkout on `one`, `.env`, and the space
 
 ```fish
 cd ~/infra; git pull --ff-only
-df -h /media/torrents          # the array; the library will share it
+cd deployments/calibre-web
+cp -n .env.example .env; chmod 600 .env    # -n: never over an .env the play already wrote to
+id                                         # PUID and PGID are these; edit .env and set them
+df -h /media/torrents                      # the array; the library will share it
 ```
+
+`.env` is made **now**, not after the play: the play appends `TUNNEL_ID` and
+`TUNNEL_CREDENTIALS` to whatever is there, and a later `cp` would replace those lines.
 
 On the machine that has the library now: `du -sh "<path to Calibre Library>"`. If it is
 anywhere near the free space, stop here — torrents live on the same disk.
@@ -48,13 +54,16 @@ into. `hosts/one/system/fstab` already carries the two new lines, by `subvol=` n
 
 ```fish
 sudo mount /mnt                                    # the array's top level (noauto in fstab)
+sudo btrfs subvolume get-default /mnt              # must say ID 5 — or /mnt is not the top level,
+                                                   # and subvol= in fstab would not find these
 sudo btrfs subvolume create /mnt/calibre-library
 sudo btrfs subvolume create /mnt/calibre-web-config
 sudo umount /mnt
 
 sudo mkdir /media/calibre-library /media/calibre-web-config
 sudo chattr +i /media/calibre-library /media/calibre-web-config
-sudo touch /media/calibre-library/x; and echo 'GUARD FAILED — stop'   # must say Operation not permitted
+sudo touch /media/calibre-library/x; and echo 'GUARD FAILED — stop'      # both must say
+sudo touch /media/calibre-web-config/x; and echo 'GUARD FAILED — stop'   # Operation not permitted
 
 bin/install-system-file fstab                      # dry run: the diff is the two new lines, nothing else
 sudo bin/install-system-file fstab --commit --allow-content-change
@@ -91,18 +100,28 @@ ansible-playbook playbooks/server-create-stack-tunnel.yml -e stack=calibre-web -
 ```
 
 It needs `~/.config/cloudflare/access-emails` on the phone (who may log in, one address per
-line) and prints how to make it if it is missing. It makes the tunnel, the CNAME, the
-credentials (on `one`, outside the checkout, owned by the sidecar's uid), the Access login
-and the `/kobo/` bypass, and writes `TUNNEL_ID` and `TUNNEL_CREDENTIALS` into `.env` on `one`.
-It **ends by proving, before anything is started**, that `/` asks for a login and `/kobo/`
-does not — calibrated first against `torrents.gsrpi.uk`. If that probe fails, do not go on.
+line) and prints how to make it if it is missing — and, **once**, a sixth permission on the
+phone's API token: *Zone → Transform Rules → Edit* (My Profile → API Tokens → edit the
+token, add the row). That is for the one request-header rule below; without it the play
+stops and says so. It makes the tunnel, the CNAME, the
+credentials (on `one`, outside the checkout, owned by the sidecar's uid), the Access login,
+the `/kobo/` bypass, and a Cloudflare rule setting `X-Scheme: https` on requests to this
+hostname — see step 6 for why. It then **proves, before anything is started**, that `/` asks for a
+login and `/kobo/` does not — calibrated first against `torrents.gsrpi.uk` — and only then
+writes `TUNNEL_ID` and `TUNNEL_CREDENTIALS` into `.env` on `one`. So a run that fails part
+way leaves a stack that **cannot** start: compose refuses without those two lines. A fresh
+hostname can take a minute to resolve; if the probe gives up on that, re-run.
+
+It refuses, rather than guesses, when: `one` has not pulled the same commit as the phone;
+an Access application on this hostname is not one `edge.yml` asks for (left over from an
+earlier `edge.yml`); or a tunnel named `calibre-web` exists with no credentials on `one`.
+Each message says what to do. Never add `-l one` — see the play's header.
 
 ### 5. Start it — on `one`
 
 ```fish
 cd ~/infra/deployments/calibre-web
-cat .env.example                                   # fill .env's other lines from it
-id                                                 # PUID / PGID
+grep -c '^TUNNEL_' .env                            # 2 — the play's lines; PUID/PGID set at step 1
 grep -o memory /sys/fs/cgroup/cgroup.controllers   # must print `memory`, or mem_limit is ignored
 sudo docker compose up -d
 sudo docker compose ps                             # both up; the sidecar healthy within a minute
@@ -118,6 +137,10 @@ Log in through Access, then as `admin` / `admin123`, and **change that password 
 - *Admin → Edit Basic Configuration → Feature Configuration*: **Enable Kobo sync**, **Proxy
   unknown requests to Kobo Store**, and **Server External Port = `443`**. Without the port,
   the Kobo is handed download links ending in `:8083` and the sync dies half way.
+  The port alone is not enough behind this tunnel: Calibre-Web takes the scheme for those
+  links only from an `X-Scheme` header (`cps/reverseproxy.py`), which Cloudflare does not
+  send, so without the step-4 rule the links read `http://calibre-web.gsrpi.uk:443/…` and
+  every book download fails while the library itself syncs (upstream: calibre-web#3595).
 - *External binaries*: kepubify at `/usr/bin/kepubify`.
 - Make a shelf (say *Kobo*), then in your user profile tick **Sync only books in selected
   shelves with Kobo** — **before the first sync**. Turned on later, it archives everything
@@ -148,5 +171,9 @@ From the phone: `ansible-playbook playbooks/server-generate-fleet-inventory.yml`
   fleet's staggered cloudflared updates.
 - **Who may log in** is `~/.config/cloudflare/access-emails` on the phone; edit it and
   re-run step 4's play. It replaces the policy's list; it does not add to it.
-- **Lost or leaked tunnel credentials:** move `~/.calibre-web-secrets/tunnel.json` aside,
-  delete the tunnel in the dashboard, re-run step 4, `sudo docker compose up -d`.
+- **Lost or leaked tunnel credentials:** in this order — `sudo docker compose stop
+  cloudflared` (a tunnel with a live connection cannot be deleted), move
+  `~/.calibre-web-secrets/tunnel.json` aside, delete the tunnel in the dashboard
+  (*Networks → Tunnels*), re-run step 4, then `sudo docker compose up -d`. That `up -d`
+  **recreates** the sidecar on purpose: `TUNNEL_ID` is in its `command:`, and a
+  `stop`/`start` would keep the old id. It is the one place here where `up -d` is right.

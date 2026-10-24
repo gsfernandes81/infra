@@ -10,3 +10,11 @@ access: browser
 # Calibre-Web's per-user token in that path is what guards it instead. Prefix-matched, and
 # the most specific application wins — the play proves `/` still asks for a login after.
 bypass_path: /kobo/
+
+# Set on every request to calibre-web.<dns_zone>, at Cloudflare's edge, before the tunnel.
+# Calibre-Web learns it is behind HTTPS ONLY from X-Scheme (cps/reverseproxy.py at 0.6.27 —
+# not X-Forwarded-Proto, which is what the edge sends). Without it the Kobo is handed
+# download links of the form http://calibre-web.gsrpi.uk:443/kobo/..., and every book
+# download fails while the library itself syncs. Upstream: janeczku/calibre-web#3595.
+request_headers:
+  X-Scheme: https

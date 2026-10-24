@@ -446,7 +446,7 @@
       tags: [access]
       ansible.builtin.set_fact:
         cf_account_id: "{{ cf_zone_q.json.result[0].account.id }}"
-        cf_app: "{{ cf_apps.json.result | default([]) | selectattr('domain', 'eq', dev_hostname) | list | first | default({}) }}"
+        cf_app: "{{ cf_apps.json.result | default([]) | selectattr('domain', 'defined') | selectattr('domain', 'eq', dev_hostname) | list | first | default({}) }}"
       when: minting | bool
 
     - name: Say so when the container has no Access application yet

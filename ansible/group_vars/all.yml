@@ -50,6 +50,7 @@ cf_api_token_howto: |
          Account | Access: Service Tokens      | Edit
          Zone    | Zone                        | Read
          Zone    | DNS                         | Edit
+         Zone    | Transform Rules             | Edit
     4. Account Resources: Include -> Specific account -> yours.
        Zone Resources:    Include -> Specific zone    -> {{ dns_zone }}.
     5. Continue to summary -> Create Token -> copy it NOW; it is shown once.
@@ -78,10 +79,11 @@ cf_access_emails_howto: |
   NO ACCESS EMAIL LIST at {{ cf_access_emails_file }} on this machine.
 
   It holds the addresses allowed through the Access login in front of a browser-facing
-  stack, one per line. In fish:
+  stack, one per line. In fish, typed at a prompt so the address reaches neither shell
+  history nor a process list; run the middle line again for each further address:
 
     mkdir -p ~/.config/cloudflare
-    printf '%s\n' 'you@example.com' > ~/.config/cloudflare/access-emails
+    read -P 'Address to admit: ' addr; printf '%s\n' $addr >> ~/.config/cloudflare/access-emails; set -e addr
 
   The login itself is whatever methods your Zero Trust account already offers
   (Settings -> Authentication) — the same ones torrents.{{ dns_zone }} uses.

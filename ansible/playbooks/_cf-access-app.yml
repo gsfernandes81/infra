@@ -1,0 +1,165 @@
+---
+# TASKS, NOT A PLAY — one Access application and its one policy, imported once per
+# application by server-create-stack-tunnel.yml: the login on a stack's hostname, then the
+# no-login application on its bypass path. Written once so a fix lands once.
+#
+# Every write follows CLAUDE.md § Verifying changes for a no_log call that can be refused:
+# failed_when: false, print Cloudflare's errors, assert. The assert reads `success` as well
+# as the status, because Cloudflare answers 200 with success:false. And the policy is READ
+# BACK after it is written: the application is PUT whole on every run, and whether a PUT
+# that names no `policies` keeps app-scoped ones attached is Cloudflare's behaviour, not
+# something a fake API settles — so the end state is proved, not inferred.
+#
+# ── what the importer sets ───────────────────────────────────────────────────
+#   cf_api, cf_account_id, cf_token, cf_unknown_id    from the play and _cf-tunnel.yml
+#   acc_name           the application's name
+#   acc_domain         hostname, or hostname + path
+#   acc_existing       the application if it already exists ({} if not) — found by the
+#                      importer, which knows what may count as "this one"
+#   acc_session        session_duration
+#   acc_decision       allow | bypass — the ONE policy this application carries
+#   acc_policy_name    its name, when it is created
+#   acc_include        its include rules
+#   acc_emails         optional: with `allow`, the read-back also checks these addresses
+#   acc_if_refused     what a refusal means for this application, for the fail message
+
+- name: "Create or update the Access application: {{ acc_name }}"
+  # allowed_idps left out: every login method the account has. auto_redirect off, so the
+  # method picker shows. PUT unconditionally when it exists — the reason is beside the same
+  # choice in _dev-container-tunnel.yml § 3.
+  ansible.builtin.uri:
+    url: >-
+      {{ cf_api }}/accounts/{{ cf_account_id }}/access/apps{{
+         '/' ~ acc_existing.id if acc_existing else '' }}
+    method: "{{ 'PUT' if acc_existing else 'POST' }}"
+    status_code: [200, 201]
+    headers: { Authorization: "Bearer {{ cf_token }}" }
+    body_format: json
+    body:
+      name: "{{ acc_name }}"
+      domain: "{{ acc_domain }}"
+      type: self_hosted
+      session_duration: "{{ acc_session }}"
+      auto_redirect_to_identity: false
+      app_launcher_visible: false
+  register: acc_app_w
+  delegate_to: localhost
+  failed_when: false
+  changed_when: acc_app_w.json.success | default(false)
+  no_log: true
+
+- name: "What Cloudflare said, if it refused the application: {{ acc_name }}"
+  ansible.builtin.debug:
+    msg: >-
+      {{ acc_domain }}: HTTP {{ acc_app_w.status | default('?') }}:
+      {{ acc_app_w.json.errors | default(acc_app_w.msg) | default('no detail') }}
+  changed_when: true
+  when:
+    - acc_app_w is not skipped
+    - (acc_app_w.status | default(0) not in [200, 201]) or not (acc_app_w.json.success | default(false))
+
+- name: "Stop if the application was not made: {{ acc_name }}"
+  ansible.builtin.assert:
+    that:
+      - acc_app_w.status | default(0) in [200, 201]
+      - acc_app_w.json.success | default(false)
+    fail_msg: >-
+      No Access application on {{ acc_domain }}. {{ acc_if_refused }} A 403 means the API
+      token lacks Account : Access: Apps and Policies : Edit.
+    quiet: true
+  when: acc_app_w is not skipped
+
+- name: "Remember the application's id: {{ acc_name }}"
+  # ALWAYS SET, to '' when there is none. This file is imported twice in one play, so a
+  # fact left over from the first import would hand the second the FIRST application's id,
+  # and its policy reads and writes would land on the wrong application.
+  ansible.builtin.set_fact:
+    acc_app_id: >-
+      {{ acc_app_w.json.result.id if (acc_app_w is not skipped)
+         else (acc_existing.id | default('')) }}
+
+- name: "List the application's policies: {{ acc_name }}"
+  ansible.builtin.uri:
+    url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ acc_app_id }}/policies"
+    headers: { Authorization: "Bearer {{ cf_token }}" }
+  register: acc_pol_q
+  delegate_to: localhost
+  check_mode: false
+  changed_when: false
+  no_log: true
+  when: acc_app_id | length > 0
+
+- name: "Write its {{ acc_decision }} policy: {{ acc_name }}"
+  ansible.builtin.uri:
+    url: >-
+      {{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{
+         acc_app_id if acc_app_id | length > 0 else cf_unknown_id }}/policies{{
+         ('/' ~ acc_pol.id) if acc_pol else '' }}
+    method: "{{ 'PUT' if acc_pol else 'POST' }}"
+    status_code: [200, 201]
+    headers: { Authorization: "Bearer {{ cf_token }}" }
+    body_format: json
+    body:
+      name: "{{ acc_pol.name | default(acc_policy_name) }}"
+      decision: "{{ acc_decision }}"
+      precedence: "{{ acc_pol.precedence | default(1) }}"
+      include: "{{ acc_include }}"
+      exclude: []
+      require: []
+  vars:
+    acc_pol: >-
+      {{ acc_pol_q.json.result | default([])
+         | selectattr('decision', 'eq', acc_decision) | list | first | default({}) }}
+  register: acc_pol_w
+  delegate_to: localhost
+  failed_when: false
+  changed_when: acc_pol_w.json.success | default(false)
+  no_log: true
+
+- name: "What Cloudflare said, if it refused the policy: {{ acc_name }}"
+  ansible.builtin.debug:
+    msg: >-
+      {{ acc_decision }} policy on {{ acc_domain }}: HTTP {{ acc_pol_w.status | default('?') }}:
+      {{ acc_pol_w.json.errors | default(acc_pol_w.msg) | default('no detail') }}
+  changed_when: true
+  when:
+    - acc_pol_w is not skipped
+    - (acc_pol_w.status | default(0) not in [200, 201]) or not (acc_pol_w.json.success | default(false))
+
+- name: "Stop if the policy was not written: {{ acc_name }}"
+  ansible.builtin.assert:
+    that:
+      - acc_pol_w.status | default(0) in [200, 201]
+      - acc_pol_w.json.success | default(false)
+    fail_msg: >-
+      {{ acc_domain }} exists but its {{ acc_decision }} policy was refused. An application
+      with no policy admits nobody, so this fails closed; a re-run finishes it.
+    quiet: true
+  when: acc_pol_w is not skipped
+
+- name: "Read the policies back: {{ acc_name }}"
+  ansible.builtin.uri:
+    url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ acc_app_id }}/policies"
+    headers: { Authorization: "Bearer {{ cf_token }}" }
+  register: acc_pol_r
+  delegate_to: localhost
+  changed_when: false
+  no_log: true
+  when: not ansible_check_mode
+
+- name: "It carries exactly that one policy: {{ acc_name }}"
+  ansible.builtin.assert:
+    that:
+      - acc_pol_r.json.success | default(false)
+      - acc_pols | length == 1
+      - acc_pols[0].decision == acc_decision
+      - acc_emails is not defined or (acc_pols[0].include | map(attribute='email.email') | sort) == (acc_emails | sort)
+    fail_msg: >-
+      {{ acc_domain }} should carry one {{ acc_decision }} policy{{ ' admitting exactly the
+      addresses in the list' if acc_emails is defined else '' }}; after the write it has
+      {{ acc_pols | map(attribute='decision') | list }}. With none it fails closed. Re-run;
+      if this persists, look at the application in the dashboard.
+    success_msg: "{{ acc_domain }}: one {{ acc_decision }} policy"
+  vars:
+    acc_pols: "{{ acc_pol_r.json.result | default([]) }}"
+  when: not ansible_check_mode

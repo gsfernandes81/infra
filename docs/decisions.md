@@ -491,7 +491,11 @@ dev containers.
 distroless — no shell to read the id out of the credentials as `infra-dev`'s entrypoint
 does — and `tunnel run` needs it as an argument or a `tunnel:` key. In `.env`, written by the
 same run that wrote the credentials, the two cannot name different tunnels; a `tunnel:` key
-in the tracked config would be a second copy that could, so the play refuses one.
+in the tracked config would be a second copy that could, so the play refuses one. **And it is
+written last**, after the probe has proved the login is in front: compose refuses to start
+without it, so a run that dies part way leaves a stack that cannot start, never one serving
+with nothing in front of it. (The first draft wrote it before the Access step; review caught
+that a refused Access write would then leave a startable, unprotected stack.)
 
 **Derived, not declared: the hostname is `<stack>.<dns_zone>`, the host is wherever
 `hosts/<host>/<stack>` points from.** `deployments/<stack>/edge.yml` carries only what cannot
@@ -504,6 +508,23 @@ Access and which carries its own OAuth. **Who may log in is a file on the contro
 is a second, more specific Access application with a `bypass` policy; Access matches by
 prefix and the most specific wins, so the play proves, before the stack is started, that
 `/` still asks for a login and the path does not — calibrated first on `torrents`.
+**`edge.yml` is the whole truth about the hostname's Access**, and the play only adds: an
+application on the hostname that `edge.yml` does not ask for — left after a `bypass_path` was
+dropped — stops the run rather than staying live behind a green recap. Each policy is **read
+back** after it is written, because the application is PUT whole on every run and whether
+that keeps app-scoped policies attached is Cloudflare's behaviour, not ours to assume. One
+copy of the application-and-policy code, `_cf-access-app.yml`, imported per application.
+
+**A Cloudflare request-header rule sets `X-Scheme: https` for `calibre-web`**, chosen over
+Calibre-Web serving TLS itself behind the sidecar. Calibre-Web learns it is behind HTTPS only
+from `X-Scheme` (`cps/reverseproxy.py`, 0.6.27); the edge sends `X-Forwarded-Proto`, so
+without the rule the Kobo is handed `http://…:443/kobo/…` and every download fails — found in
+review, confirmed in the source, upstream as calibre-web#3595. The rule keeps the app stock
+and is the proxy setup Calibre-Web documents; TLS inside the stack would have needed a
+self-signed cert and two settings that live only in the app's own database. It is
+`request_headers:` in `edge.yml`, and the play adds or patches **only its own rule** (by
+`ref`) in the zone's shared `http_request_late_transform` list — never a PUT of the list,
+which other hostnames may share. The cost is a sixth API-token permission, Transform Rules.
 
 **`_cf-tunnel.yml` is shared with `_dev-container-tunnel.yml`**, its sections 0–2 moved word
 for word. One change reaches the dev containers: an existing credentials file that cannot be
