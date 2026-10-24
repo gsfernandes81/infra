@@ -154,7 +154,7 @@
       changed_when: true
       when: ansible_check_mode and not deploy_key.stat.exists
 
-    - name: "If the deploy key exists: write its mode as 0600"
+    - name: "Write the deploy key's mode as 0600"
       # ssh refuses a private key it considers group- or world-readable, and the umask
       # that ssh-keygen inherited is not something to rely on being 077.
       #
@@ -167,7 +167,7 @@
         state: file
       when: not ansible_check_mode or deploy_key.stat.exists
 
-    - name: "If the deploy key exists: write its .pub to the phone"
+    - name: "Copy the deploy key's .pub to this control node"
       # So the gh command below can name a local FILE. The obvious alternative — printing
       # the key inline and using process substitution — is bash syntax, and every shell
       # on this fleet is fish, where `<(...)` is a syntax error. A command that cannot be
@@ -178,7 +178,7 @@
         flat: true
       when: not ansible_check_mode or deploy_key.stat.exists
 
-    - name: "If the deploy key exists: create authorized_keys"
+    - name: "Create the dev container's authorized_keys"
       # force: false so this only ever creates. The append is the next task's job, and a
       # `copy` that could overwrite would be one bad re-run away from locking every
       # client out of the container at once.
@@ -189,7 +189,7 @@
         force: false
       when: not ansible_check_mode or deploy_key.stat.exists
 
-    - name: "If the deploy key exists: install the client ssh key"
+    - name: "Install the client ssh key in authorized_keys"
       # ansible.posix.authorized_key rather than lineinfile, and requirements.yml already
       # says why in its own words: "append-never-rewrite for authorized_keys (which is
       # right, because a botched rewrite on a tunnel-only box is unrecoverable)". Same
@@ -203,7 +203,7 @@
         state: present
       when: not ansible_check_mode or deploy_key.stat.exists
 
-    - name: "If the deploy key exists: write dev/.env on {{ inventory_hostname }}"
+    - name: "Write dev/.env on {{ inventory_hostname }}"
       # Written rather than copied from .env.example, because .env holds host-specific
       # absolute paths and .env.example holds the explanation of them. Two files, two
       # jobs. The example stays as the documentation; this is the instance.

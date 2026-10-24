@@ -366,8 +366,8 @@
     # Recorded BEFORE anything changes, so a rollback restores the exact previous target
     # rather than assuming it was the old tunnel. Printed, because if this play dies
     # mid-loop the only copy of it is in a register that dies with it.
-    # FIRST, because everything below indexes `json.result[0]` — the WRITE THIS DOWN
-    # dump and the current-target set both do. With this assert further down, a hostname
+    # FIRST, because everything below indexes `json.result[0]` — the "to write down"
+    # print and the current-target set both do. With this assert further down, a hostname
     # with no DNS record died on `object has no element 0` two tasks before reaching the
     # message written for it. Nothing has changed at that point either way; the
     # difference is whether you get a traceback or a sentence at 3am.
@@ -732,7 +732,8 @@
           are above. Zone -> DNS -> Edit on {{ zone_name }} is what a PATCH needs, and a
           read-only token gets through every check before this one. Records that DID move
           now point at {{ new_tunnel }}; the pre-change targets are in the
-          "WRITE THIS DOWN" output earlier in this run, which is the map back.
+          "Print each record's current target, to write down" output earlier in this
+          run, which is the map back.
         success_msg: "all {{ moved.results | length }} records moved"
 
     - name: Wait for each hostname to match its baseline status
