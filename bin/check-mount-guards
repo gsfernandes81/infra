@@ -30,7 +30,8 @@
 set -u
 
 # Mounts are DISCOVERED from /etc/fstab, not hardcoded, so this works unchanged on
-# every host: /media/* entries that are not `noauto`. On `zero` that is 3, on `one` 4.
+# every host: /media/* entries that are not `noauto`. On `zero` that is 3, on `one` 4 —
+# 6 once calibre-web's two subvolumes are made and its tracked fstab installed.
 # A newly added data mount is therefore checked automatically — and correctly fails
 # until it has been guarded.
 #

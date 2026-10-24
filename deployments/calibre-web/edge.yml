@@ -1,0 +1,12 @@
+# How calibre-web is reached — read by ansible/playbooks/server-create-stack-tunnel.yml.
+# The hostname is not here: it is calibre-web.<dns_zone>, derived. The host is not here:
+# it is wherever hosts/<host>/calibre-web points from.
+
+# An Access login in front of the whole hostname, admitting the addresses in
+# ~/.config/cloudflare/access-emails on the machine running the play.
+access: browser
+
+# Except here. Kobo sync calls /kobo/<token>/..., and the Kobo cannot log in to Access;
+# Calibre-Web's per-user token in that path is what guards it instead. Prefix-matched, and
+# the most specific application wins — the play proves `/` still asks for a login after.
+bypass_path: /kobo/

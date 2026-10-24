@@ -1,0 +1,23 @@
+# The ingress of calibre-web's OWN tunnel — not one's host tunnel, whose routing is
+# hosts/one/system/cloudflared-config.yml. Mounted read-only into the sidecar.
+#
+# This file IS the routing: the tunnel is locally-managed (config_src: local), so there is
+# no dashboard copy to disagree with it. ansible/playbooks/server-create-stack-tunnel.yml
+# refuses to run if the first hostname is not calibre-web.<dns_zone>, if the catch-all is
+# missing, or if a `tunnel:` key appears — the id is an argument from .env, written beside
+# the credentials by the same run, so a second copy here could only ever disagree.
+#
+# ORDER IS BEHAVIOUR: first rule wins. A name, not 127.0.0.1, for the origin: on the
+# project network the service name is the stable address, and Docker's DNS answers it with
+# IPv4 — the `localhost` → ::1 trap in CLAUDE.md is about the loopback name, not this.
+
+credentials-file: /etc/cloudflared/creds.json
+
+# The same port the host tunnels pin, inside this container's own network namespace, so
+# it collides with nothing and the healthcheck and recovery.md's probe read the same way.
+metrics: 127.0.0.1:20241
+
+ingress:
+  - hostname: calibre-web.gsrpi.uk
+    service: http://calibre-web:8083
+  - service: http_status:404

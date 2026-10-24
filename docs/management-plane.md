@@ -509,12 +509,19 @@ ones that answer the question this document started from.
 | 2g | All three tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, `two`, DNS | 2f | **DONE on all three.** `one` and `zero` 2026-08-23, `two` 2026-08-29 over the `two-one` mesh. Every host's routing is now a tracked file, and `ansible/2g` — the wrapper written for this migration — is deleted, as its own header said it should be. **The dashboard sweep is the one part left, and it is manual** — deferred into [`plans/cloudflare-dashboard-sweep.md`](../plans/cloudflare-dashboard-sweep.md), because identifying which Access service token a client currently holds is a judgement no check on a box can make |
 | 2h | cloudflared: staggered autoupdate, `one` 6h → `two` 72h → `zero` 240h | all three | — | **done 2026-08-24** — the staggered frequencies are installed and live on all three |
 | 2i | Retire the `ssh-zero-dev-*` rules, and `anchor-two` with them — doors nothing is behind | `zero`'s host tunnel, DNS | nothing | **In progress 2026-08-29.** `dd` and `ds` are out of `hosts/zero/system/cloudflared-config.yml` in the repo; installing that and cycling zero's connector is the owner's step, from a mesh route — `ssh-zero.gsrpi.uk` **is** the tunnel being cycled. Safe to do now because neither container is running and neither has a tunnel of its own until Phase 5; until then they are reached through `ssh zero` and the published loopback ports 2222/2223. `anchor-two.gsrpi.uk` is out of `two`'s ingress on the same argument: it served an experiment that ended and answers 502 always. **Four** CNAMEs go in the same sitting — see the sweep plan |
-| 3 | First stack adopted: `send2ereader` on `one`, **with its connector in the stack** | one stack, non-critical box, `one`'s ingress | 2 | |
+| 3 | First stack adopted: `send2ereader` on `one`, **with its connector in the stack** | one stack, non-critical box, `one`'s ingress | 2 | **The connector pattern is set, 2026-10-24** — by `calibre-web`, a new stack, not by `send2ereader`: sidecar, its own locally-managed tunnel, `server-create-stack-tunnel.yml` (decisions.md, *Sidecar, not baked-in*). What this phase still owes is `send2ereader` itself — its connector, deleting `3001`, `bookit` out of `one`'s ingress — and the Ansible adoption with `bin/compose`'s deletion |
 | 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two stacks | 3 | |
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | Phase 3 now tests the mechanism first, on a disposable stack |
 | 6 | `dd` off `two` | `two`, `one` | arm64 CI, upstream | |
 | 7 | **Rootless podman on `one`** — roadmap §2 | `one` | 3 | |
 | 8 | `two` as the scheduled read-only control node | `two` | 6, 7 | |
+
+**Filed 2026-10-24, no phase number — nothing reports a stale sidecar `cloudflared`.**
+A stack's connector is pinned in its `compose.yaml` and is outside 2h's staggered autoupdate
+by design, so it ages silently: `server-update-cloudflared.yml` and the hosts' autoupdate
+never see it. The fix is a report, not an updater — the sidecar's image tag beside the host
+binaries' versions, from `bin/check-sources` or the fleet inventory. `calibre-web` is the
+first such stack; `garmin-mcp` would be the second. Not built.
 
 **Closed 2026-08-28 — one command now writes every ssh block this repo owns.**
 `playbooks/client-home-ssh-config.yml` composes its fleet half with one dev-container import per
@@ -1018,6 +1025,11 @@ commands in the same commit, so the document read when a box has rebooted never 
 script that no longer exists. Do both together or neither.
 
 ### Phase 3 also moves `send2ereader`'s connector into the stack — DECIDED 2026-08-24
+
+⚠︎ **The open question below — sidecar or baked-in — was settled on 2026-10-24, and not
+here:** `calibre-web` was built with a sidecar first, as a new stack with nothing to move.
+[`decisions.md`](decisions.md) § *Sidecar, not baked-in* has the pattern;
+`send2ereader` follows it, and the rest of this section stands.
 
 Phase 3 was "adopt a stack". It now also carries **phase 5's mechanism**, on the stack
 being adopted: `send2ereader` gets its own `cloudflared` inside its compose project

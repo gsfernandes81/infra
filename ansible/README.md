@@ -41,6 +41,7 @@ phone. A leading **`_`** is a half that one of these imports — not a thing you
 | install the packages each Pi should have | `server-install-packages.yml -K` · `--limit <host>` | sudo |
 | install the tracked `/etc` files, without restarting anything | `server-install-system-files.yml -K` · `-l <host>` · `-e only=<file>` | sudo |
 | create a tunnel for a Pi (nothing serves through it yet) | `server-create-tunnel.yml -e target=<host> -K` | sudo, the API token |
+| give a compose stack its own tunnel, for a `cloudflared` sidecar — plus an Access login if its `edge.yml` asks | `server-create-stack-tunnel.yml -e stack=calibre-web -K` | sudo, the API token, and `~/.config/cloudflare/access-emails` for a login |
 | move a Pi onto a new tunnel — **a deliberate outage** | `server-cutover-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | delete a Pi's tunnel — **irreversible** | `server-delete-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | update cloudflared on a Pi, deliberately | `server-update-cloudflared.yml -e target=<host> -e version=… -e sha256=… -K` | sudo; refuses while that host autoupdates, which today is all of them |
@@ -48,8 +49,10 @@ phone. A leading **`_`** is a half that one of these imports — not a thing you
 `--check --diff` first is the habit; it is what caught the `docs` metapackage before it
 landed on a 1 GB Pi. **The tunnel plays are the exception** — `server-create-tunnel.yml`
 cannot be rehearsed that way at all, because the API create is skipped in check mode and
-everything after it dies on undefined; `server-create-dev-container.yml --check` does
-every read for real and skips every write, which proves the token and shows what exists.
+everything after it dies on undefined; `server-create-dev-container.yml --check` and
+`server-create-stack-tunnel.yml --check` do every read for real and skip every write, which
+proves the token and shows what exists. The stack play's `--check` still wants `-K`: the
+read that decides whether its tunnel already exists is of a file only root can open.
 
 **Only `server-generate-fleet-inventory.yml` is read-only.** Every other `server-` play
 changes something: packages, **boot-path `/etc` files**, the cloudflared binary, tunnels
@@ -64,6 +67,7 @@ The halves, for reading rather than running:
 | `_client-fleet-ssh.yml` | the fleet's aliases in this client's `~/.ssh/config`, Windows included |
 | `_client-dev-ssh.yml` | one dev container's service token and `~/.ssh/config` block, imported once per container |
 | `_dev-container-tunnel.yml` | the **edge** side — tunnel, DNS, Access application and policy |
+| `_cf-tunnel.yml` | tasks, shared by the two plays that give something its own tunnel: zone and account, the tunnel with its dead-tunnel assert, the CNAME. **No Access** — each caller adds its own or none |
 | `_dev-container-host.yml` | the **host** side of `infra-dev` on zero — secrets dir, deploy key, authorized_keys, `dev/.env` |
 | `_assert-inventory.yml` | imported above every play that targets `control` or `fleet`, so a run with no inventory fails instead of exiting 0 |
 | `_cf-api-token.yml` | tasks, imported by every play that talks to Cloudflare: reads the API token file, refuses it on the command line, prints the minting steps when it is missing, verifies it |
@@ -311,7 +315,8 @@ from a credentials file already on the box), and `/user/tokens/verify` needs no 
 
 Which play uses which, so a 403 can be read: `client-home-ssh-config.yml` needs Zone Read
 and both Access rows (it mints service tokens and edits policies); `server-create-dev-container.yml`
-needs Cloudflare Tunnel, Zone Read, DNS and Access: Apps and Policies; `server-create-tunnel.yml`
+needs Cloudflare Tunnel, Zone Read, DNS and Access: Apps and Policies, and so does
+`server-create-stack-tunnel.yml` (the Access row only for a stack with a login); `server-create-tunnel.yml`
 needs Cloudflare Tunnel alone; `server-cutover-tunnel.yml` and `server-delete-tunnel.yml`
 need Cloudflare Tunnel, Zone Read and DNS. One token carrying all five is the point.
 

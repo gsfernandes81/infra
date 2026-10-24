@@ -8,6 +8,10 @@
 .env.*
 !.env.example
 
+# Tunnel credentials. They live outside the checkout (~/.<name>-secrets/), and this is
+# the belt to that brace: a copy dropped into the tree by mistake must not be committable.
+tunnel.json
+
 # Key material of any kind — including the future LUKS keyfile for `zero`,
 # which is referenced by path in the tracked crypttab and backed up out of band.
 *.key

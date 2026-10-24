@@ -453,6 +453,81 @@ entrypoint, which it can do because that image is ours; an upstream application 
 not, so this wants a second compose service instead. Sidecar versus baked-in is the first
 thing Phase 3 settles, and it is a pattern decision for every stack after it.
 
+⚠︎ **Settled 2026-10-24: sidecar**, and not on `send2ereader` — `calibre-web` set the
+pattern first. See the next section.
+
+## Sidecar, not baked-in — what a stack's own tunnel is
+
+**Decided 2026-10-24**, building `calibre-web` on `one`, and agreed with the session
+planning `garmin-mcp` ([`plans/garmin-mcp.md`](../plans/garmin-mcp.md)), which builds on
+the same pieces.
+
+**A second compose service, because an upstream application image is not ours to build.**
+`infra-dev` can start `cloudflared` from its own entrypoint because we own that image;
+`lscr.io/linuxserver/calibre-web` is not ours, and a derived image just to add a connector
+would put a rebuild between us and every upstream security fix. The sidecar is
+`cloudflare/cloudflared`, pinned by tag and digest like any deployed image.
+
+**`calibre-web` first, ahead of `send2ereader`.** The reasoning that picked `send2ereader` —
+the cheapest place to be wrong — applies more strongly to a stack that does not exist yet:
+nothing to move, no port to delete, no outage at all. `send2ereader` adopts the same pattern
+when Phase 3 reaches it; what that phase still owes is the Ansible adoption and the port.
+
+**One tunnel per stack, never the host's.** Two connectors on one tunnel are replicas, and
+the edge splits requests between them — so a sidecar holding the host tunnel's credentials
+would 404 at random on every rule the two configs do not share.
+
+**Locally-managed, like every tunnel since 2g.** The ingress is
+`deployments/<stack>/cloudflared.yml`, tracked; a dashboard token (`TUNNEL_TOKEN`) would
+have made it the fleet's one remotely-managed tunnel and the dashboard its routing.
+
+**Credentials outside the checkout, at `~/.<stack>-secrets/tunnel.json`, `65532:65532`
+`0600`.** Outside, because the checkout is bind-mounted into `infra-dev`, which by design has
+no route to the fleet — gitignored is not enough. `65532` because that is the image's
+`USER`; root-owned `0600` is unreadable to it. Same `~/.<name>-secrets` convention as the
+dev containers.
+
+**The tunnel id reaches `tunnel run` from `.env`, written by the play.** The image is
+distroless — no shell to read the id out of the credentials as `infra-dev`'s entrypoint
+does — and `tunnel run` needs it as an argument or a `tunnel:` key. In `.env`, written by the
+same run that wrote the credentials, the two cannot name different tunnels; a `tunnel:` key
+in the tracked config would be a second copy that could, so the play refuses one.
+
+**Derived, not declared: the hostname is `<stack>.<dns_zone>`, the host is wherever
+`hosts/<host>/<stack>` points from.** `deployments/<stack>/edge.yml` carries only what cannot
+be derived — whether there is an Access login, and a path that bypasses it.
+
+**Access is opt-in per stack**, because the clients differ: a browser login for
+`calibre-web`; none at all for `garmin-mcp`, whose client (claude.ai's connector) cannot pass
+Access and which carries its own OAuth. **Who may log in is a file on the control node**,
+`~/.config/cloudflare/access-emails`, not a list here — this repo is public. A **bypass path**
+is a second, more specific Access application with a `bypass` policy; Access matches by
+prefix and the most specific wins, so the play proves, before the stack is started, that
+`/` still asks for a login and the path does not — calibrated first on `torrents`.
+
+**`_cf-tunnel.yml` is shared with `_dev-container-tunnel.yml`**, its sections 0–2 moved word
+for word. One change reaches the dev containers: an existing credentials file that cannot be
+*read* now stops the play, where before it read as absent and would have minted a second
+tunnel over the first. A sidecar's root-only file made that case reachable.
+
+**Outside the staggered autoupdate (2h), by design.** The image's entrypoint passes
+`--no-autoupdate`, and an in-container update would land in a layer the next recreate
+discards. A bump is a commit. Nothing reports a stale sidecar yet — filed in
+[`management-plane.md`](management-plane.md).
+
+**No `SOURCE` for a registry stack pinned by digest.** `calibre-web` builds nothing, so there
+is no checkout for `bin/check-sources` to compare; the image digest in `compose.yaml` *is*
+the record of what is deployed, and git keeps it. The URL-only `SOURCE` shape stays as narrow
+as `destiny-director`'s section says — that stack follows a moving tag, which this does not.
+
+**Smaller choices made with it:** `mem_limit` on both services from day one, because `one`
+has 1 GB and no swap; `logging: max-size`, because the bypass path takes unauthenticated
+hits; the two new subvolumes in fstab by `subvol=` name rather than id, because they are
+made by hand after the commit and their ids are unknown until then. **Ebook conversion was
+left out on purpose**: it works on arm64 (linuxserver's docs say otherwise; their build
+says not), and if wanted it is a derived image with Calibre's hash-pinned arm64 tarball,
+never the `DOCKER_MODS` line, which installs at every container start.
+
 ## The lesson worth keeping
 
 **A check that can pass for the wrong reason is worse than no check**, because it stops

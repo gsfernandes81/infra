@@ -1,0 +1,70 @@
+# Calibre-Web on `one` — the library on the web, and the server a Kobo syncs from.
+# Reached ONLY through the cloudflared sidecar below, on its own tunnel; nothing is published
+# on the host. Setup, the Kobo, and what not to do to the library: README.md beside this.
+#
+# NO `network_mode: host`, ANYWHERE IN THIS FILE, and that is load-bearing. Both services
+# share the project's own network, which is why the ingress can say
+# `http://calibre-web:8083` and why 8083 cannot collide with anything listening on `one`
+# (gluetun holds 8080 there). Host networking would undo both.
+#
+# The images are literals, pinned by tag AND digest — the deployed image is never a
+# variable (CLAUDE.md § Repo invariants). A bump is an edit here, a commit and a redeploy.
+# That includes the sidecar: it is OUTSIDE the fleet's staggered cloudflared autoupdate
+# (management-plane.md, 2h), by design — `--no-autoupdate` is in the image's entrypoint,
+# and an in-container update would land in a layer the next recreate throws away.
+name: calibre-web
+
+x-logging: &logging
+  # Capped, because the Kobo's path is reachable without a login and every hit on it —
+  # including someone else's guesses — lands in json-file on `one`'s SD card.
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  calibre-web:
+    image: lscr.io/linuxserver/calibre-web:0.6.27-ls406@sha256:b206b791d77b731203fb47b5733d055c8d4ebd7c9fa59a4569a5d6a2b3ebda54
+    container_name: calibre-web
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID:?set PUID in deployments/calibre-web/.env — the uid that owns the library}
+      PGID: ${PGID:?set PGID in deployments/calibre-web/.env}
+      TZ: ${TZ:?set TZ in deployments/calibre-web/.env, e.g. Europe/London}
+    volumes:
+      # Both are subvolumes on one's array, behind the mount guards — README.md § Storage.
+      - ${CALIBRE_CONFIG:?set CALIBRE_CONFIG in deployments/calibre-web/.env}:/config
+      - ${CALIBRE_LIBRARY:?set CALIBRE_LIBRARY in deployments/calibre-web/.env}:/books
+    # No `ports:`. The sidecar reaches it over the project network; nothing else should.
+    #
+    # Capped from day one. `one` has 1 GB and swap off, beside qBittorrent, gluetun and
+    # Syncthing; a library scan or a future conversion (there is none today — see README)
+    # should hit this ceiling inside its own cgroup, not wake the OOM killer for the host.
+    mem_limit: 512m
+    logging: *logging
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39
+    container_name: calibre-web-cloudflared
+    restart: unless-stopped
+    # The image's ENTRYPOINT is `cloudflared --no-autoupdate`. The tunnel id is an argument
+    # because the image has no shell to read it out of the credentials file; the play that
+    # wrote the credentials wrote TUNNEL_ID into .env in the same run, so the two agree.
+    command: tunnel --config /etc/cloudflared/config.yml run ${TUNNEL_ID:?run ansible/playbooks/server-create-stack-tunnel.yml -e stack=calibre-web — it writes TUNNEL_ID}
+    volumes:
+      - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
+      # Outside the repo checkout, owned by 65532 (the image's user) at 0600 — the play
+      # sets both. A root-owned 0600 file here is unreadable and the connector dies on start.
+      - ${TUNNEL_CREDENTIALS:?run ansible/playbooks/server-create-stack-tunnel.yml -e stack=calibre-web — it writes TUNNEL_CREDENTIALS}:/etc/cloudflared/creds.json:ro
+    # `tunnel ready` asks the metrics server's /ready, which answers 200 once at least one
+    # connection to the edge is registered — the same probe recovery.md trusts on the host
+    # tunnels. Present in the pinned release's own source (subcommands.go, buildReadyCommand).
+    # Health is a reading, not an action: nothing restarts on it.
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:20241", "ready"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    mem_limit: 128m
+    logging: *logging

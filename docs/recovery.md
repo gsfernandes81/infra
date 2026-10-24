@@ -22,7 +22,9 @@ sudo bin/check-mount-guards      # ANY host — are the data guards still intact
 cd ~/infra
 bin/compose torrents      up -d
 bin/compose send2ereader  up -d
+bin/compose calibre-web   up -d     # once set up (its README); publishes nothing, the sidecar dials out
 netstat -tln | grep -E '8080|3001|8384|22000'        # expect all four
+docker inspect -f '{{.State.Health.Status}}' calibre-web-cloudflared   # healthy
 ```
 
 **`ionic-traces` is deliberately absent here, and must stay absent.** It is stopped by
@@ -171,7 +173,10 @@ replaced by `RequiresMountsFor=`.
 
 **`one`:** all four `/media/*` mounts are on `/dev/sda1` (the MX500 — the only disk, since the SP900 was pulled 2026-08-24). They now carry `nofail`, and
 all four bare mountpoints are `chattr +i` (Aug 2026) — all four were confirmed empty
-first, so the trap had never fired here. Independently of that, OpenRC would have
+first, so the trap had never fired here. **Six, once `calibre-web`'s two are made**
+(`/media/calibre-library`, `/media/calibre-web-config`): the tracked fstab carries them from
+2026-10-24, and they get the same two guards when they are created —
+[`deployments/calibre-web/README.md`](../deployments/calibre-web/README.md) step 2. Independently of that, OpenRC would have
 survived a missing array anyway: `critical_mounts` is empty in `/etc/conf.d/localmount`
 so `localmount` forces `rc=0`, and all four are passno 0 so fsck never touches them.
 Only `/` and `/boot` are fsck'd, both on the SD card. The guards matter for the

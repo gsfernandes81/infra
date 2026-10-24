@@ -1,0 +1,272 @@
+---
+# TASKS, NOT A PLAY — imported by every play that gives something its own locally-managed
+# tunnel. The underscore says it is never run by itself.
+#
+#   _dev-container-tunnel.yml       a dev container on zero; then adds its Access application
+#   server-create-stack-tunnel.yml  a compose stack's sidecar connector; Access only if the
+#                                   stack's edge.yml asks for it
+#
+# What is here is sections 0–2 of what used to be _dev-container-tunnel.yml alone, lifted
+# out word for word on 2026-10-24 so a stack's sidecar gets the same tunnel by the same
+# code: (0) the zone and its account, (1) the tunnel, with the dead-tunnel assert, and
+# (2) the proxied CNAME. ACCESS IS NOT HERE, on purpose. Callers differ about it — a dev
+# container wants an application with service tokens, a browser stack wants a login,
+# and a stack that a machine reaches over its own auth (garmin-mcp, for claude.ai's
+# connector) cannot have one at all — so each caller opts in with its own section after
+# this one. docs/decisions.md § "Sidecar, not baked-in" has the reasoning.
+#
+# WHAT CHANGED IN THE MOVE, and nothing else did — the 200/201 handling, the dead-tunnel
+# assert's three conditions and every check_mode line are as they were:
+#   - the credentials path, the DNS comment and the dead-tunnel message's last sentence
+#     are inputs, so _dev-container-tunnel.yml passes exactly its old values;
+#   - the credentials can be read and written as root, with an owner, for a sidecar;
+#   - the read of an existing credentials file now fails on anything but "not found".
+#     The reason is beside that task, and it is the one change a dev container can see:
+#     only when its own tunnel.json is unreadable, which used to mint a second tunnel.
+#
+# Every object is looked up before it is created, so a re-run after a partial failure is
+# the intended way to finish. The API token is the caller's: import _cf-api-token.yml
+# first, which sets cf_token.
+#
+# ── what the caller sets ─────────────────────────────────────────────────────
+#   cf_api            https://api.cloudflare.com/client/v4
+#   cf_zone           the zone — group_vars/all.yml's dns_zone, never a literal
+#   cf_name           the tunnel's name at Cloudflare
+#   cf_hostname       the CNAME this tunnel serves
+#   cf_unknown_id     the inline filler for ids only a write could produce; the reason it is
+#                     inline and not a set_fact is beside its definition in
+#                     _dev-container-tunnel.yml, and it is the reason --check is a real dry run
+#   cf_creds_path     where the credentials file lives on the host. NEVER inside the repo
+#                     checkout, gitignored or not: the checkout is bind-mounted into
+#                     infra-dev, whose whole point is having no route to the fleet.
+#   cf_dns_comment    the record's comment at Cloudflare, naming who manages it
+#   cf_dead_tunnel_hint  one sentence on what fails while the credentials name a dead tunnel
+# and, only when the reader of the credentials is not the ssh user:
+#   cf_creds_become   true to read and write the credentials file as root
+#   cf_creds_owner    / cf_creds_group — e.g. 65532, the uid cloudflare/cloudflared runs as.
+#                     A root-owned 0600 file is unreadable to it and the connector dies on start.
+
+# ── 0  the token, the zone and the account ─────────────────────────────
+# `check_mode: false` on every read, the same reason server-generate-fleet-inventory.yml
+# carries it: under --check a task is skipped by default, so a dry run would resolve
+# nothing and then fail on every id it needed. A read is safe in check mode by
+# definition. The writes below carry no such line, so --check skips exactly those.
+- name: Resolve the zone and its account
+  ansible.builtin.uri:
+    url: "{{ cf_api }}/zones?name={{ cf_zone }}"
+    headers: { Authorization: "Bearer {{ cf_token }}" }
+  register: cf_zone_q
+  delegate_to: localhost
+  check_mode: false
+  changed_when: false
+  no_log: true
+
+- name: Fail clearly if the token cannot see the zone
+  # Cloudflare answers 200 with success:false for an auth failure, so the status code
+  # is not the check — `.json.success` is. A play that read the status alone would
+  # carry on and fail later on an empty id, several tasks from the real cause.
+  ansible.builtin.assert:
+    that:
+      - cf_zone_q.json.success | default(false)
+      - (cf_zone_q.json.result | default([])) | length > 0
+    fail_msg: >-
+      The API token could not read zone {{ cf_zone }}. Either the token is wrong, or
+      it is missing Zone:Zone:Read on that zone. Nothing has been created.
+    success_msg: "zone {{ cf_zone }} is visible to this token"
+
+- name: Remember the zone and account ids
+  ansible.builtin.set_fact:
+    cf_zone_id: "{{ cf_zone_q.json.result[0].id }}"
+    cf_account_id: "{{ cf_zone_q.json.result[0].account.id }}"
+
+- name: Which account this play is working in
+  # Printed because it is the answer to the question that actually comes up: "why
+  # can it not see the object I made?" This id is derived from whoever owns the ZONE,
+  # and Access objects live under an ACCOUNT — if you have more than one, a token
+  # made in the other one is invisible here and the play would say, correctly and
+  # uselessly, that there are none. Neither id is a secret.
+  ansible.builtin.debug:
+    msg: "zone {{ cf_zone }} = {{ cf_zone_id }} · account = {{ cf_account_id }}"
+  changed_when: true
+
+# ── 1  the tunnel ───────────────────────────────────────────────────────
+# Locally-managed (config_src: local), so ingress lives in a tracked config.yml rather
+# than in the dashboard, and what this hostname answers on is reviewable in the repo
+# instead of being a screen someone clicked once.
+- name: Look for an existing credentials file on the host
+  # ABSENT IS THE ONLY FAILURE THAT MEANS "NO TUNNEL YET". Until 2026-10-24 this carried a
+  # bare `failed_when: false`, which was safe only while the ssh user owned the file. A
+  # sidecar's credentials belong to uid 65532 at 0600, so read without root they come back
+  # "not readable" — and a blanket failed_when would have read that as absent, minted a
+  # second tunnel and written its credentials over the live ones. Anything but
+  # "File not found" now stops the play. Lowercased because older ansible-core wrote
+  # "file not found", and the module text comes from the control node's version.
+  ansible.builtin.slurp:
+    src: "{{ cf_creds_path }}"
+  register: cf_creds_existing
+  become: "{{ cf_creds_become | default(false) }}"
+  failed_when:
+    - cf_creds_existing.content is not defined
+    - "'file not found' not in (cf_creds_existing.msg | default('') | lower)"
+  check_mode: false
+
+- name: Remember the tunnel id if there already is one
+  ansible.builtin.set_fact:
+    cf_tunnel_id: "{{ (cf_creds_existing.content | b64decode | from_json).TunnelID }}"
+  when: cf_creds_existing.content is defined
+  no_log: true
+
+- name: Confirm an existing tunnel is still live on this account
+  # A credentials file naming a deleted tunnel is the nastiest state here: the
+  # connector starts, cloudflared fails, and the hostname resolves to nothing — which
+  # looks exactly like the service being down. Catch it now, not at 03:00.
+  ansible.builtin.uri:
+    url: "{{ cf_api }}/accounts/{{ cf_account_id }}/cfd_tunnel/{{ cf_tunnel_id }}"
+    headers: { Authorization: "Bearer {{ cf_token }}" }
+    status_code: [200, 404]
+  register: cf_tunnel_q
+  delegate_to: localhost
+  when: cf_tunnel_id is defined
+  check_mode: false
+  changed_when: false
+  no_log: true
+
+- name: Refuse to continue on a credentials file naming a dead tunnel
+  ansible.builtin.assert:
+    that:
+      # Three conditions, in this order, because `result` arrives in four shapes and
+      # only one of them has a `deleted_at` to read. The whole point of allowing the
+      # 404 on this task was to produce the message below, and a raw Jinja error in
+      # its place is the opposite of that — which is what happened twice while
+      # getting this right:
+      #
+      #   200, object with deleted_at: null   the live tunnel — the only pass
+      #   200, object with a timestamp        deleted; caught by the third condition
+      #   404, "result": null                 caught by the first
+      #   anything else                       caught by `is mapping`
+      #
+      # `.get()` rather than `.deleted_at`, because attribute access on a dict that
+      # lacks the key yields Undefined and `Undefined is none` RAISES here rather
+      # than answering false.
+      - cf_tunnel_q.json.success | default(false)
+      - cf_tunnel_q.json.result is mapping
+      - cf_tunnel_q.json.result.get('deleted_at') is none
+    fail_msg: >-
+      {{ cf_creds_path }} on {{ inventory_hostname }} names tunnel
+      {{ cf_tunnel_id }}, which this account does not have (deleted, or created on
+      another account). Move that file aside and re-run to mint a fresh one.
+      {{ cf_dead_tunnel_hint }}
+    success_msg: "tunnel {{ cf_tunnel_id }} already exists and is live"
+  when: cf_tunnel_id is defined
+
+- name: Generate a tunnel secret
+  # 32 random bytes, base64. Generated here because Cloudflare never sends a tunnel
+  # secret back — this is the only moment it exists in the clear, which is why the
+  # credentials file is written two tasks later and not at some more convenient point.
+  ansible.builtin.set_fact:
+    cf_tunnel_secret: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') | b64encode }}"
+  when: cf_tunnel_id is not defined
+  no_log: true
+
+- name: Create the tunnel
+  ansible.builtin.uri:
+    url: "{{ cf_api }}/accounts/{{ cf_account_id }}/cfd_tunnel"
+    method: POST
+    # Cloudflare answers 201 Created on some creates and 200 on others, with no
+    # pattern worth memorising. `uri` defaults to accepting 200 ALONE, so a 201
+    # is a task failure on a call that SUCCEEDED — which on the service token
+    # meant the object was made and the response carrying its one-and-only
+    # secret was censored by no_log and thrown away. Accept both, everywhere.
+    status_code: [200, 201]
+    headers: { Authorization: "Bearer {{ cf_token }}" }
+    body_format: json
+    body:
+      name: "{{ cf_name }}"
+      tunnel_secret: "{{ cf_tunnel_secret }}"
+      config_src: local
+  register: cf_tunnel_new
+  delegate_to: localhost
+  when: cf_tunnel_id is not defined
+  no_log: true
+
+- name: Remember the new tunnel id
+  ansible.builtin.set_fact:
+    cf_tunnel_id: "{{ cf_tunnel_new.json.result.id }}"
+  when: cf_tunnel_new is not skipped
+
+- name: Write the credentials file
+  # 0600, and the content never reaches a log. This is the one artefact of the whole
+  # play that lands on a host, and it is what lets anything claim to be this tunnel.
+  # owner/group are omitted unless the caller names them, so a dev container's file is
+  # written exactly as it always was: by the ssh user, as the ssh user.
+  ansible.builtin.copy:
+    content: >-
+      {{ {'AccountTag': cf_account_id,
+          'TunnelID': cf_tunnel_id,
+          'TunnelSecret': cf_tunnel_secret} | to_json }}
+    dest: "{{ cf_creds_path }}"
+    mode: "0600"
+    owner: "{{ cf_creds_owner | default(omit) }}"
+    group: "{{ cf_creds_group | default(omit) }}"
+  become: "{{ cf_creds_become | default(false) }}"
+  when: cf_tunnel_new is not skipped
+  no_log: true
+
+# ── 2  the DNS record ───────────────────────────────────────────────────
+- name: Look for an existing record for the hostname
+  # &type=CNAME, not name alone. Cloudflare's name filter returns every record type at
+  # that name, so a stale A or AAAA left over from something else would come back
+  # first and the PUT below would rewrite THAT record's id into a CNAME — converting
+  # an unrelated record instead of managing ours.
+  ansible.builtin.uri:
+    url: "{{ cf_api }}/zones/{{ cf_zone_id }}/dns_records?type=CNAME&name={{ cf_hostname }}"
+    headers: { Authorization: "Bearer {{ cf_token }}" }
+  register: cf_dns_q
+  delegate_to: localhost
+  check_mode: false
+  changed_when: false
+  no_log: true
+
+- name: Is the record already pointing at this tunnel
+  # So a converged run reports changed=0. That matters more here than tidiness: this
+  # repo reads the recap to tell a no-op from a real one, and a play that always says
+  # "changed" is a play whose recap nobody reads.
+  #
+  # `proxied` is compared too, not just the target. An unproxied record resolves to
+  # the tunnel's address and Cloudflare never sees the request, so Access is not in
+  # front of it at all — the same reachability with the protection quietly gone.
+  ansible.builtin.set_fact:
+    cf_dns_ok: >-
+      {{ (cf_dns_q.json.result | length) > 0
+         and cf_dns_q.json.result[0].content == ((cf_tunnel_id | default('', true)) ~ '.cfargotunnel.com')
+         and (cf_dns_q.json.result[0].proxied | default(false) | bool) }}
+
+- name: The record is already correct
+  ansible.builtin.debug:
+    msg: "{{ cf_hostname }} already CNAMEs to this tunnel, proxied — leaving it"
+  changed_when: true
+  when: cf_dns_ok
+
+- name: Point the record at this tunnel
+  # PUT when it exists rather than skipping. A record left pointing at a PREVIOUS
+  # tunnel resolves perfectly and reaches nothing — the same failure as above, wearing
+  # the same disguise. Making it match costs one call; assuming it matches is the bug.
+  ansible.builtin.uri:
+    url: >-
+      {{ cf_api }}/zones/{{ cf_zone_id }}/dns_records{{
+         '/' ~ cf_dns_q.json.result[0].id if (cf_dns_q.json.result | length) > 0 else '' }}
+    method: "{{ 'PUT' if (cf_dns_q.json.result | length) > 0 else 'POST' }}"
+    status_code: [200, 201]
+    headers: { Authorization: "Bearer {{ cf_token }}" }
+    body_format: json
+    body:
+      type: CNAME
+      name: "{{ cf_hostname }}"
+      content: "{{ cf_tunnel_id | default(cf_unknown_id, true) }}.cfargotunnel.com"
+      proxied: true
+      comment: "{{ cf_dns_comment }}"
+  register: cf_dns_w
+  delegate_to: localhost
+  when: not cf_dns_ok
+  changed_when: cf_dns_w.json.success | default(false)
+  no_log: true

@@ -14,3 +14,8 @@ UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/ionic-mysql	btrfs	nofail,subvol
 UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/torrents		btrfs	nofail,subvolid=257,autodefrag,noatime,acl,discard=async 0 0
 UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/torrents-config	btrfs	nofail,subvolid=258,autodefrag,noatime,acl,discard=async 0 0
 UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/syncthing-config	btrfs	nofail,subvolid=259,autodefrag,noatime,acl,discard=async 0 0
+# calibre-web (2026-10-24). By subvol= NAME, unlike the four above: these are created by
+# hand after the fact, so their ids are unknown until then, and a name says what it holds.
+# Same nofail + chattr +i guards as every /media mount -- deployments/calibre-web/README.md.
+UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/calibre-library	btrfs	nofail,subvol=calibre-library,autodefrag,noatime,acl,discard=async 0 0
+UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/calibre-web-config	btrfs	nofail,subvol=calibre-web-config,autodefrag,noatime,acl,discard=async 0 0

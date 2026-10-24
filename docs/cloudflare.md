@@ -121,6 +121,14 @@ through `ssh zero` and the published loopback ports 2222/2223.
 | `torrents.gsrpi.uk` | `http://127.0.0.1:8080` | **behind Access** |
 | *(catch-all)* | `http_status:404` | |
 
+`calibre-web.gsrpi.uk` is **not** here, though it is placed on `one` (committed 2026-10-24;
+the tunnel and hostname exist once its setup's step 4 has run): it has its own tunnel,
+served by a `cloudflared` sidecar in its compose project, and its routing is
+[`deployments/calibre-web/cloudflared.yml`](../deployments/calibre-web/cloudflared.yml).
+**Behind Access**, except `/kobo/`, which a second, more specific application bypasses for
+the Kobo's sync. Made by `ansible/playbooks/server-create-stack-tunnel.yml`; the pattern is
+[`decisions.md`](decisions.md) § *Sidecar, not baked-in*.
+
 `ionic-traces.gsrpi.uk` was retired 2026-08-23. Its DNS record still exists and points at
 a deleted tunnel, so it resolves and fails; delete the record if you want the name gone.
 
