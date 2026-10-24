@@ -30,6 +30,13 @@
 #   group_vars/all.yml dns_zone         the hostname is <stack>.<dns_zone>, never written
 #                                       beside the stack name (CLAUDE.md § Repo invariants)
 #
+# ── the host's checkout: pulled here, not by hand ────────────────────────────
+#   The host runs the stack from ~/infra, so before anything is created the play runs
+#   `git pull --ff-only` there and then REQUIRES the host to be on exactly this control
+#   node's commit, with no uncommitted changes under deployments/<stack>/ on either side —
+#   server-install-system-files.yml's design (its header, "WHERE THE BYTES COME FROM").
+#   You still pull here, on the control node: that checkout is the one you reviewed.
+#
 # ── what it makes ────────────────────────────────────────────────────────────
 #   1. a locally-managed tunnel, named <stack>       } _cf-tunnel.yml, shared with
 #   2. a proxied CNAME <stack>.<dns_zone>            } _dev-container-tunnel.yml
@@ -178,14 +185,37 @@
           {{ stack_hostname }}, and the http_status:404 catch-all last.
         success_msg: "cloudflared.yml routes {{ stack_hostname }}"
 
+    # ── the review anchor — server-install-system-files.yml's design, 2026-08-24 ──
+    # The control node's HEAD is what was reviewed; the host's checkout is the delivery
+    # vehicle, pulled by the next play and then REQUIRED to be on exactly this commit.
+    - name: The control node's HEAD
+      ansible.builtin.command:
+        cmd: git rev-parse HEAD
+        chdir: "{{ repo_root }}"
+      register: stack_ctl_head_raw
+      changed_when: false
+      check_mode: false
+
+    # Uncommitted edits here are bytes the commit does not carry: what was reviewed on this
+    # screen and what the host would run would differ.
+    - name: Refuse uncommitted changes to the stack on the control node
+      ansible.builtin.command:
+        cmd: git status --porcelain -- deployments/{{ stack }}/
+        chdir: "{{ repo_root }}"
+      register: stack_ctl_dirty
+      changed_when: false
+      check_mode: false
+      failed_when: stack_ctl_dirty.stdout | length > 0
+
     - name: Put the host in the group the next play runs on
-      # With the checksums of the files the host will run, so the next play can prove the
-      # host's checkout is the one checked here, not an older pull.
+      # With the reviewed commit, and the checksums of the files the host will run, so the
+      # next play can prove the host's checkout is the one checked here, not an older pull.
       ansible.builtin.add_host:
         name: "{{ stack_host }}"
         groups: [stack_target]
         stack_edge: "{{ stack_edge }}"
         stack_hostname: "{{ stack_hostname }}"
+        stack_ctl_head: "{{ stack_ctl_head_raw.stdout | trim }}"
         stack_checked: "{{ dict(stack_files.results | map(attribute='item')
                                 | zip(stack_files.results | map(attribute='stat.checksum'))) }}"
       changed_when: false
@@ -275,6 +305,55 @@
       ansible.builtin.setup:
         gather_subset: ['!all']
 
+    # ── the delivery vehicle, pulled to the anchor — before anything is created ──
+    # --ff-only: a diverged host checkout is a situation to look at, not merge through.
+    # check_mode false so --check pulls too; a dry run against a stale checkout would
+    # check the wrong bytes. No -q: changed_when reads "Already up to date" from stdout.
+    - name: Pull the host's checkout, fast-forward only
+      ansible.builtin.command:
+        cmd: git pull --ff-only
+        chdir: "{{ infra_checkout }}"
+      register: stack_pull
+      changed_when: "'Already up to date' not in stack_pull.stdout"
+      check_mode: false
+
+    # pull --ff-only succeeds straight over local edits it does not touch, so the HEAD
+    # assert below would pass over a modified compose.yaml. Gitignored files (.env) are
+    # not reported, which is right: they are host-specific by design.
+    - name: The host checkout's uncommitted changes to the stack
+      ansible.builtin.command:
+        cmd: git status --porcelain -- deployments/{{ stack }}/
+        chdir: "{{ infra_checkout }}"
+      register: stack_host_dirty
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse a host checkout with uncommitted changes to the stack
+      ansible.builtin.assert:
+        that: stack_host_dirty.stdout | length == 0
+        fail_msg: >-
+          {{ inventory_hostname }}:{{ infra_checkout }} has uncommitted changes under
+          deployments/{{ stack }}/: {{ stack_host_dirty.stdout_lines | default([]) | join('; ') }}.
+          The commit check would pass over them, so the stack would run bytes nobody
+          reviewed. Commit and push them, or discard them on the host. Nothing has been created.
+
+    - name: The host's HEAD
+      ansible.builtin.command:
+        cmd: git rev-parse HEAD
+        chdir: "{{ infra_checkout }}"
+      register: stack_host_head
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse unless the host is on exactly the reviewed commit
+      ansible.builtin.assert:
+        that: stack_host_head.stdout | trim == stack_ctl_head
+        fail_msg: >-
+          {{ inventory_hostname }} is on {{ stack_host_head.stdout | trim | truncate(12, true, '') }}
+          after pulling, and this control node reviewed {{ stack_ctl_head | truncate(12, true, '') }}.
+          If you have unpushed commits: `git push`. If origin moved past your review: `git pull`
+          here, read the diff, re-run. Nothing has been created.
+
     - name: Read the host's copies of the stack's files
       # The checks above read the phone's checkout; the sidecar runs from the host's. A host
       # that has not pulled, or pulled something else, would start an ingress nobody checked.
@@ -297,9 +376,8 @@
         that: host_mismatch | default([]) | length == 0
         fail_msg: >-
           {{ inventory_hostname }}:{{ infra_checkout }}/deployments/{{ stack }}/ differs from
-          this machine's in {{ host_mismatch | default([]) }} (missing, or another commit).
-          `ssh {{ inventory_hostname }}`, then `cd ~/infra; git pull --ff-only`, pull here
-          too, and re-run. Nothing has been created.
+          this machine's in {{ host_mismatch | default([]) }}, although both are on the same
+          commit and clean — so look before re-running. Nothing has been created.
         success_msg: "{{ inventory_hostname }}'s checkout matches: {{ stack_checked | list }}"
 
     - name: The secrets directory, outside the checkout

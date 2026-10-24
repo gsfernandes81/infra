@@ -549,6 +549,13 @@ left out on purpose**: it works on arm64 (linuxserver's docs say otherwise; thei
 says not), and if wanted it is a derived image with Calibre's hash-pinned arm64 tarball,
 never the `DOCKER_MODS` line, which installs at every container start.
 
+**Amended 2026-10-24 — the stack play pulls the host itself.** It used to compare the
+checksums of the stack's three files and, on a mismatch, tell you to ssh in and pull. It now
+does what `server-install-system-files.yml` decided on 2026-08-24: `git pull --ff-only` on the
+host, refusal of uncommitted changes under `deployments/<stack>/` on either side, and the host's
+HEAD required to equal the control node's. The checksum check stays as a second layer. No
+deploy needs an ssh first any more; the control node's own `git pull` is still yours.
+
 ## garmin-mcp — a Garmin MCP for claude.ai, on `one` (read-only; five writes added, amended below)
 
 **Decided 2026-10-24** with the owner, after a security audit of the upstream and nine
