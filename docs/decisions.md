@@ -615,6 +615,30 @@ depth and reads the bare directories through a non-recursive bind of `/`.
 Moving them buys a tidier listing at the cost of a stop, an unmount, re-guarding and an fstab
 change on a box that is fine; do it only when one of those stacks is being rebuilt anyway.
 
+## Ansible output: one title line per task, as it starts — ON TRIAL
+
+**Decided 2026-10-24, on trial with the owner.** `ansible.cfg` sets `stdout_callback =
+community.general.diy` with templates in its `[callback_diy]` section: a ━━ banner per play,
+one ▸ line per task **as it starts** (cut to 56 columns, a phone in portrait) so a long run
+shows what is happening, like `docker build --progress=plain`, and under it only changed,
+failed, retry and `debug` lines. A plain ok and a skip print nothing, as before.
+
+**Why `diy` and not a live status line.** A line that rewrites itself in place (`docker
+compose up`'s view) needs state the templates do not have, and the stock callback that does it,
+`community.general.dense`, writes terminal escapes even when its output is not a terminal,
+which garbles the pasted transcripts this repo diagnoses from. A small custom callback could do
+it safely; it is repo-owned code, so it waits until the scrolling of this one proves a problem.
+
+**What the templates have to rebuild,** because `diy` silences the default callback whenever a
+template renders: `display_ok_hosts = False` (an empty render), the DRY RUN marker (on the play
+banner), and `debug` messages in full, lists included. Without that last one, the MFA block and
+the Done block in `server-deploy-garmin-mcp.yml` would print as a bare "changed".
+
+**The escape hatch** is `ANSIBLE_STDOUT_CALLBACK=default` for one run: a full transcript, or
+`-v`, which the templates ignore. **The known cost:** `diy` calls template APIs that
+ansible-core 2.23 removes (management-plane.md has the item), and prints two deprecation lines
+per run until community.general updates it.
+
 ## The lesson worth keeping
 
 **A check that can pass for the wrong reason is worse than no check**, because it stops

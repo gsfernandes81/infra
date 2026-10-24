@@ -537,6 +537,13 @@ on coverage alone (decisions.md § *garmin-mcp*). The trigger is a server for it
 **and** returns set-level strength data (the API's FIT download carries the sets). Switching
 changes only `deployments/garmin-mcp/`; the tunnel and the play stay.
 
+**Filed 2026-10-24, no phase number — `community.general.diy`, this repo's output callback, uses APIs ansible-core 2.23 removes.**
+It implements `v2_on_any` (harmless when removed: our templates do not use it) and passes
+`convert_data` to `template` (likely fatal: the callback's template call would fail). Upstream
+`main` still has both and no issue is open (checked 2026-10-24). Before the control node moves
+to 2.23, check community.general's changelog. If it is unfixed, set `stdout_callback = default`
+in `ansible.cfg` until it is; the `[callback_diy]` block can stay.
+
 **Closed 2026-10-24 — two stack plays read a fact Ansible is withdrawing.** `server-create-stack-tunnel.yml`
 and `server-deploy-garmin-mcp.yml` read the top-level `ansible_user_dir`, which ansible-core 2.24
 withdraws; every run printed `INJECT_FACTS_AS_VARS`. Both now read `ansible_facts['user_dir']`
