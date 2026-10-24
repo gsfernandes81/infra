@@ -69,7 +69,7 @@ with it.
 | Finding | Handled by |
 |---|---|
 | A leaked bearer means the whole Garmin account, including deletes | `GARMIN_ENABLED_TOOLS` = read-only allowlist; the probe proves it |
-| Transitive deps resolve fresh at every build (`pip install git+…` ignores `uv.lock`) | Sha-tagged image, build policy `missing`: deps freeze between reviewed bumps |
+| Transitive deps resolve fresh at every build (`pip install git+…` ignores `uv.lock`) | Sha-tagged literal `image:` with `build: policy`: Compose builds only when the tag is absent, so deps freeze between reviewed bumps |
 | Upstream silently logs in with `GARMIN_PASSWORD` if set, and writes a base64 copy of the tokens | The play refuses a `.env` holding `GARMIN_EMAIL` or `GARMIN_PASSWORD` |
 | Metadata built from the Host header when `PUBLIC_BASE_URL` is unset | Always set, derived from the hostname |
 | Unauthenticated hits grow Docker's json-file log on one's SD card | `logging: max-size` |
@@ -92,15 +92,24 @@ and location history until it is rotated.
     garmin-mcp-remote:0cf102c`.
     - **No `ports:`.** Named volume `garmin-tokens` at `/data/garminconnect`;
       `restart: unless-stopped`.
-    - `mem_limit: 384m`, tightened after the first real run.
+    - `mem_limit: 512m`, and left there: there is headroom on a Pi 4, and "tighten later" would
+      be a planned second session.
     - `logging: max-size`. `security_opt: no-new-privileges`.
-    - `cap_drop: ALL`, adding back `CHOWN`, `SETUID`, `SETGID` and `DAC_OVERRIDE`. The last is
-      dropped if the build proves it unneeded.
+    - `cap_drop: ALL`, adding back `CHOWN`, `SETUID`, `SETGID` and **`DAC_OVERRIDE`,
+      unconditionally**. Upstream's entrypoint runs `chown -R` as root on every start, under
+      `set -e`, and the auth step leaves the token directory at 0700 owned by `app`
+      (`token_utils.py:33`). Without `DAC_OVERRIDE`, root cannot read into that directory, so
+      the container crash-loops — but **only after the first successful auth**. A first boot
+      over an empty directory would wrongly prove the capability unneeded.
+    - `GARMIN_MCP_STATELESS_HTTP=true`. Upstream defaults to stateful sessions, which the MCP SDK
+      drops after 30 minutes idle, and claude.ai reports the resulting 404 as a failed tool call
+      (Taxuspt README, the `GARMIN_MCP_STATELESS_HTTP` entry). Without it, the first call after
+      any quiet half hour fails.
     - `GARMIN_ENABLED_TOOLS` is a literal list in this file, so a sha bump or a future write tool
       shows up as a diff.
   - **`cloudflared`** — `cloudflare/cloudflared:<version>` — the latest release when this is built, written as a literal and named in the commit message;
     `tunnel --no-autoupdate --config /etc/cloudflared/config.yml run`.
-    - The config and credentials are mounted `:ro`; `mem_limit: 64m`.
+    - The config and credentials are mounted `:ro`; `mem_limit: 128m`.
     - Outside 2h's staggered autoupdate by design: an update is a tag bump plus a redeploy.
 - **`cloudflared.yml`** — the tracked ingress: `garmin-mcp.gsrpi.uk → http://garmin-mcp:8080`,
   then `http_status:404`.
@@ -135,29 +144,51 @@ how you finish.
 1. **The edge** — imports the shared play: the tunnel and the `garmin-mcp.<dns_zone>` CNAME.
 2. **Source** — the `git` module checks out the pinned sha into `$SRC_ROOT/garmin-mcp-remote`.
    It refuses a dirty checkout or a different sha, and never forces.
-3. **Secrets** — the consent secret is generated on the control node into
-   `~/.config/garmin-mcp/consent-secret` (0600), the same pattern as the Cloudflare API token
-   file, and is never printed. The bearer is generated on `one` and shown to nobody.
-   - `.env` is written at 0600. Missing values are filled; existing ones change only under
-     `-e rotate=bearer|consent`.
-   - A `.env` holding `GARMIN_EMAIL` or `GARMIN_PASSWORD` stops the play.
-4. **Build and up** — `community.docker.docker_compose_v2` with build policy `missing`. A
-   container is recreated only when its config changed.
-5. **The MFA gate** — if the token volume holds no Garmin tokens, the play stops and prints the
-   one interactive step, written for fish and a TTY: `ssh -t one`, then inside it a sudo
-   `docker compose … run --rm garmin-mcp garmin-mcp-auth`. Upstream's `auth_cli.py` prompts for
-   the email, reads the password with `getpass` and asks for the MFA code, so the password never
-   reaches a file or an environment variable. Then re-run the play. MFA cannot be automated: the
-   code is requested inside the same process that started the login.
+3. **Secrets** — the consent secret is `lookup('password', '~/.config/garmin-mcp/consent-secret
+   …')` on the control node. That one line creates the 0600 file the first time and reads it
+   afterwards, the same place the Cloudflare API token file lives. It is never printed, because
+   CLAUDE.md keeps secrets out of scrollback. The bearer is generated on `one` and shown to
+   nobody.
+   - `.env` is written at 0600, and the play fills only missing values. **Rotation is deleting
+     the value and re-running**: the consent secret's file on the phone, or the bearer's line in
+     `.env`. There is no rotate flag.
+   - A `.env` holding `GARMIN_EMAIL` or `GARMIN_PASSWORD` stops the play. This is one task, kept
+     because upstream's own README tells you to put the password there.
+4. **Build and up** — `community.docker.docker_compose_v2` with `build: policy`, the module's
+   default. Compose then builds only when the literal `image:` tag is absent. A container is
+   recreated only when its config changed.
+5. **The MFA gate, read from `/readyz`** — no root inspection of the volume. Login runs in the
+   background, so the play polls `/readyz` (authorised) until it leaves `pending`. On `failed`,
+   it stops and prints the one interactive step, written for fish and a TTY: `ssh -t one`, then
+   a block to paste inside it.
+   - The block is a sudo `docker compose … run --rm garmin-mcp garmin-mcp-auth`, **followed by
+     `docker compose … restart garmin-mcp`**. A failed background login is terminal for the
+     server process — it says "restart the server" (`__init__.py:351`) — and a re-run of the
+     play recreates nothing when the config is unchanged, so without the restart the probe would
+     fail again.
+   - Upstream's `auth_cli.py` prompts for the email, reads the password with `getpass` and asks
+     for the MFA code, so the password never reaches a file or an environment variable. The
+     tokens land in `$GARMINTOKENS/garmin_tokens.json`, which is where the server reads them.
+   - Then re-run the play. MFA cannot be automated: the code is requested inside the same
+     process that started the login.
+   - The printed reason says `failed` can also mean a Garmin 429 or expired tokens; the fix is
+     the same block.
 6. **The probe, end to end from the control node.** Each step is calibrated against the running
    stack before it is trusted.
    - `/healthz` → 200: the tunnel and nginx.
-   - `/mcp` → 401, with a `WWW-Authenticate` naming `https://garmin-mcp.gsrpi.uk`: proves
-     `PUBLIC_BASE_URL`.
-   - An authorised `tools/list` must equal the allowlist exactly, with no additive or destructive
-     names. **This is the read-only proof**; a set variable is not.
-   - `/readyz`, authorised (nginx gates it like `/mcp`) → the Garmin login is live.
-   - Memory in use is printed, for tightening the limits.
+   - `/mcp` unauthenticated → 401: nginx is up and gating.
+   - `/.well-known/oauth-protected-resource` names `https://garmin-mcp.gsrpi.uk/mcp`: proves
+     `PUBLIC_BASE_URL`. The 401's `WWW-Authenticate` cannot prove it, because nginx builds that
+     header from `$host`.
+   - An authorised `tools/list` — a bare POST, which stateless mode allows without an
+     `initialize`. It sends `Accept: application/json, text/event-stream`, and the JSON is read
+     from the SSE `data:` line. **This is the read-only proof**; a set variable is not. Every
+     served name must match `^(get|count|search)_`, or appear in the play's
+     `garmin_allowed_writes` list, which is empty today. This holds for all 108 read tools and
+     none of the 47 write tools at the pinned sha. It carries no second copy of the allowlist,
+     and a future write tool is one name in that list.
+   - `/readyz` → `ready` (from step 5).
+   - Memory in use is printed, as a record.
    - Every `debug` whose output is the point carries `changed_when: true`.
 
 **Then** add a claude.ai custom connector for `https://garmin-mcp.gsrpi.uk/mcp` and paste the
@@ -168,7 +199,7 @@ consent secret from the phone's file.
 - **Garmin tokens expire** (~6 months): `/healthz` stays 200, tools error, `/readyz` is not ready.
   Re-do the MFA step. **Nothing on the fleet alerts**; filed, not built.
 - **Garmin rate-limits the auth step (429):** upstream makes one attempt and stops. Retry later.
-- **A leak:** `-e rotate=bearer` and/or `-e rotate=consent`, then reconnect the connector.
+- **A leak:** delete the consent secret's file on the phone and/or the bearer's line in `.env` on `one`, re-run the play, then reconnect the connector.
 - **`one` reboots:** the stack returns under `unless-stopped`. Nothing depends on `/media`.
 
 ## Verification before commit (`infra-dev`, no route to the fleet)
@@ -182,7 +213,9 @@ consent secret from the phone's file.
 - **Review:** a Fable review and autofix, or `/code-review xhigh` while Fable is out, with the
   fixes in a second commit.
 - **Not verifiable here, and the handover says so:** the aarch64 build, the MFA step, the probe
-  and the real memory figures. The play's probe is the proof, on the owner's first run.
+  and the real memory figures. A Fable advisor reviewed this plan on 2026-10-24. Its five
+  first-run breakers are folded in above: stateless HTTP, the restart after MFA, `DAC_OVERRIDE`,
+  `build: policy`, and what the 401 proves. So are three of its simplifications. The play's probe is the proof, on the owner's first run.
 
 ## Docs, in the same commit as the stack
 
