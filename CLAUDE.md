@@ -245,6 +245,9 @@ script**, run in a separate terminal, with the output pasted back.
   fetched again. Every `debug` whose output is the point carries `changed_when: true`;
   the reason is in `ansible.cfg` beside the setting. Prove a new one displays by running
   it, not by reading it.
+- **An Ansible `assert` renders `fail_msg` and `success_msg` before its test**, so each must
+  render in BOTH outcomes: `{{ rpc.error }}` in a `fail_msg` throws on the good reply, which
+  has no `error`. `| default('')` it. It crashed garmin-mcp's first passing run.
 
 ## Changing the thing you are connected through
 

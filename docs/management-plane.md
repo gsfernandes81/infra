@@ -537,14 +537,11 @@ on coverage alone (decisions.md § *garmin-mcp*). The trigger is a server for it
 **and** returns set-level strength data (the API's FIT download carries the sets). Switching
 changes only `deployments/garmin-mcp/`; the tunnel and the play stay.
 
-**Filed 2026-10-24, no phase number — two stack plays read a fact Ansible is withdrawing.**
-`server-create-stack-tunnel.yml` (lines 223, 307, 315, 686, 706) and `server-deploy-garmin-mcp.yml`
-(lines 51, 53, 173, 182) read `ansible_user_dir`, and `_dev-container-host.yml` once. Every run
-prints `INJECT_FACTS_AS_VARS ... removed from ansible-core version 2.24`, and on 2.24 those
-plays stop on an undefined variable. The fix is mechanical: `ansible_facts['user_dir']`, which
-both already gather (`setup` with `gather_subset: ['!all']`). In `server-deploy-garmin-mcp.yml`,
-define it once as a play var, e.g. `garmin_home`, so a local fake-host test can still override
-it with `-e garmin_home=…`. Seen on the owner's first `--check`; harmless until 2.24.
+**Closed 2026-10-24 — two stack plays read a fact Ansible is withdrawing.** `server-create-stack-tunnel.yml`
+and `server-deploy-garmin-mcp.yml` read the top-level `ansible_user_dir`, which ansible-core 2.24
+withdraws; every run printed `INJECT_FACTS_AS_VARS`. Both now read `ansible_facts['user_dir']`
+from the `setup` they already ran, garmin's through one `garmin_home` var. (`_dev-container-host.yml`
+had already moved to `ansible_facts['env']`; this item first said otherwise.)
 
 **Filed 2026-10-24, no phase number — the inventories do not list btrfs subvolumes.** Asked
 for by the owner. `server-generate-fleet-inventory.yml` gathers containers, listeners and

@@ -220,7 +220,7 @@
     # 200 — nothing on that path should hand an unauthenticated probe a page.
     bypass_open_statuses: [401, 404, 502, 530]
     # Where the host's checkout is. Its .env is where host-specific values live.
-    infra_checkout: "{{ ansible_user_dir }}/infra"
+    infra_checkout: "{{ ansible_facts['user_dir'] }}/infra"
 
   tasks:
     # ── before anything is made: every input this run will need ─────────────
@@ -304,7 +304,7 @@
 
     - name: The secrets directory, outside the checkout
       ansible.builtin.file:
-        path: "{{ ansible_user_dir }}/.{{ stack }}-secrets"
+        path: "{{ ansible_facts['user_dir'] }}/.{{ stack }}-secrets"
         state: directory
         mode: "0700"
 
@@ -312,7 +312,7 @@
     - name: The tunnel and its DNS record
       ansible.builtin.import_tasks: _cf-tunnel.yml
       vars:
-        cf_creds_path: "{{ ansible_user_dir }}/.{{ stack }}-secrets/tunnel.json"
+        cf_creds_path: "{{ ansible_facts['user_dir'] }}/.{{ stack }}-secrets/tunnel.json"
         cf_creds_become: true
         # cloudflare/cloudflared is distroless `nonroot`, USER 65532:65532 in its Dockerfile.
         # Docker resolves a bind mount as root, so the 0700 directory above does not stop
@@ -683,7 +683,7 @@
         mode: "0600"
       loop:
         - { key: TUNNEL_ID, value: "{{ cf_tunnel_id | default(cf_unknown_id, true) }}" }
-        - { key: TUNNEL_CREDENTIALS, value: "{{ ansible_user_dir }}/.{{ stack }}-secrets/tunnel.json" }
+        - { key: TUNNEL_CREDENTIALS, value: "{{ ansible_facts['user_dir'] }}/.{{ stack }}-secrets/tunnel.json" }
       loop_control:
         label: "{{ item.key }}"
 
@@ -703,7 +703,7 @@
         msg:
           - "tunnel    {{ cf_tunnel_id | default('(not created — --check)', true) }}"
           - "hostname  {{ stack_hostname }}"
-          - "creds     {{ inventory_hostname }}:{{ ansible_user_dir }}/.{{ stack }}-secrets/tunnel.json (65532, 0600)"
+          - "creds     {{ inventory_hostname }}:{{ ansible_facts['user_dir'] }}/.{{ stack }}-secrets/tunnel.json (65532, 0600)"
           - "env       TUNNEL_ID and TUNNEL_CREDENTIALS in {{ infra_checkout }}/deployments/{{ stack }}/.env"
           - "access    {{ 'login for the addresses in ' ~ cf_access_emails_file if stack_edge.access == 'browser' else 'NONE — the stack is its own gate' }}"
           - "{{ ('bypass    ' ~ stack_edge.bypass_path ~ ' — no login') if stack_edge.bypass_path is defined else '' }}"
