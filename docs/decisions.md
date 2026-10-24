@@ -586,6 +586,35 @@ rotated. Accepted.
   only when the tag is absent;
 - a 500 from `/register`.
 
+## Data subvolumes are `media-<stack>-<name>`, mounted at `/media/<stack>/<name>`
+
+**Decided 2026-10-24**, the owner's convention, first applied to `calibre-web`
+(`media-calibre-library` → `/media/calibre/library`, `media-calibre-config` →
+`/media/calibre/config`). It applies to every new data subvolume on an array.
+
+**Because the name carries both facts.** A subvolume listing (`btrfs subvolume list`) then
+says what each one holds and where it mounts, with no fstab to cross-read. The four older
+subvolumes on `one` are known only by id in fstab (`subvolid=256`…`259`), and what they hold
+is answered by the mountpoint beside each id, nowhere else.
+
+**At the array's top level, and in fstab by `subvol=` name.** `subvol=` resolves relative
+to the top level whatever the default subvolume is, and a new subvolume's id is unknown
+until it is made, by hand, after the commit that adds its fstab line. Creating it needs the
+top level mounted, which is what `/mnt`'s `noauto` entry is for; the setup checks
+`get-default` says ID 5 first, because `/mnt` mounts the default, not the top level.
+
+**One directory per stack under `/media`.** A stack's mounts sit together, and
+`/media/<stack>` is a plain directory on the root filesystem, never a mount and **left
+mutable**, so a later subvolume can be added beside the others. The guards go where the
+mounts land — `nofail` on each fstab line, `chattr +i` on each `/media/<stack>/<name>` —
+and `bin/check-mount-guards` needs no change: it finds every `/media/` entry in fstab at any
+depth and reads the bare directories through a non-recursive bind of `/`.
+
+**The four existing mounts are not renamed.** `/media/ionic-mysql`, `/media/torrents`,
+`/media/torrents-config` and `/media/syncthing-config` hold live data behind working guards.
+Moving them buys a tidier listing at the cost of a stop, an unmount, re-guarding and an fstab
+change on a box that is fine; do it only when one of those stacks is being rebuilt anyway.
+
 ## The lesson worth keeping
 
 **A check that can pass for the wrong reason is worse than no check**, because it stops

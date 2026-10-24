@@ -546,6 +546,15 @@ both already gather (`setup` with `gather_subset: ['!all']`). In `server-deploy-
 define it once as a play var, e.g. `garmin_home`, so a local fake-host test can still override
 it with `-e garmin_home=…`. Seen on the owner's first `--check`; harmless until 2.24.
 
+**Filed 2026-10-24, no phase number — the inventories do not list btrfs subvolumes.** Asked
+for by the owner. `server-generate-fleet-inventory.yml` gathers containers, listeners and
+volumes, and `hw-inventory` names the disks that hold btrfs, but nothing records the
+subvolumes themselves — on `one` the four older ones exist in this repo only as
+`subvolid=256`…`259` in fstab. With subvolumes now named `media-<stack>-<name>`
+([`decisions.md`](decisions.md)), a listing per host — path, id, size if qgroups are on —
+says what each one holds. Needs root and the array's top level mounted (`/mnt`, `noauto`, on
+`one`). Not built.
+
 **Closed 2026-08-28 — one command now writes every ssh block this repo owns.**
 `playbooks/client-home-ssh-config.yml` composes its fleet half with one dev-container import per
 dev container (the underscore-prefixed halves beside it), and carries the registry that says which containers exist and on which
