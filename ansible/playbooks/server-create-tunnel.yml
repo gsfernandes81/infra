@@ -8,7 +8,7 @@
 # WHY A NEW TUNNEL AT ALL. `config_src` is create-time only: PATCHing it on an existing
 # tunnel is rejected (tried 2026-08-23, `1002 Tunnel not found`, on a URL where GET works
 # and where PATCH with tunnel_secret had succeeded an hour earlier). So a tunnel whose
-# routes live in this repo has to be a new one, and its CNAMEs have to be repointed.
+# ingress rules live in this repo has to be a new one, and its CNAMEs have to be repointed.
 #
 # NOTHING HERE SERVES TRAFFIC. The new tunnel has no DNS aimed at it, so it can be
 # created, inspected and deleted with no effect on anything. That is the whole point of
@@ -54,11 +54,11 @@
       become: true
 
     # ── refuse to run twice ────────────────────────────────────────────────────
-    # The new credentials file existing means phase 1 already ran on this host. A re-run
-    # creates a second orphan tunnel, overwrites the reviewed repo config, and — worst —
-    # overwrites ~/.infra-2g-baseline-<host>.json with CURRENT state, which after a
-    # cutover records the outage as the baseline: the exact corruption the baseline
-    # exists to prevent.
+    # The new tunnel credentials file existing means phase 1 already ran on this host. A
+    # re-run creates a second orphan tunnel, overwrites the reviewed repo config, and —
+    # worst — overwrites ~/.infra-2g-baseline-<host>.json with CURRENT state, which after a
+    # cutover records the outage as the baseline: the exact corruption the baseline exists
+    # to prevent.
     - name: Read whether phase 1 already ran on {{ inventory_hostname }}
       ansible.builtin.stat:
         path: "{{ new_cred_file }}"

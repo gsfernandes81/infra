@@ -242,8 +242,9 @@ from the real one.
 
 The token used to be in `command_args`, where `supervise-daemon` logged it to syslog at
 every boot. **Fixed on all three, 2026-08-23**: there is no `--token` anywhere now. Each
-host reads `/etc/cloudflared/<host>.json` at mode 600, named by a `--config` file that is
-tracked. The rule that came out of it stands: **secrets never go in `command_args`.**
+host reads its tunnel credentials file, `/etc/cloudflared/<host>.json`, at mode 600, named
+by a `--config` file that is tracked. The rule that came out of it stands: **secrets never
+go in `command_args`.**
 
 ## Stacks
 

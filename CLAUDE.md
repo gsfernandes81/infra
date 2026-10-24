@@ -34,7 +34,7 @@ Full orientation is `README.md`; the reasoning is `docs/decisions.md`. Quick map
   `_infra.py` is their shared header parser. **Not wrapped in the Makefile yet, on
   purpose** — the Makefile header says why; do it as its own change or not at all.
 - **`ansible/`** — host list, playbooks, the fleet-inventory generator. **Runs from the
-  phone, never from a Pi**: there is no `ansible` on the boxes and there must not be.
+  control node, never from a Pi**: there is no `ansible` on the boxes and there must not be.
   `infra-dev` carries it as a *development* tool (syntax-check, `--check` against stubs),
   not a control plane.
 - **`dev/`** — the `infra-dev` container. Lifecycle is `dev/Makefile` only (it computes
@@ -237,7 +237,7 @@ script**, run in a separate terminal, with the output pasted back.
   a false statement about the tree from the fix for a false statement about the tree.
   `${PIPESTATUS[0]}`, read on the very next line, asks the question actually being asked.
 - **An Ansible `register` is overwritten by a skipped task.** The guard that read it
-  afterwards was disarmed — the `retire` playbook's history has the commit. Register
+  afterwards was disarmed — `server-delete-tunnel.yml`'s history has the commit. Register
   into a different name, or `when:` the consumer on the producer's own condition.
 - **An Ansible `debug` task reports `ok`, and `ansible.cfg` sets `display_ok_hosts =
   False`** — so a message a playbook exists to print does not print at all. It silently
@@ -309,7 +309,7 @@ answering a different question.
 
 ## Backups of secret-bearing files
 
-**A backup inherits both the secret and the permissions.** Moving the Cloudflare token
+**A backup inherits both the secret and the permissions.** Moving the tunnel token
 out of `/etc/init.d/cloudflared` (755, world-readable) left
 `/etc/init.d/cloudflared.bak-token` — same mode, same token — so the exposure the whole
 exercise existed to remove was still there afterwards, and every check said PASS

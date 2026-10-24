@@ -1,5 +1,5 @@
 ---
-# CREATE A DEV CONTAINER'S TUNNEL AND HOST SIDE, in one run, from the phone.
+# CREATE A DEV CONTAINER'S TUNNEL AND HOST SIDE, in one run, from the control node.
 #
 #     cd ansible
 #     ansible-playbook playbooks/server-create-dev-container.yml --check          # prove
@@ -9,7 +9,7 @@
 # Then, in that order:
 #
 #     ssh -t zero 'cd ~/infra/dev && make up'          # start it (-t: make sudos)
-#     ansible-playbook playbooks/client-home-ssh-config.yml -e only=<name>   # on EACH client
+#     ansible-playbook playbooks/client-home-ssh-config.yml -e only=<alias>   # on EACH client
 #
 # No -K: nothing here needs root. It needs the Cloudflare API token, read from
 # ~/.config/cloudflare/api-token on this machine; if that is missing it prints how to mint
@@ -32,7 +32,7 @@
 # the sequence was host half → make up → edge half → host half again with -e
 # tunnel_hostname, and the defence was credentials: sudo, an API token and an Access
 # service token, one per half. It was already half untrue — neither half here needs sudo —
-# and the owner asked for the task to be one command. The Access token is still a
+# and the owner asked for the task to be one command. The service token is still a
 # different half (client-home-ssh-config.yml, run on each client), and the API token is
 # still never on a command line. The decision is a row in docs/decisions.md.
 #

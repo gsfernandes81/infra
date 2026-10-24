@@ -20,7 +20,7 @@
 #   - the credentials path, the DNS comment and the dead-tunnel message's last sentence
 #     are inputs, so _dev-container-tunnel.yml passes exactly its old values;
 #   - the credentials can be read and written as root, with an owner, for a sidecar;
-#   - the read of an existing credentials file now fails on anything but "not found".
+#   - the read of an existing tunnel credentials file now fails on anything but "not found".
 #     The reason is beside that task, and it is the one change a dev container can see:
 #     only when its own tunnel.json is unreadable, which used to mint a second tunnel;
 #   - the two no_log writes — the tunnel and the record — print Cloudflare's reason and
@@ -39,13 +39,13 @@
 #   cf_unknown_id     the inline filler for ids only a write could produce; the reason it is
 #                     inline and not a set_fact is beside its definition in
 #                     _dev-container-tunnel.yml, and it is the reason --check is a real dry run
-#   cf_creds_path     where the credentials file lives on the host. NEVER inside the repo
-#                     checkout, gitignored or not: the checkout is bind-mounted into
-#                     infra-dev, whose whole point is having no route to the fleet.
+#   cf_creds_path     where the tunnel credentials file lives on the host. NEVER inside
+#                     the repo checkout, gitignored or not: the checkout is bind-mounted
+#                     into infra-dev, whose whole point is having no route to the fleet.
 #   cf_dns_comment    the record's comment at Cloudflare, naming who manages it
 #   cf_dead_tunnel_hint  one sentence on what fails while the credentials name a dead tunnel
 # and, only when the reader of the credentials is not the ssh user:
-#   cf_creds_become   true to read and write the credentials file as root
+#   cf_creds_become   true to read and write the tunnel credentials file as root
 #   cf_creds_owner    / cf_creds_group — e.g. 65532, the uid cloudflare/cloudflared runs as.
 #                     A root-owned 0600 file is unreadable to it and the connector dies on start.
 
@@ -120,8 +120,8 @@
   no_log: true
 
 - name: "Existing tunnel only: read the tunnel at Cloudflare"
-  # A credentials file naming a deleted tunnel is the nastiest state here: the
-  # connector starts, cloudflared fails, and the hostname resolves to nothing — which
+  # A tunnel credentials file naming a deleted tunnel is the nastiest state here:
+  # the connector starts, cloudflared fails, and the hostname resolves to nothing — which
   # looks exactly like the service being down. Catch it now, not at 03:00.
   ansible.builtin.uri:
     url: "{{ cf_api }}/accounts/{{ cf_account_id }}/cfd_tunnel/{{ cf_tunnel_id }}"
@@ -163,8 +163,8 @@
   when: cf_tunnel_id is defined
 
 - name: "New tunnel only: create a tunnel secret"
-  # 32 random bytes, base64. Generated here because Cloudflare never sends a tunnel
-  # secret back — this is the only moment it exists in the clear, which is why the
+  # 32 random bytes, base64. Generated here because Cloudflare never sends a tunnel secret
+  # back — this is the only moment it exists in the clear, which is why the tunnel
   # credentials file is written two tasks later and not at some more convenient point.
   ansible.builtin.set_fact:
     cf_tunnel_secret: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') | b64encode }}"

@@ -26,7 +26,7 @@ Two blocks land in `~/.ssh/config`, each edited in place on re-runs:
 | Marker | Written by | Holds |
 |---|---|---|
 | `# BEGIN infra-fleet` | `client-home-ssh-config.yml` (its fleet half) → `templates/ssh-fleet-block.j2` | the three Pis, three ways each |
-| `# BEGIN <container>` | `client-home-ssh-config.yml` (its dev half, once per container) → `templates/ssh-dev-block.j2` | one dev container, two ways |
+| `# BEGIN <alias>` | `client-home-ssh-config.yml` (its dev half, once per container) → `templates/ssh-dev-block.j2` | one dev container, two ways |
 
 Do not hand-edit between the markers. Change the template and re-run — a hand edit
 survives until the next run and then vanishes, which is the worst of both.
@@ -59,11 +59,11 @@ it — anything above it is separated from it by the next block a playbook inser
 
 ## Three routes to a dev container
 
-Each container gets **one route and one alias**; `<c>-sh` is a second name for it.
+Each container gets **one route and one alias**; `<alias>-sh` is a second name for it.
 
 | Alias | Route | Fails when |
 |---|---|---|
-| `<c>` (and `<c>-sh`) | its own tunnel → Access → the container's sshd | its tunnel, its Access app, its token, or Cloudflare |
+| `<alias>` (and `<alias>-sh`) | its own tunnel → Access → the container's sshd | its tunnel, its Access app, its token, or Cloudflare |
 
 **The container decides what a login runs, not the client** (2026-10-04, infra#7). Its sshd
 forces every session through `claude-sessions-door` (`dev/sshd_config`, `ForceCommand`),
@@ -72,11 +72,11 @@ and the identity. So:
 
 | You run | You get |
 |---|---|
-| `ssh <c>` | **the session menu** — every session in the container, `Enter` to attach or resume, `n` for a new one, `q` to leave |
-| `ssh <c> 'git log'` | the command, in `~`, exactly as any ssh runs it — `ssh <c> in-workspace git log` for the repo |
-| `scp`, `sftp`, Zed, ansible | work, as against any sshd; `scp file <c>:` lands in `~` |
-| `ssh -t <c> in-workspace` | a login shell in `/workspace` |
-| `ssh -T <c>` | a login shell with no terminal |
+| `ssh <alias>` | **the session menu** — every session in the container, `Enter` to attach or resume, `n` for a new one, `q` to leave |
+| `ssh <alias> 'git log'` | the command, in `~`, exactly as any ssh runs it — `ssh <alias> in-workspace git log` for the repo |
+| `scp`, `sftp`, Zed, ansible | work, as against any sshd; `scp file <alias>:` lands in `~` |
+| `ssh -t <alias> in-workspace` | a login shell in `/workspace` |
+| `ssh -T <alias>` | a login shell with no terminal |
 | `ssh -N -L/-R …` | the forward, untouched — `-N` opens no session, so the door never runs |
 
 Each session the menu opens is a zmx session (abduco before claude-sessions v0.4.0), so it outlives the link: an ssh session
@@ -84,23 +84,24 @@ from a phone dies at the lock screen, and the work must not. The door never lock
 a menu that cannot run (too narrow a terminal, a missing binary) says why and drops to a
 login shell.
 
-**A container whose base predates 2026-10-04 answers `ssh <c>` with its plain login shell**
-— the old `-sh` behaviour, not an error — until its repo bumps `BASE_TAG`; the menu is then
-`claude-sessions-door` by hand. The client cannot name a program the image lacks any more,
-which is what used to make a not-yet-bumped child answer `exec: claude-sessions-door: not
-found`.
+**A container whose base predates 2026-10-04 answers `ssh <alias>` with its plain login
+shell** — the old `-sh` behaviour, not an error — until its repo bumps `BASE_TAG`; the
+menu is then `claude-sessions-door` by hand. The client cannot name a program the image
+lacks any more, which is what used to make a not-yet-bumped child answer `exec:
+claude-sessions-door: not found`.
 
-**Before 2026-10-04** the main alias carried `RequestTTY yes` and `RemoteCommand in-workspace
-claude-sessions-door`, which made `ssh <c> <cmd>` a client-side error (*cannot execute
-command-line and remote command*) and scp/sftp to it unreliable; `<c>-sh` existed for both.
-A client not yet re-run still has that block and keeps working: its `RemoteCommand` arrives
-at the forced door as a command, and the door runs it — `in-workspace` then starts the door
-again, which this time sees a login. `<c>-sh` is kept as a name so tools that use it
-(`server-add-authorised-keys.yml`, or3's phone tunnel) need no change, and goes once nothing does.
+**Before 2026-10-04** the main alias carried `RequestTTY yes` and `RemoteCommand
+in-workspace claude-sessions-door`, which made `ssh <alias> <cmd>` a client-side error
+(*cannot execute command-line and remote command*) and scp/sftp to it unreliable;
+`<alias>-sh` existed for both. A client not yet re-run still has that block and keeps
+working: its `RemoteCommand` arrives at the forced door as a command, and the door runs it
+— `in-workspace` then starts the door again, which this time sees a login. `<alias>-sh` is
+kept as a name so tools that use it (`server-add-authorised-keys.yml`, or3's phone tunnel)
+need no change, and goes once nothing does.
 
 ### Break glass by hand — there is no third alias, and no port
 
-**The `<c>-lan` alias was dropped 2026-08-31 and the loopback port it reached on
+**The `<alias>-lan` alias was dropped 2026-08-31 and the loopback port it reached on
 2026-10-04.** The way in that survives a broken tunnel, Access application or token is
 `docker exec` on the container's host, through the host's own ssh:
 
@@ -242,8 +243,8 @@ ProxyCommand sh -c 'if [ -r ~/.config/<alias>/token ]; then . ~/.config/<alias>/
 (abbreviated; the real line names absolute paths and the exact run). **The ssh block and
 the token are separate, and the block does not need the token to be written.** A client
 gets a block for every container in the registry, up or not; one without a token says so
-on `ssh <c>` and stops **before `cloudflared` starts** — never falling through to Access's
-browser login, which these apps do not admit (service tokens only) and which is no use
+on `ssh <alias>` and stops **before `cloudflared` starts** — never falling through to
+Access's browser login, which these apps do not admit (service tokens only) and which is no use
 from Termux anyway. The split is in the playbook too, as tags:
 
 ```sh
@@ -271,7 +272,7 @@ shell is. fish syntax there fails with a message about `set` that names neither 
 nor ssh.
 
 **Nothing is typed.** Since 2026-10-04 the play mints this client's own service token over
-the Cloudflare API — named `<container>-<client>`, added to the container's Access policy,
+the Cloudflare API — named `<alias>-<client>`, added to the container's Access policy,
 written straight to the file — using the API token at `~/.config/cloudflare/api-token`
 (`ansible/README.md` § *The Cloudflare API token*). A lost laptop is one token to delete
 in Zero Trust → Access → Service credentials; no other client notices.

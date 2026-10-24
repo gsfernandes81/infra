@@ -1,7 +1,7 @@
 # garmin-mcp
 
 A [Garmin Connect](https://connect.garmin.com) MCP server that claude.ai reaches
-as a custom connector: ask Claude about your runs, gym sessions, sleep, HRV, training status
+as a claude.ai custom connector: ask Claude about your runs, gym sessions, sleep, HRV, training status
 and the rest. Upstream is [`gabrielkpo/garmin-mcp-remote`](https://github.com/gabrielkpo/garmin-mcp-remote)
 at the sha in `SOURCE`. That is nginx, plus a small OAuth 2.1 shim, in front of
 [`Taxuspt/garmin_mcp`](https://github.com/Taxuspt/garmin_mcp). It runs on `one`, behind its own
@@ -23,10 +23,10 @@ Why it is shaped this way, including the security audit: [`docs/decisions.md`](.
 § *garmin-mcp*. The full design and audit table were in `plans/garmin-mcp.md`, retired once the
 first deploy passed every probe (2026-10-24); `git log --all -- plans/garmin-mcp.md` finds it.
 
-## Deploying — from the phone
+## Deploying — from the control node
 
 ```fish
-cd ~/infra/ansible     # wherever the phone's checkout is
+cd ~/infra/ansible     # wherever the control node's checkout is
 ansible-playbook playbooks/server-deploy-garmin-mcp.yml --check -K   # prove: nothing is written
 ansible-playbook playbooks/server-deploy-garmin-mcp.yml -K
 ```
@@ -45,14 +45,14 @@ It asks for your Garmin email, then your password (not echoed and never stored; 
 resulting tokens are kept, in the `garmin-tokens` volume), then the code Garmin sends you. `--name`,
 because `compose run` would otherwise reuse the running server's container name and fail on
 the conflict. **The restart is not optional**: a failed login is final for the running server. Then **run the play
-again**. It finishes with every probe passing and prints the connector URL.
+again**. It finishes with every probe passing and prints the claude.ai connector URL.
 
 What the play does, in order:
 1. The tunnel and DNS, through `server-create-stack-tunnel.yml`.
 2. `.env`.
-3. The checkout, at `$SRC_ROOT/garmin-mcp`.
+3. The upstream source (pinned in `SOURCE`), at `$SRC_ROOT/garmin-mcp`.
 4. `docker compose up`, which builds the image only when its tag is absent.
-5. The probes, from the phone:
+5. The probes, from the control node:
    - `/healthz` returns 200;
    - `/mcp` returns 401 without the token;
    - the OAuth metadata names this hostname;
@@ -66,8 +66,8 @@ What the play does, in order:
 - **OAuth Client ID / Secret:** leave blank.
 
 claude.ai discovers the OAuth endpoints and opens a consent page. Paste the contents of
-`~/.config/garmin-mcp/consent-secret` **on the phone**. The play created that file (mode 0600)
-and never prints it. You do this once; the connector refreshes itself after that.
+`~/.config/garmin-mcp/consent-secret` **on the control node**. The play created that file (mode 0600)
+and never prints it. You do this once; the claude.ai connector refreshes itself after that.
 
 ## Day two
 
@@ -78,9 +78,9 @@ and never prints it. You do this once; the connector refreshes itself after that
   `failed`, and the play prints the login block. Or go straight to that block. **Nothing alerts on this**; it is filed in
   `docs/management-plane.md`.
 - **Rotating, after a suspected leak.**
-  - The consent secret: delete `~/.config/garmin-mcp/consent-secret` on the phone.
+  - The consent secret: delete `~/.config/garmin-mcp/consent-secret` on the control node.
   - The bearer token: delete the `MCP_BEARER_TOKEN=` line from `.env` on `one`.
-  - Either or both: then re-run the play and reconnect the connector.
+  - Either or both: then re-run the play and reconnect the claude.ai connector.
   - Rotating the consent secret also voids every refresh token.
 - **Bumping upstream.**
   1. Put the new sha in `SOURCE` and the new tag on `image:` in `compose.yaml`.

@@ -7,7 +7,7 @@ Rewritten the same day, twice, because most of what it first said stopped being 
 
 ## Where routing lives, per host
 
-| Host | Tunnel | Managed | Routes are in |
+| Host | Tunnel | Managed | Ingress rules are in |
 |---|---|---|---|
 | `zero` | `ce28c17c-a722-4ba1-8e46-21985337f13f` | **locally** | `hosts/zero/system/cloudflared-config.yml` |
 | `one` | `1e7fde2e-ac2f-4a5e-8ad4-591208c1e2a6` | **locally** | `hosts/one/system/cloudflared-config.yml` |
@@ -38,7 +38,7 @@ more.** While it did: do not clear the remote configuration; it was not stale, i
 served. `PUT .../cfd_tunnel/{id}/configurations` does not touch DNS, and a `GET`
 first makes it byte-exactly reversible — but there is no reason to run it.
 
-## Getting routes into git — how it was actually done
+## Getting ingress rules into git — how it was actually done
 
 `config_src` is **create-time only**. `PATCH .../cfd_tunnel/{id}` with
 `{"config_src":"local"}` is rejected (`1002 Tunnel not found`, on a URL where `GET` works
@@ -165,7 +165,7 @@ wanted, a route is one API call.
 **The general form, which is the part worth keeping: enumerate a tunnel's objects before
 believing a migration is complete.** At minimum the public hostnames
 (`/cfd_tunnel/{id}/configurations`), the DNS records aimed at it, and the private network
-routes (`/teamnet/routes?tunnel_id=`). The retire play now checks all three and refuses
+routes (`/teamnet/routes?tunnel_id=`). The delete play now checks all three and refuses
 on any of them.
 
 ## Landmines
@@ -179,7 +179,7 @@ on any of them.
   hosts. Clearing the dashboard "tidily" takes services down and presents as a broken
   tunnel.
 - **A deleted tunnel cannot be recreated with the same UUID.** A DNS record aimed at one
-  does not degrade, it breaks permanently. The retire play refuses unless every straggler
+  does not degrade, it breaks permanently. The delete play refuses unless every straggler
   is named with `-e abandon=`.
 - **Never delete a tunnel that still has a CNAME aimed at it.** Check DNS first; the play
   does.
@@ -189,14 +189,15 @@ on any of them.
   credentials sharing a word. Every play that talks to Cloudflare reads the API token
   from `~/.config/cloudflare/api-token` and prints how to mint one if it is missing
   (`ansible/README.md` § *The Cloudflare API token*); the service tokens are minted per
-  client by `client-home-ssh-config.yml`; the tunnel token is the credentials file.
+  client by `client-home-ssh-config.yml`; the tunnel token, once passed as `--token` in
+  argv, is now the tunnel credentials file.
 - **A service token in a policy cannot be deleted — rotate it.** `400`, code `12139`,
   `service_token_in_use`. Every token this fleet uses is named by an Access policy, so
   this is the normal case, not an edge one. `POST …/service_tokens/{id}/rotate` keeps the
   id and the policy, returns a fresh `client_id`/`client_secret`, and invalidates every
   client holding the old pair. Deleting is only for a token nothing references.
 - **`no_log` on a `uri` task hides the response as well as the headers.** It cost the only
-  copy of a service token secret in August, and hid a `400` from the retire play in
+  copy of a service token secret in August, and hid a `400` from the delete play in
   the same way. Register the result, let the task not fail, and print the API's own
   error list separately.
 
@@ -218,7 +219,7 @@ on any of them.
 - ~~**`two` has not been migrated**~~ — **done 2026-08-29.** Two hostnames, on the box
   with the least margin, reached over the `two-one` mesh so the cutover never travelled
   through the tunnel it was cycling. Four attempts: a missing `~/.ssh/cp` reported as
-  UNREACHABLE, a stale clone that made `install-system-file` a no-op and left the
+  UNREACHABLE, a stale checkout that made `install-system-file` a no-op and left the
   connector authenticating a tunnel its config did not name, an invalid API token, and
   then the run that worked. Every guard those failures produced is in the plays.
 - **The fleet ssh hostnames have no service token.** `ssh-zero.gsrpi.uk` is behind Access

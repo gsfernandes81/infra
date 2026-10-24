@@ -33,7 +33,7 @@
 # already caught one bad change in this repo; `no_log` is a mechanism rather than
 # discipline; and the API token becomes a Vault variable at Phase 4 with no rewrite.
 # It is also not a one-off — dd-dev, ds-dev and or3-dev want the same three objects, and
-# rotating the fleet's own tunnel tokens wants most of them.
+# rotating the fleet's own tunnel credentials (2e, done 2026-08-29) used most of them.
 #
 # WHY `uri` AND NOT `community.general.cloudflare_dns`. That module exists and would do
 # task 2. It would do only task 2 — tunnel, Access application, policy and service token
@@ -69,7 +69,7 @@
 # would cover only the tunnel and DNS, leaving Access to be clicked.
 
 - name: Create a dev container's tunnel and Access app
-  # zero, because the ONLY thing that lands on a host is the credentials file. Every
+  # zero, because the ONLY thing that lands on a host is the tunnel credentials file. Every
   # Cloudflare call is delegated to the control node — they are HTTPS to a public API and
   # have no business being made from the box being configured.
   hosts: "{{ cf_target | default('zero') }}"
@@ -115,8 +115,8 @@
     #                        API. It is what the file below holds.
     #   Access service token — Zero Trust -> Access -> Service credentials. A
     #                        client_id/secret pair a MACHINE presents to get THROUGH
-    #                        Access. This play creates one and prints it once; the
-    #                        phone holds it.
+    #                        Access. This play makes none: since 2026-10-04 the
+    #                        client play mints one per client (client-home-ssh-config.yml).
     # An API token that someone named "service_token" is still an API token.
 
   tasks:

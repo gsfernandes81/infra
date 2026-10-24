@@ -70,7 +70,7 @@ cf_api_token_howto: |
 # (# comments allowed). A FILE ON THE CONTROL NODE, NOT A LIST HERE, because this repo is
 # public and an email address in it is one more thing the world can read and a scraper
 # can use. Not a secret, so no 600 check — but never on the command line either, for the
-# same reason as the token: it would sit in shell history on the phone.
+# same reason as the token: it would sit in shell history on the control node.
 #
 # Each machine that runs the play needs its own copy; that is the price of keeping it out
 # of git, and it is small, because the list changes when a person does.

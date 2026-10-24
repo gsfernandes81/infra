@@ -288,7 +288,7 @@
       ansible.builtin.debug:
         msg:
           - "tunnel {{ doomed_tunnel }} is gone, and every credential for it is now worthless"
-          - "{{ inventory_hostname }} serves from {{ live_tunnel }}, routes in hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
+          - "{{ inventory_hostname }} serves from {{ live_tunnel }}, ingress rules in hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
           - "cleanup: rm {{ old_cred_file }} and /etc/cloudflared/{{ inventory_hostname }}-new.json"
           - "and the baseline: rm ~/.infra-2g-baseline-{{ inventory_hostname }}.json"
       changed_when: true

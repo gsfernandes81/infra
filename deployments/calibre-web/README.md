@@ -109,7 +109,7 @@ library** — keep the desktop one as a backup, and do not edit both.
 *No library yet?* Calibre-Web ships an empty one: `library/metadata.db` at the release this
 image is (`0.6.27`) — copy it into `/media/calibre/library` instead.
 
-### 4. The tunnel and the login — from the phone
+### 4. The tunnel and the login — from the control node
 
 ```fish
 cd ~/infra; git pull --ff-only; cd ansible
@@ -117,23 +117,25 @@ ansible-playbook playbooks/server-create-stack-tunnel.yml -e stack=calibre-web -
 ansible-playbook playbooks/server-create-stack-tunnel.yml -e stack=calibre-web -K
 ```
 
-It needs `~/.config/cloudflare/access-emails` on the phone (who may log in, one address per
-line) and prints how to make it if it is missing — and, **once**, a sixth permission on the
-phone's API token: *Zone → Transform Rules → Edit* (My Profile → API Tokens → edit the
-token, add the row). That is for the one request-header rule below; without it the play
-stops and says so. It makes the tunnel, the CNAME, the
-credentials (on `one`, outside the checkout, owned by the sidecar's uid), the Access login,
-the `/kobo/` bypass, and a Cloudflare rule setting `X-Scheme: https` on requests to this
-hostname — see step 6 for why. It then **proves, before anything is started**, that `/` asks for a
-login and `/kobo/` does not — calibrated first against `torrents.gsrpi.uk` — and only then
-writes `TUNNEL_ID` and `TUNNEL_CREDENTIALS` into `.env` on `one`. So a run that fails part
-way leaves a stack that **cannot** start: compose refuses without those two lines. A fresh
-hostname can take a minute to resolve; if the probe gives up on that, re-run.
+It needs `~/.config/cloudflare/access-emails` on the control node (who may log in, one
+address per line) and prints how to make it if it is missing — and, **once**, a sixth
+permission on the control node's API token: *Zone → Transform Rules → Edit* (My Profile →
+API Tokens → edit the token, add the row). That is for the one request-header rule below;
+without it the play stops and says so. It makes the tunnel, the CNAME, the tunnel
+credentials file (on `one`, outside the checkout, owned by the sidecar's uid), the Access
+login, the `/kobo/` bypass, and a Cloudflare rule setting `X-Scheme: https` on requests to
+this hostname — see step 6 for why. It then **proves, before anything is started**, that
+`/` asks for a login and `/kobo/` does not — calibrated first against `torrents.gsrpi.uk`
+— and only then writes `TUNNEL_ID` and `TUNNEL_CREDENTIALS` into `.env` on `one`. So a run
+that fails part way leaves a stack that **cannot** start: compose refuses without those
+two lines. A fresh hostname can take a minute to resolve; if the probe gives up on that,
+re-run.
 
-It refuses, rather than guesses, when: `one` has not pulled the same commit as the phone;
-an Access application on this hostname is not one `edge.yml` asks for (left over from an
-earlier `edge.yml`); or a tunnel named `calibre-web` exists with no credentials on `one`.
-Each message says what to do. Never add `-l one` — see the play's header.
+It refuses, rather than guesses, when: `one` has not pulled the same commit as the control
+node; an Access application on this hostname is not one `edge.yml` asks for (left over
+from an earlier `edge.yml`); or a tunnel named `calibre-web` exists with no tunnel
+credentials file on `one`. Each message says what to do. Never add `-l one` — see the
+play's header.
 
 ### 5. Start it — on `one`
 
@@ -178,7 +180,7 @@ sideloaded *and* is on a synced shelf will appear twice; delete the sideloaded o
 
 ### 8. Record it
 
-From the phone: `ansible-playbook playbooks/server-generate-fleet-inventory.yml`, and commit
+From the control node: `ansible-playbook playbooks/server-generate-fleet-inventory.yml`, and commit
 `docs/fleet-inventory.md` — the two containers should appear with nothing published.
 
 ## Day two
@@ -187,9 +189,9 @@ From the phone: `ansible-playbook playbooks/server-generate-fleet-inventory.yml`
 - **A version bump** — either image — is an edit to `compose.yaml` (tag *and* digest), a
   commit, `git pull` on `one`, `sudo docker compose up -d`. The sidecar does not follow the
   fleet's staggered cloudflared updates.
-- **Who may log in** is `~/.config/cloudflare/access-emails` on the phone; edit it and
+- **Who may log in** is `~/.config/cloudflare/access-emails` on the control node; edit it and
   re-run step 4's play. It replaces the policy's list; it does not add to it.
-- **Lost or leaked tunnel credentials:** in this order — `sudo docker compose stop
+- **Lost or leaked tunnel credentials file:** in this order — `sudo docker compose stop
   cloudflared` (a tunnel with a live connection cannot be deleted), move
   `~/.calibre-web-secrets/tunnel.json` aside, delete the tunnel in the dashboard
   (*Networks → Tunnels*), re-run step 4, then `sudo docker compose up -d`. That `up -d`

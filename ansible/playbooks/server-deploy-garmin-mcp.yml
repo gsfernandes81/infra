@@ -1,6 +1,6 @@
 # DEPLOY garmin-mcp — a Garmin Connect MCP server for claude.ai (its read tools plus five chosen
 # writes; garmin_allowed_writes below), on whichever host
-# hosts/<host>/garmin-mcp places it (`one`). Run from the phone:
+# hosts/<host>/garmin-mcp places it (`one`). Run from the control node:
 #
 #     cd ansible
 #     ansible-playbook playbooks/server-deploy-garmin-mcp.yml --check -K   # prove
@@ -8,14 +8,14 @@
 #     ansible-playbook playbooks/server-deploy-garmin-mcp.yml -K           # after the MFA block it prints: deploys and probes
 #
 # Then add a claude.ai custom connector for https://garmin-mcp.<dns_zone>/mcp, leave the
-# OAuth fields blank, and paste ~/.config/garmin-mcp/consent-secret from this phone into
-# the consent page. deployments/garmin-mcp/README.md is the runbook.
+# OAuth fields blank, and paste ~/.config/garmin-mcp/consent-secret from this control node
+# into the consent page. deployments/garmin-mcp/README.md is the runbook.
 #
 # NO --limit / -l, for the reason in server-create-stack-tunnel.yml's header: the host is
 # found from the stack's symlink by that play's first play, which `-l one` would skip.
 #
-# -K: the tunnel credentials belong to uid 65532, and docker needs root — gavin is not in
-# the docker group (CLAUDE.md § Privileged commands).
+# -K: the tunnel credentials file belongs to uid 65532, and docker needs root — gavin is
+# not in the docker group (CLAUDE.md § Privileged commands).
 #
 # THIS PLAY STARTS THE STACK, unlike the provisioning plays beside it, which stop before
 # anything runs. That is docs/management-plane.md § "`bin/compose` goes, at Phase 3":
@@ -24,15 +24,16 @@
 # TWO HALVES:
 #   1. server-create-stack-tunnel.yml, imported unchanged with stack=garmin-mcp. It pulls the
 #      host's checkout to this control node's commit (and refuses if it cannot), makes the
-#      tunnel and the CNAME, writes the credentials outside the checkout, proves the host's
-#      compose.yaml, edge.yml and cloudflared.yml match this phone's, writes TUNNEL_ID and
-#      TUNNEL_CREDENTIALS into .env (creating it at 0600), and leaves the host in the
-#      `stack_target` group with `stack_hostname` set. edge.yml says `access: none`.
+#      tunnel and the CNAME, writes the tunnel credentials file outside the checkout, proves
+#      the host's compose.yaml, edge.yml and cloudflared.yml match this control node's,
+#      writes TUNNEL_ID and TUNNEL_CREDENTIALS into .env (creating it at 0600), and leaves
+#      the host in the `stack_target` group with `stack_hostname` set. edge.yml says
+#      `access: none`.
 #   2. The play below, on that host: it refuses a Garmin password in .env, fills the other
-#      four .env lines, checks out the pinned source, brings the stack up, and then proves
-#      the result END TO END FROM THIS PHONE — tunnel, nginx, the OAuth metadata, the Garmin
-#      login, and the one property the whole design rests on: that the server serves only
-#      read tools.
+#      four .env lines, checks out the upstream source (pinned in SOURCE), brings the stack
+#      up, and then proves the result END TO END FROM THIS CONTROL NODE — tunnel, nginx, the
+#      OAuth metadata, the Garmin login, and the one property the whole design rests on:
+#      that the server serves only read tools.
 #
 # Re-running is the intended way to finish after a partial failure; every step looks before
 # it acts. Nothing here rebuilds the image unless its tag (in compose.yaml) is absent.
@@ -64,8 +65,8 @@
       {{ (lookup('file', repo_root ~ '/deployments/garmin-mcp/SOURCE').splitlines()
           | reject('match', '^\s*(#|$)') | first).split() }}
 
-    # The consent secret lives on THIS phone, beside the Cloudflare API token file. The
-    # password lookup creates it the first time (48 hex chars, the file 0600 in a 0700
+    # The consent secret lives on THIS control node, beside the Cloudflare API token file.
+    # The password lookup creates it the first time (48 hex chars, the file 0600 in a 0700
     # directory — the lookup's own modes) and reads it afterwards.
     # Rotation: delete the file and re-run.
     garmin_consent_file: "{{ lookup('env', 'HOME') }}/.config/garmin-mcp/consent-secret"
@@ -142,7 +143,8 @@
     - name: Read or create the consent secret
       ansible.builtin.set_fact:
         # Lower-case hex only, written as generated. `hexdigits` would include A-F, and any
-        # case-folding between the phone file and .env makes the pasted secret a mismatch.
+        # case-folding between the control node's file and .env makes the pasted secret a
+        # mismatch.
         garmin_consent: "{{ lookup('ansible.builtin.password', garmin_consent_file, length=48, chars=['0123456789abcdef']) }}"
       when: not ansible_check_mode
       no_log: true
@@ -260,7 +262,7 @@
       become: true
       when: garmin_env_missing | length == 0
 
-    # ── 6  the probes, from this phone, end to end ──────────────────────────
+    # ── 6  the probes, from this control node, end to end ───────────────────
     # Each retries (a new tunnel's DNS, a first boot, a background login), never stops on the
     # module's own failure, and is followed by an assert that says what it means. Both
     # failed_when: false AND ignore_errors: true, as in server-create-stack-tunnel.yml: -1 (no
@@ -435,7 +437,7 @@
       ansible.builtin.debug:
         msg:
           - "connector URL  {{ garmin_url }}/mcp  (claude.ai → custom connector; leave the OAuth fields blank)"
-          - "consent secret {{ garmin_consent_file }} on this phone — paste it on the consent page"
+          - "consent secret {{ garmin_consent_file }} on this control node — paste it on the consent page"
           - "tools          {{ garmin_served_tools | length }}: reads, plus {{ garmin_allowed_writes | join(', ') }}"
           - "memory         {{ garmin_stats.stdout_lines | default(['(not read)']) | join(' · ') }}"
       changed_when: true

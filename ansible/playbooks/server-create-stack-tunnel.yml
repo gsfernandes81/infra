@@ -1,6 +1,6 @@
 ---
 # GIVE A COMPOSE STACK ITS OWN TUNNEL — for a cloudflared SIDECAR in the stack, not a rule
-# in the host's tunnel. Run from the phone:
+# in the host's tunnel. Run from the control node:
 #
 #     cd ansible
 #     ansible-playbook playbooks/server-create-stack-tunnel.yml -e stack=calibre-web --check -K
@@ -10,10 +10,11 @@
 # symlink; `-l one` would skip that play, leave nothing to run on, and exit 0 having done
 # nothing — on a phone screen, indistinguishable from a clean no-op.
 #
-# -K because the credentials file belongs to uid 65532, the user cloudflare/cloudflared
-# runs as, so reading and writing it needs root — even under --check, where the read of an
-# existing file is what tells the play whether the tunnel already exists. The Cloudflare
-# API token comes from ~/.config/cloudflare/api-token as for every play that talks to it.
+# -K because the tunnel credentials file belongs to uid 65532, the user
+# cloudflare/cloudflared runs as, so reading and writing it needs root — even under
+# --check, where the read of an existing file is what tells the play whether the tunnel
+# already exists. The Cloudflare API token comes from ~/.config/cloudflare/api-token as for
+# every play that talks to it.
 #
 # NOTHING IS STARTED. Like every play here, this provisions and stops; the stack comes up
 # by hand afterwards. And it is ORDERED SO THE STACK CANNOT START EARLY: the two .env lines
@@ -249,7 +250,8 @@
     # an Access login and whose origin is irrelevant, because Access answers first.
     access_calibration_hostname: "torrents.{{ dns_zone }}"
     # Twelve tries ten seconds apart: a CNAME or an application made seconds ago can take
-    # that long to show from the phone, and a probe that gave up sooner fails a good run.
+    # that long to show from the control node, and a probe that gave up sooner fails a good
+    # run.
     probe_retries: 12
     # What the bypass path may answer and still count as open. 530: no connector yet — the
     # expected answer before the stack is started. 502: connector up, app down. 401: the app
@@ -363,8 +365,9 @@
           here, read the diff, re-run. Nothing has been created.
 
     - name: Read checksums of {{ stack }} files on {{ inventory_hostname }}
-      # The checks above read the phone's checkout; the sidecar runs from the host's. A host
-      # that has not pulled, or pulled something else, would start an ingress nobody checked.
+      # The checks above read the control node's checkout; the sidecar runs from the
+      # host's. A host that has not pulled, or pulled something else, would start an
+      # ingress nobody checked.
       ansible.builtin.stat:
         path: "{{ infra_checkout }}/deployments/{{ stack }}/{{ item }}"
       loop: "{{ stack_checked | list }}"
@@ -668,7 +671,7 @@
     # play on its own and the assert after it is what speaks, with the reason in words.
     # Both, because -1 (no answer: DNS, TLS, refused) fails `uri` whatever failed_when says,
     # and because ansible-core marks a task failed when its retries run out — 2.21 does not
-    # let that stop the play, but the phone's core may be older.
+    # let that stop the play, but the control node's core may be older.
     - name: "Access login: probe the login in front of {{ stack }}"
       when:
         - stack_edge.access == 'browser'

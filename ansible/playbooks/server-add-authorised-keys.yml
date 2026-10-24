@@ -224,9 +224,9 @@
         # expand_argument_vars: false OR THE SCRIPT IS RESOLVED ON THE WRONG MACHINE.
         # `command` expands environment variables in its arguments by default, so `$HOME`
         # below became the CONTROL NODE's home before ssh was ever invoked, and the copy
-        # was aimed at a path that exists on the phone and not in the container. It fails
-        # loudly rather than silently, but it fails. Everything in this argument is meant
-        # for the remote shell; none of it is for ours.
+        # was aimed at a path that exists on the control node and not in the container. It
+        # fails loudly rather than silently, but it fails. Everything in this argument is
+        # meant for the remote shell; none of it is for ours.
         expand_argument_vars: false
         argv:
           - ssh

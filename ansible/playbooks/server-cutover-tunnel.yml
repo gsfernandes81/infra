@@ -40,9 +40,9 @@
     cfg_file: "/etc/cloudflared/config.yml"
     repo_cfg: "{{ playbook_dir }}/../../hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
 
-    # The clone ON THE HOST. Absolute, and not `~`: the install task runs with become,
+    # The checkout ON THE HOST. Absolute, and not `~`: the install task runs with become,
     # where `~` is root's home and `~/infra` does not exist there.
-    # NOT hardcoded. Every host's clone is ~gavin/infra, including `two` — CLAUDE.md said
+    # NOT hardcoded. Every host's checkout is ~gavin/infra, including `two` — CLAUDE.md said
     # /srv/infra for that box and the box says otherwise, which is how this variable came
     # to exist. `infra_checkout` in host_vars overrides it for any host that ever differs;
     # no host sets it today, and adding one back for `two` would abort its cutover.
@@ -91,7 +91,7 @@
           play would stop it mid-run. Come in over the mesh instead and tell Ansible so:
           -e ansible_host={{ inventory_hostname }}-zero   (or -one / -two)
 
-    # ── the host's clone has to be where we think it is ──────────────────────
+    # ── the host's checkout has to be where we think it is ───────────────────
     # A `chdir` into a directory that is not there fails inside the block, which fires
     # the rescue for something that is not a rollback. Worse, this value came from
     # CLAUDE.md and hosts/<host>/setup/README.md — both of which describe how a box was
@@ -166,19 +166,19 @@
     # THE CHECK ABOVE READS THE CONTROL NODE, NOT THE HOST — `lookup('file', …)` always
     # does. So it proves the reviewed config is right HERE and says nothing about what
     # install-system-file is about to install THERE, which is read from the host's own
-    # clone. On `two`, 2026-08-28, that clone had never been pulled: the install was a
+    # checkout. On `two`, 2026-08-28, that checkout had never been pulled: the install was a
     # no-op that left config.yml naming the OLD tunnel, the credentials were then swapped
     # to the NEW one, and cloudflared could not authenticate a tunnel its config did not
     # name. It surfaced as a 503 with zero ready connections and looked like a slow box.
-    - name: Read the reviewed config from {{ inventory_hostname }}'s clone
+    - name: Read the reviewed config from {{ inventory_hostname }}'s checkout
       ansible.builtin.slurp:
         src: "{{ host_repo }}/hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
       register: host_repo_cfg
       become: true
 
-    - name: Check {{ inventory_hostname }}'s clone has this checkout's config
+    - name: Check {{ inventory_hostname }} has this checkout's config
       ansible.builtin.assert:
-        # BYTE-EQUAL, not just the tunnel id. Comparing one key passes a clone that has
+        # BYTE-EQUAL, not just the tunnel id. Comparing one key passes a checkout that has
         # the right tunnel and a stale INGRESS — a hostname added on the control node
         # after the host last pulled. That install then succeeds, the credentials swap,
         # the connector cycles, and only the post-cycle rules check catches it, with a
@@ -189,13 +189,13 @@
           hosts/{{ inventory_hostname }}/system/cloudflared-config.yml differs between
           this control node and {{ host_repo }} on {{ inventory_hostname }}. The host has
           tunnel {{ (host_repo_cfg.content | b64decode | from_yaml).tunnel }}; phase 1
-          produced {{ new_tunnel }}. Either that clone has not been pulled since the
+          produced {{ new_tunnel }}. Either that checkout has not been pulled since the
           review — in which case installing from it is a no-op and the credential swap
           then points the connector at a tunnel its config does not name — or the ingress
           differs, which the post-cycle check would only catch after an outage. Commit and
           push phase 1's config, then on {{ inventory_hostname }}:
           git -C {{ host_repo }} pull
-        success_msg: "the host's clone carries the reviewed config"
+        success_msg: "the host's checkout carries the reviewed config"
 
     # RESUMABLE. If the live credentials already name the target, the host half is done
     # — installed, swapped, cycled — and re-running it would achieve nothing while the

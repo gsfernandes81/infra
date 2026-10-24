@@ -20,7 +20,7 @@
 # procedure: this is phase 1, for every file, on every host, in one command.
 #
 # WHERE THE BYTES COME FROM, decided 2026-08-24 after a challenge and a second opinion.
-# The control node's HEAD is the review anchor; the host clone is the delivery vehicle
+# The control node's HEAD is the review anchor; the host checkout is the delivery vehicle
 # and the drift checker's frame of reference; EQUALITY BETWEEN THEM IS ASSERTED, not
 # assumed. The host pulls --ff-only, then must be on exactly the commit the control node
 # is on, or the play refuses — which also closes the race where origin moves between
@@ -28,13 +28,13 @@
 #
 # Bytes deliberately do NOT travel over the Ansible connection, although that is how
 # Ansible normally works, for three reasons: a working tree can be dirty where a commit
-# cannot, so copying from the phone's checkout can ship unreviewed bytes; check-system-
-# drift runs on the host against the host clone and must read ok immediately after a
-# correct deploy, which a control-node-ahead copy breaks by design; and the tool's
-# provenance guard IS the tracked path — a --source bypass would let any file with a
-# plausible header onto the boot path.
+# cannot, so copying from the control node's checkout can ship unreviewed bytes;
+# check-system-drift runs on the host against the host checkout and must read ok
+# immediately after a correct deploy, which a control-node-ahead copy breaks by design; and
+# the tool's provenance guard IS the tracked path — a --source bypass would let any file
+# with a plausible header onto the boot path.
 #
-# GitHub stays in the deploy path. Acceptable: every clone already syncs through it,
+# GitHub stays in the deploy path. Acceptable: every checkout already syncs through it,
 # there is deliberately no host-to-host git, and the manual scp-plus-tool path still
 # exists for an outage.
 #
@@ -85,8 +85,8 @@
       run_once: true
       failed_when: dirty.stdout | length > 0
 
-    # ── the delivery vehicle: the host clone, pinned to the anchor ───────────
-    # --ff-only: a diverged host clone is a situation to look at, not merge through.
+    # ── the delivery vehicle: the host checkout, pinned to the anchor ────────
+    # --ff-only: a diverged host checkout is a situation to look at, not merge through.
     # check_mode false so --check also pulls; a dry run against a stale checkout would
     # diff the wrong bytes. No -q: changed_when matches "Already up to date" in stdout,
     # and -q suppresses exactly that line, so every no-op pull would report changed.
@@ -114,7 +114,7 @@
       ansible.builtin.assert:
         that: host_dirty.stdout | length == 0
         fail_msg: >-
-          {{ inventory_hostname }}'s clone at {{ repo }} has local edits under hosts/
+          {{ inventory_hostname }}'s checkout at {{ repo }} has local edits under hosts/
           or bin/: {{ host_dirty.stdout_lines | join('; ') }}. The commit assert would
           still pass over these — pull --ff-only never touches them — so the tool
           would install bytes nobody reviewed. Commit, push and re-pull, or discard

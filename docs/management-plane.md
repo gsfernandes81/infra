@@ -288,8 +288,8 @@ before that prompted, in memory, for one run) and specifically NOT into the secr
 because that directory is mounted into the container and a container able to rewrite the
 Access policy in front of itself is not protected by it. The tunnel credentials are a
 read-only file rather than `--token`, which is the containerised form of the rule
-restated below. The service token belongs to the phone and must not be in the container,
-because it authorises *reaching* the container.
+restated below. Each client's service token belongs to that client and must not be in the
+container, because it authorises *reaching* the container.
 
 ### A control node inside the fleet — OPEN, deliberately
 
@@ -297,7 +297,7 @@ because it authorises *reaching* the container.
 in the image, an ssh key reaching all three hosts — and that was stepped back from on
 2026-08-22 before it was used. **By default the container now has no route to `zero`,
 `one` or `two` at all.** It develops this repo; running playbooks against the fleet stays
-on the phone. One variable turns it on (`INFRA_DEV_FLEET=1`), off is the default, and the
+on the control node. One variable turns it on (`INFRA_DEV_FLEET=1`), off is the default, and the
 argument is here rather than in whoever next runs the script.
 
 The objection is structural, not squeamish: it puts the control plane **inside a container
@@ -374,13 +374,12 @@ and the whole point of doing `infra-dev` first was to have somewhere safe to sta
 turned out to be the right order twice over: every one of these was cut over from a mesh
 route, and `two`'s took four attempts.
 
-**Two things travel with this decision.** A tunnel token per dev container — a secret,
-which is what the Vault path above is for. And
-[`host-setup.md`](host-setup.md)'s **token-in-argv leak**, flagged there as applied on no
-host: `supervise-daemon` logs its child's full command line to syslog, so a live tunnel
-token sits in `/var/log/messages` at mode 640 `root:wheel`. More tunnels means more
-instances of it, so it stops being deferrable. **Rule, restated: secrets never go in
-`command_args`.**
+**Two things travel with this decision.** A tunnel credentials file per dev container — a
+secret, which is what the Vault path above is for. And [`host-setup.md`](host-setup.md)'s
+**token-in-argv leak**, flagged there as applied on no host: `supervise-daemon` logs its
+child's full command line to syslog, so a live tunnel token sits in `/var/log/messages` at
+mode 640 `root:wheel`. More tunnels means more instances of it, so it stops being
+deferrable. **Rule, restated: secrets never go in `command_args`.**
 
 ## Placement — what can move and what cannot
 
@@ -633,7 +632,7 @@ is the useful part. The phase table is the record of where things stand.
 
 **2g, filed 2026-08-23 — DECIDED, not optional-but-nice.** The owner's reason, and it is
 the deciding one: *"I'm not interested in leaving more config than I have to in a web
-dashboard."* That is the same argument as everything else in this document — routes that
+dashboard."* That is the same argument as everything else in this document — ingress rules that
 can be reviewed, diffed and recovered from git rather than clicked into a UI nobody can
 audit. It is not fixing a fault; zero's actual security problem was closed by 2e.
 
@@ -642,10 +641,10 @@ audit. It is not fixing a fault; zero's actual security problem was closed by 2e
 `config_src: local`, and its CNAMEs are repointed to the new UUID.
 
 **For `one`, this absorbs 2e entirely.** A new tunnel arrives with fresh credentials in a
-credentials file and no token in argv, so both phases are satisfied by construction — and
-retiring the old tunnel is *stronger* than rotating its secret, because deleting a tunnel
-kills the disclosed credential outright rather than superseding it. Do not run 2e's two
-phases on `one` first; that work would be thrown away.
+tunnel credentials file and no token in argv, so both phases are satisfied by construction
+— and retiring the old tunnel is *stronger* than rotating its secret, because deleting a
+tunnel kills the disclosed credential outright rather than superseding it. Do not run 2e's
+two phases on `one` first; that work would be thrown away.
 
 **Method, which is what keeps it cheap.** Both tunnels run at once — the new connector
 comes up alongside the old one, on its own metrics port, serving nothing until DNS points
@@ -730,9 +729,9 @@ there for months.
 sequencing.** An earlier draft of this entry said the clock starts when 2d lands. It does
 not. The or3 agent's correction, verified against this repo's own code on 2026-08-24: the
 in-container tunnel is *additive*, `dev/entrypoint.sh` starting a connector only when
-`DEV_TUNNEL_HOSTNAME` is set **and** a credentials file exists, so an unset hostname means
-no second door. The window therefore opens when the owner sets that variable, which is a
-knob he holds rather than a consequence he inherits.
+`DEV_TUNNEL_HOSTNAME` is set **and** a tunnel credentials file exists, so an unset
+hostname means no second door. The window therefore opens when the owner sets that
+variable, which is a knob he holds rather than a consequence he inherits.
 
 **So do this first and there is no window.** Retiring the rule early costs nothing,
 because the break-glass path does not use the tunnel: it reaches `127.0.0.1:2224` through
@@ -752,10 +751,10 @@ through* asks for. Delete the CNAME as well as the ingress rule: the rule alone 
 record pointing at a tunnel that answers it with the catch-all 404.
 
 **2g: `one` and `zero` are done, 2026-08-23.** Both run new tunnels created with
-`config_src: local`, with their routes in `hosts/<host>/system/cloudflared-config.yml`
-and their old tunnels deleted. Retiring `one`'s old tunnel is what finally voided its
-disclosed credential, so 2e closed for that host as a side effect rather than as a
-rotation.
+`config_src: local`, with their ingress rules in
+`hosts/<host>/system/cloudflared-config.yml` and their old tunnels deleted. Retiring
+`one`'s old tunnel is what finally voided its disclosed credential, so 2e closed for that
+host as a side effect rather than as a rotation.
 
 Three things the rehearsal was worth, none of which were the plan:
 
@@ -783,7 +782,7 @@ Four attempts, and every one of them found a real defect rather than bad luck:
    died with `unix_listener: cannot bind`, reported as UNREACHABLE — which reads like the
    box being down. `_client-fleet-ssh.yml` created `~/.ssh/cm` and not ansible.cfg's own socket
    directory; the phone had it only because someone once made it by hand.
-2. **The host's clone was stale**, so `install-system-file` installed the old config as a
+2. **The host's checkout was stale**, so `install-system-file` installed the old config as a
    no-op, the credentials were then swapped to the new tunnel, and cloudflared could not
    authenticate a tunnel its config did not name. The guard that should have caught it
    read `lookup('file', …)`, which runs on the **control node** — it compared phase 1's
@@ -793,7 +792,7 @@ Four attempts, and every one of them found a real defect rather than bad luck:
    response body said otherwise and `no_log` was hiding it.
 4. The run that worked.
 
-The plays now verify the token first, check the host's own clone and the **installed**
+The plays now verify the token first, check the host's own checkout and the **installed**
 config before swapping credentials, print refusal bodies, and restore the config as well
 as the credentials on rollback. `docs/decisions.md` carries each one.
 

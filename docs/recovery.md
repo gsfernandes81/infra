@@ -197,7 +197,7 @@ bind-mounts a path that could fail to mount.
 
 | | `nofail` | `chattr +i` | tunnel credential |
 |---|---|---|---|
-| `zero` | ✅ Aug 2026 | ✅ Aug 2026 | ✅ **done 2026-08-23** — rotated, out of argv, credentials file |
+| `zero` | ✅ Aug 2026 | ✅ Aug 2026 | ✅ **done 2026-08-23** — rotated, out of argv, tunnel credentials file |
 | `one` | ✅ Aug 2026 | ✅ Aug 2026 | ✅ **done 2026-08-23** — old tunnel retired under 2g, which voided the disclosed value outright |
 | `two` | n/a (no data mounts) | n/a | ✅ **done 2026-08-29** — same way: tunnel `bdb4a988` deleted, which voided the credential that had been inline |
 

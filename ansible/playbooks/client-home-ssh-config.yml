@@ -30,7 +30,7 @@
 # container, so moving one to `one` changes no ingress rule anywhere
 # (docs/management-plane.md § Addressing). `infra-dev` and `or3-dev` have tunnels; `dd-dev`
 # and `ds-dev` do not yet (Phase 5) and are not running. Every one gets its ssh block; a
-# container with no Access application yet gets no token, and `ssh <c>` says so.
+# container with no Access application yet gets no token, and `ssh <alias>` says so.
 #
 #   container   image lives in
 #   ─────────   ──────────────────
@@ -63,7 +63,7 @@
 # A row above and an import below — but only after the edge and the host halves exist,
 # because a client block is the third of three:
 #
-#     ansible-playbook playbooks/server-create-dev-container.yml -e name=<c> -e secrets_dir=<its mount>
+#     ansible-playbook playbooks/server-create-dev-container.yml -e name=<alias> -e secrets_dir=<its mount>
 #     ansible-playbook playbooks/client-home-ssh-config.yml
 #
 # The first line is the edge half for any container and, for infra-dev only, the host
@@ -92,10 +92,10 @@
 - name: Write the fleet ssh block on this client
   ansible.builtin.import_playbook: _client-fleet-ssh.yml
   # Tagged `ssh` here, not task by task inside it: the fleet play is ssh config and nothing
-  # else — no Access token is read or written — so the whole of it is the `ssh` half.
+  # else — no service token is read or written — so the whole of it is the `ssh` half.
   tags: [ssh]
   # `when` on an import applies to every task the import brings in, which is what makes
-  # -e only=<container> a one-container run rather than a whole one.
+  # -e only=<alias> a one-container run rather than a whole one.
   when: only is not defined
 
 # ── the dev containers ─────────────────────────────────────────────────────────

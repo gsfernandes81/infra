@@ -29,12 +29,12 @@ ansible-playbook playbooks/server-generate-fleet-inventory.yml -K
 
 Two prefixes. **`client-`** runs on the machine you type on and changes only it.
 **`server-`** changes a Pi, or the Cloudflare edge in front of one, and runs from the
-phone. A leading **`_`** is a half that one of these imports — not a thing you run.
+control node. A leading **`_`** is a half that one of these imports — not a thing you run.
 
 | I want to… | Run | Needs |
 |---|---|---|
-| set up this phone or laptop: every ssh alias, every dev-container token, Windows too from WSL | `client-home-ssh-config.yml` | the [API token](#the-cloudflare-api-token) on this machine; it mints the Access tokens itself |
-| rotate one dev container's token on this client, or add it once its tunnel exists | `client-home-ssh-config.yml -e only=or3-dev -e replace_token=true` | the same |
+| set up this phone or laptop: every ssh alias, every service token, Windows too from WSL | `client-home-ssh-config.yml` | the [API token](#the-cloudflare-api-token) on this machine; it mints the service tokens itself |
+| rotate one dev container's service token on this client, or add it once its tunnel exists | `client-home-ssh-config.yml -e only=or3-dev -e replace_token=true` | the same |
 | let a new phone or laptop into the dev containers | `server-add-authorised-keys.yml -e client_pubkey_file=~/laptop.pub` | a route to `zero` |
 | create a dev container: its tunnel, DNS, Access, and (for `infra-dev`) its host side | `server-create-dev-container.yml` · `-e name=or3-dev` for another | the [API token](#the-cloudflare-api-token) |
 | see what runs where, read-only, into `docs/fleet-inventory.md` | `server-generate-fleet-inventory.yml -K` | sudo |
@@ -42,7 +42,7 @@ phone. A leading **`_`** is a half that one of these imports — not a thing you
 | install the tracked `/etc` files, without restarting anything | `server-install-system-files.yml -K` · `-l <host>` · `-e only=<file>` | sudo |
 | create a tunnel for a Pi (nothing serves through it yet) | `server-create-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | give a compose stack its own tunnel, for a `cloudflared` sidecar — plus an Access login if its `edge.yml` asks | `server-create-stack-tunnel.yml -e stack=calibre-web -K` · **never `-l`**: the host comes from the stack's symlink · pulls the host's checkout to your commit itself | sudo, the API token, and `~/.config/cloudflare/access-emails` for a login |
-| deploy `garmin-mcp` — its tunnel (the play above), `.env`, the pinned checkout, `docker compose up`, then end-to-end probes including the served-tools check (reads plus the allowed writes) | `server-deploy-garmin-mcp.yml -K` · **never `-l`** · stops once at the Garmin login, whose block it prints | sudo, the API token |
+| deploy `garmin-mcp` — its tunnel (the play above), `.env`, the upstream source (pinned in `SOURCE`), `docker compose up`, then end-to-end probes including the served-tools check (reads plus the allowed writes) | `server-deploy-garmin-mcp.yml -K` · **never `-l`** · stops once at the Garmin login, whose block it prints | sudo, the API token |
 | move a Pi onto a new tunnel — **a deliberate outage** | `server-cutover-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | delete a Pi's tunnel — **irreversible** | `server-delete-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | update cloudflared on a Pi, deliberately | `server-update-cloudflared.yml -e target=<host> -e version=… -e sha256=… -K` | sudo; refuses while that host autoupdates, which today is all of them |
@@ -60,7 +60,7 @@ changes something: packages, **boot-path `/etc` files**, the cloudflared binary,
 and DNS, `authorized_keys` on `zero`. **`server-deploy-garmin-mcp.yml` is the one play that
 starts a stack** — Phase 3's "Ansible drives stacks", first used there. `server-create-dev-container.yml` prints a secret
 that cannot be fetched again. `client-home-ssh-config.yml` writes ssh config and a 0600
-token on the client.
+service token on the client.
 
 The halves, for reading rather than running:
 
@@ -101,17 +101,17 @@ ansible-playbook playbooks/client-home-ssh-config.yml
 ```
 
 That is the fleet block, plus a block for every dev container, plus — from WSL — the
-Windows side of the same laptop. **Nothing is typed.** For every container whose token this
-client does not hold, the play mints one — this client's own, named `<container>-<client>`
-— over the Cloudflare API, adds it to the container's Access policy and writes it to
-`~/.config/<container>/token`. The only thing it needs for that is the
+Windows side of the same laptop. **Nothing is typed.** For every container whose service
+token this client does not hold, the play mints one — this client's own, named
+`<alias>-<client>` — over the Cloudflare API, adds it to the container's Access policy and
+writes it to `~/.config/<alias>/token`. The only thing it needs for that is the
 [API token](#the-cloudflare-api-token) at `~/.config/cloudflare/api-token` on this
 machine; if that is missing it prints how to mint one and stops.
 
 **When a container's tunnel does not exist yet** it has no Access application, so its
 token is skipped with a message and the run carries on; its ssh block is written anyway,
-and `ssh <c>` says the token is missing rather than failing obscurely. The ssh blocks and
-the tokens are separate halves, tagged `ssh` and `access`:
+and `ssh <alias>` says the token is missing rather than failing obscurely. The ssh blocks
+and the tokens are separate halves, tagged `ssh` and `access`:
 
 ```sh
 ansible-playbook playbooks/client-home-ssh-config.yml --tags ssh      # every block; needs no API token
@@ -284,7 +284,7 @@ In the Cloudflare dashboard, logged in as the account's owner:
 9. **Copy the token now.** Cloudflare shows it once; after this page it cannot be
    fetched again, only rolled.
 
-Then on the phone, in fish, without the token touching history or a process list:
+Then on the control node, in fish, without the token touching history or a process list:
 
 ```fish
 mkdir -p ~/.config/cloudflare; chmod 700 ~/.config/cloudflare
@@ -315,7 +315,8 @@ Account/Zone scope), and the API reference pages for every endpoint the plays ca
 (`cfd_tunnel`, `teamnet/routes`, `access/service_tokens`, `access/apps` and their
 `policies`, `zones`, `dns_records`). The union of what those pages list is the first five
 rows above, and nothing else: the plays never list accounts (the id comes from the zone, or
-from a credentials file already on the box), and `/user/tokens/verify` needs no permission.
+from a tunnel credentials file already on the box), and `/user/tokens/verify` needs no
+permission.
 **The sixth, Transform Rules, arrived 2026-10-24** with `server-create-stack-tunnel.yml`: a
 stack whose `edge.yml` names `request_headers` gets one rule in the zone's
 `http_request_late_transform` phase (`rulesets`; Cloudflare's *Request Header Transform
@@ -332,12 +333,12 @@ need Cloudflare Tunnel, Zone Read and DNS. One token carrying all six is the poi
 
 ### The Access service tokens are minted, not pasted
 
-Each client mints its own, per container, named `<container>-<client>`, when
+Each client mints its own, per container, named `<alias>-<client>`, when
 `client-home-ssh-config.yml` runs there, and adds it to the container's `non_identity`
 policy without disturbing the tokens already in it. Nothing is shown. To revoke one client:
-Zero Trust → Access → Service credentials → Service Tokens → delete `<container>-<client>`
+Zero Trust → Access → Service credentials → Service Tokens → delete `<alias>-<client>`
 (remove it from the application's policy first if Cloudflare refuses). The shared
-`<container>` tokens of the old design stay valid until removed the same way; do that once
+`<alias>` tokens of the old design stay valid until removed the same way; do that once
 every client has re-run the play.
 
 ### Rotating or revoking it

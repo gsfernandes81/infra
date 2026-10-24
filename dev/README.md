@@ -25,7 +25,7 @@ session: your keystrokes and the characters that come back.
 that a playbook you are editing can be syntax-checked, linted and read against the real
 `ansible.cfg`. They are deliberately *not* wired to the fleet: by default this container
 has no route to `zero`, `one` or `two` at all, and running playbooks against them stays
-on the phone. See *The control-node question, deferred* below; it is a decision that has
+on the control node. See *The control-node question, deferred* below; it is a decision that has
 been consciously postponed rather than an omission.
 
 ## What it is not
@@ -40,7 +40,7 @@ been consciously postponed rather than an omission.
   the container's payload, `or3-dev` shipped one defaulted off, and three arrangements for
   one capability is three things to remember and three ways to be confused at 2am. All of
   it is deleted — the supervisors in their repos, the hook and `DEV_REMOTE_CONTROL` here.
-  **One way in, everywhere: `ssh <name>`**, which lands on the `claude-sessions` menu
+  **One way in, everywhere: `ssh <alias>`**, which lands on the `claude-sessions` menu
   (since 2026-10-02; it was `abduco -A claude claude`). Every session it opens survives
   a dropped link, and it does not put a permission classifier in charge of a container
   holding deploy keys. Adding remote control back is a decision with reasoning attached,
@@ -76,16 +76,16 @@ separately, and neither is needed for a claude running on zero.
 zero should have a script for:
 
 ```sh
-# on the phone
+# on the control node
 cd ~/infra/ansible
 ansible-playbook playbooks/server-create-dev-container.yml --check --diff    # prove first
 ansible-playbook playbooks/server-create-dev-container.yml                  # edge + host halves, one run
 ```
 
 That creates the secrets directory, generates the GitHub deploy key, authorises **this
-control node's own public key** so the phone can ssh in, and writes `dev/.env`. It prints
-the one `gh repo deploy-key add …` command it cannot run itself. Then, on zero, in your
-own terminal — `gavin` is not in the docker group, so this half is never an ansible job:
+control node's own public key** so it can ssh in, and writes `dev/.env`. It prints the one
+`gh repo deploy-key add …` command it cannot run itself. Then, on zero, in your own
+terminal — `gavin` is not in the docker group, so this half is never an ansible job:
 
 ```sh
 cd ~/infra/dev && make dev             # build, start, then walk the two logins
@@ -530,8 +530,8 @@ way back to a session after a disconnect is the rest.
 
 ### The order
 
-Both playbooks run from the phone — **there is no ansible on zero and there should not
-be.** zero is the box being managed; installing a control plane on it is the wrong
+Both playbooks run from the control node — **there is no ansible on zero and there should
+not be.** zero is the box being managed; installing a control plane on it is the wrong
 direction, and this container is what zero's control node is *for*.
 
 ```sh
@@ -570,8 +570,8 @@ why the Windows token's permissions are printed rather than asserted, are in
 ### The service token is minted, not typed
 
 Since 2026-10-04 `client-home-ssh-config.yml` mints this client's own Access service token
-over the Cloudflare API — named `<container>-<client>`, added to the container's Access
-policy, written straight to `~/.config/<container>/token` at mode 600 — using the API token
+over the Cloudflare API — named `<alias>-<client>`, added to the container's Access
+policy, written straight to `~/.config/<alias>/token` at mode 600 — using the API token
 at `~/.config/cloudflare/api-token` on the same machine. Nothing is shown and nothing is
 pasted. If that file is missing the play prints how to mint one and stops;
 [`../ansible/README.md`](../ansible/README.md) § *The Cloudflare API token* is the same text.
@@ -687,7 +687,7 @@ broken rather than as the wrong policy type.
 | Secret | Lives | Must never be |
 |---|---|---|
 | Cloudflare **API token** | nowhere — `vars_prompt`, in memory for one run | in `$INFRA_SECRETS` |
-| Tunnel **credentials** | `$INFRA_SECRETS/tunnel.json`, mode 600, mounted read-only | in argv or env |
+| Tunnel **credentials file** | `$INFRA_SECRETS/tunnel.json`, mode 600, mounted read-only | in argv or env |
 | Access **service token** | the phone's environment, mode-600 fish conf.d | in the container, or in a `ProxyCommand` |
 
 Each of those "must never" is a specific failure, not tidiness:
@@ -701,8 +701,9 @@ Each of those "must never" is a specific failure, not tidiness:
   reason the container did it first still stands: it is `host-setup.md`'s token-in-argv
   leak and `management-plane.md`'s *secrets never go in `command_args`*. There is no
   `supervise-daemon` in a container, but `docker inspect` shows argv **and** env, and
-  `.Config.Env` is exactly what `server-generate-fleet-inventory.yml` refuses to read because it
-  holds live secrets. A read-only credentials file is the spelling that is in neither.
+  `.Config.Env` is exactly what `server-generate-fleet-inventory.yml` refuses to read
+  because it holds live secrets. A read-only tunnel credentials file is the spelling that
+  is in neither.
 - **The service token must not be in the container**, because it authorises *reaching*
   the container — putting it inside is the same mistake in the other direction. On the
   phone it goes in the environment rather than the `ProxyCommand`, because a secret on a
@@ -723,7 +724,8 @@ retries a tunnel that will never connect. `make tunnel-log` is what it points yo
 
 **By default this container cannot reach `zero`, `one` or `two`.** No fleet key, no
 `ssh_config.fleet`, no `known_hosts.fleet`. It develops this repo — edit, commit, push,
-syntax-check a playbook — and running playbooks against the fleet stays on the phone.
+syntax-check a playbook — and running playbooks against the fleet stays on the control
+node.
 
 That is a step back from where this was heading, taken deliberately. The container was
 being built as a second control node, and there is a real objection to it: **it puts the
@@ -1272,7 +1274,7 @@ with it, mid-edit. The menu is the habit — every session it opens is a zmx ses
 whichever way you came in. `screen` is also in the image and is better for ordinary shell
 work. abduco left the image on 2026-10-06, with the old offloader that was its last user.
 
-**`/workspace` is a bind mount of the host's clone, not a second checkout.** A `git
+**`/workspace` is a bind mount of the host's checkout, not a second one.** A `git
 pull` in the container and one on zero are the same pull, on one working tree — there
 is nothing that can drift. The entrypoint pulls `--ff-only` on start, best-effort: a
 container that will not come up because the network is down, or because the tree has
@@ -1303,7 +1305,7 @@ so on. `make dev` at either level is the bring-up above.
 
 The uid the container's `dev` user is built at comes from the **owner of the
 checkout**, read with `stat`, not from `id -u`: under `sudo` that is 0, and a dev user
-at uid 0 writes root-owned files into the bind-mounted clone. It refuses to build at 0
+at uid 0 writes root-owned files into the bind-mounted checkout. It refuses to build at 0
 rather than doing it.
 
 `restart` is `stop`/`start` deliberately — `up -d` re-evaluates the config and may

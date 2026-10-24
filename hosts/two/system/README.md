@@ -125,9 +125,9 @@ What is worth checking by hand on this box now is smaller, and none of it is a h
 
 ```sh
 id claude                                  # expect no wheel
-# NOTE: /srv/infra does not exist on this box — the clone is ~gavin/infra. The setup
+# NOTE: /srv/infra does not exist on this box — the checkout is ~gavin/infra. The setup
 # README documents the intent; the box went the other way. Checked 2026-08-29.
-stat -c '%U:%G %a' ~gavin/infra            # the clone, wherever it really is
+stat -c '%U:%G %a' ~gavin/infra            # the checkout, wherever it really is
 stat -c '%U:%G %a' ~gavin/infra/deployments/destiny-director/.env   # expect 640
 iptables -S OUTPUT | grep -c REJECT        # expect the LAN rules, step 8
 cat /etc/local.d/oom.start                 # cloudflared pinned to -1000
@@ -166,7 +166,7 @@ argument-less verbs. The current key reaches a shell, so it must **not** go ther
 
 ## The checkout is shared, and read-only to the deploy account
 
-One clone, **documented as `/srv/infra`, actually at `~gavin/infra`, and `/srv/infra` is dead** (owner, 2026-08-29). The ownership and modes below describe the directory that was never created — treat them as the intent, not the state: `gavin:deploy`, dirs `2750`,
+One checkout, **documented as `/srv/infra`, actually at `~gavin/infra`, and `/srv/infra` is dead** (owner, 2026-08-29). The ownership and modes below describe the directory that was never created — treat them as the intent, not the state: `gavin:deploy`, dirs `2750`,
 files `0640`. `gavin` pulls and edits; `claude` reads. That is what makes "the deploy
 account cannot choose the image" a permission rather than a claim.
 
