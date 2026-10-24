@@ -8,11 +8,11 @@
 # ONE CONTAINER, by name — the token-rotation path, and the way to add a token for a
 # container whose tunnel has only just been created:
 #
-#     ansible-playbook playbooks/client-home-ssh-config.yml -e only=or3-dev -e replace_token=true
+#     ansible-playbook playbooks/client-home-ssh-config.yml -e container=or3-dev -e replace_token=true
 #
-# `only`, NOT `alias`. Each import below pins `alias:` for its container; an `-e alias=`
+# `container`, NOT `alias`. Each import below pins `alias:` for its container; an `-e alias=`
 # would outrank all four (extra vars win) and configure the same container four times.
-# `only` is read by the `when:` on each import and nowhere else. With it the fleet half is
+# `container` is read by the `when:` on each import and nowhere else. With it the fleet half is
 # skipped too, so the run touches exactly one block and one token.
 #
 # Run it from THIS DIRECTORY — ansible.cfg is read from the cwd and is the only thing
@@ -63,7 +63,7 @@
 # A row above and an import below — but only after the edge and the host halves exist,
 # because a client block is the third of three:
 #
-#     ansible-playbook playbooks/server-create-dev-container.yml -e name=<alias> -e secrets_dir=<its mount>
+#     ansible-playbook playbooks/server-create-dev-container.yml -e container=<alias> -e secrets_dir=<its mount>
 #     ansible-playbook playbooks/client-home-ssh-config.yml
 #
 # The first line is the edge half for any container and, for infra-dev only, the host
@@ -75,18 +75,18 @@
 # NO NEW COLLECTIONS, and no tasks of its own: this file is composition and a table.
 # Everything it runs belongs to the two plays it imports.
 
-# ── a typo in -e only= must not be a silent, successful, empty run ─────────────
-# Every import below is gated on `only`, so a misspelt alias skips all of them and exits
+# ── a typo in -e container= must not be a silent, successful, empty run ─────────────
+# Every import below is gated on `container`, so a misspelt alias skips all of them and exits
 # 0 with an empty recap — the exact shape _assert-inventory.yml exists to prevent.
-- name: Check -e only names a dev container
+- name: Check -e container names a dev container
   hosts: localhost
   gather_facts: false
   tasks:
-    - name: Check -e only, if given, names a known dev container
+    - name: Check -e container, if given, names a known dev container
       ansible.builtin.assert:
-        that: only is not defined or only in ['infra-dev', 'or3-dev', 'dd-dev', 'ds-dev']
-        fail_msg: "-e only={{ only | default('') }} names no dev container; the registry in this file's header has the four"
-        success_msg: "{{ 'one container: ' ~ only if only is defined else 'every container' }}"
+        that: container is not defined or container in ['infra-dev', 'or3-dev', 'dd-dev', 'ds-dev']
+        fail_msg: "-e container={{ container | default('') }} names no dev container; the registry in this file's header has the four"
+        success_msg: "{{ 'one container: ' ~ container if container is defined else 'every container' }}"
 
 # ── the servers: the fleet, the mesh, and the LAN and cross-box rescue paths ────
 - name: Write the fleet ssh block on this client
@@ -95,8 +95,8 @@
   # else — no service token is read or written — so the whole of it is the `ssh` half.
   tags: [ssh]
   # `when` on an import applies to every task the import brings in, which is what makes
-  # -e only=<alias> a one-container run rather than a whole one.
-  when: only is not defined
+  # -e container=<alias> a one-container run rather than a whole one.
+  when: container is not defined
 
 # ── the dev containers ─────────────────────────────────────────────────────────
 # One import each rather than a loop over the table above, deliberately. _client-dev-ssh.yml
@@ -108,22 +108,22 @@
   ansible.builtin.import_playbook: _client-dev-ssh.yml
   vars:
     alias: infra-dev
-  when: only is not defined or only == 'infra-dev'
+  when: container is not defined or container == 'infra-dev'
 
 - name: Write ssh block and token for or3-dev
   ansible.builtin.import_playbook: _client-dev-ssh.yml
   vars:
     alias: or3-dev
-  when: only is not defined or only == 'or3-dev'
+  when: container is not defined or container == 'or3-dev'
 
 - name: Write ssh block and token for dd-dev
   ansible.builtin.import_playbook: _client-dev-ssh.yml
   vars:
     alias: dd-dev
-  when: only is not defined or only == 'dd-dev'
+  when: container is not defined or container == 'dd-dev'
 
 - name: Write ssh block and token for ds-dev
   ansible.builtin.import_playbook: _client-dev-ssh.yml
   vars:
     alias: ds-dev
-  when: only is not defined or only == 'ds-dev'
+  when: container is not defined or container == 'ds-dev'

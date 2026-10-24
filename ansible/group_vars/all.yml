@@ -88,3 +88,7 @@ cf_access_emails_howto: |
   The login itself is whatever methods your Zero Trust account already offers
   (Settings -> Authentication) — the same ones torrents.{{ dns_zone }} uses.
   Then re-run the same command. Nothing has been created at Cloudflare.
+
+# This repo's checkout on the control node: the one being reviewed, and the source of the
+# files plays compare against the host's (`infra_checkout`, group_vars/fleet.yml).
+control_checkout: "{{ (playbook_dir ~ '/../..') | realpath }}"

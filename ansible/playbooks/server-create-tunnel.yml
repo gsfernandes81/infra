@@ -36,7 +36,6 @@
     # same header inline; this does not change them.
     api_hdr:
       Authorization: "Bearer {{ cf_token }}"
-    repo_root: "{{ playbook_dir }}/../.."
     cred_file: "/etc/cloudflared/{{ inventory_hostname }}.json"
     new_cred_file: "/etc/cloudflared/{{ inventory_hostname }}-new.json"
     metrics_probe: "http://127.0.0.1:20241"
@@ -214,7 +213,7 @@
     - name: Write the candidate config.yml into this checkout
       ansible.builtin.template:
         src: ../templates/cloudflared-local-config.yml.j2
-        dest: "{{ repo_root }}/hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
+        dest: "{{ control_checkout }}/hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
         mode: "0644"
       delegate_to: localhost
       vars:
@@ -250,7 +249,7 @@
     - name: Print the next steps
       ansible.builtin.debug:
         msg:
-          - "1. read the diff: git -C {{ repo_root }} diff hosts/{{ inventory_hostname }}/system/"
+          - "1. read the diff: git -C {{ control_checkout }} diff hosts/{{ inventory_hostname }}/system/"
           - "   the ingress is now LOAD-BEARING — a hostname missing there is a 404"
           - "2. commit it, and pull on {{ inventory_hostname }}"
           - "3. then: server-cutover-tunnel.yml"

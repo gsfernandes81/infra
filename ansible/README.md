@@ -34,11 +34,11 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 | I want to… | Run | Needs |
 |---|---|---|
 | set up this phone or laptop: every ssh alias, every service token, Windows too from WSL | `client-home-ssh-config.yml` | the [API token](#the-cloudflare-api-token) on this machine; it mints the service tokens itself |
-| rotate one dev container's service token on this client, or add it once its tunnel exists | `client-home-ssh-config.yml -e only=or3-dev -e replace_token=true` | the same |
-| let a new phone or laptop into the dev containers | `server-add-authorised-keys.yml -e client_pubkey_file=~/laptop.pub` | a route to `zero` |
-| create a dev container: its tunnel, DNS, Access, and (for `infra-dev`) its host side | `server-create-dev-container.yml` · `-e name=or3-dev` for another | the [API token](#the-cloudflare-api-token) |
+| rotate one dev container's service token on this client, or add it once its tunnel exists | `client-home-ssh-config.yml -e container=or3-dev -e replace_token=true` | the same |
+| let a new phone or laptop into the dev containers | `server-add-authorized-keys.yml -e client_pubkey_file=~/laptop.pub` | a route to `zero` |
+| create a dev container: its tunnel, DNS, Access, and (for `infra-dev`) its host side | `server-create-dev-container.yml` · `-e container=or3-dev` for another | the [API token](#the-cloudflare-api-token) |
 | see what runs where, read-only, into `docs/fleet-inventory.md` | `server-generate-fleet-inventory.yml -K` | sudo |
-| install the packages each Pi should have | `server-install-packages.yml -K` · `--limit <host>` | sudo |
+| install the packages each Pi should have | `server-install-packages.yml -K` · `-l <host>` | sudo |
 | install the tracked `/etc` files, without restarting anything | `server-install-system-files.yml -K` · `-l <host>` · `-e only=<file>` | sudo |
 | create a tunnel for a Pi (nothing serves through it yet) | `server-create-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | give a compose stack its own tunnel, for a `cloudflared` sidecar — plus an Access login if its `edge.yml` asks | `server-create-stack-tunnel.yml -e stack=calibre-web -K` · **never `-l`**: the host comes from the stack's symlink · pulls the host's checkout to your commit itself | sudo, the API token, and `~/.config/cloudflare/access-emails` for a login |
@@ -46,6 +46,14 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 | move a Pi onto a new tunnel — **a deliberate outage** | `server-cutover-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | delete a Pi's tunnel — **irreversible** | `server-delete-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | update cloudflared on a Pi, deliberately | `server-update-cloudflared.yml -e target=<host> -e version=… -e sha256=… -K` | sudo; refuses while that host autoupdates, which today is all of them |
+
+**Three ways a play picks its host, each on purpose.** A play that changes one host at a time
+(the tunnel plays and the cloudflared update) is aimed with `-e target=<host>`; its `hosts:` is
+that variable, so leaving it out falls back to `one` (or refuses, for the update) and can never
+widen to the whole fleet. A fleet-wide play (packages, system files, the inventory) runs on
+`fleet` and is narrowed with `-l <host>`. A deployment play (the stack tunnel play and
+`server-deploy-garmin-mcp.yml`) reads its host from the `hosts/<host>/<name>` symlink and takes
+no `-l` at all, because `-l` would skip the play that finds the host.
 
 `--check --diff` first is the habit; it is what caught the `docs` metapackage before it
 landed on a 1 GB Pi. **The tunnel plays are the exception** — `server-create-tunnel.yml`
@@ -127,7 +135,7 @@ The ssh block and the service token are things a client *holds*. The key that ad
 is a fact about the **container**, and lives on `zero`:
 
 ```sh
-ansible-playbook playbooks/server-add-authorised-keys.yml \
+ansible-playbook playbooks/server-add-authorized-keys.yml \
   -e client_pubkey_file=~/laptop.pub
 ```
 
@@ -145,10 +153,10 @@ refuses a secrets directory that is not there rather than creating one nothing m
 `ssh-ed25519` — a truncation that still looks like a key. Use the file form above, or
 JSON: `-e '{"client_pubkey": "ssh-ed25519 AAAA... you@host"}'`.
 
-One container at a time is `-e only=`, which is the rotation path:
+One container at a time is `-e container=`, which is the rotation path:
 
 ```sh
-ansible-playbook playbooks/client-home-ssh-config.yml -e only=or3-dev -e replace_token=true
+ansible-playbook playbooks/client-home-ssh-config.yml -e container=or3-dev -e replace_token=true
 ```
 
 `only`, not `alias`: each import inside the play pins its own `alias`, and an `-e alias=`

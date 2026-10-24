@@ -4,12 +4,12 @@
 #     cd ansible
 #     ansible-playbook playbooks/server-create-dev-container.yml --check          # prove
 #     ansible-playbook playbooks/server-create-dev-container.yml                  # infra-dev
-#     ansible-playbook playbooks/server-create-dev-container.yml -e name=or3-dev  # another container
+#     ansible-playbook playbooks/server-create-dev-container.yml -e container=or3-dev  # another container
 #
 # Then, in that order:
 #
 #     ssh -t zero 'cd ~/infra/dev && make up'          # start it (-t: make sudos)
-#     ansible-playbook playbooks/client-home-ssh-config.yml -e only=<alias>   # on EACH client
+#     ansible-playbook playbooks/client-home-ssh-config.yml -e container=<alias>   # on EACH client
 #
 # No -K: nothing here needs root. It needs the Cloudflare API token, read from
 # ~/.config/cloudflare/api-token on this machine; if that is missing it prints how to mint
@@ -57,18 +57,18 @@
   hosts: localhost
   gather_facts: false
   tasks:
-    - name: "If not infra-dev: print the {{ name | default('infra-dev') }} next steps"
+    - name: "If not infra-dev: print the {{ container | default('infra-dev') }} next steps"
       ansible.builtin.debug:
         msg: >-
           The host half (secrets dir, deploy key, authorized_keys, dev/.env) runs for
           infra-dev only, because it writes dev/.env in THIS repo's checkout.
-          {{ name | default('infra-dev') }}'s is in its own repo: set DEV_TUNNEL_HOSTNAME
+          {{ container | default('infra-dev') }}'s is in its own repo: set DEV_TUNNEL_HOSTNAME
           there to the hostname printed above, then `make up` in that repo's dev/.
       changed_when: true
-      when: (name | default('infra-dev')) != 'infra-dev'
+      when: (container | default('infra-dev')) != 'infra-dev'
 
 - name: "infra-dev only: create the host side on zero"
   ansible.builtin.import_playbook: _dev-container-host.yml
   # `when` on an import applies to every task it brings in. The play still gathers facts
   # on zero, which is cheap and harmless.
-  when: (name | default('infra-dev')) == 'infra-dev'
+  when: (container | default('infra-dev')) == 'infra-dev'

@@ -47,7 +47,6 @@
     # to exist. `infra_checkout` in host_vars overrides it for any host that ever differs;
     # no host sets it today, and adding one back for `two` would abort its cutover.
     # The guard below stats the result rather than trusting either source.
-    host_repo: "{{ infra_checkout | default('/home/gavin/infra') }}"
     probe: "http://127.0.0.1:20241"
     baseline_file: "{{ lookup('env', 'HOME') }}/.infra-2g-baseline-{{ inventory_hostname }}.json"
     api_hdr:
@@ -97,22 +96,22 @@
     # CLAUDE.md and hosts/<host>/setup/README.md — both of which describe how a box was
     # BUILT, not what it currently is. `two` was documented at /srv/infra and is not
     # there. The box is the authority; this asks it before anything is written.
-    - name: Read whether {{ host_repo }} is a git checkout
+    - name: Read whether {{ infra_checkout }} is a git checkout
       ansible.builtin.stat:
-        path: "{{ host_repo }}/.git"
+        path: "{{ infra_checkout }}/.git"
       register: repo_stat
       become: true
 
-    - name: Check {{ host_repo }} on {{ inventory_hostname }} is a git checkout
+    - name: Check {{ infra_checkout }} on {{ inventory_hostname }} is a git checkout
       ansible.builtin.assert:
         that: repo_stat.stat.exists | default(false)
         fail_msg: >-
-          {{ host_repo }} on {{ inventory_hostname }} is not a git checkout, and this play
+          {{ infra_checkout }} on {{ inventory_hostname }} is not a git checkout, and this play
           runs bin/install-system-file from there. Find the real one —
           `ls -ld ~gavin/infra /srv/infra` on the box — and set it in
           ansible/host_vars/{{ inventory_hostname }}.yml as `infra_checkout`, or pass
           -e infra_checkout=/the/real/path for this run.
-        success_msg: "{{ host_repo }} is a checkout"
+        success_msg: "{{ infra_checkout }} is a checkout"
 
     # ── what we are moving from, and to ──────────────────────────────────────
     - name: Read whether both tunnel credentials files exist
@@ -172,7 +171,7 @@
     # name. It surfaced as a 503 with zero ready connections and looked like a slow box.
     - name: Read the reviewed config from {{ inventory_hostname }}'s checkout
       ansible.builtin.slurp:
-        src: "{{ host_repo }}/hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
+        src: "{{ infra_checkout }}/hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
       register: host_repo_cfg
       become: true
 
@@ -187,14 +186,14 @@
         that: (host_repo_cfg.content | b64decode) == lookup('file', repo_cfg)
         fail_msg: >-
           hosts/{{ inventory_hostname }}/system/cloudflared-config.yml differs between
-          this control node and {{ host_repo }} on {{ inventory_hostname }}. The host has
+          this control node and {{ infra_checkout }} on {{ inventory_hostname }}. The host has
           tunnel {{ (host_repo_cfg.content | b64decode | from_yaml).tunnel }}; phase 1
           produced {{ new_tunnel }}. Either that checkout has not been pulled since the
           review — in which case installing from it is a no-op and the credential swap
           then points the connector at a tunnel its config does not name — or the ingress
           differs, which the post-cycle check would only catch after an outage. Commit and
           push phase 1's config, then on {{ inventory_hostname }}:
-          git -C {{ host_repo }} pull
+          git -C {{ infra_checkout }} pull
         success_msg: "the host's checkout carries the reviewed config"
 
     # RESUMABLE. If the live credentials already name the target, the host half is done
@@ -460,7 +459,7 @@
         - name: "Full cutover: install the reviewed config.yml"
           ansible.builtin.command:
             cmd: bin/install-system-file cloudflared-config.yml --commit --allow-content-change
-            chdir: "{{ host_repo }}"
+            chdir: "{{ infra_checkout }}"
           register: inst
           become: true
           changed_when: true

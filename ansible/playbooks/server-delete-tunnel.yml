@@ -31,7 +31,7 @@
     # Delete the doomed tunnel's WARP private-network routes rather than refusing.
     # Opt-in, and it should stay that way: dropping a route someone relies on is not
     # recoverable by re-running anything.
-    drop_routes: false
+    drop_private_routes: false
 
   tasks:
     # ── the API token: read, checked and verified, in one shared file ─────────
@@ -191,7 +191,7 @@
     # left over from an experiment with WARP VPN to zero and/or WARP-based Access auth.
     # Moving them onto the new tunnel would carry an unused experiment forward; deleting
     # them ends it. If WARP is ever wanted, a route is one API call to recreate.
-    - name: "If drop_routes: delete the private network routes"
+    - name: "If drop_private_routes: delete the WARP routes"
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account }}/teamnet/routes/{{ item.id }}"
         method: DELETE
@@ -202,17 +202,17 @@
         label: "{{ item.network }}"
       delegate_to: localhost
       no_log: true
-      when: drop_routes | bool
+      when: drop_private_routes | bool
 
     # ITS OWN REGISTER, not `routes` again. A SKIPPED task still overwrites the variable
     # it registers, with a skipped result — so re-using `routes` here erased the real
-    # listing whenever drop_routes was false, `routes.json` became undefined,
+    # listing whenever drop_private_routes was false, `routes.json` became undefined,
     # `| default([])` turned that into an empty list, and the guard below passed with a
     # route plainly present. It only refused at all because Cloudflare refused.
     #
     # A guard that disarms itself when its opt-in is absent is worse than no guard: it
     # reports "All assertions passed" over exactly the condition it exists to catch.
-    - name: "If drop_routes: read the routes left after deleting"
+    - name: "If drop_private_routes: read the WARP routes left"
       ansible.builtin.uri:
         url: "{{ cf_api }}/accounts/{{ cf_account }}/teamnet/routes?tunnel_id={{ doomed_tunnel }}&is_deleted=false"
         headers: "{{ api_hdr }}"
@@ -220,12 +220,12 @@
       failed_when: false
       delegate_to: localhost
       no_log: true
-      when: drop_routes | bool
+      when: drop_private_routes | bool
 
     - name: Note which private network routes remain
       ansible.builtin.set_fact:
         routes_left: >-
-          {{ ((routes_after.json.result if (drop_routes | bool) else routes.json.result)
+          {{ ((routes_after.json.result if (drop_private_routes | bool) else routes.json.result)
               | default([], true)) }}
 
     - name: Check the old tunnel has no private network routes
@@ -237,7 +237,7 @@
           These are WARP routes, not public hostnames — the cutover did not move them, and
           they have had no connector since it ran. Decide whether they should follow the
           host onto {{ live_tunnel }} or be dropped. To drop them, re-run with
-          -e drop_routes=true. Nothing here is deleted in the meantime.
+          -e drop_private_routes=true. Nothing here is deleted in the meantime.
 
     # ── delete ───────────────────────────────────────────────────────────────
     # Clean up connection records first. Cloudflare refuses to delete a tunnel that still

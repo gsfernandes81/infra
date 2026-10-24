@@ -2,9 +2,9 @@
 # Add one client's PUBLIC key to the dev containers' authorized_keys on the host.
 #
 #     cd ansible
-#     ansible-playbook playbooks/server-add-authorised-keys.yml \
+#     ansible-playbook playbooks/server-add-authorized-keys.yml \
 #       -e '{"client_pubkey": "ssh-ed25519 AAAA... you@machine"}' --check --diff
-#     ansible-playbook playbooks/server-add-authorised-keys.yml \
+#     ansible-playbook playbooks/server-add-authorized-keys.yml \
 #       -e '{"client_pubkey": "ssh-ed25519 AAAA... you@machine"}'
 #
 # JSON, OR A FILE — NOT `-e client_pubkey=...`. Ansible's k=v extra-var form splits on

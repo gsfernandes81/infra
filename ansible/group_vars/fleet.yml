@@ -66,3 +66,9 @@ base_packages:
   - sudo
   - usbutils          # lsusb -t — absent on one, where BusyBox answers -t with a flat list
   - zram-init
+
+# This repo's checkout on each host, which the deployment, system-file and cutover plays
+# pull and read. ~gavin/infra on every host today, `two` included. A host that ever
+# differs sets `infra_checkout` in its host_vars file, which outranks this; a play must
+# not define it again, because play vars outrank host_vars and would hide that override.
+infra_checkout: /home/gavin/infra

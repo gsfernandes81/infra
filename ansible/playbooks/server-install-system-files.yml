@@ -54,18 +54,17 @@
   # there, and this reasoning is about a play that should behave as one fleet-wide step.
 
   vars:
-    repo: /home/gavin/infra
-    tool: "{{ repo }}/bin/install-system-file"
-    # The LOCAL checkout is the source of which files exist per host, so a file added to
-    # the repo shows up here without editing this play.
-    local_repo: "{{ playbook_dir }}/../.."
+    tool: "{{ infra_checkout }}/bin/install-system-file"
+    # infra_checkout (the host's) and control_checkout (this control node's) come from
+    # group_vars. The control node's checkout is the source of which files exist per host,
+    # so a file added to the repo shows up here without editing this play.
 
   tasks:
     # ── the review anchor: what the person running this actually has ─────────
     - name: Read the commit this checkout is on
       ansible.builtin.command:
         cmd: git rev-parse HEAD
-        chdir: "{{ local_repo }}"
+        chdir: "{{ control_checkout }}"
       register: ctl_head
       delegate_to: localhost
       changed_when: false
@@ -77,7 +76,7 @@
     - name: Check this checkout has no uncommitted hosts/ edits
       ansible.builtin.command:
         cmd: git status --porcelain -- hosts/
-        chdir: "{{ local_repo }}"
+        chdir: "{{ control_checkout }}"
       register: dirty
       delegate_to: localhost
       changed_when: false
@@ -90,10 +89,10 @@
     # check_mode false so --check also pulls; a dry run against a stale checkout would
     # diff the wrong bytes. No -q: changed_when matches "Already up to date" in stdout,
     # and -q suppresses exactly that line, so every no-op pull would report changed.
-    - name: Pull {{ repo }} on {{ inventory_hostname }}, fast-forward only
+    - name: Pull {{ infra_checkout }} on {{ inventory_hostname }}, fast-forward only
       ansible.builtin.command:
         cmd: git pull --ff-only
-        chdir: "{{ repo }}"
+        chdir: "{{ infra_checkout }}"
       register: pull
       changed_when: "'Already up to date' not in pull.stdout"
       check_mode: false
@@ -105,7 +104,7 @@
     - name: Read {{ inventory_hostname }}'s uncommitted hosts/ and bin/ edits
       ansible.builtin.command:
         cmd: git status --porcelain -- hosts/ bin/
-        chdir: "{{ repo }}"
+        chdir: "{{ infra_checkout }}"
       register: host_dirty
       changed_when: false
       check_mode: false
@@ -114,7 +113,7 @@
       ansible.builtin.assert:
         that: host_dirty.stdout | length == 0
         fail_msg: >-
-          {{ inventory_hostname }}'s checkout at {{ repo }} has local edits under hosts/
+          {{ inventory_hostname }}'s checkout at {{ infra_checkout }} has local edits under hosts/
           or bin/: {{ host_dirty.stdout_lines | join('; ') }}. The commit assert would
           still pass over these — pull --ff-only never touches them — so the tool
           would install bytes nobody reviewed. Commit, push and re-pull, or discard
@@ -123,7 +122,7 @@
     - name: Read the commit {{ inventory_hostname }} is on
       ansible.builtin.command:
         cmd: git rev-parse HEAD
-        chdir: "{{ repo }}"
+        chdir: "{{ infra_checkout }}"
       register: host_head
       changed_when: false
       check_mode: false
@@ -139,7 +138,7 @@
 
     - name: Read the tracked system files for {{ inventory_hostname }}
       ansible.builtin.find:
-        paths: "{{ local_repo }}/hosts/{{ inventory_hostname }}/system"
+        paths: "{{ control_checkout }}/hosts/{{ inventory_hostname }}/system"
         file_type: file
         excludes: ["README.md", "hardware.md", "hw-inventory.toml"]
       register: tracked
@@ -164,7 +163,7 @@
     - name: Read the dry-run diff of each tracked file
       ansible.builtin.command:
         cmd: "{{ tool }} {{ item }} --new --allow-content-change"
-        chdir: "{{ repo }}"
+        chdir: "{{ infra_checkout }}"
       register: dry
       loop: "{{ files }}"
       changed_when: "'Nothing to do' not in dry.stdout"
@@ -193,7 +192,7 @@
     - name: Install each file that differs
       ansible.builtin.command:
         cmd: "{{ tool }} {{ item.item }} --commit --new --allow-content-change"
-        chdir: "{{ repo }}"
+        chdir: "{{ infra_checkout }}"
       register: inst
       loop: "{{ dry.results }}"
       loop_control:

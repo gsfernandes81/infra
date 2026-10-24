@@ -81,7 +81,6 @@
   vars:
     # realpath, not the bare `/../..`: `find` counts depth against the path as given, so
     # an un-normalised root silently widens `depth` below by the two `..` it carries.
-    repo_root: "{{ (playbook_dir ~ '/../..') | realpath }}"
   tasks:
     # Every success_msg below reads only what is already proven to exist. Ansible renders
     # success_msg BEFORE it evaluates `that`, so a success message that reads the value
@@ -98,7 +97,7 @@
 
     - name: Find edge.yml, cloudflared.yml and compose.yaml
       ansible.builtin.stat:
-        path: "{{ repo_root }}/deployments/{{ stack }}/{{ item }}"
+        path: "{{ control_checkout }}/deployments/{{ stack }}/{{ item }}"
       loop: [edge.yml, cloudflared.yml, compose.yaml]
       register: stack_files
 
@@ -115,7 +114,7 @@
 
     - name: Read deployments/{{ stack }}/edge.yml
       ansible.builtin.include_vars:
-        file: "{{ repo_root }}/deployments/{{ stack }}/edge.yml"
+        file: "{{ control_checkout }}/deployments/{{ stack }}/edge.yml"
         name: stack_edge
 
     - name: Check edge.yml holds only known, valid settings
@@ -144,7 +143,7 @@
 
     - name: Find the hosts/<host>/{{ stack }} symlink
       ansible.builtin.find:
-        paths: "{{ repo_root }}/hosts"
+        paths: "{{ control_checkout }}/hosts"
         patterns: "{{ stack }}"
         file_type: link
         recurse: true
@@ -168,7 +167,7 @@
       ansible.builtin.set_fact:
         stack_host: "{{ stack_links.files[0].path | dirname | basename }}"
         stack_hostname: "{{ stack ~ '.' ~ dns_zone }}"
-        stack_ingress: "{{ lookup('file', repo_root ~ '/deployments/' ~ stack ~ '/cloudflared.yml') | from_yaml }}"
+        stack_ingress: "{{ lookup('file', control_checkout ~ '/deployments/' ~ stack ~ '/cloudflared.yml') | from_yaml }}"
 
     - name: Check cloudflared.yml routes {{ stack_hostname }}
       # The hostname in cloudflared.yml is a literal, because nothing boot-path is generated
@@ -192,7 +191,7 @@
     - name: Read the commit this checkout is on
       ansible.builtin.command:
         cmd: git rev-parse HEAD
-        chdir: "{{ repo_root }}"
+        chdir: "{{ control_checkout }}"
       register: stack_ctl_head_raw
       changed_when: false
       check_mode: false
@@ -202,7 +201,7 @@
     - name: Read uncommitted {{ stack }} edits in this checkout
       ansible.builtin.command:
         cmd: git status --porcelain -- deployments/{{ stack }}/
-        chdir: "{{ repo_root }}"
+        chdir: "{{ control_checkout }}"
       register: stack_ctl_dirty
       changed_when: false
       check_mode: false
@@ -259,8 +258,8 @@
     # not yet switched on. NOT 403, which is also what an Access deny page says, and not a
     # 200 — nothing on that path should hand an unauthenticated probe a page.
     bypass_open_statuses: [401, 404, 502, 530]
-    # Where the host's checkout is. Its .env is where host-specific values live.
-    infra_checkout: "{{ ansible_facts['user_dir'] }}/infra"
+    # The host's checkout is `infra_checkout` (group_vars/fleet.yml); its .env is where
+    # host-specific values live.
 
   tasks:
     # ── before anything is made: every input this run will need ─────────────

@@ -96,7 +96,7 @@ in-workspace claude-sessions-door`, which made `ssh <alias> <cmd>` a client-side
 `<alias>-sh` existed for both. A client not yet re-run still has that block and keeps
 working: its `RemoteCommand` arrives at the forced door as a command, and the door runs it
 — `in-workspace` then starts the door again, which this time sees a login. `<alias>-sh` is
-kept as a name so tools that use it (`server-add-authorised-keys.yml`, or3's phone tunnel)
+kept as a name so tools that use it (`server-add-authorized-keys.yml`, or3's phone tunnel)
 need no change, and goes once nothing does.
 
 ### Break glass by hand — there is no third alias, and no port
@@ -342,7 +342,7 @@ Two halves. The ssh block and the service token are things a client *holds*;
 `client-home-ssh-config.yml` writes those. The key that admits it is a fact about the **container**:
 
 ```sh
-ansible-playbook playbooks/server-add-authorised-keys.yml -e client_pubkey_file=~/laptop.pub
+ansible-playbook playbooks/server-add-authorized-keys.yml -e client_pubkey_file=~/laptop.pub
 ```
 
 `Permission denied (publickey)` with a key visible in `ssh -v` means the client half is

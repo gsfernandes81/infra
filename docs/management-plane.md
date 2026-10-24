@@ -587,7 +587,7 @@ scripts are deleted, per this repo's rule that they go once they have run. What 
 found on the way is worth more than the scripts were: the Windows ProxyCommand wrapper was
 unusable because cmd.exe miscounts byte offsets in an LF-only batch file; `IdentitiesOnly`
 alongside an `IdentityFile` that does not exist gives `Permission denied (publickey)` on a
-client whose key lives in an agent; and `server-add-authorised-keys.yml` exists at all because
+client whose key lives in an agent; and `server-add-authorized-keys.yml` exists at all because
 the key that admits a client is a fact about the container, not something the client holds.
 All three are in [`decisions.md`](decisions.md) and [`ssh-clients.md`](ssh-clients.md).
 

@@ -7,7 +7,7 @@
 #
 #     cd ansible
 #     ansible-playbook playbooks/client-home-ssh-config.yml --check --diff
-#     ansible-playbook playbooks/client-home-ssh-config.yml -e only=or3-dev    # this half, one container
+#     ansible-playbook playbooks/client-home-ssh-config.yml -e container=or3-dev    # this half, one container
 #
 # RUN IT FROM THIS DIRECTORY. ansible.cfg is read from the cwd and is the only thing that
 # points at ./inventory; from anywhere else `hosts: control` matches nothing and the play
@@ -16,7 +16,7 @@
 # is in that file.
 #
 # ONE IMPORT PER CONTAINER, and the defaults are infra-dev's. The wrapper names each one
-# with `alias:` on the import; `-e only=<alias>` on the wrapper is how you reach a single
+# with `alias:` on the import; `-e container=<alias>` on the wrapper is how you reach a single
 # container from the command line (an `-e alias=` would override every import at once).
 #
 # THE HOSTNAME IS NOT PASSED. It is `<alias>.<dns_zone>` — the repo standard, derived
@@ -457,7 +457,7 @@
       ansible.builtin.debug:
         msg: >-
           {{ dev_alias }}: no Access application for {{ dev_hostname }}, so its tunnel has
-          not been created — server-create-dev-container.yml -e name={{ dev_alias }} does
+          not been created — server-create-dev-container.yml -e container={{ dev_alias }} does
           that. No token for it on this client; its ssh block is written anyway, and
           re-running this play once the application exists mints one.
       changed_when: true
@@ -1131,7 +1131,7 @@
           - "ssh -t {{ dev_alias }} in-workspace   a login shell in /workspace"
           - "    break glass: ssh -t <host> 'cd ~/infra/dev && make shell' (sudo asks)"
           - ""
-          - "wsl/posix: block {{ ('in ' ~ ssh_config) if block_now.rc == 0 else ('NOT in ' ~ ssh_config ~ ' — run with --tags ssh') }}; token {{ ('at ' ~ token_file ~ ' (0600), sourced by the ProxyCommand, so it reaches one cloudflared and no other environment') if token_now.stat.exists | default(false) else ('NOT on this client, so ssh ' ~ dev_alias ~ ' says so and stops: client-home-ssh-config.yml --tags access -e only=' ~ dev_alias ~ ' mints it once the tunnel exists') }}."
+          - "wsl/posix: block {{ ('in ' ~ ssh_config) if block_now.rc == 0 else ('NOT in ' ~ ssh_config ~ ' — run with --tags ssh') }}; token {{ ('at ' ~ token_file ~ ' (0600), sourced by the ProxyCommand, so it reaches one cloudflared and no other environment') if token_now.stat.exists | default(false) else ('NOT on this client, so ssh ' ~ dev_alias ~ ' says so and stops: client-home-ssh-config.yml --tags access -e container=' ~ dev_alias ~ ' mints it once the tunnel exists') }}."
           - ""
           - >-
             windows: {{ 'managed directly — block in ' ~ win_ssh_config ~ ', wrapper at '

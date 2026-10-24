@@ -50,19 +50,17 @@
 
   vars:
     stack: garmin-mcp
-    repo_root: "{{ (playbook_dir ~ '/../..') | realpath }}"
     # The ssh user's home, from the minimal `setup` below. ansible_facts, not the top-level
     # ansible_user_dir, which ansible-core 2.24 withdraws. One var, so a local test can stand
     # in a fake host with -e garmin_home=….
     garmin_home: "{{ ansible_facts['user_dir'] }}"
-    infra_checkout: "{{ garmin_home }}/infra"
     garmin_stack_dir: "{{ infra_checkout }}/deployments/garmin-mcp"
     garmin_src: "{{ garmin_home }}/src/garmin-mcp"
     garmin_url: "https://{{ stack_hostname }}"
 
     # SOURCE is the one copy of the upstream URL and sha; read here on the control node.
     garmin_source: >-
-      {{ (lookup('file', repo_root ~ '/deployments/garmin-mcp/SOURCE').splitlines()
+      {{ (lookup('file', control_checkout ~ '/deployments/garmin-mcp/SOURCE').splitlines()
           | reject('match', '^\s*(#|$)') | first).split() }}
 
     # The consent secret lives on THIS control node, beside the Cloudflare API token file.
@@ -84,7 +82,7 @@
     garmin_allowed_writes: [schedule_workout, set_activity_description, unschedule_workout, upload_workout, upload_workouts]
     # The single copy of the allowlist, read from compose.yaml rather than repeated.
     garmin_enabled_count: >-
-      {{ (lookup('file', repo_root ~ '/deployments/garmin-mcp/compose.yaml') | from_yaml)
+      {{ (lookup('file', control_checkout ~ '/deployments/garmin-mcp/compose.yaml') | from_yaml)
          .services['garmin-mcp'].environment.GARMIN_ENABLED_TOOLS.split(',') | length }}
     # tools/list arrives as plain JSON or as one SSE event, depending on what the client
     # accepts. if/else, not ternary: ternary renders both branches, and the wrong one throws.
@@ -414,7 +412,7 @@
           {{ garmin_url }} serves {{ garmin_served_tools | length }} tools against
           {{ garmin_enabled_count }} allowlisted. Outside {{ garmin_read_prefix }} and
           garmin_allowed_writes: {{ garmin_tool_offenders }}. Allowlisted but not served:
-          {{ (lookup('file', repo_root ~ '/deployments/garmin-mcp/compose.yaml') | from_yaml)
+          {{ (lookup('file', control_checkout ~ '/deployments/garmin-mcp/compose.yaml') | from_yaml)
              .services['garmin-mcp'].environment.GARMIN_ENABLED_TOOLS.split(',')
              | difference(garmin_served_tools) }}.
           STOP THE STACK if anything is listed as outside: sudo docker compose stop, in

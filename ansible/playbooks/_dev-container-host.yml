@@ -82,7 +82,7 @@
                else env_tunnel_hostname) }}
     # The key that will be allowed to ssh INTO the container. Defaults to the control
     # node's own — run this from the phone and the phone authorises itself, which beats
-    # a paste. Another client's key is server-add-authorised-keys.yml's job, but an
+    # a paste. Another client's key is server-add-authorized-keys.yml's job, but an
     # override here works too: as JSON, -e '{"client_pubkey": "ssh-ed25519 AAAA… you@x"}',
     # never -e client_pubkey=… (k=v splits on the space and keeps only "ssh-ed25519").
     # `if … is defined`, not `default()`: Jinja evaluates default()'s argument eagerly, so

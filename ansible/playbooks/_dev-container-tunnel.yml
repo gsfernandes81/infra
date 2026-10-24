@@ -82,7 +82,7 @@
     # side of the same hostname from that one value, and the two must not be able to
     # disagree about the zone.
     cf_zone: "{{ zone | default(dns_zone) }}"
-    cf_name: "{{ name | default('infra-dev') }}"
+    cf_name: "{{ container | default('infra-dev') }}"
     cf_hostname: "{{ hostname | default(cf_name ~ '.' ~ cf_zone) }}"
     # Ansible templates a task's arguments BEFORE deciding to skip it, and `uri` declares
     # no check-mode support — so under --check every write is skipped, but its URL and
@@ -101,8 +101,8 @@
     # Where the container's read-only secrets mount points on the host — and so where
     # tunnel.json lives, which is how this play decides whether the tunnel ALREADY EXISTS.
     # Keyed on the container's name, `~/.<name>-secrets`, the convention
-    # server-add-authorised-keys.yml also relies on: a literal infra-dev path here made
-    # `-e name=or3-dev` read infra-dev's credentials, find its tunnel alive, and CNAME
+    # server-add-authorized-keys.yml also relies on: a literal infra-dev path here made
+    # `-e container=or3-dev` read infra-dev's credentials, find its tunnel alive, and CNAME
     # or3-dev at it. -e secrets_dir= for a container whose mount is somewhere else.
     infra_secrets: "{{ secrets_dir | default('~/.' ~ cf_name ~ '-secrets') }}"
     # Irrelevant to a service token, which does not expire with a session. Set explicitly
@@ -137,7 +137,7 @@
         fail_msg: >-
           This play no longer mints service tokens. Each client mints its own, named
           <alias>-<client>, when you run client-home-ssh-config.yml there; a lost secret is
-          -e only={{ cf_name }} -e replace_token=true on THAT client, which rotates only its
+          -e container={{ cf_name }} -e replace_token=true on THAT client, which rotates only its
           own token. Nothing here to rotate or name.
         success_msg: "no retired flags"
 

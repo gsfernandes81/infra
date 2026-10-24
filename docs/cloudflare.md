@@ -171,7 +171,7 @@ on any of them.
 ## Landmines
 
 - **A tunnel with private network routes cannot be deleted** (`1023`), and those routes
-  are not shown anywhere you would look. `server-delete-tunnel.yml -e drop_routes=true`
+  are not shown anywhere you would look. `server-delete-tunnel.yml -e drop_private_routes=true`
   deletes them (the `./2g` wrapper that shortened this is gone with 2g); it is
   opt-in because dropping a route someone relies on is not undone by re-running.
 - **Deleting a Public Hostname in the UI deletes its DNS record.** The CNAMEs are

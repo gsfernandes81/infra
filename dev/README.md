@@ -549,7 +549,7 @@ ssh -t zero 'cd ~/infra/dev && make up'
 
 # 3. the CLIENT — the machine you ssh FROM. Mints this client's own service token over
 #    the API and adds it to the application's policy; nothing is typed. See below.
-#    Every dev container and the fleet in one run; -e only=<alias> for one container,
+#    Every dev container and the fleet in one run; -e container=<alias> for one container,
 #    which is also the rotation path (-e replace_token=true).
 ansible-playbook playbooks/client-home-ssh-config.yml
 ```
@@ -557,7 +557,7 @@ ansible-playbook playbooks/client-home-ssh-config.yml
 Until 2026-10-04 this was three plays and the container was started between them, so
 the host half ran twice; the edge half now runs first and hands the hostname to the
 host half inside the one run. The host half is for `infra-dev` only — the other
-containers keep theirs in their own repos — and the play says so for any other `-e name=`.
+containers keep theirs in their own repos — and the play says so for any other `-e container=`.
 
 **Step 3 is per client, and the laptop counts as two of them.** Windows' `ssh.exe` and
 WSL's `ssh` read different configs from different homes. Run this play *in WSL* and it
