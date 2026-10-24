@@ -7,6 +7,8 @@ secrets, no data.
 
 ```sh
 bin/compose torrents up -d          # one:  torrents | send2ereader | calibre-web  (ionic-traces stopped)
+# one: garmin-mcp is the exception — Ansible drives it, from the phone (its README):
+#   cd ansible && ansible-playbook playbooks/server-deploy-garmin-mcp.yml -K
 bin/compose immich   up -d          # zero: immich | syncthing
 bin/check-sources                   # is the deployed sha still the pinned one?
 bin/check-system-drift              # do tracked /etc copies still match live?
@@ -57,7 +59,7 @@ docs/                  read these
 
 | Host | Hardware | Runs | In repo |
 |---|---|---|---|
-| `one` | Pi 4 | torrents, send2ereader; calibre-web **committed 2026-10-24, not yet started** (own tunnel, sidecar — its README is the setup); ionic-traces **stopped by decision** | yes |
+| `one` | Pi 4 | torrents, send2ereader; calibre-web **committed 2026-10-24, not yet started** (own tunnel, sidecar — its README is the setup); garmin-mcp **committed 2026-10-24, not yet deployed** (read-only Garmin Connect MCP for claude.ai; own tunnel, sidecar, deployed by Ansible — its README); ionic-traces **stopped by decision** | yes |
 | `zero` | Pi 5 | Immich (+ db, ml, redis), Syncthing — **all critical, remote** | yes |
 | `two` | Pi 1 B+, armv6, ~475 MB | destiny-director (**test** bot + its Postgres); lifeboat duties **planned, not built** | stays on Alpine |
 
@@ -97,7 +99,7 @@ exists, and the first run of it found exactly that on `one`.
 
 | Host | |
 |---|---|
-| `one` | **8080** qBittorrent (via gluetun) · ~~**7777** ionic-traces~~ — **stopped**, see [2c](docs/management-plane.md#sequencing-and-where-podman-fits) · **3001** send2ereader · **8384/22000** syncthing · *calibre-web publishes nothing — reached only through its own tunnel's sidecar* |
+| `one` | **8080** qBittorrent (via gluetun) · ~~**7777** ionic-traces~~ — **stopped**, see [2c](docs/management-plane.md#sequencing-and-where-podman-fits) · **3001** send2ereader · **8384/22000** syncthing · *calibre-web and garmin-mcp publish nothing — each is reached only through its own tunnel's sidecar* |
 | `zero` | **2283** Immich · **8384/22000** syncthing · **127.0.0.1:2224** the `or3-dev` container (`infra-dev` publishes nothing — its tunnel, or `make shell`) |
 | `two` | **none published** — the bot's web UI (8080) and break-glass sshd (2222) exist inside the container and are deliberately not mapped. See the commented `ports:` block in `deployments/destiny-director/compose.yaml` |
 

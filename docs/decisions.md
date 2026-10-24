@@ -549,6 +549,43 @@ left out on purpose**: it works on arm64 (linuxserver's docs say otherwise; thei
 says not), and if wanted it is a derived image with Calibre's hash-pinned arm64 tarball,
 never the `DOCKER_MODS` line, which installs at every container start.
 
+## garmin-mcp — a read-only Garmin MCP for claude.ai, on `one`
+
+**Decided 2026-10-24** with the owner, after a security audit of the upstream and nine
+alternatives. It builds on § *Sidecar, not baked-in* above and does not restate it.
+
+**On `one`, with no Access in front.**
+- **Not `two`:** an armv6 Pi 1 with about 475 MB, where the Python dependencies have no wheels.
+- **Not `zero`:** critical and remote. A third-party, internet-facing service holding a Garmin
+  session should fail on the box where a reboot costs nothing.
+- **No Access:** its only client is claude.ai's custom connector, which speaks the MCP
+  Authorization spec and cannot pass Access.
+- **The gate is upstream's OAuth shim.** In-process, 43 of 44 attacks on it held; the one
+  that did not is a consent lockout that blocks only *new* connections. So `edge.yml` says
+  `access: none`.
+
+**Taxuspt, read-only, over Garmin's Personal API.** The Personal API (launched 2026-10-21) has
+the better credential: a key you set the expiry of, revocable, read-only. It lost on coverage
+for what the owner does, running and lifting:
+- **Strength:** per-exercise totals only, with no individual sets.
+- **Missing entirely:** training status, readiness, load and VO₂ max trends, race predictions,
+  the personal-record list.
+
+Read-only on Taxuspt is `GARMIN_ENABLED_TOOLS` (its 108 read tools). The deploy proves it
+against the live server, not the config. The revisit trigger is filed in management-plane.md.
+
+**What a leaked bearer token costs:** read access to health and location history until it is
+rotated. Accepted.
+
+**The shim's remaining findings are known and deliberately not reported upstream** (owner,
+2026-10-24). The owner may file them if the stack stays in use:
+- the global consent lockout;
+- no frame protection on the consent page;
+- an attacker-chosen client name on that page;
+- dependencies resolved fresh at each build — neutralised here by a sha-tagged image built
+  only when the tag is absent;
+- a 500 from `/register`.
+
 ## The lesson worth keeping
 
 **A check that can pass for the wrong reason is worse than no check**, because it stops

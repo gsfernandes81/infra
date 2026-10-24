@@ -509,7 +509,7 @@ ones that answer the question this document started from.
 | 2g | All three tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, `two`, DNS | 2f | **DONE on all three.** `one` and `zero` 2026-08-23, `two` 2026-08-29 over the `two-one` mesh. Every host's routing is now a tracked file, and `ansible/2g` — the wrapper written for this migration — is deleted, as its own header said it should be. **The dashboard sweep is the one part left, and it is manual** — deferred into [`plans/cloudflare-dashboard-sweep.md`](../plans/cloudflare-dashboard-sweep.md), because identifying which Access service token a client currently holds is a judgement no check on a box can make |
 | 2h | cloudflared: staggered autoupdate, `one` 6h → `two` 72h → `zero` 240h | all three | — | **done 2026-08-24** — the staggered frequencies are installed and live on all three |
 | 2i | Retire the `ssh-zero-dev-*` rules, and `anchor-two` with them — doors nothing is behind | `zero`'s host tunnel, DNS | nothing | **In progress 2026-08-29.** `dd` and `ds` are out of `hosts/zero/system/cloudflared-config.yml` in the repo; installing that and cycling zero's connector is the owner's step, from a mesh route — `ssh-zero.gsrpi.uk` **is** the tunnel being cycled. Safe to do now because neither container is running and neither has a tunnel of its own until Phase 5; until then they are reached through `ssh zero` and the published loopback ports 2222/2223. `anchor-two.gsrpi.uk` is out of `two`'s ingress on the same argument: it served an experiment that ended and answers 502 always. **Four** CNAMEs go in the same sitting — see the sweep plan |
-| 3 | First stack adopted: `send2ereader` on `one`, **with its connector in the stack** | one stack, non-critical box, `one`'s ingress | 2 | **The connector pattern is set, 2026-10-24** — by `calibre-web`, a new stack, not by `send2ereader`: sidecar, its own locally-managed tunnel, `server-create-stack-tunnel.yml` (decisions.md, *Sidecar, not baked-in*). What this phase still owes is `send2ereader` itself — its connector, deleting `3001`, `bookit` out of `one`'s ingress — and the Ansible adoption with `bin/compose`'s deletion |
+| 3 | First stack adopted: `send2ereader` on `one`, **with its connector in the stack** | one stack, non-critical box, `one`'s ingress | 2 | **The connector pattern is set, 2026-10-24** — by `calibre-web`, a new stack, not by `send2ereader`: sidecar, its own locally-managed tunnel, `server-create-stack-tunnel.yml` (decisions.md, *Sidecar, not baked-in*). What this phase still owes is `send2ereader` itself — its connector, deleting `3001`, `bookit` out of `one`'s ingress — and the Ansible adoption with `bin/compose`'s deletion. **`garmin-mcp` is the first stack Ansible starts** (`server-deploy-garmin-mcp.yml`, committed 2026-10-24, `community.docker.docker_compose_v2`), so the adoption's mechanism exists; `bin/compose`'s deletion and `recovery.md`'s rewrite are still owed together |
 | 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two stacks | 3 | |
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | Phase 3 now tests the mechanism first, on a disposable stack |
 | 6 | `dd` off `two` | `two`, `one` | arm64 CI, upstream | |
@@ -521,7 +521,19 @@ A stack's connector is pinned in its `compose.yaml` and is outside 2h's staggere
 by design, so it ages silently: `server-update-cloudflared.yml` and the hosts' autoupdate
 never see it. The fix is a report, not an updater — the sidecar's image tag beside the host
 binaries' versions, from `bin/check-sources` or the fleet inventory. `calibre-web` is the
-first such stack; `garmin-mcp` would be the second. Not built.
+first such stack and `garmin-mcp` (committed 2026-10-24) the second. Not built.
+
+**Filed 2026-10-24, no phase number — nothing alerts when `garmin-mcp`'s Garmin login lapses.**
+The cached Garmin session lasts about six months. When it ends, the tools fail while `/healthz`
+stays green, and the only signal is a failed tool call in claude.ai. `/readyz` (behind the
+bearer token) already answers it. What is missing is anything that asks. Same class as the
+missing uptime monitoring in 2h's row.
+
+**Filed 2026-10-24, no phase number — revisit `garmin-mcp`'s backend on Garmin's Personal API.**
+Garmin's official, key-based, read-only Personal API launched on 2026-10-21. It lost to Taxuspt
+on coverage alone (decisions.md § *garmin-mcp*). The trigger is a server for it that is mature
+**and** returns set-level strength data (the API's FIT download carries the sets). Switching
+changes only `deployments/garmin-mcp/`; the tunnel and the play stay.
 
 **Closed 2026-08-28 — one command now writes every ssh block this repo owns.**
 `playbooks/client-home-ssh-config.yml` composes its fleet half with one dev-container import per

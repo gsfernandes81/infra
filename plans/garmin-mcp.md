@@ -5,9 +5,9 @@ audit of the upstream repo and nine alternatives. Nothing here is deployed. When
 running and the probe below passes, the reasoning moves to `docs/decisions.md` and this file
 is deleted, as the three-folder rule says.
 
-**Blocked on one thing:** the shared tunnel play described in *The edge* below, which
-`workspace-46` is writing for the calibre-web stack. Calibre-web lands first and records the
-sidecar decision; this plan builds on that and does not repeat it.
+**No longer blocked.** The shared tunnel play landed with calibre-web in `7bda874`, along with
+the sidecar decision (`docs/decisions.md` § *Sidecar, not baked-in*). This plan builds on both
+and does not repeat them. The steps are in `plans/garmin-mcp-implementation.md`.
 
 ## What it is
 
@@ -88,7 +88,7 @@ and location history until it is rotated.
 - **`compose.yaml`**, `name: garmin-mcp`, two services on the project network. `no network_mode:
   host` is load-bearing and is stated in a comment: without it, in-container ports cannot
   collide with `one`'s (gluetun holds 8080 on the host), and `garmin-mcp` resolves by name.
-  - **`garmin-mcp`** — `build: ${SRC_ROOT:?}/garmin-mcp-remote`, `image:
+  - **`garmin-mcp`** — `build: ${SRC_ROOT:?}/garmin-mcp`, `image:
     garmin-mcp-remote:0cf102c`.
     - **No `ports:`.** Named volume `garmin-tokens` at `/data/garminconnect`;
       `restart: unless-stopped`.
@@ -123,27 +123,34 @@ and location history until it is rotated.
 Taxuspt sha. It is cross-checked against the `@app.tool()` registrations and against
 `ADDITIVE_TOOLS` and `DESTRUCTIVE_TOOLS`, and the derivation is redone with every sha bump.
 
-## The edge — the shared tunnel play
+## The edge — `server-create-stack-tunnel.yml`, as it landed
 
-From `workspace-46`: sections 0–2 of `_dev-container-tunnel.yml` (zone and account, the tunnel
-with its dead-tunnel assert, the CNAME) lifted into a tasks file shared with that play, with
-Access as a separate step callers opt into. **garmin-mcp does not opt in**, because claude.ai's
-connector cannot pass Access; the shim is the gate.
+The edge is calibre-web's `server-create-stack-tunnel.yml`, run with `stack=garmin-mcp`. It
+was reviewed from this side on 2026-10-24 against the four points agreed for it (Access
+optional, credentials outside the checkout at 65532:0600, the 200/201 handling and
+dead-tunnel assert intact, a real `--check`), and landed in `7bda874`.
 
-Before that change is pushed, this side reviews it for four things:
-- Access is optional.
-- The credentials land outside `~gavin/infra`, owned by 65532 with mode 600.
-- The 200/201 handling and the dead-tunnel assert come through the extraction unchanged.
-- `--check` is still a real dry run.
+- **`deployments/garmin-mcp/edge.yml` says `access: none`,** so the play makes no Access
+  objects and skips its login probe. claude.ai's connector cannot pass Access; the shim is
+  the gate.
+- **It writes `TUNNEL_ID` and `TUNNEL_CREDENTIALS` into `.env`,** creating it at 0600, and the
+  credentials to `~/.garmin-mcp-secrets/tunnel.json`, 65532:65532 at 0600, outside the
+  checkout.
+- **It proves the host's `compose.yaml`, `edge.yml` and `cloudflared.yml` match the phone's,**
+  and hands the host and `stack_hostname` to later plays through `add_host`.
+- **garmin's play imports it** and adds only garmin's own steps. The sidecar is calibre-web's,
+  pinned identically.
 
 ## The play — `ansible/playbooks/server-deploy-garmin-mcp.yml`
 
 Run from the phone with `-K`. Every step looks before it acts, so a re-run after a failure is
 how you finish.
 
-1. **The edge** — imports the shared play: the tunnel and the `garmin-mcp.<dns_zone>` CNAME.
-2. **Source** — the `git` module checks out the pinned sha into `$SRC_ROOT/garmin-mcp-remote`.
-   It refuses a dirty checkout or a different sha, and never forces.
+1. **The edge** — imports `server-create-stack-tunnel.yml`: the tunnel and the
+   `garmin-mcp.<dns_zone>` CNAME.
+2. **Source** — the `git` module checks out the pinned sha into `$SRC_ROOT/garmin-mcp`, the path
+   `bin/check-sources` looks for. It refuses a dirty checkout and moves a clean one to the
+   pinned sha, so a reviewed bump needs no manual step. It never forces.
 3. **Secrets** — the consent secret is `lookup('password', '~/.config/garmin-mcp/consent-secret
    …')` on the control node. That one line creates the 0600 file the first time and reads it
    afterwards, the same place the Cloudflare API token file lives. It is never printed, because

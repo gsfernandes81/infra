@@ -1,0 +1,3 @@
+# <upstream-url> <deployed-sha>
+# Records what is deployed. Never triggers a pull — see bin/check-sources.
+https://github.com/gabrielkpo/garmin-mcp-remote.git 0cf102c139c78287bbb4a7fce5f597b3de3764c8

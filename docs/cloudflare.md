@@ -132,6 +132,14 @@ rule's `ref` is `infra_calibre_web_request_headers`, and it is the only object i
 transform rules this repo manages. Made by `ansible/playbooks/server-create-stack-tunnel.yml`; the pattern is
 [`decisions.md`](decisions.md) § *Sidecar, not baked-in*.
 
+`garmin-mcp.gsrpi.uk` is not here either (committed 2026-10-24; the tunnel and hostname exist
+once `ansible/playbooks/server-deploy-garmin-mcp.yml` has run): its own tunnel and sidecar, the
+same play underneath, routing in
+[`deployments/garmin-mcp/cloudflared.yml`](../deployments/garmin-mcp/cloudflared.yml). **No
+Access, by design**: its only client is claude.ai's custom connector, which cannot pass Access,
+and the gate is the OAuth shim inside the stack. It makes no Access objects and no transform
+rules.
+
 `ionic-traces.gsrpi.uk` was retired 2026-08-23. Its DNS record still exists and points at
 a deleted tunnel, so it resolves and fails; delete the record if you want the name gone.
 
