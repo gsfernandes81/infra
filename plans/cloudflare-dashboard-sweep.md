@@ -49,8 +49,8 @@ confirmed in one visit.
 **And a fourth record, added 2026-08-29:** `anchor-two.gsrpi.uk`. Its ingress rule came
 off `two` in the same sitting; it routed to destiny-director's anchor bot while that was
 being trialled there, the experiment ended, and it has been answering 502 ever since —
-always, not just while the bot was down, because that stack's `ports:` block is commented
-out. Delete the CNAME with the other three.
+always, not just while the bot was down, because that deployment's `ports:` block is
+commented out. Delete the CNAME with the other three.
 
 ## Before deleting a service token
 
