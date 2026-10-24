@@ -129,15 +129,15 @@ served by a `cloudflared` sidecar in its compose project, and its routing is
 the Kobo's sync. One **Request Header Transform Rule** sets `X-Scheme: https` on requests to
 it — Calibre-Web needs it to build the Kobo's download links (its `edge.yml` says why); the
 rule's `ref` is `infra_calibre_web_request_headers`, and it is the only object in the zone's
-transform rules this repo manages. Made by `ansible/playbooks/server-create-stack-tunnel.yml`; the pattern is
+transform rules this repo manages. Made by `ansible/playbooks/server-create-deployment-tunnel.yml`; the pattern is
 [`decisions.md`](decisions.md) § *Sidecar, not baked-in*.
 
 `garmin-mcp.gsrpi.uk` is not here either (deployed 2026-10-24, tunnel `efa6e10e`): its own tunnel and sidecar, the
 same play underneath, routing in
 [`deployments/garmin-mcp/cloudflared.yml`](../deployments/garmin-mcp/cloudflared.yml). **No
 Access, by design**: its only client is claude.ai's custom connector, which cannot pass Access,
-and the gate is the OAuth shim inside the stack. It makes no Access objects and no transform
-rules.
+and the gate is the OAuth shim inside the deployment. It makes no Access objects and no
+transform rules.
 
 `ionic-traces.gsrpi.uk` was retired 2026-08-23. Its DNS record still exists and points at
 a deleted tunnel, so it resolves and fails; delete the record if you want the name gone.

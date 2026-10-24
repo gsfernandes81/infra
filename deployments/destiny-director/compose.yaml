@@ -1,14 +1,14 @@
 # Deploy stub for the destiny-director test bot on `two` (Pi 1 B+, armv6, 512 MB,
 # Alpine `sys`, OpenRC, rootless podman + podman-compose).
 #
-# Unlike every other stack in this repo there is no build and no SRC_ROOT: nothing is
-# built on a 700 MHz single core. The image is prebuilt for linux/arm/v6 by the app
+# Unlike every other deployment in this repo there is no build and no SRC_ROOT: nothing
+# is built on a 700 MHz single core. The image is prebuilt for linux/arm/v6 by the app
 # repo's .github/workflows/pi-image.yml and pulled from GHCR, so what selects the deploy
 # is the image reference, not a checkout sha. SOURCE therefore records the upstream URL
-# and NO sha; bin/check-sources understands that shape and reports the stack as
-# `registry-deployed`. Read SOURCE for why the pin is absent by design.
+# and NO sha; bin/check-sources understands that shape and reports the deployment
+# as `registry-deployed`. Read SOURCE for why the pin is absent by design.
 #
-# `bin/compose destiny-director …` REFUSES this stack, on every host — see bin/compose.
+# `bin/compose destiny-director …` REFUSES this deployment, on any host — see bin/compose.
 # It is driven by plain `podman-compose` in the deploy user's shell; hosts/two/setup has
 # the exact sequence. There used to be a restricted SSH dispatcher (`dd-ctl`, ~800 lines)
 # in this directory. It is gone: it existed to keep a deploy key from escaping into
@@ -119,7 +119,7 @@ services:
     # before that it chowns the data directory to the postgres uid. A named volume is
     # created owned by the container's root (= gavin, rootless), so pinning `user:` to
     # the postgres uid would leave initdb unable to write the directory it was just
-    # given — a stack that comes up fine on an existing volume and fails only the day
+    # given — a deployment that comes up fine on an existing volume and fails only the day
     # somebody recreates it. And the privilege it would remove is small: container root
     # here IS gavin, confined to the user namespace, so "root in this container" is not
     # a privilege over the host. The bot, whose image already declares its own user, is
@@ -160,7 +160,7 @@ services:
     # cold-start race against initdb actually gets handled.
     #
     # THAT COVERS THE BOT STARTING TOO EARLY. IT DOES NOT COVER initdb BEING KILLED,
-    # which is the failure this stack actually hit, twice, and which no amount of
+    # which is the failure this deployment actually hit, twice, and which no amount of
     # client-side retrying can survive: a half-written data directory keeps a running,
     # healthy-looking server that has no `kyber` database and no pg_hba entry to reach
     # it with, forever. The cause was `--force-recreate` reaching this service through
@@ -286,8 +286,8 @@ services:
     # to. See the OOM_SCORE_ADJ comment in .env-example in the app repo.
     #
     # `restart: always` means podman restarts this on a crash. It does NOT bring the
-    # stack back after a reboot: that needs a boot-time hook, and this box deliberately
-    # has none. A power cut leaves `two` running nothing until someone runs
+    # deployment back after a reboot: that needs a boot-time hook, and this box
+    # deliberately has none. A power cut leaves `two` running nothing until someone runs
     # the deploy by hand. (If that is ever unwanted, `podman-openrc` — already installed
     # here — exposes `rc-service podman start_containers`, which restarts exactly the
     # containers with this policy and needs no new script. Do NOT enable the podman API

@@ -54,7 +54,7 @@ been consciously postponed rather than an omission.
 | | |
 |---|---|
 | `Makefile` | **the management interface** — `make up`, `make login`, `make status`, … |
-| `compose.yaml` | the stack — `name: infra-dev`, one service, nothing published |
+| `compose.yaml` | the Compose project — `name: infra-dev`, one service, nothing published |
 | `Dockerfile` | Debian slim + Node 22 + Claude Code + gh + zmx + screen + sshd + **ansible** |
 | `entrypoint.sh` | ssh material → Claude config → `git pull` → **sshd(fg)** |
 | `login.sh` | in the image: the interactive logins, idempotent — `make login` |
@@ -804,7 +804,7 @@ the above, and the ways to one are the tunnel's Access policy and `docker exec` 
 
 `- /var/run/docker.sock:/var/run/docker.sock` is missing from `compose.yaml`
 deliberately, and it is the single most likely edit somebody makes in a hurry, because
-this is the repo that drives docker stacks.
+this is the repo that drives docker deployments.
 
 `decisions.md` puts the docker group in the same class as root: anyone holding the
 socket can bind-mount `/` into a container. Handing it to a container that also runs a
@@ -1311,7 +1311,7 @@ rather than doing it.
 `restart` is `stop`/`start` deliberately — `up -d` re-evaluates the config and may
 recreate the container, throwing away every live session in it. The corollary: a
 change to `compose.yaml` only lands on `up`. This is the same rule
-[`../CLAUDE.md`](../CLAUDE.md) states for the stacks, for the same reason.
+[`../CLAUDE.md`](../CLAUDE.md) states for the deployments, for the same reason.
 
 `make down-volumes` takes `CONFIRM=yes`, because the volumes hold the claude and gh
 logins and the sshd **host key**: dropping them asks every client to accept a changed

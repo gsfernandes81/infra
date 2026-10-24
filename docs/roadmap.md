@@ -1,6 +1,6 @@
 # What's left
 
-All three hosts are in this repo now: `hosts/<host>/` carries each one's stacks as
+All three hosts are in this repo now: `hosts/<host>/` carries each one's deployments as
 symlinks into `deployments/`, plus its tracked `/etc` copies. None of what follows is
 urgent; none of it should be started remotely — ~~**except §6**~~, **which is done** (2e,
 closed 2026-08-29). What follows described it as a remote operation still to do; it was one, and it was
@@ -19,9 +19,9 @@ The entry stays rather than being deleted so the numbering below keeps the ancho
 
 **`two` got there first**, by accident of needing it: it runs rootless podman +
 podman-compose as `gavin`, with docker and containerd removed, for the
-`destiny-director` test stack. It is a much smaller sample than the torrents stack —
-one bot and a Postgres, no VPN namespace sharing — but the packaging is real and
-verified for Alpine 3.24 `armhf` in [`hosts/two/setup/README.md`](../hosts/two/setup/README.md) step 1, including the
+`destiny-director` test deployment. It is a much smaller sample than the torrents
+deployment — one bot and a Postgres, no VPN namespace sharing — but the packaging is
+real and verified for Alpine 3.24 `armhf` in [`hosts/two/setup/README.md`](../hosts/two/setup/README.md) step 1, including the
 `iptables`/netavark trap. Read that before doing this on `one`.
 
 `bin/compose` still execs `docker compose` and stays that way until this conversion —
@@ -29,7 +29,7 @@ see [decisions.md](decisions.md) for why a runtime probe was not added speculati
 
 **The one thing not to get wrong:** gluetun and qBittorrent must stay in a shared
 network namespace or port forwarding breaks silently. See
-[port-forwarding.md](port-forwarding.md). The gluetun stack will likely need to be
+[port-forwarding.md](port-forwarding.md). The gluetun deployment will likely need to be
 rootful.
 
 ## 3. openSUSE MicroOS — the target
@@ -258,4 +258,4 @@ actually carries the session, from the owner's shell rather than from an agent p
 
 Generating `/etc/fstab` from the repo (puts a generated file on the boot path) ·
 adding `gavin` to `docker` (root-equivalent) · a NOPASSWD sudoers rule ·
-switching the torrents stack to WireGuard.
+switching the torrents deployment to WireGuard.

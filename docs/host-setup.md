@@ -154,8 +154,8 @@ a different operation; apk
 resolves the order itself and containerd is never removed alone.
 
 Docker's init declares only `need sysfs cgroups net`, so it starts whether or not
-`/media/*` mounted. Put the mount guards in before running any stack that bind-mounts an
-array: [recovery.md](recovery.md#-the-trap-that-silently-eats-data--and-the-flag-that-stops-it),
+`/media/*` mounted. Put the mount guards in before running any deployment that
+bind-mounts an array: [recovery.md](recovery.md#-the-trap-that-silently-eats-data--and-the-flag-that-stops-it),
 verified by `sudo bin/check-mount-guards`.
 
 **`two` does not run Docker.** It runs rootless podman + podman-compose as `gavin`, and
@@ -182,8 +182,8 @@ Two things from that script that are still load-bearing and easy to undo by acci
   Docker or k3s. Both are on `two` only as auto-installed dependencies of
   `docker-engine`/`k3s`, and `apk del` reclaims orphaned dependencies. netavark shells
   out to `iptables` to program the bridge network's rules, including inside a *rootless*
-  netns, while **not** depending on the package; the stack would break days later for a
-  reason nobody would connect back to a Docker cleanup. `ca-certificates` is worse,
+  netns, while **not** depending on the package; the deployment would break days later for
+  a reason nobody would connect back to a Docker cleanup. `ca-certificates` is worse,
   because it is the trust store `cloudflared` validates Cloudflare's edge against:
   losing it cuts **the only way into the box**. Naming both in an explicit `apk add`
   makes them world members that no reclaim can touch.
@@ -246,12 +246,12 @@ host reads its tunnel credentials file, `/etc/cloudflared/<host>.json`, at mode 
 by a `--config` file that is tracked. The rule that came out of it stands: **secrets never
 go in `command_args`.**
 
-## Stacks
+## Deployments
 
-`deployments/<stack>/` is what a stack is, `hosts/<host>/` is where it runs,
-`bin/compose <stack> up -d` starts it — see the [README](../README.md).
+`deployments/<name>/` is what a deployment is, `hosts/<host>/` is where it runs,
+`bin/compose <name> up -d` starts it — see the [README](../README.md).
 
-The torrents stack on `one` needs `/dev/net/tun` on the host, either via
+The torrents deployment on `one` needs `/dev/net/tun` on the host, either via
 `mknod /dev/net/tun c 10 200` or by loading `tun` from `/etc/modules-load.d/`. Read
 [port-forwarding.md](port-forwarding.md) first: gluetun and qBittorrent must share one
 network namespace or port forwarding breaks silently.

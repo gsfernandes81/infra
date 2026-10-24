@@ -1,9 +1,9 @@
 #!/bin/sh
-# usage: bin/compose <stack> <args...>     e.g.  bin/compose torrents up -d
+# usage: bin/compose <deployment> <args...>     e.g.  bin/compose torrents up -d
 #
 # Thin wrapper that pins --project-directory to the *resolved* deployments/ path.
-# That makes it irrelevant whether you reached the stack via deployments/ or via a
-# hosts/<host>/ symlink: the project directory, and therefore every relative path in
+# That makes it irrelevant whether you reached the deployment via deployments/ or via
+# a hosts/<host>/ symlink: the project directory, and therefore every relative path in
 # the compose file, is the same answer either way.
 #
 # THIS RUNS `docker compose`, AND IT STAYS THAT WAY FOR NOW. `two` has no docker at all
@@ -11,11 +11,11 @@
 # runtime-aware: probe for `docker compose`, fall back to `podman-compose`. That was
 # considered and deferred, because it would not have helped:
 #
-#   * `two` runs exactly one stack, destiny-director, and that stack cannot be driven
-#     from here on ANY host, for a reason that has nothing to do with the runtime — its
-#     images are linux/arm/v6 and its .env lives only on that box. A runtime-aware
-#     wrapper would have produced a different error message for the same refusal. So
-#     this refuses by name, below, and says where to go instead.
+#   * `two` runs exactly one deployment, destiny-director, and that deployment cannot
+#     be driven from here on ANY host, for a reason that has nothing to do with the
+#     runtime — its images are linux/arm/v6 and its .env lives only on that box. A
+#     runtime-aware wrapper would have produced a different error message for the same
+#     refusal. So this refuses by name, below, and says where to go instead.
 #   * The two front-ends are not interchangeable. `docker compose` takes
 #     `--project-directory`; `podman-compose` has no such flag and derives the project
 #     directory from the compose file's realpath. Here they agree — but for different
@@ -24,13 +24,13 @@
 #
 # The bill arrives properly when `one` and `zero` move to podman under MicroOS (see
 # docs/roadmap.md), and that is the change to make it at: one deliberate conversion with
-# stacks to test it against, not a probe added speculatively for a host that never calls
-# this script. Recorded in docs/decisions.md so it is not re-derived.
+# deployments to test it against, not a probe added speculatively for a host that never
+# calls this script. Recorded in docs/decisions.md so it is not re-derived.
 set -eu
 
 if [ $# -lt 1 ]; then
-	echo "usage: ${0##*/} <stack> <args...>" >&2
-	echo "stacks:" >&2
+	echo "usage: ${0##*/} <deployment> <args...>" >&2
+	echo "deployments:" >&2
 	ls -1 "$(dirname -- "$0")/../deployments" >&2
 	exit 2
 fi
@@ -40,17 +40,18 @@ shift
 
 # pwd -P resolves symlinks; the compose file is then addressed through the real path.
 dir="$(CDPATH= cd -- "$(dirname -- "$0")/../deployments/$stack" 2>/dev/null && pwd -P)" || {
-	echo "${0##*/}: no such stack: $stack" >&2
+	echo "${0##*/}: no such deployment: $stack" >&2
 	exit 2
 }
 
-# Stacks this script must not drive. A list, not a category — there is one of them, and
-# naming it is greppable in a way a heuristic would not be. Checked AFTER the resolution
-# above so a typo'd stack name still gets "no such stack" rather than this.
+# Deployments this script must not drive. A list, not a category — there is one of them,
+# and naming it is greppable in a way a heuristic would not be. Checked AFTER the
+# resolution above so a typo'd deployment name still gets "no such deployment" rather than
+# this.
 case "$stack" in
 destiny-director)
 	cat >&2 <<-EOF
-	${0##*/}: refusing to drive $stack — it is not a docker compose stack.
+	${0##*/}: refusing to drive $stack — it is not a docker compose deployment.
 
 	  Its images are linux/arm/v6 and its .env exists only on \`two\`. Running it
 	  from any other host would pull an armv6 image and start a bot against no

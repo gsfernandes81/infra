@@ -16,7 +16,7 @@ one
 two
 
 # Hosts that run containers, and are therefore worth auditing for them. `two` is absent
-# on purpose: its one stack is leaving (see docs/management-plane.md), its podman is
+# on purpose: its one deployment is leaving (see docs/management-plane.md), its podman is
 # rootless under a different account, and auditing it for containers would mean reaching
 # that account. It stays in [fleet] and reports OS facts like the others.
 [containerized]

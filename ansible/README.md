@@ -41,7 +41,7 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 | install the packages each Pi should have | `server-install-packages.yml -K` · `-l <host>` | sudo |
 | install the tracked `/etc` files, without restarting anything | `server-install-system-files.yml -K` · `-l <host>` · `-e only=<file>` | sudo |
 | create a tunnel for a Pi (nothing serves through it yet) | `server-create-tunnel.yml -e target=<host> -K` | sudo, the API token |
-| give a compose stack its own tunnel, for a `cloudflared` sidecar — plus an Access login if its `edge.yml` asks | `server-create-stack-tunnel.yml -e stack=calibre-web -K` · **never `-l`**: the host comes from the stack's symlink · pulls the host's checkout to your commit itself | sudo, the API token, and `~/.config/cloudflare/access-emails` for a login |
+| give a compose deployment its own tunnel, for a `cloudflared` sidecar — plus an Access login if its `edge.yml` asks | `server-create-deployment-tunnel.yml -e deployment=calibre-web -K` · **never `-l`**: the host comes from the deployment's symlink · pulls the host's checkout to your commit itself | sudo, the API token, and `~/.config/cloudflare/access-emails` for a login |
 | deploy `garmin-mcp` — its tunnel (the play above), `.env`, the upstream source (pinned in `SOURCE`), `docker compose up`, then end-to-end probes including the served-tools check (reads plus the allowed writes) | `server-deploy-garmin-mcp.yml -K` · **never `-l`** · stops once at the Garmin login, whose block it prints | sudo, the API token |
 | move a Pi onto a new tunnel — **a deliberate outage** | `server-cutover-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | delete a Pi's tunnel — **irreversible** | `server-delete-tunnel.yml -e target=<host> -K` | sudo, the API token |
@@ -51,24 +51,26 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 (the tunnel plays and the cloudflared update) is aimed with `-e target=<host>`; its `hosts:` is
 that variable, so leaving it out falls back to `one` (or refuses, for the update) and can never
 widen to the whole fleet. A fleet-wide play (packages, system files, the inventory) runs on
-`fleet` and is narrowed with `-l <host>`. A deployment play (the stack tunnel play and
-`server-deploy-garmin-mcp.yml`) reads its host from the `hosts/<host>/<name>` symlink and takes
-no `-l` at all, because `-l` would skip the play that finds the host.
+`fleet` and is narrowed with `-l <host>`. A deployment play
+(`server-create-deployment-tunnel.yml` and `server-deploy-garmin-mcp.yml`) reads its host
+from the `hosts/<host>/<name>` symlink and takes no `-l` at all, because `-l` would skip
+the play that finds the host.
 
 `--check --diff` first is the habit; it is what caught the `docs` metapackage before it
 landed on a 1 GB Pi. **The tunnel plays are the exception** — `server-create-tunnel.yml`
 cannot be rehearsed that way at all, because the API create is skipped in check mode and
 everything after it dies on undefined; `server-create-dev-container.yml --check` and
-`server-create-stack-tunnel.yml --check` do every read for real and skip every write, which
-proves the token and shows what exists. The stack play's `--check` still wants `-K`: the
-read that decides whether its tunnel already exists is of a file only root can open.
+`server-create-deployment-tunnel.yml --check` do every read for real and skip every write, which
+proves the token and shows what exists. The deployment tunnel play's `--check` still wants
+`-K`: the read that decides whether its tunnel already exists is of a file only root can
+open.
 
 **Only `server-generate-fleet-inventory.yml` is read-only.** Every other `server-` play
 changes something: packages, **boot-path `/etc` files**, the cloudflared binary, tunnels
 and DNS, `authorized_keys` on `zero`. **`server-deploy-garmin-mcp.yml` is the one play that
-starts a stack** — Phase 3's "Ansible drives stacks", first used there. `server-create-dev-container.yml` prints a secret
-that cannot be fetched again. `client-home-ssh-config.yml` writes ssh config and a 0600
-service token on the client.
+starts a deployment** — Phase 3's "Ansible drives deployments", first used there.
+`server-create-dev-container.yml` prints a secret that cannot be fetched again.
+`client-home-ssh-config.yml` writes ssh config and a 0600 service token on the client.
 
 The halves, for reading rather than running:
 
@@ -78,7 +80,7 @@ The halves, for reading rather than running:
 | `_client-dev-ssh.yml` | one dev container's service token and `~/.ssh/config` block, imported once per container |
 | `_dev-container-tunnel.yml` | the **edge** side — tunnel, DNS, Access application and policy |
 | `_cf-tunnel.yml` | tasks, shared by the two plays that give something its own tunnel: zone and account, the tunnel with its dead-tunnel assert, the CNAME. **No Access** — each caller adds its own or none |
-| `_cf-access-app.yml` | tasks: one Access application and its one policy, read back after writing — imported once per application by `server-create-stack-tunnel.yml` |
+| `_cf-access-app.yml` | tasks: one Access application and its one policy, read back after writing — imported once per application by `server-create-deployment-tunnel.yml` |
 | `_dev-container-host.yml` | the **host** side of `infra-dev` on zero — secrets dir, deploy key, authorized_keys, `dev/.env` |
 | `_assert-inventory.yml` | imported above every play that targets `control` or `fleet`, so a run with no inventory fails instead of exiting 0 |
 | `_cf-api-token.yml` | tasks, imported by every play that talks to Cloudflare: reads the API token file, refuses it on the command line, prints the minting steps when it is missing, verifies it |
@@ -325,8 +327,8 @@ Account/Zone scope), and the API reference pages for every endpoint the plays ca
 rows above, and nothing else: the plays never list accounts (the id comes from the zone, or
 from a tunnel credentials file already on the box), and `/user/tokens/verify` needs no
 permission.
-**The sixth, Transform Rules, arrived 2026-10-24** with `server-create-stack-tunnel.yml`: a
-stack whose `edge.yml` names `request_headers` gets one rule in the zone's
+**The sixth, Transform Rules, arrived 2026-10-24** with `server-create-deployment-tunnel.yml`: a
+deployment whose `edge.yml` names `request_headers` gets one rule in the zone's
 `http_request_late_transform` phase (`rulesets`; Cloudflare's *Request Header Transform
 Rules* guide lists Transform Rules : Edit). A token minted before then lacks it — **edit the
 existing token and add the row**; the play stops with exactly that instruction on a 403.
@@ -334,8 +336,8 @@ existing token and add the row**; the play stops with exactly that instruction o
 Which play uses which, so a 403 can be read: `client-home-ssh-config.yml` needs Zone Read
 and both Access rows (it mints service tokens and edits policies); `server-create-dev-container.yml`
 needs Cloudflare Tunnel, Zone Read, DNS and Access: Apps and Policies, and so does
-`server-create-stack-tunnel.yml` (the Access row only for a stack with a login, plus Transform
-Rules for one with `request_headers`); `server-create-tunnel.yml`
+`server-create-deployment-tunnel.yml` (the Access row only for a deployment with a login,
+plus Transform Rules for one with `request_headers`); `server-create-tunnel.yml`
 needs Cloudflare Tunnel alone; `server-cutover-tunnel.yml` and `server-delete-tunnel.yml`
 need Cloudflare Tunnel, Zone Read and DNS. One token carrying all six is the point.
 
@@ -480,10 +482,10 @@ the two Ansible defaults that are wrong on Termux (`~` is not `$HOME` there, and
 no `/usr/bin/python3`).
 
 **The reason it was described as empty is still true and is the useful part:** per-host
-values are for when one stack needs different ones on different hosts, and **no stack in
-this repo runs on two hosts.** Syncthing looks like it does and does not: `zero`'s syncs
-the general share, `one`'s distributes completed torrents from inside the torrents stack.
-Two jobs, two definitions.
+values are for when one deployment needs different ones on different hosts, and **no
+deployment in this repo runs on two hosts.** Syncthing looks like it does and does not:
+`zero`'s syncs the general share, `one`'s distributes completed torrents from inside the
+torrents deployment. Two jobs, two definitions.
 
 `two.yml` is the one to read before adding anything here — it explains why that host must
 never get docker back, and `group_vars/fleet.yml` explains why almost everything else
@@ -491,6 +493,6 @@ belongs there instead. Unexplained divergence between the hosts is the bug.
 
 ## Not audited
 
-`two` is in `[fleet]` but not `[containerized]`: its one stack is leaving, its podman is
-rootless under a different account, and reaching that account is work that buys nothing
+`two` is in `[fleet]` but not `[containerized]`: its one deployment is leaving, its podman
+is rootless under a different account, and reaching that account is work that buys nothing
 for a box that is about to run no containers. It still reports OS facts.

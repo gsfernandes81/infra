@@ -3,17 +3,17 @@
 # tunnel. The underscore says it is never run by itself.
 #
 #   _dev-container-tunnel.yml       a dev container on zero; then adds its Access application
-#   server-create-stack-tunnel.yml  a compose stack's sidecar connector; Access only if the
-#                                   stack's edge.yml asks for it
+#   server-create-deployment-tunnel.yml  a compose deployment's sidecar connector; Access
+#                                        only if the deployment's edge.yml asks for it
 #
 # What is here is sections 0–2 of what used to be _dev-container-tunnel.yml alone, lifted
-# out word for word on 2026-10-24 so a stack's sidecar gets the same tunnel by the same
-# code: (0) the zone and its account, (1) the tunnel, with the dead-tunnel assert, and
-# (2) the proxied CNAME. ACCESS IS NOT HERE, on purpose. Callers differ about it — a dev
-# container wants an application with service tokens, a browser stack wants a login,
-# and a stack that a machine reaches over its own auth (garmin-mcp, for claude.ai's
-# connector) cannot have one at all — so each caller opts in with its own section after
-# this one. docs/decisions.md § "Sidecar, not baked-in" has the reasoning.
+# out word for word on 2026-10-24 so a deployment's sidecar gets the same tunnel by the
+# same code: (0) the zone and its account, (1) the tunnel, with the dead-tunnel assert,
+# and (2) the proxied CNAME. ACCESS IS NOT HERE, on purpose. Callers differ about it — a
+# dev container wants an application with service tokens, a browser deployment wants a
+# login, and a deployment that a machine reaches over its own auth (garmin-mcp, for
+# claude.ai's connector) cannot have one at all — so each caller opts in with its own
+# section after this one. docs/decisions.md § "Sidecar, not baked-in" has the reasoning.
 #
 # WHAT CHANGED IN THE MOVE, and nothing else did — the 200/201 handling, the dead-tunnel
 # assert's three conditions and every check_mode line are as they were:

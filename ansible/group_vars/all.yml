@@ -64,13 +64,13 @@ cf_api_token_howto: |
   Re-run the same command. The play verifies the token first and names a missing
   permission if there is one.
 
-# ── who may log in to a browser-facing stack ────────────────────────────────
-# server-create-stack-tunnel.yml puts an Access login in front of a stack whose edge.yml
-# says `access: browser`, and the policy admits the addresses in this file, one per line
-# (# comments allowed). A FILE ON THE CONTROL NODE, NOT A LIST HERE, because this repo is
-# public and an email address in it is one more thing the world can read and a scraper
-# can use. Not a secret, so no 600 check — but never on the command line either, for the
-# same reason as the token: it would sit in shell history on the control node.
+# ── who may log in to a browser-facing deployment ───────────────────────────
+# server-create-deployment-tunnel.yml puts an Access login in front of a deployment whose
+# edge.yml says `access: browser`, and the policy admits the addresses in this file, one
+# per line (# comments allowed). A FILE ON THE CONTROL NODE, NOT A LIST HERE, because this
+# repo is public and an email address in it is one more thing the world can read and a
+# scraper can use. Not a secret, so no 600 check — but never on the command line either,
+# for the same reason as the token: it would sit in shell history on the control node.
 #
 # Each machine that runs the play needs its own copy; that is the price of keeping it out
 # of git, and it is small, because the list changes when a person does.
@@ -79,8 +79,8 @@ cf_access_emails_howto: |
   NO ACCESS EMAIL LIST at {{ cf_access_emails_file }} on this machine.
 
   It holds the addresses allowed through the Access login in front of a browser-facing
-  stack, one per line. In fish, typed at a prompt so the address reaches neither shell
-  history nor a process list; run the middle line again for each further address:
+  deployment, one per line. In fish, typed at a prompt so the address reaches neither
+  shell history nor a process list; run the middle line again for each further address:
 
     mkdir -p ~/.config/cloudflare
     read -P 'Address to admit: ' addr; printf '%s\n' $addr >> ~/.config/cloudflare/access-emails; set -e addr

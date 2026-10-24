@@ -2,15 +2,15 @@
 # hosts/one/system/cloudflared-config.yml. Mounted read-only into the sidecar.
 #
 # This file IS the routing: the tunnel is locally-managed (config_src: local), so there is
-# no dashboard copy to disagree with it. ansible/playbooks/server-create-stack-tunnel.yml
+# no dashboard copy to disagree with it. ansible/playbooks/server-create-deployment-tunnel.yml
 # refuses to run if the first hostname is not garmin-mcp.<dns_zone>, if the catch-all is
 # missing, or if a `tunnel:` key appears — the id is an argument from .env, written beside
 # the credentials by the same run, so a second copy here could only ever disagree.
 #
 # ORDER IS BEHAVIOUR: first rule wins. A service name, not 127.0.0.1: on the project
-# network the name is the stable address, and nginx is the only thing in the stack that
-# listens beyond the container's own loopback — the MCP server and the OAuth shim bind
-# 127.0.0.1 inside it and are reachable only through nginx's bearer check.
+# network the name is the stable address, and nginx is the only thing in the deployment
+# that listens beyond the container's own loopback — the MCP server and the OAuth shim
+# bind 127.0.0.1 inside it and are reachable only through nginx's bearer check.
 
 credentials-file: /etc/cloudflared/creds.json
 

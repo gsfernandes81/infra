@@ -1,4 +1,4 @@
-# How calibre-web is reached — read by ansible/playbooks/server-create-stack-tunnel.yml.
+# How calibre-web is reached — read by ansible/playbooks/server-create-deployment-tunnel.yml.
 # The hostname is not here: it is calibre-web.<dns_zone>, derived. The host is not here:
 # it is wherever hosts/<host>/calibre-web points from.
 

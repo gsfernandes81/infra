@@ -6,6 +6,10 @@ not from scratch.
 Rows marked ⚠︎SUPERSEDED describe the `dd-ctl` / `root-setup.sh` era on `two`. See the
 boxed note in "`two` also runs a test bot" below for what replaced them and why.
 
+Until 2026-10-24 this repo called a deployment — a Compose project under
+`deployments/<name>/` — a "stack" (`-e stack=`, `server-create-stack-tunnel.yml`). Older
+entries keep the old word.
+
 | Decision | Because |
 |---|---|
 | Named `infra`, not `containers` | It holds host system config too. |

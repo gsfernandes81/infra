@@ -1,14 +1,14 @@
 ---
-# GIVE A COMPOSE STACK ITS OWN TUNNEL — for a cloudflared SIDECAR in the stack, not a rule
-# in the host's tunnel. Run from the control node:
+# GIVE A COMPOSE DEPLOYMENT ITS OWN TUNNEL — for a cloudflared SIDECAR in the deployment,
+# not a rule in the host's tunnel. Run from the control node:
 #
 #     cd ansible
-#     ansible-playbook playbooks/server-create-stack-tunnel.yml -e stack=calibre-web --check -K
-#     ansible-playbook playbooks/server-create-stack-tunnel.yml -e stack=calibre-web -K
+#     ansible-playbook playbooks/server-create-deployment-tunnel.yml -e deployment=calibre-web --check -K
+#     ansible-playbook playbooks/server-create-deployment-tunnel.yml -e deployment=calibre-web -K
 #
-# NO --limit / -l. The host is found by the first play, on localhost, from the stack's
-# symlink; `-l one` would skip that play, leave nothing to run on, and exit 0 having done
-# nothing — on a phone screen, indistinguishable from a clean no-op.
+# NO --limit / -l. The host is found by the first play, on localhost, from the
+# deployment's symlink; `-l one` would skip that play, leave nothing to run on, and exit 0
+# having done nothing — on a phone screen, indistinguishable from a clean no-op.
 #
 # -K because the tunnel credentials file belongs to uid 65532, the user
 # cloudflare/cloudflared runs as, so reading and writing it needs root — even under
@@ -16,32 +16,34 @@
 # already exists. The Cloudflare API token comes from ~/.config/cloudflare/api-token as for
 # every play that talks to it.
 #
-# NOTHING IS STARTED. Like every play here, this provisions and stops; the stack comes up
-# by hand afterwards. And it is ORDERED SO THE STACK CANNOT START EARLY: the two .env lines
-# the sidecar needs are written LAST, after the probe has proved the login is in front of
-# the hostname. Until then compose refuses on ${TUNNEL_ID:?}, so a run that dies half way
-# leaves a stack that will not start — never one that starts with nothing in front of it.
+# NOTHING IS STARTED. Like every play here, this provisions and stops; the deployment comes
+# up by hand afterwards. And it is ORDERED SO THE DEPLOYMENT CANNOT START EARLY: the two
+# .env lines the sidecar needs are written LAST, after the probe has proved the login is
+# in front of the hostname. Until then compose refuses on ${TUNNEL_ID:?}, so a run that
+# dies half way leaves a deployment that will not start — never one that starts with
+# nothing in front of it.
 #
 # ── what it reads, and where it is derived from ──────────────────────────────
-#   deployments/<stack>/edge.yml        access: browser | none, and an optional bypass_path
-#   deployments/<stack>/cloudflared.yml the tracked ingress; checked, never written
-#   hosts/<host>/<stack>                the symlink placing the stack on a host. The host is
-#                                       READ FROM IT — exactly one must exist — so there is
-#                                       no -e target to disagree with it.
-#   group_vars/all.yml dns_zone         the hostname is <stack>.<dns_zone>, never written
-#                                       beside the stack name (CLAUDE.md § Repo invariants)
+#   deployments/<name>/edge.yml         access: browser | none, and an optional bypass_path
+#   deployments/<name>/cloudflared.yml  the tracked ingress; checked, never written
+#   hosts/<host>/<name>                 the symlink placing the deployment on a host. The
+#                                       host is READ FROM IT — exactly one must exist — so
+#                                       there is no -e target to disagree with it.
+#   group_vars/all.yml dns_zone         the hostname is <name>.<dns_zone>, never written
+#                                       beside the deployment name
+#                                       (CLAUDE.md § Repo invariants)
 #
 # ── the host's checkout: pulled here, not by hand ────────────────────────────
-#   The host runs the stack from ~/infra, so before anything is created the play runs
+#   The host runs the deployment from ~/infra, so before anything is created the play runs
 #   `git pull --ff-only` there and then REQUIRES the host to be on exactly this control
-#   node's commit, with no uncommitted changes under deployments/<stack>/ on either side —
+#   node's commit, with no uncommitted changes under deployments/<name>/ on either side —
 #   server-install-system-files.yml's design (its header, "WHERE THE BYTES COME FROM").
 #   You still pull here, on the control node: that checkout is the one you reviewed.
 #
 # ── what it makes ────────────────────────────────────────────────────────────
-#   1. a locally-managed tunnel, named <stack>       } _cf-tunnel.yml, shared with
-#   2. a proxied CNAME <stack>.<dns_zone>            } _dev-container-tunnel.yml
-#   3. credentials at ~/.<stack>-secrets/tunnel.json on the host, 65532:65532 0600 — OUTSIDE
+#   1. a locally-managed tunnel, named <name>        } _cf-tunnel.yml, shared with
+#   2. a proxied CNAME <name>.<dns_zone>             } _dev-container-tunnel.yml
+#   3. credentials at ~/.<name>-secrets/tunnel.json on the host, 65532:65532 0600 — OUTSIDE
 #      the repo checkout, the same ~/.<name>-secrets convention as the dev containers
 #   4. ONLY for `access: browser` (_cf-access-app.yml, once per application): an Access
 #      application on the hostname admitting the addresses in
@@ -49,15 +51,15 @@
 #      that path that lets everyone through — for a client that cannot log in (the Kobo).
 #      Access path matching is by prefix and the most specific application wins, so the
 #      probe proves `/` still asks for a login after the bypass exists.
-#      `access: none` makes no Access objects — for a stack whose clients cannot pass Access
-#      and which has its own auth (garmin-mcp, behind claude.ai's connector).
+#      `access: none` makes no Access objects — for a deployment whose clients cannot pass
+#      Access and which has its own auth (garmin-mcp, behind claude.ai's connector).
 #   4b. ONLY when edge.yml names `request_headers`: one Request Header Transform Rule setting
 #      them on requests to the hostname — added or patched by its own `ref`, never by
 #      replacing the zone's list. Calibre-Web needs `X-Scheme: https`; its edge.yml says why.
-#   5. TUNNEL_ID and TUNNEL_CREDENTIALS in the stack's .env on the host, last. The sidecar
-#      has no shell to read the id out of the credentials (infra-dev's entrypoint does
-#      that), and `tunnel run` needs it, so compose passes ${TUNNEL_ID} — written by the
-#      same run that wrote the credentials, so the two cannot name different tunnels.
+#   5. TUNNEL_ID and TUNNEL_CREDENTIALS in the deployment's .env on the host, last. The
+#      sidecar has no shell to read the id out of the credentials (infra-dev's entrypoint
+#      does that), and `tunnel run` needs it, so compose passes ${TUNNEL_ID} — written by
+#      the same run that wrote the credentials, so the two cannot name different tunnels.
 #
 # EDGE.YML IS THE WHOLE TRUTH about this hostname's Access objects, and this play only
 # adds. So an application on the hostname that edge.yml does not ask for — left over after
@@ -75,7 +77,7 @@
   vars:
     required_group: fleet
 
-- name: Check {{ stack }} and find the host it runs on
+- name: Check {{ deployment }} and find the host it runs on
   hosts: localhost
   gather_facts: false
   vars:
@@ -85,105 +87,105 @@
     # Every success_msg below reads only what is already proven to exist. Ansible renders
     # success_msg BEFORE it evaluates `that`, so a success message that reads the value
     # under test turns the written fail_msg into a raw "is undefined".
-    - name: Check {{ stack }} is a valid hostname
+    - name: Check {{ deployment }} is a valid hostname
       ansible.builtin.assert:
         that:
-          - stack is defined
-          - stack is match('^[a-z0-9][a-z0-9-]*$')
+          - deployment is defined
+          - deployment is match('^[a-z0-9][a-z0-9-]*$')
         fail_msg: >-
-          Say which stack: -e stack=<name>, a directory under deployments/ that has an
+          Say which deployment: -e deployment=<name>, a directory under deployments/ that has an
           edge.yml. Lower case, digits and hyphens — it becomes a hostname.
-        success_msg: "stack {{ stack | default('?') }}"
+        success_msg: "deployment {{ deployment | default('?') }}"
 
     - name: Find edge.yml, cloudflared.yml and compose.yaml
       ansible.builtin.stat:
-        path: "{{ control_checkout }}/deployments/{{ stack }}/{{ item }}"
+        path: "{{ control_checkout }}/deployments/{{ deployment }}/{{ item }}"
       loop: [edge.yml, cloudflared.yml, compose.yaml]
-      register: stack_files
+      register: deployment_files
 
-    - name: Check {{ stack }} has its three files
+    - name: Check {{ deployment }} has its three files
       ansible.builtin.assert:
-        that: stack_files.results | rejectattr('stat.exists') | list | length == 0
+        that: deployment_files.results | rejectattr('stat.exists') | list | length == 0
         fail_msg: >-
-          deployments/{{ stack }}/ is missing
-          {{ stack_files.results | rejectattr('stat.exists') | map(attribute='item') | list }}.
-          edge.yml says whether the stack wants an Access login, cloudflared.yml is its
-          sidecar's routing, compose.yaml runs both; a stack without all three is not ready
+          deployments/{{ deployment }}/ is missing
+          {{ deployment_files.results | rejectattr('stat.exists') | map(attribute='item') | list }}.
+          edge.yml says whether the deployment wants an Access login, cloudflared.yml is its
+          sidecar's routing, compose.yaml runs both; a deployment without all three is not ready
           for a tunnel.
-        success_msg: "deployments/{{ stack }}/ has edge.yml, cloudflared.yml and compose.yaml"
+        success_msg: "deployments/{{ deployment }}/ has edge.yml, cloudflared.yml and compose.yaml"
 
-    - name: Read deployments/{{ stack }}/edge.yml
+    - name: Read deployments/{{ deployment }}/edge.yml
       ansible.builtin.include_vars:
-        file: "{{ control_checkout }}/deployments/{{ stack }}/edge.yml"
-        name: stack_edge
+        file: "{{ control_checkout }}/deployments/{{ deployment }}/edge.yml"
+        name: deployment_edge
 
     - name: Check edge.yml holds only known, valid settings
       ansible.builtin.assert:
         that:
-          - stack_edge.access is defined
-          - stack_edge.access in ['browser', 'none']
-          - stack_edge.bypass_path is not defined or stack_edge.access == 'browser'
+          - deployment_edge.access is defined
+          - deployment_edge.access in ['browser', 'none']
+          - deployment_edge.bypass_path is not defined or deployment_edge.access == 'browser'
           - >-
-            stack_edge.bypass_path is not defined
-            or (stack_edge.bypass_path is match('^/[A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)*/$'))
-          - (stack_edge | list | difference(['access', 'bypass_path', 'request_headers'])) | length == 0
-          - stack_edge.request_headers is not defined or stack_edge.request_headers is mapping
+            deployment_edge.bypass_path is not defined
+            or (deployment_edge.bypass_path is match('^/[A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)*/$'))
+          - (deployment_edge | list | difference(['access', 'bypass_path', 'request_headers'])) | length == 0
+          - deployment_edge.request_headers is not defined or deployment_edge.request_headers is mapping
           - >-
-            (stack_edge.request_headers | default({}) | dict2items
+            (deployment_edge.request_headers | default({}) | dict2items
              | rejectattr('key', 'match', '^[A-Za-z0-9-]+$') | list | length == 0)
-            and (stack_edge.request_headers | default({}) | dict2items
+            and (deployment_edge.request_headers | default({}) | dict2items
              | rejectattr('value', 'string') | list | length == 0)
         fail_msg: >-
-          deployments/{{ stack }}/edge.yml must say `access: browser` or `access: none`,
+          deployments/{{ deployment }}/edge.yml must say `access: browser` or `access: none`,
           and may add `bypass_path: /some/path/` — leading and trailing slash, browser only,
           because a bypass under no login means nothing — and `request_headers:`, a map of
           header name to a fixed string value. Nothing else is read, and an unknown key is
-          refused rather than ignored: {{ stack_edge }}
-        success_msg: "edge.yml: {{ stack_edge }}"
+          refused rather than ignored: {{ deployment_edge }}
+        success_msg: "edge.yml: {{ deployment_edge }}"
 
-    - name: Find the hosts/<host>/{{ stack }} symlink
+    - name: Find the hosts/<host>/{{ deployment }} symlink
       ansible.builtin.find:
         paths: "{{ control_checkout }}/hosts"
-        patterns: "{{ stack }}"
+        patterns: "{{ deployment }}"
         file_type: link
         recurse: true
         depth: 2
-      register: stack_links
+      register: deployment_links
 
-    - name: Check {{ stack }} is placed on one host only
+    - name: Check {{ deployment }} is placed on one host only
       # One sidecar means one tunnel, and two connectors on one tunnel are replicas: the edge
       # would split requests between two hosts. Not a state to create by accident.
       ansible.builtin.assert:
         that:
-          - stack_links.files | length == 1
-          - (stack_links.files[0].path | dirname | basename) in groups['fleet']
+          - deployment_links.files | length == 1
+          - (deployment_links.files[0].path | dirname | basename) in groups['fleet']
         fail_msg: >-
-          Expected exactly one hosts/<host>/{{ stack }} symlink, on a host in the
-          inventory; found {{ stack_links.files | map(attribute='path') | list }}.
-          `ln -s ../../deployments/{{ stack }} hosts/<host>/{{ stack }}` places it.
-        success_msg: "placed: {{ stack_links.files | map(attribute='path') | list }}"
+          Expected exactly one hosts/<host>/{{ deployment }} symlink, on a host in the
+          inventory; found {{ deployment_links.files | map(attribute='path') | list }}.
+          `ln -s ../../deployments/{{ deployment }} hosts/<host>/{{ deployment }}` places it.
+        success_msg: "placed: {{ deployment_links.files | map(attribute='path') | list }}"
 
-    - name: Read deployments/{{ stack }}/cloudflared.yml
+    - name: Read deployments/{{ deployment }}/cloudflared.yml
       ansible.builtin.set_fact:
-        stack_host: "{{ stack_links.files[0].path | dirname | basename }}"
-        stack_hostname: "{{ stack ~ '.' ~ dns_zone }}"
-        stack_ingress: "{{ lookup('file', control_checkout ~ '/deployments/' ~ stack ~ '/cloudflared.yml') | from_yaml }}"
+        deployment_host: "{{ deployment_links.files[0].path | dirname | basename }}"
+        deployment_hostname: "{{ deployment ~ '.' ~ dns_zone }}"
+        deployment_ingress: "{{ lookup('file', control_checkout ~ '/deployments/' ~ deployment ~ '/cloudflared.yml') | from_yaml }}"
 
-    - name: Check cloudflared.yml routes {{ stack_hostname }}
+    - name: Check cloudflared.yml routes {{ deployment_hostname }}
       # The hostname in cloudflared.yml is a literal, because nothing boot-path is generated
       # from a template; this is the check that keeps that literal and the derived name the
       # same. And no `tunnel:` key — the id comes from .env, written beside the credentials.
       ansible.builtin.assert:
         that:
-          - stack_ingress.tunnel is not defined
-          - stack_ingress['credentials-file'] | default('') == '/etc/cloudflared/creds.json'
-          - stack_ingress.ingress[0].hostname | default('') == stack_hostname
-          - stack_ingress.ingress[-1].service | default('') == 'http_status:404'
+          - deployment_ingress.tunnel is not defined
+          - deployment_ingress['credentials-file'] | default('') == '/etc/cloudflared/creds.json'
+          - deployment_ingress.ingress[0].hostname | default('') == deployment_hostname
+          - deployment_ingress.ingress[-1].service | default('') == 'http_status:404'
         fail_msg: >-
-          deployments/{{ stack }}/cloudflared.yml should carry no `tunnel:` (the id comes
+          deployments/{{ deployment }}/cloudflared.yml should carry no `tunnel:` (the id comes
           from .env), `credentials-file: /etc/cloudflared/creds.json`, a first rule for
-          {{ stack_hostname }}, and the http_status:404 catch-all last.
-        success_msg: "cloudflared.yml routes {{ stack_hostname }}"
+          {{ deployment_hostname }}, and the http_status:404 catch-all last.
+        success_msg: "cloudflared.yml routes {{ deployment_hostname }}"
 
     # ── the review anchor — server-install-system-files.yml's design, 2026-08-24 ──
     # The control node's HEAD is what was reviewed; the host's checkout is the delivery
@@ -192,52 +194,52 @@
       ansible.builtin.command:
         cmd: git rev-parse HEAD
         chdir: "{{ control_checkout }}"
-      register: stack_ctl_head_raw
+      register: deployment_ctl_head_raw
       changed_when: false
       check_mode: false
 
     # Uncommitted edits here are bytes the commit does not carry: what was reviewed on this
     # screen and what the host would run would differ.
-    - name: Read uncommitted {{ stack }} edits in this checkout
+    - name: Read uncommitted {{ deployment }} edits in this checkout
       ansible.builtin.command:
-        cmd: git status --porcelain -- deployments/{{ stack }}/
+        cmd: git status --porcelain -- deployments/{{ deployment }}/
         chdir: "{{ control_checkout }}"
-      register: stack_ctl_dirty
+      register: deployment_ctl_dirty
       changed_when: false
       check_mode: false
 
-    - name: Check this checkout's {{ stack }} files are committed
+    - name: Check this checkout's {{ deployment }} files are committed
       ansible.builtin.assert:
-        that: stack_ctl_dirty.stdout | length == 0
+        that: deployment_ctl_dirty.stdout | length == 0
         fail_msg: >-
-          This checkout has uncommitted changes under deployments/{{ stack }}/:
-          {{ stack_ctl_dirty.stdout_lines | default([]) | join('; ') }}. The host runs the commit,
+          This checkout has uncommitted changes under deployments/{{ deployment }}/:
+          {{ deployment_ctl_dirty.stdout_lines | default([]) | join('; ') }}. The host runs the commit,
           not these edits — commit and push them, or discard them, then re-run. Nothing has
           been touched on any host.
 
-    - name: Note {{ stack_host }} as the host to provision
+    - name: Note {{ deployment_host }} as the host to provision
       # With the reviewed commit, and the checksums of the files the host will run, so the
       # next play can prove the host's checkout is the one checked here, not an older pull.
       ansible.builtin.add_host:
-        name: "{{ stack_host }}"
-        groups: [stack_target]
-        stack_edge: "{{ stack_edge }}"
-        stack_hostname: "{{ stack_hostname }}"
-        stack_ctl_head: "{{ stack_ctl_head_raw.stdout | trim }}"
-        stack_checked: "{{ dict(stack_files.results | map(attribute='item')
-                                | zip(stack_files.results | map(attribute='stat.checksum'))) }}"
+        name: "{{ deployment_host }}"
+        groups: [deployment_target]
+        deployment_edge: "{{ deployment_edge }}"
+        deployment_hostname: "{{ deployment_hostname }}"
+        deployment_ctl_head: "{{ deployment_ctl_head_raw.stdout | trim }}"
+        deployment_checked: "{{ dict(deployment_files.results | map(attribute='item')
+                                | zip(deployment_files.results | map(attribute='stat.checksum'))) }}"
       changed_when: false
 
-- name: Create the {{ stack }} tunnel and any Access login
-  hosts: stack_target
+- name: Create the {{ deployment }} tunnel and any Access login
+  hosts: deployment_target
   gather_facts: false
   become: false
 
   vars:
     cf_api: https://api.cloudflare.com/client/v4
     cf_zone: "{{ dns_zone }}"
-    cf_name: "{{ stack }}"
-    cf_hostname: "{{ stack_hostname }}"
+    cf_name: "{{ deployment }}"
+    cf_hostname: "{{ deployment_hostname }}"
     # The filler for ids only a write could produce, inline wherever one is rendered. Why
     # inline and not a set_fact is beside its definition in _dev-container-tunnel.yml.
     cf_unknown_id: WOULD-BE-CREATED-BY-A-REAL-RUN
@@ -253,10 +255,10 @@
     # run.
     probe_retries: 12
     # What the bypass path may answer and still count as open. 530: no connector yet — the
-    # expected answer before the stack is started. 502: connector up, app down. 401: the app
-    # refusing the probe's made-up token, as it should. 404: the app with its Kobo routes
-    # not yet switched on. NOT 403, which is also what an Access deny page says, and not a
-    # 200 — nothing on that path should hand an unauthenticated probe a page.
+    # expected answer before the deployment is started. 502: connector up, app down. 401:
+    # the app refusing the probe's made-up token, as it should. 404: the app with its Kobo
+    # routes not yet switched on. NOT 403, which is also what an Access deny page says,
+    # and not a 200 — nothing on that path should hand an unauthenticated probe a page.
     bypass_open_statuses: [401, 404, 502, 530]
     # The host's checkout is `infra_checkout` (group_vars/fleet.yml); its .env is where
     # host-specific values live.
@@ -272,14 +274,14 @@
       register: cf_emails_stat
       delegate_to: localhost
       check_mode: false
-      when: stack_edge.access == 'browser'
+      when: deployment_edge.access == 'browser'
 
     - name: "If no allowed-emails list: print how to make one"
       ansible.builtin.debug:
         msg: "{{ cf_access_emails_howto }}"
       changed_when: true
       when:
-        - stack_edge.access == 'browser'
+        - deployment_edge.access == 'browser'
         - not cf_emails_stat.stat.exists
 
     - name: "Access login: check the allowed-emails list exists"
@@ -287,14 +289,14 @@
         that: cf_emails_stat.stat.exists
         fail_msg: "No {{ cf_access_emails_file }}; see above. Nothing has been created."
         quiet: true
-      when: stack_edge.access == 'browser'
+      when: deployment_edge.access == 'browser'
 
     - name: "Access login: read the allowed-emails list"
       ansible.builtin.set_fact:
         cf_access_emails: >-
           {{ lookup('file', cf_access_emails_file).splitlines()
              | map('trim') | reject('match', '^(#|$)') | list }}
-      when: stack_edge.access == 'browser'
+      when: deployment_edge.access == 'browser'
 
     - name: "Access login: check the allowed emails are valid"
       # An application whose allow policy admits nobody is safe but useless; one that admits
@@ -308,7 +310,7 @@
           {{ cf_access_emails_file }} needs at least one address, one per line, and every
           non-comment line must look like an address. Nothing has been created.
         success_msg: "{{ cf_access_emails | length }} address(es) will be admitted"
-      when: stack_edge.access == 'browser'
+      when: deployment_edge.access == 'browser'
 
     - name: Read the ssh user's home directory on {{ inventory_hostname }}
       ansible.builtin.setup:
@@ -322,94 +324,94 @@
       ansible.builtin.command:
         cmd: git pull --ff-only
         chdir: "{{ infra_checkout }}"
-      register: stack_pull
-      changed_when: "'Already up to date' not in stack_pull.stdout"
+      register: deployment_pull
+      changed_when: "'Already up to date' not in deployment_pull.stdout"
       check_mode: false
 
     # pull --ff-only succeeds straight over local edits it does not touch, so the HEAD
     # assert below would pass over a modified compose.yaml. Gitignored files (.env) are
     # not reported, which is right: they are host-specific by design.
-    - name: Read uncommitted {{ stack }} edits on {{ inventory_hostname }}
+    - name: Read uncommitted {{ deployment }} edits on {{ inventory_hostname }}
       ansible.builtin.command:
-        cmd: git status --porcelain -- deployments/{{ stack }}/
+        cmd: git status --porcelain -- deployments/{{ deployment }}/
         chdir: "{{ infra_checkout }}"
-      register: stack_host_dirty
+      register: deployment_host_dirty
       changed_when: false
       check_mode: false
 
-    - name: Check {{ inventory_hostname }} has no uncommitted {{ stack }} edits
+    - name: Check {{ inventory_hostname }} has no uncommitted {{ deployment }} edits
       ansible.builtin.assert:
-        that: stack_host_dirty.stdout | length == 0
+        that: deployment_host_dirty.stdout | length == 0
         fail_msg: >-
           {{ inventory_hostname }}:{{ infra_checkout }} has uncommitted changes under
-          deployments/{{ stack }}/: {{ stack_host_dirty.stdout_lines | default([]) | join('; ') }}.
-          The commit check would pass over them, so the stack would run bytes nobody
+          deployments/{{ deployment }}/: {{ deployment_host_dirty.stdout_lines | default([]) | join('; ') }}.
+          The commit check would pass over them, so the deployment would run bytes nobody
           reviewed. Commit and push them, or discard them on the host. Nothing has been created.
 
     - name: Read the commit {{ inventory_hostname }} is on
       ansible.builtin.command:
         cmd: git rev-parse HEAD
         chdir: "{{ infra_checkout }}"
-      register: stack_host_head
+      register: deployment_host_head
       changed_when: false
       check_mode: false
 
     - name: Check {{ inventory_hostname }} is on the same commit as this checkout
       ansible.builtin.assert:
-        that: stack_host_head.stdout | trim == stack_ctl_head
+        that: deployment_host_head.stdout | trim == deployment_ctl_head
         fail_msg: >-
-          {{ inventory_hostname }} is on {{ stack_host_head.stdout | trim | truncate(12, true, '') }}
-          after pulling, and this control node reviewed {{ stack_ctl_head | truncate(12, true, '') }}.
+          {{ inventory_hostname }} is on {{ deployment_host_head.stdout | trim | truncate(12, true, '') }}
+          after pulling, and this control node reviewed {{ deployment_ctl_head | truncate(12, true, '') }}.
           If you have unpushed commits: `git push`. If origin moved past your review: `git pull`
           here, read the diff, re-run. Nothing has been created.
 
-    - name: Read checksums of {{ stack }} files on {{ inventory_hostname }}
+    - name: Read checksums of {{ deployment }} files on {{ inventory_hostname }}
       # The checks above read the control node's checkout; the sidecar runs from the
       # host's. A host that has not pulled, or pulled something else, would start an
       # ingress nobody checked.
       ansible.builtin.stat:
-        path: "{{ infra_checkout }}/deployments/{{ stack }}/{{ item }}"
-      loop: "{{ stack_checked | list }}"
+        path: "{{ infra_checkout }}/deployments/{{ deployment }}/{{ item }}"
+      loop: "{{ deployment_checked | list }}"
       register: host_files
       check_mode: false
 
-    - name: Note which {{ stack }} files differ on {{ inventory_hostname }}
+    - name: Note which {{ deployment }} files differ on {{ inventory_hostname }}
       ansible.builtin.set_fact:
         host_mismatch: "{{ (host_mismatch | default([])) + [item.item] }}"
       loop: "{{ host_files.results }}"
       loop_control:
         label: "{{ item.item }}"
-      when: (item.stat.checksum | default('(missing)')) != stack_checked[item.item]
+      when: (item.stat.checksum | default('(missing)')) != deployment_checked[item.item]
 
-    - name: Check {{ inventory_hostname }}'s {{ stack }} files match this checkout
+    - name: Check {{ inventory_hostname }}'s {{ deployment }} files match this checkout
       ansible.builtin.assert:
         that: host_mismatch | default([]) | length == 0
         fail_msg: >-
-          {{ inventory_hostname }}:{{ infra_checkout }}/deployments/{{ stack }}/ differs from
+          {{ inventory_hostname }}:{{ infra_checkout }}/deployments/{{ deployment }}/ differs from
           this machine's in {{ host_mismatch | default([]) }}, although both are on the same
           commit and clean — so look before re-running. Nothing has been created.
-        success_msg: "{{ inventory_hostname }}'s checkout matches: {{ stack_checked | list }}"
+        success_msg: "{{ inventory_hostname }}'s checkout matches: {{ deployment_checked | list }}"
 
-    - name: Create ~/.{{ stack }}-secrets on {{ inventory_hostname }}
+    - name: Create ~/.{{ deployment }}-secrets on {{ inventory_hostname }}
       ansible.builtin.file:
-        path: "{{ ansible_facts['user_dir'] }}/.{{ stack }}-secrets"
+        path: "{{ ansible_facts['user_dir'] }}/.{{ deployment }}-secrets"
         state: directory
         mode: "0700"
 
     # ── 0–2  the zone and account, the tunnel, the DNS record ──────────────
-    - name: Create the {{ stack }} tunnel and its DNS record
+    - name: Create the {{ deployment }} tunnel and its DNS record
       ansible.builtin.import_tasks: _cf-tunnel.yml
       vars:
-        cf_creds_path: "{{ ansible_facts['user_dir'] }}/.{{ stack }}-secrets/tunnel.json"
+        cf_creds_path: "{{ ansible_facts['user_dir'] }}/.{{ deployment }}-secrets/tunnel.json"
         cf_creds_become: true
         # cloudflare/cloudflared is distroless `nonroot`, USER 65532:65532 in its Dockerfile.
         # Docker resolves a bind mount as root, so the 0700 directory above does not stop
         # the container; the file's own owner and mode are what it is checked against.
         cf_creds_owner: "65532"
         cf_creds_group: "65532"
-        cf_dns_comment: "{{ stack }} sidecar tunnel — ansible/playbooks/server-create-stack-tunnel.yml"
+        cf_dns_comment: "{{ deployment }} sidecar tunnel — ansible/playbooks/server-create-deployment-tunnel.yml"
         cf_dead_tunnel_hint: >-
-          The sidecar reads it and cannot connect until you do; the stack's other services
+          The sidecar reads it and cannot connect until you do; the deployment's other services
           are unaffected.
 
     # ── 3  what Access exists on this hostname, against what edge.yml asks for ──
@@ -430,10 +432,10 @@
       ansible.builtin.set_fact:
         cf_mine: >-
           {{ cf_app_q.json.result | default([]) | selectattr('domain', 'defined')
-             | selectattr('domain', 'match', '^' ~ (stack_hostname | regex_escape) ~ '($|/)') | list }}
-        cf_login_app_name: "{{ stack }}"
-        cf_bypass_app_name: "{{ stack }} {{ stack_edge.bypass_path | default('') }} (no login)"
-        cf_bypass_domain: "{{ stack_hostname ~ stack_edge.bypass_path | default('') }}"
+             | selectattr('domain', 'match', '^' ~ (deployment_hostname | regex_escape) ~ '($|/)') | list }}
+        cf_login_app_name: "{{ deployment }}"
+        cf_bypass_app_name: "{{ deployment }} {{ deployment_edge.bypass_path | default('') }} (no login)"
+        cf_bypass_domain: "{{ deployment_hostname ~ deployment_edge.bypass_path | default('') }}"
 
     - name: Note which wanted Access applications exist
       # By exact domain, or by the name this play gives it — but the name only among the
@@ -442,30 +444,30 @@
       # never found here and moved.
       ansible.builtin.set_fact:
         cf_login_app: >-
-          {{ ((cf_mine | selectattr('domain', 'eq', stack_hostname) | list)
+          {{ ((cf_mine | selectattr('domain', 'eq', deployment_hostname) | list)
               + (cf_mine | selectattr('name', 'eq', cf_login_app_name) | list))
              | first | default({}) }}
         cf_bypass_app: >-
-          {{ {} if stack_edge.bypass_path is not defined else
+          {{ {} if deployment_edge.bypass_path is not defined else
              ((cf_mine | selectattr('domain', 'eq', cf_bypass_domain) | list)
               + (cf_mine | selectattr('name', 'eq', cf_bypass_app_name) | list))
              | first | default({}) }}
         cf_expected_apps: >-
-          {{ [] if stack_edge.access == 'none' else
-             ([cf_login_app_name] + ([cf_bypass_app_name] if stack_edge.bypass_path is defined else [])) }}
+          {{ [] if deployment_edge.access == 'none' else
+             ([cf_login_app_name] + ([cf_bypass_app_name] if deployment_edge.bypass_path is defined else [])) }}
 
-    - name: Check edge.yml covers each {{ stack }} Access app
+    - name: Check edge.yml covers each {{ deployment }} Access app
       ansible.builtin.assert:
         that: cf_unexpected | length == 0
         fail_msg: >-
           {{ cf_unexpected | map(attribute='name') | zip(cf_unexpected | map(attribute='domain'))
-             | map('join', ' on ') | list }}: Access on {{ stack_hostname }} that
-          deployments/{{ stack }}/edge.yml does not account for (access: {{ stack_edge.access }}{{
-          ', bypass ' ~ stack_edge.bypass_path if stack_edge.bypass_path is defined else '' }}).
+             | map('join', ' on ') | list }}: Access on {{ deployment_hostname }} that
+          deployments/{{ deployment }}/edge.yml does not account for (access: {{ deployment_edge.access }}{{
+          ', bypass ' ~ deployment_edge.bypass_path if deployment_edge.bypass_path is defined else '' }}).
           This play adds and never removes, so an application left from an earlier edge.yml
           stays live until a person deletes it: Zero Trust -> Access -> Applications. Or put
           it back in edge.yml. The tunnel and record exist; nothing else was done.
-        success_msg: "no Access on {{ stack_hostname }} beyond what edge.yml asks for"
+        success_msg: "no Access on {{ deployment_hostname }} beyond what edge.yml asks for"
       vars:
         cf_unexpected: "{{ cf_mine | rejectattr('name', 'in', cf_expected_apps) | list }}"
 
@@ -474,7 +476,7 @@
       ansible.builtin.import_tasks: _cf-access-app.yml
       vars:
         acc_name: "{{ cf_login_app_name }}"
-        acc_domain: "{{ stack_hostname }}"
+        acc_domain: "{{ deployment_hostname }}"
         acc_existing: "{{ cf_login_app }}"
         acc_session: "{{ cf_session_duration }}"
         acc_decision: allow
@@ -482,14 +484,15 @@
         acc_include: "{{ cf_access_emails | map('community.general.dict_kv', 'email') | map('community.general.dict_kv', 'email') | list }}"
         acc_emails: "{{ cf_access_emails }}"
         acc_if_refused: >-
-          The hostname exists with nothing in front of it, but the stack cannot start: its
+          The hostname exists with nothing in front of it, but the deployment cannot start: its
           .env lines are written only at the end of a run that got this far.
-      when: stack_edge.access == 'browser'
+      when: deployment_edge.access == 'browser'
 
     - name: "No-login path: write the application and policy"
       # `bypass`, not `allow` with everyone: allow still runs an identity check, which the
-      # Kobo cannot answer. What guards the path then is the stack's own token in the URL —
-      # which is why the path is all this covers, and why the probe checks `/` afterwards.
+      # Kobo cannot answer. What guards the path then is the deployment's own token in the
+      # URL — which is why the path is all this covers, and why the probe checks `/`
+      # afterwards.
       ansible.builtin.import_tasks: _cf-access-app.yml
       vars:
         acc_name: "{{ cf_bypass_app_name }}"
@@ -503,8 +506,8 @@
           This fails closed — that path still asks for a login, so the client that needs it
           cannot sync — and a re-run finishes it.
       when:
-        - stack_edge.access == 'browser'
-        - stack_edge.bypass_path is defined
+        - deployment_edge.access == 'browser'
+        - deployment_edge.bypass_path is defined
 
     # ── 4b  request headers Cloudflare sets before the tunnel, if edge.yml asks ──
     # One rule in the zone's http_request_late_transform phase, matching this hostname only.
@@ -512,7 +515,7 @@
     # this never PUTs the list: it adds our rule (POST .../rules, which appends) or updates
     # it (PATCH .../rules/<id>), found by a `ref` this play owns. Only when the zone has no
     # list yet does it create one, holding this rule alone. Needs Zone : Transform Rules :
-    # Edit on the API token — only for a stack with request_headers.
+    # Edit on the API token — only for a deployment with request_headers.
     - name: Read the {{ cf_zone }} request-header rules
       ansible.builtin.uri:
         url: "{{ cf_api }}/zones/{{ cf_zone_id }}/rulesets/phases/http_request_late_transform/entrypoint"
@@ -538,38 +541,38 @@
         fail_msg: >-
           Could not read the zone's request-header rules. A 403 means the API token lacks
           Zone : Transform Rules : Edit — add it to the token in the dashboard (My Profile ->
-          API Tokens -> Edit) and re-run. The tunnel and Access are done; the stack cannot
+          API Tokens -> Edit) and re-run. The tunnel and Access are done; the deployment cannot
           start yet, because .env is written last.
         quiet: true
 
-    - name: Note the wanted and existing {{ stack }} header rules
+    - name: Note the wanted and existing {{ deployment }} header rules
       # `ref` is Cloudflare's stable rule identifier; letters, digits and underscores.
       ansible.builtin.set_fact:
         cf_hdr_ruleset_id: "{{ cf_hdr_q.json.result.id if cf_hdr_q.status == 200 else '' }}"
-        cf_hdr_ref: "infra_{{ stack | replace('-', '_') }}_request_headers"
+        cf_hdr_ref: "infra_{{ deployment | replace('-', '_') }}_request_headers"
         cf_hdr_want: >-
-          {{ {'ref': 'infra_' ~ (stack | replace('-', '_')) ~ '_request_headers',
-              'description': stack ~ ' request headers — ansible/playbooks/server-create-stack-tunnel.yml',
-              'expression': '(http.host eq "' ~ stack_hostname ~ '")',
+          {{ {'ref': 'infra_' ~ (deployment | replace('-', '_')) ~ '_request_headers',
+              'description': deployment ~ ' request headers — ansible/playbooks/server-create-deployment-tunnel.yml',
+              'expression': '(http.host eq "' ~ deployment_hostname ~ '")',
               'action': 'rewrite',
               'action_parameters': {'headers': dict(
-                 stack_edge.request_headers | default({}) | list
-                 | zip(stack_edge.request_headers | default({}) | dict2items | map(attribute='value')
+                 deployment_edge.request_headers | default({}) | list
+                 | zip(deployment_edge.request_headers | default({}) | dict2items | map(attribute='value')
                        | map('community.general.dict_kv', 'value')
                        | map('combine', {'operation': 'set'}))) },
               'enabled': true} }}
         cf_hdr_have: >-
           {{ (cf_hdr_q.json.result.rules | default([]) if cf_hdr_q.status == 200 else [])
              | selectattr('ref', 'defined')
-             | selectattr('ref', 'eq', 'infra_' ~ (stack | replace('-', '_')) ~ '_request_headers')
+             | selectattr('ref', 'eq', 'infra_' ~ (deployment | replace('-', '_')) ~ '_request_headers')
              | list | first | default({}) }}
 
     - name: Check edge.yml asks for any existing header rule
       ansible.builtin.assert:
-        that: stack_edge.request_headers is defined or not cf_hdr_have
+        that: deployment_edge.request_headers is defined or not cf_hdr_have
         fail_msg: >-
-          The zone has a request-header rule for {{ stack_hostname }} ({{ cf_hdr_ref }}), and
-          deployments/{{ stack }}/edge.yml no longer asks for one. This play adds and never
+          The zone has a request-header rule for {{ deployment_hostname }} ({{ cf_hdr_ref }}), and
+          deployments/{{ deployment }}/edge.yml no longer asks for one. This play adds and never
           removes: delete it in the dashboard (Rules -> Transform Rules), or put
           request_headers back in edge.yml.
         quiet: true
@@ -582,7 +585,7 @@
              and cf_hdr_have.action | default('') == 'rewrite'
              and (cf_hdr_have.enabled | default(true)) | bool
              and cf_hdr_have.action_parameters.headers | default({}) == cf_hdr_want.action_parameters.headers }}
-      when: stack_edge.request_headers is defined
+      when: deployment_edge.request_headers is defined
 
     - name: "Request headers: write the rule if out of date"
       ansible.builtin.uri:
@@ -604,7 +607,7 @@
       changed_when: cf_hdr_w.json.success | default(false)
       no_log: true
       when:
-        - stack_edge.request_headers is defined
+        - deployment_edge.request_headers is defined
         - not cf_hdr_ok
 
     - name: "If the header rule was refused: print why"
@@ -623,8 +626,8 @@
           - cf_hdr_w.status | default(0) in [200, 201]
           - cf_hdr_w.json.success | default(false)
         fail_msg: >-
-          No request-header rule for {{ stack_hostname }}. A 403 means the API token lacks
-          Zone : Transform Rules : Edit. The stack cannot start yet: .env is written last.
+          No request-header rule for {{ deployment_hostname }}. A 403 means the API token lacks
+          Zone : Transform Rules : Edit. The deployment cannot start yet: .env is written last.
         quiet: true
       when: cf_hdr_w is not skipped
 
@@ -637,7 +640,7 @@
       changed_when: false
       no_log: true
       when:
-        - stack_edge.request_headers is defined
+        - deployment_edge.request_headers is defined
         - not ansible_check_mode
 
     - name: "Request headers: check one rule matches edge.yml"
@@ -651,29 +654,29 @@
           After the write the zone has {{ cf_hdr_mine | length }} rule(s) with ref
           {{ cf_hdr_ref }}, or one that does not say what edge.yml says. Look at Rules ->
           Transform Rules in the dashboard.
-        success_msg: "{{ stack_hostname }}: sets {{ stack_edge.request_headers | default({}) | list }}"
+        success_msg: "{{ deployment_hostname }}: sets {{ deployment_edge.request_headers | default({}) | list }}"
       vars:
         cf_hdr_mine: >-
           {{ cf_hdr_r.json.result.rules | default([]) | selectattr('ref', 'defined')
              | selectattr('ref', 'eq', cf_hdr_ref) | list }}
       when:
-        - stack_edge.request_headers is defined
+        - deployment_edge.request_headers is defined
         - not ansible_check_mode
 
     # ── 5  the probe: is the login in front, before anything answers behind it ──
     # Access answers at the edge before a request reaches the tunnel, so all of this is
-    # provable with the stack still stopped: a login is a 302 to <team>.cloudflareaccess.com.
-    # Calibrated first against a hostname known to be behind a login — if that does not read
-    # as one, the probe is wrong, not the new application.
+    # provable with the deployment still stopped: a login is a 302 to
+    # <team>.cloudflareaccess.com. Calibrated first against a hostname known to be behind
+    # a login — if that does not read as one, the probe is wrong, not the new application.
     #
     # Each probe carries failed_when: false AND ignore_errors: true, so `uri` never stops the
     # play on its own and the assert after it is what speaks, with the reason in words.
     # Both, because -1 (no answer: DNS, TLS, refused) fails `uri` whatever failed_when says,
     # and because ansible-core marks a task failed when its retries run out — 2.21 does not
     # let that stop the play, but the control node's core may be older.
-    - name: "Access login: probe the login in front of {{ stack }}"
+    - name: "Access login: probe the login in front of {{ deployment }}"
       when:
-        - stack_edge.access == 'browser'
+        - deployment_edge.access == 'browser'
         - not ansible_check_mode
       block:
         - name: "Access login: probe the known-good {{ access_calibration_hostname }}"
@@ -695,12 +698,12 @@
               {{ access_calibration_hostname }} answered HTTP {{ probe_cal.status }}{{
               ', redirecting to ' ~ probe_cal.location if probe_cal.location is defined else '' }}
               — not an Access login, so this probe cannot recognise one and its verdict below
-              would mean nothing. Fix the probe; nothing about {{ stack }} is known to be wrong.
+              would mean nothing. Fix the probe; nothing about {{ deployment }} is known to be wrong.
             success_msg: "a login looks like: 302 to {{ (probe_cal.location | default('')) | urlsplit('hostname') }}"
 
-        - name: "Access login: probe {{ stack_hostname }}/"
+        - name: "Access login: probe {{ deployment_hostname }}/"
           ansible.builtin.uri:
-            url: "https://{{ stack_hostname }}/"
+            url: "https://{{ deployment_hostname }}/"
             follow_redirects: none
           register: probe_root
           failed_when: false
@@ -713,25 +716,25 @@
           delegate_to: localhost
           changed_when: false
 
-        - name: "Access login: check {{ stack }} asks for a login"
+        - name: "Access login: check {{ deployment }} asks for a login"
           ansible.builtin.assert:
             that:
               - probe_root.status == 302
               - "'cloudflareaccess.com' in (probe_root.location | default(''))"
             fail_msg: >-
-              {{ stack_hostname }}/ answered HTTP {{ probe_root.status }}{{
+              {{ deployment_hostname }}/ answered HTTP {{ probe_root.status }}{{
               ' (' ~ probe_root.msg ~ ')' if probe_root.status == -1 else '' }}{{
               ', redirecting to ' ~ probe_root.location if probe_root.location is defined else '' }}
-              — not an Access login. The stack cannot start: its .env lines are not written. If
+              — not an Access login. The deployment cannot start: its .env lines are not written. If
               the name does not resolve yet, re-run in a few minutes; the rest is done.
-            success_msg: "{{ stack_hostname }}/ asks for a login"
+            success_msg: "{{ deployment_hostname }}/ asks for a login"
 
-        - name: "No-login path: probe {{ stack_hostname }}{{ stack_edge.bypass_path | default('') }}"
+        - name: "No-login path: probe {{ deployment_hostname }}{{ deployment_edge.bypass_path | default('') }}"
           # Several segments below the bypass, not the bypass itself, because that is the
           # shape the client requests (/kobo/<token>/v1/initialization). Retried like the
           # root, because a just-made application can take as long to apply.
           ansible.builtin.uri:
-            url: "https://{{ stack_hostname }}{{ stack_edge.bypass_path }}infra-probe/v1/initialization"
+            url: "https://{{ deployment_hostname }}{{ deployment_edge.bypass_path }}infra-probe/v1/initialization"
             follow_redirects: none
           register: probe_bypass
           failed_when: false
@@ -741,37 +744,37 @@
           delay: 10
           delegate_to: localhost
           changed_when: false
-          when: stack_edge.bypass_path is defined
+          when: deployment_edge.bypass_path is defined
 
-        - name: "No-login path: check {{ stack_edge.bypass_path | default('') }} asks for no login"
+        - name: "No-login path: check {{ deployment_edge.bypass_path | default('') }} asks for no login"
           ansible.builtin.assert:
             that: probe_bypass.status in bypass_open_statuses
             fail_msg: >-
-              {{ stack_edge.bypass_path }} answered HTTP {{ probe_bypass.status }}{{
+              {{ deployment_edge.bypass_path }} answered HTTP {{ probe_bypass.status }}{{
               ' (' ~ probe_bypass.msg ~ ')' if probe_bypass.status == -1 else '' }}{{
               ' — redirecting to the Access login: the bypass application is not taking
               precedence' if 'cloudflareaccess.com' in (probe_bypass.location | default('')) else '' }}.
               Open means one of {{ bypass_open_statuses }}; the client on that path cannot be
-              assumed to reach it. The stack cannot start: its .env lines are not written.
+              assumed to reach it. The deployment cannot start: its .env lines are not written.
             success_msg: >-
-              {{ stack_edge.bypass_path }} is open (HTTP {{ probe_bypass.status }}{{
-              ' — no connector yet, as expected before the stack starts' if probe_bypass.status == 530 else '' }})
-          when: stack_edge.bypass_path is defined
+              {{ deployment_edge.bypass_path }} is open (HTTP {{ probe_bypass.status }}{{
+              ' — no connector yet, as expected before the deployment starts' if probe_bypass.status == 530 else '' }})
+          when: deployment_edge.bypass_path is defined
 
-    # ── 6  last: the two .env lines that let the stack start ────────────────
-    - name: Write the tunnel settings to {{ stack }}/.env on {{ inventory_hostname }}
+    # ── 6  last: the two .env lines that let the deployment start ───────────
+    - name: Write the tunnel settings to {{ deployment }}/.env on {{ inventory_hostname }}
       # lineinfile, so every other line — the ones filled from .env.example — is left alone,
       # and an .env that does not exist yet is created at 0600. Neither value is a secret;
       # the secret is the file the second one names.
       ansible.builtin.lineinfile:
-        path: "{{ infra_checkout }}/deployments/{{ stack }}/.env"
+        path: "{{ infra_checkout }}/deployments/{{ deployment }}/.env"
         regexp: "^{{ item.key }}="
         line: "{{ item.key }}={{ item.value }}"
         create: true
         mode: "0600"
       loop:
         - { key: TUNNEL_ID, value: "{{ cf_tunnel_id | default(cf_unknown_id, true) }}" }
-        - { key: TUNNEL_CREDENTIALS, value: "{{ ansible_facts['user_dir'] }}/.{{ stack }}-secrets/tunnel.json" }
+        - { key: TUNNEL_CREDENTIALS, value: "{{ ansible_facts['user_dir'] }}/.{{ deployment }}-secrets/tunnel.json" }
       loop_control:
         label: "{{ item.key }}"
 
@@ -781,7 +784,7 @@
         msg: >-
           --check: every read ran for real and every write was skipped, so what this proved
           is that the API token works, that it can see the zone, that {{ inventory_hostname }}
-          has this commit of the stack, and which objects already exist. The probe did not
+          has this commit of the deployment, and which objects already exist. The probe did not
           run. Nothing was created and nothing was changed.
       changed_when: true
       when: ansible_check_mode
@@ -790,11 +793,11 @@
       ansible.builtin.debug:
         msg:
           - "tunnel    {{ cf_tunnel_id | default('(not created — --check)', true) }}"
-          - "hostname  {{ stack_hostname }}"
-          - "creds     {{ inventory_hostname }}:{{ ansible_facts['user_dir'] }}/.{{ stack }}-secrets/tunnel.json (65532, 0600)"
-          - "env       TUNNEL_ID and TUNNEL_CREDENTIALS in {{ infra_checkout }}/deployments/{{ stack }}/.env"
-          - "access    {{ 'login for the addresses in ' ~ cf_access_emails_file if stack_edge.access == 'browser' else 'NONE — the stack is its own gate' }}"
-          - "{{ ('bypass    ' ~ stack_edge.bypass_path ~ ' — no login') if stack_edge.bypass_path is defined else '' }}"
+          - "hostname  {{ deployment_hostname }}"
+          - "creds     {{ inventory_hostname }}:{{ ansible_facts['user_dir'] }}/.{{ deployment }}-secrets/tunnel.json (65532, 0600)"
+          - "env       TUNNEL_ID and TUNNEL_CREDENTIALS in {{ infra_checkout }}/deployments/{{ deployment }}/.env"
+          - "access    {{ 'login for the addresses in ' ~ cf_access_emails_file if deployment_edge.access == 'browser' else 'NONE — the deployment is its own gate' }}"
+          - "{{ ('bypass    ' ~ deployment_edge.bypass_path ~ ' — no login') if deployment_edge.bypass_path is defined else '' }}"
           - ""
-          - "Next: start it — deployments/{{ stack }}/README.md."
+          - "Next: start it — deployments/{{ deployment }}/README.md."
       changed_when: true

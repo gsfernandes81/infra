@@ -1,7 +1,8 @@
 ---
 # TASKS, NOT A PLAY — one Access application and its one policy, imported once per
-# application by server-create-stack-tunnel.yml: the login on a stack's hostname, then the
-# no-login application on its bypass path. Written once so a fix lands once.
+# application by server-create-deployment-tunnel.yml: the login on a deployment's
+# hostname, then the no-login application on its bypass path. Written once so a fix lands
+# once.
 #
 # Every write follows CLAUDE.md § Verifying changes for a no_log call that can be refused:
 # failed_when: false, print Cloudflare's errors, assert. The assert reads `success` as well

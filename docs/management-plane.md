@@ -25,8 +25,8 @@ stored three to five times, by hand, in prose. So every one of them has drifted:
 | — | `roadmap.md` links `hosts/zero/HANDOFF.md` and `hosts/two/setup/root-setup.sh` | neither file exists |
 
 `recovery.md` is the document you read from a ship link when a box has rebooted, and it
-hard-codes both the per-host stack list and the port grep. It is the most-drifted file in
-the repo and the one where drift costs most.
+hard-codes both the per-host deployment list and the port grep. It is the most-drifted
+file in the repo and the one where drift costs most.
 
 Three frictions follow from that one gap, and they are the three that prompted this:
 
@@ -34,13 +34,13 @@ Three frictions follow from that one gap, and they are the three that prompted t
   visible in this repo was to move it in — which breaks `make dev` from a fresh or3 clone
   and inverts the dependency. That is a false choice created by the missing record, not a
   real trade.
-- **Moving a stack between hosts** is: relink `hosts/<host>/`, recreate `.env` by hand on
-  the new box, edit two prose port lines, edit `recovery.md`, and — if the target is `two`
-  — discover that `bin/compose` refuses. Nothing checks any of it.
+- **Moving a deployment between hosts** is: relink `hosts/<host>/`, recreate `.env` by
+  hand on the new box, edit two prose port lines, edit `recovery.md`, and — if the target
+  is `two` — discover that `bin/compose` refuses. Nothing checks any of it.
 - **Bring-up from nothing** exists as a numbered manual for `two` only.
   [`host-setup.md`](host-setup.md) is explicitly topic-organised, not order-organised, and
-  names no per-stack prerequisites — secrets directories, deploy keys, tunnels, or the
-  ordering of the mount guards against the first stack start.
+  names no per-deployment prerequisites — secrets directories, deploy keys, tunnels, or
+  the ordering of the mount guards against the first deployment start.
 
 ## What is not changing — DECIDED
 
@@ -168,8 +168,8 @@ host, which renders its `.env`; tear down on the old host and delete its copy.
 
 **This is a portability mechanism, not a security one, and the distinction changed the
 design.** An earlier draft of this argument aimed at "secrets never at rest on `zero` and
-`one`", which required reworking every stack from `env_file:` onto mounted secrets and
-rendering values into tmpfs. That goal was not the actual requirement, and dropping it
+`one`", which required reworking every deployment from `env_file:` onto mounted secrets
+and rendering values into tmpfs. That goal was not the actual requirement, and dropping it
 removed all of that work.
 
 The security posture nonetheless improves incidentally, which is worth stating so nobody
@@ -179,8 +179,8 @@ been. Encrypted in a private repo it is versioned, reviewable and recoverable, a
 two-way secret scan ritual in [`../CLAUDE.md`](../CLAUDE.md) retires with it.
 
 **It also dissolves the per-host `.env` problem without a design of its own.** Today
-`deployments/<stack>/.env` is one file, so a stack carrying host-specific values cannot be
-*defined once* and run on two hosts.
+`deployments/<name>/.env` is one file, so a deployment carrying host-specific values
+cannot be *defined once* and run on two hosts.
 
 **Nothing exercises this today, and the near-miss is worth stating so it is not
 mis-read.** Syncthing runs on both `zero` and `one`, which looks like the case — it is
@@ -190,9 +190,9 @@ share, and `one`'s (a service inside `deployments/torrents/`, `syncthing-torrent
 `/media/torrents`) distributes completed torrents. Two definitions because there are two
 jobs, not because one definition could not stretch to two hosts.
 
-So the limit is **latent rather than worked around** — no stack in this repo runs on two
-hosts at all, and the first one that wants to will meet it. That is exactly the mobility
-this document is for, and `host_vars/` / `group_vars/` is what removes it.
+So the limit is **latent rather than worked around** — no deployment in this repo runs on
+two hosts at all, and the first one that wants to will meet it. That is exactly the
+mobility this document is for, and `host_vars/` / `group_vars/` is what removes it.
 
 Two costs to record rather than discover:
 
@@ -508,19 +508,20 @@ ones that answer the question this document started from.
 | 2g | All three tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, `two`, DNS | 2f | **DONE on all three.** `one` and `zero` 2026-08-23, `two` 2026-08-29 over the `two-one` mesh. Every host's routing is now a tracked file, and `ansible/2g` — the wrapper written for this migration — is deleted, as its own header said it should be. **The dashboard sweep is the one part left, and it is manual** — deferred into [`plans/cloudflare-dashboard-sweep.md`](../plans/cloudflare-dashboard-sweep.md), because identifying which Access service token a client currently holds is a judgement no check on a box can make |
 | 2h | cloudflared: staggered autoupdate, `one` 6h → `two` 72h → `zero` 240h | all three | — | **done 2026-08-24** — the staggered frequencies are installed and live on all three |
 | 2i | Retire the `ssh-zero-dev-*` rules, and `anchor-two` with them — doors nothing is behind | `zero`'s host tunnel, DNS | nothing | **In progress 2026-08-29.** `dd` and `ds` are out of `hosts/zero/system/cloudflared-config.yml` in the repo; installing that and cycling zero's connector is the owner's step, from a mesh route — `ssh-zero.gsrpi.uk` **is** the tunnel being cycled. Safe to do now because neither container is running and neither has a tunnel of its own until Phase 5; until then they are reached through `ssh zero` and the published loopback ports 2222/2223. `anchor-two.gsrpi.uk` is out of `two`'s ingress on the same argument: it served an experiment that ended and answers 502 always. **Four** CNAMEs go in the same sitting — see the sweep plan |
-| 3 | First stack adopted: `send2ereader` on `one`, **with its connector in the stack** | one stack, non-critical box, `one`'s ingress | 2 | **The connector pattern is set, 2026-10-24** — by `calibre-web`, a new stack, not by `send2ereader`: sidecar, its own locally-managed tunnel, `server-create-stack-tunnel.yml` (decisions.md, *Sidecar, not baked-in*). What this phase still owes is `send2ereader` itself — its connector, deleting `3001`, `bookit` out of `one`'s ingress — and the Ansible adoption with `bin/compose`'s deletion. **`garmin-mcp` is the first stack Ansible starts** (`server-deploy-garmin-mcp.yml`, committed 2026-10-24, `community.docker.docker_compose_v2`), so the adoption's mechanism exists; `bin/compose`'s deletion and `recovery.md`'s rewrite are still owed together |
-| 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two stacks | 3 | |
-| 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | Phase 3 now tests the mechanism first, on a disposable stack |
+| 3 | First deployment adopted: `send2ereader` on `one`, **with its connector in the deployment** | one deployment, non-critical box, `one`'s ingress | 2 | **The connector pattern is set, 2026-10-24** — by `calibre-web`, a new deployment, not by `send2ereader`: sidecar, its own locally-managed tunnel, `server-create-deployment-tunnel.yml` (decisions.md, *Sidecar, not baked-in*). What this phase still owes is `send2ereader` itself — its connector, deleting `3001`, `bookit` out of `one`'s ingress — and the Ansible adoption with `bin/compose`'s deletion. **`garmin-mcp` is the first deployment Ansible starts** (`server-deploy-garmin-mcp.yml`, committed 2026-10-24, `community.docker.docker_compose_v2`), so the adoption's mechanism exists; `bin/compose`'s deletion and `recovery.md`'s rewrite are still owed together |
+| 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two deployments | 3 | |
+| 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | Phase 3 now tests the mechanism first, on a disposable deployment |
 | 6 | `dd` off `two` | `two`, `one` | arm64 CI, upstream | |
 | 7 | **Rootless podman on `one`** — roadmap §2 | `one` | 3 | |
 | 8 | `two` as the scheduled read-only control node | `two` | 6, 7 | |
 
 **Filed 2026-10-24, no phase number — nothing reports a stale sidecar `cloudflared`.**
-A stack's connector is pinned in its `compose.yaml` and is outside 2h's staggered autoupdate
-by design, so it ages silently: `server-update-cloudflared.yml` and the hosts' autoupdate
-never see it. The fix is a report, not an updater — the sidecar's image tag beside the host
-binaries' versions, from `bin/check-sources` or the fleet inventory. `calibre-web` is the
-first such stack and `garmin-mcp` (committed 2026-10-24) the second. Not built.
+A deployment's connector is pinned in its `compose.yaml` and is outside 2h's staggered
+autoupdate by design, so it ages silently: `server-update-cloudflared.yml` and the hosts'
+autoupdate never see it. The fix is a report, not an updater — the sidecar's image tag
+beside the host binaries' versions, from `bin/check-sources` or the fleet inventory.
+`calibre-web` is the first such deployment and `garmin-mcp` (committed 2026-10-24) the
+second. Not built.
 
 **Filed 2026-10-24, no phase number — nothing alerts when `garmin-mcp`'s Garmin login lapses.**
 The cached Garmin session lasts about six months. When it ends, the tools fail while `/healthz`
@@ -554,17 +555,18 @@ It implements `v2_on_any` (harmless when removed: our templates do not use it) a
 to 2.23, check community.general's changelog. If it is unfixed, set `stdout_callback = default`
 in `ansible.cfg` until it is; the `[callback_diy]` block can stay.
 
-**Closed 2026-10-24 — two stack plays read a fact Ansible is withdrawing.** `server-create-stack-tunnel.yml`
-and `server-deploy-garmin-mcp.yml` read the top-level `ansible_user_dir`, which ansible-core 2.24
-withdraws; every run printed `INJECT_FACTS_AS_VARS`. Both now read `ansible_facts['user_dir']`
-from the `setup` they already ran, garmin's through one `garmin_home` var. (`_dev-container-host.yml`
-had already moved to `ansible_facts['env']`; this item first said otherwise.)
+**Closed 2026-10-24 — two deployment plays read a fact Ansible is withdrawing.**
+`server-create-deployment-tunnel.yml` and `server-deploy-garmin-mcp.yml` read the
+top-level `ansible_user_dir`, which ansible-core 2.24 withdraws; every run printed
+`INJECT_FACTS_AS_VARS`. Both now read `ansible_facts['user_dir']` from the `setup` they
+already ran, garmin's through one `garmin_home` var. (`_dev-container-host.yml` had
+already moved to `ansible_facts['env']`; this item first said otherwise.)
 
 **Filed 2026-10-24, no phase number — the inventories do not list btrfs subvolumes.** Asked
 for by the owner. `server-generate-fleet-inventory.yml` gathers containers, listeners and
 volumes, and `hw-inventory` names the disks that hold btrfs, but nothing records the
 subvolumes themselves — on `one` the four older ones exist in this repo only as
-`subvolid=256`…`259` in fstab. With subvolumes now named `media-<stack>-<name>`
+`subvolid=256`…`259` in fstab. With subvolumes now named `media-<deployment>-<name>`
 ([`decisions.md`](decisions.md)), a listing per host — path, id, size if qgroups are on —
 says what each one holds. Needs root and the array's top level mounted (`/mnt`, `noauto`, on
 `one`). Not built.
@@ -616,11 +618,11 @@ the repo cannot fix for it:
 
 **2b–2e were off this list until 2026-08-22.** They come out of the `infra-dev` handoff.
 As filed, two of them outranked Phase 3: `one`'s broken services were the only things on
-the fleet *failing* rather than merely unbuilt, and Phase 3 adopts a stack that currently
-works. 2c was then diagnosed on 2026-08-23 and briefly looked blocked on physical
-access; the disk was pulled on 2026-08-24 and it closed. 2d was ranked as maintenance
-cost rather than risk, to wait for whichever of the four images next needed a change; it
-was built on 2026-08-24 instead.
+the fleet *failing* rather than merely unbuilt, and Phase 3 adopts a deployment that
+currently works. 2c was then diagnosed on 2026-08-23 and briefly looked blocked on
+physical access; the disk was pulled on 2026-08-24 and it closed. 2d was ranked as
+maintenance cost rather than risk, to wait for whichever of the four images next needed a
+change; it was built on 2026-08-24 instead.
 
 ~~**Which left 2e and Phase 3 as the next actionable work**~~ — **that ranking is spent.**
 2e closed inside 2g on `two` on 2026-08-29, and every 2-series phase is done except 2i,
@@ -958,8 +960,8 @@ on a schedule. That is a partial unblock, and calling it a full one is the mista
 avoid.
 
 `one` first is also roadmap §2's own answer, for its own reason: it is the non-critical
-box, its stacks are disposable, and it is where the `bin/compose` docker-vs-podman-compose
-question finally gets tested against something real.
+box, its deployments are disposable, and it is where the `bin/compose`
+docker-vs-podman-compose question finally gets tested against something real.
 
 ### What Phases 1–2 actually bought
 
@@ -1045,10 +1047,10 @@ cgroup configuration at all. Mobility solves this more cleanly than delegation w
 
 ### `bin/compose` goes, at Phase 3 — DECIDED
 
-Ansible drives stacks through `community.docker`, and `bin/compose` is deleted rather than
-wrapped. An earlier draft here said the opposite — that the playbook should call
-`bin/compose` so "how a stack is driven" had one spelling — and that was the wrong read of
-which spelling is worth keeping.
+Ansible drives deployments through `community.docker`, and `bin/compose` is deleted rather
+than wrapped. An earlier draft here said the opposite — that the playbook should call
+`bin/compose` so "how a deployment is driven" had one spelling — and that was the wrong
+read of which spelling is worth keeping.
 
 **The deciding argument is that stock tooling is knowledge that transfers.** `docker
 compose --project-directory … -f …` is longer to type than `bin/compose immich up -d`, and
@@ -1058,28 +1060,28 @@ the command that needs no local knowledge is worth more than the one that is sho
 
 What it did turns out to be covered already, which is why this is cheap:
 
-- **`--project-directory` pinning** was belt-and-braces. `hosts/<host>/<stack>` is a
+- **`--project-directory` pinning** was belt-and-braces. `hosts/<host>/<name>` is a
   symlink to the same directory, so `.env` is literally the same file, and the project
   name cannot drift because *every compose file declares `name:`* — a repo invariant that
   predates the wrapper.
 - **Refusing `destiny-director` by name** is error-message quality, not a guard. That
-  stack interpolates variables that exist only on `two`, so running it elsewhere fails
-  regardless — just less legibly.
+  deployment interpolates variables that exist only on `two`, so running it elsewhere
+  fails regardless — just less legibly.
 
 **The work is not the deletion.** It is rewriting [`recovery.md`](recovery.md)'s bring-back
 commands in the same commit, so the document read when a box has rebooted never names a
 script that no longer exists. Do both together or neither.
 
-### Phase 3 also moves `send2ereader`'s connector into the stack — DECIDED 2026-08-24
+### Phase 3 also moves `send2ereader`'s connector into the deployment — DECIDED 2026-08-24
 
 ⚠︎ **The open question below — sidecar or baked-in — was settled on 2026-10-24, and not
-here:** `calibre-web` was built with a sidecar first, as a new stack with nothing to move.
-[`decisions.md`](decisions.md) § *Sidecar, not baked-in* has the pattern;
+here:** `calibre-web` was built with a sidecar first, as a new deployment with nothing to
+move. [`decisions.md`](decisions.md) § *Sidecar, not baked-in* has the pattern;
 `send2ereader` follows it, and the rest of this section stands.
 
-Phase 3 was "adopt a stack". It now also carries **phase 5's mechanism**, on the stack
-being adopted: `send2ereader` gets its own `cloudflared` inside its compose project
-instead of being served by `one`'s host tunnel.
+Phase 3 was "adopt a deployment". It now also carries **phase 5's mechanism**, on the
+deployment being adopted: `send2ereader` gets its own `cloudflared` inside its compose
+project instead of being served by `one`'s host tunnel.
 
 **What it actually removes is the published port, and that is the reason to do it.**
 Today `bookit.gsrpi.uk` is a rule in
@@ -1092,16 +1094,16 @@ the connector without deleting the port would be motion for its own sake.
 
 **It is done here because this is the cheapest place to be wrong.** The mechanism has one
 precedent, `infra-dev`, which is a dev container holding a live agent session — breaking it
-costs the session that would be fixing it. `send2ereader` is a disposable stack on the
-non-critical box, and its outage is a book that arrives later. Phase 5 then converts the
-dev containers against a pattern that has already run somewhere.
+costs the session that would be fixing it. `send2ereader` is a disposable deployment on
+the non-critical box, and its outage is a book that arrives later. Phase 5 then converts
+the dev containers against a pattern that has already run somewhere.
 
 **The shape is the open question, and `infra-dev` does not answer it.** `infra-dev` runs
 `cloudflared` inside its *own* image, started from its entrypoint — available to it because
 the base image is ours to build. An upstream application image is not, so `send2ereader`
 wants a second service in the compose project instead. Sidecar versus baked-in is the first
-thing to settle in phase 3, and it is a pattern decision for every stack after it, not a
-detail of this one.
+thing to settle in phase 3, and it is a pattern decision for every deployment after it,
+not a detail of this one.
 
 **What does not change:** `bin/compose` still goes at Phase 3, and `recovery.md` is still
 rewritten in the same commit. The connector adds a third thing to that commit — `one`'s
@@ -1182,6 +1184,6 @@ host is a later pass with its own review.
   drift table's own rows now carry their closures, Phase 2 landed on 2026-08-21, and the
   two dead links it named are gone. It stays as evidence here,
   not a changelog. Fixing it — the port line, the dev-container count, `recovery.md`'s
-  stack lists and port greps, roadmap §1's stale paragraph and its two dead links, and the
-  missing `hosts/one/syncthing` symlink — is its own commit, and should happen whether or
-  not this proposal is accepted.
+  deployment lists and port greps, roadmap §1's stale paragraph and its two dead links,
+  and the missing `hosts/one/syncthing` symlink — is its own commit, and should happen
+  whether or not this proposal is accepted.

@@ -14,7 +14,7 @@
 #   2. a proxied CNAME            -> {{ cf_hostname }}
 #   3. an Access application      -> self_hosted, no identity provider, and NO policy yet
 #
-# 1 and 2 are _cf-tunnel.yml since 2026-10-24, shared with server-create-stack-tunnel.yml;
+# 1 and 2 are _cf-tunnel.yml since 2026-10-24, shared with server-create-deployment-tunnel.yml;
 # 3 is this play's own.
 #
 # THE POLICY AND THE SERVICE TOKENS BELONG TO THE CLIENT PLAY. Until 2026-10-04 this play
@@ -142,11 +142,11 @@
         success_msg: "no retired flags"
 
     # ── 0–2  the zone and its account, the tunnel, the DNS record ───────────
-    # Shared since 2026-10-24 with server-create-stack-tunnel.yml, which gives a compose
-    # stack's sidecar connector the same tunnel by the same code. Moved to _cf-tunnel.yml
-    # word for word; what changed in the move is listed in its header. Section 3, the
-    # Access application, stays here: it is this play's own, and a stack opts into a
-    # different one or none at all.
+    # Shared since 2026-10-24 with server-create-deployment-tunnel.yml, which gives a compose
+    # deployment's sidecar connector the same tunnel by the same code. Moved to
+    # _cf-tunnel.yml word for word; what changed in the move is listed in its header.
+    # Section 3, the Access application, stays here: it is this play's own, and a
+    # deployment opts into a different one or none at all.
     - name: Create the {{ cf_name }} tunnel and its DNS record
       ansible.builtin.import_tasks: _cf-tunnel.yml
       vars:

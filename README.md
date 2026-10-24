@@ -3,7 +3,7 @@
 Container and system config for `zero`, `one`, `two`. Config only — no source, no
 secrets, no data.
 
-## Run a stack
+## Run a deployment
 
 ```sh
 bin/compose torrents up -d          # one:  torrents | send2ereader | calibre-web  (ionic-traces stopped)
@@ -17,7 +17,7 @@ bin/check-boot-layout               # can /boot be tampered with without a reboo
 sudo bin/check-mount-guards         # can a failed mount still eat the data? (any host)
 ```
 
-**`two` is the exception.** Its one stack, `destiny-director`, cannot be driven by
+**`two` is the exception.** Its one deployment, `destiny-director`, cannot be driven by
 `bin/compose` on any host — its images are `linux/arm/v6` and its `.env` exists only on
 that box — so `bin/compose destiny-director` refuses by name and says where to go.
 
@@ -46,7 +46,7 @@ someone deploys.
 ## Layout
 
 ```
-deployments/<stack>/   what a stack is — compose.yaml, .env (ignored), SOURCE
+deployments/<name>/    what a deployment is — compose.yaml, .env (ignored), SOURCE
 hosts/<host>/          where it runs — symlinks into deployments/, tracked /etc copies
 hosts/two/setup/       how `two` was built — one reviewed root script, not on any PATH
 bin/                   the scripts above (_infra.py is their shared header parser)
@@ -68,8 +68,8 @@ Target OS for `one` and `zero`: **openSUSE MicroOS** (see [roadmap](docs/roadmap
 `two`'s lifeboat jobs — serial console, power-cycle, dead-man's switch, boot-integrity
 monitoring — are the [roadmap's §5](docs/roadmap.md#5-two--keep-it-as-the-lifeboat) and
 **none of them exist yet**. What actually runs there today is `cloudflared`, `crond`,
-`sshd`, and now this stack. It is also the only host on **rootless podman**; docker and
-containerd are removed from it. See [decisions.md](docs/decisions.md).
+`sshd`, and now this deployment. It is also the only host on **rootless podman**; docker
+and containerd are removed from it. See [decisions.md](docs/decisions.md).
 
 ### Public hostnames
 
@@ -164,7 +164,7 @@ None are in git. `.gitignore` covers `.env`, `*.key`, `qBittorrent.conf`, `*.sql
 | [management-plane.md](docs/management-plane.md) | How the fleet is managed, and why it is Ansible. |
 | [ssh-clients.md](docs/ssh-clients.md) | Reaching the fleet and the dev containers from a laptop or a phone. The generated `~/.ssh/config` blocks point here. |
 | [host-setup.md](docs/host-setup.md) | Building one of these boxes from bare Alpine. |
-| [port-forwarding.md](docs/port-forwarding.md) | The fragile bit. Read before touching the torrents stack. |
+| [port-forwarding.md](docs/port-forwarding.md) | The fragile bit. Read before touching the torrents deployment. |
 | [roadmap.md](docs/roadmap.md) | What's next, and the traps waiting in it. |
 | [decisions.md](docs/decisions.md) | Why it looks like this. Don't relitigate. |
 | [plans/](plans/) | Deferred plans, one per topic. Deleted once executed. |
@@ -174,9 +174,9 @@ None are in git. `.gitignore` covers `.env`, `*.key`, `qBittorrent.conf`, `*.sql
 
 ## Three rules
 
-- **No `..` in a compose file.** Each stack is reachable via `deployments/` *and*
+- **No `..` in a compose file.** Each deployment is reachable via `deployments/` *and*
   `hosts/one/`; a path climbing out resolves differently. Absolute paths outside a
-  stack dir.
+  deployment dir.
 - **Every compose file declares `name:`.** Without it Compose invents one from the
   directory — that's what made `torrents` and `ionic-traces` collide as `ionic`.
 - **`SRC_ROOT` goes in `.env`, never `$HOME`.** `HOME` is unset or root's under

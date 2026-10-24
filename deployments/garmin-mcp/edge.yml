@@ -1,10 +1,10 @@
-# How garmin-mcp is reached — read by ansible/playbooks/server-create-stack-tunnel.yml.
+# How garmin-mcp is reached — read by ansible/playbooks/server-create-deployment-tunnel.yml.
 # The hostname is not here: it is garmin-mcp.<dns_zone>, derived. The host is not here:
 # it is wherever hosts/<host>/garmin-mcp points from.
 
 # No Access login. claude.ai's custom connector cannot pass Cloudflare Access — it speaks
 # the MCP Authorization spec (OAuth 2.1 with discovery, DCR and PKCE) and nothing else.
-# The gate is upstream's OAuth shim inside the stack: nginx refuses every request without
-# the bearer token, and the shim releases that token only to someone who types the
+# The gate is upstream's OAuth shim inside the deployment: nginx refuses every request
+# without the bearer token, and the shim releases that token only to someone who types the
 # consent secret. docs/decisions.md § "Sidecar, not baked-in" names this case.
 access: none

@@ -48,7 +48,7 @@ the conflict. **The restart is not optional**: a failed login is final for the r
 again**. It finishes with every probe passing and prints the claude.ai connector URL.
 
 What the play does, in order:
-1. The tunnel and DNS, through `server-create-stack-tunnel.yml`.
+1. The tunnel and DNS, through `server-create-deployment-tunnel.yml`.
 2. `.env`.
 3. The upstream source (pinned in `SOURCE`), at `$SRC_ROOT/garmin-mcp`.
 4. `docker compose up`, which builds the image only when its tag is absent.
@@ -93,7 +93,7 @@ and never prints it. You do this once; the claude.ai connector refreshes itself 
   a re-run. With only one of the two, the probe fails and says which name.
 - **It is not answering.**
   - `/healthz` 530 or 1033 is the tunnel: `sudo docker logs garmin-mcp-cloudflared`.
-  - `/healthz` 502 is the stack: `sudo docker compose ps` here.
+  - `/healthz` 502 is the deployment: `sudo docker compose ps` here.
   - The play's assert messages name which one.
 
 ## What not to do

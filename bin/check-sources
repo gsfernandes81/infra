@@ -1,5 +1,5 @@
 #!/bin/sh
-# Report drift between each stack's pinned SOURCE sha and the real checkout HEAD.
+# Report drift between each deployment's pinned SOURCE sha and the real checkout HEAD.
 #
 # READ-ONLY. This never fetches, never pulls, never checks out. SOURCE records what
 # is deployed; keeping it accurate is a deliberate act, not an automatic one.
@@ -63,7 +63,7 @@ for source_file in "$repo"/deployments/*/SOURCE; do
 	fi
 
 	if [ -z "$pinned" ]; then
-		# No sha, by design. See the header, and the stack's own SOURCE for why.
+		# No sha, by design. See the header, and the deployment's own SOURCE for why.
 		# Nothing to verify from here, and nothing here that can be wrong — so this
 		# reports and moves on rather than inventing a verdict it has no basis for.
 		echo "$stack: registry-deployed  $url"
@@ -84,7 +84,7 @@ for source_file in "$repo"/deployments/*/SOURCE; do
 		continue
 	fi
 
-	# SRC_ROOT lives in the stack's gitignored .env, so it is per-host.
+	# SRC_ROOT lives in the deployment's gitignored .env, so it is per-host.
 	src_root=''
 	if [ -f "$stack_dir/.env" ]; then
 		src_root="$(sed -n 's/^[[:space:]]*SRC_ROOT[[:space:]]*=[[:space:]]*//p' "$stack_dir/.env" | tail -n1)"

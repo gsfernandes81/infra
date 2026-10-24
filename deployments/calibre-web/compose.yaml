@@ -50,12 +50,12 @@ services:
     # The image's ENTRYPOINT is `cloudflared --no-autoupdate`. The tunnel id is an argument
     # because the image has no shell to read it out of the credentials file; the play that
     # wrote the credentials wrote TUNNEL_ID into .env in the same run, so the two agree.
-    command: tunnel --config /etc/cloudflared/config.yml run ${TUNNEL_ID:?run ansible/playbooks/server-create-stack-tunnel.yml -e stack=calibre-web — it writes TUNNEL_ID}
+    command: tunnel --config /etc/cloudflared/config.yml run ${TUNNEL_ID:?run ansible/playbooks/server-create-deployment-tunnel.yml -e deployment=calibre-web — it writes TUNNEL_ID}
     volumes:
       - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
       # Outside the repo checkout, owned by 65532 (the image's user) at 0600 — the play
       # sets both. A root-owned 0600 file here is unreadable and the connector dies on start.
-      - ${TUNNEL_CREDENTIALS:?run ansible/playbooks/server-create-stack-tunnel.yml -e stack=calibre-web — it writes TUNNEL_CREDENTIALS}:/etc/cloudflared/creds.json:ro
+      - ${TUNNEL_CREDENTIALS:?run ansible/playbooks/server-create-deployment-tunnel.yml -e deployment=calibre-web — it writes TUNNEL_CREDENTIALS}:/etc/cloudflared/creds.json:ro
     # `tunnel ready` asks the metrics server's /ready, which answers 200 once at least one
     # connection to the edge is registered — the same probe recovery.md trusts on the host
     # tunnels. Present in the pinned release's own source (subcommands.go, buildReadyCommand).

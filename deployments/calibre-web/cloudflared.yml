@@ -2,7 +2,7 @@
 # hosts/one/system/cloudflared-config.yml. Mounted read-only into the sidecar.
 #
 # This file IS the routing: the tunnel is locally-managed (config_src: local), so there is
-# no dashboard copy to disagree with it. ansible/playbooks/server-create-stack-tunnel.yml
+# no dashboard copy to disagree with it. ansible/playbooks/server-create-deployment-tunnel.yml
 # refuses to run if the first hostname is not calibre-web.<dns_zone>, if the catch-all is
 # missing, or if a `tunnel:` key appears — the id is an argument from .env, written beside
 # the credentials by the same run, so a second copy here could only ever disagree.

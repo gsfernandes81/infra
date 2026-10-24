@@ -11,52 +11,54 @@
 # OAuth fields blank, and paste ~/.config/garmin-mcp/consent-secret from this control node
 # into the consent page. deployments/garmin-mcp/README.md is the runbook.
 #
-# NO --limit / -l, for the reason in server-create-stack-tunnel.yml's header: the host is
-# found from the stack's symlink by that play's first play, which `-l one` would skip.
+# NO --limit / -l, for the reason in server-create-deployment-tunnel.yml's header: the
+# host is found from the deployment's symlink by that play's first play, which `-l one`
+# would skip.
 #
 # -K: the tunnel credentials file belongs to uid 65532, and docker needs root — gavin is
 # not in the docker group (CLAUDE.md § Privileged commands).
 #
-# THIS PLAY STARTS THE STACK, unlike the provisioning plays beside it, which stop before
-# anything runs. That is docs/management-plane.md § "`bin/compose` goes, at Phase 3":
-# Ansible drives stacks through community.docker. garmin-mcp is the first stack it drives.
+# THIS PLAY STARTS THE DEPLOYMENT, unlike the provisioning plays beside it, which stop
+# before anything runs. That is docs/management-plane.md § "`bin/compose` goes, at
+# Phase 3": Ansible drives deployments through community.docker. garmin-mcp is the first
+# deployment it drives.
 #
 # TWO HALVES:
-#   1. server-create-stack-tunnel.yml, imported unchanged with stack=garmin-mcp. It pulls the
-#      host's checkout to this control node's commit (and refuses if it cannot), makes the
-#      tunnel and the CNAME, writes the tunnel credentials file outside the checkout, proves
-#      the host's compose.yaml, edge.yml and cloudflared.yml match this control node's,
-#      writes TUNNEL_ID and TUNNEL_CREDENTIALS into .env (creating it at 0600), and leaves
-#      the host in the `stack_target` group with `stack_hostname` set. edge.yml says
-#      `access: none`.
+#   1. server-create-deployment-tunnel.yml, imported unchanged with deployment=garmin-mcp.
+#      It pulls the host's checkout to this control node's commit (and refuses if it
+#      cannot), makes the tunnel and the CNAME, writes the tunnel credentials file outside
+#      the checkout, proves the host's compose.yaml, edge.yml and cloudflared.yml match
+#      this control node's, writes TUNNEL_ID and TUNNEL_CREDENTIALS into .env (creating it
+#      at 0600), and leaves the host in the `deployment_target` group with
+#      `deployment_hostname` set. edge.yml says `access: none`.
 #   2. The play below, on that host: it refuses a Garmin password in .env, fills the other
-#      four .env lines, checks out the upstream source (pinned in SOURCE), brings the stack
-#      up, and then proves the result END TO END FROM THIS CONTROL NODE — tunnel, nginx, the
-#      OAuth metadata, the Garmin login, and the one property the whole design rests on:
-#      that the server serves only read tools.
+#      four .env lines, checks out the upstream source (pinned in SOURCE), brings the
+#      deployment up, and then proves the result END TO END FROM THIS CONTROL NODE —
+#      tunnel, nginx, the OAuth metadata, the Garmin login, and the one property the whole
+#      design rests on: that the server serves only read tools.
 #
 # Re-running is the intended way to finish after a partial failure; every step looks before
 # it acts. Nothing here rebuilds the image unless its tag (in compose.yaml) is absent.
 
 - name: Create the garmin-mcp tunnel and DNS record
-  ansible.builtin.import_playbook: server-create-stack-tunnel.yml
+  ansible.builtin.import_playbook: server-create-deployment-tunnel.yml
   vars:
-    stack: garmin-mcp
+    deployment: garmin-mcp
 
 - name: Install and start garmin-mcp, then probe it
-  hosts: stack_target
+  hosts: deployment_target
   gather_facts: false
   become: false
 
   vars:
-    stack: garmin-mcp
+    deployment: garmin-mcp
     # The ssh user's home, from the minimal `setup` below. ansible_facts, not the top-level
     # ansible_user_dir, which ansible-core 2.24 withdraws. One var, so a local test can stand
     # in a fake host with -e garmin_home=….
     garmin_home: "{{ ansible_facts['user_dir'] }}"
-    garmin_stack_dir: "{{ infra_checkout }}/deployments/garmin-mcp"
+    garmin_deployment_dir: "{{ infra_checkout }}/deployments/garmin-mcp"
     garmin_src: "{{ garmin_home }}/src/garmin-mcp"
-    garmin_url: "https://{{ stack_hostname }}"
+    garmin_url: "https://{{ deployment_hostname }}"
 
     # SOURCE is the one copy of the upstream URL and sha; read here on the control node.
     garmin_source: >-
@@ -70,7 +72,7 @@
     garmin_consent_file: "{{ lookup('env', 'HOME') }}/.config/garmin-mcp/consent-secret"
 
     # The .env keys compose.yaml requires. The first four are this play's; the TUNNEL_ pair
-    # is the stack play's.
+    # is the deployment tunnel play's.
     garmin_env_keys: [SRC_ROOT, PUBLIC_BASE_URL, MCP_CONSENT_SECRET, MCP_BEARER_TOKEN, TUNNEL_ID, TUNNEL_CREDENTIALS]
 
     # ── the read-and-allowed-writes proof ─────────────────────────────────────────────────
@@ -105,11 +107,12 @@
         gather_subset: ['!all']
 
     # ── 1  .env, and no Garmin password in it ───────────────────────────────
-    - name: Read the {{ stack }} .env on {{ inventory_hostname }}
-      # The stack play has just created it. Under --check on a fresh host it has not, so a
-      # missing file is tolerated here and reported as missing keys further down.
+    - name: Read the {{ deployment }} .env on {{ inventory_hostname }}
+      # The deployment tunnel play has just created it. Under --check on a fresh host it
+      # has not, so a missing file is tolerated here and reported as missing keys further
+      # down.
       ansible.builtin.slurp:
-        src: "{{ garmin_stack_dir }}/.env"
+        src: "{{ garmin_deployment_dir }}/.env"
       register: garmin_env_raw
       check_mode: false
       failed_when:
@@ -129,9 +132,9 @@
           - "'GARMIN_EMAIL' not in garmin_env_present"
           - "'GARMIN_PASSWORD' not in garmin_env_present"
         fail_msg: >-
-          {{ garmin_stack_dir }}/.env on {{ inventory_hostname }} has
+          {{ garmin_deployment_dir }}/.env on {{ inventory_hostname }} has
           {{ garmin_env_present | select('match', '^GARMIN_(EMAIL|PASSWORD)$') | list }}.
-          Delete those lines. Upstream's README says to put them there; this stack does not
+          Delete those lines. Upstream's README says to put them there; this deployment does not
           want them: the server would silently log in with the password whenever its tokens
           failed and write a base64 copy of the tokens beside them. The one-time login in
           deployments/garmin-mcp/README.md prompts for both instead. Nothing was changed.
@@ -149,7 +152,7 @@
 
     - name: Write the consent secret into .env
       ansible.builtin.lineinfile:
-        path: "{{ garmin_stack_dir }}/.env"
+        path: "{{ garmin_deployment_dir }}/.env"
         regexp: '^MCP_CONSENT_SECRET='
         line: "MCP_CONSENT_SECRET={{ garmin_consent }}"
         create: false
@@ -159,7 +162,7 @@
 
     - name: "If no bearer token: write a token into .env"
       ansible.builtin.lineinfile:
-        path: "{{ garmin_stack_dir }}/.env"
+        path: "{{ garmin_deployment_dir }}/.env"
         regexp: '^MCP_BEARER_TOKEN='
         line: "MCP_BEARER_TOKEN={{ lookup('ansible.builtin.password', '/dev/null', length=64, chars=['0123456789abcdef']) }}"
         create: false
@@ -171,7 +174,7 @@
 
     - name: "If .env exists: write SRC_ROOT and PUBLIC_BASE_URL"
       ansible.builtin.lineinfile:
-        path: "{{ garmin_stack_dir }}/.env"
+        path: "{{ garmin_deployment_dir }}/.env"
         regexp: "^{{ item.key }}="
         line: "{{ item.key }}={{ item.value }}"
         create: false
@@ -190,7 +193,7 @@
         state: directory
         mode: "0755"
 
-    - name: Pull the {{ stack }} source at commit {{ garmin_source[1][:7] }}
+    - name: Pull the {{ deployment }} source at commit {{ garmin_source[1][:7] }}
       # force: false refuses a checkout with local modifications; a clean one is moved to the
       # pinned sha, so a reviewed bump needs no step by hand. $SRC_ROOT/garmin-mcp is the path
       # bin/check-sources looks for.
@@ -200,14 +203,14 @@
         version: "{{ garmin_source[1] }}"
         force: false
 
-    - name: Read the commit the {{ stack }} source is on
+    - name: Read the commit the {{ deployment }} source is on
       ansible.builtin.command: git -C {{ garmin_src }} rev-parse HEAD
       register: garmin_head
       changed_when: false
       check_mode: false
       failed_when: false
 
-    - name: Check the {{ stack }} source is on the pinned commit
+    - name: Check the {{ deployment }} source is on the pinned commit
       ansible.builtin.assert:
         that: garmin_head.stdout == garmin_source[1]
         fail_msg: >-
@@ -217,9 +220,9 @@
       when: not (ansible_check_mode and garmin_head.rc != 0)
 
     # ── 4  every key compose needs, before compose runs ─────────────────────
-    - name: Read the {{ stack }} .env after the writes
+    - name: Read the {{ deployment }} .env after the writes
       ansible.builtin.slurp:
-        src: "{{ garmin_stack_dir }}/.env"
+        src: "{{ garmin_deployment_dir }}/.env"
       register: garmin_env_raw2
       check_mode: false
       failed_when: false
@@ -239,7 +242,7 @@
     - name: Check .env has every required setting
       ansible.builtin.assert:
         that: garmin_env_missing | length == 0
-        fail_msg: "{{ garmin_stack_dir }}/.env lacks {{ garmin_env_missing }}. Nothing has been started."
+        fail_msg: "{{ garmin_deployment_dir }}/.env lacks {{ garmin_env_missing }}. Nothing has been started."
         success_msg: "{{ garmin_env_keys | length }} keys present"
       when: not ansible_check_mode
 
@@ -252,9 +255,9 @@
         - garmin_env_missing | length > 0
 
     # ── 5  up ───────────────────────────────────────────────────────────────
-    - name: "If .env is complete: start {{ stack }}"
+    - name: "If .env is complete: start {{ deployment }}"
       community.docker.docker_compose_v2:
-        project_src: "{{ garmin_stack_dir }}"
+        project_src: "{{ garmin_deployment_dir }}"
         build: policy
         state: present
       become: true
@@ -263,7 +266,7 @@
     # ── 6  the probes, from this control node, end to end ───────────────────
     # Each retries (a new tunnel's DNS, a first boot, a background login), never stops on the
     # module's own failure, and is followed by an assert that says what it means. Both
-    # failed_when: false AND ignore_errors: true, as in server-create-stack-tunnel.yml: -1 (no
+    # failed_when: false AND ignore_errors: true, as in server-create-deployment-tunnel.yml: -1 (no
     # answer) fails `uri` whatever failed_when says, and exhausted retries mark a task failed.
     - name: Wait for /healthz through the tunnel
       ansible.builtin.uri:
@@ -284,7 +287,7 @@
         fail_msg: >-
           {{ garmin_url }}/healthz answered {{ garmin_p_health.status | default('nothing') }}.
           530/1033 is the tunnel (sudo docker logs garmin-mcp-cloudflared on {{ inventory_hostname }});
-          502 is the stack (sudo docker compose ps in {{ garmin_stack_dir }}).
+          502 is the deployment (sudo docker compose ps in {{ garmin_deployment_dir }}).
         success_msg: "{{ garmin_url }}/healthz → 200"
       when: not ansible_check_mode
 
@@ -347,7 +350,7 @@
           - "/readyz says {{ (garmin_p_ready.content | default('{}', true) | from_json).status | default('nothing') }}. No Garmin login has been made, or it was refused at this start (expired tokens, ~6 months, or a Garmin 429). /readyz is decided once, at start-up. The fix is the same:"
           - "1. ssh -t {{ inventory_hostname }}"
           - "2. paste, inside that shell (fish):"
-          - "     cd {{ garmin_stack_dir }}"
+          - "     cd {{ garmin_deployment_dir }}"
           - "     sudo docker compose run --rm --name garmin-mcp-auth garmin-mcp garmin-mcp-auth; and sudo docker compose restart garmin-mcp"
           - "   It asks for your Garmin email, your password (not echoed, never stored) and the MFA code Garmin sends."
           - "   --name, because `compose run` would otherwise reuse the running server's container name."
@@ -365,7 +368,7 @@
         success_msg: "/readyz → ready"
       when: not ansible_check_mode
 
-    - name: Probe the tools {{ stack }} serves
+    - name: Probe the tools {{ deployment }} serves
       ansible.builtin.uri:
         url: "{{ garmin_url }}/mcp"
         method: POST
@@ -415,13 +418,13 @@
           {{ (lookup('file', control_checkout ~ '/deployments/garmin-mcp/compose.yaml') | from_yaml)
              .services['garmin-mcp'].environment.GARMIN_ENABLED_TOOLS.split(',')
              | difference(garmin_served_tools) }}.
-          STOP THE STACK if anything is listed as outside: sudo docker compose stop, in
-          {{ garmin_stack_dir }}.
+          STOP THE DEPLOYMENT if anything is listed as outside: sudo docker compose stop,
+          in {{ garmin_deployment_dir }}.
         success_msg: "{{ garmin_served_tools | length }} tools served, {{ garmin_allowed_writes | length }} of them the allowed writes"
       when: not ansible_check_mode
 
     # ── 7  the record ───────────────────────────────────────────────────────
-    - name: Read {{ stack }} memory use
+    - name: Read {{ deployment }} memory use
       ansible.builtin.command: >-
         docker stats --no-stream --format '{{ '{{' }}.Name{{ '}}' }} {{ '{{' }}.MemUsage{{ '}}' }}'
         garmin-mcp garmin-mcp-cloudflared

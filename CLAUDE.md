@@ -20,7 +20,7 @@ as the management plane, and a handful of Python tools in `bin/`.
 
 Full orientation is `README.md`; the reasoning is `docs/decisions.md`. Quick map:
 
-- **`deployments/<stack>/`** — what a stack *is*: `compose.yaml`, `.env` (gitignored,
+- **`deployments/<name>/`** — what a deployment *is*: `compose.yaml`, `.env` (gitignored,
   host-specific values live there and never `$HOME`), `SOURCE` (the upstream URL and the
   deployed sha — **it records, it never pulls**; a URL-only `SOURCE` means
   registry-deployed, see `destiny-director/SOURCE`). Canonical; hosts symlink in.
@@ -28,7 +28,7 @@ Full orientation is `README.md`; the reasoning is `docs/decisions.md`. Quick map
   tracked copies of `/etc` files, each carrying an `infra-` header that says where it
   installs (`hosts/zero/system/README.md`). `hosts/two/setup/` is the whole build of
   `two`, one reviewed root script, on no PATH.
-- **`bin/`** — `compose` (docker stacks only; refuses `destiny-director` by name),
+- **`bin/`** — `compose` (docker deployments only; refuses `destiny-director` by name),
   `check-sources`, `check-system-drift` (reports, never writes), `install-system-file`
   (writes, never restarts), `check-boot-layout`, `check-mount-guards`, `hw-inventory`.
   `_infra.py` is their shared header parser. **Not wrapped in the Makefile yet, on
@@ -195,7 +195,7 @@ script**, run in a separate terminal, with the output pasted back.
 - Use `stop`/`start`, never `up -d`, when the intent is only to cycle a container. `up`
   re-evaluates config and may recreate.
 - **Verify which commit is deployed, not that a deploy reported success.**
-  `bin/check-sources` for the pinned stacks; `podman inspect dd-beacon --format
+  `bin/check-sources` for the pinned deployments; `podman inspect dd-beacon --format
   '{{.Image}}'` on `two`, where the deploy follows a moving branch tag by design.
 - **Anything whose response cannot be fetched again is printed the moment it is
   created** — a Cloudflare service token's secret was lost to `no_log` on a task that
@@ -207,7 +207,7 @@ script**, run in a separate terminal, with the output pasted back.
   then an `assert` that stops the play. Accept every 2xx the operation could answer
   with, and prove the outcome with a check, not with the status code.
 - One-shot migration scripts get deleted once run. Leaving an executable in `bin/`
-  that tears down live stacks is a foot-gun, and git history keeps it.
+  that tears down live deployments is a foot-gun, and git history keeps it.
 
 ## Shell traps that have actually bitten here
 
@@ -377,9 +377,9 @@ that has one.**
   true, which would have you go to the dashboard rather than install the tracked file.
   Kept because the rule still governs any remotely-managed tunnel you meet, and because
   `config_src` is create-time only: the way back to one is by accident, not by choice.
-- **"Exited" is not "absent".** A stack with an exited container, a registered compose
-  project, or surviving named volumes must be torn down properly. Deleting its files
-  first orphans them permanently.
+- **"Exited" is not "absent".** A deployment with an exited container, a registered
+  compose project, or surviving named volumes must be torn down properly. Deleting its
+  files first orphans them permanently.
 - **Measure before deleting.** A subvolume flagged as a dead remnant turned out to hold
   ~340 GiB. It was still the right call, but the size should have been in the ask.
 - **Never call an improvising agent against infrastructure.** The Railway connector's

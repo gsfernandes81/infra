@@ -14,7 +14,7 @@ normal" this repo has, and it is the thing the greps below are checking against.
 sudo bin/check-mount-guards      # ANY host — are the data guards still intact?
 ```
 
-## Bring the stacks back
+## Bring the deployments back
 
 `one`:
 
@@ -52,8 +52,8 @@ matched, because the only dev container usually up is `or3-dev` and it binds
 
 **8384/22000 are Syncthing on host networking**, on both boxes. They will not appear in
 `docker ps --format '{{.Ports}}'` at all — only in `netstat`. On `one` that Syncthing is
-part of the *torrents* stack, so `bin/compose torrents up -d` is what starts it; it is
-not the same deployment as `zero`'s, which syncs a different share.
+part of the *torrents* deployment, so `bin/compose torrents up -d` is what starts it; it
+is not the same deployment as `zero`'s, which syncs a different share.
 
 On `one`, all state is on `/media` bind mounts, so containers are disposable —
 recreating loses nothing. After a gluetun recreate expect a **new** forwarded port; see

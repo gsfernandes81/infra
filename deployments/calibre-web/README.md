@@ -20,7 +20,7 @@ reasoning is [`docs/decisions.md`](../../docs/decisions.md) § *Sidecar, not bak
 - **Store purchases survive only with "Proxy unknown requests to Kobo Store" on.**
 - **PDFs never sync to a Kobo.** EPUB is converted to KEPUB on the fly by `kepubify`,
   which the image carries.
-- **There is no other conversion** (MOBI, AZW3 → EPUB) on this stack, deliberately.
+- **There is no other conversion** (MOBI, AZW3 → EPUB) on this deployment, deliberately.
   It works on arm64 if it is ever wanted — the way to add it is a derived image with
   Calibre's arm64 tarball, hash-pinned, not the `DOCKER_MODS` line, which installs on
   every start. The 512 MB cap is already sized with that in mind.
@@ -113,8 +113,8 @@ image is (`0.6.27`) — copy it into `/media/calibre/library` instead.
 
 ```fish
 cd ~/infra; git pull --ff-only; cd ansible
-ansible-playbook playbooks/server-create-stack-tunnel.yml -e stack=calibre-web --check -K
-ansible-playbook playbooks/server-create-stack-tunnel.yml -e stack=calibre-web -K
+ansible-playbook playbooks/server-create-deployment-tunnel.yml -e deployment=calibre-web --check -K
+ansible-playbook playbooks/server-create-deployment-tunnel.yml -e deployment=calibre-web -K
 ```
 
 It needs `~/.config/cloudflare/access-emails` on the control node (who may log in, one
@@ -127,9 +127,9 @@ login, the `/kobo/` bypass, and a Cloudflare rule setting `X-Scheme: https` on r
 this hostname — see step 6 for why. It then **proves, before anything is started**, that
 `/` asks for a login and `/kobo/` does not — calibrated first against `torrents.gsrpi.uk`
 — and only then writes `TUNNEL_ID` and `TUNNEL_CREDENTIALS` into `.env` on `one`. So a run
-that fails part way leaves a stack that **cannot** start: compose refuses without those
-two lines. A fresh hostname can take a minute to resolve; if the probe gives up on that,
-re-run.
+that fails part way leaves a deployment that **cannot** start: compose refuses without
+those two lines. A fresh hostname can take a minute to resolve; if the probe gives up on
+that, re-run.
 
 It refuses, rather than guesses, when: `one` has not pulled the same commit as the control
 node; an Access application on this hostname is not one `edge.yml` asks for (left over

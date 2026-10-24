@@ -1,7 +1,7 @@
 # <upstream-url> [<deployed-sha>]
 # Records what is deployed. Never triggers a pull — see bin/check-sources.
 #
-# NO SHA HERE, DELIBERATELY. This stack is *registry-deployed*: nothing is built on
+# NO SHA HERE, DELIBERATELY. This deployment is *registry-deployed*: nothing is built on
 # `two` (a 700 MHz single core), so there is no checkout on the box for a sha to name.
 # The image is built for linux/arm/v6 by the upstream repo's own CI and published to
 # ghcr.io/gsfernandes81/destiny-director.
@@ -21,7 +21,7 @@
 #                         deploy is now a shell command in the deploy user's history.
 #
 # So the line below records provenance, and only that. bin/check-sources recognises a
-# URL-only SOURCE and reports the stack as `registry-deployed` — not drift, not
+# URL-only SOURCE and reports the deployment as `registry-deployed` — not drift, not
 # malformed, and it does not affect the exit status. A second field that is not a sha, a
 # third field, or a first field that is not a URL is still a hard failure there: absence
 # of a pin is the design here, but a garbled SOURCE must never pass for one.

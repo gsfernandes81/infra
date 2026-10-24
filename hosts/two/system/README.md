@@ -26,8 +26,8 @@ With it come three host changes:
   removes the stated objection to tracking `/etc` files here (see below): the
   interpreter `bin/check-system-drift` needs is no longer a cost this box would pay
   only for the checker's sake.
-- **An unprivileged `claude` account** deploys the stack, with an ordinary SSH key and
-  plain `podman-compose`. This reverses the "no new user on `two`" decision — see
+- **An unprivileged `claude` account** deploys `destiny-director`, with an ordinary SSH
+  key and plain `podman-compose`. This reverses the "no new user on `two`" decision — see
   [`docs/decisions.md`](../../../docs/decisions.md) and the section below.
 
 The build is [`../setup/README.md`](../setup/README.md), a numbered instruction manual.
