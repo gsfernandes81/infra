@@ -36,6 +36,12 @@ and it is why this is not a playbook.
 
 ## Two things to check while in there
 
+**✔ Answered, and the DNS half is done, 2026-10-25.** The owner deleted all four records below;
+both Cloudflare's and Google's resolvers return NXDOMAIN for each, with `ssh-zero` still
+resolving as the control. `-or3`'s record had survived until then, and its rule was gone from
+zero's running connector (it answered the catch-all 404 that day), so zero was cycled at some
+point after `7bb2075`. What is left of this plan is the token and application half.
+
 Both are recorded as unverified and nothing tracked settles them:
 
 - **Did `ssh-zero-dev-or3.gsrpi.uk`'s CNAME actually get deleted** after `7bb2075` removed
