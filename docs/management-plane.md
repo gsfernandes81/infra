@@ -535,6 +535,14 @@ dead tokens. The signal has to be a real Garmin call (an authorised `tools/call 
 or a scheduled restart followed by `/readyz`. Same class as the missing uptime monitoring in
 2h's row.
 
+**Proposed route, recorded 2026-10-25 at the owner's ask — not built.** Mail goes out through
+Cloudflare: gsrpi.uk already has Email Routing (its MX is Cloudflare's), and a Worker with a
+`send_email` binding can send from a gsrpi.uk address to any destination verified there — the
+owner's own inbox, which is all an alert needs. The probe runs on `one`, inside the
+`garmin-mcp` project, calling Taxuspt over the compose network so it needs no way through the
+OAuth shim. On failure it POSTs to the Worker, behind a service token, and the Worker sends
+the mail. A Worker probing from outside would have to automate that OAuth login instead.
+
 **Filed 2026-10-25, no phase number — the fleet ssh hostnames may no longer be behind Access.**
 Unauthenticated, `ssh-zero`, `ssh-one` and `ssh-two` answer 200 with no login redirect, where
 `infra-dev` (service tokens only) answers 403. Unverified until the Zero Trust dashboard is
@@ -717,6 +725,10 @@ three eventually). `playbooks/server-update-cloudflared.yml` — explicit, hash-
 stage refusing while an earlier one is unhealthy — exists and is not used; **revisit once
 uptime monitoring exists**, e.g. `ping.<host>.gsrpi.uk`, because a gate is only worth
 building when something can tell you a host is down, and today nothing can.
+**The same Worker could be that monitor** (recorded 2026-10-25, not built): a Cron Trigger
+probing each host's public endpoint and mailing on failure, as proposed for `garmin-mcp`'s
+lapsed login below the phase table. Unlike a check on a box, it still reports when the box is
+the thing that is down.
 
 **2i, filed 2026-08-24, and it is a consequence of 2d rather than a plan of its own.**
 It was found by the or3 session while converting `or3-dev`, and written into
