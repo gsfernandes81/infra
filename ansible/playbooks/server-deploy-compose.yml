@@ -41,12 +41,14 @@
 # DEPLOYMENT-SPECIFIC CHECKS are hook files, found by name and run only if they exist:
 #   ansible/deploy-hooks/<name>/preflight.yml   before the plan: what must be true for the
 #                                                plan to mean anything (send2ereader: its
-#                                                image can be fetched from ghcr)
+#                                                image can be fetched from ghcr; torrents:
+#                                                the forwarded port before the change)
 #   ansible/deploy-hooks/<name>/probe.yml       after a redeploy, once every container is up:
 #                                                end-to-end checks (send2ereader: the page,
-#                                                the image it runs, no published port)
-# They are included from _deploy-compose-one.yml, so they see `dep` ({host, name}), `dep_dir`
-# and `dep_repo` (on that host) and run on the control node, delegating host work to
+#                                                the image it runs, no published port;
+#                                                torrents: port forwarding came back)
+# They are included from _deploy-compose-one.yml, so they see `dep` ({host, name}) and
+# `dep_dir` (the deployment's directory on that host) and run on the control node, delegating host work to
 # dep.host themselves. A hook that needs a variable defines it. They live under ansible/, not
 # deployments/, because they are how the fleet is managed and deployments/ is what a
 # deployment is. Required .env keys are not hooks: the play reads every `${VAR:?}` out of

@@ -29,7 +29,7 @@
       {{ lookup('file', control_checkout ~ '/deployments/' ~ dep.name ~ '/compose.yaml')
          | regex_findall('[$][{]([A-Za-z0-9_]+):[?]') | unique | list }}
 
-- name: Read the variable names in {{ dep.name }}'s .env
+- name: Read the variable names in .env for {{ dep.name }}
   # Names only: sed prints the part before the `=`, so a value never reaches a register or a
   # log. No .env at all is rc 2, and reads as no names.
   ansible.builtin.command:
@@ -42,7 +42,7 @@
   delegate_to: "{{ dep.host }}"
   when: dep_required | length > 0
 
-- name: Check {{ dep.name }}'s .env has the required names
+- name: Check .env has the names {{ dep.name }} requires
   # Skipped under --check for a first bring-up only: the keys are written by the tunnel play
   # in a real run, which a dry run cannot see (CLAUDE.md § Privileged commands).
   ansible.builtin.assert:
@@ -58,7 +58,7 @@
     - dep_required | length > 0
     - not (ansible_check_mode and (bringup | default(false) | bool))
 
-- name: Stat {{ dep.name }}'s preflight hook
+- name: Stat the preflight hook for {{ dep.name }}
   ansible.builtin.stat:
     path: "{{ playbook_dir }}/../deploy-hooks/{{ dep.name }}/preflight.yml"
   register: dep_preflight
@@ -116,7 +116,7 @@
           ((dep_answer.user_input | default('') | lower) in ['y', 'yes'])) }}
 
 # ── do ───────────────────────────────────────────────────────────────────────
-- name: "If going ahead: read {{ dep.name }}'s container ids"
+- name: "If going ahead: read container ids of {{ dep.name }}"
   ansible.builtin.command:
     cmd: docker compose ps -a --format '{% raw %}{{.Name}} {{.ID}}{% endraw %}'
     chdir: "{{ dep_dir }}"
@@ -151,7 +151,7 @@
   delegate_to: "{{ dep.host }}"
   when: dep_go | bool
 
-- name: "If going ahead: read {{ dep.name }}'s container ids again"
+- name: "If going ahead: read those container ids again"
   ansible.builtin.command:
     cmd: docker compose ps -a --format '{% raw %}{{.Name}} {{.ID}}{% endraw %}'
     chdir: "{{ dep_dir }}"
@@ -172,7 +172,7 @@
     success_msg: "{{ dep.name }}: all containers up"
   when: dep_go | bool
 
-- name: Stat {{ dep.name }}'s probe hook
+- name: Stat the probe hook for {{ dep.name }}
   ansible.builtin.stat:
     path: "{{ playbook_dir }}/../deploy-hooks/{{ dep.name }}/probe.yml"
   register: dep_probe

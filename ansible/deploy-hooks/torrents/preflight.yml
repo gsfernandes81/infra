@@ -1,0 +1,32 @@
+---
+# torrents' check before the plan, included by playbooks/_deploy-compose-one.yml. It records
+# the port qBittorrent is configured with NOW, so probe.yml can tell a redeploy that got a
+# new forwarded port from one that did not (docs/port-forwarding.md § 3). Read-only, and run
+# under --check and for a declined change too, which costs nothing.
+#
+# The config directory is the host side of the volume that compose.yaml maps to /config, read
+# from compose.yaml so the path is written once. The lookahead has no capture group on
+# purpose: a group reference in a folded block reaches regex_search in a form it cannot parse
+# (found by running it, 2026-10-25).
+
+- name: Note where qBittorrent keeps its config
+  ansible.builtin.set_fact:
+    torrents_config_dir: >-
+      {{ lookup('file', control_checkout ~ '/deployments/torrents/compose.yaml')
+         | regex_search('/[^\s:]+(?=:/config\b)') }}
+
+- name: Read the port qBittorrent is configured with
+  # -F and the `=`: an exact key, not Session\PortRangeMin and its relatives. No file or no
+  # key is rc 1 or 2 and reads as an empty port, which probe.yml treats as "no earlier port".
+  ansible.builtin.command:
+    argv: [grep, -F, 'Session\Port=', "{{ torrents_config_dir }}/qBittorrent/qBittorrent.conf"]
+  register: torrents_port_raw
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  become: true
+  delegate_to: "{{ dep.host }}"
+
+- name: Note that port
+  ansible.builtin.set_fact:
+    torrents_port_before: "{{ (torrents_port_raw.stdout_lines | default([]) | first | default('=')).split('=')[1] | trim }}"

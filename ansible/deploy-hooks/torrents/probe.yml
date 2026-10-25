@@ -1,0 +1,39 @@
+---
+# torrents' checks after a redeploy, included by playbooks/_deploy-compose-one.yml once every
+# container is up. The one that matters is port forwarding, which docs/port-forwarding.md
+# calls the most fragile thing on the host: the containers can all be healthy while Proton's
+# forwarded port never reached qBittorrent.
+#
+# THE TEST, from that doc: the configured port differs from the one before the redeploy AND is
+# not 6881. qBittorrent rewrites Session\Port to its own TORRENTING_PORT (6881) seconds after
+# a start, long before a port is assigned, so a bare "did it change" passes on that artefact
+# and stops looking. The real port arrives about a minute in, so this waits for it.
+# Needs torrents_config_dir and torrents_port_before from preflight.yml.
+
+- name: Wait for the forwarded port to reach qBittorrent
+  ansible.builtin.command:
+    argv: [grep, -F, 'Session\Port=', "{{ torrents_config_dir }}/qBittorrent/qBittorrent.conf"]
+  register: torrents_port_now_raw
+  until: >-
+    (torrents_port_now_raw.stdout_lines | default([]) | first | default('=')).split('=')[1] | trim
+      not in ['', '6881', torrents_port_before]
+  retries: 20
+  delay: 15
+  changed_when: false
+  failed_when: false
+  ignore_errors: true
+  become: true
+  delegate_to: "{{ dep.host }}"
+
+- name: Check forwarding came back
+  vars:
+    torrents_port_now: "{{ (torrents_port_now_raw.stdout_lines | default([]) | first | default('=')).split('=')[1] | trim }}"
+  ansible.builtin.assert:
+    that: torrents_port_now not in ['', '6881', torrents_port_before]
+    fail_msg: >-
+      qBittorrent's Session\Port is '{{ torrents_port_now }}' after five minutes, and was
+      '{{ torrents_port_before }}' before. An empty value or 6881 is qBittorrent's own default
+      and means Proton's port never arrived; the same port as before is what a forwarding that
+      did not run looks like, though Proton can hand out the same port twice. Look at
+      docs/port-forwarding.md and run the hook's wget by hand inside the gluetun container.
+    success_msg: "forwarding is back: port {{ torrents_port_before | default('?', true) }} became {{ torrents_port_now }}"
