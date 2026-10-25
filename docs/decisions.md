@@ -919,6 +919,22 @@ notifier would only say "upstream moved". Neither was worth it for one deploymen
 changes rarely. The way back is the `send2ereader` shape: CI publishes to ghcr, compose pins
 `tag@digest`, and Renovate then covers the image like the rest.
 
+## One redeploy play for the plain compose deployments, asking once per deployment
+
+`server-deploy-compose.yml -e deployment=<name>|all`. One play and not one per deployment,
+because immich, syncthing, torrents and calibre-web need nothing beyond `docker compose up`,
+and `garmin-mcp` and `send2ereader` already have plays for their tunnels, `.env` and probes,
+which this one refuses and names. The question is per **deployment**, never per container:
+gluetun and qBittorrent share a network namespace and must be recreated together, and
+Immich's four containers are one application, so a per-container question invites answering
+"no" to half a pair. `all` is the owner's addition: it goes through every deployment in turn,
+`one` before `zero`, each with its own plan and its own question, stops at the first failure,
+and refuses `assume_yes`, so the question that keeps each prompt meaningful cannot be switched
+off for the lot. The plan is Compose's own dry run, printed before anything changes; the
+result is read from container ids before and after. Not run against a box when written
+(`infra-dev` has no route); the module's `actions` output is printed defensively, and the first
+real run is the test.
+
 ## The lesson worth keeping
 
 

@@ -1,0 +1,200 @@
+---
+# REDEPLOY A COMPOSE DEPLOYMENT whose files or pinned images changed in git, on whichever host
+# hosts/<host>/<name> places it. Run from the control node:
+#
+#     cd ansible
+#     ansible-playbook playbooks/server-deploy-compose.yml -e deployment=immich --check -K  # plan only
+#     ansible-playbook playbooks/server-deploy-compose.yml -e deployment=immich -K          # ask, then do
+#     ansible-playbook playbooks/server-deploy-compose.yml -e deployment=all -K             # each in turn
+#
+# NO --limit / -l: the host is read from the deployment's symlink, as in
+# server-create-deployment-tunnel.yml, and `-l` would skip the play that finds it.
+# -K because docker needs root and gavin is not in the docker group (CLAUDE.md § Privileged
+# commands).
+#
+# WHAT ONE DEPLOYMENT GOES THROUGH, in order, and a refusal at any step touches nothing:
+#   1. The host's checkout is pulled fast-forward only and must be clean under the
+#      deployment and on exactly the commit this checkout reviewed. Uncommitted edits here
+#      stop the run: the host runs the commit, not what is on this screen.
+#   2. PLAN. Compose is asked what `up` would do, as a dry run, and the answer is printed:
+#      which containers would be created or recreated, and which images pulled. Nothing has
+#      changed. A deployment with nothing to do says so and is not asked about.
+#   3. ASK, once, for this deployment: "Redeploy immich on zero? [y/N]". Anything but y/yes
+#      skips it. `--check` stops after the plan and never asks.
+#   4. DO. `up` with `pull: missing`, which pulls a pinned digest only if the host lacks it.
+#      Then the container ids are compared with the ids from before, so what was recreated
+#      is read, not assumed (CLAUDE.md § Verifying changes), and the play waits for
+#      healthchecks and fails naming any container that is not up.
+#
+# `deployment=all` runs that for every deployment this play may touch, ONE AT A TIME, `one`
+# before `zero` (the non-critical box first, as the rest of this repo is rolled out), each
+# with its own plan and its own question. It stops at the first failure and does not go on
+# to the next, so a broken deployment is never followed by a second change. A "no" skips
+# only that deployment. `-e assume_yes=true` skips the question for ONE named deployment and
+# is refused with `all`, so the per-deployment question cannot be switched off for the lot.
+#
+# WHAT IT WILL NOT TOUCH, and says so rather than silently skipping:
+#   garmin-mcp, send2ereader  have their own plays (tunnel, .env, probes). Use those.
+#   ionic-traces              stopped by decision; `up` would start it.
+#   anything on `two`         podman, rootless, a different account; not a docker host.
+#
+# NOT TESTED AGAINST A BOX when it was written: infra-dev has no route to the fleet. The
+# discovery half runs anywhere (`-e deployment=all --check` stops early without a route to
+# any host), and the module output the plan is printed from is read defensively. The first
+# real run is the test; read its plan before saying y.
+
+- name: Check the inventory is loaded
+  ansible.builtin.import_playbook: _assert-inventory.yml
+  vars:
+    required_group: fleet
+
+- name: Find the deployments to redeploy
+  hosts: localhost
+  gather_facts: false
+  vars:
+    deploy_own_play:
+      garmin-mcp: server-deploy-garmin-mcp.yml
+      send2ereader: server-deploy-send2ereader.yml
+    deploy_excluded:
+      ionic-traces: stopped by decision, and up would start it
+  tasks:
+    - name: Check what to redeploy was named
+      ansible.builtin.assert:
+        that:
+          - deployment is defined
+          - deployment is match('^[a-z0-9][a-z0-9-]*$')
+          - not (deployment == 'all' and (assume_yes | default(false) | bool))
+        fail_msg: >-
+          Say which: -e deployment=<name> (a directory under deployments/), or -e deployment=all
+          to go through every one in turn. -e assume_yes=true skips the question for one named
+          deployment and is refused with all.
+        success_msg: "deployment {{ deployment | default('?') }}"
+
+    - name: Find the hosts/<host>/<name> symlinks
+      ansible.builtin.find:
+        paths: "{{ control_checkout }}/hosts"
+        patterns: "*"
+        file_type: link
+        recurse: true
+        depth: 2
+      register: deploy_links
+
+    - name: Note the host and name of each symlink
+      ansible.builtin.set_fact:
+        deploy_candidates: >-
+          {{ (deploy_candidates | default([]))
+             + [{'host': item.path.split('/')[-2], 'name': item.path.split('/')[-1]}] }}
+      loop: "{{ deploy_links.files }}"
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Find each candidate's compose.yaml
+      ansible.builtin.stat:
+        path: "{{ control_checkout }}/deployments/{{ item.name }}/compose.yaml"
+      loop: "{{ deploy_candidates | default([]) }}"
+      loop_control:
+        label: "{{ item.host }}/{{ item.name }}"
+      register: deploy_composes
+
+    - name: Note the deployments this play may redeploy
+      ansible.builtin.set_fact:
+        deploy_keep: "{{ (deploy_keep | default([])) + [item.item] }}"
+      loop: "{{ deploy_composes.results }}"
+      loop_control:
+        label: "{{ item.item.host }}/{{ item.item.name }}"
+      when:
+        - item.stat.exists
+        - item.item.host in groups['containerized']
+        - item.item.name not in deploy_own_play
+        - item.item.name not in deploy_excluded
+
+    - name: Note why each of the others is left alone
+      ansible.builtin.set_fact:
+        deploy_left: >-
+          {{ (deploy_left | default([]))
+             + [item.item.host ~ '/' ~ item.item.name ~ ': '
+                ~ ('own play, ' ~ deploy_own_play[item.item.name] if item.item.name in deploy_own_play else
+                   deploy_excluded[item.item.name] if item.item.name in deploy_excluded else
+                   'not a docker host' if item.item.host not in groups['containerized'] else
+                   'no compose.yaml')] }}
+      loop: "{{ deploy_composes.results }}"
+      loop_control:
+        label: "{{ item.item.host }}/{{ item.item.name }}"
+      when: item.item not in (deploy_keep | default([]))
+
+    - name: Order them, one before zero and then by name
+      # The non-critical box first, so a mistake costs the cheap box. Written out because it
+      # is two hosts; a third container host would have to be added here.
+      ansible.builtin.set_fact:
+        deploy_targets: >-
+          {{ ((deploy_keep | default([])) | selectattr('host', 'eq', 'one') | sort(attribute='name') | list)
+             + ((deploy_keep | default([])) | selectattr('host', 'eq', 'zero') | sort(attribute='name') | list) }}
+
+    - name: Pick what this run covers
+      ansible.builtin.set_fact:
+        deploy_run: >-
+          {{ deploy_targets if deployment == 'all'
+             else (deploy_targets | selectattr('name', 'eq', deployment) | list) }}
+
+    - name: Check {{ deployment }} can be redeployed here
+      ansible.builtin.assert:
+        that: deploy_run | length > 0
+        fail_msg: >-
+          Nothing to redeploy for "{{ deployment }}". Left alone, and why:
+          {{ deploy_left | default([]) | join('; ') }}. Otherwise it needs a
+          hosts/<host>/{{ deployment }} symlink on a docker host and a compose.yaml.
+        success_msg: "{{ deploy_run | map(attribute='name') | join(', ') }}"
+
+    - name: Read the commit this checkout is on
+      ansible.builtin.command:
+        cmd: git rev-parse HEAD
+        chdir: "{{ control_checkout }}"
+      register: deploy_head_raw
+      changed_when: false
+      check_mode: false
+
+    - name: Read uncommitted edits to deployments and hosts
+      ansible.builtin.command:
+        cmd: git status --porcelain -- deployments hosts
+        chdir: "{{ control_checkout }}"
+      register: deploy_dirty
+      changed_when: false
+      check_mode: false
+
+    - name: Check this checkout's deployments are committed
+      ansible.builtin.assert:
+        that: deploy_dirty.stdout | length == 0
+        fail_msg: >-
+          This checkout has uncommitted changes: {{ deploy_dirty.stdout_lines | default([]) | join('; ') }}.
+          The host runs the commit, not these edits. Commit and push them, or discard them,
+          then re-run. Nothing has been touched on any host.
+
+    - name: Note the commit the hosts must be on
+      ansible.builtin.set_fact:
+        deploy_ctl_head: "{{ deploy_head_raw.stdout | trim }}"
+
+    - name: Print the order, and what is left alone
+      ansible.builtin.debug:
+        msg:
+          - "In turn: {{ deploy_run | map(attribute='host') | zip(deploy_run | map(attribute='name')) | map('join', '/') | join(', ') }}"
+          - "Left alone: {{ deploy_left | default(['nothing']) | join('; ') }}"
+      changed_when: true
+      when: deployment == 'all'
+
+- name: Redeploy each in turn, asking before each
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    # A failure here ends the run: the play is on one host, so Ansible stops the loop and
+    # no later deployment is started. A "no" is not a failure and goes on to the next.
+    - name: Go through the deployments one at a time
+      ansible.builtin.include_tasks: _deploy-compose-one.yml
+      loop: "{{ deploy_run }}"
+      loop_control:
+        loop_var: dep
+        label: "{{ dep.host }}/{{ dep.name }}"
+
+    - name: Print what happened to each
+      ansible.builtin.debug:
+        msg: "{{ deploy_summary | default(['nothing was run']) }}"
+      changed_when: true

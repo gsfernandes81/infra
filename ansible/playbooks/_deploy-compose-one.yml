@@ -1,0 +1,188 @@
+---
+# NOT A PLAYBOOK YOU RUN — server-deploy-compose.yml includes this once per deployment, with
+# `dep` set to {host, name}. Its header says what the whole run does; this file is one
+# deployment's turn: refuse, plan, ask, do, check. Every host task is delegated, because the
+# calling play is on the control node (it has to be, to ask a question in a terminal), and a
+# delegated task reads `ansible_*` connection variables from the target but NOT its other
+# group variables, which is why `infra_checkout` is taken from hostvars below.
+
+- name: Note where {{ dep.name }} lives on {{ dep.host }}
+  ansible.builtin.set_fact:
+    dep_dir: "{{ hostvars[dep.host].infra_checkout }}/deployments/{{ dep.name }}"
+    dep_repo: "{{ hostvars[dep.host].infra_checkout }}"
+    dep_skipped: false
+
+# ── the host's checkout, pulled to the commit this control node reviewed ────
+- name: Pull the checkout on {{ dep.host }}, fast-forward only
+  # check_mode false so --check pulls too: a plan against a stale checkout would plan the
+  # wrong bytes. No -q, changed_when reads "Already up to date" from stdout.
+  ansible.builtin.command:
+    cmd: git pull --ff-only
+    chdir: "{{ dep_repo }}"
+  register: dep_pull
+  changed_when: "'Already up to date' not in dep_pull.stdout"
+  check_mode: false
+  delegate_to: "{{ dep.host }}"
+
+- name: Read uncommitted {{ dep.name }} edits on {{ dep.host }}
+  # pull --ff-only succeeds over local edits it does not touch, so the HEAD check below
+  # would pass over a modified compose.yaml. .env is gitignored and rightly not reported.
+  ansible.builtin.command:
+    cmd: git status --porcelain -- deployments/{{ dep.name }}/
+    chdir: "{{ dep_repo }}"
+  register: dep_host_dirty
+  changed_when: false
+  check_mode: false
+  delegate_to: "{{ dep.host }}"
+
+- name: Read the commit {{ dep.host }} is on
+  ansible.builtin.command:
+    cmd: git rev-parse HEAD
+    chdir: "{{ dep_repo }}"
+  register: dep_host_head
+  changed_when: false
+  check_mode: false
+  delegate_to: "{{ dep.host }}"
+
+- name: Check {{ dep.host }} is clean and on the reviewed commit
+  ansible.builtin.assert:
+    that:
+      - dep_host_dirty.stdout | length == 0
+      - dep_host_head.stdout | trim == deploy_ctl_head
+    fail_msg: >-
+      {{ dep.host }}:{{ dep_repo }} is on {{ dep_host_head.stdout | default('') | trim | truncate(12, true, '') }}
+      with {{ dep_host_dirty.stdout_lines | default([]) | length }} uncommitted change(s) under
+      deployments/{{ dep.name }}/, and this control node reviewed
+      {{ deploy_ctl_head | truncate(12, true, '') }}. Unpushed commits: `git push`. Origin moved
+      past your review: `git pull` here, read the diff, re-run. Nothing was changed.
+    success_msg: "{{ dep.host }} is on {{ deploy_ctl_head | truncate(12, true, '') }} and clean"
+
+# ── the plan: Compose's own dry run, nothing changed ─────────────────────────
+- name: Plan {{ dep.name }}, as a dry run
+  # check_mode true on the task itself, so even a real run only ever asks here. The module
+  # runs `up --dry-run`; `actions` lists what it would do to each container and image.
+  community.docker.docker_compose_v2:
+    project_src: "{{ dep_dir }}"
+    pull: missing
+    state: present
+  check_mode: true
+  register: dep_plan
+  become: true
+  delegate_to: "{{ dep.host }}"
+
+- name: Print what up would do to {{ dep.name }}
+  # Read defensively: the key names are the module's to change, and a plan printed as blanks
+  # would be worse than printing the raw entry, so the whole entry is the fallback.
+  ansible.builtin.debug:
+    msg: >-
+      {{ dep.name }} on {{ dep.host }}{{ ' (the critical box)' if dep.host == 'zero' else '' }}:
+      {{ 'would change: ' if dep_plan.changed else 'nothing to change.' }}{{
+      (dep_plan.actions | default([]))
+        | map('string') | map('regex_replace', '[{}\x27]', '') | join('; ') if dep_plan.changed else '' }}
+  changed_when: true
+
+# ── ask ──────────────────────────────────────────────────────────────────────
+- name: "If changes and not --check: ask about {{ dep.name }}"
+  ansible.builtin.pause:
+    prompt: >-
+      Redeploy {{ dep.name }} on {{ dep.host }}{{ ' (the critical box)' if dep.host == 'zero' else '' }}?
+      Containers above are recreated, with a short outage. [y/N]
+  register: dep_answer
+  when:
+    - dep_plan.changed
+    - not ansible_check_mode
+    - not (assume_yes | default(false) | bool)
+
+- name: Note whether to go ahead with {{ dep.name }}
+  ansible.builtin.set_fact:
+    dep_go: >-
+      {{ dep_plan.changed and not ansible_check_mode and
+         ((assume_yes | default(false) | bool) or
+          ((dep_answer.user_input | default('') | lower) in ['y', 'yes'])) }}
+
+# ── do ───────────────────────────────────────────────────────────────────────
+- name: "If going ahead: read {{ dep.name }}'s container ids"
+  ansible.builtin.command:
+    cmd: docker compose ps -a --format '{% raw %}{{.Name}} {{.ID}}{% endraw %}'
+    chdir: "{{ dep_dir }}"
+  register: dep_ids_before
+  changed_when: false
+  become: true
+  delegate_to: "{{ dep.host }}"
+  when: dep_go | bool
+
+- name: "If going ahead: redeploy {{ dep.name }}"
+  community.docker.docker_compose_v2:
+    project_src: "{{ dep_dir }}"
+    pull: missing
+    state: present
+  register: dep_up
+  become: true
+  delegate_to: "{{ dep.host }}"
+  when: dep_go | bool
+
+- name: "If going ahead: wait for {{ dep.name }} to settle"
+  # `starting` is a healthcheck that has not answered yet; `Restarting` is a crash loop. Both
+  # read as not yet; the check after says what the end state means.
+  ansible.builtin.command:
+    cmd: docker compose ps -a --format '{% raw %}{{.Name}} {{.Status}}{% endraw %}'
+    chdir: "{{ dep_dir }}"
+  register: dep_status
+  until: dep_status.stdout is not search('starting|Restarting')
+  retries: 20
+  delay: 15
+  changed_when: false
+  become: true
+  delegate_to: "{{ dep.host }}"
+  when: dep_go | bool
+
+- name: "If going ahead: read {{ dep.name }}'s container ids again"
+  ansible.builtin.command:
+    cmd: docker compose ps -a --format '{% raw %}{{.Name}} {{.ID}}{% endraw %}'
+    chdir: "{{ dep_dir }}"
+  register: dep_ids_after
+  changed_when: false
+  become: true
+  delegate_to: "{{ dep.host }}"
+  when: dep_go | bool
+
+- name: "If going ahead: check every {{ dep.name }} container is up"
+  ansible.builtin.assert:
+    that: dep_status.stdout_lines | reject('search', ' Up ') | list | length == 0
+    fail_msg: >-
+      Not up after the redeploy on {{ dep.host }}:
+      {{ dep_status.stdout_lines | default([]) | reject('search', ' Up ') | join('; ') }}.
+      The rest of this run is stopped. `sudo docker compose logs` in {{ dep_dir }} says why;
+      the deployment is as the failed `up` left it.
+    success_msg: "{{ dep.name }}: all containers up"
+  when: dep_go | bool
+
+- name: "If going ahead: compare the ids before and after"
+  # Recreated means a new id. A container whose id did not change was left alone, which is
+  # the point of reading ids and not StartedAt (CLAUDE.md § Verifying changes).
+  ansible.builtin.set_fact:
+    dep_before: "{{ dict(dep_ids_before.stdout_lines | map('split', ' ') | map('first')
+                    | zip(dep_ids_before.stdout_lines | map('split', ' ') | map('last'))) }}"
+    dep_after: "{{ dict(dep_ids_after.stdout_lines | map('split', ' ') | map('first')
+                   | zip(dep_ids_after.stdout_lines | map('split', ' ') | map('last'))) }}"
+  when: dep_go | bool
+
+- name: "If going ahead: print which were recreated"
+  ansible.builtin.debug:
+    msg: >-
+      {{ dep.name }}: recreated {{ dep_after | dict2items
+           | rejectattr('value', 'eq', '') | selectattr('key', 'in', dep_after.keys())
+           | rejectattr('value', 'in', dep_before.values()) | map(attribute='key') | list or 'none' }};
+      unchanged {{ dep_after | dict2items | selectattr('value', 'in', dep_before.values())
+           | map(attribute='key') | list or 'none' }}
+  changed_when: true
+  when: dep_go | bool
+
+- name: Note what happened to {{ dep.name }}
+  ansible.builtin.set_fact:
+    deploy_summary: >-
+      {{ (deploy_summary | default([])) + [dep.host ~ '/' ~ dep.name ~ ': ' ~
+         ('redeployed' if dep_go | bool else
+          'plan only (--check)' if ansible_check_mode and dep_plan.changed else
+          'nothing to change' if not dep_plan.changed else
+          'skipped, not confirmed')] }}

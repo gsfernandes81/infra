@@ -5,11 +5,19 @@ secrets, no data.
 
 ## Run a deployment
 
-Two deployments have a deploy play, run from the control node; each one's README says how:
+Two deployments have their own deploy play, run from the control node; each one's README says how:
 
 ```sh
 cd ansible && ansible-playbook playbooks/server-deploy-send2ereader.yml -K   # one
 cd ansible && ansible-playbook playbooks/server-deploy-garmin-mcp.yml -K     # one
+```
+
+Every other docker deployment is redeployed after a change by one play, which plans, asks
+once per deployment, then does it, and says what was recreated (`--check` stops at the plan):
+
+```sh
+cd ansible && ansible-playbook playbooks/server-deploy-compose.yml -e deployment=immich -K
+cd ansible && ansible-playbook playbooks/server-deploy-compose.yml -e deployment=all -K    # each in turn, `one` first
 ```
 
 Any deployment starts with stock Compose, on its host, from its directory:
