@@ -201,32 +201,11 @@
     # ── the review anchor — server-install-system-files.yml's design, 2026-08-24 ──
     # The control node's HEAD is what was reviewed; the host's checkout is the delivery
     # vehicle, pulled by the next play and then REQUIRED to be on exactly this commit.
-    - name: Read the commit this checkout is on
-      ansible.builtin.command:
-        cmd: git rev-parse HEAD
-        chdir: "{{ control_checkout }}"
-      register: deployment_ctl_head_raw
-      changed_when: false
-      check_mode: false
-
-    # Uncommitted edits here are bytes the commit does not carry: what was reviewed on this
-    # screen and what the host would run would differ.
-    - name: Read uncommitted {{ deployment }} edits in this checkout
-      ansible.builtin.command:
-        cmd: git status --porcelain -- deployments/{{ deployment }}/
-        chdir: "{{ control_checkout }}"
-      register: deployment_ctl_dirty
-      changed_when: false
-      check_mode: false
-
     - name: Check this checkout's {{ deployment }} files are committed
-      ansible.builtin.assert:
-        that: deployment_ctl_dirty.stdout | length == 0
-        fail_msg: >-
-          This checkout has uncommitted changes under deployments/{{ deployment }}/:
-          {{ deployment_ctl_dirty.stdout_lines | default([]) | join('; ') }}. The host runs the commit,
-          not these edits — commit and push them, or discard them, then re-run. Nothing has
-          been touched on any host.
+      ansible.builtin.import_tasks: _review-anchor.yml
+      vars:
+        anchor_paths: ["deployments/{{ deployment }}/"]
+        anchor_untouched: Nothing has been touched on any host.
 
     - name: Note {{ deployment_host }} as the host to provision
       # With the reviewed commit, and the checksums of the files the host will run, so the
@@ -236,7 +215,7 @@
         groups: [deployment_target]
         deployment_edge: "{{ deployment_edge }}"
         deployment_hostname: "{{ deployment_hostname }}"
-        deployment_ctl_head: "{{ deployment_ctl_head_raw.stdout | trim }}"
+        deployment_ctl_head: "{{ anchor_head_raw.stdout | trim }}"
         deployment_checked: "{{ dict(deployment_files.results | map(attribute='item')
                                 | zip(deployment_files.results | map(attribute='stat.checksum'))) }}"
       changed_when: false
@@ -328,53 +307,13 @@
         gather_subset: ['!all']
 
     # ── the delivery vehicle, pulled to the anchor — before anything is created ──
-    # --ff-only: a diverged host checkout is a situation to look at, not merge through.
-    # check_mode false so --check pulls too; a dry run against a stale checkout would
-    # check the wrong bytes. No -q: changed_when reads "Already up to date" from stdout.
-    - name: Pull {{ infra_checkout }} on {{ inventory_hostname }}, fast-forward only
-      ansible.builtin.command:
-        cmd: git pull --ff-only
-        chdir: "{{ infra_checkout }}"
-      register: deployment_pull
-      changed_when: "'Already up to date' not in deployment_pull.stdout"
-      check_mode: false
-
-    # pull --ff-only succeeds straight over local edits it does not touch, so the HEAD
-    # assert below would pass over a modified compose.yaml. Gitignored files (.env) are
-    # not reported, which is right: they are host-specific by design.
-    - name: Read uncommitted {{ deployment }} edits on {{ inventory_hostname }}
-      ansible.builtin.command:
-        cmd: git status --porcelain -- deployments/{{ deployment }}/
-        chdir: "{{ infra_checkout }}"
-      register: deployment_host_dirty
-      changed_when: false
-      check_mode: false
-
-    - name: Check {{ inventory_hostname }} has no uncommitted {{ deployment }} edits
-      ansible.builtin.assert:
-        that: deployment_host_dirty.stdout | length == 0
-        fail_msg: >-
-          {{ inventory_hostname }}:{{ infra_checkout }} has uncommitted changes under
-          deployments/{{ deployment }}/: {{ deployment_host_dirty.stdout_lines | default([]) | join('; ') }}.
-          The commit check would pass over them, so the deployment would run bytes nobody
-          reviewed. Commit and push them, or discard them on the host. Nothing has been created.
-
-    - name: Read the commit {{ inventory_hostname }} is on
-      ansible.builtin.command:
-        cmd: git rev-parse HEAD
-        chdir: "{{ infra_checkout }}"
-      register: deployment_host_head
-      changed_when: false
-      check_mode: false
-
-    - name: Check {{ inventory_hostname }} is on the same commit as this checkout
-      ansible.builtin.assert:
-        that: deployment_host_head.stdout | trim == deployment_ctl_head
-        fail_msg: >-
-          {{ inventory_hostname }} is on {{ deployment_host_head.stdout | trim | truncate(12, true, '') }}
-          after pulling, and this control node reviewed {{ deployment_ctl_head | truncate(12, true, '') }}.
-          If you have unpushed commits: `git push`. If origin moved past your review: `git pull`
-          here, read the diff, re-run. Nothing has been created.
+    - name: Pull {{ inventory_hostname }}'s checkout and check it is the reviewed commit
+      ansible.builtin.import_tasks: _sync-host-checkout.yml
+      vars:
+        sync_host: "{{ inventory_hostname }}"
+        sync_paths: ["deployments/{{ deployment }}/"]
+        anchor_head: "{{ deployment_ctl_head }}"
+        sync_untouched: Nothing has been created.
 
     - name: Read checksums of {{ deployment }} files on {{ inventory_hostname }}
       # The checks above read the control node's checkout; the sidecar runs from the

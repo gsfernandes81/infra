@@ -1,0 +1,51 @@
+---
+# NOT A PLAYBOOK YOU RUN — imported by the plays that put the repo's bytes on a host
+# (server-install-system-files.yml, server-create-deployment-tunnel.yml,
+# server-deploy-compose.yml), BEFORE they touch anything. It is the control node's half of
+# one design, set 2026-08-24 in server-install-system-files.yml: the control node's HEAD is
+# what the person running this reviewed; the host's checkout is only the delivery vehicle,
+# and _sync-host-checkout.yml then REQUIRES the host to be on exactly this commit.
+#
+# Takes:   anchor_paths      a list of git pathspecs this run will deliver, relative to the
+#                            repo root: ["deployments/immich/"], ["hosts/"]
+#          anchor_untouched  the last sentence of the failure message, saying what has not
+#                            happened yet (default: "Nothing was changed.")
+# Leaves:  anchor_head_raw   the registered `git rev-parse HEAD`; the commit is
+#                            `anchor_head_raw.stdout | trim`
+#
+# Every task runs on the control node, once, whatever play imported it: a play over the
+# fleet would otherwise check the control node's checkout once per host.
+#
+# Uncommitted edits here are bytes the commit does not carry: what was reviewed on this
+# screen and what the host would run would differ. So they stop the run.
+
+- name: Read the commit this checkout is on
+  ansible.builtin.command:
+    cmd: git rev-parse HEAD
+    chdir: "{{ control_checkout }}"
+  register: anchor_head_raw
+  changed_when: false
+  check_mode: false
+  delegate_to: localhost
+  run_once: true
+
+- name: Read uncommitted edits in this checkout
+  ansible.builtin.command:
+    argv: "{{ ['git', 'status', '--porcelain', '--'] + anchor_paths }}"
+    chdir: "{{ control_checkout }}"
+  register: anchor_dirty
+  changed_when: false
+  check_mode: false
+  delegate_to: localhost
+  run_once: true
+
+- name: Check this checkout's files are committed
+  ansible.builtin.assert:
+    that: anchor_dirty.stdout | length == 0
+    fail_msg: >-
+      This checkout has uncommitted changes under {{ anchor_paths | join(', ') }}:
+      {{ anchor_dirty.stdout_lines | default([]) | join('; ') }}. The host runs the commit,
+      not these edits. Commit and push them, or discard them, then re-run.
+      {{ anchor_untouched | default('Nothing was changed.') }}
+  delegate_to: localhost
+  run_once: true

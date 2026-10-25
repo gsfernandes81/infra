@@ -159,33 +159,15 @@
           hosts/<host>/{{ deployment }} symlink on a docker host and a compose.yaml.
         success_msg: "{{ deploy_run | map(attribute='name') | join(', ') }}"
 
-    - name: Read the commit this checkout is on
-      ansible.builtin.command:
-        cmd: git rev-parse HEAD
-        chdir: "{{ control_checkout }}"
-      register: deploy_head_raw
-      changed_when: false
-      check_mode: false
-
-    - name: Read uncommitted edits to deployments and hosts
-      ansible.builtin.command:
-        cmd: git status --porcelain -- deployments hosts
-        chdir: "{{ control_checkout }}"
-      register: deploy_dirty
-      changed_when: false
-      check_mode: false
-
-    - name: Check this checkout's deployments are committed
-      ansible.builtin.assert:
-        that: deploy_dirty.stdout | length == 0
-        fail_msg: >-
-          This checkout has uncommitted changes: {{ deploy_dirty.stdout_lines | default([]) | join('; ') }}.
-          The host runs the commit, not these edits. Commit and push them, or discard them,
-          then re-run. Nothing has been touched on any host.
+    - name: Check this checkout is committed and note its commit
+      ansible.builtin.import_tasks: _review-anchor.yml
+      vars:
+        anchor_paths: [deployments, hosts]
+        anchor_untouched: Nothing has been touched on any host.
 
     - name: Note the commit the hosts must be on
       ansible.builtin.set_fact:
-        deploy_ctl_head: "{{ deploy_head_raw.stdout | trim }}"
+        deploy_ctl_head: "{{ anchor_head_raw.stdout | trim }}"
 
     - name: Print the order, and what is left alone
       ansible.builtin.debug:

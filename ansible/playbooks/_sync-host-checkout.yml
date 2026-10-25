@@ -1,0 +1,67 @@
+---
+# NOT A PLAYBOOK YOU RUN — imported by the plays that deliver the repo to a host, right after
+# _review-anchor.yml has recorded the commit the control node reviewed. It pulls the host's
+# checkout to that commit and refuses unless the host is clean and on exactly it, so what
+# runs on the host is the reviewed commit and not whatever was lying in its working tree.
+#
+# Takes:   sync_host         the inventory host to sync (for a play that runs ON the host,
+#                            "{{ inventory_hostname }}"; for the redeploy play, which runs
+#                            on the control node, the target)
+#          sync_paths        git pathspecs this run will deliver, relative to the repo root
+#          anchor_head       the commit the control node reviewed
+#          sync_untouched    the last sentence of a failure message (default: "Nothing was
+#                            changed.")
+#
+# Every task is delegated to sync_host and reads `infra_checkout` from that host's
+# variables, so the one file serves a play that runs on the host and a play that does not.
+# A delegated task reads another host's `ansible_*` connection variables but NOT its other
+# group variables, which is why hostvars[] is used and not the bare name.
+
+- name: Pull the checkout on the host, fast-forward only
+  # --ff-only: a diverged host checkout is a situation to look at, not merge through.
+  # check_mode false so --check pulls too: a dry run against a stale checkout would
+  # check the wrong bytes. No -q: changed_when reads "Already up to date" from stdout, and
+  # -q suppresses exactly that line, so every no-op pull would report changed.
+  ansible.builtin.command:
+    cmd: git pull --ff-only
+    chdir: "{{ hostvars[sync_host].infra_checkout }}"
+  register: sync_pull
+  changed_when: "'Already up to date' not in sync_pull.stdout"
+  check_mode: false
+  delegate_to: "{{ sync_host }}"
+
+- name: Read uncommitted edits on the host
+  # pull --ff-only succeeds straight over local edits it does not touch, so the commit check
+  # below would pass over a modified file. Gitignored files (.env) are not reported, which is
+  # right: they are host-specific by design.
+  ansible.builtin.command:
+    argv: "{{ ['git', 'status', '--porcelain', '--'] + sync_paths }}"
+    chdir: "{{ hostvars[sync_host].infra_checkout }}"
+  register: sync_dirty
+  changed_when: false
+  check_mode: false
+  delegate_to: "{{ sync_host }}"
+
+- name: Read the commit the host is on
+  ansible.builtin.command:
+    cmd: git rev-parse HEAD
+    chdir: "{{ hostvars[sync_host].infra_checkout }}"
+  register: sync_head
+  changed_when: false
+  check_mode: false
+  delegate_to: "{{ sync_host }}"
+
+- name: Check the host is clean and on the reviewed commit
+  ansible.builtin.assert:
+    that:
+      - sync_dirty.stdout | length == 0
+      - sync_head.stdout | trim == anchor_head
+    fail_msg: >-
+      {{ sync_host }}:{{ hostvars[sync_host].infra_checkout }} is on
+      {{ sync_head.stdout | default('') | trim | truncate(12, true, '') }} after pulling, with
+      {{ sync_dirty.stdout_lines | default([]) | length }} uncommitted change(s) under
+      {{ sync_paths | join(', ') }}{{ ': ' ~ (sync_dirty.stdout_lines | default([]) | join('; ')) if sync_dirty.stdout_lines | default([]) | length > 0 else '' }},
+      and this control node reviewed {{ anchor_head | truncate(12, true, '') }}. Unpushed commits:
+      `git push`. Origin moved past your review: `git pull` here, read the diff, re-run.
+      {{ sync_untouched | default('Nothing was changed.') }}
+    success_msg: "{{ sync_host }} is on {{ anchor_head | truncate(12, true, '') }} and clean"

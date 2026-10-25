@@ -941,6 +941,19 @@ result is read from container ids before and after. Written 2026-10-25 from `inf
 which has no route to a box; the module's `actions` output is printed defensively, and the
 plan paths were then run on `one` and `zero` the same day.
 
+## The pull-and-verify step is two shared files
+
+The step that makes a host run the reviewed commit was written out three times:
+`server-install-system-files.yml` (2026-08-24), the tunnel play, and the redeploy play.
+It is now `ansible/playbooks/_review-anchor.yml` (the control node's commit and a check that
+what is about to be delivered is committed) and `_sync-host-checkout.yml` (pull the host's
+checkout fast-forward only, then require it clean and on exactly that commit), imported
+by all three. A new play that delivers the repo to a host imports them, and does not copy
+the tasks. The design is unchanged and so are its messages; each caller names its own paths
+and its own closing sentence. The tunnel play keeps its extra checksum comparison of the
+files it will run, which is specific to it. Checked from `infra-dev`: every play
+syntax-checks, and the two files run clean and fail correctly against this checkout.
+
 ## The lesson worth keeping
 
 

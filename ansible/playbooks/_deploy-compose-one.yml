@@ -9,53 +9,15 @@
 - name: Note where {{ dep.name }} lives on {{ dep.host }}
   ansible.builtin.set_fact:
     dep_dir: "{{ hostvars[dep.host].infra_checkout }}/deployments/{{ dep.name }}"
-    dep_repo: "{{ hostvars[dep.host].infra_checkout }}"
     dep_skipped: false
 
 # ── the host's checkout, pulled to the commit this control node reviewed ────
-- name: Pull the checkout on {{ dep.host }}, fast-forward only
-  # check_mode false so --check pulls too: a plan against a stale checkout would plan the
-  # wrong bytes. No -q, changed_when reads "Already up to date" from stdout.
-  ansible.builtin.command:
-    cmd: git pull --ff-only
-    chdir: "{{ dep_repo }}"
-  register: dep_pull
-  changed_when: "'Already up to date' not in dep_pull.stdout"
-  check_mode: false
-  delegate_to: "{{ dep.host }}"
-
-- name: Read uncommitted {{ dep.name }} edits on {{ dep.host }}
-  # pull --ff-only succeeds over local edits it does not touch, so the HEAD check below
-  # would pass over a modified compose.yaml. .env is gitignored and rightly not reported.
-  ansible.builtin.command:
-    cmd: git status --porcelain -- deployments/{{ dep.name }}/
-    chdir: "{{ dep_repo }}"
-  register: dep_host_dirty
-  changed_when: false
-  check_mode: false
-  delegate_to: "{{ dep.host }}"
-
-- name: Read the commit {{ dep.host }} is on
-  ansible.builtin.command:
-    cmd: git rev-parse HEAD
-    chdir: "{{ dep_repo }}"
-  register: dep_host_head
-  changed_when: false
-  check_mode: false
-  delegate_to: "{{ dep.host }}"
-
-- name: Check {{ dep.host }} is clean and on the reviewed commit
-  ansible.builtin.assert:
-    that:
-      - dep_host_dirty.stdout | length == 0
-      - dep_host_head.stdout | trim == deploy_ctl_head
-    fail_msg: >-
-      {{ dep.host }}:{{ dep_repo }} is on {{ dep_host_head.stdout | default('') | trim | truncate(12, true, '') }}
-      with {{ dep_host_dirty.stdout_lines | default([]) | length }} uncommitted change(s) under
-      deployments/{{ dep.name }}/, and this control node reviewed
-      {{ deploy_ctl_head | truncate(12, true, '') }}. Unpushed commits: `git push`. Origin moved
-      past your review: `git pull` here, read the diff, re-run. Nothing was changed.
-    success_msg: "{{ dep.host }} is on {{ deploy_ctl_head | truncate(12, true, '') }} and clean"
+- name: Pull the host's checkout and check it is the reviewed commit
+  ansible.builtin.import_tasks: _sync-host-checkout.yml
+  vars:
+    sync_host: "{{ dep.host }}"
+    sync_paths: ["deployments/{{ dep.name }}/"]
+    anchor_head: "{{ deploy_ctl_head }}"
 
 # ── what must be true first ──────────────────────────────────────────────────
 - name: Note the variables compose.yaml requires

@@ -61,80 +61,24 @@
 
   tasks:
     # ── the review anchor: what the person running this actually has ─────────
-    - name: Read the commit this checkout is on
-      ansible.builtin.command:
-        cmd: git rev-parse HEAD
-        chdir: "{{ control_checkout }}"
-      register: ctl_head
-      delegate_to: localhost
-      changed_when: false
-      check_mode: false
-      run_once: true
-
     # A dirty hosts/ tree means the files reviewed locally are not the files the commit
-    # contains — the diff on screen and the diff that deploys would differ.
+    # contains: the diff on screen and the diff that deploys would differ.
     - name: Check this checkout has no uncommitted hosts/ edits
-      ansible.builtin.command:
-        cmd: git status --porcelain -- hosts/
-        chdir: "{{ control_checkout }}"
-      register: dirty
-      delegate_to: localhost
-      changed_when: false
-      check_mode: false
-      run_once: true
-      failed_when: dirty.stdout | length > 0
+      ansible.builtin.import_tasks: _review-anchor.yml
+      vars:
+        anchor_paths: [hosts/]
+        anchor_untouched: Nothing was installed.
 
     # ── the delivery vehicle: the host checkout, pinned to the anchor ────────
-    # --ff-only: a diverged host checkout is a situation to look at, not merge through.
-    # check_mode false so --check also pulls; a dry run against a stale checkout would
-    # diff the wrong bytes. No -q: changed_when matches "Already up to date" in stdout,
-    # and -q suppresses exactly that line, so every no-op pull would report changed.
-    - name: Pull {{ infra_checkout }} on {{ inventory_hostname }}, fast-forward only
-      ansible.builtin.command:
-        cmd: git pull --ff-only
-        chdir: "{{ infra_checkout }}"
-      register: pull
-      changed_when: "'Already up to date' not in pull.stdout"
-      check_mode: false
-
-    # The HEAD assert below proves the host is on the reviewed COMMIT, but
-    # `pull --ff-only` succeeds straight over local edits it does not touch — a dirty
-    # working tree deploys modified bytes under a green assert. Same hole the
-    # control-node dirty check closes, on the side that actually feeds the tool.
-    - name: Read {{ inventory_hostname }}'s uncommitted hosts/ and bin/ edits
-      ansible.builtin.command:
-        cmd: git status --porcelain -- hosts/ bin/
-        chdir: "{{ infra_checkout }}"
-      register: host_dirty
-      changed_when: false
-      check_mode: false
-
-    - name: Check {{ inventory_hostname }} has no uncommitted hosts/ or bin/ edits
-      ansible.builtin.assert:
-        that: host_dirty.stdout | length == 0
-        fail_msg: >-
-          {{ inventory_hostname }}'s checkout at {{ infra_checkout }} has local edits under hosts/
-          or bin/: {{ host_dirty.stdout_lines | join('; ') }}. The commit assert would
-          still pass over these — pull --ff-only never touches them — so the tool
-          would install bytes nobody reviewed. Commit, push and re-pull, or discard
-          them on the host. Nothing was installed.
-
-    - name: Read the commit {{ inventory_hostname }} is on
-      ansible.builtin.command:
-        cmd: git rev-parse HEAD
-        chdir: "{{ infra_checkout }}"
-      register: host_head
-      changed_when: false
-      check_mode: false
-
-    - name: Check {{ inventory_hostname }} is on the same commit as this checkout
-      ansible.builtin.assert:
-        that: host_head.stdout | trim == ctl_head.stdout | trim
-        fail_msg: >-
-          {{ inventory_hostname }} is on {{ host_head.stdout | trim | truncate(12, true, '') }}
-          and this control node reviewed {{ ctl_head.stdout | trim | truncate(12, true, '') }}.
-          If origin moved past your review: `git pull` here, re-read the diff, re-run.
-          If you have unpushed commits: `git push`. Nothing was installed.
+    # The host side also covers bin/, because the tool that installs the files is read from
+    # the host's checkout: a dirty bin/ would install bytes nobody reviewed.
+    - name: Pull {{ inventory_hostname }}'s checkout and check it is the reviewed commit
+      ansible.builtin.import_tasks: _sync-host-checkout.yml
+      vars:
+        sync_host: "{{ inventory_hostname }}"
+        sync_paths: [hosts/, bin/]
+        anchor_head: "{{ anchor_head_raw.stdout | trim }}"
+        sync_untouched: Nothing was installed.
 
     - name: Read the tracked system files for {{ inventory_hostname }}
       ansible.builtin.find:
