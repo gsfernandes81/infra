@@ -607,6 +607,10 @@ All three are in [`decisions.md`](decisions.md) and [`ssh-clients.md`](ssh-clien
 **Still open, and not this phase's:** `dd-dev` and `ds-dev` have no tunnel of their own, so
 `client-home-ssh-config.yml` skips them by name until Phase 5; and 2i's rules are still live on zero.
 
+**Closed 2026-10-25, from the phone's `~/.ssh/config` as the owner pasted it:** one `Host
+or3-dev`, the managed block, and `infra-dev`'s `ProxyCommand` on the absolute cloudflared
+path — both leftovers below are gone. The original note follows.
+
 **Filed 2026-08-25, no phase number — the two client plays now cover Windows, and the
 phone's own block is behind them.** `_client-dev-ssh.yml` had no Windows half at all: run from
 WSL it configured WSL and left Windows untouched, which is why a laptop that reaches
