@@ -550,6 +550,20 @@ Unauthenticated, `ssh-zero`, `ssh-one` and `ssh-two` answer 200 with no login re
 `infra-dev` (service tokens only) answers 403. Unverified until the Zero Trust dashboard is
 read: [gsfernandes81/infra#12](https://github.com/gsfernandes81/infra/issues/12).
 
+**Filed 2026-10-25, no phase number: send2ereader's conversions probably cannot run on
+`one`.** The fork's Dockerfile, at the sha in `deployments/send2ereader/SOURCE`, downloads
+`kepubify-linux-64bit` and an i386 `kindlegen`, both x86 programs, and `one` is aarch64.
+Unless `one` has x86 emulation registered, which nothing in this repo installs, an EPUB
+sent to a Kobo or a Kindle with its conversion box ticked fails with an error on the
+sending page. Both boxes start ticked (`static/upload.html`). A PDF, a MOBI, or a send
+with the box unticked is unaffected. Found by reading the fork's source; not yet seen on the
+box, and one EPUB sent to a Kobo with Kepubify ticked settles it.
+
+The fix belongs in the fork. Kepubify v4.0.4 publishes `kepubify-linux-arm64`, so choosing
+the download by Docker's `TARGETARCH` fixes the Kobo path. KindleGen was only ever built
+for x86, so on `one` the Kindle conversion needs emulation or goes, and the fork could
+start that box unticked there.
+
 **Closed 2026-10-24 — Ansible output should wrap long lines preserving their indent, the way Helix soft-wraps.** Done by `ansible/callback_plugins/infra.py` (decisions.md § "Ansible output: this repo's own callback"), which measures the terminal itself. The original note follows.
 The owner's ask: a long task title or message line continues on the next line at the same
 indent as where it started (under the ▸, under the host column), never at column 0 and never
