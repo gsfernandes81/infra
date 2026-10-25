@@ -60,8 +60,10 @@ description:
   - The infra repo's own output; see the header of the file.
 """
 
+import atexit
 import os
 import pprint
+import re
 import shutil
 import sys
 import textwrap
@@ -73,16 +75,15 @@ from ansible.plugins.callback import CallbackBase
 from ansible.utils import color as ansible_color
 
 WORD_W = 7                  # the longest status word; every word starts at the same column
-TIME_W = 6                  # room kept for the time: "412ms", "47.3s", "2m14s"
 WRAP = '↪ '                 # Helix's wrap indicator, drawn in the indent of a continuation
 
 ANSI = {'green': '0;32', 'red': '0;31', 'yellow': '0;33', 'cyan': '0;36', 'bright_red': '1;31',
         'blue': '0;34', 'purple': '1;35', 'gray': '0;90'}
-SYMBOL = {'done': '✓', 'changed': '~', 'failed': '✗', 'ignored': '✗', 'down': '⚠', 'running': '●'}
+SYMBOL = {'done': '✓', 'changed': '~', 'failed': '✗', 'ignored': '✗', 'down': '⚠', 'running': '●', 'skipped': '→'}
 WORD = {'done': 'DONE', 'changed': 'CHANGED', 'failed': 'FAILED', 'ignored': 'IGNORED',
-        'down': 'DOWN', 'running': 'RUNNING'}
+        'down': 'DOWN', 'running': 'RUNNING', 'skipped': 'SKIPPED'}
 COLOUR = {'done': 'green', 'changed': 'yellow', 'failed': 'red', 'ignored': 'yellow',
-          'down': 'bright_red', 'running': 'blue'}
+          'down': 'bright_red', 'running': 'blue', 'skipped': 'cyan'}
 RANK = ['done', 'changed', 'ignored', 'down', 'failed']          # worst last
 
 
@@ -108,12 +109,21 @@ class CallbackModule(CallbackBase):
         self._live_width = 0
         self._tick = -1
         os.register_at_fork(after_in_child=self._after_fork)
+        # A run that ends without reaching stats (Ctrl-C, an error escaping the strategy)
+        # would lose the running step's buffered results; print them on the way out.
+        atexit.register(self._at_exit)
         self._watch_display()
         if self._tty:
             self._stop = threading.Event()
             threading.Thread(target=self._ticker, name='infra-timer', daemon=True).start()
 
     # ── plumbing ──────────────────────────────────────────────────────────────
+    def _at_exit(self):
+        if self._child:
+            return
+        with self._lock:
+            self._finish()
+
     def _after_fork(self):
         self._lock = threading.RLock()
         self._child = True
@@ -147,12 +157,20 @@ class CallbackModule(CallbackBase):
 
         self._display.display = display
 
+    @staticmethod
+    def _plain(text):
+        return re.sub(r'\x1b\[[0-9;]*m', '', text)
+
     def _say(self, text):
-        """Print one already-coloured line through Ansible's display."""
+        """Print one already-coloured line: colour to the screen, plain text to the log."""
         with self._lock:
             self._ours = True
             try:
-                self._display.display(text)
+                if self._colour:
+                    self._display.display(text, screen_only=True)
+                    self._display.display(self._plain(text), log_only=True)
+                else:
+                    self._display.display(text)
             finally:
                 self._ours = False
 
@@ -257,7 +275,14 @@ class CallbackModule(CallbackBase):
                 self._erase_live()
             if not self._named:
                 for l in self._name_lines():
-                    self._display.display(l) if not self._tty else self._write(l + '\n')
+                    if self._tty:
+                        self._write(l + '\n')
+                        self._display.display(self._plain(l), log_only=True)
+                    else:
+                        self._display.display(l)
+                # Display does not flush, and piped stdout is block-buffered while stderr is
+                # not: without this, in a `2>&1` log the warning lands above the name it follows.
+                sys.stdout.flush()
                 self._named = True
         finally:
             self._ours = False
@@ -297,18 +322,24 @@ class CallbackModule(CallbackBase):
                 self._erase_live()
             if self._hosts:
                 self._print_step()
+            elif self._named:     # the name went up, then every host skipped: close it
+                for l in self._continuation('skipped', self._fmt(time.time() - self._start)):
+                    self._say(l)
         finally:
             self._ours = False
         self._task = None
+
+    def _continuation(self, status, timer):
+        """A `↪ ……… time STATUS` line, for a step whose name is already on screen."""
+        lines = self._step_lines(status, timer, name='', prefix='  ' + WRAP)
+        return ['  ' + self._c(WRAP, 'gray') + l[4:] if l.startswith('  ' + WRAP) else l for l in lines]
 
     def _print_step(self):
         statuses = [h['status'] for h in self._hosts.values()]
         status = max(statuses, key=RANK.index)
         timer = self._fmt(time.time() - self._start)
         if self._named:          # the name is already up, above whatever interrupted it
-            lines = self._step_lines(status, timer, name='', prefix='  ' + WRAP)
-            lines = [self._c(WRAP, 'gray').join(l.split(WRAP, 1)) if l.startswith('  ' + WRAP) else l for l in lines]
-            lines = ['  ' + self._c(WRAP, 'gray') + l[4:] if l.startswith('  ' + WRAP) else l for l in lines]
+            lines = self._continuation(status, timer)
         else:
             lines = self._step_lines(status, timer)
         for l in lines:
