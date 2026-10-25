@@ -1,4 +1,8 @@
 ---
+# SUPERSEDED by server-deploy-compose.yml (and server-bring-up-deployment.yml for a first
+# bring-up), with this deployment's checks in ansible/deploy-hooks/. Kept only until the
+# first real run of that path, then deleted: plans/deploy-play-unification.md.
+#
 # DEPLOY send2ereader, on whichever host hosts/<host>/send2ereader places it (`one`), at
 # bookit.<dns_zone>. Run from the control node:
 #

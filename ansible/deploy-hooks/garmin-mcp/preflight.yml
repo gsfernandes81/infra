@@ -1,0 +1,141 @@
+---
+# garmin-mcp's work before the .env check and the plan, included by
+# playbooks/_deploy-compose-one.yml (the contract is in server-deploy-compose.yml's header).
+# Moved from the deployment's own play, server-deploy-garmin-mcp.yml, on 2026-10-25.
+#
+# 1. It refuses a Garmin email or password in .env, under --check too.
+# 2. It CREATES what a first bring-up lacks and nothing else, outside --check: the four .env
+#    lines this deployment generates itself, and the upstream source checkout. Compose cannot
+#    plan without them. Every one is written only when absent, so on a routine redeploy
+#    this hook writes nothing and the plan you are asked about is the whole change.
+#    Values that change on purpose (a rotated consent secret, a new upstream sha) are
+#    prepare.yml's, after you answer y.
+#
+# Sets garmin_home and garmin_src, which prepare.yml and probe.yml read in the same pass.
+
+- name: Read the home directory of the ssh user on {{ dep.host }}
+  # ansible_facts, not the top-level ansible_user_dir, which ansible-core 2.24 withdraws.
+  # delegate_facts, so the fact lands on the host and not on the control node.
+  ansible.builtin.setup:
+    gather_subset: ['!all']
+  delegate_to: "{{ dep.host }}"
+  delegate_facts: true
+
+- name: Note the home directory
+  # Its own task, so that -e garmin_home=… (which beats set_fact) moves garmin_src with it:
+  # that is how a local test stands in a fake host.
+  ansible.builtin.set_fact:
+    garmin_home: "{{ hostvars[dep.host].ansible_facts.user_dir }}"
+
+- name: Note where the garmin-mcp source lives
+  ansible.builtin.set_fact:
+    garmin_src: "{{ garmin_home }}/src/garmin-mcp"
+    # SOURCE is the one copy of the upstream URL and sha; read here on the control node.
+    garmin_source: >-
+      {{ (lookup('file', control_checkout ~ '/deployments/garmin-mcp/SOURCE').splitlines()
+          | reject('match', '^\s*(#|$)') | first).split() }}
+    # edge.yml has no subdomain:, so the name is the deployment's (CLAUDE.md § Repo
+    # invariants: the zone is appended, never written beside it).
+    garmin_url: >-
+      https://{{ (lookup('file', control_checkout ~ '/deployments/garmin-mcp/edge.yml') | from_yaml).subdomain
+                 | default('garmin-mcp') }}.{{ dns_zone }}
+    # The consent secret lives on THIS control node, beside the Cloudflare API token file.
+    # The password lookup creates it the first time (48 hex chars, the file 0600 in a 0700
+    # directory, the lookup's own modes) and reads it afterwards.
+    garmin_consent_file: "{{ lookup('env', 'HOME') }}/.config/garmin-mcp/consent-secret"
+
+# ── 1  no Garmin password in .env ────────────────────────────────────────────
+- name: Read the variable names in .env for garmin-mcp
+  # Names only, as the play's own .env check reads them: a value never reaches a register.
+  # No .env (a --check of a first bring-up) is rc 2, and reads as no names.
+  ansible.builtin.command:
+    cmd: sed -nE 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=.*/\2/p' .env
+    chdir: "{{ dep_dir }}"
+  register: garmin_env_names
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  delegate_to: "{{ dep.host }}"
+
+- name: Check .env has no Garmin email or password
+  ansible.builtin.assert:
+    that:
+      - "'GARMIN_EMAIL' not in garmin_env_names.stdout_lines"
+      - "'GARMIN_PASSWORD' not in garmin_env_names.stdout_lines"
+    fail_msg: >-
+      {{ dep_dir }}/.env on {{ dep.host }} has
+      {{ garmin_env_names.stdout_lines | select('match', '^GARMIN_(EMAIL|PASSWORD)$') | list }}.
+      Delete those lines. Upstream's README says to put them there; this deployment does not
+      want them: the server would silently log in with the password whenever its tokens
+      failed and write a base64 copy of the tokens beside them. The one-time login in
+      deployments/garmin-mcp/README.md prompts for both instead. Nothing was changed.
+    success_msg: "no Garmin credentials in .env"
+
+# ── 2  what a first bring-up lacks ───────────────────────────────────────────
+# create: false throughout: .env is created at 0600 by the tunnel play, and a missing one
+# here means that play has not run, which the .env check after this hook reports by name.
+- name: "If no consent secret: write it into .env"
+  ansible.builtin.lineinfile:
+    path: "{{ dep_dir }}/.env"
+    regexp: '^MCP_CONSENT_SECRET='
+    # Lower-case hex only, written as generated. `hexdigits` would include A-F, and any
+    # case-folding between the control node's file and .env makes the pasted secret a
+    # mismatch.
+    line: "MCP_CONSENT_SECRET={{ lookup('ansible.builtin.password', garmin_consent_file, length=48, chars=['0123456789abcdef']) }}"
+    create: false
+    mode: "0600"
+  delegate_to: "{{ dep.host }}"
+  when:
+    - not ansible_check_mode
+    - "'MCP_CONSENT_SECRET' not in garmin_env_names.stdout_lines"
+  no_log: true
+
+- name: "If no bearer token: write a token into .env"
+  # Generated here once, seen by nobody but the OAuth shim and claude.ai. Rotation is
+  # deleting this line (the README).
+  ansible.builtin.lineinfile:
+    path: "{{ dep_dir }}/.env"
+    regexp: '^MCP_BEARER_TOKEN='
+    line: "MCP_BEARER_TOKEN={{ lookup('ansible.builtin.password', '/dev/null', length=64, chars=['0123456789abcdef']) }}"
+    create: false
+    mode: "0600"
+  delegate_to: "{{ dep.host }}"
+  when:
+    - not ansible_check_mode
+    - "'MCP_BEARER_TOKEN' not in garmin_env_names.stdout_lines"
+  no_log: true
+
+- name: "If missing: write SRC_ROOT and PUBLIC_BASE_URL"
+  ansible.builtin.lineinfile:
+    path: "{{ dep_dir }}/.env"
+    regexp: "^{{ item.key }}="
+    line: "{{ item.key }}={{ item.value }}"
+    create: false
+    mode: "0600"
+  loop:
+    - { key: SRC_ROOT, value: "{{ garmin_home }}/src" }
+    - { key: PUBLIC_BASE_URL, value: "{{ garmin_url }}" }
+  loop_control:
+    label: "{{ item.key }}"
+  delegate_to: "{{ dep.host }}"
+  when:
+    - not ansible_check_mode
+    - item.key not in garmin_env_names.stdout_lines
+
+- name: Create the source checkout directory on {{ dep.host }}
+  ansible.builtin.file:
+    path: "{{ garmin_home }}/src"
+    state: directory
+    mode: "0755"
+  delegate_to: "{{ dep.host }}"
+
+- name: "If no source checkout: clone it at {{ garmin_source[1][:7] }}"
+  # update: false leaves an existing checkout exactly where it is; prepare.yml moves it, after
+  # the question. Only a missing one is cloned, at the pinned sha, so a first bring-up has a
+  # build context. $SRC_ROOT/garmin-mcp is the path bin/check-sources looks for.
+  ansible.builtin.git:
+    repo: "{{ garmin_source[0] }}"
+    dest: "{{ garmin_src }}"
+    version: "{{ garmin_source[1] }}"
+    update: false
+  delegate_to: "{{ dep.host }}"

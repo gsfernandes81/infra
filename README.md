@@ -5,20 +5,17 @@ secrets, no data.
 
 ## Run a deployment
 
-Two deployments have their own deploy play, run from the control node; each one's README says how:
-
-```sh
-cd ansible && ansible-playbook playbooks/server-deploy-send2ereader.yml -K   # one
-cd ansible && ansible-playbook playbooks/server-deploy-garmin-mcp.yml -K     # one
-```
-
-Every other docker deployment (and `send2ereader`, whose own play above also still works) is redeployed after a change by one play, which plans, asks
-once per deployment, then does it, runs the deployment's own checks, and says what was recreated (`--check` stops at the plan). A first bring-up with a tunnel is `server-bring-up-deployment.yml -e deployment=<name> -K`:
+Every docker deployment is redeployed after a change by one play, run from the control node. It plans, asks
+once per deployment, then does it, runs the deployment's own checks, and says what was recreated (`--check` stops at the plan). A first bring-up with a tunnel is `server-bring-up-deployment.yml -e deployment=<name> -K`; a deployment's README says what is particular to it:
 
 ```sh
 cd ansible && ansible-playbook playbooks/server-deploy-compose.yml -e deployment=immich -K
 cd ansible && ansible-playbook playbooks/server-deploy-compose.yml -e deployment=all -K    # each in turn, `one` first
+cd ansible && ansible-playbook playbooks/server-deploy-compose.yml -e deployment=garmin-mcp -e recreate=true -K   # with no change
 ```
+
+`send2ereader` and `garmin-mcp` also keep their old plays, `server-deploy-<name>.yml`, until the first real run of
+the shared one with `recreate=true` exercises their checks ([`plans/deploy-play-unification.md`](plans/deploy-play-unification.md)).
 
 Any deployment starts with stock Compose, on its host, from its directory:
 

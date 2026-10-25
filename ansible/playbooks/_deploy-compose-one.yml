@@ -10,6 +10,9 @@
   ansible.builtin.set_fact:
     dep_dir: "{{ hostvars[dep.host].infra_checkout }}/deployments/{{ dep.name }}"
     dep_skipped: false
+    # -e recreate=true makes the plan and the `up` recreate every container, so a deployment
+    # whose files did not change can still be put through the question, `up` and its probe.
+    dep_recreate: "{{ 'always' if (recreate | default(false) | bool) else 'auto' }}"
 
 # ── the host's checkout, pulled to the commit this control node reviewed ────
 - name: Pull the host's checkout, check its commit
@@ -20,6 +23,18 @@
     anchor_head: "{{ deploy_ctl_head }}"
 
 # ── what must be true first ──────────────────────────────────────────────────
+# The preflight hook runs before the .env check, because a hook may be what fills .env in:
+# garmin-mcp's writes the lines it generates itself when they are missing, so a first
+# bring-up can be planned. The check after it is then the backstop for the hook as well.
+- name: Stat the preflight hook for {{ dep.name }}
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../deploy-hooks/{{ dep.name }}/preflight.yml"
+  register: dep_preflight
+
+- name: "If it has a preflight hook: run it"
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/../deploy-hooks/{{ dep.name }}/preflight.yml"
+  when: dep_preflight.stat.exists
+
 - name: Note the variables compose.yaml requires
   # Every ${VAR:?message}, which is how this repo says "absent should stop Compose". The
   # pattern avoids backslashes on purpose: a folded YAML scalar passes them to Jinja as they
@@ -51,21 +66,12 @@
       {{ dep.host }}:{{ dep_dir }}/.env lacks
       {{ dep_required | difference(dep_env_names.stdout_lines | default([])) }}, which compose.yaml
       requires. TUNNEL_ID and TUNNEL_CREDENTIALS are written by server-create-deployment-tunnel.yml
-      (server-bring-up-deployment.yml runs it); the rest are the owner's to put there.
-      Nothing was changed.
+      (server-bring-up-deployment.yml runs it); a preflight hook may write its own (garmin-mcp's
+      does, outside --check); the rest are the owner's to put there. No container was touched.
     success_msg: "{{ dep_required | length }} required variables present"
   when:
     - dep_required | length > 0
     - not (ansible_check_mode and (bringup | default(false) | bool))
-
-- name: Stat the preflight hook for {{ dep.name }}
-  ansible.builtin.stat:
-    path: "{{ playbook_dir }}/../deploy-hooks/{{ dep.name }}/preflight.yml"
-  register: dep_preflight
-
-- name: "If it has a preflight hook: run it"
-  ansible.builtin.include_tasks: "{{ playbook_dir }}/../deploy-hooks/{{ dep.name }}/preflight.yml"
-  when: dep_preflight.stat.exists
 
 # ── a --check of a first bring-up stops here ─────────────────────────────────
 # Compose cannot plan without the variables it requires, and for a first bring-up those
@@ -86,9 +92,17 @@
     - name: Plan {{ dep.name }}, as a dry run
       # check_mode true on the task itself, so even a real run only ever asks here. The module
       # runs `up --dry-run`; `actions` lists what it would do to each container and image.
+      #
+      # pull: policy, here and on the real `up`, and never `missing`: any --pull overrides
+      # EVERY service's pull_policy (compose v5.6.1, cmd/compose/create.go, Apply), so
+      # `missing` would make garmin-mcp's `pull_policy: never` look for its tag on Docker Hub
+      # before building it. A service that sets none gets Compose's default, which is
+      # `missing` anyway. A dry run builds nothing (pkg/dryrun's ImageBuild is a no-op, and
+      # bake has its own dry-run branch).
       community.docker.docker_compose_v2:
         project_src: "{{ dep_dir }}"
-        pull: missing
+        pull: policy
+        recreate: "{{ dep_recreate }}"
         state: present
       check_mode: true
       register: dep_plan
@@ -156,7 +170,8 @@
     - name: "If going ahead: redeploy {{ dep.name }}"
       community.docker.docker_compose_v2:
         project_src: "{{ dep_dir }}"
-        pull: missing
+        pull: policy
+        recreate: "{{ dep_recreate }}"
         state: present
       register: dep_up
       become: true

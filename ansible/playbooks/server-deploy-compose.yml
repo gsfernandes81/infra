@@ -6,6 +6,7 @@
 #     ansible-playbook playbooks/server-deploy-compose.yml -e deployment=immich --check -K  # plan only
 #     ansible-playbook playbooks/server-deploy-compose.yml -e deployment=immich -K          # ask, then do
 #     ansible-playbook playbooks/server-deploy-compose.yml -e deployment=all -K             # each in turn
+#     ansible-playbook playbooks/server-deploy-compose.yml -e deployment=garmin-mcp -e recreate=true -K
 #
 # NO --limit / -l: the host is read from the deployment's symlink, as in
 # server-create-deployment-tunnel.yml, and `-l` would skip the play that finds it.
@@ -21,7 +22,8 @@
 #      changed. A deployment with nothing to do says so and is not asked about.
 #   3. ASK, once, for this deployment: "Redeploy immich on zero? [y/N]". Anything but y/yes
 #      skips it. `--check` stops after the plan and never asks.
-#   4. DO. `up` with `pull: missing`, which pulls a pinned digest only if the host lacks it.
+#   4. DO. `up`, which pulls a pinned digest only if the host lacks it and builds a built
+#      image only if its tag is absent, each service's pull_policy honoured.
 #      Then the container ids are compared with the ids from before, so what was recreated
 #      is read, not assumed (CLAUDE.md § Verifying changes), and the play waits for
 #      healthchecks and fails naming any container that is not up.
@@ -33,24 +35,35 @@
 # only that deployment. `-e assume_yes=true` skips the question for ONE named deployment and
 # is refused with `all`, so the per-deployment question cannot be switched off for the lot.
 #
+# `-e recreate=true` recreates every container of ONE named deployment even when nothing in
+# it changed, so the plan has something to ask about and the probe hook runs. It is how a
+# probe is exercised without a change, and how garmin-mcp is restarted after its Garmin
+# login lapses (its README). Refused with `all`, for the same reason as assume_yes.
+#
 # WHAT IT WILL NOT TOUCH, and says so rather than silently skipping:
-#   garmin-mcp                has its own play, server-deploy-garmin-mcp.yml.
 #   ionic-traces              `up` would start it if it is stopped.
 #   anything on a host outside the `containerized` inventory group.
 #
 # DEPLOYMENT-SPECIFIC CHECKS are hook files, found by name and run only if they exist:
-#   ansible/deploy-hooks/<name>/preflight.yml   before the plan: what must be true for the
-#                                                plan to mean anything (send2ereader: its
-#                                                image can be fetched from ghcr; torrents:
-#                                                the forwarded port before the change)
+#   ansible/deploy-hooks/<name>/preflight.yml   before the .env check and the plan: what must
+#                                                be true for the plan to mean anything
+#                                                (send2ereader: its image can be fetched from
+#                                                ghcr; torrents: the forwarded port before the
+#                                                change). It may CREATE what is missing and
+#                                                nothing else (garmin-mcp: its generated .env
+#                                                lines and the source checkout, on a first
+#                                                bring-up), never under --check, and never
+#                                                touches a container.
 #   ansible/deploy-hooks/<name>/prepare.yml     after you answer y and before `up`: host-side
 #                                                files the deployment needs, written only for
 #                                                a change you confirmed (calibre-web: the
-#                                                kepubify link Calibre-Web will accept)
+#                                                kepubify link Calibre-Web will accept;
+#                                                garmin-mcp: the source moved to SOURCE's sha)
 #   ansible/deploy-hooks/<name>/probe.yml       after a redeploy, once every container is up:
 #                                                end-to-end checks (send2ereader: the page,
 #                                                the image it runs, no published port;
-#                                                torrents: port forwarding came back)
+#                                                torrents: port forwarding came back;
+#                                                garmin-mcp: the served tools and the login)
 # They are included from _deploy-compose-one.yml, so they see `dep` ({host, name}) and
 # `dep_dir` (the deployment's directory on that host) and run on the control node, delegating host work to
 # dep.host themselves. A hook that needs a variable defines it. They live under ansible/, not
@@ -74,8 +87,6 @@
   hosts: localhost
   gather_facts: false
   vars:
-    deploy_own_play:
-      garmin-mcp: server-deploy-garmin-mcp.yml
     deploy_excluded:
       ionic-traces: excluded here, since up would start it if it is stopped
   tasks:
@@ -85,10 +96,12 @@
           - deployment is defined
           - deployment is match('^[a-z0-9][a-z0-9-]*$')
           - not (deployment == 'all' and (assume_yes | default(false) | bool))
+          - not (deployment == 'all' and (recreate | default(false) | bool))
         fail_msg: >-
           Say which: -e deployment=<name> (a directory under deployments/), or -e deployment=all
-          to go through every one in turn. -e assume_yes=true skips the question for one named
-          deployment and is refused with all.
+          to go through every one in turn. -e assume_yes=true skips the question and
+          -e recreate=true recreates every container, each for one named deployment, and both
+          are refused with all.
         success_msg: "deployment {{ deployment | default('?') }}"
 
     - name: Find the hosts/<host>/<name> symlinks
@@ -126,7 +139,6 @@
       when:
         - item.stat.exists
         - item.item.host in groups['containerized']
-        - item.item.name not in deploy_own_play
         - item.item.name not in deploy_excluded
 
     - name: Note why each of the others is left alone
@@ -134,8 +146,7 @@
         deploy_left: >-
           {{ (deploy_left | default([]))
              + [item.item.host ~ '/' ~ item.item.name ~ ': '
-                ~ ('own play, ' ~ deploy_own_play[item.item.name] if item.item.name in deploy_own_play else
-                   deploy_excluded[item.item.name] if item.item.name in deploy_excluded else
+                ~ (deploy_excluded[item.item.name] if item.item.name in deploy_excluded else
                    'not a docker host' if item.item.host not in groups['containerized'] else
                    'no compose.yaml')] }}
       loop: "{{ deploy_composes.results }}"

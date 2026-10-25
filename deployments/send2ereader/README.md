@@ -28,7 +28,8 @@ ansible-playbook playbooks/server-deploy-compose.yml -e deployment=send2ereader 
 ansible-playbook playbooks/server-deploy-compose.yml -e deployment=send2ereader -K
 ```
 
-The older play below also works, and is deleted once this one has done a real deploy
+The older play below also works, and is deleted once this one has done a real deploy, which
+`-e recreate=true` makes without a change
 ([`plans/deploy-play-unification.md`](../../plans/deploy-play-unification.md)).
 
 ```fish

@@ -1,0 +1,254 @@
+---
+# garmin-mcp's checks after a redeploy, included by playbooks/_deploy-compose-one.yml once
+# every container is up. End to end from this control node: tunnel, nginx, the OAuth
+# metadata, the one property the whole design rests on (the server serves only read tools
+# and the allowed writes), and last the Garmin login. Reads dep_dir, garmin_url and
+# garmin_consent_file (preflight.yml).
+#
+# THE LOGIN COMES LAST, and waits for you. The tool list does not need it: upstream registers
+# tools at start-up and logs in on a background thread (Taxuspt's _PendingGarminClient), so
+# the allowlist is proved first, even on a first bring-up. If /readyz then says the login is
+# missing or refused, this prints the login block and PAUSES: do the block in another
+# terminal, press Enter here, and the play waits for `ready`. It has to be here rather than
+# on a re-run, because a re-run has nothing to change and never reaches a probe.
+#
+# Each probe retries (a new tunnel's DNS, a first boot, a background login), never stops on
+# the module's own failure, and is followed by an assert that says what it means. Both
+# failed_when: false AND ignore_errors: true: -1 (no answer) fails `uri` whatever
+# failed_when says, and exhausted retries mark a task failed.
+
+- name: Note the allowlist and the probe timing
+  ansible.builtin.set_fact:
+    # Every read tool at the pinned Taxuspt sha matches this, and no write tool does (the
+    # derivation is in compose.yaml beside GARMIN_ENABLED_TOOLS).
+    garmin_read_prefix: '^(get|count|search)_'
+    # The owner's five, 2026-10-24, the same names compose.yaml appends to the allowlist. A
+    # write tool enabled later goes in compose.yaml AND here, in one commit: that is the whole
+    # procedure.
+    garmin_allowed_writes: [schedule_workout, set_activity_description, unschedule_workout, upload_workout, upload_workouts]
+    # The single copy of the allowlist, read from compose.yaml rather than repeated.
+    garmin_enabled: >-
+      {{ (lookup('file', control_checkout ~ '/deployments/garmin-mcp/compose.yaml') | from_yaml)
+         .services['garmin-mcp'].environment.GARMIN_ENABLED_TOOLS.split(',') }}
+    # A new tunnel's DNS can take a minute or two; every probe waits up to five.
+    probe_retries: 20
+    probe_delay: 15
+
+# ── the edge and the gate ────────────────────────────────────────────────────
+- name: Wait for /healthz through the tunnel
+  ansible.builtin.uri:
+    url: "{{ garmin_url }}/healthz"
+    status_code: [200]
+  register: garmin_p_health
+  until: garmin_p_health.status | default(0) == 200
+  retries: "{{ probe_retries }}"
+  delay: "{{ probe_delay }}"
+  failed_when: false
+  ignore_errors: true
+
+- name: Check the tunnel and nginx are up
+  ansible.builtin.assert:
+    that: garmin_p_health.status | default(0) == 200
+    fail_msg: >-
+      {{ garmin_url }}/healthz answered {{ garmin_p_health.status | default('nothing') }}.
+      530/1033 is the tunnel (sudo docker logs garmin-mcp-cloudflared on {{ dep.host }});
+      502 is the deployment (sudo docker compose ps in {{ dep_dir }}).
+    success_msg: "{{ garmin_url }}/healthz → 200"
+
+- name: Probe /mcp without a token
+  ansible.builtin.uri:
+    url: "{{ garmin_url }}/mcp"
+    status_code: [401]
+  register: garmin_p_noauth
+  failed_when: false
+  ignore_errors: true
+
+- name: Probe the OAuth metadata document
+  ansible.builtin.uri:
+    url: "{{ garmin_url }}/.well-known/oauth-protected-resource"
+    return_content: true
+  register: garmin_p_meta
+  failed_when: false
+  ignore_errors: true
+
+- name: Check /mcp gate and PUBLIC_BASE_URL
+  # The 401 cannot prove PUBLIC_BASE_URL: nginx builds its WWW-Authenticate from $host.
+  # Only the shim's metadata reads that variable.
+  ansible.builtin.assert:
+    that:
+      - garmin_p_noauth.status | default(0) == 401
+      - (garmin_p_meta.json | default({})).resource | default('') == garmin_url ~ '/mcp'
+    fail_msg: >-
+      /mcp without a token answered {{ garmin_p_noauth.status | default('nothing') }}
+      (want 401); the metadata says resource =
+      {{ (garmin_p_meta.json | default({})).resource | default('nothing') }}
+      (want {{ garmin_url }}/mcp).
+    success_msg: "/mcp → 401 without a token; metadata names {{ garmin_url }}/mcp"
+
+# ── the tools it serves ──────────────────────────────────────────────────────
+- name: Read the bearer token from .env
+  ansible.builtin.slurp:
+    src: "{{ dep_dir }}/.env"
+  register: garmin_env_raw
+  delegate_to: "{{ dep.host }}"
+  no_log: true
+
+- name: Note the bearer token
+  ansible.builtin.set_fact:
+    garmin_bearer: >-
+      {{ (garmin_env_raw.content | b64decode).splitlines()
+         | select('match', '^MCP_BEARER_TOKEN=') | map('regex_replace', '^MCP_BEARER_TOKEN=', '')
+         | first | default('') }}
+  no_log: true
+
+- name: Probe the tools garmin-mcp serves
+  ansible.builtin.uri:
+    url: "{{ garmin_url }}/mcp"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ garmin_bearer }}"
+      Accept: application/json, text/event-stream
+    body_format: json
+    body: { jsonrpc: "2.0", id: 1, method: tools/list }
+    return_content: true
+  register: garmin_p_tools
+  failed_when: false
+  ignore_errors: true
+  no_log: true
+
+- name: Check tools/list answered 200
+  ansible.builtin.assert:
+    that: garmin_p_tools.status | default(0) == 200
+    fail_msg: "tools/list answered {{ garmin_p_tools.status | default('nothing') }}: {{ (garmin_p_tools.content | default(''))[:300] }}"
+    quiet: true
+
+- name: Note the tools/list reply
+  # Plain JSON or one SSE event, depending on what the client accepts. if/else, not ternary:
+  # ternary renders both branches, and the wrong one throws.
+  ansible.builtin.set_fact:
+    garmin_rpc: >-
+      {{ (garmin_p_tools.content | from_json) if (garmin_p_tools.content | trim).startswith('{')
+         else (garmin_p_tools.content.splitlines() | select('match', '^data:') | first
+               | regex_replace('^data:\s*', '') | from_json) }}
+
+- name: Check tools/list is not an error
+  ansible.builtin.assert:
+    that: garmin_rpc.error is not defined
+    # default(''): an assert's messages are rendered BEFORE its test, so on a good reply,
+    # which has no `error`, a bare reference throws instead of passing.
+    fail_msg: "tools/list returned an error: {{ garmin_rpc.error | default('') }}"
+    quiet: true
+
+- name: Note the served tools and any outside the allowlist
+  ansible.builtin.set_fact:
+    garmin_served_tools: "{{ garmin_rpc.result.tools | map(attribute='name') | list }}"
+    garmin_tool_offenders: >-
+      {{ garmin_rpc.result.tools | map(attribute='name') | reject('match', garmin_read_prefix)
+         | reject('in', garmin_allowed_writes) | list }}
+
+- name: Check served tools match the allowlist
+  ansible.builtin.assert:
+    that:
+      - garmin_tool_offenders | length == 0
+      - garmin_served_tools | length == garmin_enabled | length
+    fail_msg: >-
+      {{ garmin_url }} serves {{ garmin_served_tools | length }} tools against
+      {{ garmin_enabled | length }} allowlisted. Outside {{ garmin_read_prefix }} and
+      garmin_allowed_writes: {{ garmin_tool_offenders }}. Allowlisted but not served:
+      {{ garmin_enabled | difference(garmin_served_tools) }}.
+      STOP THE DEPLOYMENT if anything is listed as outside: sudo docker compose stop,
+      in {{ dep_dir }}.
+    success_msg: "{{ garmin_served_tools | length }} tools served, {{ garmin_allowed_writes | length }} of them the allowed writes"
+
+# ── the Garmin login, last ───────────────────────────────────────────────────
+- name: Wait for the Garmin login to settle
+  # Login runs in the background after a start, so `pending` is waited out. 200 is ready;
+  # 503 carries pending or failed.
+  ansible.builtin.uri:
+    url: "{{ garmin_url }}/readyz"
+    headers: { Authorization: "Bearer {{ garmin_bearer }}" }
+    status_code: [200, 503]
+    return_content: true
+  register: garmin_p_ready
+  until: (garmin_p_ready.content | default('{}', true) | from_json).status | default('') not in ['', 'pending']
+  retries: "{{ probe_retries }}"
+  delay: "{{ probe_delay }}"
+  failed_when: false
+  ignore_errors: true
+  no_log: true
+
+- name: Note the login state
+  ansible.builtin.set_fact:
+    garmin_login: "{{ (garmin_p_ready.content | default('{}', true) | from_json).status | default('nothing') }}"
+
+- name: "If not logged in: print the Garmin login step"
+  ansible.builtin.debug:
+    msg:
+      - "/readyz says {{ garmin_login }}. No Garmin login has been made, or it was refused at this start (expired tokens, ~6 months, or a Garmin 429). /readyz is decided once, at start-up. The fix is the same:"
+      - "1. in another terminal: ssh -t {{ dep.host }}"
+      - "2. paste, inside that shell (fish):"
+      - "     cd {{ dep_dir }}"
+      - "     sudo docker compose run --rm --name garmin-mcp-auth garmin-mcp garmin-mcp-auth; and sudo docker compose restart garmin-mcp"
+      - "   It asks for your Garmin email, your password (not echoed, never stored) and the MFA code Garmin sends."
+      - "   --name, because `compose run` would otherwise reuse the running server's container name."
+      - "   The restart is not optional: a failed login is final for the running server."
+      - "3. come back here and press Enter. This run then waits up to five minutes for /readyz to say ready."
+  changed_when: true
+  when: garmin_login != 'ready'
+
+- name: "If not logged in: wait for the login block to be run"
+  ansible.builtin.pause:
+    prompt: "Press Enter once the block above has finished (Ctrl-C then A stops the run)"
+  when: garmin_login != 'ready'
+
+- name: "If not logged in: wait for /readyz to say ready"
+  # Until `ready`, not until "not pending": Enter can arrive while the old server still says
+  # `failed`, before the restart has replaced it. A different register from the first wait,
+  # since a skipped task would overwrite it (CLAUDE.md § Shell traps).
+  ansible.builtin.uri:
+    url: "{{ garmin_url }}/readyz"
+    headers: { Authorization: "Bearer {{ garmin_bearer }}" }
+    status_code: [200, 503]
+    return_content: true
+  register: garmin_p_ready_after
+  until: (garmin_p_ready_after.content | default('{}', true) | from_json).status | default('') == 'ready'
+  retries: "{{ probe_retries }}"
+  delay: "{{ probe_delay }}"
+  failed_when: false
+  ignore_errors: true
+  no_log: true
+  when: garmin_login != 'ready'
+
+- name: Note the login state after the login block
+  ansible.builtin.set_fact:
+    garmin_login: "{{ (garmin_p_ready_after.content | default('{}', true) | from_json).status | default('nothing') }}"
+  when: garmin_login != 'ready'
+
+- name: Check the Garmin login is live
+  ansible.builtin.assert:
+    that: garmin_login == 'ready'
+    fail_msg: >-
+      /readyz says {{ garmin_login }}. The login block above is what to do; afterwards, on
+      {{ dep.host }} in {{ dep_dir }}, `sudo docker compose exec garmin-mcp curl -s
+      http://127.0.0.1:8000/readyz` says whether it took, without a token. Every check before
+      this one passed.
+    success_msg: "/readyz → ready"
+
+# ── the record ───────────────────────────────────────────────────────────────
+- name: Read garmin-mcp memory use
+  ansible.builtin.command:
+    argv: [docker, stats, --no-stream, --format, "{% raw %}{{.Name}} {{.MemUsage}}{% endraw %}", garmin-mcp, garmin-mcp-cloudflared]
+  register: garmin_stats
+  changed_when: false
+  failed_when: false
+  become: true
+  delegate_to: "{{ dep.host }}"
+
+- name: Print the connector URL and summary
+  ansible.builtin.debug:
+    msg:
+      - "connector URL  {{ garmin_url }}/mcp  (claude.ai → custom connector; leave the OAuth fields blank)"
+      - "consent secret {{ garmin_consent_file }} on this control node; paste it on the consent page"
+      - "tools          {{ garmin_served_tools | length }}: reads, plus {{ garmin_allowed_writes | join(', ') }}"
+      - "memory         {{ garmin_stats.stdout_lines | default(['(not read)']) | join(' · ') }}"
+  changed_when: true

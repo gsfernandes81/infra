@@ -930,7 +930,8 @@ read `${VAR:?}` names out of `compose.yaml` to check `.env` instead of keeping l
 and leaves tunnel provisioning to `server-bring-up-deployment.yml`, because the tunnel play
 PUTs Access policies unconditionally and a routine image bump must not touch Cloudflare.
 As of 2026-10-25 `send2ereader` is on it and `garmin-mcp`'s play is still its own
-(`plans/deploy-play-unification.md`). The question is per **deployment**, never per container:
+(`plans/deploy-play-unification.md`); `garmin-mcp` joined later that day, in the row
+*garmin-mcp joins the redeploy play*. The question is per **deployment**, never per container:
 gluetun and qBittorrent share a network namespace and must be recreated together, and
 Immich's four containers are one application, so a per-container question invites answering
 "no" to half a pair. `all` is the owner's addition: it goes through every deployment in turn,
@@ -970,6 +971,36 @@ the binary through the link and checks both memory limits are in force, which th
 to ask a person to check by hand. The hook is the first `prepare.yml`: a hook point after the
 yes and before `up`, so nothing is written for a change that was declined. Remove it if a
 later Calibre-Web accepts a binary named `kepubify`.
+
+## garmin-mcp joins the redeploy play, which changes in three ways to take it
+
+Decided 2026-10-25. `server-deploy-garmin-mcp.yml` became three hooks in
+`ansible/deploy-hooks/garmin-mcp/`, and `server-deploy-compose.yml` needed three changes for them.
+
+**`pull: policy`, never `pull: missing`.** Compose applies any `--pull` to every service and
+overrides each one's `pull_policy` (compose v5.6.1, `cmd/compose/create.go`). So `missing` would
+have made `garmin-mcp` look for its tag on Docker Hub before building it, and a same-named image
+published there would have won over the reviewed source. Refusing that is why its
+`pull_policy: never` exists. No other deployment sets a `pull_policy`, so they get Compose's
+default, which is `missing`, as before.
+
+**A preflight hook may create what is missing, and it runs before the `.env` check.** Compose
+cannot plan a first bring-up of `garmin-mcp` without the four `.env` lines it generates and
+without its build context. The hook writes each of them only when it is absent, and never under
+`--check`. Values that change on purpose, a rotated consent secret or a new upstream sha, are
+written by `prepare.yml` after the yes. So on a routine redeploy the plan you answer is still the
+whole change.
+
+**`-e recreate=true`, for one named deployment, refused with `all`.** Probes run only after a
+redeploy. The old play probed on every run, and its README relied on that twice: a re-run
+finished the first Garmin login, and a restart then a re-run caught a lapsed one. A recreate
+gives both cases a redeploy to probe after. It also lets any deployment's probe be exercised with
+nothing changed, which is what deleting the two old plays waits for.
+
+The Garmin login moved to the end of the probe, where the play prints the login block and
+pauses until it has been run. `tools/list` answers without a login, because upstream registers
+its tools at start-up and logs in on a background thread, so the allowlist is proved first,
+even on a first bring-up.
 
 ## The lesson worth keeping
 

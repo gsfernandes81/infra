@@ -1,0 +1,60 @@
+---
+# garmin-mcp's host-side preparation, included by playbooks/_deploy-compose-one.yml AFTER the
+# question is answered y and BEFORE `up`, so nothing here is written for a change you
+# declined and nothing here runs under --check. Reads garmin_home, garmin_src, garmin_source,
+# garmin_url and garmin_consent_file from preflight.yml, which ran in the same pass.
+#
+# Two things: the .env values that change on purpose, and the source moved to SOURCE's sha,
+# which `up` then builds from when the tag in compose.yaml is absent.
+
+- name: Write the consent secret into .env
+  # From the file on this control node, every run, so deleting that file rotates it. A
+  # rotation alone changes nothing the plan can see, which is why the README rotates with
+  # -e recreate=true.
+  ansible.builtin.lineinfile:
+    path: "{{ dep_dir }}/.env"
+    regexp: '^MCP_CONSENT_SECRET='
+    line: "MCP_CONSENT_SECRET={{ lookup('ansible.builtin.password', garmin_consent_file, length=48, chars=['0123456789abcdef']) }}"
+    create: false
+    mode: "0600"
+  delegate_to: "{{ dep.host }}"
+  no_log: true
+
+- name: Write SRC_ROOT and PUBLIC_BASE_URL into .env
+  ansible.builtin.lineinfile:
+    path: "{{ dep_dir }}/.env"
+    regexp: "^{{ item.key }}="
+    line: "{{ item.key }}={{ item.value }}"
+    create: false
+    mode: "0600"
+  loop:
+    - { key: SRC_ROOT, value: "{{ garmin_home }}/src" }
+    - { key: PUBLIC_BASE_URL, value: "{{ garmin_url }}" }
+  loop_control:
+    label: "{{ item.key }}"
+  delegate_to: "{{ dep.host }}"
+
+- name: Move the garmin-mcp source to {{ garmin_source[1][:7] }}
+  # force: false refuses a checkout with local modifications; a clean one is moved to the
+  # pinned sha, so a reviewed bump needs no step by hand.
+  ansible.builtin.git:
+    repo: "{{ garmin_source[0] }}"
+    dest: "{{ garmin_src }}"
+    version: "{{ garmin_source[1] }}"
+    force: false
+  delegate_to: "{{ dep.host }}"
+
+- name: Read the commit the garmin-mcp source is on
+  ansible.builtin.command: git -C {{ garmin_src }} rev-parse HEAD
+  register: garmin_head
+  changed_when: false
+  failed_when: false
+  delegate_to: "{{ dep.host }}"
+
+- name: Check the garmin-mcp source is on the pinned commit
+  ansible.builtin.assert:
+    that: garmin_head.stdout == garmin_source[1]
+    fail_msg: >-
+      {{ garmin_src }} is at {{ garmin_head.stdout | default('nothing', true) }},
+      SOURCE pins {{ garmin_source[1] }}. Nothing has been started.
+    success_msg: "{{ garmin_src }} at {{ garmin_source[1][:7] }}"

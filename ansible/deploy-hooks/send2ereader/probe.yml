@@ -15,7 +15,7 @@
     probe_retries: 20
     probe_delay: 15
 
-# Failed_when: false AND ignore_errors: true, as in server-deploy-garmin-mcp.yml: no answer at
+# Failed_when: false AND ignore_errors: true, as in deploy-hooks/garmin-mcp/probe.yml: no answer at
 # all fails `uri` whatever failed_when says, and exhausted retries mark the task failed. The
 # assert after each says what the answer means.
 - name: Wait for the upload page through the tunnel
