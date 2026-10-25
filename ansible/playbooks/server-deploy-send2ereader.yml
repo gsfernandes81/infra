@@ -16,15 +16,17 @@
 #   1. server-create-deployment-tunnel.yml, imported unchanged: it pulls the host's checkout
 #      to this control node's commit, makes or finds the tunnel, points the bookit record at
 #      it, and writes TUNNEL_ID and TUNNEL_CREDENTIALS into .env.
-#   2. The play below moves the source checkout to the sha in SOURCE, builds, starts both
-#      services, and probes bookit from this control node.
+#   2. The play below proves `one` can fetch the pinned image from ghcr, pulls it if it is
+#      not there yet, starts both services, checks the app runs that image, and probes
+#      bookit from this control node.
 # The first run after the sidecar commit is the cutover: bookit is down from the record's
-# repoint in step 1 until the start in step 2, which is the build plus a few seconds.
+# repoint in step 1 until the start in step 2, which is the pull plus a few seconds.
 #
-# The build runs on every deploy. Docker's layer cache makes an unchanged source a no-op
-# that yields the same image, so Compose leaves the running container alone; a new sha in
-# SOURCE rebuilds and recreates. Compose's own `policy` would reuse a stale image after a
-# bump, because the image has no tag of its own.
+# NOTHING IS BUILT ON `one`. The app is the fork's CI-built image, a literal in
+# compose.yaml with its tag (the fork commit) and digest. `pull: missing` is right for a
+# digest: an unchanged one is already there and Compose leaves the container alone, and a
+# new one is missing, so it is pulled and the container recreated. The ghcr probe runs in
+# --check too, because a real run has already moved the bookit record when it gets here.
 #
 # Re-running is the intended way to finish after a partial failure.
 
@@ -33,7 +35,7 @@
   vars:
     deployment: send2ereader
 
-- name: Build and start send2ereader, then probe it
+- name: Pull and start send2ereader, then probe it
   hosts: deployment_target
   gather_facts: false
   become: false
@@ -42,20 +44,26 @@
     deployment: send2ereader
     s2e_dir: "{{ infra_checkout }}/deployments/send2ereader"
     s2e_url: "https://{{ deployment_hostname }}"
-    # SOURCE is the one copy of the fork's URL and the deployed sha, read on the control node.
-    s2e_source: >-
-      {{ (lookup('file', control_checkout ~ '/deployments/send2ereader/SOURCE').splitlines()
-          | reject('match', '^\s*(#|$)') | first).split() }}
-    # The .env keys compose.yaml requires: SRC_ROOT has been there since the deployment was
-    # adopted; the TUNNEL_ pair is the tunnel play's.
-    s2e_env_keys: [SRC_ROOT, TUNNEL_ID, TUNNEL_CREDENTIALS]
+    # The app's image, read from compose.yaml on the control node: the one copy of it.
+    # ghcr.io/<repo>:<tag>@sha256:<digest>, and the probe below needs the parts. Matched
+    # whole, with no capture group: a group reference ('\\1') in a folded block reaches
+    # regex_search in a form it cannot parse and fails with "'NoneType' object has no
+    # attribute 'group'" (found by running it, 2026-10-25). The sidecar's image is not on
+    # ghcr, so this matches the app's alone.
+    s2e_image: >-
+      {{ lookup('file', control_checkout ~ '/deployments/send2ereader/compose.yaml')
+         | regex_search('ghcr\.io/\S+@sha256:[0-9a-f]{64}') }}
+    s2e_repo: "{{ s2e_image.split('@')[0].split(':')[0] | regex_replace('^ghcr\\.io/', '') }}"
+    s2e_tag: "{{ s2e_image.split('@')[0].split(':')[1] }}"
+    s2e_digest: "{{ s2e_image.split('@')[1] }}"
+    # The .env keys compose.yaml requires, both written by the tunnel play.
+    s2e_env_keys: [TUNNEL_ID, TUNNEL_CREDENTIALS]
     s2e_env_lines: >-
       {{ (s2e_env_raw.content | default('') | b64decode).splitlines()
          | reject('match', '^\s*(#|$)') | select('search', '=') | list }}
     s2e_env: >-
       {{ dict(s2e_env_lines | map('regex_replace', '=.*$', '')
               | zip(s2e_env_lines | map('regex_replace', '^[^=]*=', ''))) }}
-    s2e_src: "{{ s2e_env.SRC_ROOT | default('') }}/send2ereader"
     # A new record can take a minute or two to answer; each probe waits up to five.
     probe_retries: 20
     probe_delay: 15
@@ -76,74 +84,57 @@
       ansible.builtin.assert:
         that: s2e_env_keys | difference(s2e_env.keys() | list) | length == 0
         fail_msg: >-
-          {{ s2e_dir }}/.env lacks {{ s2e_env_keys | difference(s2e_env.keys() | list) }}.
-          SRC_ROOT is the directory holding the send2ereader checkout (e.g. /home/gavin/src);
-          the TUNNEL_ pair is written by the tunnel play above. Nothing has been started.
+          {{ s2e_dir }}/.env lacks {{ s2e_env_keys | difference(s2e_env.keys() | list) }},
+          which the tunnel play above writes. Nothing has been started.
         success_msg: "{{ s2e_env_keys | length }} keys present"
       when: not ansible_check_mode
 
-    - name: "--check only: check .env names SRC_ROOT"
-      # The dry run proves what a real run needs that the tunnel play does not write, so a
-      # missing SRC_ROOT shows here, before a real run has moved the bookit record.
-      ansible.builtin.assert:
-        that: (s2e_env.SRC_ROOT | default('')) is match('^/')
-        fail_msg: >-
-          {{ s2e_dir }}/.env has no SRC_ROOT (an absolute path, the directory holding the
-          send2ereader checkout). A real run would move the bookit record and then stop here.
-        success_msg: "SRC_ROOT={{ s2e_env.SRC_ROOT | default('') }}"
-      when: ansible_check_mode
-
-    # ── 2  the source, at the pinned sha ────────────────────────────────────
-    - name: Move the {{ deployment }} source to commit {{ s2e_source[1][:7] }}
-      # force: false refuses a checkout with local edits; a clean one is moved to the pinned
-      # sha, so a reviewed bump in SOURCE needs no step by hand.
-      ansible.builtin.git:
-        repo: "{{ s2e_source[0] }}"
-        dest: "{{ s2e_src }}"
-        version: "{{ s2e_source[1] }}"
-        force: false
-      when: not ansible_check_mode
-
-    - name: Read the commit the {{ deployment }} source is on
-      ansible.builtin.command: git -C {{ s2e_src }} rev-parse HEAD
-      register: s2e_head
-      changed_when: false
+    # ── 2  the image, as `one` will fetch it ────────────────────────────────
+    # Anonymous, as `one`'s docker pulls it: no credential is kept on `one`, so the package
+    # must be public. Calibrated 2026-10-25 against f7fc0d2's image: token, then 200.
+    - name: Read an anonymous ghcr pull token on {{ inventory_hostname }}
+      ansible.builtin.uri:
+        url: "https://ghcr.io/token?scope=repository:{{ s2e_repo }}:pull"
+        return_content: true
+      register: s2e_ghcr_token
       check_mode: false
       failed_when: false
 
-    - name: Check the {{ deployment }} source is on the pinned commit
-      ansible.builtin.assert:
-        that: s2e_head.stdout == s2e_source[1]
-        fail_msg: >-
-          {{ s2e_src }} is at {{ s2e_head.stdout | default('nothing', true) }}, SOURCE pins
-          {{ s2e_source[1] }}. Nothing has been started.
-        success_msg: "{{ s2e_src }} at {{ s2e_source[1][:7] }}"
-      when: not ansible_check_mode
+    - name: Probe the pinned image on ghcr from {{ inventory_hostname }}
+      ansible.builtin.uri:
+        url: "https://ghcr.io/v2/{{ s2e_repo }}/manifests/{{ s2e_digest }}"
+        method: HEAD
+        headers:
+          Authorization: "Bearer {{ s2e_ghcr_token.json.token | default('') }}"
+          Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json
+      register: s2e_ghcr
+      check_mode: false
+      failed_when: false
 
-    - name: "--check only: check the source checkout exists"
+    - name: Check ghcr serves {{ s2e_tag[:7] }} to {{ inventory_hostname }}
       ansible.builtin.assert:
-        that: s2e_head.rc == 0
+        that: s2e_ghcr.status | default(0) == 200
         fail_msg: >-
-          {{ s2e_src }} is not a git checkout on {{ inventory_hostname }}. A real run would
-          clone it from {{ s2e_source[0] }} after moving the bookit record, so clone it
-          first if the build there needs anything a fresh clone lacks.
-        success_msg: "{{ s2e_src }} is a checkout, at {{ s2e_head.stdout[:7] }}"
-      when: ansible_check_mode
+          ghcr answered {{ s2e_ghcr.status | default('nothing') }} for {{ s2e_repo }}@{{ s2e_digest[:19] }}
+          from {{ inventory_hostname }}. 401 or 403 means the package is not public; 404, that
+          the digest in compose.yaml is wrong or was deleted; nothing, that {{ inventory_hostname }}
+          cannot reach ghcr.io. Nothing has been started.
+        success_msg: "ghcr serves {{ s2e_repo }}:{{ s2e_tag[:7] }} to {{ inventory_hostname }}"
 
     - name: "--check only: print what a real run would do"
       ansible.builtin.debug:
         msg: >-
-          A real run moves {{ s2e_src }} (now at {{ s2e_head.stdout | default('?', true) | truncate(7, true, '') }})
-          to {{ s2e_source[1][:7] }}, builds, starts {{ deployment }} and its sidecar, and
-          probes {{ s2e_url }}. Nothing was built or started.
+          A real run pulls {{ s2e_repo }}:{{ s2e_tag[:7] }} if {{ inventory_hostname }} lacks
+          it, starts {{ deployment }} and its sidecar, and probes {{ s2e_url }}. Nothing was
+          pulled or started.
       changed_when: true
       when: ansible_check_mode
 
     # ── 3  up ───────────────────────────────────────────────────────────────
-    - name: Build and start {{ deployment }} and its sidecar
+    - name: Pull and start {{ deployment }} and its sidecar
       community.docker.docker_compose_v2:
         project_src: "{{ s2e_dir }}"
-        build: always
+        pull: missing
         state: present
       become: true
       when: not ansible_check_mode
@@ -199,7 +190,42 @@
         success_msg: "{{ s2e_url }}/ gives an e-reader the key page"
       when: not ansible_check_mode
 
-    # ── 5  the port is gone ─────────────────────────────────────────────────
+    # ── 5  the image it runs, and the port that is gone ─────────────────────
+    # Image IDs, not names: .Config.Image is whatever string the container was created
+    # with, and how Docker records a tag-plus-digest reference is not worth betting a
+    # false failure on. The ID the container runs against the ID the pinned reference
+    # resolves to answers the question directly, and a container left from the old build
+    # on `one` fails it.
+    - name: Read the image ID the {{ deployment }} container runs
+      ansible.builtin.command:
+        argv: [docker, inspect, --format, "{% raw %}{{.Image}}{% endraw %}", send2ereader]
+      register: s2e_running
+      changed_when: false
+      failed_when: false
+      become: true
+      when: not ansible_check_mode
+
+    - name: Read the image ID of the pinned {{ s2e_tag[:7] }}
+      ansible.builtin.command:
+        argv: [docker, image, inspect, --format, "{% raw %}{{.Id}}{% endraw %}", "{{ s2e_image }}"]
+      register: s2e_pinned
+      changed_when: false
+      failed_when: false
+      become: true
+      when: not ansible_check_mode
+
+    - name: Check {{ deployment }} runs the pinned image
+      ansible.builtin.assert:
+        that:
+          - s2e_running.rc == 0 and s2e_pinned.rc == 0
+          - s2e_running.stdout == s2e_pinned.stdout
+        fail_msg: >-
+          send2ereader runs {{ s2e_running.stdout | default('?', true) }}, the pinned
+          {{ s2e_tag[:7] }} is {{ s2e_pinned.stdout | default('not on ' ~ inventory_hostname, true) }}.
+          sudo docker compose up -d in {{ s2e_dir }} recreates it.
+        success_msg: "send2ereader runs {{ s2e_repo }}:{{ s2e_tag[:7] }}"
+      when: not ansible_check_mode
+
     - name: Read the {{ deployment }} container's published ports
       # docker inspect, not community.docker.docker_container_info: that module needs the
       # Python Docker SDK and requests on the target, which `one` does not have
@@ -227,7 +253,7 @@
     - name: Print what is running and what is left
       ansible.builtin.debug:
         msg:
-          - "{{ s2e_url }} served by the {{ deployment }} sidecar, source at {{ s2e_source[1][:7] }}"
+          - "{{ s2e_url }} served by the {{ deployment }} sidecar, image {{ s2e_tag[:7] }}"
           - ""
           - "Once, after the first deploy: install one's host tunnel configuration without"
           - "bookit (deployments/send2ereader/README.md, 'Once, after that first run')."

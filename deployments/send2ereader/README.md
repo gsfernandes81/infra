@@ -10,10 +10,9 @@ nothing listens on `one`. The reasoning is [`docs/decisions.md`](../../docs/deci
 
 | file | what it holds |
 |---|---|
-| `compose.yaml` | the app, built from the fork, and the sidecar |
+| `compose.yaml` | the app, the fork's CI-built image pinned by tag and digest, and the sidecar |
 | `cloudflared.yml` | the sidecar's routing: `bookit.gsrpi.uk` to the app |
 | `edge.yml` | no Access login, and the public name `bookit` |
-| `SOURCE` | the fork and the sha `one` builds from |
 
 ## Deploying it, from the control node
 
@@ -23,8 +22,8 @@ ansible-playbook playbooks/server-deploy-send2ereader.yml --check -K
 ansible-playbook playbooks/server-deploy-send2ereader.yml -K
 ```
 
-The dry run proves the API token, `one`'s checkout of this repo, `SRC_ROOT` in `.env` and
-the source checkout, and changes nothing. It should name the hostname `bookit.gsrpi.uk`
+The dry run proves the API token, `one`'s checkout of this repo, and that `one` can fetch
+the pinned image from ghcr, and changes nothing. It should name the hostname `bookit.gsrpi.uk`
 and access `NONE`. Never add `-l one`; the play's header says why.
 
 A real run does this, in order:
@@ -32,19 +31,20 @@ A real run does this, in order:
 1. pulls `one`'s checkout of this repo to the control node's commit;
 2. makes or finds the tunnel `send2ereader` and points the `bookit` DNS record at it;
 3. writes `TUNNEL_ID` and `TUNNEL_CREDENTIALS` into `.env` on `one`;
-4. moves `${SRC_ROOT}/send2ereader` on `one` to the sha in `SOURCE`;
-5. builds the app and starts both services;
+4. checks `one` can fetch the pinned image from ghcr, anonymously;
+5. pulls the image if `one` lacks it and starts both services;
 6. fetches `https://bookit.gsrpi.uk` from the control node, as a browser and as a Kobo,
-   and checks the app container publishes no port.
+   checks the app container runs the pinned image, and checks it publishes no port.
 
-The build runs every time. Docker's layer cache turns an unchanged source into the same
-image, so the running container is left alone; a new sha in `SOURCE` rebuilds it and
-recreates the container.
+Nothing is built on `one`. The image is the fork's, built by its CI
+(`.github/workflows/docker.yml` there) for arm64 and amd64, smoke-tested on native
+runners, and tagged with the fork commit it was built from. An unchanged digest is already
+on `one`, so the running container is left alone; a new one is pulled and the container
+recreated. The package is public, so `one` holds no credential for it.
 
 **The first run is the cutover.** Until then the container on `one` still publishes port
 3001 and `one`'s host tunnel serves `bookit`. Sending a book fails from step 2 until step
-5 ends: seconds with the build cache on `one` intact, many minutes if it was cleared,
-because the image compiles a PDF tool.
+5 ends: the image pull and a few seconds.
 
 If that first run stops after step 2 and you want `bookit` back before fixing it, point
 the record at `one`'s host tunnel again: in the Cloudflare dashboard, DNS, set the
@@ -82,11 +82,20 @@ names the play that writes it.
 
 ## A new version
 
-Put the new sha in `SOURCE`, commit and push, then run the play. It moves the checkout on
-`one`, rebuilds and recreates. It refuses a checkout with local edits rather than
-discarding them. It leaves that checkout on a detached HEAD at the sha, and sets its
-`origin` to the URL in `SOURCE`; other remotes are left alone. `bin/check-sources` on
-`one` reports whether the checkout matches `SOURCE`.
+Every push to the fork's `master` publishes `ghcr.io/gsfernandes81/send2ereader:<commit>`.
+To deploy one, put its tag **and** digest in `compose.yaml`'s `image:` line, commit and
+push, then run the play. The digest is the record of what runs, which is why there is no
+`SOURCE` here (`docs/decisions.md`). Read the digest without docker:
+
+```fish
+python3 -c 'import json,sys,urllib.request as u; s=sys.argv[1]; t=json.load(u.urlopen("https://ghcr.io/token?scope=repository:gsfernandes81/send2ereader:pull"))["token"]; r=u.Request("https://ghcr.io/v2/gsfernandes81/send2ereader/manifests/"+s, method="HEAD", headers={"Authorization":"Bearer "+t,"Accept":"application/vnd.oci.image.index.v1+json"}); print(u.urlopen(r).headers["Docker-Content-Digest"])' <the full fork commit>
+```
+
+**Once, after the first deploy from the image:** `one` still has the fork's checkout under
+the old `SRC_ROOT` (in `.env`, e.g. `~/src/send2ereader`), and the image built from it if
+an earlier deploy built one.
+Neither is used now. Measure the checkout, then remove both when you choose; the stale
+`SRC_ROOT` line in `.env` can go too.
 
 ## What not to do
 

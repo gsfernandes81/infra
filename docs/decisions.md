@@ -179,7 +179,8 @@ field that is not a sha, a third field — all still fail loudly. Absence of a p
 design here; a garbled `SOURCE` must never pass for one.
 
 **This does not generalise, and must not.** For `torrents`, `immich`, `ionic-traces`
-and `send2ereader` the original reason holds in full: they are built from checkouts, on
+and `send2ereader` (until 2026-10-25, when it moved to a CI image pinned by digest, which is
+a different shape again: see its section) the original reason holds in full: they are built from checkouts, on
 hosts that come back by themselves, and two of them are critical and remote. If a
 future stack wants the same treatment, it has to clear all three tests above, not cite
 this paragraph.
@@ -580,12 +581,27 @@ start: seconds with `one`'s build cache, minutes without it. A disposable servic
 that, and avoiding it would have meant a second hostname or a tunnel play split around the
 DNS write.
 
+⚠︎ **SUPERSEDED the same day by the paragraph after next: `one` builds nothing now.** The
+build paragraph is kept because it is why the dry run used to check `SRC_ROOT`.
+
 **The deploy play builds on every run.** The app image has no tag of its own, so Compose's
 `build: policy` would keep a stale image after a new sha in `SOURCE`. Docker's layer cache
 turns an unchanged source into the same image, so Compose leaves the running container
 alone; a new sha rebuilds and recreates it. Its dry run proves `SRC_ROOT` and the source
 checkout, the two things a real run needs that the tunnel play does not write, so their
 absence shows before the record moves (found in review).
+
+**Amended 2026-10-25, later: the app is the fork's CI-built image, and `one` only pulls it.**
+The owner had the fork's CI publish `ghcr.io/gsfernandes81/send2ereader:<full commit>` for
+arm64 and amd64, smoke-tested on native runners, so a deploy no longer waits out a build on a
+Pi 4. `compose.yaml` names it as a literal, tag and digest, per the repo invariant. **`SOURCE`
+is dropped**, as `calibre-web`'s was: the image's tag is the fork commit and its digest is
+the record, while a `<url> <sha>` `SOURCE` means *built on the host from a checkout* to
+`bin/check-sources`, which would report the missing checkout as drift. The play pulls with
+`pull: missing`, right for a digest: unchanged is already there, a new one is missing. Its
+dry run now proves what a real run needs that the tunnel play does not write — that `one`
+can fetch that digest from ghcr anonymously, so the package must stay public — and a real
+run checks the container's image ID equals the pinned reference's.
 
 `edge.yml` says `access: none`: an e-reader's browser is the client, `bookit` had no login
 before, and send2ereader's own four-character key, dropped 30 seconds after the reader

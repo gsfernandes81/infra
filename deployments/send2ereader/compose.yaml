@@ -3,9 +3,12 @@
 # the deployment's own tunnel. Nothing is published on the host. README.md beside this has
 # the setup and the cutover from `one`'s host tunnel.
 #
-# The app is built from the fork checked out at ${SRC_ROOT}/send2ereader on `one`, at the
-# sha in SOURCE. The build context is absolute so this file works through the
-# hosts/one/send2ereader symlink.
+# The app is the fork's CI-built image (gsfernandes81/send2ereader, .github/workflows/
+# docker.yml): arm64 and amd64, smoke-tested on native runners, tagged with the full fork
+# commit it was built from. It is a literal here, tag AND digest, so git records exactly
+# what runs; the digest is the record and there is no SOURCE (docs/decisions.md). A new
+# version is a new tag and digest here, a commit, and the deploy play. Nothing is built on
+# `one` any more.
 #
 # No `network_mode: host` here. Both services share the project's own network, which is
 # how the sidecar's ingress reaches `http://send2ereader:3001` with no port on the host.
@@ -13,9 +16,7 @@ name: send2ereader
 
 services:
   send2ereader:
-    build:
-      context: ${SRC_ROOT:?set SRC_ROOT in deployments/send2ereader/.env, e.g. /home/gavin/src}/send2ereader
-      dockerfile: ./Dockerfile
+    image: ghcr.io/gsfernandes81/send2ereader:f7fc0d243e0715670d8d1d2e399f6029cad60370@sha256:65c4e478fbf9a6a27606e44eeb9432a042eab877aa49f57a5bdc83cf5d861385
     container_name: send2ereader
     restart: unless-stopped
     # No `ports:`. Until the sidecar this published 3001 on the host only so that `one`'s

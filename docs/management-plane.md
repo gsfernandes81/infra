@@ -591,9 +591,16 @@ the download by Docker's `TARGETARCH` fixes the Kobo path. KindleGen was only ev
 for x86, so on `one` the Kindle conversion needs emulation or goes, and the fork could
 start that box unticked there.
 
-**Kepubify is fixed in the fork** (owner-reported, 2026-10-25); what is left is the test —
-one EPUB to a Kobo with Kepubify ticked, once the deployment is started on the build that
-carries the fix. KindleGen is unchanged and still has no arm build.
+**Kepubify is fixed in the fork** (owner-reported, 2026-10-25), and the pinned image
+(`f7fc0d2`, built on `96cee4a` "per-arch kepubify, no kindlegen off x86") carries it; the
+fork's CI smoke-tests each architecture. What is left is the test on the box — one EPUB to a
+Kobo with Kepubify ticked after the next deploy. The arm64 image leaves KindleGen out, so the
+Kindle conversion is unavailable on `one`.
+
+**Closed 2026-10-25 — done the same day:** `compose.yaml` pins
+`ghcr.io/gsfernandes81/send2ereader:f7fc0d2…@sha256:65c4e478…`, `SOURCE` is dropped, and the
+play pulls instead of building (decisions.md, the `send2ereader` amendment). Takes effect at
+the owner's next run of the play. The original note follows.
 
 **Filed 2026-10-25, no phase number: deploy send2ereader from a CI-built image, not a build
 on `one`.** The owner has asked for the fork's CI to publish images to ghcr. When the first
