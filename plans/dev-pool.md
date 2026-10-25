@@ -1,9 +1,10 @@
 # Plan: one memory pool for the dev containers, and a hub that manages every session
 
-**A proposal, 2026-10-25, from the owner's direction in session; nothing here is decided
-or built.** It belongs to Phase 5 ([`docs/management-plane.md`](../docs/management-plane.md),
-the phase table) and changes what that phase builds. When it is taken, the reasoning moves
-to [`docs/decisions.md`](../docs/decisions.md) and this file shrinks to what is left.
+**Proposed 2026-10-25, and its main choices decided the same day by the owner: one compose
+file in `infra`, cgroup v2, `claude-sessions` only in the hub** ([`docs/decisions.md`](../docs/decisions.md),
+*Dev containers: one compose file in `infra`, …*). **Nothing is built.** It belongs to Phase 5 ([`docs/management-plane.md`](../docs/management-plane.md),
+the phase table) and changes what that phase builds. This file holds the shape and what is
+left; the reasons are in decisions.md.
 
 ## Why
 
@@ -21,8 +22,9 @@ limits the owner is having to manage each container separately.
 
 ## The shape
 
-1. **One small container per repo, as today.** The children are unchanged in kind: same
-   base, same five seams, each repo's own secrets.
+1. **One small container per repo, all in one compose file in `infra`.** The children keep
+   their base, their seams, their own secrets and their own Dockerfiles in their repos; the
+   compose file builds each from an absolute checkout path in its `.env` (no `..`).
 
 2. **One memory limit for all of them: a parent cgroup.** Every dev container sets
    `cgroup_parent: /devpool`, and the limit is written once, on the pool. Per-container
@@ -38,22 +40,30 @@ limits the owner is having to manage each container separately.
      repo than the one that grew.
    - **Compose cannot set the pool's limit.** It is a tracked file in `hosts/zero/system/`,
      with an `infra-` header, run at boot before anything starts a dev container: create the
-     cgroup and write its limit. On cgroup v2 it also enables `+memory` in the pool's
-     `cgroup.subtree_control`. On MicroOS it becomes a `dev.slice` with `MemoryMax=`, which
-     rootless podman can use there.
+     cgroup and write its limit. **`zero` is on cgroup v2** (the owner, 2026-10-25, set up as
+     Alpine recommends; the file's first step confirms `cgroup2fs`), so the file writes
+     `memory.max` and `memory.swap.max` and enables `+memory +pids` in the pool's
+     `cgroup.subtree_control`. The test above was v1; **v2 is proved on `zero`** in step 1
+     below. On MicroOS it becomes a `dev.slice` with `MemoryMax=`, which rootless podman can
+     use there.
 
-3. **A hub container: `claude-sessions`, rewritten for one consumer.** The owner is the only
-   user, so `claude-sessions` becomes the tool that runs in its own small container and ssh-es
-   into every dev container on the box.
+3. **A hub container: `claude-sessions`, rewritten for one consumer, and run nowhere else.**
+   The owner is the only user, so `claude-sessions` becomes the tool that runs in its own small
+   container and manages every dev container over ssh — the menu, attaching, stopping **and
+   the offloader**, which keeps its rule (measured activity, ten quiet minutes, a keep-alive
+   holds a slot) and measures each container's slots remotely.
    - **What the owner gets:** one menu listing every session in every container; Enter
      attaches (`ssh -t <container>` into the slot); any session can be stopped from it.
    - **Built in, not adopted:** off-the-shelf managers (Agent Deck's ssh remotes, CCManager,
      claude-squad) drive tmux sessions they started, and the slots here are zmx.
-   - **It needs, in the claude-sessions repo:** a hub mode whose sources are the containers
-     on the dev network, a machine-readable `list` per container, and a `stop SLOT` (today
-     `close` refuses a running slot, and only the offloader stops one).
-   - **Already in place:** the dev containers run a forwarded command as given (the door), so
-     `ssh <container> claude-sessions list` works now.
+   - **The rewrite, in the claude-sessions repo, has to settle what a dev container keeps**
+     once the binary is gone from it: something the hub can read for its slots (zmx sessions)
+     and their activity (`/proc`, over ssh), a keep-alive a claude in the slot can still set,
+     and replacements for the two things the binary supplies through Claude Code's managed
+     settings today — the hooks that feed the registry, and the status line.
+   - **The door leaves the dev containers.** A login to one lands in a shell, or attaches the
+     slot it names; the menu is the hub's. A forwarded command already runs as given, which is
+     what the hub's ssh calls need.
    - **The hub holds one dedicated key, authorised in every dev container.** The owner's
      reasoning, accepted: the hub sits behind public-key auth and a Cloudflare Access login,
      and that reach is no wider than an ssh login on `zero` already gives (an attacker there
@@ -71,24 +81,20 @@ limits the owner is having to manage each container separately.
 
 ## Open, the owner's
 
-- **One compose file in `infra`, or each repo keeps its own** and joins the pool and the
-  network. The pool works either way. One file reverses *Claude dev containers stay in their
-  own app repos* (decisions.md) for every child.
 - **The pool's size and swap limit.** `zero` has 4 GB. Immich's machine learning peaks lower
   after v3.3.5, and ~2.3 GB was available on 2026-10-25 before that.
-- **`zero`'s cgroup version** (`stat -fc %T /sys/fs/cgroup`: `cgroup2fs` is v2), which
-  decides the pool file's exact lines.
-- **Whether offloading moves to the hub** or stays per container. Measuring a slot's activity
-  needs `/proc` in that container.
+- **`or3-dev`'s shared working tree.** Its `/workspace` is `zero`'s own clone, by or3's design
+  (management-plane.md, *The `or3-dev` caveat*); moving its definition into `infra` can keep
+  that bind mount, but it is or3's trade to confirm.
 
 ## Order, once taken
 
 1. The pool file on `zero`, proved by attempting to over-allocate inside the pool and
    requiring the kill to land there (CLAUDE.md: calibrate the check first).
-2. The hub mode, in the claude-sessions repo.
-3. The hub container and the sidecar, in `dev/`.
-4. Each child joins the pool and the network, and drops its published port, in its own repo
-   or the shared compose file, per the open choice above.
+2. The hub rewrite, in the claude-sessions repo.
+3. The one compose file in `infra`: the hub, the sidecar, the network, and `infra-dev` first.
+4. Each child moves in, joins the pool, and drops its published port; its repo keeps the
+   Dockerfile and loses its compose file.
 
 ## Done when
 

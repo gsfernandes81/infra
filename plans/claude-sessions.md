@@ -10,6 +10,10 @@ off* to *The offloader acts on measured activity alone*, and in `dev/README.md` 
 *claude-sessions*. The full plan, with its Phase 0 findings and the approved mockups, is
 in git history before 2026-10-25.
 
+**What comes next is [`dev-pool.md`](dev-pool.md)**: decided 2026-10-25, `claude-sessions` moves
+out of the dev containers into a hub that manages them all over ssh. The items below are about
+today's per-container layout and stay open until that is built.
+
 ## Open, on the boxes (the owner's)
 
 1. **Stage A's dry-run log.** `~/.local/share/claude-sessions-dry-run.log` in each dev
