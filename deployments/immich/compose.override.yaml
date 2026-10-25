@@ -15,8 +15,8 @@
 # Renovate proposes them as one group (renovate.json), and a release also means replacing
 # compose.yaml (SOURCE) — already v3.3.5's file, whose postgres and valkey lines are the
 # ones `zero` runs. The server migrates the database on its first start on a new version
-# and there is no migrating back, so a deploy is preceded by a dump off the array
-# (docs/recovery.md).
+# and there is no migrating back, so the redeploy play dumps it off the array first, after
+# you answer y (ansible/deploy-hooks/immich/prepare.yml, docs/recovery.md).
 #
 # NO `:?` GUARDS HERE, and that is tested, not forgotten. The data paths used to carry
 # `${UPLOAD_LOCATION:?…}` and `${DB_DATA_LOCATION:?…}` so an unset value stopped Compose

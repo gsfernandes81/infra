@@ -1,0 +1,181 @@
+---
+# immich's host-side preparation, included by playbooks/_deploy-compose-one.yml AFTER the
+# question is answered y and BEFORE `up`, so nothing here runs for a change you declined and
+# nothing here runs under --check.
+#
+# It takes a database dump OFF THE ARRAY. The server migrates the database on its first start
+# on a new version and there is no migrating back, so this dump is the way back. Immich's own
+# nightly dump lands in /media/immich-data/backups/, on the same array as the database, and
+# does not survive losing it. This one goes to /var/backups/immich, on the SD card.
+#
+# Every confirmed redeploy dumps, not only a version change: a few minutes and a few hundred
+# MB, against guessing from the plan which change can touch the database. The newest
+# three are kept, so a dump from before a migration is pushed out by that
+# many later redeploys; copy it elsewhere first if it has to outlive them.
+#
+# -e immich_dump=false skips it, for the one case it cannot run: a redeploy to bring back a
+# database that is not running. It says so in the run.
+
+- name: Note where the Immich dump goes
+  # Each its own fact, so -e overrides one (a local test stands in a fake host that way).
+  ansible.builtin.set_fact:
+    immich_dump_dir: /var/backups/immich
+    immich_dump_keep: 3
+    # Free space wanted before a dump starts. A dump of zero's database is a few hundred MB
+    # compressed; the rest is headroom for the SD card, which also holds /var/lib/docker.
+    immich_dump_min_free_mib: 2048
+    immich_dump_stamp: "{{ now(utc=true, fmt='%Y%m%dT%H%MZ') }}"
+
+- name: "If immich_dump=false: say no dump is taken"
+  ansible.builtin.debug:
+    msg: "-e immich_dump=false: NO database dump before this redeploy. The newest one in {{ immich_dump_dir }} on {{ dep.host }} is the way back."
+  changed_when: true
+  when: not (immich_dump | default(true) | bool)
+
+- name: Dump the database unless immich_dump=false
+  when: immich_dump | default(true) | bool
+  block:
+    - name: Read the state of the Immich containers
+      # All containers, filtered here: `ps` exits 0 whatever is missing, where `inspect` of a
+      # missing name fails.
+      ansible.builtin.command:
+        argv: [docker, ps, -a, --format, "{% raw %}{{.Names}} {{.State}} {{.Image}}{% endraw %}"]
+      register: immich_ps
+      changed_when: false
+      become: true
+      delegate_to: "{{ dep.host }}"
+
+    - name: Note the database state and running version
+      ansible.builtin.set_fact:
+        immich_db_state: >-
+          {{ (immich_ps.stdout_lines | select('match', '^immich_postgres ') | first | default('immich_postgres absent')).split()[1] }}
+        # The tag the dump was taken under, for its file name: the version a restore goes with.
+        immich_from: >-
+          {{ (immich_ps.stdout_lines | select('match', '^immich_server ') | first | default('')
+              | regex_search(':(v[0-9][^@ ]*)', '\1') | default(['unknown'], true) | first) }}
+
+    - name: Check immich_postgres is running
+      ansible.builtin.assert:
+        that: immich_db_state == 'running'
+        fail_msg: >-
+          immich_postgres on {{ dep.host }} is {{ immich_db_state }}, so no dump can be taken.
+          Start it (sudo docker compose start database, in {{ dep_dir }}) and run this again,
+          or, if the redeploy is what brings it back, add -e immich_dump=false.
+          Nothing has been started.
+        success_msg: "immich_postgres running, server at {{ immich_from }}"
+
+    - name: Create {{ immich_dump_dir }} on {{ dep.host }}
+      # 0700, made by root (become): a dump holds every user's password hash and API keys.
+      ansible.builtin.file:
+        path: "{{ immich_dump_dir }}"
+        state: directory
+        mode: "0700"
+      become: true
+      delegate_to: "{{ dep.host }}"
+
+    - name: Find unfinished dumps left by an earlier run
+      ansible.builtin.find:
+        paths: "{{ immich_dump_dir }}"
+        patterns: "*.partial"
+      register: immich_partials
+      become: true
+      delegate_to: "{{ dep.host }}"
+
+    - name: Delete the unfinished dumps found
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ immich_partials.files }}"
+      loop_control:
+        label: "{{ item.path }}"
+      become: true
+      delegate_to: "{{ dep.host }}"
+
+    - name: Read the free space in {{ immich_dump_dir }}
+      ansible.builtin.command:
+        argv: [df, -Pk, "{{ immich_dump_dir }}"]
+      register: immich_df
+      changed_when: false
+      become: true
+      delegate_to: "{{ dep.host }}"
+
+    - name: Check there is room for a dump
+      ansible.builtin.assert:
+        that: (immich_df.stdout_lines[-1].split()[3] | int) // 1024 >= immich_dump_min_free_mib | int
+        fail_msg: >-
+          {{ immich_dump_dir }} on {{ dep.host }} has {{ (immich_df.stdout_lines[-1].split()[3] | int) // 1024 }} MiB
+          free, under the {{ immich_dump_min_free_mib }} MiB wanted. Free some, or move older dumps
+          off it. Nothing has been started.
+        success_msg: "{{ (immich_df.stdout_lines[-1].split()[3] | int) // 1024 }} MiB free"
+
+    - name: Dump the Immich database to {{ immich_dump_dir }}
+      # pipefail is right HERE because both halves matter: a failed pg_dumpall with a working
+      # gzip still writes a valid, short file. The trailer check after is the real test.
+      # zero's /bin/sh is busybox ash, which takes it, as server-generate-fleet-inventory.yml
+      # already relies on.
+      # umask, so the file is 0600 from its first byte, not after a chmod.
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail; umask 077;
+          docker exec immich_postgres sh -c 'pg_dumpall --clean --if-exists -U "$POSTGRES_USER"'
+          | gzip > {{ immich_dump_dir }}/immich-{{ immich_dump_stamp }}-{{ immich_from }}.sql.gz.partial
+      become: true
+      delegate_to: "{{ dep.host }}"
+
+    - name: Read the end of the dump
+      # Reads only the last lines, which are SQL comments: no data reaches the register.
+      ansible.builtin.shell:
+        cmd: >-
+          gzip -cd {{ immich_dump_dir }}/immich-{{ immich_dump_stamp }}-{{ immich_from }}.sql.gz.partial
+          | tail -n 5
+      register: immich_dump_tail
+      changed_when: false
+      failed_when: false
+      become: true
+      delegate_to: "{{ dep.host }}"
+
+    - name: Check the dump is complete
+      ansible.builtin.assert:
+        that: immich_dump_tail.stdout is search('PostgreSQL database cluster dump complete')
+        fail_msg: >-
+          The dump in {{ immich_dump_dir }} on {{ dep.host }} does not end with pg_dumpall's
+          "dump complete" line, so it is cut short. It is left as a .partial, which the next run
+          deletes. Nothing has been started.
+        success_msg: "dump complete"
+
+    - name: Name the dump as finished
+      ansible.builtin.command:
+        argv:
+          - mv
+          - "{{ immich_dump_dir }}/immich-{{ immich_dump_stamp }}-{{ immich_from }}.sql.gz.partial"
+          - "{{ immich_dump_dir }}/immich-{{ immich_dump_stamp }}-{{ immich_from }}.sql.gz"
+      become: true
+      delegate_to: "{{ dep.host }}"
+
+    - name: Find the dumps in {{ immich_dump_dir }}
+      ansible.builtin.find:
+        paths: "{{ immich_dump_dir }}"
+        patterns: "immich-*.sql.gz"
+      register: immich_dumps
+      become: true
+      delegate_to: "{{ dep.host }}"
+
+    - name: Delete all but the newest {{ immich_dump_keep }}
+      # By name, which starts with the UTC time it was taken, not by mtime, which a copy or a
+      # restore from elsewhere can change.
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ (immich_dumps.files | sort(attribute='path', reverse=true))[(immich_dump_keep | int):] }}"
+      loop_control:
+        label: "{{ item.path }}"
+      become: true
+      delegate_to: "{{ dep.host }}"
+
+    - name: Print the dump this redeploy can go back to
+      ansible.builtin.debug:
+        msg:
+          - "dump    {{ dep.host }}:{{ immich_dump_dir }}/immich-{{ immich_dump_stamp }}-{{ immich_from }}.sql.gz
+            ({{ ((immich_dumps.files | selectattr('path', 'search', immich_dump_stamp) | map(attribute='size') | first | default(0)) / 1048576) | round(1) }} MiB)"
+          - "kept    {{ [immich_dumps.files | length, immich_dump_keep | int] | min }} in {{ immich_dump_dir }}; restoring is docs/recovery.md § Immich's database"
+      changed_when: true

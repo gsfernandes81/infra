@@ -61,7 +61,8 @@
 #                                                files the deployment needs, written only for
 #                                                a change you confirmed (calibre-web: the
 #                                                kepubify link Calibre-Web will accept;
-#                                                garmin-mcp: the source moved to SOURCE's sha)
+#                                                garmin-mcp: the source moved to SOURCE's sha;
+#                                                immich: a database dump off the array)
 #   ansible/deploy-hooks/<name>/probe.yml       after a redeploy, once every container is up:
 #                                                end-to-end checks (send2ereader: the page,
 #                                                the image it runs, no published port;

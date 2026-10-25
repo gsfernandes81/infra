@@ -1019,7 +1019,8 @@ exclusion as a second lock, and `fstab` keeps the mount, behind its guards.
 ## Immich to v3.3.5, with machine learning's v2 models
 
 **Decided 2026-10-25**, the owner's call, for memory on `zero`. Committed, **not yet
-deployed**: the redeploy play does that, after a database dump off the array, because the
+deployed**: the redeploy play does that, after a database dump off the array (its own hook,
+the next section), because the
 server migrates the database on its first v3.3.5 start and there is no way back but that
 dump. `compose.yaml` was already v3.3.5's release file, and its postgres and valkey lines are
 what `zero` runs, so the change is the two app images in the override and one variable.
@@ -1056,6 +1057,28 @@ setting saved from the UI — the code reads the file *instead of* the database,
 file omits falls back to Immich's default — and makes the settings page read-only. If it is
 ever wanted in git, the way is the API (`GET`, then `PUT /api/system-config` with only the
 concurrency changed, an admin key scoped to system config), which applies live.
+
+## Immich redeploys dump the database first, off the array
+
+**Decided 2026-10-25**, the owner's suggestion when the v3.3.5 deploy was handed over with a
+dump to paste first. The dump is now `ansible/deploy-hooks/immich/prepare.yml`, so it cannot
+be forgotten, and [`docs/recovery.md`](recovery.md) § *Immich's database* says where it goes.
+
+- **A prepare hook, not preflight.** Preflight runs before the question and under `--check`,
+  so it would dump on every plan and every "no". Prepare runs only after you answer y, before
+  `up`, which is the moment the old database is still the old one.
+- **Every confirmed redeploy, not only a version change.** It costs minutes and a few
+  hundred MB. Deciding from the plan which change can touch the database is a guess, and a
+  wrong guess is the one case the dump exists for.
+- **`/var/backups/immich` on the SD card, 0700, newest three kept.** Off the array is the
+  point: Immich's nightly dump is on the array it would be needed for. Three, because the SD
+  card also holds `/var/lib/docker`; the hook refuses to start under 2 GiB free.
+- **It refuses rather than guesses**: no dump if `immich_postgres` is not running, and a dump
+  whose last line is not pg_dumpall's "dump complete" stays a `.partial` and stops the run.
+  Both stop before `up`. `-e immich_dump=false` is for the one case a dump cannot be taken: a
+  redeploy that is itself what brings the database back.
+- **No standalone dump play.** The manual block in `recovery.md` covers the invasive work
+  that is not a redeploy; a play for it can be added if that comes up more than once.
 
 ## Dev containers: one compose file in `infra`, one memory pool, `claude-sessions` only in a hub
 

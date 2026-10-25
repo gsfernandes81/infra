@@ -69,9 +69,8 @@ netstat -tln | grep -E '2283|8384|22000'                        # all three
 ```
 
 On `zero`, recreating `immich_postgres` is fine, but losing or shadowing its mount is
-not: the database cluster is on `/media/immich-db`. Immich writes a nightly `pg_dump` to
-`/media/immich-data/backups/`, on the same array as the data, so it covers logical
-corruption and not the array's loss. Take a dump off the array before anything invasive.
+not: the database cluster is on `/media/immich-db`. Take a dump off the array before
+anything invasive ([Immich's database](#immichs-database)).
 
 **`two`:** nothing to bring back. Its one deployment, `destiny-director`, is stopped since
 2026-10-25 with its files kept ([README](../README.md)).
@@ -81,6 +80,38 @@ corruption and not the array's loss. Take a dump off the array before anything i
 grep for them would only ever fail. And 8384 and 22000 are Syncthing on host networking,
 on both boxes: they appear in `netstat` but not in `docker ps`'s ports. `one`'s Syncthing
 is part of the `torrents` deployment and syncs a different share from `zero`'s.
+
+## Immich's database
+
+Two dumps are made, and only one is off the array:
+
+- **Immich's own**, nightly, in `/media/immich-data/backups/`. It is on the same array as
+  the database, so it covers a bad migration or a deleted album, not the array's loss.
+- **The redeploy play's**, in `/var/backups/immich/` on `zero`'s SD card, readable by root
+  only. [`ansible/deploy-hooks/immich/prepare.yml`](../ansible/deploy-hooks/immich/prepare.yml)
+  takes one after you answer y to an Immich redeploy and before `up`, and keeps the newest
+  three. Each is named for the UTC time it was taken and the server version it was taken
+  under: `immich-20261025T2300Z-v3.0.1.sql.gz` goes with v3.0.1.
+
+Before anything invasive that is not a redeploy, such as array work or the move to MicroOS,
+take one by hand. In `ssh zero`:
+
+```fish
+sudo -v
+sudo mkdir -p -m 700 /var/backups/immich
+set f /var/backups/immich/immich-(date -u +%Y%m%dT%H%MZ)-manual.sql.gz
+sudo docker exec immich_postgres sh -c 'pg_dumpall --clean --if-exists -U "$POSTGRES_USER"' | gzip | sudo tee $f >/dev/null
+sudo sh -c "gzip -cd $f | tail -n 3"      # must say: dump complete
+```
+
+A manual dump counts towards the three the play keeps.
+
+**Restoring** is Immich's procedure
+([backup and restore](https://docs.immich.app/administration/backup-and-restore)), with
+one of these files as its input and the server version in the name. It starts from an
+empty database, which here means an empty `/media/immich-db`: move the old cluster aside
+on the same array and keep it until the restore is proved. It has not been rehearsed on
+this fleet.
 
 ## The dev containers on `zero`
 
