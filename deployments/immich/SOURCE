@@ -1,0 +1,19 @@
+# <upstream-url> [<deployed-sha>]
+# Records what is deployed. Never triggers a pull — see bin/check-sources.
+#
+# URL ONLY, because this is registry-deployed: nothing is built on `zero`, the images are
+# Immich's own. No sha is meaningful, so the pin lives elsewhere. Read these two together.
+#
+# compose.yaml is Immich's release compose file with this repo's changes on top: `:?` on
+# the two data paths, memory and cpu limits on the server and machine-learning services,
+# and a trimmed valkey healthcheck. It is NOT Immich's file unmodified, so it cannot be
+# replaced by a fresh download. Upstream's current file is
+#     https://github.com/immich-app/immich/releases/latest/download/docker-compose.yml
+# and the one for the version running is the same URL with `download/<tag>/` for `latest/`.
+#
+# The postgres and valkey images follow that release file, not the newest tag on a
+# registry: the postgres tag names its Postgres major version and the vector extension
+# versions, so a newer tag can be a dump-and-restore upgrade (Dependabot proposed 14 to 16
+# on its first run). When taking a release, diff its file against compose.yaml for those
+# two `image:` lines.
+https://github.com/immich-app/immich.git
