@@ -1104,7 +1104,7 @@ cannot plan any image the host lacks. Every bump would have failed the same way.
 - **One image at a time, detached.** The first real pull, Immich's two images at once, put
   `zero`'s load at 11.2 and dropped the run's ssh session. `COMPOSE_PARALLEL_LIMIT=1` and
   `async` answer that from the play; the daemon's own download limit is filed in
-  [`management-plane.md`](management-plane.md), since it costs a dockerd restart.
+  [`management-plane.md`](management-plane.md), as a host file rather than a play setting.
 
 ## Dev containers: one compose file in `infra`, one memory pool, `claude-sessions` only in a hub
 

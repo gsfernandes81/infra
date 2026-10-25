@@ -551,9 +551,11 @@ pull, two images at once, put `zero`'s load at 11.2 and dropped the redeploy pla
 session. `/var/lib/docker` is on the SD card, beside every container's root filesystem. The
 play now pulls one image at a time and detached
 ([`_deploy-compose-one.yml`](../ansible/playbooks/_deploy-compose-one.yml)). The daemon's own
-side is open: `max-concurrent-downloads` in `/etc/docker/daemon.json` (default 3 layers at
-once) would lower it further, but takes a dockerd restart, which restarts every container on
-`zero`. Worth doing with the MicroOS move, or with `/var/lib/docker` moving off the SD card.
+side is open: `max-concurrent-downloads` in `/etc/docker/daemon.json` (default 3 layers of
+one image at once) would lower it further. dockerd reloads that setting on SIGHUP (moby
+`daemon/reload.go`), so it touches no container and can be done any time, as a new tracked
+`hosts/zero/system/daemon.json`. Moving `/var/lib/docker` off the SD card is the larger fix,
+and belongs with the MicroOS move.
 
 **Filed 2026-10-24, no phase number — nothing alerts when `garmin-mcp`'s Garmin login lapses.**
 The cached Garmin session lasts about six months. When it ends, the tools fail while `/healthz`

@@ -134,12 +134,16 @@
       # pulls one image at a time (cmd/compose/compose.go, resolveMaxConcurrency). async runs
       # the pull detached on the host and polls it over short connections, so a dropped
       # session no longer cancels it: the pull finishes, and a re-run finds the images there.
+      # The budget is generous on purpose: the task returns when the pull ends, and a pull
+      # killed at the limit loses every layer it had not finished an image with. A re-run
+      # while a detached pull is still going starts a second one beside it; the daemon shares
+      # the layer transfers, so nothing downloads twice.
       community.docker.docker_compose_v2_pull:
         project_src: "{{ dep_dir }}"
         ignore_buildable: true
       environment:
         COMPOSE_PARALLEL_LIMIT: "1"
-      async: 3600
+      async: 14400
       poll: 15
       become: true
       delegate_to: "{{ dep.host }}"
