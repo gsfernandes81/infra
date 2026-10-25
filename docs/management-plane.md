@@ -512,9 +512,9 @@ ones that answer the question this document started from.
 | 3 | First deployment adopted: `send2ereader` on `one`, **with its connector in the deployment** | one deployment, non-critical box, `one`'s ingress | 2 | **The connector pattern is set, 2026-10-24** — by `calibre-web`, a new deployment, not by `send2ereader`: sidecar, its own locally-managed tunnel, `server-create-deployment-tunnel.yml` (decisions.md, *Sidecar, not baked-in*). What this phase still owes is `send2ereader` itself — its connector, deleting `3001`, `bookit` out of `one`'s ingress — and the Ansible adoption with `bin/compose`'s deletion. **`garmin-mcp` is the first deployment Ansible starts** (`server-deploy-garmin-mcp.yml`, committed 2026-10-24, `community.docker.docker_compose_v2`), so the adoption's mechanism exists; `bin/compose`'s deletion and `recovery.md`'s rewrite are still owed together |
 | 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two deployments | 3 | |
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | Phase 3 now tests the mechanism first, on a disposable deployment. **Owner's leaning, 2026-10-25: the sidecar model here too**, as Phase 3 settled it for deployments, in place of `infra-dev`'s connector started from its own entrypoint — likely, not yet decided |
-| 6 | `dd` off `two` | `two`, `one` | arm64 CI, upstream | |
+| 6 | ~~`dd` off `two`~~ | `two`, `one` | arm64 CI, upstream | **Dropped 2026-10-25**, the owner's call: moving `destiny-director` follows its own needs, not this plan — [gsfernandes81/infra#11](https://github.com/gsfernandes81/infra/issues/11), which may or may not end in a PR. The number is kept so the others do not shift |
 | 7 | **Rootless podman on `one`** — roadmap §2 | `one` | 3, MicroOS on `one` | **Deferred to MicroOS, 2026-10-25** — the owner's call, so `one` converts once, with memory limits, instead of on OpenRC without them and then again ([`decisions.md`](decisions.md)) |
-| 8 | `two` as the scheduled read-only control node | `two` | 6, 7 | Waits for MicroOS on `one` too, through 7 |
+| 8 | `two` as the scheduled read-only control node | `two` | 7; ~~6~~ | Waits for MicroOS on `one` too, through 7. ⚠︎ **Open since 6 was dropped:** § *The control plane* requires `two` to run no containers for this, and 6 was what met that — undecided whether Phase 8 now waits on #11, runs alongside the bot, or goes |
 
 **Filed 2026-10-24, no phase number — nothing reports a stale sidecar `cloudflared`.**
 A deployment's connector is pinned in its `compose.yaml` and is outside 2h's staggered
@@ -1172,9 +1172,9 @@ host is a later pass with its own review.
    move. "Login only, history stays put" is cheap and keeps transcripts on one box;
    "carry everything" is seamless and drags a growing pile around the fleet. This is a
    decision, not a detail.
-2. **Where does `destiny-director` land when it leaves `two`, and who builds its arm64
-   images?** Its CI builds `linux/arm/v6` today. `one` or `zero` both work; the image build
-   is an upstream change in that repo, not here.
+2. ~~**Where does `destiny-director` land when it leaves `two`, and who builds its arm64
+   images?**~~ Moved to [gsfernandes81/infra#11](https://github.com/gsfernandes81/infra/issues/11)
+   with Phase 6, 2026-10-25.
 3. **Does the auth server mind a changed source IP?** Untested. Client-side there is
    nothing to mind and a home IP changes anyway, so this is judged low risk — but it is
    assumed, not established, and the two-host half of the experiment would settle it.
