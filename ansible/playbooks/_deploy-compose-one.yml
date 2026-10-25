@@ -128,9 +128,19 @@
       # overrides every service's pull_policy (cmd/compose/pull.go). Without it a service that
       # sets none is refreshed, which for a pinned digest already present is a registry check
       # and no download. ignore_buildable leaves an image with a build: section to `up`.
+      #
+      # GENTLY, because Immich's v3.3.5 pull, server and machine learning at once, put zero's
+      # load at 11.2 and dropped this run's ssh session (2026-10-25). COMPOSE_PARALLEL_LIMIT=1
+      # pulls one image at a time (cmd/compose/compose.go, resolveMaxConcurrency). async runs
+      # the pull detached on the host and polls it over short connections, so a dropped
+      # session no longer cancels it: the pull finishes, and a re-run finds the images there.
       community.docker.docker_compose_v2_pull:
         project_src: "{{ dep_dir }}"
         ignore_buildable: true
+      environment:
+        COMPOSE_PARALLEL_LIMIT: "1"
+      async: 3600
+      poll: 15
       become: true
       delegate_to: "{{ dep.host }}"
       when: dep_missing | length > 0

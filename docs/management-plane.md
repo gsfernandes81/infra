@@ -546,6 +546,15 @@ redeploy play), each tag checked against the registry first, so Renovate can now
 bumps. Left unpinned: `ionic-traces`' `mysql:8`, stopped and switched off in
 `renovate.json`.
 
+**Filed 2026-10-25, no phase number — a large image pull starves `zero`.** Immich v3.3.5's
+pull, two images at once, put `zero`'s load at 11.2 and dropped the redeploy play's ssh
+session. `/var/lib/docker` is on the SD card, beside every container's root filesystem. The
+play now pulls one image at a time and detached
+([`_deploy-compose-one.yml`](../ansible/playbooks/_deploy-compose-one.yml)). The daemon's own
+side is open: `max-concurrent-downloads` in `/etc/docker/daemon.json` (default 3 layers at
+once) would lower it further, but takes a dockerd restart, which restarts every container on
+`zero`. Worth doing with the MicroOS move, or with `/var/lib/docker` moving off the SD card.
+
 **Filed 2026-10-24, no phase number — nothing alerts when `garmin-mcp`'s Garmin login lapses.**
 The cached Garmin session lasts about six months. When it ends, the tools fail while `/healthz`
 stays green, and the only signal is a failed tool call in claude.ai. **`/readyz` cannot answer
