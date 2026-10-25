@@ -226,7 +226,10 @@ on any of them.
   and relies on a browser-obtained JWT that expires — it broke `ssh zero` from the phone
   on 2026-08-23 with `websocket: bad handshake`. Refresh with
   `cloudflared access login https://ssh-zero.gsrpi.uk`. A service token would end the
-  recurrence, at the cost of a policy change per hostname.
+  recurrence, at the cost of a policy change per hostname. ⚠︎ **Checked 2026-10-25:** all
+  three fleet ssh hostnames answer an unauthenticated request with 200 and no Access
+  redirect, so the applications may be gone —
+  [gsfernandes81/infra#12](https://github.com/gsfernandes81/infra/issues/12).
 - **The three `ssh-zero-dev-*` hostnames** were never checked for Access, and their
   ingress rules are now gone from zero — so the question that remains is only whether
   their DNS records and any Access application still exist at Cloudflare. Folded into
