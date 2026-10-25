@@ -10,11 +10,12 @@ deployments*.
 
 ## Open
 
-1. **Run an apply for real.** The plan paths have run on `one` (no change) and on `zero` (a
-   recreate plan), owner-reported 2026-10-25. Not yet exercised: the question, `up`, the id
-   comparison, the health wait, and `send2ereader`'s `probe.yml`, which only runs after a
-   redeploy of it.
-2. **Delete `server-deploy-send2ereader.yml`** once step 1 has done a real deploy of it, and
+1. **Exercise `send2ereader`'s `probe.yml`.** The whole path has run for real, owner-reported
+   2026-10-25: a no-change plan on `one`, and on `zero` a recreate plan, the question, `up`,
+   the id comparison and the health wait (syncthing, recreated, up after about a minute).
+   What has not run is a hook-driven probe, which only fires after a redeploy of the
+   deployment that has one. It runs the next time `send2ereader`'s image changes.
+2. **Delete `server-deploy-send2ereader.yml`** once step 1 has passed, and
    point `deployments/send2ereader/README.md` and the root `README.md` at the generic play
    only.
 3. **Move `garmin-mcp` onto it**, the delicate one. Its play's parts that are not generic:
