@@ -577,6 +577,12 @@ refresh call extends a token without re-minting it; the play could mint with
 `duration: forever`, as `plans/fleet-ssh-access.md` does for the fleet's tokens. Found by
 the Fable review of that plan.
 
+**Closed 2026-10-25 — kepubify works on `one`, tested live.** From outside, through `bookit`:
+`/tools` reported `kepubify: true, kindlegen: false`; a generated EPUB sent with Kepubify ticked
+to a key held as a Kobo came back `converted with kepubify`, and the file the Kobo downloaded
+was `book.kepub.epub` with `koboSpan` markup, then was deleted. KindleGen is absent on arm64 by
+design, so a Kindle gets the EPUB as it is. The original note follows.
+
 **Filed 2026-10-25, no phase number: send2ereader's conversions probably cannot run on
 `one`.** The fork's Dockerfile, at the sha in `deployments/send2ereader/SOURCE`, downloads
 `kepubify-linux-64bit` and an i386 `kindlegen`, both x86 programs, and `one` is aarch64.
