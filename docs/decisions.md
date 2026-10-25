@@ -866,7 +866,9 @@ digest-pinned; `send2ereader`'s app image, `garmin-mcp`'s local build and Immich
 are ignored (the reasons are in the file). Floating tags are to be pinned to the digest
 each box runs, then tracked the same way; if Dependabot does not move a digest alone, a
 workflow for exactly those images is the fallback. Renovate is the fallback if it cannot
-parse our compose files.
+parse our compose files (it can). **A dependency name has no registry prefix** in
+`ignore:`; the first run proved it by proposing a major Postgres bump that the ignore was
+written to stop.
 
 ## The lesson worth keeping
 

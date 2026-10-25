@@ -535,9 +535,11 @@ ruled out is anything that updates on the box — an in-container update dies wi
 recreate, and a Watchtower-style puller would run an image git does not name. Covers the
 app images too, not only the sidecar; `destiny-director` follows a moving tag by design and
 stays out. `calibre-web` is the first such deployment and `garmin-mcp` the second.
-**Configured 2026-10-25, not yet seen to work:** Dependabot, via `.github/dependabot.yml`,
-for the pinned deployments. Its first run is the test of whether it parses our compose
-files. The floating tags (`gluetun`, `qbittorrent`, `syncthing`, `mysql`) are outside it
+**Configured 2026-10-25, first run seen:** Dependabot, via `.github/dependabot.yml`, for the
+pinned deployments. It parses our compose files, and it moves a digest under a fixed tag
+(the `valkey:9` PR), which is what pinning the floating tags relies on. Its ignore list
+named images with their registry, which Dependabot does not use, so it proposed a Postgres
+14 to 16 bump for Immich; the names are fixed and that PR closed. The floating tags (`gluetun`, `qbittorrent`, `syncthing`, `mysql`) are outside it
 until they are pinned to the digest each box is running.
 
 **Filed 2026-10-24, no phase number — nothing alerts when `garmin-mcp`'s Garmin login lapses.**

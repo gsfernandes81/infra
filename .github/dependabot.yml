@@ -25,9 +25,13 @@ updates:
     ignore:
       # Built by the fork's CI and tagged with a commit, so there is no version order for a
       # bot to follow. Deployed by editing compose.yaml by hand (its README, "A new version").
-      - dependency-name: ghcr.io/gsfernandes81/send2ereader
+      - dependency-name: gsfernandes81/send2ereader
       # Built on `one` from the garmin-mcp checkout, not pulled from a registry.
       - dependency-name: garmin-mcp-remote
       # Immich's images move together and an upgrade there is a deliberate act; its
       # postgres is tied to the vector extension versions in its tag.
-      - dependency-name: ghcr.io/immich-app/*
+      #
+      # Dependabot names a dependency without its registry (`immich-app/postgres`, not
+      # `ghcr.io/immich-app/postgres`), so these names carry none. The first run opened a
+      # Postgres 14 to 16 bump (PR 13) because the ignore was written with the prefix.
+      - dependency-name: immich-app/*
