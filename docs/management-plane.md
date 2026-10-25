@@ -534,7 +534,11 @@ deployment's `compose.yaml`, and the owner merges and deploys as with any bump. 
 ruled out is anything that updates on the box — an in-container update dies with the next
 recreate, and a Watchtower-style puller would run an image git does not name. Covers the
 app images too, not only the sidecar; `destiny-director` follows a moving tag by design and
-stays out. `calibre-web` is the first such deployment and `garmin-mcp` the second. Not built.
+stays out. `calibre-web` is the first such deployment and `garmin-mcp` the second.
+**Configured 2026-10-25, not yet seen to work:** Dependabot, via `.github/dependabot.yml`,
+for the pinned deployments. Its first run is the test of whether it parses our compose
+files. The floating tags (`gluetun`, `qbittorrent`, `syncthing`, `mysql`) are outside it
+until they are pinned to the digest each box is running.
 
 **Filed 2026-10-24, no phase number — nothing alerts when `garmin-mcp`'s Garmin login lapses.**
 The cached Garmin session lasts about six months. When it ends, the tools fail while `/healthz`

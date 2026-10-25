@@ -854,6 +854,20 @@ admitted tokens.
 **Not covered:** `KbdInteractiveAuthentication` is still on in `sshd-infra.conf`; turning
 it off is a change to sshd itself, for the two-phase procedure, and is not chosen.
 
+## Pinned images are bumped by a pull request, from Dependabot
+
+A stale sidecar `cloudflared` is invisible to the hosts' autoupdate, and the fix is a bot
+that proposes: Dependabot opens a PR bumping `tag@sha256:` in a deployment's
+`compose.yaml`, the owner merges, and deploys as with any bump. Dependabot and not a
+workflow because its config, `.github/dependabot.yml`, is not a workflow file, which the
+agent's `gh` token (no `workflow` scope) can push, and the repo is public, so it costs
+nothing and holds no secret. The bot is scoped to deployments whose images are already
+digest-pinned; `send2ereader`'s app image, `garmin-mcp`'s local build and Immich's images
+are ignored (the reasons are in the file). Floating tags are to be pinned to the digest
+each box runs, then tracked the same way; if Dependabot does not move a digest alone, a
+workflow for exactly those images is the fallback. Renovate is the fallback if it cannot
+parse our compose files.
+
 ## The lesson worth keeping
 
 
