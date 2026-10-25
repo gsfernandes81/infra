@@ -1002,6 +1002,17 @@ pauses until it has been run. `tools/list` answers without a login, because upst
 its tools at start-up and logs in on a background thread, so the allowlist is proved first,
 even on a first bring-up.
 
+## `ionic-traces` comes off `hosts/one/`; its deployment stays
+
+**Decided 2026-10-25**, the owner's call. `hosts/<host>/` says where a deployment runs, and
+`ionic-traces` has not run anywhere since it was stopped by decision in 2c. A link saying it
+runs on `one` was a statement the fleet contradicts, and the reason the redeploy play needed
+an exclusion for it. **Only the link goes.** `deployments/ionic-traces/` stays, because the
+deployment is not gone from `one`: its three exited containers, its compose project `ionic`
+and the data on `/media/ionic-mysql` are all still there ("Exited" is not "absent", CLAUDE.md
+§ Landmines), and a teardown or a repair needs the compose file. The redeploy play keeps its
+exclusion as a second lock, and `fstab` keeps the mount, behind its guards.
+
 ## The lesson worth keeping
 
 

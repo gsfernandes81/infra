@@ -41,7 +41,10 @@
 # login lapses (its README). Refused with `all`, for the same reason as assume_yes.
 #
 # WHAT IT WILL NOT TOUCH, and says so rather than silently skipping:
-#   ionic-traces              `up` would start it if it is stopped.
+#   ionic-traces              `up` would start it if it is stopped. Since 2026-10-25 it is
+#                             not linked from hosts/ at all, so the play never finds it; the
+#                             exclusion stays as a second lock, so re-adding the link to
+#                             place it again cannot also start it unasked.
 #   anything on a host outside the `containerized` inventory group.
 #
 # DEPLOYMENT-SPECIFIC CHECKS are hook files, found by name and run only if they exist:

@@ -398,7 +398,7 @@ deferrable. **Rule, restated: secrets never go in `command_args`.**
 | Immich (+ db, ml, redis) | `zero` | no | the bcache-fronted btrfs array |
 | Syncthing | `zero`, `one` | no | the data it syncs |
 | torrents (gluetun + qBittorrent) | `one` | no | `/dev/net/tun`, shared network namespace |
-| ionic-traces (**stopped** — see 2c) | `one` | **yes** | habit |
+| ionic-traces (**stopped** — see 2c) | none — off `hosts/one/` since 2026-10-25; exited containers and data still on `one` | **yes** | habit |
 | send2ereader | `one` | **yes** | habit |
 | destiny-director (test bot + pg) | `two` | **yes**, and must | armv6 images today — see OPEN |
 | `dd-dev` + `dd-mysql` | `zero` | **yes** | habit |

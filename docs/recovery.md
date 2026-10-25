@@ -50,7 +50,8 @@ until its first deploy from the control node has written its tunnel settings (it
 decision ([management-plane.md](management-plane.md), 2c): it has very few users, only its
 database is worth anything, and starting it would restart the crash loop that stopping it
 ended, on the one copy of that database. Its compose file, `SOURCE` and `.env` remain, so
-repairing it is for a person to decide, not a reboot.
+repairing it is for a person to decide, not a reboot. It is no longer linked from
+`hosts/one/` (2026-10-25), so nothing that walks `hosts/` brings it back either.
 
 On `one`, state is on `/media` bind mounts, except `garmin-mcp`'s Garmin session, which is
 the named volume `garmin-tokens` on the SD card. Recreating a container loses nothing;
