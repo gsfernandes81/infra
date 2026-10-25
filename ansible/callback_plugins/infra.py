@@ -189,6 +189,21 @@ class CallbackModule(CallbackBase):
 
     @staticmethod
     def _fmt(seconds, live=False):
+        """Times as shown: 412ms, 3.2s, 2m14s; while running, tenths: 3.4s, 2m04.3s. Rounded
+        ONCE at the precision shown, then split, so 59.97s reads 1m00.0s and never 60.0s."""
+        if live:
+            mins, tenths = divmod(round(seconds * 10), 600)
+            return f'{tenths / 10:.1f}s' if mins == 0 else f'{mins}m{tenths / 10:04.1f}s'
+        ms = round(seconds * 1000)
+        if ms < 1000:
+            return f'{ms}ms'
+        tenths = round(seconds * 10)
+        if tenths < 600:
+            return f'{tenths / 10:.1f}s'
+        mins, secs = divmod(round(seconds), 60)
+        return f'{mins}m{secs:02d}s'
+
+    def _fmt(seconds, live=False):
         if live:                 # tenths while a step runs: 3.4s, then 2m04.3s
             if seconds < 60:
                 return f'{seconds:.1f}s'
