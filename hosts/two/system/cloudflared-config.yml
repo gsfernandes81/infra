@@ -47,5 +47,6 @@ ingress:
   # was down. It was captured faithfully by phase 1 because the edge was still serving it,
   # which is what a faithful capture does: it copies what is there, not what is wanted.
   #
-  # Its CNAME is a separate object and still exists — see plans/cloudflare-dashboard-sweep.md.
+  # Its CNAME was a separate object, deleted by the owner on 2026-10-25 with the other three
+  # in 2i (plans/cloudflare-dashboard-sweep.md).
   - service: http_status:404
