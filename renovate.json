@@ -21,7 +21,10 @@
         "ghcr.io/immich-app/immich-server",
         "ghcr.io/immich-app/immich-machine-learning"
       ],
-      "groupName": "immich"
+      "groupName": "immich",
+      "prBodyNotes": [
+        "**This PR moves only the two image versions in `deployments/immich/compose.override.yaml`.** Taking a release also means replacing `deployments/immich/compose.yaml` with that release's own file and reading the diff, especially the postgres and valkey `image:` lines, which follow the release (`deployments/immich/SOURCE`). Read Immich's release notes for every version between the old pin and this one before merging."
+      ]
     },
     {
       "description": "deployments/immich/compose.yaml is Immich's release file, unmodified. Its postgres and valkey lines follow that release, not the newest registry tag: the postgres tag names a Postgres major version, so a newer tag can be a dump-and-restore upgrade (Dependabot proposed 14 to 16). deployments/immich/SOURCE says how a release is taken.",
