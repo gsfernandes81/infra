@@ -880,7 +880,7 @@ nothing else: no release notes in the PR, no way to hold a Postgres tag on its m
 version, no way to take two images as one version except per-directory groups. Renovate
 does all of those from `renovate.json`, which, like `dependabot.yml`, is not a workflow
 file and so can be pushed from here. The hosted Mend app is installed by the owner on the
-repo; until it is, nothing proposes bumps.
+repo; until it is, nothing proposes bumps. Installed 2026-10-25, owner-reported.
 
 **Neither bot sees Immich change the shape of its compose file** (a new service, a renamed
 variable), and Immich has done that before. So `deployments/immich/compose.yaml` is now

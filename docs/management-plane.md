@@ -535,7 +535,7 @@ ruled out is anything that updates on the box — an in-container update dies wi
 recreate, and a Watchtower-style puller would run an image git does not name. Covers the
 app images too, not only the sidecar; `destiny-director` follows a moving tag by design and
 stays out. `calibre-web` is the first such deployment and `garmin-mcp` the second.
-**Configured 2026-10-25, waiting on the Mend Renovate app (the owner's install):**
+**Configured 2026-10-25, and the Mend Renovate app installed by the owner the same day (owner-reported; no Renovate pull request had opened when this was written):**
 `renovate.json` for the pinned deployments. Dependabot ran first and was replaced; its
 first run proved a digest moves under a fixed tag and that ignore names carry no registry,
 and proposed a Postgres 14 to 16 bump for Immich that was closed ([`decisions.md`](decisions.md)).
