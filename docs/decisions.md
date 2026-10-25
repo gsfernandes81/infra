@@ -679,7 +679,18 @@ stock live-progress callback, `community.general.dense`, writes terminal escapes
 pasted transcripts. roots/ansible-output-prettify was the model for measuring the terminal and
 timing steps, but it prints nothing until a step ends, and it has no licence, so nothing was
 copied from it. The plugin is about 250 lines and uses only `CallbackBase`. Leaving `diy` also
-removed its two deprecation lines per run and the ansible-core 2.23 risk filed for it.
+removed its two deprecation lines per run and the ansible-core 2.23 risk filed for it. The
+plugin itself reads results through `TaskResult.result`/`.task`/`.host`, falling back to the
+underscored names older cores have, because those underscored names are deprecated for
+removal in 2.23.
+
+**Workers are forked, and the timer thread holds a lock.** A Fable review found, and a test
+reproduced, that a fork taken while the timer held it left the child with a lock nobody could
+release, so the child's first output hung the run. A forked child now drops the lock and the
+redraw logic (its output is proxied to the controller anyway). The same review restored what
+the first version dropped from failures (a command's stdout, a module failure's
+`module_stdout`, the exception), printed `debug: var:` values and loop diffs, and stopped
+redraws across a terminal resize, where counting lines back up would land on the wrong ones.
 
 **What makes redrawing safe.** The plugin redraws or erases only while its own title is the
 last thing on screen. It wraps `Display.display`, which every other line Ansible prints goes

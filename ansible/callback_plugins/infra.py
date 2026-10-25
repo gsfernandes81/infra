@@ -24,6 +24,16 @@
 # unreachable hosts, retries (`↻`), and the message of any debug task marked changed,
 # lists included, in full. A plain ok or a skip prints nothing (as display_ok_hosts and
 # display_skipped_hosts = False did). no_log results say only that they are hidden.
+#
+# KNOWN LIMIT: vars_prompt and --step read input() without going through Display, so on a
+# terminal the timer would redraw over their prompt. This repo's plays do not prompt by
+# policy (secrets come from files); a play that ever does should be run with
+# ANSIBLE_STDOUT_CALLBACK=default.
+#
+# Workers are FORKED. A fork taken while the timer thread holds this plugin's lock would
+# hand the child a lock nobody can release, and its first display call would hang the run
+# (review, 2026-10-24; reproduced). So a forked child drops the lock and the redraw logic
+# entirely: its output is proxied to the controller's display anyway.
 
 from __future__ import annotations
 
@@ -35,6 +45,8 @@ description:
   - The infra repo's own output; see the header of the file.
 """
 
+import os
+import pprint
 import shutil
 import sys
 import textwrap
@@ -67,17 +79,41 @@ class CallbackModule(CallbackBase):
         self._live = 0              # lines of a live, uncommitted title on screen (tty)
         self._tick = -1
         self._check = bool(context.CLIARGS.get('check'))
+        self._child = False
+        self._live_width = 0
+        os.register_at_fork(after_in_child=self._after_fork)
         self._watch_display()
         if self._tty:
             self._stop = threading.Event()
             threading.Thread(target=self._ticker, name='infra-timer', daemon=True).start()
 
     # ── output plumbing ───────────────────────────────────────────────────────
+    def _after_fork(self):
+        self._lock = threading.RLock()
+        self._child = True
+        self._live = 0
+
+    # TaskResult's _result/_host/_task are deprecated for removal in ansible-core 2.23;
+    # result/host/task replace them. Older cores have only the underscored names.
+    @staticmethod
+    def _res(result):
+        return result.result if hasattr(type(result), 'result') else result._result
+
+    @staticmethod
+    def _task_of(result):
+        return result.task if hasattr(type(result), 'task') else result._task
+
+    @staticmethod
+    def _host_of(result):
+        return result.host if hasattr(type(result), 'host') else result._host
+
     def _watch_display(self):
         """Wrap Display.display so foreign output first commits a live title."""
         original = self._display.display
 
         def display(*args, **kwargs):
+            if self._child:
+                return original(*args, **kwargs)
             with self._lock:
                 if not self._ours and self._live:
                     self._commit_live()
@@ -123,21 +159,34 @@ class CallbackModule(CallbackBase):
 
     def _draw_live(self, timer):
         """Draw (or redraw) the live title, cursor left at the end of its last line."""
+        if self._live and self._width() != self._live_width:
+            # The terminal was resized (a phone rotated): the terminal has re-flowed the
+            # title, so counting lines back up would land on the wrong ones. Leave it as
+            # it is, committed, and stop redrawing this step.
+            self._write('\n')
+            self._live = 0
+            self._shown = True
+            return
         up = ('\r' + '\x1b[1A' * (self._live - 1) + '\x1b[J') if self._live else ''
         lines = self._title_lines(timer)
         self._write(up + '\n'.join(stringc(l, 'cyan') for l in lines))
         self._live = len(lines)
+        self._live_width = self._width()
 
     def _commit_live(self):
         """Leave the live title on screen for good, with its time so far if over a second."""
         elapsed = time.time() - self._start
         self._draw_live(self._secs(elapsed) if elapsed >= 1 else '')
-        self._write('\n')
+        if self._live:
+            self._write('\n')
         self._live = 0
         self._shown = True
 
     def _erase_live(self):
-        self._write('\r' + '\x1b[1A' * (self._live - 1) + '\x1b[J')
+        if self._width() != self._live_width:
+            self._write('\n')              # resized: see _draw_live; keep rather than guess
+        else:
+            self._write('\r' + '\x1b[1A' * (self._live - 1) + '\x1b[J')
         self._live = 0
 
     def _show_title(self):
@@ -210,9 +259,15 @@ class CallbackModule(CallbackBase):
             for l in self._wrap(item, ' ' * DETAIL, ' ' * DETAIL, w):
                 self._say(l, color=color)
 
-    @staticmethod
-    def _host(result):
-        return result._host.get_name()
+    def _host(self, result):
+        return self._host_of(result).get_name()
+
+    def _warnings(self, res):
+        if res.get('warnings') or res.get('deprecations') or res.get('exception'):
+            with self._lock:
+                self._ran = True
+                self._show_title()
+        self._handle_warnings(res)
 
     def _message(self, res):
         if res.get('censored'):
@@ -220,8 +275,15 @@ class CallbackModule(CallbackBase):
         return res.get('msg', '')
 
     def _changed(self, result):
-        res = result._result
+        res = self._res(result)
         msg = self._message(res)
+        task = self._task_of(result)
+        if not res.get('censored') and task.action.split('.')[-1] == 'debug' and 'msg' not in res:
+            var = task.args.get('var')
+            if var is not None and var in res:     # debug: var=… — the value IS the point
+                msg = f'{var}: ' + pprint.pformat(res[var], width=max(self._width() - DETAIL, 20))
+        if isinstance(msg, dict):
+            msg = pprint.pformat(msg, width=max(self._width() - DETAIL, 20))
         if res.get('censored'):
             self._line('~', self._host(result), 'changed · hidden (no_log)', 'yellow')
         elif isinstance(msg, str) and msg and '\n' not in msg and len(msg) <= self._width() - DETAIL:
@@ -233,7 +295,7 @@ class CallbackModule(CallbackBase):
             self._line('~', self._host(result), 'changed', 'yellow')
 
     def _failed(self, result, ignored, label=None):
-        res = result._result
+        res = self._res(result)
         text = ('failed (ignored)' if ignored else 'failed') + ' · '
         if label is not None:
             text = f'{label} · ' + text
@@ -241,10 +303,18 @@ class CallbackModule(CallbackBase):
         color = 'yellow' if ignored else 'bright red'
         self._line('✘', self._host(result), text + str(msg).split('\n')[0], color)
         rest = str(msg).split('\n')[1:]
-        err = res.get('stderr') or res.get('module_stderr') or ''
-        tail = rest + (str(err).strip().split('\n')[-10:] if err else [])
+        tail = list(rest)
+        # The cause is not always in msg: a failed command's own output, and for a MODULE
+        # FAILURE the remote's stdout (a missing interpreter says so there), not stderr.
+        for key in ('stdout', 'module_stdout', 'stderr', 'module_stderr'):
+            val = str(res.get(key) or '').strip()
+            if val:
+                tail += val.split('\n')[-10:]
         if tail and not res.get('censored'):
             self._detail(tail, color)
+        if res.get('exception'):
+            with self._lock:
+                self._handle_exception(res)
 
     # ── callback events ───────────────────────────────────────────────────────
     def v2_playbook_on_play_start(self, play):
@@ -270,28 +340,32 @@ class CallbackModule(CallbackBase):
         self._say(' ▸ (no hosts matched)', color='dark gray')
 
     def v2_runner_on_ok(self, result):
-        self._handle_warnings(result._result)
-        if 'results' in result._result:      # a loop: its items printed on their own
+        res = self._res(result)
+        self._warnings(res)
+        if 'results' in res:                 # a loop: its items printed on their own
             with self._lock:
                 self._ran = True
             return
-        if result._result.get('changed'):
+        if res.get('changed'):
             self._changed(result)
         else:
             with self._lock:
                 self._ran = True
 
     def v2_runner_item_on_ok(self, result):
-        if result._result.get('changed'):
-            label = self._get_item_label(result._result)
+        res = self._res(result)
+        self._warnings(res)
+        if res.get('changed'):
+            label = self._get_item_label(res)
             self._line('~', self._host(result), str(label), 'yellow')
         else:
             with self._lock:
                 self._ran = True
 
     def v2_runner_on_failed(self, result, ignore_errors=False):
-        self._handle_warnings(result._result)
-        if 'results' in result._result:
+        res = self._res(result)
+        self._warnings({k: v for k, v in res.items() if k != 'exception'})
+        if 'results' in res:
             with self._lock:
                 self._ran = True
             if not ignore_errors:
@@ -300,29 +374,38 @@ class CallbackModule(CallbackBase):
         self._failed(result, ignore_errors)
 
     def v2_runner_item_on_failed(self, result):
-        self._failed(result, bool(result._task.ignore_errors), label=self._get_item_label(result._result))
+        res = self._res(result)
+        self._warnings({k: v for k, v in res.items() if k != 'exception'})
+        self._failed(result, bool(self._task_of(result).ignore_errors), label=self._get_item_label(res))
 
     def v2_runner_on_unreachable(self, result):
-        self._line('✘', self._host(result), 'unreachable · ' + str(result._result.get('msg', '')), 'bright red')
+        res = self._res(result)
+        self._warnings(res)
+        self._line('✘', self._host(result), 'unreachable · ' + str(res.get('msg', '')), 'bright red')
 
     def v2_runner_retry(self, result):
-        res = result._result
+        res = self._res(result)
         left = int(res.get('retries', 0)) - int(res.get('attempts', 0))
         self._line('↻', self._host(result), f'retrying · {left} left', 'dark gray')
 
     def v2_runner_on_skipped(self, result):
-        pass
+        self._warnings(self._res(result))
 
     def v2_runner_item_on_skipped(self, result):
-        pass
+        self._warnings(self._res(result))
 
     def v2_on_file_diff(self, result):
-        diff = result._result.get('diff')
-        if diff and self._display.verbosity >= 0 and context.CLIARGS.get('diff'):
-            with self._lock:
-                self._ran = True
-                self._show_title()
-                self._say(self._get_diff(diff))
+        res = self._res(result)
+        # A loop's diffs are per item, under `results` (as the default callback reads them).
+        items = res.get('results') if 'results' in res else [res]
+        for r in items or []:
+            if r.get('diff') and r.get('changed', False):
+                with self._lock:
+                    self._ran = True
+                    self._show_title()
+                    text = self._get_diff(r['diff'])
+                    if text.strip():
+                        self._say(text)
 
     def v2_playbook_on_stats(self, stats):
         with self._lock:
