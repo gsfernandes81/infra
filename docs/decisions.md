@@ -727,18 +727,22 @@ report.** The host list in the message comes from comparing each host's section 
 committed report with the new one, with the `Generated` line ignored. A report that differs
 only in its timestamp is not committed at all.
 
-**The guard runs before anything is read.** It fetches `origin`, then refuses unless this
-checkout is exactly `origin/main` (no commits ahead or behind) and the report has no
-uncommitted edits. A play that commits on its own must not stack a commit on top of work
-nobody has pushed, and it must not commit over a hand edit. It refuses rather than pulling:
-a pull from inside a playbook would move a checkout the owner may be working in.
+**The guard runs before anything is written**, right after facts are gathered. It fetches
+`origin`, then refuses unless this checkout is exactly `origin/main` (no commits ahead or
+behind) and the report has no edits beyond its `Generated` line. A play that commits on its
+own must not stack a commit on top of work nobody has pushed, and it must not commit over a
+hand edit. It refuses rather than pulling: a pull from inside a playbook would move a
+checkout the owner may be working in. The timestamp an unchanged run leaves behind is not
+an edit, so the next run is not refused over it.
 
-**What it will not do.** A partial run (`-l`) and `--check` never commit; the template
-already said a partial report must not go over a full one. The commit holds the report and
-nothing else (`git commit -- <path>`), after a scan for the CLAUDE.md secret names. The
-default is to ask before pushing, because `main` is what the hosts pull. `-e push=true` skips
-the question, for a future scheduled run. `-e push=false` commits and stops. `-e
-commit=false` only writes the file, as before.
+**What it will not do.** A partial run never commits, and neither does `--check`. Partial
+means a host left out by `-l`, or one that did not answer: a down host would otherwise be
+committed as a section saying UNREACHABLE, over its last real one. The template already said
+a partial report must not go over a full one. The commit holds the report and nothing else
+(`git commit -- <path>`), after a scan for the CLAUDE.md secret names. The default is to ask
+before pushing, because `main` is what the hosts pull. `-e push=true` skips the question,
+for a future scheduled run. `-e push=false` commits and stops. `-e commit=false` only writes
+the file, as before. A run that commits nothing says why.
 
 ## The lesson worth keeping
 

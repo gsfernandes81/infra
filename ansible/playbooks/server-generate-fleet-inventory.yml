@@ -32,10 +32,12 @@
     # docs/fleet-inventory.md on its own, with a short machine-written message, and asks
     # before pushing. -e commit=false writes the file only; -e push=true pushes without
     # asking (for a scheduled run); -e push=false commits and leaves the push to you.
-    # A partial run (--limit) and --check never commit or push: the file's header says a
-    # partial report must not be committed over a full one.
+    # A partial run and --check never commit or push: the file's header says a partial
+    # report must not be committed over a full one. Partial means a host left out by --limit
+    # OR one that did not answer — ansible_play_hosts drops a host once it is unreachable or
+    # fails, where ansible_play_hosts_all would still list it and commit its section erased.
     inventory_commit: "{{ commit | default(true) | bool }}"
-    inventory_full: "{{ (ansible_play_hosts_all | sort) == (groups['fleet'] | sort) }}"
+    inventory_full: "{{ (ansible_play_hosts | sort) == (groups['fleet'] | sort) }}"
     inventory_path: docs/fleet-inventory.md
     # The message (owner, 2026-10-25): when the report was generated, and which machines
     # changed, from the committed report against the new one with the Generated line ignored.
@@ -66,7 +68,7 @@
       print(f'fleet inventory: regenerated {when}, ' + (f"changed on {', '.join(changed)}" if changed else 'header changed only'))
 
   tasks:
-    # ── before reading anything: this checkout must be origin/main exactly ──────────
+    # ── before writing anything: this checkout must be origin/main exactly ──────────
     # Fetch, never pull: pulling would change the very playbook being run under you.
     # Behind means origin has commits you have not read; ahead means a push would publish
     # your own unpushed work along with the report. Either way, you decide, not this play.
@@ -92,8 +94,10 @@
       when: inventory_commit and inventory_full
 
     - name: "Full run: read uncommitted edits to the report"
+      # The same test as the one after writing, Generated line ignored, so the timestamp an
+      # unchanged run leaves behind does not refuse the next run. Staged edits count too.
       ansible.builtin.command:
-        cmd: git status --porcelain -- {{ inventory_path }}
+        cmd: git diff HEAD --numstat -I '^Generated ' -- {{ inventory_path }}
         chdir: "{{ control_checkout }}"
       register: inventory_dirty
       changed_when: false
@@ -113,7 +117,7 @@
           origin/main{{ ', and docs/fleet-inventory.md has uncommitted edits' if inventory_dirty.stdout | default('') else '' }}.
           Behind: `git pull` and read what came in. Ahead: push or set aside your commits.
           Edits: discard them (the file is generated). Or run with -e commit=false.
-          Nothing has been read or written.
+          Nothing has been written.
         quiet: true
       delegate_to: localhost
       run_once: true
@@ -245,6 +249,17 @@
         audited_hosts: "{{ ansible_play_hosts_all }}"
 
     # ── after writing: commit a real change, then ask before pushing ────────────────
+    - name: "If a host is missing: say nothing is committed"
+      ansible.builtin.debug:
+        msg: >-
+          Not committed: {{ groups['fleet'] | difference(ansible_play_hosts) | join(', ') }}
+          {{ 'was' if (groups['fleet'] | difference(ansible_play_hosts) | length) == 1 else 'were' }}
+          left out or did not answer, and a partial report is never committed.
+      changed_when: true
+      delegate_to: localhost
+      run_once: true
+      when: inventory_commit and not inventory_full and not ansible_check_mode
+
     - name: "Full run: check the report changed beyond its Generated line"
       ansible.builtin.command:
         cmd: git diff --numstat -I '^Generated ' -- {{ inventory_path }}
@@ -255,6 +270,14 @@
       delegate_to: localhost
       run_once: true
       when: inventory_commit and inventory_full and not ansible_check_mode
+
+    - name: "If nothing changed: say there is nothing to commit"
+      ansible.builtin.debug:
+        msg: Unchanged since its last commit apart from the Generated line, so nothing is committed.
+      changed_when: true
+      delegate_to: localhost
+      run_once: true
+      when: inventory_commit and inventory_full and not ansible_check_mode and inventory_changed.stdout | length == 0
 
     - name: "If it changed: check the report for secret names"
       # CLAUDE.md's name-based scan, on the one file being committed. The play extracts named
