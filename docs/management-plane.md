@@ -557,10 +557,13 @@ had dropped. Until `zero` is sorted, every system-files install and every deploy
 pulls the host is blocked fleet-wide, since the play checks all hosts before installing
 anywhere.
 
-**Filed 2026-10-25, no phase number — the fleet ssh hostnames may no longer be behind Access.**
-Unauthenticated, `ssh-zero`, `ssh-one` and `ssh-two` answer 200 with no login redirect, where
-`infra-dev` (service tokens only) answers 403. Unverified until the Zero Trust dashboard is
-read: [gsfernandes81/infra#12](https://github.com/gsfernandes81/infra/issues/12).
+**Filed 2026-10-25, no phase number: the fleet ssh hostnames are not behind Access.**
+Confirmed from outside the same day: with no credentials, `ssh-zero`, `ssh-one` and
+`ssh-two` accept the WebSocket upgrade `cloudflared access ssh` sends, and sshd answers
+with its banner, where `infra-dev` answers 403. sshd's keys-only settings are the only gate.
+The owner chose service tokens, one per client as the dev containers have, for the fix
+([gsfernandes81/infra#12](https://github.com/gsfernandes81/infra/issues/12); the details
+are in `docs/cloudflare.md` § *Open*).
 
 **Filed 2026-10-25, no phase number: send2ereader's conversions probably cannot run on
 `one`.** The fork's Dockerfile, at the sha in `deployments/send2ereader/SOURCE`, downloads
