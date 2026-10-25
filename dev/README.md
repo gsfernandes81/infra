@@ -594,7 +594,8 @@ zero's existing tunnel, or a shared ingress container — breaks exactly there.
 the same instinct that put `bin/compose` in this repo. Provisioning the way in to a
 managed box is management-plane work: in the plane it gets parsed JSON instead of a
 hand-rolled extractor, a real `--check`, `no_log` as a mechanism rather than as
-discipline, and an API token that becomes a Vault variable at Phase 4 with no rewrite.
+discipline, and an API token that could have become a Vault variable at Phase 4 with no rewrite
+(it will not: it stays one per machine, `docs/management-plane.md` Phase 4).
 
 ### It is additive, and that is load-bearing
 
