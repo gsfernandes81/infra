@@ -20,6 +20,18 @@ nothing listens on `one`. The reasoning is [`docs/decisions.md`](../../docs/deci
 
 ## Deploying it, from the control node
 
+**A redeploy after a change** (a new image digest, a compose edit) is the generic play, which
+plans, asks, and runs this deployment's checks from `ansible/deploy-hooks/send2ereader/`:
+
+```fish
+ansible-playbook playbooks/server-deploy-compose.yml -e deployment=send2ereader --check -K
+ansible-playbook playbooks/server-deploy-compose.yml -e deployment=send2ereader -K
+```
+
+It is new and has not yet been run against `one`; until it has, the older play below is the
+proven path, and is deleted once the new one has done a real deploy
+([`plans/deploy-play-unification.md`](../../plans/deploy-play-unification.md)).
+
 ```fish
 cd ~/infra; git pull --ff-only; cd ansible
 ansible-playbook playbooks/server-deploy-send2ereader.yml --check -K

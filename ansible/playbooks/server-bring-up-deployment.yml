@@ -1,0 +1,28 @@
+---
+# FIRST BRING-UP of a compose deployment that has its own tunnel: give it one, then deploy it.
+# Run from the control node:
+#
+#     cd ansible
+#     ansible-playbook playbooks/server-bring-up-deployment.yml -e deployment=calibre-web --check -K
+#     ansible-playbook playbooks/server-bring-up-deployment.yml -e deployment=calibre-web -K
+#
+# NO --limit / -l, for the reason in server-create-deployment-tunnel.yml. ONE deployment at a
+# time, never `all`: the tunnel play takes exactly one name.
+#
+# This is only the two plays in order, so each keeps its own header and its own checks:
+#   1. server-create-deployment-tunnel.yml  the tunnel, the DNS record, an Access login if
+#                                           edge.yml asks, and TUNNEL_ID and
+#                                           TUNNEL_CREDENTIALS in the host's .env
+#   2. server-deploy-compose.yml            the plan, the question, `up`, the hook checks
+# `bringup=true` tells the second that a --check cannot see the keys the first would write.
+#
+# A routine redeploy after a change is server-deploy-compose.yml alone and never touches
+# Cloudflare: the tunnel play PUTs Access policies unconditionally.
+
+- name: Give the deployment a tunnel
+  ansible.builtin.import_playbook: server-create-deployment-tunnel.yml
+
+- name: Deploy it
+  ansible.builtin.import_playbook: server-deploy-compose.yml
+  vars:
+    bringup: true

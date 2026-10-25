@@ -923,8 +923,14 @@ changes rarely. The way back is the `send2ereader` shape: CI publishes to ghcr, 
 
 `server-deploy-compose.yml -e deployment=<name>|all`. One play and not one per deployment,
 because immich, syncthing, torrents and calibre-web need nothing beyond `docker compose up`,
-and `garmin-mcp` and `send2ereader` already have plays for their tunnels, `.env` and probes,
-which this one refuses and names. The question is per **deployment**, never per container:
+and `garmin-mcp` and `send2ereader` had plays for their tunnels, `.env` and probes. What
+made those two different was small: a pre-check and a set of probes. So the play takes
+**hook files** per deployment (`ansible/deploy-hooks/<name>/preflight.yml`, `probe.yml`),
+read `${VAR:?}` names out of `compose.yaml` to check `.env` instead of keeping lists by hand,
+and leaves tunnel provisioning to `server-bring-up-deployment.yml`, because the tunnel play
+PUTs Access policies unconditionally and a routine image bump must not touch Cloudflare.
+`send2ereader` has moved onto it; `garmin-mcp`'s play is still its own, until it moves
+(`plans/deploy-play-unification.md`). The question is per **deployment**, never per container:
 gluetun and qBittorrent share a network namespace and must be recreated together, and
 Immich's four containers are one application, so a per-container question invites answering
 "no" to half a pair. `all` is the owner's addition: it goes through every deployment in turn,

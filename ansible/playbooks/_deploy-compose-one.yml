@@ -57,6 +57,54 @@
       past your review: `git pull` here, read the diff, re-run. Nothing was changed.
     success_msg: "{{ dep.host }} is on {{ deploy_ctl_head | truncate(12, true, '') }} and clean"
 
+# ── what must be true first ──────────────────────────────────────────────────
+- name: Note the variables compose.yaml requires
+  # Every ${VAR:?message}, which is how this repo says "absent should stop Compose". The
+  # pattern avoids backslashes on purpose: a folded YAML scalar passes them to Jinja as they
+  # are, and a lookbehind-free [$][{] reads the same everywhere.
+  ansible.builtin.set_fact:
+    dep_required: >-
+      {{ lookup('file', control_checkout ~ '/deployments/' ~ dep.name ~ '/compose.yaml')
+         | regex_findall('[$][{]([A-Za-z0-9_]+):[?]') | unique | list }}
+
+- name: Read the variable names in {{ dep.name }}'s .env
+  # Names only: sed prints the part before the `=`, so a value never reaches a register or a
+  # log. No .env at all is rc 2, and reads as no names.
+  ansible.builtin.command:
+    cmd: sed -nE 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=.*/\2/p' .env
+    chdir: "{{ dep_dir }}"
+  register: dep_env_names
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  delegate_to: "{{ dep.host }}"
+  when: dep_required | length > 0
+
+- name: Check {{ dep.name }}'s .env names what compose.yaml requires
+  # Skipped under --check for a first bring-up only: the keys are written by the tunnel play
+  # in a real run, which a dry run cannot see (CLAUDE.md § Privileged commands).
+  ansible.builtin.assert:
+    that: dep_required | difference(dep_env_names.stdout_lines | default([])) | length == 0
+    fail_msg: >-
+      {{ dep.host }}:{{ dep_dir }}/.env lacks
+      {{ dep_required | difference(dep_env_names.stdout_lines | default([])) }}, which compose.yaml
+      requires. TUNNEL_ID and TUNNEL_CREDENTIALS are written by server-create-deployment-tunnel.yml
+      (server-bring-up-deployment.yml runs it); the rest are the owner's to put there.
+      Nothing was changed.
+    success_msg: "{{ dep_required | length }} required variables present"
+  when:
+    - dep_required | length > 0
+    - not (ansible_check_mode and (bringup | default(false) | bool))
+
+- name: Stat {{ dep.name }}'s preflight hook
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../deploy-hooks/{{ dep.name }}/preflight.yml"
+  register: dep_preflight
+
+- name: "If it has a preflight hook: run it"
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/../deploy-hooks/{{ dep.name }}/preflight.yml"
+  when: dep_preflight.stat.exists
+
 # ── the plan: Compose's own dry run, nothing changed ─────────────────────────
 - name: Plan {{ dep.name }}, as a dry run
   # check_mode true on the task itself, so even a real run only ever asks here. The module
@@ -156,6 +204,18 @@
       the deployment is as the failed `up` left it.
     success_msg: "{{ dep.name }}: all containers up"
   when: dep_go | bool
+
+- name: Stat {{ dep.name }}'s probe hook
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../deploy-hooks/{{ dep.name }}/probe.yml"
+  register: dep_probe
+  when: dep_go | bool
+
+- name: "If going ahead and it has a probe hook: run it"
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/../deploy-hooks/{{ dep.name }}/probe.yml"
+  when:
+    - dep_go | bool
+    - dep_probe.stat.exists | default(false)
 
 - name: "If going ahead: compare the ids before and after"
   # Recreated means a new id. A container whose id did not change was left alone, which is

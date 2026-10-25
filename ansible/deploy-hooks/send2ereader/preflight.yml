@@ -1,0 +1,54 @@
+---
+# send2ereader's check before the plan, included by playbooks/_deploy-compose-one.yml (the
+# contract is in server-deploy-compose.yml's header). It proves `one` can fetch the pinned
+# image from ghcr, because nothing is built there: the app is the fork's CI-built image, a
+# literal in compose.yaml with its tag (the fork commit) and digest. Runs under --check too,
+# since it changes nothing and a plan for an image that cannot be fetched is not a plan.
+#
+# Anonymous, as `one`'s docker pulls it: no credential is kept on `one`, so the package
+# must be public. Calibrated 2026-10-25 against f7fc0d2's image: token, then 200.
+
+- name: Note send2ereader's pinned image
+  # Read from compose.yaml on the control node, the one copy of it. Matched whole, with no
+  # capture group: a group reference ('\\1') in a folded block reaches regex_search in a form
+  # it cannot parse and fails with "'NoneType' object has no attribute 'group'" (found by
+  # running it, 2026-10-25). The sidecar's image is not on ghcr, so this matches the app's.
+  ansible.builtin.set_fact:
+    s2e_image: >-
+      {{ lookup('file', control_checkout ~ '/deployments/send2ereader/compose.yaml')
+         | regex_search('ghcr\.io/\S+@sha256:[0-9a-f]{64}') }}
+
+- name: Note the image's repository, tag and digest
+  ansible.builtin.set_fact:
+    s2e_repo: "{{ s2e_image.split('@')[0].split(':')[0] | regex_replace('^ghcr\\.io/', '') }}"
+    s2e_tag: "{{ s2e_image.split('@')[0].split(':')[1] }}"
+    s2e_digest: "{{ s2e_image.split('@')[1] }}"
+
+- name: Read an anonymous ghcr pull token
+  ansible.builtin.uri:
+    url: "https://ghcr.io/token?scope=repository:{{ s2e_repo }}:pull"
+    return_content: true
+  register: s2e_ghcr_token
+  check_mode: false
+
+- name: Probe the pinned image on ghcr from {{ dep.host }}
+  ansible.builtin.uri:
+    url: "https://ghcr.io/v2/{{ s2e_repo }}/manifests/{{ s2e_digest }}"
+    method: HEAD
+    headers:
+      Authorization: "Bearer {{ s2e_ghcr_token.json.token | default('') }}"
+      Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json
+  register: s2e_ghcr
+  check_mode: false
+  failed_when: false
+  delegate_to: "{{ dep.host }}"
+
+- name: Check ghcr serves the pinned image to {{ dep.host }}
+  ansible.builtin.assert:
+    that: s2e_ghcr.status | default(0) == 200
+    fail_msg: >-
+      ghcr answered {{ s2e_ghcr.status | default('nothing') }} for {{ s2e_repo }}@{{ s2e_digest[:19] }}
+      from {{ dep.host }}. 401 or 403 means the package is not public; 404, that the digest in
+      compose.yaml is wrong or was deleted; nothing, that {{ dep.host }} cannot reach ghcr.io.
+      Nothing has been started.
+    success_msg: "ghcr serves {{ s2e_repo }}:{{ s2e_tag[:7] }} to {{ dep.host }}"

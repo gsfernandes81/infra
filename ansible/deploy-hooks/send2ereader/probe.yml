@@ -1,0 +1,116 @@
+---
+# send2ereader's checks after a redeploy, included by playbooks/_deploy-compose-one.yml once
+# every container is up. End to end from the control node, then the two facts the sidecar
+# exists to guarantee: the container runs the pinned image, and it publishes no port.
+# Needs s2e_image, s2e_tag and s2e_repo from preflight.yml, which ran in the same pass.
+
+- name: Note where send2ereader is served
+  # edge.yml's `subdomain:` replaces the deployment's name in its hostname (bookit), and the
+  # zone is appended here, never written beside it (CLAUDE.md § Repo invariants).
+  ansible.builtin.set_fact:
+    s2e_url: >-
+      https://{{ (lookup('file', control_checkout ~ '/deployments/send2ereader/edge.yml') | from_yaml).subdomain
+                 | default('send2ereader') }}.{{ dns_zone }}
+    # A new record can take a minute or two to answer; each probe waits up to five.
+    probe_retries: 20
+    probe_delay: 15
+
+# Failed_when: false AND ignore_errors: true, as in server-deploy-garmin-mcp.yml: no answer at
+# all fails `uri` whatever failed_when says, and exhausted retries mark the task failed. The
+# assert after each says what the answer means.
+- name: Wait for the upload page through the tunnel
+  ansible.builtin.uri:
+    url: "{{ s2e_url }}/"
+    return_content: true
+  register: s2e_p_upload
+  until: s2e_p_upload.status | default(0) == 200
+  retries: "{{ probe_retries }}"
+  delay: "{{ probe_delay }}"
+  failed_when: false
+  ignore_errors: true
+
+- name: Check the upload page is served
+  ansible.builtin.assert:
+    that:
+      - s2e_p_upload.status | default(0) == 200
+      - "'id=\"uploadform\"' in s2e_p_upload.content | default('')"
+    fail_msg: >-
+      {{ s2e_url }}/ answered {{ s2e_p_upload.status | default('nothing') }}. 530 or 1033
+      is the tunnel (sudo docker logs send2ereader-cloudflared on {{ dep.host }});
+      502 is the app (sudo docker compose ps in {{ dep_dir }}); a 200 without the upload
+      form is something other than send2ereader answering.
+    success_msg: "{{ s2e_url }}/ serves the upload page"
+
+- name: Probe the key page as a Kobo would
+  # The server picks the page by user agent: an e-reader gets the page that shows a key.
+  ansible.builtin.uri:
+    url: "{{ s2e_url }}/"
+    headers:
+      User-Agent: Mozilla/5.0 (Linux; U; Android 2.0; en-us;) AppleWebKit/538.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/538.1 (Kobo Touch 0377/4.20.14622)
+    return_content: true
+  register: s2e_p_key
+  failed_when: false
+
+- name: Check an e-reader gets the key page
+  ansible.builtin.assert:
+    that:
+      - s2e_p_key.status | default(0) == 200
+      - "'id=\"keyoutput\"' in s2e_p_key.content | default('')"
+    fail_msg: "{{ s2e_url }}/ as a Kobo answered {{ s2e_p_key.status | default('nothing') }} without the key page."
+    success_msg: "{{ s2e_url }}/ gives an e-reader the key page"
+
+# Image IDs, not names: .Config.Image is whatever string the container was created with, and
+# how Docker records a tag-plus-digest reference is not worth betting a false failure on. The
+# ID the container runs against the ID the pinned reference resolves to answers the question
+# directly, and a container left from the old build on `one` fails it.
+- name: Read the image ID the send2ereader container runs
+  ansible.builtin.command:
+    argv: [docker, inspect, --format, "{% raw %}{{.Image}}{% endraw %}", send2ereader]
+  register: s2e_running
+  changed_when: false
+  failed_when: false
+  become: true
+  delegate_to: "{{ dep.host }}"
+
+- name: Read the image ID of the pinned {{ s2e_tag[:7] }}
+  ansible.builtin.command:
+    argv: [docker, image, inspect, --format, "{% raw %}{{.Id}}{% endraw %}", "{{ s2e_image }}"]
+  register: s2e_pinned
+  changed_when: false
+  failed_when: false
+  become: true
+  delegate_to: "{{ dep.host }}"
+
+- name: Check send2ereader runs the pinned image
+  ansible.builtin.assert:
+    that:
+      - s2e_running.rc == 0 and s2e_pinned.rc == 0
+      - s2e_running.stdout == s2e_pinned.stdout
+    fail_msg: >-
+      send2ereader runs {{ s2e_running.stdout | default('?', true) }}, the pinned
+      {{ s2e_tag[:7] }} is {{ s2e_pinned.stdout | default('not on ' ~ dep.host, true) }}.
+      sudo docker compose up -d in {{ dep_dir }} recreates it.
+    success_msg: "send2ereader runs {{ s2e_repo }}:{{ s2e_tag[:7] }}"
+
+- name: Read the send2ereader container's published ports
+  # docker inspect, not community.docker.docker_container_info: that module needs the Python
+  # Docker SDK and requests on the target, which `one` does not have (ansible/README.md
+  # § "Where prefer the standard tool loses"). The {% raw %} guard keeps Jinja off Docker's
+  # own Go template.
+  ansible.builtin.command:
+    argv: [docker, inspect, --format, "{% raw %}{{json .HostConfig.PortBindings}}{% endraw %}", send2ereader]
+  register: s2e_ports
+  changed_when: false
+  become: true
+  delegate_to: "{{ dep.host }}"
+
+- name: Check send2ereader publishes nothing on the host
+  # The point of the sidecar. A port left published is a second way in that skips the
+  # tunnel, and the probes above would pass with it.
+  ansible.builtin.assert:
+    that: (s2e_ports.stdout | from_json | default({}, true)) == {}
+    fail_msg: >-
+      send2ereader still publishes {{ s2e_ports.stdout | default('?') }} on {{ dep.host }}.
+      compose.yaml has no ports:, so the running container is an older one:
+      sudo docker compose up -d in {{ dep_dir }}.
+    success_msg: "send2ereader publishes nothing on {{ dep.host }}"

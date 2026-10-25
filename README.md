@@ -12,8 +12,8 @@ cd ansible && ansible-playbook playbooks/server-deploy-send2ereader.yml -K   # o
 cd ansible && ansible-playbook playbooks/server-deploy-garmin-mcp.yml -K     # one
 ```
 
-Every other docker deployment is redeployed after a change by one play, which plans, asks
-once per deployment, then does it, and says what was recreated (`--check` stops at the plan):
+Every other docker deployment (and `send2ereader`, whose play below is kept until the new one has done a real run) is redeployed after a change by one play, which plans, asks
+once per deployment, then does it, runs the deployment's own checks, and says what was recreated (`--check` stops at the plan). A first bring-up with a tunnel is `server-bring-up-deployment.yml -e deployment=<name> -K`:
 
 ```sh
 cd ansible && ansible-playbook playbooks/server-deploy-compose.yml -e deployment=immich -K

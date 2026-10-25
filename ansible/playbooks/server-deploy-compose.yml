@@ -34,9 +34,28 @@
 # is refused with `all`, so the per-deployment question cannot be switched off for the lot.
 #
 # WHAT IT WILL NOT TOUCH, and says so rather than silently skipping:
-#   garmin-mcp, send2ereader  have their own plays (tunnel, .env, probes). Use those.
+#   garmin-mcp                has its own play, server-deploy-garmin-mcp.yml, until it is
+#                             moved here (plans/deploy-play-unification.md).
 #   ionic-traces              stopped by decision; `up` would start it.
 #   anything on `two`         podman, rootless, a different account; not a docker host.
+#
+# DEPLOYMENT-SPECIFIC CHECKS are hook files, found by name and run only if they exist:
+#   ansible/deploy-hooks/<name>/preflight.yml   before the plan: what must be true for the
+#                                                plan to mean anything (send2ereader: its
+#                                                image can be fetched from ghcr)
+#   ansible/deploy-hooks/<name>/probe.yml       after a redeploy, once every container is up:
+#                                                end-to-end checks (send2ereader: the page,
+#                                                the image it runs, no published port)
+# They are included from _deploy-compose-one.yml, so they see `dep` ({host, name}), `dep_dir`
+# and `dep_repo` (on that host) and run on the control node, delegating host work to
+# dep.host themselves. A hook that needs a variable defines it. They live under ansible/, not
+# deployments/, because they are how the fleet is managed and deployments/ is what a
+# deployment is. Required .env keys are not hooks: the play reads every `${VAR:?}` out of
+# compose.yaml and checks the host's .env names it, so the list cannot go stale.
+#
+# FIRST BRING-UP is server-bring-up-deployment.yml, which runs the tunnel play and then this
+# one, with `bringup=true` so the .env check waits for a real run (a --check cannot see keys
+# the tunnel play has yet to write). A routine redeploy never touches Cloudflare.
 #
 # NOT TESTED AGAINST A BOX when it was written: infra-dev has no route to the fleet. The
 # discovery half runs anywhere (`-e deployment=all --check` stops early without a route to
@@ -54,7 +73,6 @@
   vars:
     deploy_own_play:
       garmin-mcp: server-deploy-garmin-mcp.yml
-      send2ereader: server-deploy-send2ereader.yml
     deploy_excluded:
       ionic-traces: stopped by decision, and up would start it
   tasks:
