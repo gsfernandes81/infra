@@ -8,7 +8,6 @@
 # and NO sha; bin/check-sources understands that shape and reports the deployment
 # as `registry-deployed`. Read SOURCE for why the pin is absent by design.
 #
-# `bin/compose destiny-director …` REFUSES this deployment, on any host — see bin/compose.
 # It is driven by plain `podman-compose` in the deploy user's shell; hosts/two/setup has
 # the exact sequence. There used to be a restricted SSH dispatcher (`dd-ctl`, ~800 lines)
 # in this directory. It is gone: it existed to keep a deploy key from escaping into

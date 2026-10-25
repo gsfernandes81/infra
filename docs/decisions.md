@@ -29,7 +29,7 @@ entries keep the old word.
 | OpenCloud and k3s deleted, not migrated | Both confirmed unused. k3s was still *running* a live cluster (traefik, coredns, metrics-server) and holding ~880 MB of swap; removing it plus the dead `nextcloud` subvolume returned ~344 GiB to the array. |
 | **Docker and containerd removed from `two`; rootless podman instead** | Two daemons and their shims cost roughly 34 MB RSS on a board with ~475 MB total, and `two` ran no docker containers worth the price. Rootless podman is daemonless — nothing is resident when nothing is running — and it needs no `docker` group, which this repo already refuses to grant. It is also where `one` and `zero` are headed under MicroOS, so `two` is the cheap place to learn it. |
 | **No new user, no boot autostart on `two`** ⚠︎SUPERSEDED | Rootless podman's isolation comes from the user namespace, not from which unprivileged uid owns it, so a second service account buys nothing over `gavin`. **That reasoning was incomplete and the entry is re-stated below** — a dedicated account also buys a `/bin/sh` login shell and an empty home, which is the only thing that takes the ambient login shell out of the deploy key's TCB. Still not done; see "The forced command runs inside `gavin`'s login shell". And a test bot that resurrects itself at 03:00 and takes 200 MB of a 475 MB lifeboat is the wrong default: `restart: always` covers a crashed container, and a reboot deliberately leaves the box running nothing until someone deploys. |
-| **`bin/compose` stays docker-only and refuses `destiny-director` by name** ⚠︎SUPERSEDED | Making it runtime-aware would not have helped: that stack cannot be driven from `bin/compose` on *any* host, because its compose file interpolates two variables only `dd-ctl` supplies. And `docker compose` and `podman-compose` are not interchangeable — different project-directory semantics that agree here by coincidence. A wrapper hiding that will eventually hide a difference that matters. The conversion belongs to the MicroOS move, where there are stacks to test it against. |
+| **`bin/compose` stays docker-only and refuses `destiny-director` by name** ⚠︎SUPERSEDED by management-plane.md § *`bin/compose` goes, at Phase 3*; deleted 2026-10-25 | Making it runtime-aware would not have helped: that stack cannot be driven from `bin/compose` on *any* host, because its compose file interpolates two variables only `dd-ctl` supplies. And `docker compose` and `podman-compose` are not interchangeable — different project-directory semantics that agree here by coincidence. A wrapper hiding that will eventually hide a difference that matters. The conversion belongs to the MicroOS move, where there are stacks to test it against. |
 | **`dd-ctl` has exactly one copy, and it is not in `bin/`** ⚠︎SUPERSEDED | It drives one stack, so it lives beside that stack; `bin/` is for fleet-wide tools, and the README points at it from there. No symlink to it anywhere: a script reachable two ways is a script whose behaviour can depend on which way you came. It carries no `infra-` header either, because `_infra.py` only reads those under `hosts/<host>/system/` — a header no parser reads is decoration dressed as a checked invariant. |
 | **`dd-ctl`'s verbs take no arguments** ⚠︎SUPERSEDED | Deleting the arguments deletes every line of validation that existed to make them safe, and the bugs that could hide in it. It also means the keyholder cannot name the image. It does **not** mean the image is safe from everyone — see below. |
 | **The deployed image is a literal in `compose.yaml`, not a variable** | It is the one knob, and it is tracked. `SOURCE` already withholds the commit deliberately; putting the *branch* in a gitignored `.env` too would leave this repo unable to say anything at all about what `two` runs. It also removes a `${…:?}` failure path and any chance of `.env` and `compose.yaml` disagreeing. Editing it to test a branch shows up as local drift, which is the desired signal. |
@@ -573,10 +573,19 @@ what derivation buys, and it holds. The tunnel, the secrets directory and the DN
 comment keep the deployment's name. Without `subdomain:` nothing changes for the other
 deployments.
 
-The cost is a short outage at cutover. The play points the existing `bookit` record at the
-new tunnel before the sidecar is running, so `bookit` answers with a Cloudflare error
-until the owner starts the deployment. That is minutes on a disposable service, and
-avoiding it would have meant a second hostname or a play split around the DNS write.
+The cost is a short outage at cutover. The tunnel play points the existing `bookit` record
+at the new tunnel before the sidecar runs. `server-deploy-send2ereader.yml` imports that
+play and starts the deployment later in the same run, so the gap is the build and the
+start: seconds with `one`'s build cache, minutes without it. A disposable service can take
+that, and avoiding it would have meant a second hostname or a tunnel play split around the
+DNS write.
+
+**The deploy play builds on every run.** The app image has no tag of its own, so Compose's
+`build: policy` would keep a stale image after a new sha in `SOURCE`. Docker's layer cache
+turns an unchanged source into the same image, so Compose leaves the running container
+alone; a new sha rebuilds and recreates it. Its dry run proves `SRC_ROOT` and the source
+checkout, the two things a real run needs that the tunnel play does not write, so their
+absence shows before the record moves (found in review).
 
 `edge.yml` says `access: none`: an e-reader's browser is the client, `bookit` had no login
 before, and send2ereader's own four-character key, dropped 30 seconds after the reader

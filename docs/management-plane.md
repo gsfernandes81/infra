@@ -36,7 +36,7 @@ Three frictions follow from that one gap, and they are the three that prompted t
   real trade.
 - **Moving a deployment between hosts** is: relink `hosts/<host>/`, recreate `.env` by
   hand on the new box, edit two prose port lines, edit `recovery.md`, and — if the target
-  is `two` — discover that `bin/compose` refuses. Nothing checks any of it.
+  is `two` — discover that it runs podman, not docker. Nothing checks any of it.
 - **Bring-up from nothing** exists as a numbered manual for `two` only.
   [`host-setup.md`](host-setup.md) is explicitly topic-organised, not order-organised, and
   names no per-deployment prerequisites — secrets directories, deploy keys, tunnels, or
@@ -64,9 +64,10 @@ naming first. Nothing below is weakened by this document.
   session.** Ansible does not change this: playbooks are run by a person, from a control
   node, in their own terminal.
 - ~~**`bin/compose` stays docker-only and stays refusing `destiny-director` by name.**~~
-  **Reversed** — see *`bin/compose` goes, at Phase 3* below. Struck rather than deleted,
-  because this list is what the document promises it is not disturbing, and quietly
-  dropping a line from it would make the promise unfalsifiable.
+  **Reversed, and `bin/compose` deleted 2026-10-25** — see *`bin/compose` goes, at Phase
+  3* below. Struck rather than deleted, because this list is what the document promises it
+  is not disturbing, and quietly dropping a line from it would make the promise
+  unfalsifiable.
 
 ## The control plane — DECIDED
 
@@ -138,9 +139,10 @@ re-derived; argue with the reasons, not from scratch.
   destiny-director to its image architecture. Nomad would express the pinning as
   constraints and then never schedule anywhere else.
 - **It makes bring-up-from-nothing worse**, which was one of the three problems. Recovery
-  today is `bin/compose immich up -d`, a command that works with nothing else running.
-  Under Nomad it starts with bootstrapping a control plane, its gossip key and its ACLs,
-  before any workload starts, on a box you may be reaching from mid-ocean.
+  today is `sudo docker compose up -d` in the deployment's directory, which works with
+  nothing else running. Under Nomad it starts with bootstrapping a control plane, its
+  gossip key and its ACLs, before any workload starts, on a box you may be reaching from
+  mid-ocean.
 - **Dev containers are the worst fit of all.** They are `restart: no` *because* they hold
   live sessions and uncommitted worktrees. A scheduler's premise is that it owns the
   lifecycle and will reschedule. The job would have to be written to ask Nomad not to act
@@ -509,7 +511,7 @@ ones that answer the question this document started from.
 | 2g | All three tunnels become locally-managed — new tunnels, ingress in git | `zero`, `one`, `two`, DNS | 2f | **DONE on all three.** `one` and `zero` 2026-08-23, `two` 2026-08-29 over the `two-one` mesh. Every host's routing is now a tracked file, and `ansible/2g` — the wrapper written for this migration — is deleted, as its own header said it should be. **The dashboard sweep is the one part left, and it is manual** — deferred into [`plans/cloudflare-dashboard-sweep.md`](../plans/cloudflare-dashboard-sweep.md), because identifying which Access service token a client currently holds is a judgement no check on a box can make |
 | 2h | cloudflared: staggered autoupdate, `one` 6h → `two` 72h → `zero` 240h | all three | — | **done 2026-08-24** — the staggered frequencies are installed and live on all three |
 | 2i | Retire the `ssh-zero-dev-*` rules, and `anchor-two` with them — doors nothing is behind | `zero`'s host tunnel, DNS | nothing | **In progress 2026-08-29.** `dd` and `ds` are out of `hosts/zero/system/cloudflared-config.yml` in the repo; installing that and cycling zero's connector is the owner's step, from a mesh route — `ssh-zero.gsrpi.uk` **is** the tunnel being cycled. Safe to do now because neither container is running and neither has a tunnel of its own until Phase 5; until then they are reached through `ssh zero` and the published loopback ports 2222/2223. `anchor-two.gsrpi.uk` is out of `two`'s ingress on the same argument: it served an experiment that ended and answers 502 always. **Four** CNAMEs go in the same sitting — see the sweep plan. **Checked from outside 2026-10-25: not installed.** All four CNAMEs resolve; `ssh-zero-dev-dd`, `-ds` and `anchor-two` answer 502, so a live rule still matches them, while `ssh-zero-dev-or3`, whose rule is gone, answers the catch-all 404. **The four CNAMEs were deleted the same day** by the owner, verified NXDOMAIN on two resolvers — with no record the edge routes nothing to those rules, so the second doors are shut; installing and cycling now only brings the live ingress in line with the repo |
-| 3 | First deployment adopted: `send2ereader` on `one`, **with its connector in the deployment** | one deployment, non-critical box, `one`'s ingress | 2 | **The connector pattern is set, 2026-10-24** — by `calibre-web`, a new deployment, not by `send2ereader`: sidecar, its own locally-managed tunnel, `server-create-deployment-tunnel.yml` (decisions.md, *Sidecar, not baked-in*). **`send2ereader`'s sidecar is committed, 2026-10-25**: its own tunnel, `3001` no longer published, `bookit` out of `one`'s tracked ingress and kept as its name by `subdomain:` in `edge.yml`. The cutover on `one` is the owner's, in [its README](../deployments/send2ereader/README.md); until then the installed host connector serves `bookit`. What this phase still owes is `bin/compose`'s deletion with `recovery.md`'s rewrite. **`garmin-mcp` is the first deployment Ansible starts** (`server-deploy-garmin-mcp.yml`, committed 2026-10-24, `community.docker.docker_compose_v2`), so the adoption's mechanism exists; `bin/compose`'s deletion and `recovery.md`'s rewrite are still owed together |
+| 3 | First deployment adopted: `send2ereader` on `one`, **with its connector in the deployment** | one deployment, non-critical box, `one`'s ingress | 2 | **Done 2026-10-25, bar the owner's first deploy.** `send2ereader` has its own tunnel and a `cloudflared` sidecar, publishes no port, keeps its name `bookit` through `subdomain:` in `edge.yml`, and is started by `server-deploy-send2ereader.yml`, the second deployment a play starts after `garmin-mcp`. That play's first run is the cutover ([its README](../deployments/send2ereader/README.md)); until then `one`'s installed host connector serves `bookit`. `bin/compose` is deleted, and `recovery.md` brings deployments back with stock `docker compose`. The connector pattern itself was set on 2026-10-24 by `calibre-web` (decisions.md, *Sidecar, not baked-in*) |
 | 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two deployments | 3 | |
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | Phase 3 now tests the mechanism first, on a disposable deployment. **Owner's leaning, 2026-10-25: the sidecar model here too**, as Phase 3 settled it for deployments, in place of `infra-dev`'s connector started from its own entrypoint — likely, not yet decided |
 | 6 | ~~`dd` off `two`~~ | `two`, `one` | arm64 CI, upstream | **Dropped 2026-10-25**, the owner's call: moving `destiny-director` follows its own needs, not this plan — [gsfernandes81/infra#11](https://github.com/gsfernandes81/infra/issues/11), which may or may not end in a PR. The number is kept so the others do not shift |
@@ -987,8 +989,8 @@ part of why Phase 8 stopped waiting on it the same day. On MicroOS rootless podm
 on OpenRC it would not, and the conversion would be done twice.
 
 `one` first is also roadmap §2's own answer, for its own reason: it is the non-critical
-box, its deployments are disposable, and it is where the `bin/compose`
-docker-vs-podman-compose question finally gets tested against something real.
+box, its deployments are disposable, and it is where `recovery.md`'s
+docker-vs-podman-compose commands finally get tested against something real.
 
 ### What Phases 1–2 actually bought
 
@@ -1074,6 +1076,10 @@ cgroup configuration at all. Mobility solves this more cleanly than delegation w
 
 ### `bin/compose` goes, at Phase 3 — DECIDED
 
+**Done 2026-10-25.** `bin/compose` is deleted, `recovery.md` brings deployments back with
+stock `sudo docker compose up -d` in each deployment's directory, and `send2ereader` is
+the second deployment a play starts (`server-deploy-send2ereader.yml`).
+
 Ansible drives deployments through `community.docker`, and `bin/compose` is deleted rather
 than wrapped. An earlier draft here said the opposite — that the playbook should call
 `bin/compose` so "how a deployment is driven" had one spelling — and that was the wrong
@@ -1136,7 +1142,7 @@ not a detail of this one.
 used to put it in the same commit as `bin/compose`'s deletion and `recovery.md`'s rewrite.
 That pairing exists so `recovery.md` never names a script that is gone, and the sidecar
 does not change whether `bin/compose` exists. So the connector did not need to wait. The
-deletion and the rewrite still go together, in one commit.
+deletion and the rewrite went together, in one commit, the same day.
 
 ### What `one` must answer before `zero` is considered
 
@@ -1173,7 +1179,7 @@ It gains a sentence saying where they are now recorded.
 ## A principle to apply more widely, later
 
 **Prefer the interface an outsider already knows over the one this repo invented.** It is
-why `bin/compose` goes at Phase 3, why the hand-rolled `apk` loop went, and — the owner's
+why `bin/compose` went at Phase 3, why the hand-rolled `apk` loop went, and — the owner's
 own example — why `make` carries so much of the project management in these repos instead
 of bespoke scripts. A `Makefile` is an interface every developer and every agent can read
 on sight; a script in `bin/` is knowledge that exists only here, and has to be learned

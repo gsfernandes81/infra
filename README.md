@@ -5,11 +5,24 @@ secrets, no data.
 
 ## Run a deployment
 
+Two deployments have a deploy play, run from the control node; each one's README says how:
+
 ```sh
-bin/compose torrents up -d          # one:  torrents | send2ereader | calibre-web  (ionic-traces stopped)
-# one: garmin-mcp is the exception — Ansible drives it, from the control node (its README):
-#   cd ansible && ansible-playbook playbooks/server-deploy-garmin-mcp.yml -K
-bin/compose immich   up -d          # zero: immich | syncthing
+cd ansible && ansible-playbook playbooks/server-deploy-send2ereader.yml -K   # one
+cd ansible && ansible-playbook playbooks/server-deploy-garmin-mcp.yml -K     # one
+```
+
+Any deployment starts with stock Compose, on its host, from its directory:
+
+```sh
+cd ~/infra/deployments/torrents && sudo docker compose up -d
+#   one:  torrents | send2ereader | garmin-mcp | calibre-web  (ionic-traces stopped)
+#   zero: immich | syncthing
+```
+
+The repo's own checks:
+
+```sh
 bin/check-sources                   # is the deployed sha still the pinned one?
 bin/check-system-drift              # do tracked /etc copies still match live?
 bin/install-system-file <name>      # install one of them (dry run without --commit)
@@ -17,10 +30,9 @@ bin/check-boot-layout               # can /boot be tampered with without a reboo
 sudo bin/check-mount-guards         # can a failed mount still eat the data? (any host)
 ```
 
-**`two` is the exception.** Its one deployment, `destiny-director` — **stopped since
-2026-10-25, files kept** — cannot be driven by
-`bin/compose` on any host — its images are `linux/arm/v6` and its `.env` exists only on
-that box — so `bin/compose destiny-director` refuses by name and says where to go.
+**`two` is the exception.** Its one deployment, `destiny-director`, is **stopped since
+2026-10-25, files kept**. It runs on podman, not docker: its images are `linux/arm/v6` and
+its `.env` exists only on that box.
 
 It is deployed with plain `podman-compose`, in an unprivileged deploy account's shell:
 
@@ -60,7 +72,7 @@ docs/                  read these
 
 | Host | Hardware | Runs | In repo |
 |---|---|---|---|
-| `one` | Pi 4 | torrents, send2ereader (moving to its own tunnel and sidecar, committed 2026-10-25, cutover pending: its README); calibre-web **committed 2026-10-24, not yet started** (own tunnel, sidecar — its README is the setup); garmin-mcp **deployed 2026-10-24** (Garmin Connect MCP for claude.ai: its read tools plus five workout and activity-notes writes; own tunnel, sidecar, deployed by Ansible — its README); ionic-traces **stopped by decision** | yes |
+| `one` | Pi 4 | torrents, send2ereader (own tunnel and sidecar, committed 2026-10-25; its first deploy is the cutover, its README); calibre-web **committed 2026-10-24, not yet started** (own tunnel, sidecar — its README is the setup); garmin-mcp **deployed 2026-10-24** (Garmin Connect MCP for claude.ai: its read tools plus five workout and activity-notes writes; own tunnel, sidecar, deployed by Ansible — its README); ionic-traces **stopped by decision** | yes |
 | `zero` | Pi 5 | Immich (+ db, ml, redis), Syncthing — **all critical, remote** | yes |
 | `two` | Pi 1 B+, armv6, ~475 MB | destiny-director (**test** bot + its Postgres) **stopped 2026-10-25, files kept** ([#11](https://github.com/gsfernandes81/infra/issues/11)); lifeboat duties **planned, not built** | stays on Alpine |
 
@@ -124,7 +136,7 @@ and each holds live sessions and uncommitted worktrees. See
 **`infra-dev` is the exception to "dev containers stay in their own repo", and it is not
 one.** That rule says a dev container belongs to the repo it develops; this one develops
 *this* repo, so `dev/` is exactly where it belongs. What it is not is a host service —
-nothing in `deployments/` or `hosts/` refers to it, and `bin/compose` cannot drive it.
+nothing in `deployments/` or `hosts/` refers to it, and its lifecycle is `dev/Makefile`.
 
 It also carries `ansible-core` and the collections — but **it is not a control node, by
 decision**: no fleet key, no `ssh_config.fleet`, so it has no route to `zero`, `one` or

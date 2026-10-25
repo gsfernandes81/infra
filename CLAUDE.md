@@ -29,11 +29,11 @@ Full orientation is `README.md`; the reasoning is `docs/decisions.md`. Quick map
   tracked copies of `/etc` files, each carrying an `infra-` header that says where it
   installs (`hosts/zero/system/README.md`). `hosts/two/setup/` is the whole build of
   `two`, one reviewed root script, on no PATH.
-- **`bin/`** — `compose` (docker deployments only; refuses `destiny-director` by name),
-  `check-sources`, `check-system-drift` (reports, never writes), `install-system-file`
-  (writes, never restarts), `check-boot-layout`, `check-mount-guards`, `hw-inventory`.
-  `_infra.py` is their shared header parser. **Not wrapped in the Makefile yet, on
-  purpose** — the Makefile header says why; do it as its own change or not at all.
+- **`bin/`** — `check-sources`, `check-system-drift` (reports, never writes),
+  `install-system-file` (writes, never restarts), `check-boot-layout`,
+  `check-mount-guards`, `hw-inventory`. `_infra.py` is their shared header parser. **Not
+  wrapped in the Makefile yet, on purpose** — the Makefile header says why; do it as its
+  own change or not at all.
 - **`ansible/`** — host list, playbooks, the fleet-inventory generator. **Runs from the
   control node, never from a Pi**: there is no `ansible` on the boxes and there must not be.
   `infra-dev` carries it as a *development* tool (syntax-check, `--check` against stubs),
@@ -455,8 +455,8 @@ alike.
   53 characters rendered, 50 for a play.
 - Match the surrounding style: prose comments that say *why*, file headers that say what
   the file is for and what not to do to it, `make help` that is the Makefile's own header.
-- A script that refuses is better than one that guesses — `bin/compose` refusing
-  `destiny-director` by name, the Makefile failing with `docker: not found` off-host
-  rather than silently ssh-ing. Keep that shape.
+- A script that refuses is better than one that guesses — `bin/install-system-file`
+  refusing a content change without `--allow-content-change`, the Makefile failing with
+  `docker: not found` off-host rather than silently ssh-ing. Keep that shape.
 - Secrets live in gitignored `.env` files and on the boxes — never in git, never in a
   `.bak` beside the original, never in a handover block that will sit in scrollback.

@@ -815,7 +815,7 @@ tunnel, not to a spare one.
 **Nothing needs it.** Ansible drives docker on `zero` the same way it drives docker on
 `one`: over ssh, as a host in the inventory. `community.docker`'s `docker_compose_v2`
 invokes the Compose CLI plugin on the target and needs neither a local socket nor the
-Python SDK, which is what makes retiring `bin/compose` at Phase 3 cheap. If something
+Python SDK, which is what made retiring `bin/compose` at Phase 3 cheap. If something
 one day genuinely needs the socket, the answer is a rootless podman socket under a
 dedicated account, not this line.
 

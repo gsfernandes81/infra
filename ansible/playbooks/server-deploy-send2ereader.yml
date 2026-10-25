@@ -1,0 +1,230 @@
+---
+# DEPLOY send2ereader, on whichever host hosts/<host>/send2ereader places it (`one`), at
+# bookit.<dns_zone>. Run from the control node:
+#
+#     cd ansible
+#     ansible-playbook playbooks/server-deploy-send2ereader.yml --check -K   # prove
+#     ansible-playbook playbooks/server-deploy-send2ereader.yml -K           # deploy
+#
+# NO --limit / -l: the host is found from the deployment's symlink by the first play of
+# server-create-deployment-tunnel.yml, which `-l one` would skip.
+#
+# -K: the tunnel credentials file belongs to uid 65532, and docker needs root (gavin is not
+# in the docker group, CLAUDE.md § Privileged commands).
+#
+# What one run does, in order:
+#   1. server-create-deployment-tunnel.yml, imported unchanged: it pulls the host's checkout
+#      to this control node's commit, makes or finds the tunnel, points the bookit record at
+#      it, and writes TUNNEL_ID and TUNNEL_CREDENTIALS into .env.
+#   2. The play below moves the source checkout to the sha in SOURCE, builds, starts both
+#      services, and probes bookit from this control node.
+# The first run after the sidecar commit is the cutover: bookit is down from the record's
+# repoint in step 1 until the start in step 2, which is the build plus a few seconds.
+#
+# The build runs on every deploy. Docker's layer cache makes an unchanged source a no-op
+# that yields the same image, so Compose leaves the running container alone; a new sha in
+# SOURCE rebuilds and recreates. Compose's own `policy` would reuse a stale image after a
+# bump, because the image has no tag of its own.
+#
+# Re-running is the intended way to finish after a partial failure.
+
+- name: Create the send2ereader tunnel and DNS record
+  ansible.builtin.import_playbook: server-create-deployment-tunnel.yml
+  vars:
+    deployment: send2ereader
+
+- name: Build and start send2ereader, then probe it
+  hosts: deployment_target
+  gather_facts: false
+  become: false
+
+  vars:
+    deployment: send2ereader
+    s2e_dir: "{{ infra_checkout }}/deployments/send2ereader"
+    s2e_url: "https://{{ deployment_hostname }}"
+    # SOURCE is the one copy of the fork's URL and the deployed sha, read on the control node.
+    s2e_source: >-
+      {{ (lookup('file', control_checkout ~ '/deployments/send2ereader/SOURCE').splitlines()
+          | reject('match', '^\s*(#|$)') | first).split() }}
+    # The .env keys compose.yaml requires: SRC_ROOT has been there since the deployment was
+    # adopted; the TUNNEL_ pair is the tunnel play's.
+    s2e_env_keys: [SRC_ROOT, TUNNEL_ID, TUNNEL_CREDENTIALS]
+    s2e_env_lines: >-
+      {{ (s2e_env_raw.content | default('') | b64decode).splitlines()
+         | reject('match', '^\s*(#|$)') | select('search', '=') | list }}
+    s2e_env: >-
+      {{ dict(s2e_env_lines | map('regex_replace', '=.*$', '')
+              | zip(s2e_env_lines | map('regex_replace', '^[^=]*=', ''))) }}
+    s2e_src: "{{ s2e_env.SRC_ROOT | default('') }}/send2ereader"
+    # A new record can take a minute or two to answer; each probe waits up to five.
+    probe_retries: 20
+    probe_delay: 15
+
+  tasks:
+    # ── 1  .env ─────────────────────────────────────────────────────────────
+    - name: Read the {{ deployment }} .env on {{ inventory_hostname }}
+      # Nothing in this file is a secret (the tunnel's secret is the file it names), but it
+      # is read quietly anyway, so a secret added to it later never lands in a log.
+      ansible.builtin.slurp:
+        src: "{{ s2e_dir }}/.env"
+      register: s2e_env_raw
+      check_mode: false
+      failed_when: false
+      no_log: true
+
+    - name: Check .env has every key compose.yaml needs
+      ansible.builtin.assert:
+        that: s2e_env_keys | difference(s2e_env.keys() | list) | length == 0
+        fail_msg: >-
+          {{ s2e_dir }}/.env lacks {{ s2e_env_keys | difference(s2e_env.keys() | list) }}.
+          SRC_ROOT is the directory holding the send2ereader checkout (e.g. /home/gavin/src);
+          the TUNNEL_ pair is written by the tunnel play above. Nothing has been started.
+        success_msg: "{{ s2e_env_keys | length }} keys present"
+      when: not ansible_check_mode
+
+    - name: "--check only: check .env names SRC_ROOT"
+      # The dry run proves what a real run needs that the tunnel play does not write, so a
+      # missing SRC_ROOT shows here, before a real run has moved the bookit record.
+      ansible.builtin.assert:
+        that: (s2e_env.SRC_ROOT | default('')) is match('^/')
+        fail_msg: >-
+          {{ s2e_dir }}/.env has no SRC_ROOT (an absolute path, the directory holding the
+          send2ereader checkout). A real run would move the bookit record and then stop here.
+        success_msg: "SRC_ROOT={{ s2e_env.SRC_ROOT | default('') }}"
+      when: ansible_check_mode
+
+    # ── 2  the source, at the pinned sha ────────────────────────────────────
+    - name: Move the {{ deployment }} source to commit {{ s2e_source[1][:7] }}
+      # force: false refuses a checkout with local edits; a clean one is moved to the pinned
+      # sha, so a reviewed bump in SOURCE needs no step by hand.
+      ansible.builtin.git:
+        repo: "{{ s2e_source[0] }}"
+        dest: "{{ s2e_src }}"
+        version: "{{ s2e_source[1] }}"
+        force: false
+      when: not ansible_check_mode
+
+    - name: Read the commit the {{ deployment }} source is on
+      ansible.builtin.command: git -C {{ s2e_src }} rev-parse HEAD
+      register: s2e_head
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: Check the {{ deployment }} source is on the pinned commit
+      ansible.builtin.assert:
+        that: s2e_head.stdout == s2e_source[1]
+        fail_msg: >-
+          {{ s2e_src }} is at {{ s2e_head.stdout | default('nothing', true) }}, SOURCE pins
+          {{ s2e_source[1] }}. Nothing has been started.
+        success_msg: "{{ s2e_src }} at {{ s2e_source[1][:7] }}"
+      when: not ansible_check_mode
+
+    - name: "--check only: check the source checkout exists"
+      ansible.builtin.assert:
+        that: s2e_head.rc == 0
+        fail_msg: >-
+          {{ s2e_src }} is not a git checkout on {{ inventory_hostname }}. A real run would
+          clone it from {{ s2e_source[0] }} after moving the bookit record, so clone it
+          first if the build there needs anything a fresh clone lacks.
+        success_msg: "{{ s2e_src }} is a checkout, at {{ s2e_head.stdout[:7] }}"
+      when: ansible_check_mode
+
+    - name: "--check only: print what a real run would do"
+      ansible.builtin.debug:
+        msg: >-
+          A real run moves {{ s2e_src }} (now at {{ s2e_head.stdout | default('?', true) | truncate(7, true, '') }})
+          to {{ s2e_source[1][:7] }}, builds, starts {{ deployment }} and its sidecar, and
+          probes {{ s2e_url }}. Nothing was built or started.
+      changed_when: true
+      when: ansible_check_mode
+
+    # ── 3  up ───────────────────────────────────────────────────────────────
+    - name: Build and start {{ deployment }} and its sidecar
+      community.docker.docker_compose_v2:
+        project_src: "{{ s2e_dir }}"
+        build: always
+        state: present
+      become: true
+      when: not ansible_check_mode
+
+    # ── 4  the probes, from this control node, end to end ───────────────────
+    # failed_when: false AND ignore_errors: true, as in server-deploy-garmin-mcp.yml: no
+    # answer at all fails `uri` whatever failed_when says, and exhausted retries mark the
+    # task failed. The assert after each says what the answer means.
+    - name: Wait for the upload page through the tunnel
+      ansible.builtin.uri:
+        url: "{{ s2e_url }}/"
+        return_content: true
+      register: s2e_p_upload
+      until: s2e_p_upload.status | default(0) == 200
+      retries: "{{ probe_retries }}"
+      delay: "{{ probe_delay }}"
+      failed_when: false
+      ignore_errors: true
+      delegate_to: localhost
+      when: not ansible_check_mode
+
+    - name: Check bookit serves the upload page
+      ansible.builtin.assert:
+        that:
+          - s2e_p_upload.status | default(0) == 200
+          - "'id=\"uploadform\"' in s2e_p_upload.content | default('')"
+        fail_msg: >-
+          {{ s2e_url }}/ answered {{ s2e_p_upload.status | default('nothing') }}. 530 or 1033
+          is the tunnel (sudo docker logs send2ereader-cloudflared on {{ inventory_hostname }});
+          502 is the app (sudo docker compose ps in {{ s2e_dir }}); a 200 without the upload
+          form is something other than send2ereader answering.
+        success_msg: "{{ s2e_url }}/ serves the upload page"
+      when: not ansible_check_mode
+
+    - name: Probe the key page as a Kobo would
+      # The server picks the page by user agent: an e-reader gets the page that shows a key.
+      ansible.builtin.uri:
+        url: "{{ s2e_url }}/"
+        headers:
+          User-Agent: Mozilla/5.0 (Linux; U; Android 2.0; en-us;) AppleWebKit/538.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/538.1 (Kobo Touch 0377/4.20.14622)
+        return_content: true
+      register: s2e_p_key
+      failed_when: false
+      delegate_to: localhost
+      when: not ansible_check_mode
+
+    - name: Check bookit gives an e-reader the key page
+      ansible.builtin.assert:
+        that:
+          - s2e_p_key.status | default(0) == 200
+          - "'id=\"keyoutput\"' in s2e_p_key.content | default('')"
+        fail_msg: "{{ s2e_url }}/ as a Kobo answered {{ s2e_p_key.status | default('nothing') }} without the key page."
+        success_msg: "{{ s2e_url }}/ gives an e-reader the key page"
+      when: not ansible_check_mode
+
+    # ── 5  the port is gone ─────────────────────────────────────────────────
+    - name: Read the {{ deployment }} container's published ports
+      community.docker.docker_container_info:
+        name: send2ereader
+      register: s2e_container
+      become: true
+      when: not ansible_check_mode
+
+    - name: Check {{ deployment }} publishes nothing on the host
+      # The point of the sidecar. A port left published is a second way in that skips the
+      # tunnel, and the probes above would pass with it.
+      ansible.builtin.assert:
+        that: (s2e_container.container.HostConfig.PortBindings | default({}, true)) == {}
+        fail_msg: >-
+          send2ereader still publishes {{ s2e_container.container.HostConfig.PortBindings | default({}, true) }}
+          on {{ inventory_hostname }}. compose.yaml has no ports:, so the running container is
+          an older one: sudo docker compose up -d in {{ s2e_dir }}.
+        success_msg: "send2ereader publishes nothing on {{ inventory_hostname }}"
+      when: not ansible_check_mode
+
+    - name: Print what is running and what is left
+      ansible.builtin.debug:
+        msg:
+          - "{{ s2e_url }} served by the {{ deployment }} sidecar, source at {{ s2e_source[1][:7] }}"
+          - ""
+          - "Once, after the first deploy: install one's host tunnel configuration without"
+          - "bookit (deployments/send2ereader/README.md, 'Once, after that first run')."
+      changed_when: true
+      when: not ansible_check_mode

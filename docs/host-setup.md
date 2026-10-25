@@ -248,8 +248,10 @@ go in `command_args`.**
 
 ## Deployments
 
-`deployments/<name>/` is what a deployment is, `hosts/<host>/` is where it runs,
-`bin/compose <name> up -d` starts it — see the [README](../README.md).
+`deployments/<name>/` is what a deployment is, and `hosts/<host>/` is where it runs. On
+the host, `sudo docker compose up -d` in `deployments/<name>/` starts it; a deployment
+with a deploy play is started by that play from the control node (the
+[README](../README.md)).
 
 The torrents deployment on `one` needs `/dev/net/tun` on the host, either via
 `mknod /dev/net/tun c 10 200` or by loading `tun` from `/etc/modules-load.d/`. Read

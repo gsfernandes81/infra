@@ -31,8 +31,8 @@ deployment — one bot and a Postgres, no VPN namespace sharing — but the pack
 real and verified for Alpine 3.24 `armhf` in [`hosts/two/setup/README.md`](../hosts/two/setup/README.md) step 1, including the
 `iptables`/netavark trap. Read that before doing this on `one`.
 
-`bin/compose` still execs `docker compose` and stays that way until this conversion —
-see [decisions.md](decisions.md) for why a runtime probe was not added speculatively.
+[`recovery.md`](recovery.md)'s bring-back commands are stock `docker compose`, and this
+conversion rewrites them for podman.
 
 **The one thing not to get wrong:** gluetun and qBittorrent must stay in a shared
 network namespace or port forwarding breaks silently. See

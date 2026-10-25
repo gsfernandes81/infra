@@ -17,7 +17,7 @@
 # the work with a hand-rolled `apk info -e` loop and `command: apk add`, on the reasoning
 # that collections were expensive over a metered radio. That reasoning was wrong on the
 # numbers: community.general is 2.70 MiB, not the ~50 MiB of the `ansible` metapackage it
-# was confused with. It was also inconsistent — this repo is dropping `bin/compose`
+# was confused with. It was also inconsistent — this repo dropped `bin/compose`
 # because stock tooling is knowledge that transfers, and a bespoke shell loop is
 # repo-specific knowledge in exactly the same way.
 #

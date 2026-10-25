@@ -43,6 +43,7 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 | create a tunnel for a Pi (nothing serves through it yet) | `server-create-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | give a compose deployment its own tunnel, for a `cloudflared` sidecar — plus an Access login if its `edge.yml` asks | `server-create-deployment-tunnel.yml -e deployment=calibre-web -K` · **never `-l`**: the host comes from the deployment's symlink · pulls the host's checkout to your commit itself | sudo, the API token, and `~/.config/cloudflare/access-emails` for a login |
 | deploy `garmin-mcp` — its tunnel (the play above), `.env`, the upstream source (pinned in `SOURCE`), `docker compose up`, then end-to-end probes including the served-tools check (reads plus the allowed writes) | `server-deploy-garmin-mcp.yml -K` · **never `-l`** · stops once at the Garmin login, whose block it prints | sudo, the API token |
+| deploy `send2ereader` at `bookit` — its tunnel (the play above), the fork's source at the sha in `SOURCE`, a build, `docker compose up`, then end-to-end probes and a check that no port is published. Its first run is the cutover from `one`'s host tunnel | `server-deploy-send2ereader.yml -K` · **never `-l`** | sudo, the API token |
 | move a Pi onto a new tunnel — **a deliberate outage** | `server-cutover-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | delete a Pi's tunnel — **irreversible** | `server-delete-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | update cloudflared on a Pi, deliberately | `server-update-cloudflared.yml -e target=<host> -e version=… -e sha256=… -K` | sudo; refuses while that host autoupdates, which today is all of them |
@@ -52,7 +53,7 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 that variable, so leaving it out falls back to `one` (or refuses, for the update) and can never
 widen to the whole fleet. A fleet-wide play (packages, system files, the inventory) runs on
 `fleet` and is narrowed with `-l <host>`. A deployment play
-(`server-create-deployment-tunnel.yml` and `server-deploy-garmin-mcp.yml`) reads its host
+(`server-create-deployment-tunnel.yml` and the two `server-deploy-` plays) reads its host
 from the `hosts/<host>/<name>` symlink and takes no `-l` at all, because `-l` would skip
 the play that finds the host.
 
@@ -67,8 +68,9 @@ open.
 
 **Only `server-generate-fleet-inventory.yml` is read-only** on the hosts. On the control node it
 writes the report and commits it. Every other `server-` play changes something: packages,
-**boot-path `/etc` files**, the cloudflared binary, tunnels and DNS, `authorized_keys` on `zero`. **`server-deploy-garmin-mcp.yml` is the one play that
-starts a deployment** — Phase 3's "Ansible drives deployments", first used there.
+**boot-path `/etc` files**, the cloudflared binary, tunnels and DNS, `authorized_keys` on
+`zero`. **The two `server-deploy-` plays are the ones that start a deployment**, Phase 3's
+"Ansible drives deployments": `garmin-mcp` first, then `send2ereader`.
 `server-create-dev-container.yml` prints a secret that cannot be fetched again.
 `client-home-ssh-config.yml` writes ssh config and a 0600 service token on the client.
 
@@ -452,7 +454,7 @@ Two things make the hand-roll the better answer here anyway:
 
 `community.docker` still earns its place: **`docker_compose_v2` needs no SDK** — it invokes
 the Compose CLI plugin directly, requiring only Docker CLI with compose ≥ 2.18.0 — which is
-what makes retiring `bin/compose` at Phase 3 cheap. Worth knowing that it parses CLI output
+what made retiring `bin/compose` at Phase 3 cheap. Worth knowing that it parses CLI output
 rather than using an API, and upstream says a new Compose plugin release can break it; that
 is a reason to keep `recovery.md`'s bring-back commands as plain `docker compose`, which
 this repo was going to do anyway.

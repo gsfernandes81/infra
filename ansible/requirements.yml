@@ -20,7 +20,7 @@ collections:
   - name: community.general
     version: ">=13.3.0"
 
-  # docker_compose_v2 and docker_container_info — what replaces bin/compose at Phase 3.
+  # docker_compose_v2 and docker_container_info: what replaced bin/compose at Phase 3.
   # See docs/management-plane.md.
   - name: community.docker
     version: ">=5.2.2"
