@@ -38,6 +38,7 @@ never touches Cloudflare. `-e recreate=true` puts it through a redeploy when not
 
 ```fish
 ansible-playbook playbooks/server-deploy-compose.yml -e deployment=garmin-mcp -K
+ansible-playbook playbooks/server-deploy-compose.yml -e deployment=garmin-mcp -e recreate=true -K   # with no change
 ```
 
 `server-deploy-garmin-mcp.yml`, the play this deployment had before, is kept until the first
@@ -101,6 +102,8 @@ and never prints it. You do this once; the claude.ai connector refreshes itself 
   - The bearer token: delete the `MCP_BEARER_TOKEN=` line from `.env` on `one`.
   - Either or both: then redeploy with `-e recreate=true` and reconnect the claude.ai connector.
     A new consent secret changes nothing the plan can see, so without it nothing is redeployed.
+    A deleted bearer line is written again before the question, so answer y: after a no, `.env`
+    holds a token the running server does not.
   - Rotating the consent secret also voids every refresh token.
 - **Bumping upstream.**
   1. Put the new sha in `SOURCE` and the new tag on `image:` in `compose.yaml`.

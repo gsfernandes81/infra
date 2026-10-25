@@ -203,7 +203,7 @@
       delegate_to: "{{ dep.host }}"
       when: dep_go | bool
 
-    - name: "If going ahead: check every {{ dep.name }} container is up"
+    - name: "If going ahead: check {{ dep.name }} is all up"
       ansible.builtin.assert:
         that: dep_status.stdout_lines | reject('search', ' Up ') | list | length == 0
         fail_msg: >-

@@ -47,7 +47,7 @@
 # ── 1  no Garmin password in .env ────────────────────────────────────────────
 - name: Read the variable names in .env for garmin-mcp
   # Names only, as the play's own .env check reads them: a value never reaches a register.
-  # No .env (a --check of a first bring-up) is rc 2, and reads as no names.
+  # No .env (a --check of a first bring-up) is a non-zero rc, and reads as no names.
   ansible.builtin.command:
     cmd: sed -nE 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=.*/\2/p' .env
     chdir: "{{ dep_dir }}"
@@ -71,9 +71,27 @@
       deployments/garmin-mcp/README.md prompts for both instead. Nothing was changed.
     success_msg: "no Garmin credentials in .env"
 
+- name: Check the image tag in compose.yaml matches SOURCE
+  # A bump is SOURCE and the tag together (compose.yaml's header). The tag is what decides
+  # whether `up` builds, so a SOURCE bump without it plans "nothing to change" forever, and
+  # the source is only compared with SOURCE after the question, in prepare.yml. Read-only,
+  # so it runs under --check too.
+  ansible.builtin.assert:
+    that: >-
+      (lookup('file', control_checkout ~ '/deployments/garmin-mcp/compose.yaml') | from_yaml)
+      .services['garmin-mcp'].image == 'garmin-mcp-remote:' ~ garmin_source[1][:7]
+    fail_msg: >-
+      compose.yaml builds
+      {{ (lookup('file', control_checkout ~ '/deployments/garmin-mcp/compose.yaml') | from_yaml).services['garmin-mcp'].image }},
+      and SOURCE pins {{ garmin_source[1][:7] }}. Bump both in one commit; the README's
+      "Bumping upstream" says how. Nothing was changed.
+    success_msg: "image tag matches SOURCE ({{ garmin_source[1][:7] }})"
+
 # ── 2  what a first bring-up lacks ───────────────────────────────────────────
 # create: false throughout: .env is created at 0600 by the tunnel play, and a missing one
-# here means that play has not run, which the .env check after this hook reports by name.
+# here means that play has not run. So each write also needs the read above to have found
+# the file (rc 0): otherwise lineinfile fails under no_log, which hides why, and the .env
+# check after this hook, which names the bring-up play, would never run.
 - name: "If no consent secret: write it into .env"
   ansible.builtin.lineinfile:
     path: "{{ dep_dir }}/.env"
@@ -87,6 +105,7 @@
   delegate_to: "{{ dep.host }}"
   when:
     - not ansible_check_mode
+    - garmin_env_names.rc == 0
     - "'MCP_CONSENT_SECRET' not in garmin_env_names.stdout_lines"
   no_log: true
 
@@ -102,6 +121,7 @@
   delegate_to: "{{ dep.host }}"
   when:
     - not ansible_check_mode
+    - garmin_env_names.rc == 0
     - "'MCP_BEARER_TOKEN' not in garmin_env_names.stdout_lines"
   no_log: true
 
@@ -120,6 +140,7 @@
   delegate_to: "{{ dep.host }}"
   when:
     - not ansible_check_mode
+    - garmin_env_names.rc == 0
     - item.key not in garmin_env_names.stdout_lines
 
 - name: Create the source checkout directory on {{ dep.host }}
