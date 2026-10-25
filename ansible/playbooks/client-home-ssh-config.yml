@@ -47,7 +47,9 @@
 #
 # Each import below mints THIS client's own Access service token for its container,
 # named `<alias>-<client>`, over the Cloudflare API, and adds it to the container's
-# policy. It needs the API token at ~/.config/cloudflare/api-token on this machine and
+# policy. The fleet gets one too, `fleet-<client>`, never expiring, for the Access gate on
+# the Pis' ssh hostnames (_client-fleet-token.yml; the gate is
+# server-create-fleet-ssh-access.yml). It needs the API token at ~/.config/cloudflare/api-token on this machine and
 # prints how to mint one if it is missing. A container with no Access application yet is
 # skipped with a message, blocks still written.
 #
@@ -91,11 +93,19 @@
 # ── the servers: the fleet, the mesh, and the LAN and cross-box rescue paths ────
 - name: Write the fleet ssh block on this client
   ansible.builtin.import_playbook: _client-fleet-ssh.yml
-  # Tagged `ssh` here, not task by task inside it: the fleet play is ssh config and nothing
-  # else — no service token is read or written — so the whole of it is the `ssh` half.
+  # Tagged `ssh` here, not task by task inside it: the fleet play is ssh config and the
+  # script its ProxyCommand runs, and no service token is read or written there, so the
+  # whole of it is the `ssh` half.
   tags: [ssh]
   # `when` on an import applies to every task the import brings in, which is what makes
   # -e container=<alias> a one-container run rather than a whole one.
+  when: container is not defined
+
+# After the block, so the script that loads the token exists whatever this half does. The
+# token is the `access` half, and a client without one still connects to an ungated host.
+- name: Mint this client's fleet ssh token
+  ansible.builtin.import_playbook: _client-fleet-token.yml
+  tags: [access]
   when: container is not defined
 
 # ── the dev containers ─────────────────────────────────────────────────────────

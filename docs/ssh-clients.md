@@ -25,7 +25,7 @@ Two blocks land in `~/.ssh/config`, each edited in place on re-runs:
 
 | Marker | Written by | Holds |
 |---|---|---|
-| `# BEGIN infra-fleet` | `client-home-ssh-config.yml` (its fleet half) → `templates/ssh-fleet-block.j2` | the three Pis, three ways each |
+| `# BEGIN infra-fleet` | `client-home-ssh-config.yml` (its fleet half) → `templates/ssh-fleet-block.j2` | the three Pis, three ways each; their ProxyCommand is `~/.config/fleet/access-ssh` |
 | `# BEGIN <alias>` | `client-home-ssh-config.yml` (its dev half, once per container) → `templates/ssh-dev-block.j2` | one dev container, two ways |
 
 Do not hand-edit between the markers. Change the template and re-run — a hand edit
@@ -145,6 +145,36 @@ under pressure. Every box is now reachable through both of the others.
 `HostName` on the `-zero|-one|-two` aliases is resolved **on the jump host**, so those are
 LAN addresses as it sees them.
 
+## The fleet's gate: one token per client, never expiring
+
+Each Pi's ssh hostname is meant to sit behind an Access application, `fleet ssh <host>`,
+and all three link one reusable policy, `fleet ssh service tokens`, which admits each
+client's own `fleet-<client>` service token. The plays exist since 2026-10-25; each host
+is gated by its own run of `server-create-fleet-ssh-access.yml`, in the order and with the
+checks in [`plans/fleet-ssh-access.md`](../plans/fleet-ssh-access.md), and until then that
+host is open as before.
+
+**The `zero`, `one` and `two` aliases run `~/.config/fleet/access-ssh`.** That script
+loads `~/.config/fleet/token` into the one `cloudflared` it starts, as the dev containers'
+ProxyCommand does. Without a whole token it prints a warning naming the fix and connects
+without one. That works on a host not yet gated, and on a gated host Cloudflare refuses
+with `websocket: bad handshake`, below the warning. The dev containers' ProxyCommand stops
+instead; the fleet's does not, because a client that has not caught up should still reach
+a host that is not gated, and this is the way in when everything else is broken.
+
+**The token never expires.** Cloudflare's default lifetime is one year, which would shut
+every client out of every Pi at once, a year after minting. The client play mints with
+`duration: forever`, reads the token back, and writes no file unless Cloudflare reports
+`forever`; the server play refuses to admit any fleet token that expires.
+
+On Windows the ProxyCommand is `cf-access-fleet.cmd`, the dev containers' wrapper shape
+(*Windows has no `sh`*, below). The laptop's `-s24` aliases run the **phone's** copy of
+the script, so the phone's token is the one the gate sees, and the phone has to have run
+the client play first.
+
+A new client runs `client-home-ssh-config.yml`. If the policy exists, its token joins it
+in the same run and every gated host admits it at once.
+
 ### The jump rules, and what they depend on
 
 `ProxyJump` since 2026-08-23: all three hosts set `AllowTcpForwarding yes` with
@@ -215,7 +245,8 @@ cable. This exists for the ship: the laptop has no internet, the phone does.
   a plain connection refused on `127.0.0.1:8022` — the right error, naming what is missing.
 - **The targets are tunnel hostnames, not LAN addresses**, and that is the point: every
   byte of egress happens on the phone, which is the only one with a network. So the phone
-  runs `cloudflared`, exactly as the mesh aliases have their jump host run `nc`. Not
+  runs its fleet script (*The fleet's gate*, above), which runs `cloudflared` with the
+  phone's token, exactly as the mesh aliases have their jump host run `nc`. Not
   `ProxyJump`, which would open a raw TCP connection to `ssh-zero.gsrpi.uk:22` where
   nothing is listening — an `ssh://` ingress is not raw TCP at the edge.
 - `127.0.0.1`, **not** `localhost`. ssh resolves `localhost` to `::1` first and
@@ -251,11 +282,6 @@ from Termux anyway. The split is in the playbook too, as tags:
 ansible-playbook playbooks/client-home-ssh-config.yml --tags ssh      # every block, no prompts
 ansible-playbook playbooks/client-home-ssh-config.yml --tags access   # tokens only
 ```
-
-At the prompt, **leave both the Client ID and the Client Secret blank to skip that
-container's token** — the run carries on to the next one. One blank and one not is
-refused as a slip. Until 2026-10-02 a blank stopped the whole composed run, and a
-container without a token got no block at all.
 
 So the secret is in the environment of exactly one short-lived `cloudflared` and nothing
 else. Three places it deliberately does **not** go:

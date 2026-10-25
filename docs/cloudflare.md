@@ -248,5 +248,7 @@ token is named `<container>-<client>` and is the `TUNNEL_SERVICE_TOKEN_ID` in so
   probe finds `syncthing`, `syncthing-torrents` and `torrents` still redirecting to the
   Access login. The owner chose service tokens for the fix, the dev containers' mechanism,
   2026-10-25 ([gsfernandes81/infra#12](https://github.com/gsfernandes81/infra/issues/12)).
+  The plays are built the same day; each host stays open until the owner gates it, in the
+  order [`plans/fleet-ssh-access.md`](../plans/fleet-ssh-access.md) gives.
 - ~~**The three `ssh-zero-dev-*` hostnames** were never checked for Access~~ — moot: their
   records were deleted on 2026-10-25 and the Access objects swept the same day.

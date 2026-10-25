@@ -795,6 +795,59 @@ before pushing, because `main` is what the hosts pull. `-e push=true` skips the 
 for a future scheduled run. `-e push=false` commits and stops. `-e commit=false` only writes
 the file, as before. A run that commits nothing says why.
 
+## The fleet's ssh hostnames are gated by per-client service tokens
+
+**Decided 2026-10-25 (owner),** after an outside probe found `ssh-zero`, `ssh-one` and
+`ssh-two` with no Access in front: a WebSocket upgrade with no credentials reached sshd's
+banner on all three, so sshd's keys-only settings were the only gate
+([infra#12](https://github.com/gsfernandes81/infra/issues/12)). The plays are
+`server-create-fleet-ssh-access.yml` and the fleet halves of `client-home-ssh-config.yml`.
+A Fable review of the plan shaped the parts marked below.
+
+**Service tokens, one per client, over a browser login.** A browser login's session
+expires, and an expired one broke `ssh zero` from the phone on 2026-08-23 with
+`websocket: bad handshake`. The dev containers already run per-client service tokens
+(`<container>-<client>`), so the fleet gets `fleet-<client>` from the same client play. A
+lost laptop is one token to delete.
+
+**The tokens never expire (review).** Cloudflare's default lifetime is one year, and the
+dev containers' tokens were minted with it. A fleet token minted that way would shut every
+client out of every Pi on the same day, a year later, with the August symptom. So the
+client play mints with `duration: forever` and reads the token back before writing the
+file, and the server play refuses to admit any fleet token that expires. A token reported
+as leaked is disabled by Cloudflare itself, which this does not change.
+
+**Clients first, then the gate.** The dev containers' order, an application with no
+policy that each client then joins, would admit nobody between the two steps, which on
+the fleet means no way into any Pi. Presenting a token to a hostname with no gate changes
+nothing, so every client starts presenting its token first, and the server play admits
+every `fleet-*` token that exists and stops for a yes on the list.
+
+**One reusable policy, one application per host (review).** `fleet ssh service tokens` is
+linked from `fleet ssh zero`, `fleet ssh one` and `fleet ssh two`, each created already
+linked, so no application exists admitting nobody, a client's token is added once, and
+undoing one host is deleting its application without touching the other two. One
+application on three hostnames was the first draft; rolling it back would have meant
+editing an object that was already gating a live host.
+
+**Probes that cannot pass for the wrong reason (review).** The ssh probe runs first
+against the open host, so a probe that cannot pass from this client (a key behind a
+passphrase) stops the run before anything is written. After the write the play waits
+until the hostname refuses an unauthenticated request, because Access changes take time
+to reach the edge, and only then runs the ssh probe again, with `-S none`, so an open
+multiplexed connection cannot answer for Cloudflare. Any failure after the application
+exists deletes it. The play can prove only its own client's token, so the laptop checks
+itself before the next host is gated.
+
+**The fleet ProxyCommand falls back; the dev containers' does not.** Without a whole token
+the fleet script warns and connects without one, so a client that has not caught up still
+reaches a host that is not gated yet, and on a gated one the warning names the fix. The
+dev containers' ProxyCommand stops instead, because their applications have only ever
+admitted tokens.
+
+**Not covered:** `KbdInteractiveAuthentication` is still on in `sshd-infra.conf`; turning
+it off is a change to sshd itself, for the two-phase procedure, and is not chosen.
+
 ## The lesson worth keeping
 
 

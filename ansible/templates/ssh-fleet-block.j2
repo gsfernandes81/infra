@@ -67,11 +67,17 @@ Host two
   HostName ssh-two.gsrpi.uk
 
 # Listed explicitly, not `zero*`: that would also catch zero-local and zero-two, which
-# must NOT go through the edge. No token is sourced here - the boxes' tunnels admit you
-# on your certificate, while every dev container's own hostname sits behind an Access
-# service token and gets the `sh -c` form from client-home-ssh-config.yml instead.
+# must NOT go through the edge. Each box's ssh hostname sits behind an Access application
+# that admits per-client service tokens (server-create-fleet-ssh-access.yml), so the
+# ProxyCommand is a script that loads this client's fleet token, when it has one, into the
+# one cloudflared it runs. Without one it warns and connects anyway: that works on a host
+# not yet gated, and on a gated one the warning names the fix.
 Host zero one two
-  ProxyCommand {{ cloudflared }} access ssh --hostname %h
+{% if windows %}
+  ProxyCommand {{ win_fleet_wrapper }} %h
+{% else %}
+  ProxyCommand {{ fleet_access_ssh }} %h
+{% endif %}
 
 # NO DEV CONTAINER IS IN THIS BLOCK, and the reason is what they are rather than where
 # they are. `zero-dev-dd`, `zero-dev-ds` and `zero-dev-or3` were aliases for the
@@ -108,8 +114,10 @@ Host one-s24
 Host two-s24
   HostName ssh-two.gsrpi.uk
 
+# The phone runs its own copy of the fleet script, so the phone's token is the one the
+# gate sees. The phone has to have run the client play first, or this has no script to run.
 Host *-s24
-  ProxyCommand ssh s24 {{ phone_cloudflared }} access ssh --hostname %h
+  ProxyCommand ssh s24 {{ phone_fleet_access_ssh }} %h
 
 Host s24
   # 127.0.0.1, NOT localhost: ssh tries ::1 first and adb forward binds IPv4 only, so the

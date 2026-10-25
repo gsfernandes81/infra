@@ -1,0 +1,579 @@
+---
+# GATE ONE BOX'S SSH HOSTNAME BEHIND CLOUDFLARE ACCESS, admitting the fleet's per-client
+# service tokens. Run from the control node, one host per run, `one` first and `zero` last:
+#
+#     cd ansible
+#     ansible-playbook playbooks/server-create-fleet-ssh-access.yml -e host=one --check
+#     ansible-playbook playbooks/server-create-fleet-ssh-access.yml -e host=one
+#     ansible-playbook playbooks/server-create-fleet-ssh-access.yml -e host=one -e remove=true   # undo
+#
+# No -K: it touches no host. It writes only at Cloudflare, with the API token at
+# ~/.config/cloudflare/api-token on this machine, and it probes from here.
+#
+# WHY IT IS SHAPED THIS WAY. Each box's ssh hostname is the only way into it from outside
+# the house, and every jump alias crosses one of them, so a gate that admits no client is
+# a lockout of every Pi at once. So:
+#
+#   - Every client mints its own `fleet-<client>` token first (client-home-ssh-config.yml),
+#     while presenting it is still harmless. This play admits every such token that exists
+#     and stops for a yes on the list, because only the owner knows every client.
+#   - One reusable policy, `fleet ssh service tokens`, and one application per host,
+#     `fleet ssh <host>`, created already linked to it. An application never exists
+#     admitting nobody, and undoing a host is deleting its application, which leaves the
+#     other two as they were.
+#   - It proves the result from here with probes that cannot pass for the wrong reason:
+#     the same ssh probe is first run against the OPEN host, so a probe that cannot pass
+#     from this client stops the run before anything is written; then it waits until the
+#     hostname refuses an unauthenticated request, because Access changes take time to
+#     reach the edge; only then does it run the ssh probe again, with -S none so an open
+#     multiplexed connection cannot answer for Cloudflare.
+#   - Any failure after the application is created deletes it again, so a run ends either
+#     gated and working or open as before.
+#
+# It can prove only THIS machine's token. After each host, check the laptop (the summary
+# prints how) before gating the next.
+#
+# Refuses, rather than guesses: a host not in the fleet; a hostname that is not that
+# host's tracked ssh rule; an application on the hostname it did not make (the ones from
+# August may still exist, set to bypass, and removing Access in front of something is the
+# owner's call); a fleet token that expires; no token for this client.
+#
+# The reasoning, and the review that shaped it: docs/decisions.md § "The fleet's ssh
+# hostnames are gated by per-client service tokens".
+
+- name: Check the inventory is loaded
+  ansible.builtin.import_playbook: _assert-inventory.yml
+  vars:
+    required_group: control
+
+- name: Gate a box's ssh hostname behind Access
+  hosts: control
+  gather_facts: false
+
+  vars:
+    fleet_host: "{{ host | default('') }}"
+    fleet_hostname: "ssh-{{ fleet_host }}.{{ dns_zone }}"
+    fleet_app_name: "fleet ssh {{ fleet_host }}"
+    fleet_policy_name: fleet ssh service tokens
+    fleet_remove: "{{ remove | default(false) | bool }}"
+    cf_api: https://api.cloudflare.com/client/v4
+    # The probes. URLs are variables so a test can point them at a stand-in.
+    fleet_url: "https://{{ fleet_hostname }}/"
+    control_url: "https://infra-dev.{{ dns_zone }}/"
+    # About 90 seconds for a new application to reach the edge.
+    gate_retries: 18
+    gate_delay: 5
+    # -S none and ControlMaster=no: never an existing multiplexed connection, always a new
+    # one through Cloudflare. BatchMode: a prompt here would hang the run.
+    ssh_probe: [ssh, -S, none, -o, ControlMaster=no, -o, BatchMode=yes, -o, ConnectTimeout=20, "{{ fleet_host }}", "true"]
+    client_name: >-
+      {{ client if client is defined
+         else ('phone' if (lookup('env', 'TERMUX_VERSION') | length) > 0
+               else lookup('pipe', 'uname -n')) }}
+    own_token_name: "fleet-{{ client_name }}"
+    home: "{{ lookup('env', 'HOME') }}"
+
+  tasks:
+    # ── what is being gated ──────────────────────────────────────────────────
+    - name: Check -e host names a box in the fleet
+      ansible.builtin.assert:
+        that: fleet_host in groups['fleet']
+        fail_msg: "Say which box: -e host=one (then two, then zero). Got '{{ fleet_host }}'."
+        success_msg: "{{ fleet_hostname }}"
+
+    - name: Read {{ fleet_host }}'s tracked tunnel routing
+      ansible.builtin.set_fact:
+        fleet_ingress: "{{ lookup('file', control_checkout ~ '/hosts/' ~ fleet_host ~ '/system/cloudflared-config.yml') | from_yaml }}"
+
+    - name: Check {{ fleet_hostname }} is {{ fleet_host }}'s ssh rule
+      # The hostname is derived, so this is what keeps the derivation and the routing the
+      # same: gating a name the tunnel does not route would prove nothing.
+      ansible.builtin.assert:
+        that: >-
+          fleet_ingress.ingress | selectattr('hostname', 'defined')
+          | selectattr('hostname', 'eq', fleet_hostname)
+          | selectattr('service', 'eq', 'ssh://127.0.0.1:22') | list | length == 1
+        fail_msg: >-
+          hosts/{{ fleet_host }}/system/cloudflared-config.yml has no rule sending
+          {{ fleet_hostname }} to ssh://127.0.0.1:22. Nothing done.
+        success_msg: "{{ fleet_hostname }} -> ssh://127.0.0.1:22 on {{ fleet_host }}'s tunnel"
+
+    # ── this client: the probe has to be able to run from here ───────────────
+    - name: Read this client's ssh settings for {{ fleet_host }}
+      ansible.builtin.command:
+        argv: [ssh, -G, "{{ fleet_host }}"]
+      register: ssh_g
+      changed_when: false
+      check_mode: false
+
+    - name: Probe this client's fleet token file
+      ansible.builtin.stat:
+        path: "{{ home }}/.config/fleet/token"
+      register: own_tf
+      check_mode: false
+
+    - name: Check this client presents its fleet token
+      # Without both, the probe after the gate would fail on this client, and the rescue
+      # would undo a gate that may be fine for every other client.
+      ansible.builtin.assert:
+        that:
+          - ssh_g.stdout is search('(?m)^proxycommand .*/\.config/fleet/access-ssh ')
+          - own_tf.stat.exists | default(false)
+        fail_msg: >-
+          This client is not set up for the gate: its ssh config for {{ fleet_host }} does not
+          run ~/.config/fleet/access-ssh, or it has no ~/.config/fleet/token. Run
+          client-home-ssh-config.yml here first. Nothing done.
+        success_msg: "this client loads its fleet token for {{ fleet_host }}"
+
+    # ── Cloudflare: the account, and what already covers the hostname ────────
+    - name: Read the Cloudflare API token
+      ansible.builtin.import_tasks: _cf-api-token.yml
+
+    - name: Read the account for {{ dns_zone }}
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/zones?name={{ dns_zone }}"
+        headers: { Authorization: "Bearer {{ cf_token }}" }
+      register: cf_zone_q
+      check_mode: false
+      changed_when: false
+      no_log: true
+
+    - name: Check the API token can see {{ dns_zone }}
+      ansible.builtin.assert:
+        that:
+          - cf_zone_q.json.success | default(false)
+          - (cf_zone_q.json.result | default([])) | length > 0
+        fail_msg: >-
+          The API token could not read zone {{ dns_zone }}: it is wrong, or missing Zone:Read.
+          ansible/README.md § "The Cloudflare API token".
+        success_msg: "zone {{ dns_zone }} is visible to this token"
+
+    - name: Read the account's Access applications
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_zone_q.json.result[0].account.id }}/access/apps"
+        headers: { Authorization: "Bearer {{ cf_token }}" }
+      register: cf_apps_q
+      check_mode: false
+      changed_when: false
+      no_log: true
+
+    # Covering means `domain`, any public `destinations` entry, or the deprecated
+    # `self_hosted_domains`, where an application from before `destinations` names it.
+    - name: Note which applications cover {{ fleet_hostname }}
+      ansible.builtin.set_fact:
+        cf_account_id: "{{ cf_zone_q.json.result[0].account.id }}"
+        fleet_covering: >-
+          {%- set out = [] -%}
+          {%- for a in cf_apps_q.json.result | default([]) -%}
+            {%- set uris = (a.destinations | default([]) | selectattr('uri', 'defined')
+                            | map(attribute='uri') | list)
+                           + (a.self_hosted_domains | default([])) + [a.domain | default('')] -%}
+            {%- if fleet_hostname in (uris | map('regex_replace', '/.*$', '') | list) -%}
+              {%- set _ = out.append({'id': a.id, 'name': a.name | default('?'), 'policies': a.policies | default([])}) -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ out }}
+
+    - name: Note this play's own application, if it exists
+      ansible.builtin.set_fact:
+        fleet_app: "{{ fleet_covering | selectattr('name', 'eq', fleet_app_name) | list | first | default({}) }}"
+        fleet_foreign: "{{ fleet_covering | rejectattr('name', 'eq', fleet_app_name) | list }}"
+
+    - name: Check no other Access application covers {{ fleet_hostname }}
+      ansible.builtin.assert:
+        that: fleet_foreign | length == 0
+        fail_msg: >-
+          {{ fleet_hostname }} is already covered by Access applications this play did not
+          make: {{ fleet_foreign | map(attribute='name') | list }} ({{ fleet_foreign
+          | map(attribute='id') | list }}). They may be the August ones, set to bypass. Look
+          at them in Zero Trust -> Access -> Applications and delete them if they are; then
+          re-run. Nothing done.
+        success_msg: "{{ 'only ' ~ fleet_app_name ~ ' covers it' if fleet_app else 'nothing covers it yet' }}"
+
+    # ── undo: -e remove=true ─────────────────────────────────────────────────
+    - name: "If removing: delete {{ fleet_app_name }}"
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ fleet_app.id }}"
+        method: DELETE
+        status_code: [200, 202, 204]
+        headers: { Authorization: "Bearer {{ cf_token }}" }
+      register: fleet_del
+      failed_when: false
+      no_log: true
+      when: fleet_remove and (fleet_app | length > 0) and not ansible_check_mode
+
+    - name: "If removing: check {{ fleet_app_name }} was deleted"
+      ansible.builtin.assert:
+        that: fleet_del.status | default(0) in [200, 202, 204]
+        fail_msg: >-
+          Could not delete {{ fleet_app_name }}: HTTP {{ fleet_del.status | default('?') }}
+          {{ fleet_del.json.errors | default([]) }}. Delete it in Zero Trust -> Access ->
+          Applications instead.
+        success_msg: "{{ fleet_app_name }} deleted; {{ fleet_hostname }} is open again (the policy and the tokens are kept)"
+      when: fleet_del is not skipped
+
+    - name: "If removing: print the outcome"
+      ansible.builtin.debug:
+        msg: >-
+          {{ ('--check: would delete ' ~ fleet_app_name) if ansible_check_mode and fleet_app
+             else ('no ' ~ fleet_app_name ~ ' to delete; ' ~ fleet_hostname ~ ' is not gated by this play')
+             if not fleet_app else (fleet_app_name ~ ' deleted') }}.
+      changed_when: true
+      when: fleet_remove
+
+    - name: "If removing: stop here"
+      ansible.builtin.meta: end_host
+      when: fleet_remove
+
+    # ── calibrate the probes against known states ────────────────────────────
+    - name: Probe infra-dev, the known-gated control
+      ansible.builtin.uri:
+        url: "{{ control_url }}"
+        follow_redirects: none
+        status_code: [-1, 200, 301, 302, 401, 403, 404, 502, 503, 530]
+        timeout: 20
+      register: probe_control
+      check_mode: false
+      changed_when: false
+      failed_when: false
+      ignore_errors: true
+
+    - name: Probe {{ fleet_hostname }} before anything is written
+      ansible.builtin.uri:
+        url: "{{ fleet_url }}"
+        follow_redirects: none
+        status_code: [-1, 200, 301, 302, 401, 403, 404, 502, 503, 530]
+        timeout: 20
+      register: probe_before
+      check_mode: false
+      changed_when: false
+      failed_when: false
+      ignore_errors: true
+
+    - name: Note what a gated answer looks like
+      # 403, or a redirect to the team's Access login. Never "not 200": a DNS or TLS failure
+      # is not 200 either.
+      ansible.builtin.set_fact:
+        control_gated: >-
+          {{ probe_control.status | default(0) == 403
+             or (probe_control.status | default(0) == 302
+                 and (probe_control.location | default('')) is search('cloudflareaccess\.com')) }}
+        fleet_gated_before: >-
+          {{ probe_before.status | default(0) == 403
+             or (probe_before.status | default(0) == 302
+                 and (probe_before.location | default('')) is search('cloudflareaccess\.com')) }}
+
+    - name: Check the probes read the known states correctly
+      ansible.builtin.assert:
+        that:
+          - control_gated | bool
+          - (probe_before.status | default(0) == 200) if not fleet_app else (fleet_gated_before | bool)
+        fail_msg: >-
+          The probes do not read known states as expected, so their verdict after the write
+          could not be trusted. {{ control_url }} (gated) answered
+          {{ probe_control.status | default('nothing') }}; {{ fleet_url }} ({{ 'gated by ' ~
+          fleet_app_name if fleet_app else 'open' }}) answered {{ probe_before.status | default('nothing') }}.
+          Nothing done.
+        success_msg: "control reads gated; {{ fleet_hostname }} reads {{ 'gated' if fleet_app else 'open' }}"
+
+    - name: Probe ssh to {{ fleet_host }} through its open tunnel
+      # The same probe as after the gate, against the open host: if it cannot pass now (a
+      # key behind a passphrase, a host key prompt), its failure later would mean nothing.
+      ansible.builtin.command:
+        argv: "{{ ssh_probe }}"
+      register: ssh_before
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: not fleet_app
+
+    - name: Check ssh to {{ fleet_host }} works from here before the gate
+      ansible.builtin.assert:
+        that: ssh_before.rc == 0
+        fail_msg: >-
+          `{{ ssh_probe | join(' ') }}` fails from this client while {{ fleet_hostname }} is
+          still open (rc {{ ssh_before.rc }}: {{ ssh_before.stderr | default('') | trim }}), so it
+          cannot prove anything after the gate. It must run without a prompt: a key in an
+          agent or without a passphrase, and the host key already known. Nothing done.
+        success_msg: "ssh {{ fleet_host }} works from here, the probe is calibrated"
+      when: not fleet_app
+
+    # ── the tokens to admit ──────────────────────────────────────────────────
+    - name: Read the account's service tokens
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/service_tokens"
+        headers: { Authorization: "Bearer {{ cf_token }}" }
+      register: cf_st_q
+      check_mode: false
+      changed_when: false
+      no_log: true
+
+    - name: Note the fleet tokens
+      ansible.builtin.set_fact:
+        fleet_tokens: >-
+          {{ cf_st_q.json.result | default([]) | selectattr('name', 'defined')
+             | selectattr('name', 'match', '^fleet-') | list }}
+
+    - name: Check every fleet token never expires and this client has one
+      ansible.builtin.assert:
+        that:
+          - own_token_name in (fleet_tokens | map(attribute='name') | list)
+          - fleet_tokens | rejectattr('duration', 'defined') | list | length == 0
+          - fleet_tokens | rejectattr('duration', 'eq', 'forever') | list | length == 0
+          - fleet_tokens | selectattr('enabled', 'defined') | rejectattr('enabled') | list | length == 0
+        fail_msg: >-
+          Fleet tokens: {{ fleet_tokens | map(attribute='name') | list }}, durations
+          {{ fleet_tokens | map(attribute='duration') | list }}. This client's must be among
+          them ({{ own_token_name }}), and every one must be enabled and never expire, or the
+          gate would admit a client that is shut out later. Run client-home-ssh-config.yml
+          -e replace_token=true on the client whose token is wrong. Nothing done.
+        success_msg: "{{ fleet_tokens | length }} fleet tokens, none expiring"
+
+    - name: "Ask before gating {{ fleet_hostname }}"
+      ansible.builtin.pause:
+        prompt: |
+
+          {{ 'Converge' if fleet_app else 'Gate' }} {{ fleet_hostname }}, admitting only these clients:
+
+            {{ fleet_tokens | map(attribute='name') | join('\n  ') }}
+
+          A client you use that is not in this list is shut out of {{ fleet_host }} through its
+          tunnel until it runs client-home-ssh-config.yml. Type yes to go on
+      register: fleet_confirm
+      when: not ansible_check_mode
+
+    - name: Check the answer was yes
+      ansible.builtin.assert:
+        that: (fleet_confirm.user_input | default('') | trim | lower) == 'yes'
+        fail_msg: "Not confirmed. Nothing done."
+        success_msg: "confirmed"
+      when: not ansible_check_mode
+
+    - name: "--check only: print what a real run would do"
+      ansible.builtin.debug:
+        msg: >-
+          --check: would {{ 'create' if not fleet_app else 'keep' }} {{ fleet_app_name }} on
+          {{ fleet_hostname }}, linked to "{{ fleet_policy_name }}" admitting
+          {{ fleet_tokens | map(attribute='name') | list }}, then wait for the hostname to
+          refuse an unauthenticated request and ssh {{ fleet_host }} through it.
+          Nothing was written.
+      changed_when: true
+      when: ansible_check_mode
+
+    # ── the write, the proof, and the undo if the proof fails ────────────────
+    - name: Gate {{ fleet_hostname }} and prove it
+      when: not ansible_check_mode
+      block:
+        - name: Read the account's reusable Access policies
+          ansible.builtin.uri:
+            url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/policies"
+            headers: { Authorization: "Bearer {{ cf_token }}" }
+          register: cf_pol_q
+          changed_when: false
+          no_log: true
+
+        - name: Note the {{ fleet_policy_name }} policy
+          ansible.builtin.set_fact:
+            fleet_pol: "{{ cf_pol_q.json.result | default([]) | selectattr('name', 'eq', fleet_policy_name) | list | first | default({}) }}"
+            fleet_include: >-
+              {%- set out = [] -%}
+              {%- for t in fleet_tokens -%}
+                {%- set _ = out.append({'service_token': {'token_id': t.id}}) -%}
+              {%- endfor -%}
+              {{ out }}
+
+        - name: Write the {{ fleet_policy_name }} policy
+          # Every fleet token, plus any token id already in it, so a write here never takes a
+          # client out. decision: non_identity, because `allow` expects an identity and
+          # sends a headless client to a login page.
+          ansible.builtin.uri:
+            url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/policies{{ ('/' ~ fleet_pol.id) if fleet_pol else '' }}"
+            method: "{{ 'PUT' if fleet_pol else 'POST' }}"
+            status_code: [200, 201]
+            headers: { Authorization: "Bearer {{ cf_token }}" }
+            body_format: json
+            body:
+              name: "{{ fleet_policy_name }}"
+              decision: non_identity
+              exclude: "{{ fleet_pol.exclude | default([]) }}"
+              require: "{{ fleet_pol.require | default([]) }}"
+              include: >-
+                {{ (fleet_pol.include | default([]))
+                   + (fleet_include | rejectattr('service_token.token_id', 'in',
+                        (fleet_pol.include | default([]) | selectattr('service_token', 'defined')
+                         | map(attribute='service_token.token_id') | list)) | list) }}
+          register: fleet_pol_w
+          failed_when: false
+          no_log: true
+
+        - name: Check the policy was written
+          ansible.builtin.assert:
+            that:
+              - fleet_pol_w.status | default(0) in [200, 201]
+              - fleet_pol_w.json.success | default(false)
+            fail_msg: >-
+              The "{{ fleet_policy_name }}" policy was not written: HTTP {{ fleet_pol_w.status | default('?') }}
+              {{ fleet_pol_w.json.errors | default([]) }}. A 403 means the API token lacks
+              Account : Access: Apps and Policies : Edit. No application was touched.
+            success_msg: "{{ fleet_policy_name }} written"
+
+        - name: Read the policy back
+          ansible.builtin.uri:
+            url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/policies/{{ fleet_pol_w.json.result.id }}"
+            headers: { Authorization: "Bearer {{ cf_token }}" }
+          register: fleet_pol_r
+          changed_when: false
+          no_log: true
+
+        - name: Check the policy admits every fleet token
+          ansible.builtin.assert:
+            that:
+              - fleet_pol_r.json.result.decision | default('') == 'non_identity'
+              - >-
+                fleet_tokens | map(attribute='id')
+                | difference(fleet_pol_r.json.result.include | default([])
+                             | selectattr('service_token', 'defined')
+                             | map(attribute='service_token.token_id') | list)
+                | list | length == 0
+            fail_msg: "The policy read back does not admit every fleet token. No application was touched."
+            success_msg: "{{ fleet_policy_name }} admits all {{ fleet_tokens | length }}"
+
+        - name: "If new: create {{ fleet_app_name }}, linked to the policy"
+          # In one call, so the application never exists admitting nobody. `destinations`,
+          # not the deprecated `self_hosted_domains`.
+          ansible.builtin.uri:
+            url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps"
+            method: POST
+            status_code: [200, 201]
+            headers: { Authorization: "Bearer {{ cf_token }}" }
+            body_format: json
+            body:
+              name: "{{ fleet_app_name }}"
+              type: self_hosted
+              domain: "{{ fleet_hostname }}"
+              destinations: [{ type: public, uri: "{{ fleet_hostname }}" }]
+              session_duration: 24h
+              app_launcher_visible: false
+              policies: [{ id: "{{ fleet_pol_w.json.result.id }}", precedence: 1 }]
+          register: fleet_app_w
+          failed_when: false
+          no_log: true
+          when: not fleet_app
+
+        - name: Note the application this run created
+          ansible.builtin.set_fact:
+            fleet_created_id: "{{ fleet_app_w.json.result.id }}"
+          when:
+            - fleet_app_w is not skipped
+            - fleet_app_w.json.result.id is defined
+
+        - name: "If new: check {{ fleet_app_name }} was created"
+          ansible.builtin.assert:
+            that:
+              - fleet_app_w.status | default(0) in [200, 201]
+              - fleet_app_w.json.success | default(false)
+            fail_msg: >-
+              {{ fleet_app_name }} was not created: HTTP {{ fleet_app_w.status | default('?') }}
+              {{ fleet_app_w.json.errors | default([]) }}.
+            success_msg: "{{ fleet_app_name }} created"
+          when: fleet_app_w is not skipped
+
+        - name: Read {{ fleet_app_name }} back
+          ansible.builtin.uri:
+            url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ fleet_created_id | default(fleet_app.id) }}"
+            headers: { Authorization: "Bearer {{ cf_token }}" }
+          register: fleet_app_r
+          changed_when: false
+          no_log: true
+
+        - name: Check {{ fleet_app_name }} is linked to the policy
+          ansible.builtin.assert:
+            that: >-
+              fleet_pol_w.json.result.id in (fleet_app_r.json.result.policies | default([])
+              | map(attribute='id') | list)
+            fail_msg: >-
+              {{ fleet_app_name }} does not carry the "{{ fleet_policy_name }}" policy, so it
+              would admit nobody.
+            success_msg: "{{ fleet_app_name }} carries {{ fleet_policy_name }}"
+
+        - name: Wait for {{ fleet_hostname }} to refuse an unauthenticated request
+          ansible.builtin.uri:
+            url: "{{ fleet_url }}"
+            follow_redirects: none
+            status_code: [-1, 200, 301, 302, 401, 403, 404, 502, 503, 530]
+            timeout: 20
+          register: probe_after
+          until: >-
+            probe_after.status | default(0) == 403
+            or (probe_after.status | default(0) == 302
+                and (probe_after.location | default('')) is search('cloudflareaccess\.com'))
+          retries: "{{ gate_retries }}"
+          delay: "{{ gate_delay }}"
+          changed_when: false
+          failed_when: false
+          # No answer fails `uri` whatever failed_when says, and exhausted retries mark the
+          # task failed; the assert below gives the verdict, and the rescue the undo.
+          ignore_errors: true
+
+        - name: Check {{ fleet_hostname }} is gated
+          ansible.builtin.assert:
+            that: >-
+              probe_after.status | default(0) == 403
+              or (probe_after.status | default(0) == 302
+                  and (probe_after.location | default('')) is search('cloudflareaccess\.com'))
+            fail_msg: >-
+              {{ fleet_hostname }} still answers an unauthenticated request with
+              {{ probe_after.status | default('nothing') }} after
+              {{ (gate_retries | int) * (gate_delay | int) }}s, so the gate is not in force.
+            success_msg: "{{ fleet_hostname }} refuses an unauthenticated request"
+
+        - name: Probe ssh to {{ fleet_host }} through the gate
+          ansible.builtin.command:
+            argv: "{{ ssh_probe }}"
+          register: ssh_after
+          changed_when: false
+          failed_when: false
+
+        - name: Check ssh to {{ fleet_host }} still works from here
+          ansible.builtin.assert:
+            that: ssh_after.rc == 0
+            fail_msg: >-
+              ssh {{ fleet_host }} fails through the gate (rc {{ ssh_after.rc }}:
+              {{ ssh_after.stderr | default('') | trim }}). `websocket: bad handshake` means
+              Access refused this client's token.
+            success_msg: "ssh {{ fleet_host }} gets through the gate with this client's token"
+
+      rescue:
+        - name: "On failure: delete the application this run created"
+          ansible.builtin.uri:
+            url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ fleet_created_id }}"
+            method: DELETE
+            status_code: [200, 202, 204]
+            headers: { Authorization: "Bearer {{ cf_token }}" }
+          register: fleet_undo
+          failed_when: false
+          no_log: true
+          when: fleet_created_id is defined
+
+        - name: "On failure: stop, saying what failed and what is left"
+          ansible.builtin.fail:
+            msg: >-
+              {{ ansible_failed_task.name | default('a step') }} failed:
+              {{ ansible_failed_result.msg | default('') }}
+              {{ ('The application it created was deleted, so ' ~ fleet_hostname ~ ' is open as before.')
+                 if (fleet_undo.status | default(0)) in [200, 202, 204]
+                 else ('IT COULD NOT BE DELETED (HTTP ' ~ (fleet_undo.status | default('?')) ~ '): delete '
+                       ~ fleet_app_name ~ ' in Zero Trust -> Access -> Applications, or re-run with -e remove=true.')
+                 if fleet_created_id is defined
+                 else ('No application was created by this run.' if not fleet_app
+                       else (fleet_app_name ~ ' existed before this run and is left in place; -e remove=true opens the hostname.')) }}
+
+    - name: Print what is gated and what to check next
+      ansible.builtin.debug:
+        msg:
+          - "{{ fleet_hostname }} is gated by {{ fleet_app_name }}, admitting {{ fleet_tokens | map(attribute='name') | join(', ') }}."
+          - "Now check the laptop before the next host: in WSL `ssh -S none {{ fleet_host }} true`, and from Windows `ssh {{ fleet_host }}`."
+          - "Undo: -e host={{ fleet_host }} -e remove=true, or delete {{ fleet_app_name }} in Zero Trust -> Access -> Applications."
+          - "{{ {'one': 'Next: -e host=two.', 'two': 'Next: -e host=zero, the critical box, last.', 'zero': 'If one and two are gated too, all three are done: close infra#12.'}[fleet_host] }}"
+      changed_when: true
+      when: not ansible_check_mode

@@ -33,9 +33,10 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 
 | I want to… | Run | Needs |
 |---|---|---|
-| set up this phone or laptop: every ssh alias, every service token, Windows too from WSL | `client-home-ssh-config.yml` | the [API token](#the-cloudflare-api-token) on this machine; it mints the service tokens itself |
+| set up this phone or laptop: every ssh alias, every service token (the fleet's `fleet-<client>` too, never expiring), Windows too from WSL | `client-home-ssh-config.yml` | the [API token](#the-cloudflare-api-token) on this machine; it mints the service tokens itself |
 | rotate one dev container's service token on this client, or add it once its tunnel exists | `client-home-ssh-config.yml -e container=or3-dev -e replace_token=true` | the same |
 | let a new phone or laptop into the dev containers | `server-add-authorized-keys.yml -e client_pubkey_file=~/laptop.pub` | a route to `zero` |
+| gate one Pi's ssh hostname behind Access, admitting each client's fleet token, proved from here and undone if the proof fails. **One host per run, `one` first, `zero` last** | `server-create-fleet-ssh-access.yml -e host=one` · `-e remove=true` to undo · no `-K` | the API token, and this client set up by the play above |
 | create a dev container: its tunnel, DNS, Access, and (for `infra-dev`) its host side | `server-create-dev-container.yml` · `-e container=or3-dev` for another | the [API token](#the-cloudflare-api-token) |
 | see what runs where, read-only, into `docs/fleet-inventory.md` — a full run that changed it commits it and asks before pushing | `server-generate-fleet-inventory.yml -K` · `-e push=true` / `push=false` / `commit=false` | sudo, and this checkout exactly at `origin/main` |
 | install the packages each Pi should have | `server-install-packages.yml -K` · `-l <host>` | sudo |
@@ -66,13 +67,14 @@ proves the token and shows what exists. The deployment tunnel play's `--check` s
 `-K`: the read that decides whether its tunnel already exists is of a file only root can
 open.
 
-**Only `server-generate-fleet-inventory.yml` is read-only** on the hosts. On the control node it
-writes the report and commits it. Every other `server-` play changes something: packages,
-**boot-path `/etc` files**, the cloudflared binary, tunnels and DNS, `authorized_keys` on
-`zero`. **The two `server-deploy-` plays are the ones that start a deployment**, Phase 3's
-"Ansible drives deployments": `garmin-mcp` first, then `send2ereader`.
-`server-create-dev-container.yml` prints a secret that cannot be fetched again.
-`client-home-ssh-config.yml` writes ssh config and a 0600 service token on the client.
+**Only `server-generate-fleet-inventory.yml` is read-only** on the hosts. On the control
+node it writes the report and commits it. Every other `server-` play changes something:
+packages, **boot-path `/etc` files**, the cloudflared binary, tunnels and DNS,
+`authorized_keys` on `zero`, Access in front of the fleet's ssh hostnames. **The two
+`server-deploy-` plays are the ones that start a deployment**, Phase 3's "Ansible drives
+deployments": `garmin-mcp` first, then `send2ereader`. `server-create-dev-container.yml`
+prints a secret that cannot be fetched again. `client-home-ssh-config.yml` writes ssh
+config and a 0600 service token on the client.
 
 The halves, for reading rather than running:
 
@@ -335,13 +337,15 @@ deployment whose `edge.yml` names `request_headers` gets one rule in the zone's
 Rules* guide lists Transform Rules : Edit). A token minted before then lacks it — **edit the
 existing token and add the row**; the play stops with exactly that instruction on a 403.
 
-Which play uses which, so a 403 can be read: `client-home-ssh-config.yml` needs Zone Read
-and both Access rows (it mints service tokens and edits policies); `server-create-dev-container.yml`
-needs Cloudflare Tunnel, Zone Read, DNS and Access: Apps and Policies, and so does
+Which play uses which, so a 403 can be read: `server-create-fleet-ssh-access.yml` needs
+Zone Read, Access: Apps and Policies and Access: Service Tokens (it only reads the
+tokens); `client-home-ssh-config.yml` needs Zone Read and both Access rows (it mints
+service tokens and edits policies); `server-create-dev-container.yml` needs Cloudflare
+Tunnel, Zone Read, DNS and Access: Apps and Policies, and so does
 `server-create-deployment-tunnel.yml` (the Access row only for a deployment with a login,
-plus Transform Rules for one with `request_headers`); `server-create-tunnel.yml`
-needs Cloudflare Tunnel alone; `server-cutover-tunnel.yml` and `server-delete-tunnel.yml`
-need Cloudflare Tunnel, Zone Read and DNS. One token carrying all six is the point.
+plus Transform Rules for one with `request_headers`); `server-create-tunnel.yml` needs
+Cloudflare Tunnel alone; `server-cutover-tunnel.yml` and `server-delete-tunnel.yml` need
+Cloudflare Tunnel, Zone Read and DNS. One token carrying all six is the point.
 
 ### The Access service tokens are minted, not pasted
 

@@ -8,9 +8,11 @@
 # own block in place, so re-running either one cannot disturb the other or append a
 # duplicate.
 #
-# THIS PLAY WRITES ONE FILE ON THE CONTROL NODE. It touches no host in the fleet, needs
-# no become, and reaches nothing over the network except `command -v cloudflared`. It is
-# safe to re-run at any time, including from a rescue.
+# THIS PLAY WRITES ON THE CONTROL NODE ONLY: the ssh block, and the small script its
+# ProxyCommand runs (~/.config/fleet/access-ssh, which loads this client's fleet Access
+# token into cloudflared when there is one; _client-fleet-token.yml mints the token). It
+# touches no host in the fleet, needs no become, and reaches nothing over the network. It
+# is safe to re-run at any time, including from a rescue.
 #
 #   ansible-playbook playbooks/client-home-ssh-config.yml --tags ssh
 #
@@ -85,10 +87,28 @@
     # fault. On for POSIX clients, off for the Windows render.
     multiplex: true
 
-    # cloudflared AS THE PHONE SEES IT. The -s24 aliases have the phone run it, so this
-    # is a Termux path and is never executed on the client writing this file. Absolute,
-    # because a non-interactive ssh session's PATH is not Termux's interactive one.
-    phone_cloudflared: "/data/data/com.termux/files/usr/bin/cloudflared"
+    # The fleet's Access token, and the script that hands it to cloudflared. The token
+    # is minted and written by _client-fleet-token.yml; this play writes the script, which
+    # holds no secret, so `--tags ssh` alone leaves a working (if tokenless) client.
+    fleet_dir: "{{ home }}/.config/fleet"
+    fleet_token_file: "{{ fleet_dir }}/token"
+    fleet_access_ssh: "{{ fleet_dir }}/access-ssh"
+
+    # The PHONE's copy of that script, as the phone names it. The -s24 aliases have the
+    # phone run it over ssh, so this is a Termux path and is never executed on the client
+    # writing this file. Absolute, because a non-interactive ssh session's PATH is not
+    # Termux's interactive one.
+    phone_fleet_access_ssh: "/data/data/com.termux/files/home/.config/fleet/access-ssh"
+
+    # The Windows side of the laptop: the wrapper that is the fleet ProxyCommand there, and
+    # the token it reads. Two spellings each, stated rather than derived, as above.
+    windows_home_win: 'C:\Users\gavin'
+    win_fleet_wrapper: '{{ windows_home_win }}\.ssh\cf-access-fleet.cmd'
+    win_fleet_wrapper_wsl: "{{ windows_home }}/.ssh/cf-access-fleet.cmd"
+    win_fleet_token_file: '{{ windows_home_win }}\.config\fleet\token'
+
+    # Which ProxyCommand the block renders. Set per render, never globally.
+    windows: false
 
   tasks:
     # BEST EFFORT ONLY — the assertion below is on the RESULT, not on this succeeding.
@@ -143,15 +163,20 @@
     # LF anyway (the Jinja lexer normalises newlines), so refusing it would blame a dash
     # that is not there. NOT GUARDED: the paste file's own wrapper lines further down,
     # which are ASCII by hand.
-    - name: Check the fleet ssh template is plain ASCII
+    - name: Check the fleet ssh templates are plain ASCII
       ansible.builtin.assert:
-        that: lookup('file', '../templates/ssh-fleet-block.j2') is not search('[^\t\n\r -~]')
+        that: lookup('file', '../templates/' ~ item) is not search('[^\t\n\r -~]')
         fail_msg: >-
-          ansible/templates/ssh-fleet-block.j2 has a character outside printable ASCII.
+          ansible/templates/{{ item }} has a character outside printable ASCII.
           The laptop's copy of this block is read and edited under a Windows codepage,
           where an em dash or a box-drawing rule turns into several characters of
-          something else. Use -, --, or a row of - instead (docs/ssh-clients.md).
+          something else, and in the .cmd wrapper into a command. Use -, --, or a row of -
+          instead (docs/ssh-clients.md).
         quiet: true
+      loop:
+        - ssh-fleet-block.j2
+        - fleet-access-ssh.sh.j2
+        - cf-access-fleet.cmd.j2
 
     - name: Create ~/.ssh if missing, mode 700
       ansible.builtin.file:
@@ -265,6 +290,22 @@
         - "# {mark} infra-fleet (ansible/playbooks/ssh-client.yml)"
         - "# {mark} infra-fleet (ansible/playbooks/configure-client-fleet.yml)"
 
+    # The script before the block that names it, so a run that stops between the two
+    # leaves the old block, which works, rather than a block naming a missing script.
+    - name: Create ~/.config/fleet, mode 700
+      ansible.builtin.file:
+        path: "{{ fleet_dir }}"
+        state: directory
+        mode: "0700"
+
+    - name: Write the fleet ProxyCommand script, mode 700
+      ansible.builtin.template:
+        src: ../templates/fleet-access-ssh.sh.j2
+        dest: "{{ fleet_access_ssh }}"
+        mode: "0700"
+      vars:
+        cloudflared: "{{ cfd_resolved }}"
+
     # insertbefore, NOT the default append. `Host *` carries the defaults and must stay
     # last: ssh takes the first value it obtains, so a fleet block placed after it would
     # silently lose to it. If `Host *` is absent the block appends, which is correct for
@@ -371,6 +412,22 @@
         - "# {mark} infra-fleet"
       when: on_windows_client | bool
 
+    # The fleet wrapper, before the block that names it, for the reason the POSIX script
+    # comes before the POSIX block. CRLF and no mode, for the reasons on the dev
+    # containers' wrapper task in _client-dev-ssh.yml.
+    - name: "WSL only: create the Windows .ssh directory"
+      ansible.builtin.file:
+        path: "{{ windows_home }}/.ssh"
+        state: directory
+      when: on_windows_client | bool
+
+    - name: "WSL only: write cf-access-fleet.cmd"
+      ansible.builtin.template:
+        src: ../templates/cf-access-fleet.cmd.j2
+        dest: "{{ win_fleet_wrapper_wsl }}"
+        newline_sequence: "\r\n"
+      when: on_windows_client | bool
+
     # No `mode:`. /mnt/c is drvfs and does not carry Unix permissions unless mounted with
     # metadata — setting one either fails or silently does nothing, and a task that
     # pretends to have set a mode is worse than one that does not try.
@@ -387,6 +444,7 @@
         cloudflared: "{{ windows_cloudflared }}"
         adb_jump: true
         multiplex: false
+        windows: true
       when: on_windows_client | bool
 
     # Fallback for a control node that cannot see the laptop — Termux. Only written when
@@ -403,6 +461,14 @@
           # The cloudflared path below is NOT verified: this control node cannot see the
           # laptop's filesystem. Run this play from WSL and it manages that file directly,
           # checking the path first.
+          #
+          # The fleet ProxyCommand on Windows is a wrapper, saved with CRLF endings at
+          # {{ win_fleet_wrapper }}. The laptop's fleet token is minted by running the play
+          # in WSL; there is no way to make it from here.
+          # ---8<--- cf-access-fleet.cmd ---8<---
+          {{ lookup('template', '../templates/cf-access-fleet.cmd.j2') }}
+          # ---8<--- end ---8<---
+          #
           # BEGIN infra-fleet (ansible/playbooks/client-home-ssh-config.yml)
           {{ lookup('template', '../templates/ssh-fleet-block.j2') }}
           # END infra-fleet (ansible/playbooks/client-home-ssh-config.yml)
@@ -410,6 +476,7 @@
         cloudflared: "{{ windows_cloudflared }}"
         adb_jump: true
         multiplex: false
+        windows: true
       # Both conditions. -e windows_ssh_config="" means "skip the Windows half entirely",
       # as the vars comment promises — but with it empty the stat above is skipped, its
       # `exists` defaults false, and this fallback would write the paste file anyway.
@@ -421,7 +488,7 @@
     - name: Print where the fleet block was written
       ansible.builtin.debug:
         msg:
-          - "wrote the infra-fleet block into {{ ssh_config }}"
+          - "wrote the infra-fleet block into {{ ssh_config }}, and {{ fleet_access_ssh }}, its ProxyCommand"
           - >-
             windows: {{ 'managed directly at ' ~ windows_ssh_config
             if on_windows_client | bool

@@ -576,7 +576,9 @@ Confirmed from outside the same day: with no credentials, `ssh-zero`, `ssh-one` 
 with its banner, where `infra-dev` answers 403. sshd's keys-only settings are the only gate.
 The owner chose service tokens, one per client as the dev containers have, for the fix
 ([gsfernandes81/infra#12](https://github.com/gsfernandes81/infra/issues/12); the details
-are in `docs/cloudflare.md` § *Open*).
+are in `docs/cloudflare.md` § *Open*). **Built 2026-10-25, rollout not started:**
+`server-create-fleet-ssh-access.yml`, one host per run, and the steps in
+[`plans/fleet-ssh-access.md`](../plans/fleet-ssh-access.md).
 
 **Filed 2026-10-25, no phase number: the dev containers' service tokens probably expire a
 year after minting.** `_client-dev-ssh.yml` mints each `<container>-<client>` token with
