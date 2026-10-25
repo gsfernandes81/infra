@@ -907,6 +907,18 @@ no daemon (`dev/Dockerfile`): the point is `docker compose config`, which CLAUDE
 for before any compose change and which the container could not run. `DOCKER_HOST` points
 at a path that does not exist, so a command needing a daemon fails with a message.
 
+## garmin-mcp stays built on `one`, and nothing watches its upstream
+
+Considered 2026-10-25 and set aside, the owner's call: building the image on GitHub CI, and
+a check that says when upstream has moved. `garmin-mcp` is the one deployment still built
+on a box, from `SOURCE`'s sha, and a bump is a deliberate review of two upstreams and the
+tool allowlist, which no bot can do for you. A CI build would remove the Pi's build and pin
+the Python dependencies by digest, at the cost of a two-commit bump (the digest exists only
+after CI has run) and a workflow file pushed by someone with the `workflow` scope; a
+notifier would only say "upstream moved". Neither was worth it for one deployment that
+changes rarely. The way back is the `send2ereader` shape: CI publishes to ghcr, compose pins
+`tag@digest`, and Renovate then covers the image like the rest.
+
 ## The lesson worth keeping
 
 
