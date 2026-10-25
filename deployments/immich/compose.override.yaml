@@ -1,0 +1,28 @@
+# What is ours on top of Immich's release file. compose.yaml beside this is that file,
+# UNMODIFIED, so a release is taken by replacing it and reading a plain diff (SOURCE says
+# how). Compose reads this one automatically; no command changes.
+#
+# Resource limits are the only change. Measured on `zero` (Pi 5), not Immich's advice.
+#
+# NO `:?` GUARDS HERE, and that is tested, not forgotten. The data paths used to carry
+# `${UPLOAD_LOCATION:?…}` and `${DB_DATA_LOCATION:?…}` so an unset value stopped Compose
+# instead of bind-mounting an empty path (a blank library, or initdb into nothing).
+# Upstream's own `${UPLOAD_LOCATION}:/data` already does that: unset, it renders `:/data`
+# and Compose refuses it ("empty section between colons"), same for the database. Verified
+# 2026-10-25 on Compose 5.6.1, with and without this file. The message is worse; the stop
+# is the same. If a Compose upgrade ever stops refusing that, this is where the guards
+# come back: re-state each volume here with `:?`, merged by its container path.
+services:
+  immich-server:
+    deploy:
+      resources:
+        limits:
+          cpus: '3'
+          memory: '2000M'
+
+  immich-machine-learning:
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: '2000M'
