@@ -511,6 +511,34 @@
       changed_when: true
       when: (minting | bool) and ansible_check_mode
 
+    - name: "If {{ st_name }} exists: set no expiry"
+      tags: [access]
+      # Before the rotation, so a token minted with Cloudflare's one-year default comes out
+      # of this run unexpiring: the 2026-10-04 tokens were minted without a duration and
+      # would have lapsed around 2027-10-04 with `websocket: bad handshake`.
+      # failed_when: false, print, assert, as for the write below.
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/service_tokens/{{ cf_st_existing.id }}"
+        method: PUT
+        status_code: [200]
+        headers: { Authorization: "Bearer {{ cf_token }}" }
+        body_format: json
+        body: { name: "{{ st_name }}", duration: forever }
+      register: cf_st_dur
+      failed_when: false
+      no_log: true
+      when: (minting | bool) and (cf_st_existing | length > 0) and not ansible_check_mode
+
+    - name: "If {{ st_name }} exists: check no expiry"
+      tags: [access]
+      ansible.builtin.assert:
+        that: cf_st_dur.status | default(0) == 200
+        fail_msg: >-
+          Could not set "{{ st_name }}" to never expire: HTTP {{ cf_st_dur.status | default('?') }}
+          {{ cf_st_dur.json.errors | default([]) }}. Nothing rotated or written.
+        success_msg: "{{ st_name }} set to never expire"
+      when: cf_st_dur is not skipped
+
     - name: "New token only: create or rotate {{ st_name }}"
       tags: [access]
       # Rotate when it exists: Cloudflare returns a secret at creation and at rotation and
@@ -529,7 +557,7 @@
         status_code: [200, 201]
         headers: { Authorization: "Bearer {{ cf_token }}" }
         body_format: json
-        body: "{{ omit if cf_st_existing else {'name': st_name} }}"
+        body: "{{ omit if cf_st_existing else {'name': st_name, 'duration': 'forever'} }}"
       register: cf_st_w
       failed_when: false
       no_log: true
@@ -555,6 +583,35 @@
           lacks Account : Access: Service Tokens : Edit — ansible/README.md § "The
           Cloudflare API token".
         success_msg: "{{ st_name }} {{ 'rotated' if cf_st_existing else 'minted' }}"
+      when: cf_st_w is not skipped
+
+    - name: "New token only: read {{ st_name }} back"
+      tags: [access]
+      # Proves the end state rather than trusting the request: the lifetime is the one
+      # property of this token that fails a year from now, silently, if it is wrong.
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/service_tokens/{{ cf_st_w.json.result.id }}"
+        headers: { Authorization: "Bearer {{ cf_token }}" }
+      register: cf_st_r
+      check_mode: false
+      changed_when: false
+      no_log: true
+      when: cf_st_w is not skipped
+
+    - name: "New token only: check no expiry"
+      tags: [access]
+      # Before the policy write and the token file, so a token that would lapse is never
+      # admitted or written; a re-run finds it by name and sets the duration first.
+      ansible.builtin.assert:
+        that:
+          - cf_st_r.json.result.duration | default('') == 'forever'
+          - cf_st_r.json.result.enabled | default(true) | bool
+        fail_msg: >-
+          Cloudflare reports "{{ st_name }}" with duration
+          "{{ cf_st_r.json.result.duration | default('?') }}" and expiry
+          {{ cf_st_r.json.result.expires_at | default('?') }}, not `forever`, or disabled.
+          Nothing admitted or written; re-running sets the duration and rotates again.
+        success_msg: "{{ st_name }} never expires"
       when: cf_st_w is not skipped
 
     - name: "New token only: write the token into the policy"

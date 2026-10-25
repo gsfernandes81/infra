@@ -815,7 +815,9 @@ lost laptop is one token to disable: a token a policy lists cannot be deleted, a
 server play leaves disabled tokens out (review).
 
 **The tokens never expire (review).** Cloudflare's default lifetime is one year, and the
-dev containers' tokens were minted with it. A fleet token minted that way would shut every
+dev containers' tokens were minted with it (and, until 2026-10-25, the dev play still did:
+it now mints `forever` too, with the same read-back, the existing ones having been set by
+hand). A fleet token minted that way would shut every
 client out of every Pi on the same day, a year later, with the August symptom. So the
 client play mints with `duration: forever` and reads the token back before writing the
 file, and the server play refuses to admit any fleet token that expires. A token reported

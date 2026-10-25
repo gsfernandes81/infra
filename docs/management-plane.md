@@ -552,15 +552,15 @@ owner's own inbox, which is all an alert needs. The probe runs on `one`, inside 
 OAuth shim. On failure it POSTs to the Worker, behind a service token, and the Worker sends
 the mail. A Worker probing from outside would have to automate that OAuth login instead.
 
-**Filed 2026-10-25, no phase number: the dev containers' service tokens probably expire a
-year after minting.** `_client-dev-ssh.yml` mints each `<container>-<client>` token with
-only a name, and Cloudflare's API gives a token one year (8760 hours) unless told
-otherwise. The tokens minted on 2026-10-04 would then lapse around 2027-10-04, and `ssh
-infra-dev` and `ssh or3-dev` would fail with `websocket: bad handshake`, the August
-symptom. The Expiration column under Access, Service Auth, Service Tokens settles it. A
-refresh call extends a token without re-minting it; the play could mint with
-`duration: forever`, as `_client-fleet-token.yml` does for the fleet's tokens. Found by
-the Fable review of the fleet ssh gate's plan.
+**Closed 2026-10-25, no phase number: the dev containers' service tokens expired a year
+after minting.** `_client-dev-ssh.yml` minted each `<container>-<client>` token with only
+a name, and Cloudflare's API gives a token one year (8760 hours) unless told otherwise, so
+the tokens minted on 2026-10-04 would have lapsed around 2027-10-04 with `websocket: bad
+handshake`, the August symptom. The owner set the existing tokens to never expire by hand
+the same day. The play now mints with `duration: forever`, sets it on an existing token
+before rotating, and reads the token back before admitting or writing it, as
+`_client-fleet-token.yml` does for the fleet's. Found by the Fable review of the fleet ssh
+gate's plan.
 
 **2b–2e were off this list until 2026-08-22.** They come out of the `infra-dev` handoff.
 As filed, two of them outranked Phase 3: `one`'s broken services were the only things on
