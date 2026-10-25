@@ -203,17 +203,6 @@ class CallbackModule(CallbackBase):
         mins, secs = divmod(round(seconds), 60)
         return f'{mins}m{secs:02d}s'
 
-    def _fmt(seconds, live=False):
-        if live:                 # tenths while a step runs: 3.4s, then 2m04.3s
-            if seconds < 60:
-                return f'{seconds:.1f}s'
-            return f'{int(seconds) // 60}m{seconds % 60:04.1f}s'
-        if seconds < 1:
-            return f'{seconds * 1000:.0f}ms'
-        if seconds < 60:
-            return f'{seconds:.1f}s'
-        return f'{int(seconds) // 60}m{int(seconds) % 60:02d}s'
-
     def _helix(self, text, indent, width, first=None):
         """Wrap `text` Helix-style: continuations keep the indent, marked with the wrap
         indicator in the indent's last two columns. `first` replaces the first line's indent
