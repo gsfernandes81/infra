@@ -209,6 +209,53 @@
       become: true
       when: inventory_hostname in groups['containerized'] | default([])
 
+    - name: Read the btrfs subvolumes on {{ inventory_hostname }}
+      # Asked for by the owner, 2026-10-24: the inventories named the disks that hold btrfs
+      # but nothing recorded the subvolumes, so on `one` the four older ones existed in this
+      # repo only as subvolid=256…259 in fstab.
+      #
+      # NO MOUNT, and that is the point of how it is spelt. The obvious shape mounts the
+      # array's top level (fstab's noauto /mnt on `one`, /mnt/ext on `zero`) and lists it,
+      # and the owner's first ask was to do that on a throwaway directory rather than /mnt.
+      # Neither is needed: `btrfs subvolume list -a` lists EVERY subvolume of the filesystem
+      # a path is on, whatever is or is not mounted, so any mounted /media/* path is enough
+      # and this play stays one that changes nothing on any host. Each filesystem is listed
+      # once, through its first mountpoint, keyed by its uuid.
+      #
+      # gen is dropped by the template: it moves on every write, and this file is committed.
+      # Sizes are not read: without qgroups (not enabled here; enabling them is a change)
+      # the only per-subvolume figure is `btrfs filesystem du`, a walk of every file —
+      # hundreds of GiB of Immich on the critical box — which is not a read to put in an
+      # inventory. Each mount is printed with its filesystem's uuid, so the template says
+      # where each subvolume is mounted without confusing two filesystems' subvolume 256.
+      ansible.builtin.shell: |
+        if ! command -v btrfs >/dev/null 2>&1; then
+          echo "== no btrfs-progs"
+          exit 0
+        fi
+        awk '$3 == "btrfs" { print $2, $4 }' /proc/self/mounts | {
+          seen=""
+          while read -r mp opts; do
+            uuid=$(btrfs filesystem show "$mp" 2>/dev/null | sed -n 's/.*uuid: *\([0-9a-f-]*\).*/\1/p' | head -n 1)
+            if [ -z "$uuid" ]; then
+              echo "== unreadable $mp"
+              continue
+            fi
+            echo "== mount $uuid $mp $opts"
+            case " $seen " in *" $uuid "*) continue ;; esac
+            seen="$seen $uuid"
+            echo "== filesystem $uuid $mp"
+            btrfs subvolume list -a "$mp" || echo "== unreadable $mp"
+          done
+        }
+      args:
+        executable: /bin/sh
+      register: audit_btrfs
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      become: true
+
     - name: "If a read failed: print what could not be read"
       # A partial inventory that looks complete is the wrong-reason pass this repo keeps
       # designing against. If a read failed, say so on the host it failed on.
@@ -217,11 +264,14 @@
           {{ inventory_hostname }}: could not read
           {{ 'sockets ' if audit_sockets.rc | default(1) != 0 else '' }}
           {{ 'containers ' if (audit_containers.rc | default(0)) not in [0] else '' }}
+          {{ 'btrfs ' if audit_btrfs.rc | default(1) != 0 or '== unreadable' in audit_btrfs.stdout | default('') else '' }}
           — the report will show this as UNREADABLE, not as empty.
       changed_when: true
       when: >-
         audit_sockets.rc | default(1) != 0
         or (audit_containers.rc | default(0)) not in [0]
+        or audit_btrfs.rc | default(1) != 0
+        or '== unreadable' in audit_btrfs.stdout | default('')
 
     - name: Write docs/fleet-inventory.md
       # In THIS play, delegated, rather than a second play against localhost. A second

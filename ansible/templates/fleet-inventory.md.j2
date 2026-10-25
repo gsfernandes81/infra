@@ -107,6 +107,68 @@ None.
 {% endfor %}
 {% endif %}
 
+### Btrfs subvolumes
+
+{% set bl = (h.audit_btrfs | default({})).stdout_lines | default([]) %}
+{% if h.audit_btrfs is not defined or h.audit_btrfs.rc | default(1) != 0 %}
+**UNREADABLE** — treat as unknown, not as no subvolumes.
+{% elif '== no btrfs-progs' in bl %}
+**UNREADABLE** — `btrfs-progs` is not installed (`server-install-packages.yml` puts it there).
+{% else %}
+{# The read prints "== mount <uuid> <mountpoint> <options>" for every btrfs mount, and the
+   first time it meets a filesystem, "== filesystem <uuid> <mountpoint>" followed by its
+   `btrfs subvolume list -a` lines ("ID 278 gen 9 top level 5 path <FS_TREE>/syncthing").
+   String splits only: a regex group reference does not survive every quoting it passes
+   through. Mounts are keyed by uuid and subvolume id, so two filesystems' subvolume 256
+   stay apart. gen is dropped: it moves on every write, and this file is committed. #}
+{% set ns = namespace(fs=none) %}
+{% set fss = [] %}
+{% set bad = [] %}
+{% set mounted = {} %}
+{% for line in bl %}
+{% if line.startswith('== mount ') %}
+{% set w = line.split(' ') %}
+{% for o in (w[4] | default('')).split(',') if o.startswith('subvolid=') %}
+{% set k = w[2] ~ '/' ~ o[9:] %}
+{% set _ = mounted.update({k: mounted.get(k, []) + [w[3]]}) %}
+{% endfor %}
+{% elif line.startswith('== filesystem ') %}
+{% set w = line.split(' ') %}
+{% set ns.fs = {'uuid': w[2], 'via': w[3] | default(''), 'subs': []} %}
+{% set _ = fss.append(ns.fs) %}
+{% elif line.startswith('== unreadable ') %}
+{% set _ = bad.append(line[14:]) %}
+{% elif ns.fs is not none and line.startswith('ID ') and ' path ' in line %}
+{% set _ = ns.fs.subs.append({'id': line.split(' ')[1], 'path': line.split(' path ', 1)[1] | replace('<FS_TREE>/', '', 1)}) %}
+{% endif %}
+{% endfor %}
+{% for m in bad %}
+**UNREADABLE** at `{{ m }}` — a filesystem there could not be listed; treat it as unknown.
+
+{% endfor %}
+{% if not fss and not bad %}
+No btrfs filesystem mounted.
+{% endif %}
+{% for fs in fss %}
+{% set top = mounted.get(fs.uuid ~ '/5', []) %}
+Filesystem `{{ fs.uuid }}`, listed through `{{ fs.via }}`:
+
+| ID | Subvolume | Mounted at |
+|---|---|---|
+{% if top %}
+| 5 | *(top level)* | `{{ top | join('`, `') }}` |
+{% endif %}
+{% for s in fs.subs %}
+{% set at = mounted.get(fs.uuid ~ '/' ~ s.id, []) %}
+| {{ s.id }} | `{{ s.path }}` | {{ ('`' ~ (at | join('`, `')) ~ '`') if at else '—' }} |
+{% endfor %}
+{% if not fs.subs %}
+| — | *none besides the top level* | |
+{% endif %}
+
+{% endfor %}
+{% endif %}
+
 {% endfor %}
 ---
 

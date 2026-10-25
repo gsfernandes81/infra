@@ -645,6 +645,15 @@ top-level `ansible_user_dir`, which ansible-core 2.24 withdraws; every run print
 already ran, garmin's through one `garmin_home` var. (`_dev-container-host.yml` had
 already moved to `ansible_facts['env']`; this item first said otherwise.)
 
+**Closed 2026-10-25 — built, and it takes effect at the next inventory run.**
+`server-generate-fleet-inventory.yml` reads each host's btrfs subvolumes and the report gains a
+**Btrfs subvolumes** section per host: id, path, and where each is mounted. **No mount**: the
+owner asked for the top level on a throwaway directory rather than `/mnt`, and it turned out
+not to be needed, because `btrfs subvolume list -a` lists every subvolume of the filesystem from
+any mounted path, so the play still changes nothing on any host. No sizes: there are no
+qgroups, and the alternative walks every file. Tested against stand-in output in btrfs's
+formats, not yet on a box; the first run's diff is the check. The original note follows.
+
 **Filed 2026-10-24, no phase number — the inventories do not list btrfs subvolumes.** Asked
 for by the owner. `server-generate-fleet-inventory.yml` gathers containers, listeners and
 volumes, and `hw-inventory` names the disks that hold btrfs, but nothing records the
