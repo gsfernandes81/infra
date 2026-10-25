@@ -482,7 +482,7 @@ nothing and print a clean report. A read is safe in check mode by definition.
 
 ## What is in `host_vars/`, and what is deliberately not
 
-~~It is empty on purpose.~~ It holds four files: `zero.yml`, `one.yml` and `two.yml`, each
+It holds four files: `zero.yml`, `one.yml` and `two.yml`, each
 naming that host's container runtime and nothing else, and `localhost.yml`, which carries
 the two Ansible defaults that are wrong on Termux (`~` is not `$HOME` there, and there is
 no `/usr/bin/python3`).

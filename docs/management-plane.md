@@ -356,33 +356,29 @@ to have ansible in it for editing playbooks.
 `recovery.md` says both must be assumed disclosed. Rotation was deferred there to "when
 physically present", which from a ship is months away.
 
-**`infra-dev`'s tunnel is what makes that a remote operation.** It is a way into zero that
-does not traverse zero's own tunnel, and it holds the fleet key — so the two-phase
-procedure in `CLAUDE.md` § *Changing the thing you are connected through* can finally be
-satisfied for `zero`: prepare and prove inert from a session that does not cross the
-tunnel being restarted, then restart with an end-to-end probe and automatic rollback.
+**A session that does not cross the tunnel being restarted is what makes that a remote
+operation**, and the mesh gives every box one: the two-phase procedure in `CLAUDE.md`
+§ *Changing the thing you are connected through* (prepare and prove inert, then restart
+with an end-to-end probe and automatic rollback) can be satisfied from another box.
+`infra-dev` cannot serve: it has no route to the fleet (no fleet key, no
+`ssh_config.fleet`).
 
 The order, once `infra-dev` has been up long enough to be trusted:
 
-1. ~~`zero`~~ — **done 2026-08-23**, but not the way this said. The session was held on
-   the **`two` bastion**, not inside `infra-dev`: that container has no route to zero at
-   all (no fleet key, no `ssh_config.fleet`, `INFRA_DEV_FLEET` unset), so it is a safe
-   place to stand and a useless place to work from. The claim above that it "holds the
-   fleet key" was wrong. `/ready` also turned out to be insufficient alone — see
-   `recovery.md`.
+1. `zero`: **done 2026-08-23**, with the session held on the **`two` bastion**. `/ready`
+   turned out to be insufficient alone (`recovery.md`).
 2. `one` — same, with the session held on **`one` reached by a jump from `two`**.
    An earlier draft said "held on `zero` over the LAN", which cannot be done:
    `recovery.md` documents that LAN path in the other direction (`one` → `zero`), and
    `decisions.md` refuses a key on `zero` authorising it to reach `one` at all. `two` is
    the bastion for both boxes — the lifeboat direction, which is the one that entry
    blesses. Confirmed reachable 2026-08-23.
-3. `two` — ~~check first whether the token is even still inline~~. Checked 2026-08-28:
-   it is **not**. It moved to `/etc/cloudflared/two.json` on 2026-08-23 and the init
-   script runs `--config`, no `--token`. ~~The secret is unchanged, so it is still live
-   until 2g deletes the tunnel~~ — **2g deleted it on 2026-08-29, which is what voided
-   it.** Nothing disclosed is live on this fleet.
+3. `two`: **done 2026-08-29.** Its token had moved to `/etc/cloudflared/two.json` on
+   2026-08-23 (the init script runs `--config`, not `--token`), and 2g deleted the tunnel
+   on 2026-08-29, which voided the unchanged secret. Nothing disclosed is live on this
+   fleet.
 
-~~Not started~~ — **all three done**, and it was deliberately not bundled with the dev
+**All three are done.** It was deliberately not bundled with the dev
 container work at the time, because it is churn on the boxes you are connected through
 and the whole point of doing `infra-dev` first was to have somewhere safe to stand. That
 turned out to be the right order twice over: every one of these was cut over from a mesh
@@ -527,7 +523,7 @@ ones that answer the question this document started from.
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4 (OPEN 1 decided, OPEN 3 moot, 2026-10-25) | Phase 3 now tests the mechanism first, on a disposable deployment. **Owner's leaning, 2026-10-25: the sidecar model here too**, as Phase 3 settled it for deployments, in place of `infra-dev`'s connector started from its own entrypoint — likely, not yet decided |
 | 6 | ~~`dd` off `two`~~ | `two`, `one` | arm64 CI, upstream | **Dropped 2026-10-25**, the owner's call: moving `destiny-director` follows its own needs, not this plan — [gsfernandes81/infra#11](https://github.com/gsfernandes81/infra/issues/11), which may or may not end in a PR. The number is kept so the others do not shift |
 | 7 | **Rootless podman on `one`** — roadmap §2 | `one` | 3, MicroOS on `one` | **Deferred to MicroOS, 2026-10-25** — the owner's call, so `one` converts once, with memory limits, instead of on OpenRC without them and then again ([`decisions.md`](decisions.md)) |
-| 8 | ~~`two` as the scheduled read-only control node~~ | `two` | ~~6, 7~~ — none since 2026-10-25 | **Dropped 2026-10-25**, the owner's call: no control node inside the fleet. It needed Ansible on a Pi and a key on `two` reaching `zero` and `one`, which this repo refuses, and its one unique benefit, alerting with nobody at the phone, goes to the proposed Cloudflare Worker monitor (see 2h's notes), which needs no key on the fleet. The number is kept. The earlier state follows: **Not gated on 7 any more** (owner, 2026-10-25): it starts with the scheduled checks that need no root, and container inventory stays an interactive `-K` run until 7 lifts that for `one` and MicroOS for `zero`. § *The control plane* requires `two` to run no containers for this, and dropping 6 left that open for a day: **met, owner-reported 2026-10-25** — `destiny-director` no longer runs on `two`. Nothing gates Phase 8 now |
+| 8 | ~~`two` as the scheduled read-only control node~~ | `two` | ~~6, 7~~ — none since 2026-10-25 | **Dropped 2026-10-25**, the owner's call: no control node inside the fleet. It needed Ansible on a Pi and a key on `two` reaching `zero` and `one`, which this repo refuses, and its one unique benefit, alerting with nobody at the phone, goes to the proposed Cloudflare Worker monitor (see 2h's notes), which needs no key on the fleet. The number is kept. |
 
 **Filed 2026-10-24, no phase number — nothing reports a stale sidecar `cloudflared`.**
 A deployment's connector is pinned in its `compose.yaml` and is outside 2h's staggered
@@ -556,27 +552,6 @@ owner's own inbox, which is all an alert needs. The probe runs on `one`, inside 
 OAuth shim. On failure it POSTs to the Worker, behind a service token, and the Worker sends
 the mail. A Worker probing from outside would have to automate that OAuth login instead.
 
-**Closed 2026-10-25 — `zero`'s checkout had diverged from `main`** (owner-reported fixed the same
-day, and the system-files install that it blocked has run since). The original note follows.
-
-**Filed 2026-10-25, no phase number — `zero`'s checkout has diverged from `main`, and nothing installs until it is sorted.**
-`server-install-system-files.yml` stopped at its own `git pull --ff-only` on `zero`: the host's
-`~gavin/infra` holds commits `origin/main` does not, and the reverse. That checkout is also
-`infra-dev`'s `/workspace` (`INFRA_SRC`), so the likely cause is a session committing to `main`
-there — unpushed, or pushed in rebased form leaving the originals behind. **Do not reset until
-`git log --left-right --cherry-mark HEAD...origin/main` shows every local-only commit has a
-`=` twin upstream**; a `<` without one is work that exists nowhere else. The same run found `two`
-dirty with an obsolete `ports: 8080` edit to `destiny-director`'s compose file, which the owner
-had dropped. Until `zero` is sorted, every system-files install is blocked fleet-wide, since
-the play checks all hosts before installing anywhere; a deployment play pulls only its own host.
-
-**Closed 2026-10-25: the fleet ssh hostnames are behind Access.** Found open the same
-morning, with sshd answering an unauthenticated WebSocket upgrade on all three. Each now
-has a `fleet ssh <host>` application admitting per-client, never-expiring service tokens
-(`server-create-fleet-ssh-access.yml`), rolled out by the owner to all three hosts and
-both clients, and an outside probe gets 403 from each
-([gsfernandes81/infra#12](https://github.com/gsfernandes81/infra/issues/12)).
-
 **Filed 2026-10-25, no phase number: the dev containers' service tokens probably expire a
 year after minting.** `_client-dev-ssh.yml` mints each `<container>-<client>` token with
 only a name, and Cloudflare's API gives a token one year (8760 hours) unless told
@@ -587,141 +562,6 @@ refresh call extends a token without re-minting it; the play could mint with
 `duration: forever`, as `_client-fleet-token.yml` does for the fleet's tokens. Found by
 the Fable review of the fleet ssh gate's plan.
 
-**Closed 2026-10-25 — kepubify works on `one`, tested live.** From outside, through `bookit`:
-`/tools` reported `kepubify: true, kindlegen: false`; a generated EPUB sent with Kepubify ticked
-to a key held as a Kobo came back `converted with kepubify`, and the file the Kobo downloaded
-was `book.kepub.epub` with `koboSpan` markup, then was deleted. KindleGen is absent on arm64 by
-design, so a Kindle gets the EPUB as it is. The original note follows.
-
-**Filed 2026-10-25, no phase number: send2ereader's conversions probably cannot run on
-`one`.** The fork's Dockerfile, at the sha in `deployments/send2ereader/SOURCE`, downloads
-`kepubify-linux-64bit` and an i386 `kindlegen`, both x86 programs, and `one` is aarch64.
-Unless `one` has x86 emulation registered, which nothing in this repo installs, an EPUB
-sent to a Kobo or a Kindle with its conversion box ticked fails with an error on the
-sending page. Both boxes start ticked (`static/upload.html`). A PDF, a MOBI, or a send
-with the box unticked is unaffected. Found by reading the fork's source; not yet seen on the
-box, and one EPUB sent to a Kobo with Kepubify ticked settles it.
-
-The fix belongs in the fork. Kepubify v4.0.4 publishes `kepubify-linux-arm64`, so choosing
-the download by Docker's `TARGETARCH` fixes the Kobo path. KindleGen was only ever built
-for x86, so on `one` the Kindle conversion needs emulation or goes, and the fork could
-start that box unticked there.
-
-**Kepubify is fixed in the fork** (owner-reported, 2026-10-25), and the pinned image
-(`f7fc0d2`, built on `96cee4a` "per-arch kepubify, no kindlegen off x86") carries it; the
-fork's CI smoke-tests each architecture. What is left is the test on the box — one EPUB to a
-Kobo with Kepubify ticked after the next deploy. The arm64 image leaves KindleGen out, so the
-Kindle conversion is unavailable on `one`.
-
-**Closed 2026-10-25 — done the same day:** `compose.yaml` pins
-`ghcr.io/gsfernandes81/send2ereader:f7fc0d2…@sha256:65c4e478…`, `SOURCE` is dropped, and the
-play pulls instead of building (decisions.md, the `send2ereader` amendment). Takes effect at
-the owner's next run of the play. The original note follows.
-
-**Filed 2026-10-25, no phase number: deploy send2ereader from a CI-built image, not a build
-on `one`.** The owner has asked for the fork's CI to publish images to ghcr. When the first
-one lands, `deployments/send2ereader/compose.yaml` swaps `build:` for a literal
-`image: ghcr.io/gsfernandes81/send2ereader:<tag>@sha256:<digest>` (the repo invariant: the
-deployed image is a literal, tag and digest), `SRC_ROOT` leaves `.env`, and
-`server-deploy-send2ereader.yml` loses its checkout-and-build steps — pull, start and the
-same probes. `SOURCE` either goes, as `calibre-web`'s did (the digest is the record), with the
-image tagged by the fork sha it was built from, or stays as provenance; the owner's call at the
-switch. The fork's checkout on `one` can then go, measured first. What the CI has to give for
-this to work: a `linux/arm64` image (`one` is aarch64), and a package `one` can pull — public,
-or a pull credential kept on `one`. Not started; waiting on the images.
-
-**Closed 2026-10-24 — Ansible output should wrap long lines preserving their indent, the way Helix soft-wraps.** Done by `ansible/callback_plugins/infra.py` (decisions.md § "Ansible output: this repo's own callback"), which measures the terminal itself. The original note follows.
-The owner's ask: a long task title or message line continues on the next line at the same
-indent as where it started (under the ▸, under the host column), never at column 0 and never
-cut off — like Helix's soft-wrap with indent preservation. Today the `[callback_diy]` templates
-cut titles at a fixed 56 columns, because a `diy` template cannot see the terminal's width:
-Ansible's display measures it but does not hand it to templates, and fish and bash both keep
-`COLUMNS` unexported. Jinja's `wordwrap` with an indented wrapstring can do the wrapping; the
-width is the open part — exported `COLUMNS` (a fish wrapper: `COLUMNS=$COLUMNS command
-ansible-playbook $argv`), falling back to 79. Owner chose 2026-10-24 to leave the plugin's
-own deprecation lines alone.
-
-**Closed 2026-10-24 — `community.general.diy`, this repo's output callback, used APIs ansible-core 2.23 removes.** Moot: the repo no longer uses `diy`. The original note follows.
-It implements `v2_on_any` (harmless when removed: our templates do not use it) and passes
-`convert_data` to `template` (likely fatal: the callback's template call would fail). Upstream
-`main` still has both and no issue is open (checked 2026-10-24). Before the control node moves
-to 2.23, check community.general's changelog. If it is unfixed, set `stdout_callback = default`
-in `ansible.cfg` until it is; the `[callback_diy]` block can stay.
-
-**Closed 2026-10-24 — two deployment plays read a fact Ansible is withdrawing.**
-`server-create-deployment-tunnel.yml` and `server-deploy-garmin-mcp.yml` read the
-top-level `ansible_user_dir`, which ansible-core 2.24 withdraws; every run printed
-`INJECT_FACTS_AS_VARS`. Both now read `ansible_facts['user_dir']` from the `setup` they
-already ran, garmin's through one `garmin_home` var. (`_dev-container-host.yml` had
-already moved to `ansible_facts['env']`; this item first said otherwise.)
-
-**Closed 2026-10-25 — built, and it takes effect at the next inventory run.**
-`server-generate-fleet-inventory.yml` reads each host's btrfs subvolumes and the report gains a
-**Btrfs subvolumes** section per host: id, path, and where each is mounted. **No mount**: the
-owner asked for the top level on a throwaway directory rather than `/mnt`, and it turned out
-not to be needed, because `btrfs subvolume list -a` lists every subvolume of the filesystem from
-any mounted path, so the play still changes nothing on any host. No sizes: there are no
-qgroups, and the alternative walks every file. Tested against stand-in output in btrfs's
-formats, not yet on a box; the first run's diff is the check. The original note follows.
-
-**Filed 2026-10-24, no phase number — the inventories do not list btrfs subvolumes.** Asked
-for by the owner. `server-generate-fleet-inventory.yml` gathers containers, listeners and
-volumes, and `hw-inventory` names the disks that hold btrfs, but nothing records the
-subvolumes themselves — on `one` the four older ones exist in this repo only as
-`subvolid=256`…`259` in fstab. With subvolumes now named `media-<deployment>-<name>`
-([`decisions.md`](decisions.md)), a listing per host — path, id, size if qgroups are on —
-says what each one holds. Needs root and the array's top level mounted (`/mnt`, `noauto`, on
-`one`). Not built.
-
-**Closed 2026-08-28 — one command now writes every ssh block this repo owns.**
-`playbooks/client-home-ssh-config.yml` composes its fleet half with one dev-container import per
-dev container (the underscore-prefixed halves beside it), and carries the registry that says which containers exist and on which
-ports. Their hostnames are not in it: a dev container's is `<alias>.<dns_zone>`, derived
-at both ends from `group_vars/all.yml` rather than spelled beside the alias it is built
-from (see [`decisions.md`](decisions.md)). It runs on the phone and in WSL, writes both
-sides of the laptop from the latter, and skips a container whose Access application does
-not exist yet by name instead of stopping the run. **Since 2026-10-02 that skips the token, not
-the container** — every block is written — and since 2026-10-04 there is no prompt at all:
-the play mints this client's own token over the API, and
-the two halves run separately as `--tags ssh` and `--tags access`
-([`ssh-clients.md`](ssh-clients.md)).
-
-Both clients are done. The phone and the laptop each ran their reorder and both one-shot
-scripts are deleted, per this repo's rule that they go once they have run. What the laptop
-found on the way is worth more than the scripts were: the Windows ProxyCommand wrapper was
-unusable because cmd.exe miscounts byte offsets in an LF-only batch file; `IdentitiesOnly`
-alongside an `IdentityFile` that does not exist gives `Permission denied (publickey)` on a
-client whose key lives in an agent; and `server-add-authorized-keys.yml` exists at all because
-the key that admits a client is a fact about the container, not something the client holds.
-All three are in [`decisions.md`](decisions.md) and [`ssh-clients.md`](ssh-clients.md).
-
-**Still open, and not this phase's:** `dd-dev` and `ds-dev` have no tunnel of their own, so
-`client-home-ssh-config.yml` skips them by name until Phase 5; and 2i's rules are still live on zero.
-
-**Closed 2026-10-25, from the phone's `~/.ssh/config` as the owner pasted it:** one `Host
-or3-dev`, the managed block, and `infra-dev`'s `ProxyCommand` on the absolute cloudflared
-path — both leftovers below are gone. The original note follows.
-
-**Filed 2026-08-25, no phase number — the two client plays now cover Windows, and the
-phone's own block is behind them.** `_client-dev-ssh.yml` had no Windows half at all: run from
-WSL it configured WSL and left Windows untouched, which is why a laptop that reaches
-`zero` from PowerShell could not reach `infra-dev` from anywhere. It now writes both sides
-of the laptop in one WSL run, and both client plays refuse to run with no inventory rather
-than exiting 0 with an empty recap. Two things this turned up on the **live phone**, which
-the repo cannot fix for it:
-
-- Its `infra-dev` block still carries a **bare** `cloudflared` in the `ProxyCommand` — the
-  output of the pre-2026-08-24 `| default('cloudflared', true)`, and the exact bug that
-  fix existed to remove. A bare name resolves in an interactive shell and then fails
-  inside ssh's `/bin/sh`, presenting as the tunnel being down. Re-running the play rewrites
-  the block in place with the absolute path and does not ask for the token again.
-- `Host or3-dev` is defined **twice** — the managed block at the top of the file and a
-  hand-written `nc`-through-zero block below it. First-value-wins gives
-  `HostName or3-dev.gsrpi.uk` from the first and `Port 2224` from the second (confirmed
-  with `ssh -G`). Inert while the ProxyCommand is `cloudflared access ssh --hostname %h`,
-  which ignores the port — and a live trap the moment it is not. The hand-written block is
-  fully superseded and should be deleted.
-
 **2b–2e were off this list until 2026-08-22.** They come out of the `infra-dev` handoff.
 As filed, two of them outranked Phase 3: `one`'s broken services were the only things on
 the fleet *failing* rather than merely unbuilt, and Phase 3 adopts a deployment that
@@ -729,11 +569,6 @@ currently works. 2c was then diagnosed on 2026-08-23 and briefly looked blocked 
 physical access; the disk was pulled on 2026-08-24 and it closed. 2d was ranked as
 maintenance cost rather than risk, to wait for whichever of the four images next needed a
 change; it was built on 2026-08-24 instead.
-
-~~**Which left 2e and Phase 3 as the next actionable work**~~ — **that ranking is spent.**
-2e closed inside 2g on `two` on 2026-08-29, and every 2-series phase is done except 2i,
-whose repo half has landed and whose install-and-cycle on `zero` is the owner's step.
-**The next actionable numbered phase is 3.**
 
 ⚠︎ Everything above this line is the ranking as it was argued, kept because the argument
 is the useful part. The phase table is the record of where things stand.
@@ -965,11 +800,8 @@ Alpine script using the same supervisor, in the default runlevel, demonstrably w
 log. `containerd` was the other candidate and was passed over because CLAUDE.md records
 that service as unused, and a script that may never have run is not known-good state.
 
-~~**`two` still needs it, and it needs it more.**~~ **`two` was done at the same sitting,
-2026-08-23** — the phase table row said so all along and this paragraph did not, which is
-a doc disagreeing with itself rather than with a box. Settled 2026-08-29 against the
-tracked artefact: `hosts/two/system/cloudflared` declares `output_log` and `error_log`,
-both pointing at `/var/log/cloudflared.log`.
+**`two` was done at the same sitting, 2026-08-23**: `hosts/two/system/cloudflared`
+declares `output_log` and `error_log`, both pointing at `/var/log/cloudflared.log`.
 
 **It is a different fix from the other two, which is presumably why this paragraph
 survived.** `zero` and `one` pipe through `log_proxy`, which arrived with docker; `two`
@@ -986,8 +818,7 @@ inferred from a 503.
 
 Two is not a copy-paste of the other two: it runs no docker, so
 `/etc/init.d/docker` is not there to model on, and whether `log_proxy` exists at all needs
-checking before assuming the same block works. ~~It also tracks no `/etc` files yet~~ —
-**both halves of that were stale when written.** `two` tracks `cloudflared`,
+checking before assuming the same block works. `two` tracks `cloudflared`,
 `cloudflared-config.yml` and `sshd-infra.conf`, each carrying an `infra-` header; and
 `python3` is in `base_packages` with `ansible_python_interpreter` pinned to it fleet-wide,
 so `check-system-drift` and `install-system-file` have always been able to run there. 2g's
@@ -1294,9 +1125,10 @@ host is a later pass with its own review.
    move. "Login only, history stays put" is cheap and keeps transcripts on one box;
    "carry everything" is seamless and drags a growing pile around the fleet. This is a
    decision, not a detail.
-2. ~~**Where does `destiny-director` land when it leaves `two`, and who builds its arm64
-   images?**~~ Moved to [gsfernandes81/infra#11](https://github.com/gsfernandes81/infra/issues/11)
-   with Phase 6, 2026-10-25.
+2. **Where `destiny-director` lands when it leaves `two`, and who builds its arm64
+   images**: moved to
+   [gsfernandes81/infra#11](https://github.com/gsfernandes81/infra/issues/11) with Phase
+   6, 2026-10-25.
 3. ✔ **MOOT, the owner's call 2026-10-25:** if a moved container's Claude Code login ever stops
    working, re-logging in is an acceptable cost, and a move between the three Pis does not
    change the public IP anyway. The original question follows.
@@ -1313,10 +1145,6 @@ host is a later pass with its own review.
 - **A dry run that changes nothing is the first deliverable**, not the last. Ansible's
   `--check` against all three hosts, reporting drift only, is what proves the inventory is
   right before anything writes.
-- ~~**The drift listed at the top of this document is not yet fixed.**~~ **It is** — the
-  drift table's own rows now carry their closures, Phase 2 landed on 2026-08-21, and the
-  two dead links it named are gone. It stays as evidence here,
-  not a changelog. Fixing it — the port line, the dev-container count, `recovery.md`'s
-  deployment lists and port greps, roadmap §1's stale paragraph and its two dead links,
-  and the missing `hosts/one/syncthing` symlink — is its own commit, and should happen
-  whether or not this proposal is accepted.
+- **The drift listed at the top of this document is fixed**: its rows carry their
+  closures, Phase 2 landed on 2026-08-21, and the two dead links it named are gone. It
+  stays there as evidence, not a changelog.

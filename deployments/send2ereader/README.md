@@ -4,6 +4,10 @@ send2ereader on `one`, at **`bookit.gsrpi.uk`**: an e-reader's browser opens the
 shows a four-character key, and a phone or computer sends a book to that key. Read this to
 deploy it, to start it after a reboot, or to move it to a new version.
 
+Kobo conversion (Kepubify) works on `one`, tested live on 2026-10-25. Kindle conversion
+does not: KindleGen was only ever built for x86 and the arm64 image leaves it out, so a
+Kindle gets an EPUB as it is.
+
 It has its own tunnel, served by a `cloudflared` sidecar in this compose project, so
 nothing listens on `one`. The reasoning is [`docs/decisions.md`](../../docs/decisions.md)
 § *Sidecar, not baked-in*.

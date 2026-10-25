@@ -137,6 +137,11 @@ end of a session for the next one. Two rules, both of which have bitten:
   `zero: routes into the repo`). Not conventional commits; the *why* is the point, and
   `type(scope):` has no room for it.
 - **Never rewrite `main` history, never force-push.** The hosts pull it.
+- **A host checkout that will not fast-forward is not reset until every local commit is
+  accounted for.** `git log --left-right --cherry-mark HEAD...origin/main` must show each
+  `<` commit with a `=` twin upstream; a `<` without one is work that exists nowhere else.
+  `zero`'s diverged on 2026-10-25: its checkout is also `infra-dev`'s `/workspace`, so a
+  session committing there and pushing a rebased copy leaves the originals behind.
 - **Read `git diff --stat` before every commit** and revert any file the change has no
   business touching.
 

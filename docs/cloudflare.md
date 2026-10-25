@@ -77,7 +77,7 @@ with `curl -s 127.0.0.1:20241/config` on the host.
 | Hostname | Origin | |
 |---|---|---|
 | `ssh-two.gsrpi.uk` | `ssh://127.0.0.1:22` | the lifeboat's own door; **behind Access**, per-client service tokens |
-| ~~`anchor-two.gsrpi.uk`~~ | ~~`http://127.0.0.1:8080`~~ | **removed 2026-08-29.** It served destiny-director's anchor bot while that was trialled on `two`; the experiment ended and nothing has listened on 8080 since. It was **502 always**, not "502 when the bot is down" — `deployments/destiny-director/compose.yaml` has its `ports:` block commented out. Its CNAME still exists |
+| ~~`anchor-two.gsrpi.uk`~~ | ~~`http://127.0.0.1:8080`~~ | **removed 2026-08-29.** It served destiny-director's anchor bot while that was trialled on `two`; the experiment ended and nothing has listened on 8080 since. It was **502 always**, not "502 when the bot is down" — `deployments/destiny-director/compose.yaml` has its `ports:` block commented out. Its CNAME was deleted in 2i, 2026-10-25 |
 
 Both carried identical `originRequest` settings, equal to the tunnel default, so nothing
 was lost in the rewrite — the assert that would have caught a `noTLSVerify` or
@@ -96,8 +96,8 @@ Snapshot; the file above is the source of truth. Regenerate with
 | `immich.gsrpi.uk` | `http://127.0.0.1:2283` | no Access — 200 unauthenticated |
 | *(catch-all)* | `http_status:404` | |
 
-~~`ssh-zero-dev-dd` / `-ds` / `-or3`~~ — **all three removed from zero's ingress.** or3's
-in `7bb2075` once it had its own tunnel; `dd` and `ds` under 2i on 2026-08-29. They were
+`ssh-zero-dev-dd`, `-ds` and `-or3` are gone from zero's ingress: or3's in `7bb2075` once it
+had its own tunnel, `dd` and `ds` under 2i on 2026-08-29. They were
 doors zero opened on a container's behalf, and each was a second way in beside that
 container's own connector.
 
@@ -229,21 +229,8 @@ token is named `<container>-<client>` and is the `TUNNEL_SERVICE_TOKEN_ID` in so
 
 ## Open
 
-- ~~**`two` has not been migrated**~~ — **done 2026-08-29.** Two hostnames, on the box
-  with the least margin, reached over the `two-one` mesh so the cutover never travelled
-  through the tunnel it was cycling. Four attempts: a missing `~/.ssh/cp` reported as
-  UNREACHABLE, a stale checkout that made `install-system-file` a no-op and left the
-  connector authenticating a tunnel its config did not name, an invalid API token, and
-  then the run that worked. Every guard those failures produced is in the plays.
-- **Closed 2026-10-25: the fleet ssh hostnames are behind Access again.** That morning an
-  outside probe with no credentials got a WebSocket upgrade, the request
-  `cloudflared access ssh` sends, through to sshd's banner on `ssh-zero`, `ssh-one` and
-  `ssh-two`: whatever gated them in August, when an expired browser login broke `ssh zero`
-  from the phone, no longer did. The same day each got an application, `fleet ssh <host>`,
-  admitting per-client service tokens (`docs/ssh-clients.md` § *The fleet's gate*), and
-  the same probe now gets 403 from all three
-  ([gsfernandes81/infra#12](https://github.com/gsfernandes81/infra/issues/12)). sshd's own
-  settings stay the second layer: keys only, no root, no passwords. Each sshd still offers
-  `keyboard-interactive`, because `sshd-infra.conf` does not turn it off.
-- ~~**The three `ssh-zero-dev-*` hostnames** were never checked for Access~~ — moot: their
-  records were deleted on 2026-10-25 and the Access objects swept the same day.
+- **Each sshd still offers `keyboard-interactive`**, because `sshd-infra.conf` does not
+  turn it off. sshd is the second layer behind the fleet's Access gate (keys only, no
+  root, no passwords), and on Alpine's build without PAM that method probably accepts
+  nothing, but turning it off would settle it. It is a change to sshd on the boxes you
+  reach through it, for the two-phase procedure, and not chosen yet.

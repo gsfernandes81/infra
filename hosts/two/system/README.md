@@ -33,12 +33,12 @@ With it come three host changes:
 The build is [`../setup/README.md`](../setup/README.md), a numbered instruction manual.
 It replaced an 1800-line `root-setup.sh`.
 
-> ~~**Status: not applied as of 2026-08-06.**~~ **Applied — the box matches those
-> bullets.** Docker and containerd are gone (`ansible/host_vars/two.yml` declares podman,
-> crun, conmon, netavark and says docker "must never get back"), `python3` is present and
-> pinned fleet-wide in `group_vars/fleet.yml`, and the unprivileged `claude` account is
-> the documented way in (`README.md`). Docker removal was opt-in behind
-> `DD_REMOVE_DOCKER=1` as a separate second run; it happened.
+> **Applied: the box matches those bullets.** Docker and containerd are gone
+> (`ansible/host_vars/two.yml` declares podman, crun, conmon, netavark and says docker
+> "must never get back"), `python3` is present and pinned fleet-wide in
+> `group_vars/fleet.yml`, and the unprivileged `claude` account is the documented way in
+> (`README.md`). Docker removal was opt-in behind `DD_REMOVE_DOCKER=1` as a separate
+> second run; it happened.
 >
 > This banner said "nothing in it has been run on the box" for 23 days after the box
 > stopped matching it, on the page that tells you what `two` is.
@@ -104,7 +104,7 @@ of one. See the roadmap before doing anything here.
 
 ## Tracked `/etc` copies
 
-~~**Still none.**~~ **Three, since 2026-08-23**, each carrying an `infra-` header naming
+**Three, since 2026-08-23**, each carrying an `infra-` header naming
 where it installs:
 
 | file | installs at |
