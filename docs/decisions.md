@@ -25,7 +25,7 @@ entries keep the old word.
 | `two` leaves the fleet, but is **kept as the lifeboat** | Its armv6 was the *only* thing forcing a Debian fleet, so it doesn't migrate. It stays powered on for serial console, power-cycling, and watchdog duty — the things that help when a critical box won't boot. Stays on Alpine. *Diskless was written here as settled and is not:* `two` is a `sys` install today, and now has a Postgres data directory arguing against the switch — see "`two` also runs a test bot" below. |
 | `chattr +i` on bare mountpoints, not a guard service | Makes the bad write **impossible** rather than detected, with no boot-path code. The guard service that was drafted instead added a new way for the box to come up with no containers, and had a false-failure mode: renaming a Syncthing share would have silently stopped Docker on the next reboot. |
 | Claude dev containers stay in their own app repos | They are developer tooling, not host services. Pulling them into `deployments/` would break `make dev` from a fresh app clone, invert the dependency, and — decisively — still leave both `Dockerfile.dev` files duplicated. It relocates the duplication instead of removing it. |
-| `containerd` service removed, package kept | `dockerd` spawns its own containerd; every moby shim uses `/var/run/docker/containerd/containerd.sock`, so the standalone service owned zero shims. But `docker-engine` **hard-depends on the package** — `apk del containerd` would kill every container at the next start. Service-level removal only. **On `one` and `zero`.** On `two` the package goes too, in one transaction with every dependent — see below; the rule was always "never *alone*", not "never". |
+| `containerd` service removed, package kept | `dockerd` spawns its own containerd; every moby shim uses `/var/run/docker/containerd/containerd.sock`, so the standalone service owned zero shims. But `docker-engine` **hard-depends on the package** — `apk del containerd` would kill every container at the next start. Service-level removal only. **On `one` and `zero`.** ⚠︎ **Not done on `one`**, found 2026-10-25: `containerd` was still in its default runlevel, started at boot 62 days earlier — about 15 MB, and owning none of the shims, every one of which is on dockerd's own socket. The removal was handed over that day; until the owner confirms it, `one` still runs it. On `two` the package goes too, in one transaction with every dependent — see below; the rule was always "never *alone*", not "never". |
 | OpenCloud and k3s deleted, not migrated | Both confirmed unused. k3s was still *running* a live cluster (traefik, coredns, metrics-server) and holding ~880 MB of swap; removing it plus the dead `nextcloud` subvolume returned ~344 GiB to the array. |
 | **Docker and containerd removed from `two`; rootless podman instead** | Two daemons and their shims cost roughly 34 MB RSS on a board with ~475 MB total, and `two` ran no docker containers worth the price. Rootless podman is daemonless — nothing is resident when nothing is running — and it needs no `docker` group, which this repo already refuses to grant. It is also where `one` and `zero` are headed under MicroOS, so `two` is the cheap place to learn it. |
 | **No new user, no boot autostart on `two`** ⚠︎SUPERSEDED | Rootless podman's isolation comes from the user namespace, not from which unprivileged uid owns it, so a second service account buys nothing over `gavin`. **That reasoning was incomplete and the entry is re-stated below** — a dedicated account also buys a `/bin/sh` login shell and an empty home, which is the only thing that takes the ambient login shell out of the deploy key's TCB. Still not done; see "The forced command runs inside `gavin`'s login shell". And a test bot that resurrects itself at 03:00 and takes 200 MB of a 475 MB lifeboat is the wrong default: `restart: always` covers a crashed container, and a reboot deliberately leaves the box running nothing until someone deploys. |
@@ -347,7 +347,9 @@ including the record of its failing disk, with `zero`'s hardware.
 
 The cost is real and accepted: facts about `one` and `two` cannot be verified from
 `zero`, so anything unconfirmed is marked unverified in the docs rather than guessed —
-zram on both hosts, and `one`'s file modes, are the current examples.
+zram on `zero`, and `one`'s file modes, are the current examples. (`one`'s zram was
+confirmed by the owner on 2026-10-25: `/dev/zram0`, 768 MB zstd, is its first swap at
+priority 16383, holding ~400 MB in ~118 MB of RAM, with `sda2` behind it at −2 and empty.)
 
 ### The mesh, and why it does not breach any of the above — 2026-08-23
 
@@ -555,7 +557,8 @@ the record of what is deployed, and git keeps it. The URL-only `SOURCE` shape st
 as `destiny-director`'s section says — that stack follows a moving tag, which this does not.
 
 **Smaller choices made with it:** `mem_limit` on both services from day one, because `one`
-has 1 GB and no swap; `logging: max-size`, because the bypass path takes unauthenticated
+has 1 GB (⚠︎ "no swap" was wrong when written: `one` swaps to 768 MB of zram first and its SSD
+partition second, both in `/proc/swaps` on 2026-10-25 — the cap stands, for its own reason); `logging: max-size`, because the bypass path takes unauthenticated
 hits; the two new subvolumes in fstab by `subvol=` name rather than id, because they are
 made by hand after the commit and their ids are unknown until then. **Ebook conversion was
 left out on purpose**: it works on arm64 (linuxserver's docs say otherwise; their build

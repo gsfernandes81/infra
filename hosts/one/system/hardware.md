@@ -22,7 +22,7 @@ readable here — fill it in via the overrides file rather than guessing.
 | Index | Dev | Bay | Role | Model | Serial |
 |---|---|---|---|---|---|
 | `64G-?-SD-?` | mmcblk0 | onboard | boot + root | SN64G | 0xca52d937 |
-| `500G-2.5in-SSD-2022-03` | sda | 1 | btrfs array (sda1) + swap (sda2, currently off) | CT500MX500SSD1 | 2210E616D97F |
+| `500G-2.5in-SSD-2022-03` | sda | 1 | btrfs array (sda1) + swap (sda2, on, behind zram0) | CT500MX500SSD1 | 2210E616D97F |
 
 ## USB topology
 

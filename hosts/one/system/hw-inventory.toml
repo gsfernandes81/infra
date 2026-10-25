@@ -20,7 +20,7 @@ smart_skip = []
 # SP900 held bay 0). Everything mounts by UUID, so the rename cost nothing.
 [overrides.sda]
 bay = "1"
-role = "btrfs array (sda1) + swap (sda2, currently off)"
+role = "btrfs array (sda1) + swap (sda2, on, behind zram0)"
 # Model, serial, form factor and manufacture date are read from SMART — this disk is
 # healthy and safe to poll. Its Micron serial encodes YYWW, which the script decodes.
 

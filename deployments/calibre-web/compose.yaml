@@ -37,8 +37,8 @@ services:
       - ${CALIBRE_LIBRARY:?set CALIBRE_LIBRARY in deployments/calibre-web/.env}:/books
     # No `ports:`. The sidecar reaches it over the project network; nothing else should.
     #
-    # Capped from day one. `one` has 1 GB and swap off, beside qBittorrent, gluetun and
-    # Syncthing; a library scan or a future conversion (there is none today — see README)
+    # Capped from day one. `one` has 1 GB (swap is 768 MB of zram, then the SSD), beside
+    # qBittorrent, gluetun and Syncthing; a library scan or a future conversion (there is none today — see README)
     # should hit this ceiling inside its own cgroup, not wake the OOM killer for the host.
     mem_limit: 512m
     logging: *logging
