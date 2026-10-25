@@ -13,8 +13,9 @@
   Config.Env on the bot containers holds live tokens. If you widen what is gathered,
   widen it knowing this file is the destination.
 
-  Commit FULL runs only. A --limit run says PARTIAL RUN at the top and must not be
-  committed over a complete one.
+  The playbook commits FULL runs itself and asks before pushing. A --limit run says
+  PARTIAL RUN at the top, is never committed by it, and must not be committed over a
+  complete one by hand either.
 -->
 
 Generated {{ report_generated }} — from the hosts, not from this repo.

@@ -715,6 +715,31 @@ skipped steps not shown, nothing truncated, and a closing line that says when th
 Ansible's own exception block (an `[ERROR]` with a source excerpt) now prints only with `-v`:
 the cause is already in the step's `Error:` and output lines.
 
+## The fleet inventory commits itself, and asks before it pushes
+
+**Decided 2026-10-25 (owner).** A full run of `server-generate-fleet-inventory.yml` whose
+report changed commits `docs/fleet-inventory.md` with a message the play writes:
+`fleet inventory: regenerated 2026-10-25 14:02 UTC, changed on one, two`. Then it shows the
+commit and asks `Push this commit to origin/main? [y/N]`.
+
+**Because a hand-written message added nothing, and a hand commit could carry the wrong
+report.** The host list in the message comes from comparing each host's section of the
+committed report with the new one, with the `Generated` line ignored. A report that differs
+only in its timestamp is not committed at all.
+
+**The guard runs before anything is read.** It fetches `origin`, then refuses unless this
+checkout is exactly `origin/main` (no commits ahead or behind) and the report has no
+uncommitted edits. A play that commits on its own must not stack a commit on top of work
+nobody has pushed, and it must not commit over a hand edit. It refuses rather than pulling:
+a pull from inside a playbook would move a checkout the owner may be working in.
+
+**What it will not do.** A partial run (`-l`) and `--check` never commit; the template
+already said a partial report must not go over a full one. The commit holds the report and
+nothing else (`git commit -- <path>`), after a scan for the CLAUDE.md secret names. The
+default is to ask before pushing, because `main` is what the hosts pull. `-e push=true` skips
+the question, for a future scheduled run. `-e push=false` commits and stops. `-e
+commit=false` only writes the file, as before.
+
 ## The lesson worth keeping
 
 

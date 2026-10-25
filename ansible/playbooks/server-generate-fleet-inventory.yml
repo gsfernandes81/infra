@@ -5,7 +5,8 @@
 #
 # This CHANGES NOTHING on any host. Every task is a read, every one is
 # `changed_when: false`, and there is no handler, no template and no copy aimed at a
-# target. The only file written is the report, on the control node.
+# target. The only file written is the report, on the control node. A full run then
+# commits it there and asks before pushing (the vars below, and decisions.md).
 #
 # WHY -K IS NEEDED, and why that is the design rather than a wart:
 #   `gavin` is not in the `docker` group — decisions.md, because it is root-equivalent —
@@ -26,7 +27,98 @@
   gather_facts: true
   become: false
 
+  vars:
+    # COMMITTING THE REPORT, 2026-10-24 (owner). A FULL run with a real change commits
+    # docs/fleet-inventory.md on its own, with a short machine-written message, and asks
+    # before pushing. -e commit=false writes the file only; -e push=true pushes without
+    # asking (for a scheduled run); -e push=false commits and leaves the push to you.
+    # A partial run (--limit) and --check never commit or push: the file's header says a
+    # partial report must not be committed over a full one.
+    inventory_commit: "{{ commit | default(true) | bool }}"
+    inventory_full: "{{ (ansible_play_hosts_all | sort) == (groups['fleet'] | sort) }}"
+    inventory_path: docs/fleet-inventory.md
+    # The message (owner, 2026-10-25): when the report was generated, and which machines
+    # changed, from the committed report against the new one with the Generated line ignored.
+    inventory_summary_py: |
+      import re, subprocess, sys
+      repo, path = sys.argv[1], sys.argv[2]
+      def parse(text):
+          hosts, host, sec = {}, None, None
+          for line in text.split('\n'):
+              m = re.match(r'^## `([^`]+)`', line)
+              if m:
+                  host, sec = m.group(1), 'system'
+                  hosts.setdefault(host, {})
+                  continue
+              m = re.match(r'^### (.+)', line)
+              if m and host:
+                  sec = m.group(1).strip().lower()
+                  continue
+              if host and not line.startswith('Generated '):
+                  hosts[host].setdefault(sec, []).append(line)
+          return hosts
+      old = subprocess.run(['git', '-C', repo, 'show', 'HEAD:' + path], capture_output=True, text=True).stdout
+      o, n = parse(old), parse(open(repo + '/' + path).read())
+      changed = [h for h in sorted(set(o) | set(n)) if o.get(h) != n.get(h)]
+      new = open(repo + '/' + path).read()
+      m = re.search(r'^Generated (\d{4}-\d\d-\d\d)T(\d\d:\d\d)', new, re.M)
+      when = f'{m.group(1)} {m.group(2)} UTC' if m else 'now'
+      print(f'fleet inventory: regenerated {when}, ' + (f"changed on {', '.join(changed)}" if changed else 'header changed only'))
+
   tasks:
+    # ── before reading anything: this checkout must be origin/main exactly ──────────
+    # Fetch, never pull: pulling would change the very playbook being run under you.
+    # Behind means origin has commits you have not read; ahead means a push would publish
+    # your own unpushed work along with the report. Either way, you decide, not this play.
+    - name: "Full run: fetch origin to compare this checkout with it"
+      ansible.builtin.command:
+        cmd: git fetch --quiet origin
+        chdir: "{{ control_checkout }}"
+      changed_when: false
+      check_mode: false
+      delegate_to: localhost
+      run_once: true
+      when: inventory_commit and inventory_full
+
+    - name: "Full run: count commits this checkout and origin/main differ by"
+      ansible.builtin.command:
+        cmd: git rev-list --left-right --count HEAD...origin/main
+        chdir: "{{ control_checkout }}"
+      register: inventory_ahead_behind
+      changed_when: false
+      check_mode: false
+      delegate_to: localhost
+      run_once: true
+      when: inventory_commit and inventory_full
+
+    - name: "Full run: read uncommitted edits to the report"
+      ansible.builtin.command:
+        cmd: git status --porcelain -- {{ inventory_path }}
+        chdir: "{{ control_checkout }}"
+      register: inventory_dirty
+      changed_when: false
+      check_mode: false
+      delegate_to: localhost
+      run_once: true
+      when: inventory_commit and inventory_full
+
+    - name: "Full run: check this checkout is origin/main, report unedited"
+      ansible.builtin.assert:
+        that:
+          - (inventory_ahead_behind.stdout.split() | map('int') | list) == [0, 0]
+          - inventory_dirty.stdout | length == 0
+        fail_msg: >-
+          This checkout is {{ (inventory_ahead_behind.stdout.split() | default(['?', '?']))[0] }} ahead
+          of and {{ (inventory_ahead_behind.stdout.split() | default(['?', '?']))[1] }} behind
+          origin/main{{ ', and docs/fleet-inventory.md has uncommitted edits' if inventory_dirty.stdout | default('') else '' }}.
+          Behind: `git pull` and read what came in. Ahead: push or set aside your commits.
+          Edits: discard them (the file is generated). Or run with -e commit=false.
+          Nothing has been read or written.
+        quiet: true
+      delegate_to: localhost
+      run_once: true
+      when: inventory_commit and inventory_full
+
     - name: Read the listening TCP sockets on {{ inventory_hostname }}
       # The authoritative answer to "what is published here" — better than any compose
       # file, because it is what the kernel thinks. -p needs root for process names; the
@@ -151,3 +243,101 @@
         # UNREACHABLE, and without this line a partial report is indistinguishable from
         # a full one where two hosts were down.
         audited_hosts: "{{ ansible_play_hosts_all }}"
+
+    # ── after writing: commit a real change, then ask before pushing ────────────────
+    - name: "Full run: check the report changed beyond its Generated line"
+      ansible.builtin.command:
+        cmd: git diff --numstat -I '^Generated ' -- {{ inventory_path }}
+        chdir: "{{ control_checkout }}"
+      register: inventory_changed
+      changed_when: false
+      check_mode: false
+      delegate_to: localhost
+      run_once: true
+      when: inventory_commit and inventory_full and not ansible_check_mode
+
+    - name: "If it changed: check the report for secret names"
+      # CLAUDE.md's name-based scan, on the one file being committed. The play extracts named
+      # container fields and never Config.Env, so a hit means something new leaked in.
+      ansible.builtin.command:
+        cmd: grep -nEI 'PRIVATE_KEY|DISCORD_TOKEN|OPENVPN_PASSWORD|ROOT_PASSWORD|PBKDF2|eyJhIjoi' {{ inventory_path }}
+        chdir: "{{ control_checkout }}"
+      register: inventory_secrets
+      changed_when: false
+      check_mode: false
+      failed_when: inventory_secrets.rc == 0
+      delegate_to: localhost
+      run_once: true
+      when: inventory_commit and inventory_full and not ansible_check_mode and inventory_changed.stdout | length > 0
+
+    - name: "If it changed: write the commit message"
+      ansible.builtin.command:
+        argv: [python3, -I, -c, "{{ inventory_summary_py }}", "{{ control_checkout }}", "{{ inventory_path }}"]
+      register: inventory_message
+      changed_when: false
+      check_mode: false
+      delegate_to: localhost
+      run_once: true
+      when: inventory_commit and inventory_full and not ansible_check_mode and inventory_changed.stdout | length > 0
+
+    - name: "If it changed: commit the report, and only the report"
+      # A pathspec commit takes this file's working-tree state and nothing else, so anything
+      # you had staged stays out of it.
+      ansible.builtin.command:
+        argv: [git, commit, --quiet, -m, "{{ inventory_message.stdout | trim }}", --, "{{ inventory_path }}"]
+        chdir: "{{ control_checkout }}"
+      delegate_to: localhost
+      run_once: true
+      when: inventory_commit and inventory_full and not ansible_check_mode and inventory_changed.stdout | length > 0
+
+    - name: "If committed: print the commit"
+      ansible.builtin.command:
+        cmd: git show --stat --format=%s HEAD
+        chdir: "{{ control_checkout }}"
+      register: inventory_show
+      changed_when: false
+      check_mode: false
+      delegate_to: localhost
+      run_once: true
+      when: inventory_commit and inventory_full and not ansible_check_mode and inventory_changed.stdout | length > 0
+
+    - name: "If committed: show what would be pushed"
+      ansible.builtin.debug:
+        msg: "{{ inventory_show.stdout_lines }}"
+      changed_when: true
+      delegate_to: localhost
+      run_once: true
+      when: inventory_commit and inventory_full and not ansible_check_mode and inventory_changed.stdout | length > 0
+
+    - name: "If committed: ask before pushing"
+      ansible.builtin.pause:
+        prompt: "Push this commit to origin/main? [y/N]"
+      register: inventory_answer
+      delegate_to: localhost
+      run_once: true
+      when:
+        - inventory_commit and inventory_full and not ansible_check_mode and inventory_changed.stdout | length > 0
+        - push is not defined
+
+    - name: "If confirmed: push the commit"
+      ansible.builtin.command:
+        cmd: git push --quiet origin HEAD:main
+        chdir: "{{ control_checkout }}"
+      register: inventory_push
+      failed_when: false
+      delegate_to: localhost
+      run_once: true
+      when:
+        - inventory_commit and inventory_full and not ansible_check_mode and inventory_changed.stdout | length > 0
+        - (push | default(false) | bool) if push is defined else ((inventory_answer.user_input | default('') | lower) in ['y', 'yes'])
+
+    - name: "If committed: say whether it was pushed"
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'pushed to origin/main' if (inventory_push.rc | default(1)) == 0 else
+             ('push FAILED, the commit is local: ' ~ (inventory_push.stderr | default('')) | trim) if inventory_push is not skipped else
+             'not pushed: the commit is local; `git push` when ready' }}
+      changed_when: true
+      delegate_to: localhost
+      run_once: true
+      when: inventory_commit and inventory_full and not ansible_check_mode and inventory_changed.stdout | length > 0

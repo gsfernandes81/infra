@@ -37,7 +37,7 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 | rotate one dev container's service token on this client, or add it once its tunnel exists | `client-home-ssh-config.yml -e container=or3-dev -e replace_token=true` | the same |
 | let a new phone or laptop into the dev containers | `server-add-authorized-keys.yml -e client_pubkey_file=~/laptop.pub` | a route to `zero` |
 | create a dev container: its tunnel, DNS, Access, and (for `infra-dev`) its host side | `server-create-dev-container.yml` · `-e container=or3-dev` for another | the [API token](#the-cloudflare-api-token) |
-| see what runs where, read-only, into `docs/fleet-inventory.md` | `server-generate-fleet-inventory.yml -K` | sudo |
+| see what runs where, read-only, into `docs/fleet-inventory.md` — a full run that changed it commits it and asks before pushing | `server-generate-fleet-inventory.yml -K` · `-e push=true` / `push=false` / `commit=false` | sudo, and this checkout exactly at `origin/main` |
 | install the packages each Pi should have | `server-install-packages.yml -K` · `-l <host>` | sudo |
 | install the tracked `/etc` files, without restarting anything | `server-install-system-files.yml -K` · `-l <host>` · `-e only=<file>` | sudo |
 | create a tunnel for a Pi (nothing serves through it yet) | `server-create-tunnel.yml -e target=<host> -K` | sudo, the API token |
@@ -65,9 +65,9 @@ proves the token and shows what exists. The deployment tunnel play's `--check` s
 `-K`: the read that decides whether its tunnel already exists is of a file only root can
 open.
 
-**Only `server-generate-fleet-inventory.yml` is read-only.** Every other `server-` play
-changes something: packages, **boot-path `/etc` files**, the cloudflared binary, tunnels
-and DNS, `authorized_keys` on `zero`. **`server-deploy-garmin-mcp.yml` is the one play that
+**Only `server-generate-fleet-inventory.yml` is read-only** on the hosts. On the control node it
+writes the report and commits it. Every other `server-` play changes something: packages,
+**boot-path `/etc` files**, the cloudflared binary, tunnels and DNS, `authorized_keys` on `zero`. **`server-deploy-garmin-mcp.yml` is the one play that
 starts a deployment** — Phase 3's "Ansible drives deployments", first used there.
 `server-create-dev-container.yml` prints a secret that cannot be fetched again.
 `client-home-ssh-config.yml` writes ssh config and a 0600 service token on the client.
