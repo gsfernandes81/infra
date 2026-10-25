@@ -536,7 +536,9 @@ or a scheduled restart followed by `/readyz`. Same class as the missing uptime m
 Garmin's official, key-based, read-only Personal API launched on 2026-10-21. It lost to Taxuspt
 on coverage alone (decisions.md § *garmin-mcp*). The trigger is a server for it that is mature
 **and** returns set-level strength data (the API's FIT download carries the sets). Switching
-changes only `deployments/garmin-mcp/`; the tunnel and the play stay.
+changes only `deployments/garmin-mcp/`; the tunnel and the play stay. **Very long term**, the
+owner's call on 2026-10-25: likely months away. Tracked in
+[gsfernandes81/infra#10](https://github.com/gsfernandes81/infra/issues/10).
 
 **Closed 2026-10-24 — Ansible output should wrap long lines preserving their indent, the way Helix soft-wraps.** Done by `ansible/callback_plugins/infra.py` (decisions.md § "Ansible output: this repo's own callback"), which measures the terminal itself. The original note follows.
 The owner's ask: a long task title or message line continues on the next line at the same
