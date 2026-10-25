@@ -344,8 +344,12 @@
 
           {{ 'Converge' if fleet_app else 'Gate' }} {{ fleet_hostname }}, admitting only these clients:
 
-            {{ fleet_tokens | map(attribute='name') | join('\n  ') }}
-          {{ ('\n  Disabled, not admitted: ' ~ (fleet_disabled | join(', '))) if fleet_disabled else '' }}
+          {% for t in fleet_tokens %}
+            {{ t.name }}
+          {% endfor %}
+          {% if fleet_disabled %}
+            Disabled, not admitted: {{ fleet_disabled | join(', ') }}
+          {% endif %}
 
           A client you use that is not in this list is shut out of {{ fleet_host }} through its
           tunnel until it runs client-home-ssh-config.yml. Type yes to go on
