@@ -293,7 +293,13 @@ read-only file rather than `--token`, which is the containerised form of the rul
 restated below. Each client's service token belongs to that client and must not be in the
 container, because it authorises *reaching* the container.
 
-### A control node inside the fleet — OPEN, deliberately
+### A control node inside the fleet — ⚠︎ DECIDED 2026-10-25: no
+
+**The owner's call: no control node inside the fleet.** `infra-dev` stays a development
+container with no route to the fleet, for good; the reasoning below is why, and it is kept.
+(Whether that also retires Phase 8 — `two` as the scheduled read-only control node, which is
+also inside the fleet — was asked the same day and is not settled here.)
+
 
 `infra-dev` was being built as a second control node — `ansible-core` and the collections
 in the image, an ssh key reaching all three hosts — and that was stepped back from on
@@ -460,7 +466,7 @@ logging out the source device**, which on the phone is the thing you use to fix 
 to 22,171,662 bytes, holding `projects/` (40 entries), `sessions/`, `history.jsonl`,
 `uploads/`, `daemon/` and `telemetry/`. The credential is tens of KB of that. Every move
 copies the whole pile through whatever staging path is used, each copy is a disclosure
-surface, and nothing prunes it. See OPEN 1.
+surface, and nothing prunes it. OPEN 1, decided 2026-10-25: the history moves with it.
 
 **A guard that fails does not stop the operation it guards.** The test's
 `mkdir -p /root/cred-test && chmod 700` ran unprivileged and failed — and the next command,
@@ -513,7 +519,7 @@ ones that answer the question this document started from.
 | 2i | Retire the `ssh-zero-dev-*` rules, and `anchor-two` with them — doors nothing is behind | `zero`'s host tunnel, DNS | nothing | **Done 2026-10-25.** `dd` and `ds` came out of `hosts/zero/system/cloudflared-config.yml` and `anchor-two` out of `two`'s on 2026-08-29. On 2026-10-25 the owner deleted all four CNAMEs (`ssh-zero-dev-dd`, `-ds`, `-or3` and `anchor-two`, verified NXDOMAIN on two resolvers), then installed both files and cycled both connectors, each from a session that did not cross its own tunnel (`two-one` for `two`, `zero-two` for `zero`); `ssh` through each tunnel works afterwards (owner-reported). `dd-dev` and `ds-dev` are reached through `ssh zero` and their loopback ports until Phase 5 gives them tunnels. The dashboard sweep's service-token half was finished the same day (owner-reported), and its plan deleted |
 | 3 | First deployment adopted: `send2ereader` on `one`, **with its connector in the deployment** | one deployment, non-critical box, `one`'s ingress | 2 | **Done 2026-10-25, bar the owner's first deploy.** `send2ereader` has its own tunnel and a `cloudflared` sidecar, publishes no port, keeps its name `bookit` through `subdomain:` in `edge.yml`, and is started by `server-deploy-send2ereader.yml`, the second deployment a play starts after `garmin-mcp`. That play's first run is the cutover ([its README](../deployments/send2ereader/README.md)); until then `one`'s installed host connector serves `bookit`. `bin/compose` is deleted, and `recovery.md` brings deployments back with stock `docker compose`. The connector pattern itself was set on 2026-10-24 by `calibre-web` (decisions.md, *Sidecar, not baked-in*) |
 | 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two deployments | 3 | |
-| 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | Phase 3 now tests the mechanism first, on a disposable deployment. **Owner's leaning, 2026-10-25: the sidecar model here too**, as Phase 3 settled it for deployments, in place of `infra-dev`'s connector started from its own entrypoint — likely, not yet decided |
+| 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 3 (OPEN 1 decided: history moves) | Phase 3 now tests the mechanism first, on a disposable deployment. **Owner's leaning, 2026-10-25: the sidecar model here too**, as Phase 3 settled it for deployments, in place of `infra-dev`'s connector started from its own entrypoint — likely, not yet decided |
 | 6 | ~~`dd` off `two`~~ | `two`, `one` | arm64 CI, upstream | **Dropped 2026-10-25**, the owner's call: moving `destiny-director` follows its own needs, not this plan — [gsfernandes81/infra#11](https://github.com/gsfernandes81/infra/issues/11), which may or may not end in a PR. The number is kept so the others do not shift |
 | 7 | **Rootless podman on `one`** — roadmap §2 | `one` | 3, MicroOS on `one` | **Deferred to MicroOS, 2026-10-25** — the owner's call, so `one` converts once, with memory limits, instead of on OpenRC without them and then again ([`decisions.md`](decisions.md)) |
 | 8 | `two` as the scheduled read-only control node | `two` | ~~6, 7~~ — none since 2026-10-25 | **Not gated on 7 any more** (owner, 2026-10-25): it starts with the scheduled checks that need no root, and container inventory stays an interactive `-K` run until 7 lifts that for `one` and MicroOS for `zero`. § *The control plane* requires `two` to run no containers for this, and dropping 6 left that open for a day: **met, owner-reported 2026-10-25** — `destiny-director` no longer runs on `two`. Nothing gates Phase 8 now |
@@ -1273,7 +1279,13 @@ host is a later pass with its own review.
 
 ## OPEN — do not resolve these by implementing
 
-1. **Does a moved dev container carry its history, or start clean with only the login?**
+1. ✔ **DECIDED 2026-10-25 (owner): a moved dev container carries its history** — the whole
+   credential volume moves, not only the login. The cost is accepted: every move copies the
+   growing pile through a staging path, so that path is a disclosure surface and must fail the
+   run if its permission step fails (*Two findings worth keeping* above). The original
+   question follows.
+
+   **Does a moved dev container carry its history, or start clean with only the login?**
    22 MB of transcripts and uploads per move, growing without bound, versus a seamless
    move. "Login only, history stays put" is cheap and keeps transcripts on one box;
    "carry everything" is seamless and drags a growing pile around the fleet. This is a
