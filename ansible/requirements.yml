@@ -20,7 +20,8 @@ collections:
   - name: community.general
     version: ">=13.3.0"
 
-  # docker_compose_v2 and docker_container_info: what replaced bin/compose at Phase 3.
+  # docker_compose_v2: what replaced bin/compose at Phase 3. docker_container_info is not
+  # used: it needs the Docker SDK on the target (ansible/README.md says why).
   # See docs/management-plane.md.
   - name: community.docker
     version: ">=5.2.2"

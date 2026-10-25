@@ -52,7 +52,10 @@ database is worth anything, and starting it would restart the crash loop that st
 ended, on the one copy of that database. Its compose file, `SOURCE` and `.env` remain, so
 repairing it is for a person to decide, not a reboot.
 
-On `one` all state is on `/media` bind mounts, so recreating a container loses nothing.
+On `one`, state is on `/media` bind mounts, except `garmin-mcp`'s Garmin session, which is
+the named volume `garmin-tokens` on the SD card. Recreating a container loses nothing;
+`docker volume prune` or `docker compose down -v` loses that session, and logging in again
+needs the MFA step in its README.
 After gluetun is recreated, expect a new forwarded port
 ([port-forwarding.md](port-forwarding.md)).
 
@@ -154,6 +157,12 @@ regardless: `critical_mounts` is empty in `/etc/conf.d/localmount`, so `localmou
 0, and every `/media` entry has fsck pass 0. Only `/` and `/boot`, both on the SD card,
 are checked. A reboot with no hands was tested on 2026-08-24: every subvolume mounted,
 every container up, the guards intact.
+
+If `one`'s array is missing after a reboot, read what the kernel found with
+`cat /proc/partitions`, not `lsblk`, which opens the block devices and can hang a fragile
+USB bridge. A wedged USB-SATA bridge cannot be fixed from software: every kernel-side
+reset was tried in August 2026, and only cutting the enclosure's power brought it back
+(2026-08-24). The MX500 is still in that Sabrent enclosure.
 
 **`zero`:** all three `/media` entries carry `nofail`. The array is btrfs RAID1 across two
 bcache devices, so both must assemble before it can mount read-write; btrfs refuses a

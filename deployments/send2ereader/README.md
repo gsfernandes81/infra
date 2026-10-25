@@ -84,8 +84,9 @@ names the play that writes it.
 
 Put the new sha in `SOURCE`, commit and push, then run the play. It moves the checkout on
 `one`, rebuilds and recreates. It refuses a checkout with local edits rather than
-discarding them. `bin/check-sources` on `one` reports whether the checkout matches
-`SOURCE`.
+discarding them. It leaves that checkout on a detached HEAD at the sha, and sets its
+`origin` to the URL in `SOURCE`; other remotes are left alone. `bin/check-sources` on
+`one` reports whether the checkout matches `SOURCE`.
 
 ## What not to do
 

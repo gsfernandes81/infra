@@ -201,9 +201,14 @@
 
     # ── 5  the port is gone ─────────────────────────────────────────────────
     - name: Read the {{ deployment }} container's published ports
-      community.docker.docker_container_info:
-        name: send2ereader
-      register: s2e_container
+      # docker inspect, not community.docker.docker_container_info: that module needs the
+      # Python Docker SDK and requests on the target, which `one` does not have
+      # (ansible/README.md § "Where prefer the standard tool loses"). The {% raw %} guard
+      # keeps Jinja off Docker's own Go template.
+      ansible.builtin.command:
+        argv: [docker, inspect, --format, "{% raw %}{{json .HostConfig.PortBindings}}{% endraw %}", send2ereader]
+      register: s2e_ports
+      changed_when: false
       become: true
       when: not ansible_check_mode
 
@@ -211,9 +216,9 @@
       # The point of the sidecar. A port left published is a second way in that skips the
       # tunnel, and the probes above would pass with it.
       ansible.builtin.assert:
-        that: (s2e_container.container.HostConfig.PortBindings | default({}, true)) == {}
+        that: (s2e_ports.stdout | from_json | default({}, true)) == {}
         fail_msg: >-
-          send2ereader still publishes {{ s2e_container.container.HostConfig.PortBindings | default({}, true) }}
+          send2ereader still publishes {{ s2e_ports.stdout | default('?') }}
           on {{ inventory_hostname }}. compose.yaml has no ports:, so the running container is
           an older one: sudo docker compose up -d in {{ s2e_dir }}.
         success_msg: "send2ereader publishes nothing on {{ inventory_hostname }}"
