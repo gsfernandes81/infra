@@ -26,7 +26,8 @@
 #   - THE POLICY MAY NOT EXIST YET. If it does, this client's token is added to it; if it
 #     does not, the server play includes every `fleet-*` token when it creates it.
 #
-# A lost laptop is one token to delete in Zero Trust. The token's own name says whose it is.
+# A lost laptop is one token to disable in Zero Trust (a token a policy lists cannot be
+# deleted). The token's own name says whose it is.
 
 - name: Check the inventory is loaded
   ansible.builtin.import_playbook: _assert-inventory.yml
@@ -231,6 +232,55 @@
         success_msg: "{{ st_name }} {{ 'rotated' if cf_st_existing else 'minted' }}"
       when: cf_st_w is not skipped
 
+    # ── the files, at once ───────────────────────────────────────────────────
+    # STRAIGHT AFTER THE MINT OR ROTATION, before anything else can fail. A rotation ends
+    # the previous secret immediately, so a file written last would be left holding a dead
+    # one whenever a later step failed, and a plain re-run keeps an existing file: on a
+    # gated fleet that is this client shut out of every Pi. Written first, the file always
+    # holds the live secret, and the checks below stop the run loudly instead.
+    - name: "New token only: create ~/.config/fleet, mode 700"
+      ansible.builtin.file:
+        path: "{{ fleet_token_file | dirname }}"
+        state: directory
+        mode: "0700"
+      when: cf_st_w is not skipped
+
+    - name: "New token only: write the fleet token, mode 600"
+      # Sourced by ~/.config/fleet/access-ssh, so POSIX sh syntax.
+      ansible.builtin.copy:
+        dest: "{{ fleet_token_file }}"
+        mode: "0600"
+        content: |
+          # Cloudflare Access service token "{{ st_name }}" for the fleet's ssh hostnames,
+          # this client's own, never expiring. Minted by ansible/playbooks/client-home-ssh-config.yml;
+          # disable the token in Zero Trust -> Access -> Service credentials to revoke this client alone.
+          # Loaded by ~/.config/fleet/access-ssh, the fleet ProxyCommand. POSIX sh, not fish.
+          TUNNEL_SERVICE_TOKEN_ID={{ cf_st_w.json.result.client_id }}
+          TUNNEL_SERVICE_TOKEN_SECRET={{ cf_st_w.json.result.client_secret }}
+          export TUNNEL_SERVICE_TOKEN_ID TUNNEL_SERVICE_TOKEN_SECRET
+      when: cf_st_w is not skipped
+      no_log: true
+
+    - name: "New token, WSL: create the Windows fleet token directory"
+      # No mode: /mnt/c is drvfs (_client-dev-ssh.yml has the reasoning).
+      ansible.builtin.file:
+        path: "{{ win_fleet_token_file_wsl | dirname }}"
+        state: directory
+      when: (on_windows_client | bool) and (cf_st_w is not skipped)
+
+    - name: "New token, WSL: write the Windows fleet token file"
+      # Read by cf-access-fleet.cmd through findstr, not sourced, so no `export`.
+      ansible.builtin.copy:
+        dest: "{{ win_fleet_token_file_wsl }}"
+        content: |
+          # Cloudflare Access service token "{{ st_name }}" for the fleet's ssh hostnames, this
+          # laptop's own, never expiring. Minted by ansible/playbooks/client-home-ssh-config.yml
+          # in WSL. Read by C:\Users\gavin\.ssh\cf-access-fleet.cmd; NTFS permissions, not a mode.
+          TUNNEL_SERVICE_TOKEN_ID={{ cf_st_w.json.result.client_id }}
+          TUNNEL_SERVICE_TOKEN_SECRET={{ cf_st_w.json.result.client_secret }}
+      when: (on_windows_client | bool) and (cf_st_w is not skipped)
+      no_log: true
+
     - name: "New token only: read {{ st_name }} back"
       # Proves the end state rather than trusting the request: the lifetime is the one
       # property of this token that fails a year from now, silently, if it is wrong.
@@ -252,8 +302,9 @@
           Cloudflare reports "{{ st_name }}" with duration
           "{{ cf_st_r.json.result.duration | default('?') }}" and expiry
           {{ cf_st_r.json.result.expires_at | default('?') }}, not `forever`, or disabled. A
-          token like that shuts this client out of every Pi when it lapses, so nothing is
-          written. Re-running sets the duration and rotates again.
+          token like that shuts this client out of every Pi when it lapses. Its file IS
+          written, so this client works until then; re-run with -e replace_token=true, which
+          sets the duration and rotates again, and the server play will not admit it.
         success_msg: "{{ st_name }} never expires"
       when: cf_st_w is not skipped
 
@@ -301,14 +352,14 @@
       when: (cf_st_w is not skipped) and (cf_fpol | length > 0)
 
     - name: "If the policy exists: check it admits {{ st_name }}"
-      # Stopping here leaves the token minted and the file unwritten, so the next run finds
-      # no file, rotates, and tries the policy again, as in _client-dev-ssh.yml.
       ansible.builtin.assert:
         that: cf_fpol_w.status | default(0) == 200
         fail_msg: >-
-          "{{ st_name }}" was minted but the "{{ fleet_policy_name }}" policy was not
-          updated: HTTP {{ cf_fpol_w.status | default('?') }} {{ cf_fpol_w.json.errors | default([]) }}.
-          A 403 means the API token lacks Account : Access: Apps and Policies : Edit.
+          "{{ st_name }}" is minted and written, but the "{{ fleet_policy_name }}" policy was
+          not updated: HTTP {{ cf_fpol_w.status | default('?') }} {{ cf_fpol_w.json.errors | default([]) }}.
+          So no gated host admits this client yet. A 403 means the API token lacks
+          Account : Access: Apps and Policies : Edit. Re-run with -e replace_token=true to
+          retry, or the next server-create-fleet-ssh-access.yml run admits it.
         success_msg: "{{ fleet_policy_name }} admits {{ st_name }}"
       when: cf_fpol_w is not skipped
 
@@ -320,50 +371,6 @@
           when it creates it.
       changed_when: true
       when: (cf_st_w is not skipped) and (cf_fpol | length == 0)
-
-    # ── the files ────────────────────────────────────────────────────────────
-    - name: "New token only: create ~/.config/fleet, mode 700"
-      ansible.builtin.file:
-        path: "{{ fleet_token_file | dirname }}"
-        state: directory
-        mode: "0700"
-      when: cf_st_w is not skipped
-
-    - name: "New token only: write the fleet token, mode 600"
-      # Sourced by ~/.config/fleet/access-ssh, so POSIX sh syntax.
-      ansible.builtin.copy:
-        dest: "{{ fleet_token_file }}"
-        mode: "0600"
-        content: |
-          # Cloudflare Access service token "{{ st_name }}" for the fleet's ssh hostnames,
-          # this client's own, never expiring. Minted by ansible/playbooks/client-home-ssh-config.yml;
-          # delete the token in Zero Trust -> Access -> Service credentials to revoke this client alone.
-          # Loaded by ~/.config/fleet/access-ssh, the fleet ProxyCommand. POSIX sh, not fish.
-          TUNNEL_SERVICE_TOKEN_ID={{ cf_st_w.json.result.client_id }}
-          TUNNEL_SERVICE_TOKEN_SECRET={{ cf_st_w.json.result.client_secret }}
-          export TUNNEL_SERVICE_TOKEN_ID TUNNEL_SERVICE_TOKEN_SECRET
-      when: cf_st_w is not skipped
-      no_log: true
-
-    - name: "New token, WSL: create the Windows fleet token directory"
-      # No mode: /mnt/c is drvfs (_client-dev-ssh.yml has the reasoning).
-      ansible.builtin.file:
-        path: "{{ win_fleet_token_file_wsl | dirname }}"
-        state: directory
-      when: (on_windows_client | bool) and (cf_st_w is not skipped)
-
-    - name: "New token, WSL: write the Windows fleet token file"
-      # Read by cf-access-fleet.cmd through findstr, not sourced, so no `export`.
-      ansible.builtin.copy:
-        dest: "{{ win_fleet_token_file_wsl }}"
-        content: |
-          # Cloudflare Access service token "{{ st_name }}" for the fleet's ssh hostnames, this
-          # laptop's own, never expiring. Minted by ansible/playbooks/client-home-ssh-config.yml
-          # in WSL. Read by C:\Users\gavin\.ssh\cf-access-fleet.cmd; NTFS permissions, not a mode.
-          TUNNEL_SERVICE_TOKEN_ID={{ cf_st_w.json.result.client_id }}
-          TUNNEL_SERVICE_TOKEN_SECRET={{ cf_st_w.json.result.client_secret }}
-      when: (on_windows_client | bool) and (cf_st_w is not skipped)
-      no_log: true
 
     - name: "New token, WSL: read the Windows fleet token's ACL"
       ansible.builtin.command:

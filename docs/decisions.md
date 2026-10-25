@@ -808,7 +808,8 @@ A Fable review of the plan shaped the parts marked below.
 expires, and an expired one broke `ssh zero` from the phone on 2026-08-23 with
 `websocket: bad handshake`. The dev containers already run per-client service tokens
 (`<container>-<client>`), so the fleet gets `fleet-<client>` from the same client play. A
-lost laptop is one token to delete.
+lost laptop is one token to disable: a token a policy lists cannot be deleted, and the
+server play leaves disabled tokens out (review).
 
 **The tokens never expire (review).** Cloudflare's default lifetime is one year, and the
 dev containers' tokens were minted with it. A fleet token minted that way would shut every

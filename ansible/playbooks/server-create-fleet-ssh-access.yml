@@ -308,11 +308,21 @@
       changed_when: false
       no_log: true
 
-    - name: Note the fleet tokens
+    - name: Note the fleet tokens, and any that are disabled
+      # A disabled token is how a lost client is revoked: a token a policy lists cannot be
+      # deleted (12139), so it stays in the account. It admits nothing and is left out here.
       ansible.builtin.set_fact:
         fleet_tokens: >-
           {{ cf_st_q.json.result | default([]) | selectattr('name', 'defined')
-             | selectattr('name', 'match', '^fleet-') | list }}
+             | selectattr('name', 'match', '^fleet-')
+             | rejectattr('enabled', 'defined') | list
+             + (cf_st_q.json.result | default([]) | selectattr('name', 'defined')
+                | selectattr('name', 'match', '^fleet-')
+                | selectattr('enabled', 'defined') | selectattr('enabled') | list) }}
+        fleet_disabled: >-
+          {{ cf_st_q.json.result | default([]) | selectattr('name', 'defined')
+             | selectattr('name', 'match', '^fleet-')
+             | selectattr('enabled', 'defined') | rejectattr('enabled') | map(attribute='name') | list }}
 
     - name: Check every fleet token never expires and this client has one
       ansible.builtin.assert:
@@ -320,12 +330,11 @@
           - own_token_name in (fleet_tokens | map(attribute='name') | list)
           - fleet_tokens | rejectattr('duration', 'defined') | list | length == 0
           - fleet_tokens | rejectattr('duration', 'eq', 'forever') | list | length == 0
-          - fleet_tokens | selectattr('enabled', 'defined') | rejectattr('enabled') | list | length == 0
         fail_msg: >-
           Fleet tokens: {{ fleet_tokens | map(attribute='name') | list }}, durations
           {{ fleet_tokens | map(attribute='duration') | list }}. This client's must be among
-          them ({{ own_token_name }}), and every one must be enabled and never expire, or the
-          gate would admit a client that is shut out later. Run client-home-ssh-config.yml
+          them ({{ own_token_name }}), enabled, and every enabled one must never expire, or
+          the gate would admit a client that is shut out later. Run client-home-ssh-config.yml
           -e replace_token=true on the client whose token is wrong. Nothing done.
         success_msg: "{{ fleet_tokens | length }} fleet tokens, none expiring"
 
@@ -336,6 +345,7 @@
           {{ 'Converge' if fleet_app else 'Gate' }} {{ fleet_hostname }}, admitting only these clients:
 
             {{ fleet_tokens | map(attribute='name') | join('\n  ') }}
+          {{ ('\n  Disabled, not admitted: ' ~ (fleet_disabled | join(', '))) if fleet_disabled else '' }}
 
           A client you use that is not in this list is shut out of {{ fleet_host }} through its
           tunnel until it runs client-home-ssh-config.yml. Type yes to go on
@@ -511,8 +521,8 @@
           delay: "{{ gate_delay }}"
           changed_when: false
           failed_when: false
-          # No answer fails `uri` whatever failed_when says, and exhausted retries mark the
-          # task failed; the assert below gives the verdict, and the rescue the undo.
+          # Exhausted retries mark the task failed whatever the answers were; the assert
+          # below gives the verdict, and the rescue the undo.
           ignore_errors: true
 
         - name: Check {{ fleet_hostname }} is gated
