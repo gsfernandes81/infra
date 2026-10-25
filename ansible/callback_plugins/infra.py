@@ -28,7 +28,12 @@
 #     word is 7, so a host that cannot be reached is DOWN rather than UNREACHABLE), and the
 #     terminal's last column stays empty so a redraw never meets an early line wrap;
 #   - times read 412ms, 3.2s, 2m14s; the closing line says so when the run failed;
-#   - debug messages print in full under their line, and a debug task is DONE, not CHANGED.
+#   - debug messages print in full under their line, and a debug task is DONE, not CHANGED;
+#   - a play can say the run was cut short without failing. `set_stats` with a run-level
+#     `incomplete` string (data: {incomplete: "declined: zero/immich"}, per_host: false) turns
+#     a green "completed successfully" into a yellow "finished, but not everything ran:" plus
+#     that string. A failure is still red and still wins. The redeploy play uses it when a
+#     question is answered with anything but y.
 #
 # TWO MODES, chosen once from whether stdout is a terminal:
 #   terminal  The running step's line is drawn as it starts and redrawn as its timer ticks,
@@ -545,8 +550,11 @@ class CallbackModule(CallbackBase):
                         self._say('    ' + self._c(f'{sym} {n} {word}', colour))
             took = self._fmt(time.time() - self._run_start)
             self._say('')
+            incomplete = str(((getattr(stats, 'custom', None) or {}).get('_run') or {}).get('incomplete') or '')
             if failed:
                 self._say(self._c(f'✗ {self._kind} failed after {took}', 'red'))
+            elif incomplete:
+                self._say(self._c(f'→ {self._kind} finished in {took}, but not everything ran: {incomplete}', 'yellow'))
             else:
                 # ✓ like every successful step above it; a deployment keeps prettify's rocket.
                 icon = {'Deployment': '🚀', 'Provisioning': '⚙️'}.get(self._kind, '✓')

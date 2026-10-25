@@ -194,3 +194,12 @@
       ansible.builtin.debug:
         msg: "{{ deploy_summary | default(['nothing was run']) }}"
       changed_when: true
+
+    - name: If any were declined, say so in the closing line
+      # Read by callback_plugins/infra.py, which then closes the run in yellow instead of
+      # green: declining is not a failure, but it is not "completed successfully" either.
+      ansible.builtin.set_stats:
+        data:
+          incomplete: "declined {{ deploy_declined | join(', ') }}"
+        per_host: false
+      when: deploy_declined | default([]) | length > 0

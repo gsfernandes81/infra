@@ -12,7 +12,7 @@
     dep_skipped: false
 
 # ── the host's checkout, pulled to the commit this control node reviewed ────
-- name: Pull the host's checkout and check it is the reviewed commit
+- name: Pull the host's checkout, check its commit
   ansible.builtin.import_tasks: _sync-host-checkout.yml
   vars:
     sync_host: "{{ dep.host }}"
@@ -42,7 +42,7 @@
   delegate_to: "{{ dep.host }}"
   when: dep_required | length > 0
 
-- name: Check {{ dep.name }}'s .env names what compose.yaml requires
+- name: Check {{ dep.name }}'s .env has the required names
   # Skipped under --check for a first bring-up only: the keys are written by the tunnel play
   # in a real run, which a dry run cannot see (CLAUDE.md § Privileged commands).
   ansible.builtin.assert:
@@ -204,6 +204,14 @@
            | map(attribute='key') | list or 'none' }}
   changed_when: true
   when: dep_go | bool
+
+- name: "If declined: note it for the closing line"
+  ansible.builtin.set_fact:
+    deploy_declined: "{{ (deploy_declined | default([])) + [dep.host ~ '/' ~ dep.name] }}"
+  when:
+    - dep_plan.changed
+    - not ansible_check_mode
+    - not (dep_go | bool)
 
 - name: Note what happened to {{ dep.name }}
   ansible.builtin.set_fact:
