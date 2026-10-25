@@ -17,7 +17,8 @@ bin/check-boot-layout               # can /boot be tampered with without a reboo
 sudo bin/check-mount-guards         # can a failed mount still eat the data? (any host)
 ```
 
-**`two` is the exception.** Its one deployment, `destiny-director`, cannot be driven by
+**`two` is the exception.** Its one deployment, `destiny-director` — **stopped since
+2026-10-25, files kept** — cannot be driven by
 `bin/compose` on any host — its images are `linux/arm/v6` and its `.env` exists only on
 that box — so `bin/compose destiny-director` refuses by name and says where to go.
 
@@ -61,7 +62,7 @@ docs/                  read these
 |---|---|---|---|
 | `one` | Pi 4 | torrents, send2ereader; calibre-web **committed 2026-10-24, not yet started** (own tunnel, sidecar — its README is the setup); garmin-mcp **deployed 2026-10-24** (Garmin Connect MCP for claude.ai: its read tools plus five workout and activity-notes writes; own tunnel, sidecar, deployed by Ansible — its README); ionic-traces **stopped by decision** | yes |
 | `zero` | Pi 5 | Immich (+ db, ml, redis), Syncthing — **all critical, remote** | yes |
-| `two` | Pi 1 B+, armv6, ~475 MB | destiny-director (**test** bot + its Postgres); lifeboat duties **planned, not built** | stays on Alpine |
+| `two` | Pi 1 B+, armv6, ~475 MB | destiny-director (**test** bot + its Postgres) **stopped 2026-10-25, files kept** ([#11](https://github.com/gsfernandes81/infra/issues/11)); lifeboat duties **planned, not built** | stays on Alpine |
 
 Target OS for `one` and `zero`: **openSUSE MicroOS** (see [roadmap](docs/roadmap.md)).
 

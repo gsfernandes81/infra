@@ -25,7 +25,8 @@ this section still holds for whenever it happens.
 
 **`two` got there first**, by accident of needing it: it runs rootless podman +
 podman-compose as `gavin`, with docker and containerd removed, for the
-`destiny-director` test deployment. It is a much smaller sample than the torrents
+`destiny-director` test deployment (stopped since 2026-10-25; the packaging stands). It is a
+much smaller sample than the torrents
 deployment — one bot and a Postgres, no VPN namespace sharing — but the packaging is
 real and verified for Alpine 3.24 `armhf` in [`hosts/two/setup/README.md`](../hosts/two/setup/README.md) step 1, including the
 `iptables`/netavark trap. Read that before doing this on `one`.
@@ -235,9 +236,10 @@ most worn card, while you are unreachable), backups, a log sink (SD wear), or an
 Node.js-shaped.
 
 **None of the five jobs above exists yet.** What `two` actually runs today is
-`cloudflared`, `crond`, `sshd`, and the `destiny-director` **test** bot with its
-Postgres. That last one is on none of the lists above and breaks no letter of them, but
-it is not lifeboat duty either, and it costs RAM and continuous SD writes. If these jobs
+`cloudflared`, `crond` and `sshd`. The `destiny-director` **test** bot and its Postgres
+are **stopped since 2026-10-25**, files kept ([#11](https://github.com/gsfernandes81/infra/issues/11)).
+While it ran it was on none of the lists above and broke no letter of them, but it was
+not lifeboat duty either, and it cost RAM and continuous SD writes. If these jobs
 get built they take precedence and the bot moves — settled in
 [decisions.md](decisions.md) so it is not re-argued under pressure.
 

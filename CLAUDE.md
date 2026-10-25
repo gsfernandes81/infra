@@ -2,7 +2,8 @@
 
 Container and system config for three Raspberry Pis — `zero` (Pi 5, Immich + Syncthing,
 **critical and remote**), `one` (Pi 4, torrents + send2ereader) and `two` (Pi 1 B+,
-armv6, the `destiny-director` test bot on rootless podman). **Config only — no source,
+armv6, the `destiny-director` test bot on rootless podman — stopped since 2026-10-25, files
+kept). **Config only — no source,
 no secrets, no data.** Alpine + OpenRC on all three today; `one` and `zero` are headed
 for openSUSE MicroOS. Docker Compose on `one`/`zero`, `podman-compose` on `two`, Ansible
 as the management plane, and a handful of Python tools in `bin/`.
