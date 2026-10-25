@@ -200,6 +200,9 @@
       # green: declining is not a failure, but it is not "completed successfully" either.
       ansible.builtin.set_stats:
         data:
-          incomplete: "declined {{ deploy_declined | join(', ') }}"
+          incomplete: >-
+            the following deployment{{ '' if deploy_declined | length == 1 else 's' }}
+            {{ 'was' if deploy_declined | length == 1 else 'were' }} declined:
+            {{ deploy_declined | join(', ') }}
         per_host: false
       when: deploy_declined | default([]) | length > 0
