@@ -72,7 +72,7 @@ docs/                  read these
 
 | Host | Hardware | Runs | In repo |
 |---|---|---|---|
-| `one` | Pi 4 | torrents, send2ereader (own tunnel and sidecar, committed 2026-10-25; its first deploy is the cutover, its README); calibre-web **committed 2026-10-24, not yet started** (own tunnel, sidecar — its README is the setup); garmin-mcp **deployed 2026-10-24** (Garmin Connect MCP for claude.ai: its read tools plus five workout and activity-notes writes; own tunnel, sidecar, deployed by Ansible — its README); ionic-traces **stopped by decision** | yes |
+| `one` | Pi 4 | torrents, send2ereader (own tunnel and sidecar, cut over 2026-10-25, owner-reported; its README); calibre-web **committed 2026-10-24, not yet started** (own tunnel, sidecar — its README is the setup); garmin-mcp **deployed 2026-10-24** (Garmin Connect MCP for claude.ai: its read tools plus five workout and activity-notes writes; own tunnel, sidecar, deployed by Ansible — its README); ionic-traces **stopped by decision** | yes |
 | `zero` | Pi 5 | Immich (+ db, ml, redis), Syncthing — **all critical, remote** | yes |
 | `two` | Pi 1 B+, armv6, ~475 MB | destiny-director (**test** bot + its Postgres) **stopped 2026-10-25, files kept** ([#11](https://github.com/gsfernandes81/infra/issues/11)); lifeboat duties **planned, not built** | stays on Alpine |
 
@@ -112,7 +112,7 @@ exists, and the first run of it found exactly that on `one`.
 
 | Host | |
 |---|---|
-| `one` | **8080** qBittorrent (via gluetun) · ~~**7777** ionic-traces~~ — **stopped**, see [2c](docs/management-plane.md#sequencing-and-where-podman-fits) · **8384/22000** syncthing · *send2ereader, calibre-web and garmin-mcp publish nothing (send2ereader's 3001 until its cutover) — each is reached only through its own tunnel's sidecar* |
+| `one` | **8080** qBittorrent (via gluetun) · ~~**7777** ionic-traces~~ — **stopped**, see [2c](docs/management-plane.md#sequencing-and-where-podman-fits) · **8384/22000** syncthing · *send2ereader, calibre-web and garmin-mcp publish nothing — each is reached only through its own tunnel's sidecar* |
 | `zero` | **2283** Immich · **8384/22000** syncthing · **127.0.0.1:2224** the `or3-dev` container (`infra-dev` publishes nothing — its tunnel, or `make shell`) |
 | `two` | **none published** — the bot's web UI (8080) and break-glass sshd (2222) exist inside the container and are deliberately not mapped. See the commented `ports:` block in `deployments/destiny-director/compose.yaml` |
 

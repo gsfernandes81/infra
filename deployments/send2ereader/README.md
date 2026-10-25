@@ -46,18 +46,16 @@ runners, and tagged with the fork commit it was built from. An unchanged digest 
 on `one`, so the running container is left alone; a new one is pulled and the container
 recreated. The package is public, so `one` holds no credential for it.
 
-**The first run is the cutover.** Until then the container on `one` still publishes port
-3001 and `one`'s host tunnel serves `bookit`. Sending a book fails from step 2 until step
-5 ends: the image pull and a few seconds.
+**The first run was the cutover, and it is done (owner-reported, 2026-10-25).** Sending a
+book failed from step 2 until step 5 ended: the image pull and a few seconds. The two
+paragraphs below are kept as the record of what it was and how it would have been undone.
 
-If that first run stops after step 2 and you want `bookit` back before fixing it, point
-the record at `one`'s host tunnel again: in the Cloudflare dashboard, DNS, set the
-`bookit` CNAME's target to `1e7fde2e-ac2f-4a5e-8ad4-591208c1e2a6.cfargotunnel.com` (the
-`tunnel:` in `hosts/one/system/cloudflared-config.yml`). That works while the installed
-host configuration still has its `bookit` rule and the old container still publishes 3001,
-which is true until the run reaches step 5 and until you do the install below.
+If that first run had stopped after step 2, `bookit` came back by pointing the record at
+`one`'s host tunnel again: in the Cloudflare dashboard, DNS, set the `bookit` CNAME's
+target to `1e7fde2e-ac2f-4a5e-8ad4-591208c1e2a6.cfargotunnel.com`. That stopped working
+once the host configuration lost its `bookit` rule, so it is no longer a way back.
 
-**Once, after that first run: install `one`'s host tunnel configuration without
+**Done once, after that first run: install `one`'s host tunnel configuration without
 `bookit`.**
 
 ```fish

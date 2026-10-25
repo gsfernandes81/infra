@@ -143,9 +143,9 @@ transform rules.
 served by that deployment's own sidecar, with the routing in
 [`deployments/send2ereader/cloudflared.yml`](../deployments/send2ereader/cloudflared.yml).
 It keeps the name `bookit` through `subdomain:` in its `edge.yml`. No Access, because an
-e-reader's browser is the client. Until the owner runs the cutover in
-[its README](../deployments/send2ereader/README.md), the installed connector on `one`
-still serves `bookit` from `127.0.0.1:3001`.
+e-reader's browser is the client. The cutover in
+[its README](../deployments/send2ereader/README.md) was run by the owner, who reported the
+whole of it done on 2026-10-25.
 
 `ionic-traces.gsrpi.uk` was retired 2026-08-23. Its DNS record still exists and points at
 a deleted tunnel, so it resolves and fails; delete the record if you want the name gone.
