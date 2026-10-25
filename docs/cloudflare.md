@@ -76,7 +76,7 @@ with `curl -s 127.0.0.1:20241/config` on the host.
 
 | Hostname | Origin | |
 |---|---|---|
-| `ssh-two.gsrpi.uk` | `ssh://127.0.0.1:22` | the lifeboat's own door; **no Access** (Open, below) |
+| `ssh-two.gsrpi.uk` | `ssh://127.0.0.1:22` | the lifeboat's own door; **behind Access**, per-client service tokens |
 | ~~`anchor-two.gsrpi.uk`~~ | ~~`http://127.0.0.1:8080`~~ | **removed 2026-08-29.** It served destiny-director's anchor bot while that was trialled on `two`; the experiment ended and nothing has listened on 8080 since. It was **502 always**, not "502 when the bot is down" — `deployments/destiny-director/compose.yaml` has its `ports:` block commented out. Its CNAME still exists |
 
 Both carried identical `originRequest` settings, equal to the tunnel default, so nothing
@@ -90,7 +90,7 @@ Snapshot; the file above is the source of truth. Regenerate with
 
 | Hostname | Origin | |
 |---|---|---|
-| `ssh-zero.gsrpi.uk` | `ssh://127.0.0.1:22` | **no Access**: sshd answers anyone (Open, below) |
+| `ssh-zero.gsrpi.uk` | `ssh://127.0.0.1:22` | **behind Access**, per-client service tokens |
 | `syncthing.gsrpi.uk` | `http://127.0.0.1:8384` | **behind Access** |
 | `syncthing-server.gsrpi.uk` | `tcp://127.0.0.1:22000` | the sync protocol, not the UI |
 | `immich.gsrpi.uk` | `http://127.0.0.1:2283` | no Access — 200 unauthenticated |
@@ -116,7 +116,7 @@ through `ssh zero` and the published loopback ports 2222/2223.
 
 | Hostname | Origin | |
 |---|---|---|
-| `ssh-one.gsrpi.uk` | `ssh://127.0.0.1:22` | **no Access** (Open, below) |
+| `ssh-one.gsrpi.uk` | `ssh://127.0.0.1:22` | **behind Access**, per-client service tokens |
 | `syncthing-torrents.gsrpi.uk` | `http://127.0.0.1:8384` | **behind Access**; origin down, 2c |
 | `torrents.gsrpi.uk` | `http://127.0.0.1:8080` | **behind Access** |
 | *(catch-all)* | `http_status:404` | |
@@ -235,20 +235,15 @@ token is named `<container>-<client>` and is the `TUNNEL_SERVICE_TOKEN_ID` in so
   UNREACHABLE, a stale checkout that made `install-system-file` a no-op and left the
   connector authenticating a tunnel its config did not name, an invalid API token, and
   then the run that worked. Every guard those failures produced is in the plays.
-- **The fleet ssh hostnames are not behind Access.** Checked from outside on 2026-10-25,
-  with no credentials of any kind: a WebSocket upgrade, which is what
-  `cloudflared access ssh` sends, gets 101 from `ssh-zero`, `ssh-one` and `ssh-two`, and
-  `ssh-zero` and `ssh-two` then send sshd's banner (`SSH-2.0-OpenSSH_10.3`). So anyone with
-  `cloudflared` reaches sshd, and sshd's own settings are the only gate: keys only, no
-  root, no passwords (`hosts/<host>/system/sshd-infra.conf`). Each sshd still offers
-  `keyboard-interactive`, because that file does not turn it off. In August these
-  hostnames were behind a browser login: an expired one broke `ssh zero` from the phone on
-  2026-08-23 with `websocket: bad handshake`. Whatever Access objects existed no longer
-  gate them; the dashboard would say whether they are deleted or set to bypass. The same
-  probe finds `syncthing`, `syncthing-torrents` and `torrents` still redirecting to the
-  Access login. The owner chose service tokens for the fix, the dev containers' mechanism,
-  2026-10-25 ([gsfernandes81/infra#12](https://github.com/gsfernandes81/infra/issues/12)).
-  The plays are built the same day; each host stays open until the owner gates it, in the
-  order [`plans/fleet-ssh-access.md`](../plans/fleet-ssh-access.md) gives.
+- **Closed 2026-10-25: the fleet ssh hostnames are behind Access again.** That morning an
+  outside probe with no credentials got a WebSocket upgrade, the request
+  `cloudflared access ssh` sends, through to sshd's banner on `ssh-zero`, `ssh-one` and
+  `ssh-two`: whatever gated them in August, when an expired browser login broke `ssh zero`
+  from the phone, no longer did. The same day each got an application, `fleet ssh <host>`,
+  admitting per-client service tokens (`docs/ssh-clients.md` § *The fleet's gate*), and
+  the same probe now gets 403 from all three
+  ([gsfernandes81/infra#12](https://github.com/gsfernandes81/infra/issues/12)). sshd's own
+  settings stay the second layer: keys only, no root, no passwords. Each sshd still offers
+  `keyboard-interactive`, because `sshd-infra.conf` does not turn it off.
 - ~~**The three `ssh-zero-dev-*` hostnames** were never checked for Access~~ — moot: their
   records were deleted on 2026-10-25 and the Access objects swept the same day.

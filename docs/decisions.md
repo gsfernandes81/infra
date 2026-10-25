@@ -802,7 +802,9 @@ the file, as before. A run that commits nothing says why.
 banner on all three, so sshd's keys-only settings were the only gate
 ([infra#12](https://github.com/gsfernandes81/infra/issues/12)). The plays are
 `server-create-fleet-ssh-access.yml` and the fleet halves of `client-home-ssh-config.yml`.
-A Fable review of the plan shaped the parts marked below.
+A Fable review of the plan shaped the parts marked below. **Rolled out the same day** by
+the owner to all three hosts and both clients; an outside probe with no credentials then
+got 403 from all three, where that morning it had reached sshd.
 
 **Service tokens, one per client, over a browser login.** A browser login's session
 expires, and an expired one broke `ssh zero` from the phone on 2026-08-23 with

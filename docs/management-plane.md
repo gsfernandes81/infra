@@ -570,15 +570,12 @@ dirty with an obsolete `ports: 8080` edit to `destiny-director`'s compose file, 
 had dropped. Until `zero` is sorted, every system-files install is blocked fleet-wide, since
 the play checks all hosts before installing anywhere; a deployment play pulls only its own host.
 
-**Filed 2026-10-25, no phase number: the fleet ssh hostnames are not behind Access.**
-Confirmed from outside the same day: with no credentials, `ssh-zero`, `ssh-one` and
-`ssh-two` accept the WebSocket upgrade `cloudflared access ssh` sends, and sshd answers
-with its banner, where `infra-dev` answers 403. sshd's keys-only settings are the only gate.
-The owner chose service tokens, one per client as the dev containers have, for the fix
-([gsfernandes81/infra#12](https://github.com/gsfernandes81/infra/issues/12); the details
-are in `docs/cloudflare.md` § *Open*). **Built 2026-10-25, rollout not started:**
-`server-create-fleet-ssh-access.yml`, one host per run, and the steps in
-[`plans/fleet-ssh-access.md`](../plans/fleet-ssh-access.md).
+**Closed 2026-10-25: the fleet ssh hostnames are behind Access.** Found open the same
+morning, with sshd answering an unauthenticated WebSocket upgrade on all three. Each now
+has a `fleet ssh <host>` application admitting per-client, never-expiring service tokens
+(`server-create-fleet-ssh-access.yml`), rolled out by the owner to all three hosts and
+both clients, and an outside probe gets 403 from each
+([gsfernandes81/infra#12](https://github.com/gsfernandes81/infra/issues/12)).
 
 **Filed 2026-10-25, no phase number: the dev containers' service tokens probably expire a
 year after minting.** `_client-dev-ssh.yml` mints each `<container>-<client>` token with
@@ -587,8 +584,8 @@ otherwise. The tokens minted on 2026-10-04 would then lapse around 2027-10-04, a
 infra-dev` and `ssh or3-dev` would fail with `websocket: bad handshake`, the August
 symptom. The Expiration column under Access, Service Auth, Service Tokens settles it. A
 refresh call extends a token without re-minting it; the play could mint with
-`duration: forever`, as `plans/fleet-ssh-access.md` does for the fleet's tokens. Found by
-the Fable review of that plan.
+`duration: forever`, as `_client-fleet-token.yml` does for the fleet's tokens. Found by
+the Fable review of the fleet ssh gate's plan.
 
 **Closed 2026-10-25 — kepubify works on `one`, tested live.** From outside, through `bookit`:
 `/tools` reported `kepubify: true, kindlegen: false`; a generated EPUB sent with Kepubify ticked

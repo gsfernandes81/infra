@@ -147,12 +147,10 @@ LAN addresses as it sees them.
 
 ## The fleet's gate: one token per client, never expiring
 
-Each Pi's ssh hostname is meant to sit behind an Access application, `fleet ssh <host>`,
-and all three link one reusable policy, `fleet ssh service tokens`, which admits each
-client's own `fleet-<client>` service token. The plays exist since 2026-10-25; each host
-is gated by its own run of `server-create-fleet-ssh-access.yml`, in the order and with the
-checks in [`plans/fleet-ssh-access.md`](../plans/fleet-ssh-access.md), and until then that
-host is open as before.
+Each Pi's ssh hostname sits behind an Access application, `fleet ssh <host>`, and all
+three link one reusable policy, `fleet ssh service tokens`, which admits each client's own
+`fleet-<client>` service token. All three were gated on 2026-10-25, one host per run of
+`server-create-fleet-ssh-access.yml`; `-e host=<host> -e remove=true` opens one again.
 
 **The `zero`, `one` and `two` aliases run `~/.config/fleet/access-ssh`.** That script
 loads `~/.config/fleet/token` into the one `cloudflared` it starts, as the dev containers'
