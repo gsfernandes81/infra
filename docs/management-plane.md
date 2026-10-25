@@ -535,14 +535,6 @@ dead tokens. The signal has to be a real Garmin call (an authorised `tools/call 
 or a scheduled restart followed by `/readyz`. Same class as the missing uptime monitoring in
 2h's row.
 
-**Filed 2026-10-24, no phase number — revisit `garmin-mcp`'s backend on Garmin's Personal API.**
-Garmin's official, key-based, read-only Personal API launched on 2026-10-21. It lost to Taxuspt
-on coverage alone (decisions.md § *garmin-mcp*). The trigger is a server for it that is mature
-**and** returns set-level strength data (the API's FIT download carries the sets). Switching
-changes only `deployments/garmin-mcp/`; the tunnel and the play stay. **Very long term**, the
-owner's call on 2026-10-25: likely months away. Tracked in
-[gsfernandes81/infra#10](https://github.com/gsfernandes81/infra/issues/10).
-
 **Filed 2026-10-25, no phase number — the fleet ssh hostnames may no longer be behind Access.**
 Unauthenticated, `ssh-zero`, `ssh-one` and `ssh-two` answer 200 with no login redirect, where
 `infra-dev` (service tokens only) answers 403. Unverified until the Zero Trust dashboard is
