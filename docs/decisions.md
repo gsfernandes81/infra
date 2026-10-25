@@ -1071,8 +1071,10 @@ be forgotten, and [`docs/recovery.md`](recovery.md) § *Immich's database* says 
   hundred MB. Deciding from the plan which change can touch the database is a guess, and a
   wrong guess is the one case the dump exists for.
 - **`/var/backups/immich` on the SD card, 0700, newest three kept.** Off the array is the
-  point: Immich's nightly dump is on the array it would be needed for. Three, because the SD
-  card also holds `/var/lib/docker`; the hook refuses to start under 2 GiB free.
+  point: Immich's nightly dump is on the array it would be needed for. Three, the owner's
+  number, because the SD card also holds `/var/lib/docker`; the hook refuses to start with
+  less free than 2 GiB or twice the largest dump kept. The dump just taken is never ranked
+  for deletion, so a control node whose clock is behind cannot rotate it away.
 - **It refuses rather than guesses**: no dump if `immich_postgres` is not running, and a dump
   whose last line is not pg_dumpall's "dump complete" stays a `.partial` and stops the run.
   Both stop before `up`. `-e immich_dump=false` is for the one case a dump cannot be taken: a

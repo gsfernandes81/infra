@@ -21,10 +21,12 @@
   ansible.builtin.set_fact:
     immich_dump_dir: /var/backups/immich
     immich_dump_keep: 3
-    # Free space wanted before a dump starts. A dump of zero's database is a few hundred MB
-    # compressed; the rest is headroom for the SD card, which also holds /var/lib/docker.
+    # Free space wanted before a dump starts: this, or twice the largest dump already kept,
+    # whichever is more. The SD card also holds /var/lib/docker. The first dump's size is
+    # worth reading off the summary line: search embeddings compress poorly.
     immich_dump_min_free_mib: 2048
-    immich_dump_stamp: "{{ now(utc=true, fmt='%Y%m%dT%H%MZ') }}"
+    # To the second, so two runs in one minute cannot write the same name.
+    immich_dump_stamp: "{{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}"
 
 - name: "If immich_dump=false: say no dump is taken"
   ansible.builtin.debug:
@@ -45,14 +47,32 @@
       become: true
       delegate_to: "{{ dep.host }}"
 
+    - name: Read the version label of immich_server
+      # The image's own version label, because the tag can say less: zero's v3.0.1 was started
+      # from the floating `v3`, and a re-pulled floating tag shows as a bare image id.
+      ansible.builtin.command:
+        argv: [docker, inspect, --format, '{% raw %}{{index .Config.Labels "org.opencontainers.image.version"}}{% endraw %}', immich_server]
+      register: immich_label
+      changed_when: false
+      failed_when: false
+      become: true
+      delegate_to: "{{ dep.host }}"
+
     - name: Note the database state and running version
       ansible.builtin.set_fact:
         immich_db_state: >-
           {{ (immich_ps.stdout_lines | select('match', '^immich_postgres ') | first | default('immich_postgres absent')).split()[1] }}
-        # The tag the dump was taken under, for its file name: the version a restore goes with.
+        # The version the dump was taken under, for its file name: the version a restore goes
+        # with. The label first, then the image tag, then `unknown`.
         immich_from: >-
-          {{ (immich_ps.stdout_lines | select('match', '^immich_server ') | first | default('')
-              | regex_search(':(v[0-9][^@ ]*)', '\1') | default(['unknown'], true) | first) }}
+          {{ (immich_label.stdout | default('') | trim | regex_replace('^([0-9])', 'v\1'))
+             if (immich_label.stdout | default('') | trim) is match('^v?[0-9]')
+             else (immich_ps.stdout_lines | select('match', '^immich_server ') | first | default('')
+                   | regex_search(':(v[0-9][^@ ]*)', '\1') | default(['unknown'], true) | first) }}
+
+    - name: Note the name of this dump
+      ansible.builtin.set_fact:
+        immich_dump_path: "{{ immich_dump_dir }}/immich-{{ immich_dump_stamp }}-{{ immich_from }}.sql.gz"
 
     - name: Check immich_postgres is running
       ansible.builtin.assert:
@@ -91,6 +111,21 @@
       become: true
       delegate_to: "{{ dep.host }}"
 
+    - name: Find the dumps already in {{ immich_dump_dir }}
+      # Stamp-first names only, so a file named otherwise is neither counted nor deleted.
+      ansible.builtin.find:
+        paths: "{{ immich_dump_dir }}"
+        patterns: "immich-[0-9]*.sql.gz"
+      register: immich_dumps
+      become: true
+      delegate_to: "{{ dep.host }}"
+
+    - name: Note the free space a dump wants
+      ansible.builtin.set_fact:
+        immich_dump_want_mib: >-
+          {{ [immich_dump_min_free_mib | int,
+              2 * ((immich_dumps.files | map(attribute='size') | max | default(0)) // 1048576)] | max }}
+
     - name: Read the free space in {{ immich_dump_dir }}
       ansible.builtin.command:
         argv: [df, -Pk, "{{ immich_dump_dir }}"]
@@ -101,10 +136,10 @@
 
     - name: Check there is room for a dump
       ansible.builtin.assert:
-        that: (immich_df.stdout_lines[-1].split()[3] | int) // 1024 >= immich_dump_min_free_mib | int
+        that: (immich_df.stdout_lines[-1].split()[3] | int) // 1024 >= immich_dump_want_mib | int
         fail_msg: >-
           {{ immich_dump_dir }} on {{ dep.host }} has {{ (immich_df.stdout_lines[-1].split()[3] | int) // 1024 }} MiB
-          free, under the {{ immich_dump_min_free_mib }} MiB wanted. Free some, or move older dumps
+          free, under the {{ immich_dump_want_mib }} MiB wanted. Free some, or move older dumps
           off it. Nothing has been started.
         success_msg: "{{ (immich_df.stdout_lines[-1].split()[3] | int) // 1024 }} MiB free"
 
@@ -118,16 +153,17 @@
         cmd: >-
           set -o pipefail; umask 077;
           docker exec immich_postgres sh -c 'pg_dumpall --clean --if-exists -U "$POSTGRES_USER"'
-          | gzip > {{ immich_dump_dir }}/immich-{{ immich_dump_stamp }}-{{ immich_from }}.sql.gz.partial
+          | gzip > {{ immich_dump_path }}.partial
       become: true
       delegate_to: "{{ dep.host }}"
 
     - name: Read the end of the dump
-      # Reads only the last lines, which are SQL comments: no data reaches the register.
+      # A count, not the lines: on a dump cut short, the last lines are table rows, password
+      # hashes among them, and a register shows under -v.
       ansible.builtin.shell:
         cmd: >-
-          gzip -cd {{ immich_dump_dir }}/immich-{{ immich_dump_stamp }}-{{ immich_from }}.sql.gz.partial
-          | tail -n 5
+          gzip -cd {{ immich_dump_path }}.partial
+          | tail -n 3 | grep -c 'PostgreSQL database cluster dump complete'
       register: immich_dump_tail
       changed_when: false
       failed_when: false
@@ -136,7 +172,7 @@
 
     - name: Check the dump is complete
       ansible.builtin.assert:
-        that: immich_dump_tail.stdout is search('PostgreSQL database cluster dump complete')
+        that: (immich_dump_tail.stdout | default('0', true) | trim | int) >= 1
         fail_msg: >-
           The dump in {{ immich_dump_dir }} on {{ dep.host }} does not end with pg_dumpall's
           "dump complete" line, so it is cut short. It is left as a .partial, which the next run
@@ -147,35 +183,43 @@
       ansible.builtin.command:
         argv:
           - mv
-          - "{{ immich_dump_dir }}/immich-{{ immich_dump_stamp }}-{{ immich_from }}.sql.gz.partial"
-          - "{{ immich_dump_dir }}/immich-{{ immich_dump_stamp }}-{{ immich_from }}.sql.gz"
-      become: true
-      delegate_to: "{{ dep.host }}"
-
-    - name: Find the dumps in {{ immich_dump_dir }}
-      ansible.builtin.find:
-        paths: "{{ immich_dump_dir }}"
-        patterns: "immich-*.sql.gz"
-      register: immich_dumps
+          - "{{ immich_dump_path }}.partial"
+          - "{{ immich_dump_path }}"
       become: true
       delegate_to: "{{ dep.host }}"
 
     - name: Delete all but the newest {{ immich_dump_keep }}
-      # By name, which starts with the UTC time it was taken, not by mtime, which a copy or a
-      # restore from elsewhere can change.
+      # This run's dump is always kept and the others are ranked by name, which starts with the
+      # UTC time each was taken. Not by mtime, which a copy or a restore can change; and never
+      # with this dump in the ranking, since a control node whose clock is behind would put it
+      # last and delete it.
       ansible.builtin.file:
         path: "{{ item.path }}"
         state: absent
-      loop: "{{ (immich_dumps.files | sort(attribute='path', reverse=true))[(immich_dump_keep | int):] }}"
+      loop: >-
+        {{ (immich_dumps.files | rejectattr('path', 'equalto', immich_dump_path)
+            | sort(attribute='path', reverse=true) | list)[((immich_dump_keep | int) - 1):] }}
       loop_control:
         label: "{{ item.path }}"
       become: true
       delegate_to: "{{ dep.host }}"
 
+    - name: Read this dump back
+      ansible.builtin.stat:
+        path: "{{ immich_dump_path }}"
+      register: immich_dump_stat
+      become: true
+      delegate_to: "{{ dep.host }}"
+
+    - name: Check this dump is in place
+      ansible.builtin.assert:
+        that: immich_dump_stat.stat.exists and immich_dump_stat.stat.size > 0
+        fail_msg: "{{ immich_dump_path }} on {{ dep.host }} is missing or empty after rotation. Nothing has been started."
+        quiet: true
+
     - name: Print the dump this redeploy can go back to
       ansible.builtin.debug:
         msg:
-          - "dump    {{ dep.host }}:{{ immich_dump_dir }}/immich-{{ immich_dump_stamp }}-{{ immich_from }}.sql.gz
-            ({{ ((immich_dumps.files | selectattr('path', 'search', immich_dump_stamp) | map(attribute='size') | first | default(0)) / 1048576) | round(1) }} MiB)"
-          - "kept    {{ [immich_dumps.files | length, immich_dump_keep | int] | min }} in {{ immich_dump_dir }}; restoring is docs/recovery.md § Immich's database"
+          - "dump    {{ dep.host }}:{{ immich_dump_path }} ({{ (immich_dump_stat.stat.size / 1048576) | round(1) }} MiB)"
+          - "kept    {{ [immich_dumps.files | rejectattr('path', 'equalto', immich_dump_path) | list | length, (immich_dump_keep | int) - 1] | min + 1 }} in {{ immich_dump_dir }}; restoring is docs/recovery.md § Immich's database"
       changed_when: true

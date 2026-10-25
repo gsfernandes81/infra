@@ -91,7 +91,9 @@ Two dumps are made, and only one is off the array:
   only. [`ansible/deploy-hooks/immich/prepare.yml`](../ansible/deploy-hooks/immich/prepare.yml)
   takes one after you answer y to an Immich redeploy and before `up`, and keeps the newest
   three. Each is named for the UTC time it was taken and the server version it was taken
-  under: `immich-20261025T2300Z-v3.0.1.sql.gz` goes with v3.0.1.
+  under: `immich-20261025T230000Z-v3.0.1.sql.gz` goes with v3.0.1. The version is the
+  image's own label, else its tag; a server started from a floating tag such as `v3` can
+  only say `v3`, and `unknown` means neither said anything.
 
 Before anything invasive that is not a redeploy, such as array work or the move to MicroOS,
 take one by hand. In `ssh zero`:
@@ -99,12 +101,15 @@ take one by hand. In `ssh zero`:
 ```fish
 sudo -v
 sudo mkdir -p -m 700 /var/backups/immich
-set f /var/backups/immich/immich-(date -u +%Y%m%dT%H%MZ)-manual.sql.gz
-sudo docker exec immich_postgres sh -c 'pg_dumpall --clean --if-exists -U "$POSTGRES_USER"' | gzip | sudo tee $f >/dev/null
-sudo sh -c "gzip -cd $f | tail -n 3"      # must say: dump complete
+set f /var/backups/immich/immich-(date -u +%Y%m%dT%H%M%SZ)-manual.sql.gz
+sudo docker exec immich_postgres sh -c 'pg_dumpall --clean --if-exists -U "$POSTGRES_USER"' | gzip | sudo sh -c "umask 077; cat > $f.partial"
+sudo sh -c "gzip -cd $f.partial | tail -n 3"      # must say: dump complete
+sudo mv $f.partial $f                              # only if it did
 ```
 
-A manual dump counts towards the three the play keeps.
+A dump named this way counts towards the three the play keeps, so the next redeploy may
+delete it; copy it elsewhere if it has to outlive that. A name that does not start with
+`immich-` and a digit is ignored by the play: neither counted nor deleted.
 
 **Restoring** is Immich's procedure
 ([backup and restore](https://docs.immich.app/administration/backup-and-restore)), with
