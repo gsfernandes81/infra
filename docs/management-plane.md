@@ -519,10 +519,13 @@ ones that answer the question this document started from.
 **Filed 2026-10-24, no phase number — nothing reports a stale sidecar `cloudflared`.**
 A deployment's connector is pinned in its `compose.yaml` and is outside 2h's staggered
 autoupdate by design, so it ages silently: `server-update-cloudflared.yml` and the hosts'
-autoupdate never see it. The fix is a report, not an updater — the sidecar's image tag
-beside the host binaries' versions, from `bin/check-sources` or the fleet inventory.
-`calibre-web` is the first such deployment and `garmin-mcp` (committed 2026-10-24) the
-second. Not built.
+autoupdate never see it. **The fix is an updater that proposes, never one that deploys**
+(owner, 2026-10-25): a bot such as Renovate opens a PR bumping the tag *and* digest in the
+deployment's `compose.yaml`, and the owner merges and deploys as with any bump. What stays
+ruled out is anything that updates on the box — an in-container update dies with the next
+recreate, and a Watchtower-style puller would run an image git does not name. Covers the
+app images too, not only the sidecar; `destiny-director` follows a moving tag by design and
+stays out. `calibre-web` is the first such deployment and `garmin-mcp` the second. Not built.
 
 **Filed 2026-10-24, no phase number — nothing alerts when `garmin-mcp`'s Garmin login lapses.**
 The cached Garmin session lasts about six months. When it ends, the tools fail while `/healthz`
