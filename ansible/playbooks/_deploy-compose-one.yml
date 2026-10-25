@@ -67,157 +67,177 @@
   ansible.builtin.include_tasks: "{{ playbook_dir }}/../deploy-hooks/{{ dep.name }}/preflight.yml"
   when: dep_preflight.stat.exists
 
-# ── the plan: Compose's own dry run, nothing changed ─────────────────────────
-- name: Plan {{ dep.name }}, as a dry run
-  # check_mode true on the task itself, so even a real run only ever asks here. The module
-  # runs `up --dry-run`; `actions` lists what it would do to each container and image.
-  community.docker.docker_compose_v2:
-    project_src: "{{ dep_dir }}"
-    pull: missing
-    state: present
-  check_mode: true
-  register: dep_plan
-  become: true
-  delegate_to: "{{ dep.host }}"
-
-- name: Note the plan's lines for {{ dep.name }}
-  # Compose renames a container it is replacing to <12 hex>_<name> while it builds the new
-  # one, and the dry run reports that rename as a second container "Starting". It is the same
-  # container, so those entries are left out. Read defensively: the key names are the
-  # module's to change, and the whole entry is the fallback so a plan is never blanks.
-  ansible.builtin.set_fact:
-    dep_plan_lines: >-
-      {% set out = [] %}{% for a in dep_plan.actions | default([]) %}{% if a.id is not defined or a.id is not match('^[0-9a-f]{12}_') %}{% set _ = out.append((a.what | default('?')) ~ ' ' ~ (a.id | default(a.msg | default(a | string))) ~ ': ' ~ (a.status | default(''))) %}{% endif %}{% endfor %}{{ out }}
-
-- name: Print what up would do to {{ dep.name }}
+# ── a --check of a first bring-up stops here ─────────────────────────────────
+# Compose cannot plan without the variables it requires, and for a first bring-up those
+# include the tunnel keys that only a real run of the tunnel play writes. So the plan and
+# everything after it wait for the real run, where the tunnel half has written them first.
+- name: "--check, bring-up: say the plan waits"
   ansible.builtin.debug:
     msg: >-
-      {{ dep.name }} on {{ dep.host }}:
-      {{ 'would change: ' ~ (dep_plan_lines | join('; ')) if dep_plan.changed else 'nothing to change.' }}
+      --check of a first bring-up: the plan for {{ dep.name }} needs the tunnel keys that
+      a real run writes to .env before this step, so it is skipped. Everything above ran.
   changed_when: true
+  when: ansible_check_mode and (bringup | default(false) | bool)
 
-# ── ask ──────────────────────────────────────────────────────────────────────
-- name: "If changes and not --check: ask about {{ dep.name }}"
-  ansible.builtin.pause:
-    prompt: >-
-      Redeploy {{ dep.name }} on {{ dep.host }}?
-      Containers above are recreated, with a short outage. [y/N]
-  register: dep_answer
-  when:
-    - dep_plan.changed
-    - not ansible_check_mode
-    - not (assume_yes | default(false) | bool)
+- name: Plan, ask, redeploy and check
+  when: not (ansible_check_mode and (bringup | default(false) | bool))
+  block:
+    # ── the plan: Compose's own dry run, nothing changed ───────────────────────
+    - name: Plan {{ dep.name }}, as a dry run
+      # check_mode true on the task itself, so even a real run only ever asks here. The module
+      # runs `up --dry-run`; `actions` lists what it would do to each container and image.
+      community.docker.docker_compose_v2:
+        project_src: "{{ dep_dir }}"
+        pull: missing
+        state: present
+      check_mode: true
+      register: dep_plan
+      become: true
+      delegate_to: "{{ dep.host }}"
 
-- name: Note whether to go ahead with {{ dep.name }}
+    - name: Note the plan's lines for {{ dep.name }}
+      # Compose renames a container it is replacing to <12 hex>_<name> while it builds the new
+      # one, and the dry run reports that rename as a second container "Starting". It is the same
+      # container, so those entries are left out. Read defensively: the key names are the
+      # module's to change, and the whole entry is the fallback so a plan is never blanks.
+      ansible.builtin.set_fact:
+        dep_plan_lines: >-
+          {% set out = [] %}{% for a in dep_plan.actions | default([]) %}{% if a.id is not defined or a.id is not match('^[0-9a-f]{12}_') %}{% set _ = out.append((a.what | default('?')) ~ ' ' ~ (a.id | default(a.msg | default(a | string))) ~ ': ' ~ (a.status | default(''))) %}{% endif %}{% endfor %}{{ out }}
+
+    - name: Print what up would do to {{ dep.name }}
+      ansible.builtin.debug:
+        msg: >-
+          {{ dep.name }} on {{ dep.host }}:
+          {{ 'would change: ' ~ (dep_plan_lines | join('; ')) if dep_plan.changed else 'nothing to change.' }}
+      changed_when: true
+
+    # ── ask ──────────────────────────────────────────────────────────────────────
+    - name: "If changes and not --check: ask about {{ dep.name }}"
+      ansible.builtin.pause:
+        prompt: >-
+          Redeploy {{ dep.name }} on {{ dep.host }}?
+          Containers above are recreated, with a short outage. [y/N]
+      register: dep_answer
+      when:
+        - dep_plan.changed
+        - not ansible_check_mode
+        - not (assume_yes | default(false) | bool)
+
+    - name: Note whether to go ahead with {{ dep.name }}
+      ansible.builtin.set_fact:
+        dep_go: >-
+          {{ dep_plan.changed and not ansible_check_mode and
+             ((assume_yes | default(false) | bool) or
+              ((dep_answer.user_input | default('') | lower) in ['y', 'yes'])) }}
+
+    # ── do ───────────────────────────────────────────────────────────────────────
+    - name: "If going ahead: read container ids of {{ dep.name }}"
+      ansible.builtin.command:
+        cmd: docker compose ps -a --format '{% raw %}{{.Name}} {{.ID}}{% endraw %}'
+        chdir: "{{ dep_dir }}"
+      register: dep_ids_before
+      changed_when: false
+      become: true
+      delegate_to: "{{ dep.host }}"
+      when: dep_go | bool
+
+    - name: "If going ahead: redeploy {{ dep.name }}"
+      community.docker.docker_compose_v2:
+        project_src: "{{ dep_dir }}"
+        pull: missing
+        state: present
+      register: dep_up
+      become: true
+      delegate_to: "{{ dep.host }}"
+      when: dep_go | bool
+
+    - name: "If going ahead: wait for {{ dep.name }} to settle"
+      # `starting` is a healthcheck that has not answered yet; `Restarting` is a crash loop. Both
+      # read as not yet; the check after says what the end state means.
+      ansible.builtin.command:
+        cmd: docker compose ps -a --format '{% raw %}{{.Name}} {{.Status}}{% endraw %}'
+        chdir: "{{ dep_dir }}"
+      register: dep_status
+      until: dep_status.stdout is not search('starting|Restarting')
+      retries: 20
+      delay: 15
+      changed_when: false
+      become: true
+      delegate_to: "{{ dep.host }}"
+      when: dep_go | bool
+
+    - name: "If going ahead: read those container ids again"
+      ansible.builtin.command:
+        cmd: docker compose ps -a --format '{% raw %}{{.Name}} {{.ID}}{% endraw %}'
+        chdir: "{{ dep_dir }}"
+      register: dep_ids_after
+      changed_when: false
+      become: true
+      delegate_to: "{{ dep.host }}"
+      when: dep_go | bool
+
+    - name: "If going ahead: check every {{ dep.name }} container is up"
+      ansible.builtin.assert:
+        that: dep_status.stdout_lines | reject('search', ' Up ') | list | length == 0
+        fail_msg: >-
+          Not up after the redeploy on {{ dep.host }}:
+          {{ dep_status.stdout_lines | default([]) | reject('search', ' Up ') | join('; ') }}.
+          The rest of this run is stopped. `sudo docker compose logs` in {{ dep_dir }} says why;
+          the deployment is as the failed `up` left it.
+        success_msg: "{{ dep.name }}: all containers up"
+      when: dep_go | bool
+
+    - name: Stat the probe hook for {{ dep.name }}
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../deploy-hooks/{{ dep.name }}/probe.yml"
+      register: dep_probe
+      when: dep_go | bool
+
+    - name: "If going ahead and it has a probe hook: run it"
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../deploy-hooks/{{ dep.name }}/probe.yml"
+      when:
+        - dep_go | bool
+        - dep_probe.stat.exists | default(false)
+
+    - name: "If going ahead: compare the ids before and after"
+      # Recreated means a new id. A container whose id did not change was left alone, which is
+      # the point of reading ids and not StartedAt (CLAUDE.md § Verifying changes).
+      ansible.builtin.set_fact:
+        dep_before: "{{ dict(dep_ids_before.stdout_lines | map('split', ' ') | map('first')
+                        | zip(dep_ids_before.stdout_lines | map('split', ' ') | map('last'))) }}"
+        dep_after: "{{ dict(dep_ids_after.stdout_lines | map('split', ' ') | map('first')
+                       | zip(dep_ids_after.stdout_lines | map('split', ' ') | map('last'))) }}"
+      when: dep_go | bool
+
+    - name: "If going ahead: print which were recreated"
+      ansible.builtin.debug:
+        msg: >-
+          {{ dep.name }}: recreated {{ dep_after | dict2items
+               | rejectattr('value', 'eq', '') | selectattr('key', 'in', dep_after.keys())
+               | rejectattr('value', 'in', dep_before.values()) | map(attribute='key') | list or 'none' }};
+          unchanged {{ dep_after | dict2items | selectattr('value', 'in', dep_before.values())
+               | map(attribute='key') | list or 'none' }}
+      changed_when: true
+      when: dep_go | bool
+
+    - name: "If declined: note it for the closing line"
+      ansible.builtin.set_fact:
+        deploy_declined: "{{ (deploy_declined | default([])) + [dep.host ~ '/' ~ dep.name] }}"
+      when:
+        - dep_plan.changed
+        - not ansible_check_mode
+        - not (dep_go | bool)
+
+    - name: Note what happened to {{ dep.name }}
+      ansible.builtin.set_fact:
+        deploy_summary: >-
+          {{ (deploy_summary | default([])) + [dep.host ~ '/' ~ dep.name ~ ': ' ~
+             ('redeployed' if dep_go | bool else
+              'plan only (--check)' if ansible_check_mode and dep_plan.changed else
+              'nothing to change' if not dep_plan.changed else
+              'skipped, not confirmed')] }}
+
+- name: "--check, bring-up: note the plan waits"
   ansible.builtin.set_fact:
-    dep_go: >-
-      {{ dep_plan.changed and not ansible_check_mode and
-         ((assume_yes | default(false) | bool) or
-          ((dep_answer.user_input | default('') | lower) in ['y', 'yes'])) }}
-
-# ── do ───────────────────────────────────────────────────────────────────────
-- name: "If going ahead: read container ids of {{ dep.name }}"
-  ansible.builtin.command:
-    cmd: docker compose ps -a --format '{% raw %}{{.Name}} {{.ID}}{% endraw %}'
-    chdir: "{{ dep_dir }}"
-  register: dep_ids_before
-  changed_when: false
-  become: true
-  delegate_to: "{{ dep.host }}"
-  when: dep_go | bool
-
-- name: "If going ahead: redeploy {{ dep.name }}"
-  community.docker.docker_compose_v2:
-    project_src: "{{ dep_dir }}"
-    pull: missing
-    state: present
-  register: dep_up
-  become: true
-  delegate_to: "{{ dep.host }}"
-  when: dep_go | bool
-
-- name: "If going ahead: wait for {{ dep.name }} to settle"
-  # `starting` is a healthcheck that has not answered yet; `Restarting` is a crash loop. Both
-  # read as not yet; the check after says what the end state means.
-  ansible.builtin.command:
-    cmd: docker compose ps -a --format '{% raw %}{{.Name}} {{.Status}}{% endraw %}'
-    chdir: "{{ dep_dir }}"
-  register: dep_status
-  until: dep_status.stdout is not search('starting|Restarting')
-  retries: 20
-  delay: 15
-  changed_when: false
-  become: true
-  delegate_to: "{{ dep.host }}"
-  when: dep_go | bool
-
-- name: "If going ahead: read those container ids again"
-  ansible.builtin.command:
-    cmd: docker compose ps -a --format '{% raw %}{{.Name}} {{.ID}}{% endraw %}'
-    chdir: "{{ dep_dir }}"
-  register: dep_ids_after
-  changed_when: false
-  become: true
-  delegate_to: "{{ dep.host }}"
-  when: dep_go | bool
-
-- name: "If going ahead: check every {{ dep.name }} container is up"
-  ansible.builtin.assert:
-    that: dep_status.stdout_lines | reject('search', ' Up ') | list | length == 0
-    fail_msg: >-
-      Not up after the redeploy on {{ dep.host }}:
-      {{ dep_status.stdout_lines | default([]) | reject('search', ' Up ') | join('; ') }}.
-      The rest of this run is stopped. `sudo docker compose logs` in {{ dep_dir }} says why;
-      the deployment is as the failed `up` left it.
-    success_msg: "{{ dep.name }}: all containers up"
-  when: dep_go | bool
-
-- name: Stat the probe hook for {{ dep.name }}
-  ansible.builtin.stat:
-    path: "{{ playbook_dir }}/../deploy-hooks/{{ dep.name }}/probe.yml"
-  register: dep_probe
-  when: dep_go | bool
-
-- name: "If going ahead and it has a probe hook: run it"
-  ansible.builtin.include_tasks: "{{ playbook_dir }}/../deploy-hooks/{{ dep.name }}/probe.yml"
-  when:
-    - dep_go | bool
-    - dep_probe.stat.exists | default(false)
-
-- name: "If going ahead: compare the ids before and after"
-  # Recreated means a new id. A container whose id did not change was left alone, which is
-  # the point of reading ids and not StartedAt (CLAUDE.md § Verifying changes).
-  ansible.builtin.set_fact:
-    dep_before: "{{ dict(dep_ids_before.stdout_lines | map('split', ' ') | map('first')
-                    | zip(dep_ids_before.stdout_lines | map('split', ' ') | map('last'))) }}"
-    dep_after: "{{ dict(dep_ids_after.stdout_lines | map('split', ' ') | map('first')
-                   | zip(dep_ids_after.stdout_lines | map('split', ' ') | map('last'))) }}"
-  when: dep_go | bool
-
-- name: "If going ahead: print which were recreated"
-  ansible.builtin.debug:
-    msg: >-
-      {{ dep.name }}: recreated {{ dep_after | dict2items
-           | rejectattr('value', 'eq', '') | selectattr('key', 'in', dep_after.keys())
-           | rejectattr('value', 'in', dep_before.values()) | map(attribute='key') | list or 'none' }};
-      unchanged {{ dep_after | dict2items | selectattr('value', 'in', dep_before.values())
-           | map(attribute='key') | list or 'none' }}
-  changed_when: true
-  when: dep_go | bool
-
-- name: "If declined: note it for the closing line"
-  ansible.builtin.set_fact:
-    deploy_declined: "{{ (deploy_declined | default([])) + [dep.host ~ '/' ~ dep.name] }}"
-  when:
-    - dep_plan.changed
-    - not ansible_check_mode
-    - not (dep_go | bool)
-
-- name: Note what happened to {{ dep.name }}
-  ansible.builtin.set_fact:
-    deploy_summary: >-
-      {{ (deploy_summary | default([])) + [dep.host ~ '/' ~ dep.name ~ ': ' ~
-         ('redeployed' if dep_go | bool else
-          'plan only (--check)' if ansible_check_mode and dep_plan.changed else
-          'nothing to change' if not dep_plan.changed else
-          'skipped, not confirmed')] }}
+    deploy_summary: "{{ (deploy_summary | default([])) + [dep.host ~ '/' ~ dep.name ~ ': the plan waits for the real run (--check of a first bring-up)'] }}"
+  when: ansible_check_mode and (bringup | default(false) | bool)
