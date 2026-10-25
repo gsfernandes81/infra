@@ -317,8 +317,8 @@ on one of the boxes the control plane controls**.
 The argument the other way is real and is why this is open rather than closed: **an
 inventory run from Termux is metered end to end to reach boxes sitting on zero's own LAN,
 and from inside the container it is free.** That saving recurs every run, and Phase 8's
-answer to it — scheduling from `two` — is blocked behind Phase 7's rootless podman, which
-since 2026-10-25 waits for MicroOS on `one`.
+answer to it — scheduling from `two` — no longer waits on Phase 7's rootless podman (owner,
+2026-10-25): it starts with what needs no root, and the container half stays interactive.
 
 Three things would change the answer, and it is worth knowing which one you are waiting
 for rather than revisiting this on a feeling:
@@ -514,7 +514,7 @@ ones that answer the question this document started from.
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | Phase 3 now tests the mechanism first, on a disposable deployment. **Owner's leaning, 2026-10-25: the sidecar model here too**, as Phase 3 settled it for deployments, in place of `infra-dev`'s connector started from its own entrypoint — likely, not yet decided |
 | 6 | ~~`dd` off `two`~~ | `two`, `one` | arm64 CI, upstream | **Dropped 2026-10-25**, the owner's call: moving `destiny-director` follows its own needs, not this plan — [gsfernandes81/infra#11](https://github.com/gsfernandes81/infra/issues/11), which may or may not end in a PR. The number is kept so the others do not shift |
 | 7 | **Rootless podman on `one`** — roadmap §2 | `one` | 3, MicroOS on `one` | **Deferred to MicroOS, 2026-10-25** — the owner's call, so `one` converts once, with memory limits, instead of on OpenRC without them and then again ([`decisions.md`](decisions.md)) |
-| 8 | `two` as the scheduled read-only control node | `two` | 7; ~~6~~ | Waits for MicroOS on `one` too, through 7. ⚠︎ **Open since 6 was dropped:** § *The control plane* requires `two` to run no containers for this, and 6 was what met that — undecided whether Phase 8 now waits on #11, runs alongside the bot, or goes |
+| 8 | `two` as the scheduled read-only control node | `two` | ~~6, 7~~ — none since 2026-10-25 | **Not gated on 7 any more** (owner, 2026-10-25): it starts with the scheduled checks that need no root, and container inventory stays an interactive `-K` run until 7 lifts that for `one` and MicroOS for `zero`. ⚠︎ **Open since 6 was dropped:** § *The control plane* requires `two` to run no containers for this, and 6 was what met that — undecided whether Phase 8 now waits on #11, runs alongside the bot, or goes |
 
 **Filed 2026-10-24, no phase number — nothing reports a stale sidecar `cloudflared`.**
 A deployment's connector is pinned in its `compose.yaml` and is outside 2h's staggered
@@ -966,6 +966,10 @@ assumed. What is worth carrying forward is the scoping: that token was *All acco
 zones* against the five permissions it actually needed, and the place to fix that is at
 mint time, not by deleting it again afterwards.
 
+⚠︎ **Superseded 2026-10-25: 7 no longer gates 8** — Phase 8 starts with the checks that need
+no root, and 7 later lifts the container half for `one`. The reasoning below is why that half
+needs it.
+
 **Phase 7 moved.** Rootless podman was going to be a follow-on; it is a **precondition of
 Phase 8**, because `podman ps` as the connecting user needs no sudo.
 `server-generate-fleet-inventory.yml` takes `-K` today only because `gavin` is not in the
@@ -978,8 +982,8 @@ table below — so Phase 8 starts out able to audit `one` unprivileged and `zero
 on a schedule. That is a partial unblock, and calling it a full one is the mistake to
 avoid.
 
-**And since 2026-10-25 Phase 7 waits for MicroOS on `one`**, the owner's call, so Phase 8
-waits with it. On MicroOS rootless podman keeps its memory limits (the trade table below);
+**And since 2026-10-25 Phase 7 waits for MicroOS on `one`**, the owner's call — which is
+part of why Phase 8 stopped waiting on it the same day. On MicroOS rootless podman keeps its memory limits (the trade table below);
 on OpenRC it would not, and the conversion would be done twice.
 
 `one` first is also roadmap §2's own answer, for its own reason: it is the non-critical
