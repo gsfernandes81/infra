@@ -130,7 +130,7 @@
 - name: Print what up would do to {{ dep.name }}
   ansible.builtin.debug:
     msg: >-
-      {{ dep.name }} on {{ dep.host }}{{ ' (the critical box)' if dep.host == 'zero' else '' }}:
+      {{ dep.name }} on {{ dep.host }}:
       {{ 'would change: ' ~ (dep_plan_lines | join('; ')) if dep_plan.changed else 'nothing to change.' }}
   changed_when: true
 
@@ -138,7 +138,7 @@
 - name: "If changes and not --check: ask about {{ dep.name }}"
   ansible.builtin.pause:
     prompt: >-
-      Redeploy {{ dep.name }} on {{ dep.host }}{{ ' (the critical box)' if dep.host == 'zero' else '' }}?
+      Redeploy {{ dep.name }} on {{ dep.host }}?
       Containers above are recreated, with a short outage. [y/N]
   register: dep_answer
   when:

@@ -27,7 +27,7 @@
 #      healthchecks and fails naming any container that is not up.
 #
 # `deployment=all` runs that for every deployment this play may touch, ONE AT A TIME, `one`
-# before `zero` (the non-critical box first, as the rest of this repo is rolled out), each
+# before `zero`, each
 # with its own plan and its own question. It stops at the first failure and does not go on
 # to the next, so a broken deployment is never followed by a second change. A "no" skips
 # only that deployment. `-e assume_yes=true` skips the question for ONE named deployment and
@@ -141,8 +141,7 @@
       when: item.item not in (deploy_keep | default([]))
 
     - name: Order them, one before zero and then by name
-      # The non-critical box first, so a mistake costs the cheap box. Written out because it
-      # is two hosts; a third container host would have to be added here.
+      # Written out because it is two hosts; a third container host would have to be added here.
       ansible.builtin.set_fact:
         deploy_targets: >-
           {{ ((deploy_keep | default([])) | selectattr('host', 'eq', 'one') | sort(attribute='name') | list)
