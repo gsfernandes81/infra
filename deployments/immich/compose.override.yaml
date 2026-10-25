@@ -2,7 +2,17 @@
 # UNMODIFIED, so a release is taken by replacing it and reading a plain diff (SOURCE says
 # how). Compose reads this one automatically; no command changes.
 #
-# Resource limits are the only change. Measured on `zero` (Pi 5), not Immich's advice.
+# Two changes: the server and machine-learning images pinned to the version `zero` runs,
+# and the resource limits (measured on `zero`, a Pi 5, not Immich's advice).
+#
+# THE PINS, read off the box on 2026-10-25 and checked against the registry: `v3.0.1` is
+# what runs, by the digests below. It was started from `IMMICH_VERSION=v3`, a floating
+# major tag that had since moved on, so `.env`'s IMMICH_VERSION no longer reaches the
+# image and can be deleted. Both images are ONE version, so they move together; Renovate
+# proposes them as one group (renovate.json), and a release also means replacing
+# compose.yaml (SOURCE). Pinning at what runs rather than at the latest is the point: the
+# next `up -d` recreates the containers on the same bytes, where the latest could run a
+# database migration that cannot be undone.
 #
 # NO `:?` GUARDS HERE, and that is tested, not forgotten. The data paths used to carry
 # `${UPLOAD_LOCATION:?…}` and `${DB_DATA_LOCATION:?…}` so an unset value stopped Compose
@@ -14,6 +24,7 @@
 # come back: re-state each volume here with `:?`, merged by its container path.
 services:
   immich-server:
+    image: ghcr.io/immich-app/immich-server:v3.0.1@sha256:46dedfc5848f7313bd6b584ea9f2648057430307aad6de56de968f6710a72cae
     deploy:
       resources:
         limits:
@@ -21,6 +32,7 @@ services:
           memory: '2000M'
 
   immich-machine-learning:
+    image: ghcr.io/immich-app/immich-machine-learning:v3.0.1@sha256:cb2128c5cbc554fdaa2a036fb4419c808a9f3e0f27170e569dd9e727243da909
     deploy:
       resources:
         limits:

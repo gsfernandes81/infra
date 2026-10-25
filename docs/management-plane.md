@@ -539,8 +539,11 @@ stays out. `calibre-web` is the first such deployment and `garmin-mcp` the secon
 `renovate.json` for the pinned deployments. Dependabot ran first and was replaced; its
 first run proved a digest moves under a fixed tag and that ignore names carry no registry,
 and proposed a Postgres 14 to 16 bump for Immich that was closed ([`decisions.md`](decisions.md)).
-The floating tags (`gluetun`, `qbittorrent`, `syncthing`, `mysql`) are outside it until
-they are pinned to the digest each box is running.
+The floating images were pinned on 2026-10-25 to the digest each box was running
+(`gluetun`, `qbittorrent`, both `syncthing`s, Immich's server and machine learning at
+v3.0.1), each tag checked against the registry first, so Renovate can now propose their
+bumps. Left unpinned: `ionic-traces`' `mysql:8`, stopped and switched off in
+`renovate.json`.
 
 **Filed 2026-10-24, no phase number — nothing alerts when `garmin-mcp`'s Garmin login lapses.**
 The cached Garmin session lasts about six months. When it ends, the tools fail while `/healthz`

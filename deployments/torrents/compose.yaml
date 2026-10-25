@@ -1,7 +1,10 @@
 name: torrents
 services:
   gluetun:
-    image: qmcgaw/gluetun:latest
+    # Pinned by digest to the build running on 2026-10-25, which no version tag points at
+    # any more (`latest` has moved on twice), so `latest` here is a label and the digest is
+    # the image. Moving to a version tag is a deliberate bump of the VPN container.
+    image: qmcgaw/gluetun:latest@sha256:a70a461a9c86966193f543009cfedf57e51d2f4880f0d834d7b3c0091c9250d1
     restart: always
     cap_add:
       - NET_ADMIN
@@ -22,7 +25,7 @@ services:
 
   torrent:
     container_name: torrent
-    image: linuxserver/qbittorrent:latest
+    image: linuxserver/qbittorrent:5.1.4-r2-ls442@sha256:065792d2b11f0facff340210fc1cf13623b029a94ecdf08b02d06d922205f618
     restart: always
     network_mode: "service:gluetun"
     environment:
@@ -43,7 +46,7 @@ services:
           memory: '256M'
 
   syncthing:
-    image: syncthing/syncthing
+    image: syncthing/syncthing:2.0.14@sha256:6d2ab058383b533e045cf2c32fc4c6bbe87c612c92bc2aca9f552fb099b2e123
     container_name: syncthing
     hostname: syncthing-torrents.gsrpi.uk
     environment:
