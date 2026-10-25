@@ -565,6 +565,16 @@ The owner chose service tokens, one per client as the dev containers have, for t
 ([gsfernandes81/infra#12](https://github.com/gsfernandes81/infra/issues/12); the details
 are in `docs/cloudflare.md` § *Open*).
 
+**Filed 2026-10-25, no phase number: the dev containers' service tokens probably expire a
+year after minting.** `_client-dev-ssh.yml` mints each `<container>-<client>` token with
+only a name, and Cloudflare's API gives a token one year (8760 hours) unless told
+otherwise. The tokens minted on 2026-10-04 would then lapse around 2027-10-04, and `ssh
+infra-dev` and `ssh or3-dev` would fail with `websocket: bad handshake`, the August
+symptom. The Expiration column under Access, Service Auth, Service Tokens settles it. A
+refresh call extends a token without re-minting it; the play could mint with
+`duration: forever`, as `plans/fleet-ssh-access.md` does for the fleet's tokens. Found by
+the Fable review of that plan.
+
 **Filed 2026-10-25, no phase number: send2ereader's conversions probably cannot run on
 `one`.** The fork's Dockerfile, at the sha in `deployments/send2ereader/SOURCE`, downloads
 `kepubify-linux-64bit` and an i386 `kindlegen`, both x86 programs, and `one` is aarch64.
