@@ -702,6 +702,17 @@ writes plain, append-only lines.
 
 **The escape hatch is unchanged:** `ANSIBLE_STDOUT_CALLBACK=default` for one run.
 
+**Restyled after prettify the same day (owner):** one line per task with gray dots out to a
+right-aligned time and status word, prettify's symbols (`✓ ~ ✗ → ⚠ ●`), ANSI colours, status
+words, `PLAY [name]` header, `Error:` lines, per-host recap and closing line. Every status word
+starts in one column, the furthest right it can: the longest word is seven letters, so an
+unreachable host is `DOWN`, and the terminal's last column stays empty so a redraw never meets
+an early line wrap. Long lines wrap as Helix soft-wraps (the line's indent kept, marked `↪`).
+Kept from before, against prettify: the running step's `● … RUNNING` line with its timer,
+skipped steps not shown, nothing truncated, and a closing line that says when the run failed.
+Ansible's own exception block (an `[ERROR]` with a source excerpt) now prints only with `-v`:
+the cause is already in the step's `Error:` and output lines.
+
 ## The lesson worth keeping
 
 
