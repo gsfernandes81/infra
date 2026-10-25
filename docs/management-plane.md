@@ -589,6 +589,22 @@ the download by Docker's `TARGETARCH` fixes the Kobo path. KindleGen was only ev
 for x86, so on `one` the Kindle conversion needs emulation or goes, and the fork could
 start that box unticked there.
 
+**Kepubify is fixed in the fork** (owner-reported, 2026-10-25); what is left is the test —
+one EPUB to a Kobo with Kepubify ticked, once the deployment is started on the build that
+carries the fix. KindleGen is unchanged and still has no arm build.
+
+**Filed 2026-10-25, no phase number: deploy send2ereader from a CI-built image, not a build
+on `one`.** The owner has asked for the fork's CI to publish images to ghcr. When the first
+one lands, `deployments/send2ereader/compose.yaml` swaps `build:` for a literal
+`image: ghcr.io/gsfernandes81/send2ereader:<tag>@sha256:<digest>` (the repo invariant: the
+deployed image is a literal, tag and digest), `SRC_ROOT` leaves `.env`, and
+`server-deploy-send2ereader.yml` loses its checkout-and-build steps — pull, start and the
+same probes. `SOURCE` either goes, as `calibre-web`'s did (the digest is the record), with the
+image tagged by the fork sha it was built from, or stays as provenance; the owner's call at the
+switch. The fork's checkout on `one` can then go, measured first. What the CI has to give for
+this to work: a `linux/arm64` image (`one` is aarch64), and a package `one` can pull — public,
+or a pull credential kept on `one`. Not started; waiting on the images.
+
 **Closed 2026-10-24 — Ansible output should wrap long lines preserving their indent, the way Helix soft-wraps.** Done by `ansible/callback_plugins/infra.py` (decisions.md § "Ansible output: this repo's own callback"), which measures the terminal itself. The original note follows.
 The owner's ask: a long task title or message line continues on the next line at the same
 indent as where it started (under the ▸, under the host column), never at column 0 and never
