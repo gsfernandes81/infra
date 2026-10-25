@@ -88,8 +88,74 @@
 - name: Plan, ask, redeploy and check
   when: not (ansible_check_mode and (bringup | default(false) | bool))
   block:
+    # ── images the host lacks, which Compose's dry run cannot plan past ────────
+    # The dry run fakes the pull and then asks the REAL daemon about the image when it plans the
+    # recreate (compose v5.6.1, pkg/dryrun/dryrunclient.go: ImageInspect is faked only for
+    # pullServiceImage and buildContainerVolumes), so any bump fails with "No such image". So
+    # what the host lacks is read first. A real run pulls it before the plan; that touches no
+    # container. Under --check, or for an image only `up` can build, the plan names it instead.
+    - name: Read the images {{ dep.name }} uses
+      # Image references only: they are literals in compose.yaml, so no .env value is printed.
+      ansible.builtin.command:
+        cmd: docker compose config --images
+        chdir: "{{ dep_dir }}"
+      register: dep_images
+      changed_when: false
+      check_mode: false
+      become: true
+      delegate_to: "{{ dep.host }}"
+
+    - name: Check which images {{ dep.host }} lacks
+      ansible.builtin.command:
+        argv: [docker, image, inspect, --format, present, "{{ item }}"]
+      loop: "{{ dep_images.stdout_lines | unique }}"
+      register: dep_img_before
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      become: true
+      delegate_to: "{{ dep.host }}"
+
+    - name: Note the images missing on {{ dep.host }}
+      ansible.builtin.set_fact:
+        dep_missing: "{{ dep_img_before.results | rejectattr('rc', 'eq', 0) | map(attribute='item') | list }}"
+
+    - name: "If images are missing: pull images for {{ dep.name }}"
+      # Under --check the module runs `pull --dry-run`, which still asks the registry for each
+      # reference, so a pinned digest that does not exist fails here, before any question.
+      # The module's default policy passes NO --policy flag, and that is the point: --policy,
+      # like `up --pull`, overrides every service's pull_policy (cmd/compose/pull.go), so
+      # garmin-mcp's `never` would look for its tag on Docker Hub. ignore_buildable leaves an
+      # image with a build: section to `up`.
+      community.docker.docker_compose_v2_pull:
+        project_src: "{{ dep_dir }}"
+        ignore_buildable: true
+      become: true
+      delegate_to: "{{ dep.host }}"
+      when: dep_missing | length > 0
+
+    - name: "If pulled: check which images are still missing"
+      # Its own register: a skipped task would overwrite the one above (CLAUDE.md § Shell traps).
+      ansible.builtin.command:
+        argv: [docker, image, inspect, --format, present, "{{ item }}"]
+      loop: "{{ dep_missing }}"
+      register: dep_img_after
+      changed_when: false
+      failed_when: false
+      become: true
+      delegate_to: "{{ dep.host }}"
+      when:
+        - dep_missing | length > 0
+        - not ansible_check_mode
+
+    - name: Note the images Compose cannot plan past
+      ansible.builtin.set_fact:
+        dep_unplannable: >-
+          {{ dep_missing if ansible_check_mode else
+             (dep_img_after.results | default([]) | rejectattr('rc', 'eq', 0) | map(attribute='item') | list) }}
+
     # ── the plan: Compose's own dry run, nothing changed ───────────────────────
-    - name: Plan {{ dep.name }}, as a dry run
+    - name: "If no image is missing: plan {{ dep.name }}, dry run"
       # check_mode true on the task itself, so even a real run only ever asks here. The module
       # runs `up --dry-run`; `actions` lists what it would do to each container and image.
       #
@@ -108,21 +174,28 @@
       register: dep_plan
       become: true
       delegate_to: "{{ dep.host }}"
+      when: dep_unplannable | length == 0
 
     - name: Note the plan's lines for {{ dep.name }}
       # Compose renames a container it is replacing to <12 hex>_<name> while it builds the new
       # one, and the dry run reports that rename as a second container "Starting". It is the same
       # container, so those entries are left out. Read defensively: the key names are the
       # module's to change, and the whole entry is the fallback so a plan is never blanks.
+      # With an image Compose cannot plan past, the plan is that image, and `up` recreates
+      # every container using it; others change only if their own config did.
       ansible.builtin.set_fact:
+        dep_plan_changed: "{{ (dep_unplannable | length > 0) or (dep_plan.changed | default(false)) }}"
         dep_plan_lines: >-
-          {% set out = [] %}{% for a in dep_plan.actions | default([]) %}{% if a.id is not defined or a.id is not match('^[0-9a-f]{12}_') %}{% set _ = out.append((a.what | default('?')) ~ ' ' ~ (a.id | default(a.msg | default(a | string))) ~ ': ' ~ (a.status | default(''))) %}{% endif %}{% endfor %}{{ out }}
+          {% if dep_unplannable | length > 0 %}{{ ['the host lacks ' ~ (dep_unplannable | join(', '))
+              ~ (', which up pulls or builds' if ansible_check_mode else ', which up builds')
+              ~ ', and recreates the containers using it. Compose cannot plan past a missing image,'
+              ~ ' so any other container changes only if its own config did'] }}{% else %}{% set out = [] %}{% for a in dep_plan.actions | default([]) %}{% if a.id is not defined or a.id is not match('^[0-9a-f]{12}_') %}{% set _ = out.append((a.what | default('?')) ~ ' ' ~ (a.id | default(a.msg | default(a | string))) ~ ': ' ~ (a.status | default(''))) %}{% endif %}{% endfor %}{{ out }}{% endif %}
 
     - name: Print what up would do to {{ dep.name }}
       ansible.builtin.debug:
         msg: >-
           {{ dep.name }} on {{ dep.host }}:
-          {{ 'would change: ' ~ (dep_plan_lines | join('; ')) if dep_plan.changed else 'nothing to change.' }}
+          {{ 'would change: ' ~ (dep_plan_lines | join('; ')) if dep_plan_changed | bool else 'nothing to change.' }}
       changed_when: true
 
     # ── ask ──────────────────────────────────────────────────────────────────────
@@ -133,14 +206,14 @@
           Containers above are recreated, with a short outage. [y/N]
       register: dep_answer
       when:
-        - dep_plan.changed
+        - (dep_plan_changed | bool)
         - not ansible_check_mode
         - not (assume_yes | default(false) | bool)
 
     - name: Note whether to go ahead with {{ dep.name }}
       ansible.builtin.set_fact:
         dep_go: >-
-          {{ dep_plan.changed and not ansible_check_mode and
+          {{ (dep_plan_changed | bool) and not ansible_check_mode and
              ((assume_yes | default(false) | bool) or
               ((dep_answer.user_input | default('') | lower) in ['y', 'yes'])) }}
 
@@ -251,7 +324,7 @@
       ansible.builtin.set_fact:
         deploy_declined: "{{ (deploy_declined | default([])) + [dep.host ~ '/' ~ dep.name] }}"
       when:
-        - dep_plan.changed
+        - (dep_plan_changed | bool)
         - not ansible_check_mode
         - not (dep_go | bool)
 
@@ -260,8 +333,8 @@
         deploy_summary: >-
           {{ (deploy_summary | default([])) + [dep.host ~ '/' ~ dep.name ~ ': ' ~
              ('redeployed' if dep_go | bool else
-              'plan only (--check)' if ansible_check_mode and dep_plan.changed else
-              'nothing to change' if not dep_plan.changed else
+              'plan only (--check)' if ansible_check_mode and (dep_plan_changed | bool) else
+              'nothing to change' if not (dep_plan_changed | bool) else
               'skipped, not confirmed')] }}
 
 - name: "--check, bring-up: note the plan waits"

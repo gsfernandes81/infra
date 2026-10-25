@@ -1082,6 +1082,24 @@ be forgotten, and [`docs/recovery.md`](recovery.md) § *Immich's database* says 
 - **No standalone dump play.** The manual block in `recovery.md` covers the invasive work
   that is not a redeploy; a play for it can be added if that comes up more than once.
 
+## The redeploy play pulls missing images before its plan
+
+**Decided 2026-10-25**, after the first `--check` of an image bump (Immich v3.3.5) failed at
+the plan with "No such image". Compose's dry run fakes the pull and then asks the real daemon
+about the image when it plans the recreate (v5.6.1, `pkg/dryrun/dryrunclient.go`), so it
+cannot plan any image the host lacks. Every bump would have failed the same way.
+
+- **A real run pulls what is missing, before the question.** It touches no container, and a
+  "no" leaves only images on the host, which `up` would have pulled anyway. The plan you then
+  answer is Compose's own, as before.
+- **Through `compose pull` with no `--policy`.** `--policy` overrides every service's
+  `pull_policy`, as `up --pull` does, so it would send garmin-mcp's locally built tag to Docker
+  Hub. `--ignore-buildable` leaves an image with a `build:` section to `up`.
+- **`--check` pulls nothing.** `pull --dry-run` asks the registry for each reference, so a
+  digest that does not exist still fails there, and the plan names the missing images instead
+  of Compose's container list. An image only `up` can build is planned the same way in a real
+  run.
+
 ## Dev containers: one compose file in `infra`, one memory pool, `claude-sessions` only in a hub
 
 **Decided 2026-10-25**, the owner's three calls on [`plans/dev-pool.md`](../plans/dev-pool.md).
