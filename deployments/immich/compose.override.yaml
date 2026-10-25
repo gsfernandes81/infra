@@ -3,10 +3,10 @@
 # how). Compose reads this one automatically; no command changes.
 #
 # Two changes: the server and machine-learning images pinned to the version `zero` runs,
-# and the resource limits (measured on `zero`, a Pi 5, not Immich's advice).
+# and the resource limits (measured on the host it runs on, not Immich's advice).
 #
-# THE PINS, read off the box on 2026-10-25 and checked against the registry: `v3.0.1` is
-# what runs, by the digests below. It was started from `IMMICH_VERSION=v3`, a floating
+# THE PINS, read off the box on 2026-10-25 and checked against the registry: `v3.0.1` was
+# what ran, by the digests below. It had been started from `IMMICH_VERSION=v3`, a floating
 # major tag that had since moved on, so `.env`'s IMMICH_VERSION no longer reaches the
 # image and can be deleted. Both images are ONE version, so they move together; Renovate
 # proposes them as one group (renovate.json), and a release also means replacing

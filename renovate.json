@@ -37,12 +37,12 @@
       "enabled": false
     },
     {
-      "description": "Built on `one` from a checkout, never pulled from a registry.",
+      "description": "Built on its host from a checkout, never pulled from a registry.",
       "matchPackageNames": ["garmin-mcp-remote"],
       "enabled": false
     },
     {
-      "description": "Stopped deployments, kept as files. destiny-director follows a moving tag by design.",
+      "description": "Not bumped by Renovate. destiny-director follows a moving tag by design; the others are explained in their own README and docs/decisions.md.",
       "matchFileNames": [
         "deployments/destiny-director/**",
         "deployments/ionic-traces/**"

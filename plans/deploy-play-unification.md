@@ -10,10 +10,10 @@ deployments*.
 
 ## Open
 
-1. **Run it for real** on `one`: `-e deployment=send2ereader --check -K`, read the plan, then
-   without `--check`. It has only been rendered and syntax-checked from `infra-dev`, which
-   has no route to the fleet; the Compose module's plan output is printed defensively and is
-   the part most likely to need a fix. Try `torrents` the same way.
+1. **Run an apply for real.** The plan paths have run on `one` (no change) and on `zero` (a
+   recreate plan), owner-reported 2026-10-25. Not yet exercised: the question, `up`, the id
+   comparison, the health wait, and `send2ereader`'s `probe.yml`, which only runs after a
+   redeploy of it.
 2. **Delete `server-deploy-send2ereader.yml`** once step 1 has done a real deploy of it, and
    point `deployments/send2ereader/README.md` and the root `README.md` at the generic play
    only.

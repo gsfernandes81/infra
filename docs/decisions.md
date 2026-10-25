@@ -929,7 +929,7 @@ made those two different was small: a pre-check and a set of probes. So the play
 read `${VAR:?}` names out of `compose.yaml` to check `.env` instead of keeping lists by hand,
 and leaves tunnel provisioning to `server-bring-up-deployment.yml`, because the tunnel play
 PUTs Access policies unconditionally and a routine image bump must not touch Cloudflare.
-`send2ereader` has moved onto it; `garmin-mcp`'s play is still its own, until it moves
+As of 2026-10-25 `send2ereader` is on it and `garmin-mcp`'s play is still its own
 (`plans/deploy-play-unification.md`). The question is per **deployment**, never per container:
 gluetun and qBittorrent share a network namespace and must be recreated together, and
 Immich's four containers are one application, so a per-container question invites answering
@@ -937,9 +937,9 @@ Immich's four containers are one application, so a per-container question invite
 `one` before `zero`, each with its own plan and its own question, stops at the first failure,
 and refuses `assume_yes`, so the question that keeps each prompt meaningful cannot be switched
 off for the lot. The plan is Compose's own dry run, printed before anything changes; the
-result is read from container ids before and after. Not run against a box when written
-(`infra-dev` has no route); the module's `actions` output is printed defensively, and the first
-real run is the test.
+result is read from container ids before and after. Written 2026-10-25 from `infra-dev`,
+which has no route to a box; the module's `actions` output is printed defensively, and the
+plan paths were then run on `one` and `zero` the same day.
 
 ## The lesson worth keeping
 

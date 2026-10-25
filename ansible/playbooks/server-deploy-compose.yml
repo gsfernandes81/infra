@@ -34,10 +34,9 @@
 # is refused with `all`, so the per-deployment question cannot be switched off for the lot.
 #
 # WHAT IT WILL NOT TOUCH, and says so rather than silently skipping:
-#   garmin-mcp                has its own play, server-deploy-garmin-mcp.yml, until it is
-#                             moved here (plans/deploy-play-unification.md).
-#   ionic-traces              stopped by decision; `up` would start it.
-#   anything on `two`         podman, rootless, a different account; not a docker host.
+#   garmin-mcp                has its own play, server-deploy-garmin-mcp.yml.
+#   ionic-traces              `up` would start it if it is stopped.
+#   anything on a host outside the `containerized` inventory group.
 #
 # DEPLOYMENT-SPECIFIC CHECKS are hook files, found by name and run only if they exist:
 #   ansible/deploy-hooks/<name>/preflight.yml   before the plan: what must be true for the
@@ -57,10 +56,8 @@
 # one, with `bringup=true` so the .env check waits for a real run (a --check cannot see keys
 # the tunnel play has yet to write). A routine redeploy never touches Cloudflare.
 #
-# NOT TESTED AGAINST A BOX when it was written: infra-dev has no route to the fleet. The
-# discovery half runs anywhere (`-e deployment=all --check` stops early without a route to
-# any host), and the module output the plan is printed from is read defensively. The first
-# real run is the test; read its plan before saying y.
+# The discovery half runs anywhere, including where no host is reachable, so
+# `-e deployment=all --check` there shows what would be covered and what is left alone.
 
 - name: Check the inventory is loaded
   ansible.builtin.import_playbook: _assert-inventory.yml
@@ -74,7 +71,7 @@
     deploy_own_play:
       garmin-mcp: server-deploy-garmin-mcp.yml
     deploy_excluded:
-      ionic-traces: stopped by decision, and up would start it
+      ionic-traces: excluded here, since up would start it if it is stopped
   tasks:
     - name: Check what to redeploy was named
       ansible.builtin.assert:
@@ -141,7 +138,7 @@
       when: item.item not in (deploy_keep | default([]))
 
     - name: Order them, one before zero and then by name
-      # Written out because it is two hosts; a third container host would have to be added here.
+      # Written out, so a new container host has to be added here.
       ansible.builtin.set_fact:
         deploy_targets: >-
           {{ ((deploy_keep | default([])) | selectattr('host', 'eq', 'one') | sort(attribute='name') | list)
