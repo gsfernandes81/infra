@@ -317,7 +317,8 @@ on one of the boxes the control plane controls**.
 The argument the other way is real and is why this is open rather than closed: **an
 inventory run from Termux is metered end to end to reach boxes sitting on zero's own LAN,
 and from inside the container it is free.** That saving recurs every run, and Phase 8's
-answer to it — scheduling from `two` — is blocked behind Phase 7's rootless podman.
+answer to it — scheduling from `two` — is blocked behind Phase 7's rootless podman, which
+since 2026-10-25 waits for MicroOS on `one`.
 
 Three things would change the answer, and it is worth knowing which one you are waiting
 for rather than revisiting this on a feeling:
@@ -510,10 +511,10 @@ ones that answer the question this document started from.
 | 2i | Retire the `ssh-zero-dev-*` rules, and `anchor-two` with them — doors nothing is behind | `zero`'s host tunnel, DNS | nothing | **In progress 2026-08-29.** `dd` and `ds` are out of `hosts/zero/system/cloudflared-config.yml` in the repo; installing that and cycling zero's connector is the owner's step, from a mesh route — `ssh-zero.gsrpi.uk` **is** the tunnel being cycled. Safe to do now because neither container is running and neither has a tunnel of its own until Phase 5; until then they are reached through `ssh zero` and the published loopback ports 2222/2223. `anchor-two.gsrpi.uk` is out of `two`'s ingress on the same argument: it served an experiment that ended and answers 502 always. **Four** CNAMEs go in the same sitting — see the sweep plan |
 | 3 | First deployment adopted: `send2ereader` on `one`, **with its connector in the deployment** | one deployment, non-critical box, `one`'s ingress | 2 | **The connector pattern is set, 2026-10-24** — by `calibre-web`, a new deployment, not by `send2ereader`: sidecar, its own locally-managed tunnel, `server-create-deployment-tunnel.yml` (decisions.md, *Sidecar, not baked-in*). What this phase still owes is `send2ereader` itself — its connector, deleting `3001`, `bookit` out of `one`'s ingress — and the Ansible adoption with `bin/compose`'s deletion. **`garmin-mcp` is the first deployment Ansible starts** (`server-deploy-garmin-mcp.yml`, committed 2026-10-24, `community.docker.docker_compose_v2`), so the adoption's mechanism exists; `bin/compose`'s deletion and `recovery.md`'s rewrite are still owed together |
 | 4 | Vault: `send2ereader`, then `ionic-traces` — second target now questionable, see 2c | secrets for two deployments | 3 | |
-| 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | Phase 3 now tests the mechanism first, on a disposable deployment |
+| 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 1 & 3 | Phase 3 now tests the mechanism first, on a disposable deployment. **Owner's leaning, 2026-10-25: the sidecar model here too**, as Phase 3 settled it for deployments, in place of `infra-dev`'s connector started from its own entrypoint — likely, not yet decided |
 | 6 | `dd` off `two` | `two`, `one` | arm64 CI, upstream | |
-| 7 | **Rootless podman on `one`** — roadmap §2 | `one` | 3 | |
-| 8 | `two` as the scheduled read-only control node | `two` | 6, 7 | |
+| 7 | **Rootless podman on `one`** — roadmap §2 | `one` | 3, MicroOS on `one` | **Deferred to MicroOS, 2026-10-25** — the owner's call, so `one` converts once, with memory limits, instead of on OpenRC without them and then again ([`decisions.md`](decisions.md)) |
+| 8 | `two` as the scheduled read-only control node | `two` | 6, 7 | Waits for MicroOS on `one` too, through 7 |
 
 **Filed 2026-10-24, no phase number — nothing reports a stale sidecar `cloudflared`.**
 A deployment's connector is pinned in its `compose.yaml` and is outside 2h's staggered
@@ -958,6 +959,10 @@ Phase 8**, because `podman ps` as the connecting user needs no sudo.
 table below — so Phase 8 starts out able to audit `one` unprivileged and `zero` not at all
 on a schedule. That is a partial unblock, and calling it a full one is the mistake to
 avoid.
+
+**And since 2026-10-25 Phase 7 waits for MicroOS on `one`**, the owner's call, so Phase 8
+waits with it. On MicroOS rootless podman keeps its memory limits (the trade table below);
+on OpenRC it would not, and the conversion would be done twice.
 
 `one` first is also roadmap §2's own answer, for its own reason: it is the non-critical
 box, its deployments are disposable, and it is where the `bin/compose`

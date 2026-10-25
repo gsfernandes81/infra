@@ -15,6 +15,12 @@ The entry stays rather than being deleted so the numbering below keeps the ancho
 
 ## 2. Podman on `one`
 
+**Deferred to MicroOS, 2026-10-25** — the owner's call. On MicroOS it is the Quadlet
+conversion in §3, with memory limits that rootless podman on OpenRC cannot enforce
+([`management-plane.md`](management-plane.md) § *What rootless podman costs on OpenRC*),
+rather than a podman-compose conversion now and a second one at the migration. The rest of
+this section still holds for whenever it happens.
+
 `one` is the right guinea pig — non-critical and fully described here.
 
 **`two` got there first**, by accident of needing it: it runs rootless podman +
