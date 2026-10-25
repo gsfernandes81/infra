@@ -1,0 +1,21 @@
+# The routing of send2ereader's own tunnel, mounted read-only into the sidecar. `one`'s
+# host tunnel is hosts/one/system/cloudflared-config.yml, a different file.
+#
+# This file is the routing: the tunnel is locally managed, so there is no dashboard copy.
+# ansible/playbooks/server-create-deployment-tunnel.yml refuses to run unless the first
+# hostname is the one edge.yml names, the 404 catch-all is last, and there is no `tunnel:`
+# key (the id comes from .env, written beside the credentials).
+#
+# The first matching rule wins. The origin is the service name, which Docker's DNS on the
+# project network answers with an IPv4 address.
+
+credentials-file: /etc/cloudflared/creds.json
+
+# The port the host tunnels use, inside this container's own network namespace, so it
+# collides with nothing and the healthcheck reads it the same way.
+metrics: 127.0.0.1:20241
+
+ingress:
+  - hostname: bookit.gsrpi.uk
+    service: http://send2ereader:3001
+  - service: http_status:404

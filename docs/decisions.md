@@ -563,6 +563,27 @@ host, refusal of uncommitted changes under `deployments/<stack>/` on either side
 HEAD required to equal the control node's. The checksum check stays as a second layer. No
 deploy needs an ssh first any more; the control node's own `git pull` is still yours.
 
+**Amended 2026-10-25: `send2ereader` moves to a sidecar, and keeps the name `bookit`.**
+The owner chose to keep `bookit.gsrpi.uk`, the name typed on e-readers since before the
+sidecar and short to type on one, over the derived `send2ereader.gsrpi.uk`. So `edge.yml`
+takes an optional `subdomain:`, one DNS label that replaces the deployment's name in its
+hostname. The play still appends `dns_zone` and still checks `cloudflared.yml`'s first
+rule against the result, so the two files cannot name different hostnames. That check is
+what derivation buys, and it holds. The tunnel, the secrets directory and the DNS record's
+comment keep the deployment's name. Without `subdomain:` nothing changes for the other
+deployments.
+
+The cost is a short outage at cutover. The play points the existing `bookit` record at the
+new tunnel before the sidecar is running, so `bookit` answers with a Cloudflare error
+until the owner starts the deployment. That is minutes on a disposable service, and
+avoiding it would have meant a second hostname or a play split around the DNS write.
+
+`edge.yml` says `access: none`: an e-reader's browser is the client, `bookit` had no login
+before, and send2ereader's own four-character key, dropped 30 seconds after the reader
+stops refreshing it, is what pairs a sender with a reader. The move also ends
+`send2ereader`'s published port 3001, which is the reason § *A stack's `cloudflared`
+belongs in the stack* gave for doing it.
+
 ## garmin-mcp — a Garmin MCP for claude.ai, on `one` (read-only; five writes added, amended below)
 
 **Decided 2026-10-24** with the owner, after a security audit of the upstream and nine

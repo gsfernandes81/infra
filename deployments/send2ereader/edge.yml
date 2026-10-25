@@ -1,0 +1,15 @@
+# How send2ereader is reached, read by
+# ansible/playbooks/server-create-deployment-tunnel.yml. The host is wherever
+# hosts/<host>/send2ereader points from.
+
+# No Access login. The client is an e-reader's built-in browser, which cannot reasonably
+# sign in to Access, and bookit had no login on the host tunnel either. What pairs a
+# sender with a reader is send2ereader's own four-character key, shown on the reader's
+# page. The server drops a key 30 seconds after that page stops refreshing it, and after
+# an hour at most (index.js, expireDelay and maxExpireDuration).
+access: none
+
+# The public name is bookit.gsrpi.uk, not send2ereader.gsrpi.uk. It is the name typed on
+# e-readers since before the sidecar, and it is short to type on one. The play still adds
+# the zone itself, so only the first label is written here.
+subdomain: bookit

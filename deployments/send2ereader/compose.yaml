@@ -1,21 +1,55 @@
-# Deploy stub. The source lives in its own repo — see SOURCE.
-# Copied from the checkout's docker-compose.yaml, with the build context made absolute
-# so this file is safe to reach through a hosts/<host>/ symlink.
+# send2ereader on `one`: a page an e-reader's browser opens to receive a book sent from a
+# phone. The public name is bookit.gsrpi.uk, served by the cloudflared sidecar below on
+# the deployment's own tunnel. Nothing is published on the host. README.md beside this has
+# the setup and the cutover from `one`'s host tunnel.
 #
-# The explicit `name:` is a no-op here, not a change: the checkout's file declared no
-# name, so Compose derived `send2ereader` from the directory, which is what the running
-# container is already labelled with. Stating it means the project name no longer
-# depends on which directory you happen to run from.
+# The app is built from the fork checked out at ${SRC_ROOT}/send2ereader on `one`, at the
+# sha in SOURCE. The build context is absolute so this file works through the
+# hosts/one/send2ereader symlink.
+#
+# No `network_mode: host` here. Both services share the project's own network, which is
+# how the sidecar's ingress reaches `http://send2ereader:3001` with no port on the host.
 name: send2ereader
+
 services:
   send2ereader:
     build:
       context: ${SRC_ROOT:?set SRC_ROOT in deployments/send2ereader/.env, e.g. /home/gavin/src}/send2ereader
       dockerfile: ./Dockerfile
     container_name: send2ereader
-    # Restart means, Automatic re-start the container after a shutdown unless manual stop container
     restart: unless-stopped
-    # Ports means, Bind external and internal docker ports, only change the external port, not the internal port
-    # Format: <External Port>:<Internal Port>
-    ports:
-      - 3001:3001
+    # No `ports:`. Until the sidecar this published 3001 on the host only so that `one`'s
+    # host tunnel could reach it; the sidecar reaches it over the project network instead.
+
+  cloudflared:
+    # The same pinned image as calibre-web's sidecar. A bump is an edit here and a
+    # redeploy: the image runs with `--no-autoupdate`, outside the fleet's staggered
+    # autoupdate (management-plane.md, 2h).
+    image: cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39
+    container_name: send2ereader-cloudflared
+    restart: unless-stopped
+    # The tunnel id is an argument because the image has no shell to read it from the
+    # credentials file. The play that wrote the credentials wrote TUNNEL_ID into .env in
+    # the same run, so the two name the same tunnel.
+    command: tunnel --config /etc/cloudflared/config.yml run ${TUNNEL_ID:?run ansible/playbooks/server-create-deployment-tunnel.yml -e deployment=send2ereader, which writes TUNNEL_ID}
+    volumes:
+      - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
+      # Outside the repo checkout, owned by 65532 (the image's user) at 0600; the play
+      # sets both. A root-owned 0600 file here is unreadable and the connector exits on
+      # start.
+      - ${TUNNEL_CREDENTIALS:?run ansible/playbooks/server-create-deployment-tunnel.yml -e deployment=send2ereader, which writes TUNNEL_CREDENTIALS}:/etc/cloudflared/creds.json:ro
+    # Answers 200 once at least one connection to the edge is registered. Health is a
+    # reading here: nothing restarts on it.
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:20241", "ready"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    # `one` has 1 GB and no swap.
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

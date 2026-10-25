@@ -116,7 +116,6 @@ through `ssh zero` and the published loopback ports 2222/2223.
 | Hostname | Origin | |
 |---|---|---|
 | `ssh-one.gsrpi.uk` | `ssh://127.0.0.1:22` | |
-| `bookit.gsrpi.uk` | `http://127.0.0.1:3001` | this is `send2ereader`'s public name |
 | `syncthing-torrents.gsrpi.uk` | `http://127.0.0.1:8384` | **behind Access**; origin down, 2c |
 | `torrents.gsrpi.uk` | `http://127.0.0.1:8080` | **behind Access** |
 | *(catch-all)* | `http_status:404` | |
@@ -138,6 +137,14 @@ same play underneath, routing in
 Access, by design**: its only client is claude.ai's custom connector, which cannot pass Access,
 and the gate is the OAuth shim inside the deployment. It makes no Access objects and no
 transform rules.
+
+`bookit.gsrpi.uk` left this table on 2026-10-25. It is `send2ereader`'s public name, now
+served by that deployment's own sidecar, with the routing in
+[`deployments/send2ereader/cloudflared.yml`](../deployments/send2ereader/cloudflared.yml).
+It keeps the name `bookit` through `subdomain:` in its `edge.yml`. No Access, because an
+e-reader's browser is the client. Until the owner runs the cutover in
+[its README](../deployments/send2ereader/README.md), the installed connector on `one`
+still serves `bookit` from `127.0.0.1:3001`.
 
 `ionic-traces.gsrpi.uk` was retired 2026-08-23. Its DNS record still exists and points at
 a deleted tunnel, so it resolves and fails; delete the record if you want the name gone.

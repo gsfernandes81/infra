@@ -21,10 +21,10 @@ sudo bin/check-mount-guards      # ANY host — are the data guards still intact
 ```sh
 cd ~/infra
 bin/compose torrents      up -d
-bin/compose send2ereader  up -d
+bin/compose send2ereader  up -d     # refuses until its tunnel exists (its README); the sidecar dials out
 bin/compose calibre-web   up -d     # once set up (its README); publishes nothing, the sidecar dials out
-netstat -tln | grep -E '8080|3001|8384|22000'        # expect all four
-docker inspect -f '{{.State.Health.Status}}' calibre-web-cloudflared   # healthy
+netstat -tln | grep -E '8080|8384|22000'             # expect all three
+docker inspect -f '{{.State.Health.Status}}' calibre-web-cloudflared send2ereader-cloudflared   # healthy, twice
 ```
 
 **`ionic-traces` is deliberately absent here, and must stay absent.** It is stopped by

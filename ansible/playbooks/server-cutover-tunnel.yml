@@ -242,7 +242,7 @@
     # is that it is the SAME afterwards. `status_code: -1` looks like "accept anything"
     # and is not: the module compares the real status against that literal list.
     #
-    # Expect a spread. On `one`: 200 for ssh-one and bookit, and 302 for torrents and
+    # Expect a spread. On `one`: 200 for ssh-one, and 302 for torrents and
     # syncthing-torrents, which sit behind Cloudflare Access and are redirected to a
     # login before the origin is ever reached. Access binds to the HOSTNAME, not to the
     # tunnel, so it should survive this unchanged — and comparing to baseline is what

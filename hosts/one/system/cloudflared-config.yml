@@ -34,8 +34,6 @@ metrics: 127.0.0.1:20241
 ingress:
   - hostname: ssh-one.gsrpi.uk
     service: ssh://127.0.0.1:22
-  - hostname: bookit.gsrpi.uk
-    service: http://127.0.0.1:3001
   - hostname: syncthing-torrents.gsrpi.uk
     service: http://127.0.0.1:8384
   - hostname: torrents.gsrpi.uk

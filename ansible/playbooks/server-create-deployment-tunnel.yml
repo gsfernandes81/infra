@@ -24,14 +24,19 @@
 # nothing in front of it.
 #
 # ── what it reads, and where it is derived from ──────────────────────────────
-#   deployments/<name>/edge.yml         access: browser | none, and an optional bypass_path
+#   deployments/<name>/edge.yml         access: browser | none, and optional bypass_path,
+#                                       request_headers and subdomain
 #   deployments/<name>/cloudflared.yml  the tracked ingress; checked, never written
 #   hosts/<host>/<name>                 the symlink placing the deployment on a host. The
 #                                       host is READ FROM IT — exactly one must exist — so
 #                                       there is no -e target to disagree with it.
 #   group_vars/all.yml dns_zone         the hostname is <name>.<dns_zone>, never written
 #                                       beside the deployment name
-#                                       (CLAUDE.md § Repo invariants)
+#                                       (CLAUDE.md § Repo invariants). The one exception
+#                                       is edge.yml's `subdomain:`, for a public name in
+#                                       use before its deployment had a tunnel (bookit,
+#                                       for send2ereader). It replaces <name> only; the
+#                                       zone is still appended here.
 #
 # ── the host's checkout: pulled here, not by hand ────────────────────────────
 #   The host runs the deployment from ~/infra, so before anything is created the play runs
@@ -128,7 +133,11 @@
           - >-
             deployment_edge.bypass_path is not defined
             or (deployment_edge.bypass_path is match('^/[A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)*/$'))
-          - (deployment_edge | list | difference(['access', 'bypass_path', 'request_headers'])) | length == 0
+          - (deployment_edge | list | difference(['access', 'bypass_path', 'request_headers', 'subdomain'])) | length == 0
+          - >-
+            deployment_edge.subdomain is not defined
+            or (deployment_edge.subdomain is string
+                and deployment_edge.subdomain is match('^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'))
           - deployment_edge.request_headers is not defined or deployment_edge.request_headers is mapping
           - >-
             (deployment_edge.request_headers | default({}) | dict2items
@@ -139,8 +148,10 @@
           deployments/{{ deployment }}/edge.yml must say `access: browser` or `access: none`,
           and may add `bypass_path: /some/path/` — leading and trailing slash, browser only,
           because a bypass under no login means nothing — and `request_headers:`, a map of
-          header name to a fixed string value. Nothing else is read, and an unknown key is
-          refused rather than ignored: {{ deployment_edge }}
+          header name to a fixed string value, and `subdomain: <label>`, one DNS label
+          (lower case, digits, hyphens inside) that replaces the deployment's name in its
+          hostname. Nothing else is read, and an unknown key is refused rather than
+          ignored: {{ deployment_edge }}
         success_msg: "edge.yml: {{ deployment_edge }}"
 
     - name: Find the hosts/<host>/{{ deployment }} symlink
@@ -168,7 +179,7 @@
     - name: Read deployments/{{ deployment }}/cloudflared.yml
       ansible.builtin.set_fact:
         deployment_host: "{{ deployment_links.files[0].path | dirname | basename }}"
-        deployment_hostname: "{{ deployment ~ '.' ~ dns_zone }}"
+        deployment_hostname: "{{ deployment_edge.subdomain | default(deployment) ~ '.' ~ dns_zone }}"
         deployment_ingress: "{{ lookup('file', control_checkout ~ '/deployments/' ~ deployment ~ '/cloudflared.yml') | from_yaml }}"
 
     - name: Check cloudflared.yml routes {{ deployment_hostname }}
