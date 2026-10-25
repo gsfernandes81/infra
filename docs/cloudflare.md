@@ -102,8 +102,9 @@ doors zero opened on a container's behalf, and each was a second way in beside t
 container's own connector.
 
 **Removing a rule does not remove its CNAME.** A record still pointing at zero's tunnel
-now gets the catch-all 404, which reads like a container that is merely down. All three
-records go in the same visit — see [`../plans/cloudflare-dashboard-sweep.md`](../plans/cloudflare-dashboard-sweep.md).
+now gets the catch-all 404, which reads like a container that is merely down. All four —
+`ssh-zero-dev-dd`, `-ds`, `-or3` and `anchor-two` — were deleted on 2026-10-25, verified
+NXDOMAIN on two resolvers.
 
 `infra-dev.gsrpi.uk` is **not** here — it has its own tunnel, run by a connector inside
 the container, which is the pattern *management-plane.md* § *Addressing* chose.
@@ -210,6 +211,11 @@ on any of them.
 
 ## Safe to delete
 
+**Swept by the owner on 2026-10-25**, the dashboard sweep's plan with it. The list stays as
+what to look for after the next failed provisioning run. Since 2026-10-04 every live service
+token is named `<container>-<client>` and is the `TUNNEL_SERVICE_TOKEN_ID` in some client's
+`~/.config/<container>/token`; anything else is a candidate, removed from its policy first.
+
 - **API tokens after use.** Rotation and migration need `Account -> Cloudflare Tunnel ->
   Edit`, `Zone -> Zone -> Read` and `Zone -> DNS -> Edit` on `gsrpi.uk`, and nothing else.
   **Zone -> Zone -> Read is not optional and was missing from this list**: the cutover
@@ -242,7 +248,5 @@ on any of them.
   probe finds `syncthing`, `syncthing-torrents` and `torrents` still redirecting to the
   Access login. The owner chose service tokens for the fix, the dev containers' mechanism,
   2026-10-25 ([gsfernandes81/infra#12](https://github.com/gsfernandes81/infra/issues/12)).
-- **The three `ssh-zero-dev-*` hostnames** were never checked for Access, and their
-  ingress rules are now gone from zero — so the question that remains is only whether
-  their DNS records and any Access application still exist at Cloudflare. Folded into
-  [`../plans/cloudflare-dashboard-sweep.md`](../plans/cloudflare-dashboard-sweep.md).
+- ~~**The three `ssh-zero-dev-*` hostnames** were never checked for Access~~ — moot: their
+  records were deleted on 2026-10-25 and the Access objects swept the same day.
