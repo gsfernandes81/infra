@@ -48,5 +48,5 @@ ingress:
   # which is what a faithful capture does: it copies what is there, not what is wanted.
   #
   # Its CNAME was a separate object, deleted by the owner on 2026-10-25 with the other three
-  # in 2i (plans/cloudflare-dashboard-sweep.md).
+  # in 2i (docs/management-plane.md, the 2i row).
   - service: http_status:404
