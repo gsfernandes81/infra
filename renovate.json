@@ -1,0 +1,50 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Proposes bumps to the images the compose files pin. It opens a pull request and nothing else: you merge and deploy, so git still names what runs. See docs/decisions.md, 'Pinned images are bumped by a pull request'."
+  ],
+  "extends": ["config:recommended"],
+  "enabledManagers": ["docker-compose"],
+  "semanticCommits": "disabled",
+  "dependencyDashboard": false,
+  "schedule": ["before 6am on monday"],
+  "timezone": "Europe/London",
+  "packageRules": [
+    {
+      "description": "One pull request for the sidecar that three deployments carry, so the three move together.",
+      "matchPackageNames": ["cloudflare/cloudflared"],
+      "groupName": "cloudflared sidecar"
+    },
+    {
+      "description": "Immich's server and machine-learning images are one version and move together. Taken from the override file only; the vendored upstream file is switched off below.",
+      "matchPackageNames": [
+        "ghcr.io/immich-app/immich-server",
+        "ghcr.io/immich-app/immich-machine-learning"
+      ],
+      "groupName": "immich"
+    },
+    {
+      "description": "deployments/immich/compose.yaml is Immich's release file, unmodified. Its postgres and valkey lines follow that release, not the newest registry tag: the postgres tag names a Postgres major version, so a newer tag can be a dump-and-restore upgrade (Dependabot proposed 14 to 16). deployments/immich/SOURCE says how a release is taken.",
+      "matchFileNames": ["deployments/immich/compose.yaml"],
+      "enabled": false
+    },
+    {
+      "description": "Commit-tagged image built by the fork's CI, so there is no version order to follow. Deployed by editing compose.yaml by hand (its README, 'A new version').",
+      "matchPackageNames": ["ghcr.io/gsfernandes81/send2ereader"],
+      "enabled": false
+    },
+    {
+      "description": "Built on `one` from a checkout, never pulled from a registry.",
+      "matchPackageNames": ["garmin-mcp-remote"],
+      "enabled": false
+    },
+    {
+      "description": "Stopped deployments, kept as files. destiny-director follows a moving tag by design.",
+      "matchFileNames": [
+        "deployments/destiny-director/**",
+        "deployments/ionic-traces/**"
+      ],
+      "enabled": false
+    }
+  ]
+}

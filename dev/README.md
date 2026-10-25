@@ -273,6 +273,15 @@ jcode                          # first start offers provider OAuth or a key
   `jcode` line reads the version off a running container. `Dockerfile.base` (the Jcode
   layer) and [`../docs/decisions.md`](../docs/decisions.md) have the reasons.
 
+## The docker CLI is here for `config`, and only that
+
+`docker` and the Compose plugin are in the image, hash-pinned, so the `docker compose
+config` diff CLAUDE.md asks for before a compose change can be made from in here. There is
+no engine and no socket (the section above still holds), and `DOCKER_HOST` points at a path
+that does not exist: `docker compose up` fails at once and says it cannot reach a daemon,
+while `config` renders. Render against a copy with a made-up `.env`, never the real one,
+since the output interpolates it.
+
 ## Ansible from in here
 
 ```sh

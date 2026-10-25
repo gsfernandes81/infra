@@ -55,6 +55,48 @@ RUN ansible-galaxy collection install --collections-path /usr/share/ansible/coll
         'community.docker:>=5.2.2' \
     && ansible-galaxy collection list
 
+# The docker CLI and the Compose plugin, for ONE job: `docker compose config`, which
+# renders a compose file without a daemon. CLAUDE.md asks for the `docker compose config`
+# diff before any compose change, and this container could not make it. THERE IS NO
+# DAEMON HERE AND THERE MUST NOT BE: no engine is installed, no socket is mounted, and
+# DOCKER_HOST points at a path that does not exist, so anything that needs a daemon
+# (`up`, `ps`, `pull`) fails at once and says why instead of reaching for a socket that
+# somebody mounts later. `config` works under that setting; measured 2026-10-25. `gavin`
+# stays out of the `docker` group on the hosts and none of this changes it.
+#
+# Render against a copy with a made-up `.env`, never the real one: `config` interpolates
+# it, so its output IS the secrets (CLAUDE.md, "Verifying changes").
+#
+# Hash-pinned per architecture, like cloudflared. Both are vendor release assets, the CLI
+# from download.docker.com (the static archive carries dockerd too; only the client is
+# extracted) and Compose from its GitHub release, whose own .sha256 files these are.
+# Compose is a v5 line; the hosts' Alpine `docker-cli-compose` may not be, and a
+# difference between the two renderers would show as a diff in `config` output alone.
+ARG DOCKER_VERSION=29.9.2
+ARG DOCKER_SHA256_arm64=873b3e0207857c3b2f28392fb922f3ea6efe37620c16d4d4aaf2fef409c90b73
+ARG DOCKER_SHA256_amd64=9ac225999fd5e863f7694c728ef23d480616b1e5639328fa309befd4243d69eb
+ARG COMPOSE_VERSION=5.6.1
+ARG COMPOSE_SHA256_arm64=42cfa75f51ad0ccf290bad37899e0038a8c10a0069e85233ecc1d53e3ff1347d
+ARG COMPOSE_SHA256_amd64=47737f4236e6d3ccea7291995203f8f018058783b4c3a9469119811a0b5db8c0
+RUN set -eux; \
+    case "$(dpkg --print-architecture)" in \
+      arm64) triple=aarch64; dsha="${DOCKER_SHA256_arm64}"; csha="${COMPOSE_SHA256_arm64}" ;; \
+      amd64) triple=x86_64;  dsha="${DOCKER_SHA256_amd64}"; csha="${COMPOSE_SHA256_amd64}" ;; \
+      *) echo "unsupported arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/docker.tgz "https://download.docker.com/linux/static/stable/${triple}/docker-${DOCKER_VERSION}.tgz"; \
+    echo "${dsha}  /tmp/docker.tgz" | sha256sum -c -; \
+    tar -xzf /tmp/docker.tgz -C /usr/local/bin --strip-components=1 docker/docker; \
+    rm /tmp/docker.tgz; \
+    mkdir -p /usr/local/lib/docker/cli-plugins; \
+    curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-compose \
+      "https://github.com/docker/compose/releases/download/v${COMPOSE_VERSION}/docker-compose-linux-${triple}"; \
+    echo "${csha}  /usr/local/lib/docker/cli-plugins/docker-compose" | sha256sum -c -; \
+    chmod 0755 /usr/local/lib/docker/cli-plugins/docker-compose; \
+    docker --version; \
+    docker compose version
+ENV DOCKER_HOST=unix:///nonexistent-no-daemon-here.sock
+
 # ansible.cfg is read from the CWD, which is why the phone needs `cd ~/infra/ansible`
 # before every run and why forgetting it produces "No inventory was parsed" — a real
 # half-hour, already spent once. Naming the file absolutely makes `ansible fleet -m ping`

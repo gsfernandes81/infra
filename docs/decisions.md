@@ -856,6 +856,9 @@ it off is a change to sshd itself, for the two-phase procedure, and is not chose
 
 ## Pinned images are bumped by a pull request, from Dependabot
 
+⚠︎ **SUPERSEDED 2026-10-25 by the next section: Renovate, not Dependabot.** Kept because the
+reasoning for a proposing bot, and the registry-prefix lesson, still stand.
+
 A stale sidecar `cloudflared` is invisible to the hosts' autoupdate, and the fix is a bot
 that proposes: Dependabot opens a PR bumping `tag@sha256:` in a deployment's
 `compose.yaml`, the owner merges, and deploys as with any bump. Dependabot and not a
@@ -869,6 +872,40 @@ workflow for exactly those images is the fallback. Renovate is the fallback if i
 parse our compose files (it can). **A dependency name has no registry prefix** in
 `ignore:`; the first run proved it by proposing a major Postgres bump that the ignore was
 written to stop.
+
+## Renovate replaces Dependabot, and Immich's compose file becomes an override
+
+Dependabot's first run showed what it could not do. It moves a tag and a digest, and
+nothing else: no release notes in the PR, no way to hold a Postgres tag on its major
+version, no way to take two images as one version except per-directory groups. Renovate
+does all of those from `renovate.json`, which, like `dependabot.yml`, is not a workflow
+file and so can be pushed from here. The hosted Mend app is installed by the owner on the
+repo; until it is, nothing proposes bumps.
+
+**Neither bot sees Immich change the shape of its compose file** (a new service, a renamed
+variable), and Immich has done that before. So `deployments/immich/compose.yaml` is now
+Immich's release file *unmodified*, `compose.override.yaml` beside it holds the changes
+that are ours, and Compose merges the two with no command change. Taking a release is
+replacing one file with the release's own and reading a plain diff, with nothing to merge
+and no workflow to maintain. A merge workflow was designed and set aside for this.
+Renovate is switched off for the vendored file, because its postgres and valkey lines
+follow the release, and runs on the override, where the server and machine-learning
+images are pinned once the owner has read the digests off the box.
+
+**What the override holds, measured with Compose 5.6.1 on 2026-10-25:** the memory and CPU
+limits. The `:?` guards on the two data paths are *not* in it: upstream's own
+`${UPLOAD_LOCATION}:/data` already stops Compose when the variable is unset (`invalid
+spec: :/data: empty section between colons`), so the guard's purpose holds without our
+line and only the message is worse. That rests on how Compose parses short volume syntax,
+so it was tested for both variables, with and without the override, before the guard lines
+were dropped. The rendered `config` differs from the previous file in exactly the lines
+Immich's release changed: the postgres digest, an empty `healthcheck` on the database
+and valkey's digest and health test.
+
+**`infra-dev` carries the docker CLI and the Compose plugin to make that comparison**, and
+no daemon (`dev/Dockerfile`): the point is `docker compose config`, which CLAUDE.md asks
+for before any compose change and which the container could not run. `DOCKER_HOST` points
+at a path that does not exist, so a command needing a daemon fails with a message.
 
 ## The lesson worth keeping
 
