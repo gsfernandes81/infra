@@ -1016,6 +1016,47 @@ and the data on `/media/ionic-mysql` are all still there ("Exited" is not "absen
 § Landmines), and a teardown or a repair needs the compose file. The redeploy play keeps its
 exclusion as a second lock, and `fstab` keeps the mount, behind its guards.
 
+## Immich to v3.3.5, with machine learning's v2 models
+
+**Decided 2026-10-25**, the owner's call, for memory on `zero`. Committed, **not yet
+deployed**: the redeploy play does that, after a database dump off the array, because the
+server migrates the database on its first v3.3.5 start and there is no way back but that
+dump. `compose.yaml` was already v3.3.5's release file, and its postgres and valkey lines are
+what `zero` runs, so the change is the two app images in the override and one variable.
+
+**Measured here, on x86 CPU, with Immich's default models** (ViT-B-32 for search, buffalo_l
+for faces) loaded and called repeatedly, memory read from the processes themselves:
+
+| machine learning | idle | models loaded | peak during calls |
+|---|---|---|---|
+| v3.0.1 (`zero` today) | ~250 MB | ~1.19 GB own | ~1.5 GB own, ~1.6 GB in all |
+| v3.3.5, v1 models | ~235 MB | ~270 MB own + ~770 MB mapped files | ~520 MB own, ~1.3 GB in all |
+| v3.3.5, v2 models | ~235 MB | ~266 MB own + ~770 MB mapped files | ~506 MB own, ~1.3 GB in all |
+
+**The saving is v3.3 itself**: it maps model files from disk instead of copying them into the
+process, and those pages are clean, so under pressure the kernel drops and re-reads them
+rather than swapping. v2 against v1 differed by little on x86; it is set anyway because the
+release notes say the improvements reach every backend and many depend on the new exports,
+the arm64 build is the one that matters and was not measured, and it becomes the default in
+a later release. Its outputs are numerically equivalent, so no job is re-run. **Idle is
+unchanged**: both versions end the worker after `MACHINE_LEARNING_MODEL_TTL` (300 s) without
+a request and come back with nothing loaded, which is the ~250 MB `zero` showed. Read
+cgroup-wide, v3.3.5 looked far smaller still; that was an artefact, the model files' page
+cache having been charged to an earlier container, and the per-process figures above
+replace it.
+
+**Release notes read, v3.0.1 to v3.3.5:** no change to the database or Valkey images, the
+compose file or any variable. Behaviour changes worth knowing: v3.1.0 drops iOS 14 and syncs
+an OIDC role claim to `isAdmin` on later logins; v3.3.0 syncs quota, role and username
+claims on every login; new thumbnail settings reach existing assets only if thumbnail
+generation is re-run for all. v3.2.0's notes were read only in part.
+
+**Job concurrency is left in the web UI.** The config file Immich offers replaces every
+setting saved from the UI — the code reads the file *instead of* the database, and a key the
+file omits falls back to Immich's default — and makes the settings page read-only. If it is
+ever wanted in git, the way is the API (`GET`, then `PUT /api/system-config` with only the
+concurrency changed, an admin key scoped to system config), which applies live.
+
 ## The lesson worth keeping
 
 

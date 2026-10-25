@@ -541,7 +541,8 @@ first run proved a digest moves under a fixed tag and that ignore names carry no
 and proposed a Postgres 14 to 16 bump for Immich that was closed ([`decisions.md`](decisions.md)).
 The floating images were pinned on 2026-10-25 to the digest each box was running
 (`gluetun`, `qbittorrent`, both `syncthing`s, Immich's server and machine learning at
-v3.0.1), each tag checked against the registry first, so Renovate can now propose their
+v3.0.1 — bumped to v3.3.5 in the repo later that day, deployed when the owner runs the
+redeploy play), each tag checked against the registry first, so Renovate can now propose their
 bumps. Left unpinned: `ionic-traces`' `mysql:8`, stopped and switched off in
 `renovate.json`.
 
