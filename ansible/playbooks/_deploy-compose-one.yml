@@ -118,15 +118,20 @@
   become: true
   delegate_to: "{{ dep.host }}"
 
+- name: Note the plan's lines for {{ dep.name }}
+  # Compose renames a container it is replacing to <12 hex>_<name> while it builds the new
+  # one, and the dry run reports that rename as a second container "Starting". It is the same
+  # container, so those entries are left out. Read defensively: the key names are the
+  # module's to change, and the whole entry is the fallback so a plan is never blanks.
+  ansible.builtin.set_fact:
+    dep_plan_lines: >-
+      {% set out = [] %}{% for a in dep_plan.actions | default([]) %}{% if a.id is not defined or a.id is not match('^[0-9a-f]{12}_') %}{% set _ = out.append((a.what | default('?')) ~ ' ' ~ (a.id | default(a.msg | default(a | string))) ~ ': ' ~ (a.status | default(''))) %}{% endif %}{% endfor %}{{ out }}
+
 - name: Print what up would do to {{ dep.name }}
-  # Read defensively: the key names are the module's to change, and a plan printed as blanks
-  # would be worse than printing the raw entry, so the whole entry is the fallback.
   ansible.builtin.debug:
     msg: >-
       {{ dep.name }} on {{ dep.host }}{{ ' (the critical box)' if dep.host == 'zero' else '' }}:
-      {{ 'would change: ' if dep_plan.changed else 'nothing to change.' }}{{
-      (dep_plan.actions | default([]))
-        | map('string') | map('regex_replace', '[{}\x27]', '') | join('; ') if dep_plan.changed else '' }}
+      {{ 'would change: ' ~ (dep_plan_lines | join('; ')) if dep_plan.changed else 'nothing to change.' }}
   changed_when: true
 
 # ── ask ──────────────────────────────────────────────────────────────────────
