@@ -58,7 +58,7 @@ ingress:
   # so removing these costs no access today. Until then they are reached through zero:
   # `ssh zero`, then the published loopback port (2222 and 2223).
   #
-  # Deleting the rule does not delete the CNAME. Both records were removed at Cloudflare
-  # in the same sitting; a record left pointing at this tunnel gets the catch-all 404
-  # below and looks like a service that is merely down.
+  # Deleting the rule does not delete the CNAME: a record left pointing at this tunnel gets
+  # the catch-all 404 below and looks like a service that is merely down. Both records were
+  # deleted at Cloudflare on 2026-10-25, with the rest of 2i.
   - service: http_status:404
