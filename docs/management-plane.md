@@ -71,6 +71,10 @@ naming first. Nothing below is weakened by this document.
 
 ## The control plane — DECIDED
 
+⚠︎ **SUPERSEDED 2026-10-25: the phone is the only control node.** `two`'s half below was
+Phase 8, and the owner dropped it: no control node inside the fleet. Kept because the
+read-only/mutating split is still the right shape if a second one is ever argued for.
+
 **Two control nodes, split by what they are allowed to do.**
 
 | Control node | Runs | Key |
@@ -297,8 +301,9 @@ container, because it authorises *reaching* the container.
 
 **The owner's call: no control node inside the fleet.** `infra-dev` stays a development
 container with no route to the fleet, for good; the reasoning below is why, and it is kept.
-(Whether that also retires Phase 8 — `two` as the scheduled read-only control node, which is
-also inside the fleet — was asked the same day and is not settled here.)
+**It retires Phase 8 too**, the owner said the same day: `two` is inside the fleet, and it would
+have needed Ansible on a Pi and a key on `two` reaching `zero` and `one`, both refused here.
+The phone is the only control node.
 
 
 `infra-dev` was being built as a second control node — `ansible-core` and the collections
@@ -522,7 +527,7 @@ ones that answer the question this document started from.
 | 5 | Mobile workloads — dev containers + in-container `cloudflared` | `zero` | 4, OPEN 3 (OPEN 1 decided: history moves) | Phase 3 now tests the mechanism first, on a disposable deployment. **Owner's leaning, 2026-10-25: the sidecar model here too**, as Phase 3 settled it for deployments, in place of `infra-dev`'s connector started from its own entrypoint — likely, not yet decided |
 | 6 | ~~`dd` off `two`~~ | `two`, `one` | arm64 CI, upstream | **Dropped 2026-10-25**, the owner's call: moving `destiny-director` follows its own needs, not this plan — [gsfernandes81/infra#11](https://github.com/gsfernandes81/infra/issues/11), which may or may not end in a PR. The number is kept so the others do not shift |
 | 7 | **Rootless podman on `one`** — roadmap §2 | `one` | 3, MicroOS on `one` | **Deferred to MicroOS, 2026-10-25** — the owner's call, so `one` converts once, with memory limits, instead of on OpenRC without them and then again ([`decisions.md`](decisions.md)) |
-| 8 | `two` as the scheduled read-only control node | `two` | ~~6, 7~~ — none since 2026-10-25 | **Not gated on 7 any more** (owner, 2026-10-25): it starts with the scheduled checks that need no root, and container inventory stays an interactive `-K` run until 7 lifts that for `one` and MicroOS for `zero`. § *The control plane* requires `two` to run no containers for this, and dropping 6 left that open for a day: **met, owner-reported 2026-10-25** — `destiny-director` no longer runs on `two`. Nothing gates Phase 8 now |
+| 8 | ~~`two` as the scheduled read-only control node~~ | `two` | ~~6, 7~~ — none since 2026-10-25 | **Dropped 2026-10-25**, the owner's call: no control node inside the fleet. It needed Ansible on a Pi and a key on `two` reaching `zero` and `one`, which this repo refuses, and its one unique benefit, alerting with nobody at the phone, goes to the proposed Cloudflare Worker monitor (see 2h's notes), which needs no key on the fleet. The number is kept. The earlier state follows: **Not gated on 7 any more** (owner, 2026-10-25): it starts with the scheduled checks that need no root, and container inventory stays an interactive `-K` run until 7 lifts that for `one` and MicroOS for `zero`. § *The control plane* requires `two` to run no containers for this, and dropping 6 left that open for a day: **met, owner-reported 2026-10-25** — `destiny-director` no longer runs on `two`. Nothing gates Phase 8 now |
 
 **Filed 2026-10-24, no phase number — nothing reports a stale sidecar `cloudflared`.**
 A deployment's connector is pinned in its `compose.yaml` and is outside 2h's staggered
@@ -1053,9 +1058,9 @@ assumed. What is worth carrying forward is the scoping: that token was *All acco
 zones* against the five permissions it actually needed, and the place to fix that is at
 mint time, not by deleting it again afterwards.
 
-⚠︎ **Superseded 2026-10-25: 7 no longer gates 8** — Phase 8 starts with the checks that need
-no root, and 7 later lifts the container half for `one`. The reasoning below is why that half
-needs it.
+⚠︎ **Superseded 2026-10-25, twice: 7 stopped gating 8, and then 8 was dropped.** Phase 7 stays
+for its own reasons (rootless podman on `one` with memory limits, at MicroOS). The reasoning
+below was about Phase 8 and is kept as history.
 
 **Phase 7 moved.** Rootless podman was going to be a follow-on; it is a **precondition of
 Phase 8**, because `podman ps` as the connecting user needs no sudo.

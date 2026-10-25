@@ -12,11 +12,11 @@
 #   `gavin` is not in the `docker` group — decisions.md, because it is root-equivalent —
 #   and NOPASSWD sudo is in roadmap.md's "Not doing". So reading the docker socket costs
 #   one password prompt per run. That is fine for a human-run inventory and it is exactly
-#   why Phase 7 (a scheduled read-only run from `two`) CANNOT simply run this playbook: it
-#   would need passwordless sudo on zero and one, which this repo refuses. That problem is
-#   real, it is not solved here, and the shape of the answer is probably the one
-#   bin/hw-inventory already uses — each host writes its own report locally, and Ansible
-#   fetches it unprivileged. Recorded so it is met at design time rather than at 03:00.
+#   why a scheduled run of it was never simple: it would need passwordless sudo on zero
+#   and one, which this repo refuses. The scheduled read-only run from `two` (Phase 8) was
+#   dropped on 2026-10-25, no control node inside the fleet; if scheduled reports come back,
+#   the shape is probably the one bin/hw-inventory already uses — each host writes its own
+#   report locally, and the control node fetches it unprivileged.
 #
 # `check_mode: false` on the command tasks is deliberate: under --check, command/shell are
 # skipped by default, so a `--check` run of a read-only playbook would report nothing and
