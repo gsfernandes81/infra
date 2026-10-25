@@ -8,7 +8,7 @@
 #       ✓ Read the ssh user's home directory on one ........ 412ms DONE
 #       ~ If .env is complete: start garmin-mcp, building
 #       ↪ it only if the image is absent ................... 2m14s CHANGED
-#       ● Probe /healthz through the tunnel ................... 47s RUNNING
+#       ● Probe /healthz through the tunnel ................. 47.3s RUNNING
 #
 #       one
 #         ✓ 58 successful
@@ -19,7 +19,8 @@
 # prettify's symbols, colours, status words, PLAY header, Error: lines, per-host recap and
 # closing line. It has no licence, so nothing is copied from it: this is a reimplementation
 # of its look. Where this differs, on purpose (owner, 2026-10-24):
-#   - a step that is running shows `● … 47s RUNNING` with the timer ticking (terminal only);
+#   - a step that is running shows `● … 47.3s RUNNING`, its timer redrawn in tenths, in place,
+#     up to ten times a second (terminal only);
 #   - skipped steps are not shown at all (the recap still counts them);
 #   - long lines wrap the way Helix soft-wraps: continuation keeps the line's indent, marked
 #     with `↪`, and nothing is cut off;
@@ -188,9 +189,10 @@ class CallbackModule(CallbackBase):
 
     @staticmethod
     def _fmt(seconds, live=False):
-        if live:
-            s = int(seconds)
-            return f'{s}s' if s < 60 else f'{s // 60}m{s % 60:02d}s'
+        if live:                 # tenths while a step runs: 3.4s, then 2m04.3s
+            if seconds < 60:
+                return f'{seconds:.1f}s'
+            return f'{int(seconds) // 60}m{seconds % 60:04.1f}s'
         if seconds < 1:
             return f'{seconds * 1000:.0f}ms'
         if seconds < 60:
@@ -251,9 +253,15 @@ class CallbackModule(CallbackBase):
             self._live = 0
             self._named = True
             return
-        up = ('\r' + '\x1b[1A' * (self._live - 1) + '\x1b[J') if self._live else ''
         lines = self._step_lines('running', self._fmt(time.time() - self._start, live=True))
-        self._write(up + '\n'.join(lines))
+        if self._live and len(lines) == self._live:
+            # Same shape as on screen (the dots absorb the timer's length): overwrite in place,
+            # clearing only what is left at each line's end, so ten redraws a second do not flicker.
+            up = '\r' + '\x1b[1A' * (self._live - 1)
+            self._write(up + '\x1b[K\n'.join(lines) + '\x1b[K')
+        else:
+            up = ('\r' + '\x1b[1A' * (self._live - 1) + '\x1b[J') if self._live else ''
+            self._write(up + '\n'.join(lines))
         self._live = len(lines)
         self._live_width = self._width()
 
@@ -288,11 +296,11 @@ class CallbackModule(CallbackBase):
             self._ours = False
 
     def _ticker(self):
-        while not self._stop.wait(0.25):
+        while not self._stop.wait(0.05):
             with self._lock:
                 if self._live and self._task is not None and not self._named:
-                    tick = int(time.time() - self._start)
-                    if tick != self._tick:
+                    tick = self._fmt(time.time() - self._start, live=True)
+                    if tick != self._tick:       # redraw only when the shown time changes
                         self._tick = tick
                         self._ours = True
                         try:
@@ -304,7 +312,7 @@ class CallbackModule(CallbackBase):
         with self._lock:
             self._finish()
             self._task, self._start = name, time.time()
-            self._hosts, self._named, self._tick = {}, False, 0
+            self._hosts, self._named, self._tick = {}, False, None
             if self._tty:
                 self._ours = True
                 try:
