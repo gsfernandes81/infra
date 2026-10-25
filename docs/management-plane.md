@@ -545,6 +545,9 @@ owner's own inbox, which is all an alert needs. The probe runs on `one`, inside 
 OAuth shim. On failure it POSTs to the Worker, behind a service token, and the Worker sends
 the mail. A Worker probing from outside would have to automate that OAuth login instead.
 
+**Closed 2026-10-25 — `zero`'s checkout had diverged from `main`** (owner-reported fixed the same
+day, and the system-files install that it blocked has run since). The original note follows.
+
 **Filed 2026-10-25, no phase number — `zero`'s checkout has diverged from `main`, and nothing installs until it is sorted.**
 `server-install-system-files.yml` stopped at its own `git pull --ff-only` on `zero`: the host's
 `~gavin/infra` holds commits `origin/main` does not, and the reverse. That checkout is also
@@ -553,9 +556,8 @@ there — unpushed, or pushed in rebased form leaving the originals behind. **Do
 `git log --left-right --cherry-mark HEAD...origin/main` shows every local-only commit has a
 `=` twin upstream**; a `<` without one is work that exists nowhere else. The same run found `two`
 dirty with an obsolete `ports: 8080` edit to `destiny-director`'s compose file, which the owner
-had dropped. Until `zero` is sorted, every system-files install and every deployment play that
-pulls the host is blocked fleet-wide, since the play checks all hosts before installing
-anywhere.
+had dropped. Until `zero` is sorted, every system-files install is blocked fleet-wide, since
+the play checks all hosts before installing anywhere; a deployment play pulls only its own host.
 
 **Filed 2026-10-25, no phase number: the fleet ssh hostnames are not behind Access.**
 Confirmed from outside the same day: with no credentials, `ssh-zero`, `ssh-one` and
