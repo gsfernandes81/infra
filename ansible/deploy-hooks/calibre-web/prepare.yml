@@ -1,0 +1,59 @@
+---
+# calibre-web's host-side preparation, included by playbooks/_deploy-compose-one.yml AFTER the
+# question is answered y and BEFORE `up`, so nothing here is written for a change you
+# declined and nothing here runs under --check.
+#
+# It gives Calibre-Web a kepubify it will accept. The image ships the binary as
+# /usr/bin/kepubify, but Calibre-Web 0.6.27 (cps/binary_helper.py) only accepts a file whose
+# real name is kepubify-linux-64bit or kepubify-linux-32bit, so saving "Path to Kepubify
+# E-Book Converter" as /usr/bin/kepubify fails with "Kepubify binary not found". A DIRECTORY
+# is checked differently: it is searched for those names with no real-name test, so a symlink
+# of the right name inside a directory is accepted, and follows the image's own binary when
+# the image changes. The setting in Calibre-Web is then that directory, /config/kepubify
+# (deployments/calibre-web/README.md, step 6).
+#
+# The link lives on the config volume, so it survives a recreate; this hook makes it again
+# on every redeploy and after a rebuilt volume. It points at a path that exists only inside
+# the container, which is why `force: true`: the link is dangling on the host by design.
+#
+# Remove this file if a later Calibre-Web accepts a binary named kepubify.
+
+- name: Read where calibre-web's config volume is on the host
+  # Names the host side of the volume that compose.yaml maps to /config, and that is
+  # host-specific, so it lives in the host's .env and is read from there.
+  ansible.builtin.command:
+    cmd: sed -nE 's/^[[:space:]]*(export[[:space:]]+)?CALIBRE_CONFIG[[:space:]]*=[[:space:]]*(.*)$/\2/p' .env
+    chdir: "{{ dep_dir }}"
+  register: cw_config_raw
+  changed_when: false
+  check_mode: false
+  delegate_to: "{{ dep.host }}"
+
+- name: Note that path
+  ansible.builtin.set_fact:
+    cw_config_dir: >-
+      {{ (cw_config_raw.stdout_lines | default([]) | last | default('') | trim).strip('"').strip("'") }}
+
+- name: Check CALIBRE_CONFIG is an absolute path
+  ansible.builtin.assert:
+    that: cw_config_dir is match('^/')
+    fail_msg: >-
+      CALIBRE_CONFIG in {{ dep.host }}:{{ dep_dir }}/.env is '{{ cw_config_dir }}', not an absolute
+      path. Nothing was changed.
+
+- name: Make the directory Calibre-Web will be pointed at
+  ansible.builtin.file:
+    path: "{{ cw_config_dir }}/kepubify"
+    state: directory
+    mode: "0755"
+  become: true
+  delegate_to: "{{ dep.host }}"
+
+- name: Link the image's kepubify under the name it accepts
+  ansible.builtin.file:
+    src: /usr/bin/kepubify
+    dest: "{{ cw_config_dir }}/kepubify/kepubify-linux-64bit"
+    state: link
+    force: true
+  become: true
+  delegate_to: "{{ dep.host }}"

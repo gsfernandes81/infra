@@ -954,6 +954,23 @@ and its own closing sentence. The tunnel play keeps its extra checksum compariso
 files it will run, which is specific to it. Checked from `infra-dev`: every play
 syntax-checks, and the two files run clean and fail correctly against this checkout.
 
+## calibre-web's kepubify is a symlink the deploy play makes, in a directory
+
+Found 2026-10-25 at bring-up. The image ships kepubify as `/usr/bin/kepubify`, and its
+first-run script writes that path into Calibre-Web's database, but saving the settings page
+runs Calibre-Web 0.6.27's own check (`cps/binary_helper.py`), which accepts a file only if its
+real name is `kepubify-linux-64bit` or `-32bit`, and fails with *Kepubify binary not found*. A
+directory is searched for those names without the real-name test, so the setting is the
+directory `/config/kepubify`, holding a symlink of the right name to the image's binary. The
+link is made by `ansible/deploy-hooks/calibre-web/prepare.yml` after the question is answered
+and before `up`, not by an image script: LinuxServer's custom-script directory wants
+root-owned executable files, and this checkout is owned by the uid the container runs as, so
+whether it would run was not something to find out at bring-up. The deployment's probe runs
+the binary through the link and checks both memory limits are in force, which the README used
+to ask a person to check by hand. The hook is the first `prepare.yml`: a hook point after the
+yes and before `up`, so nothing is written for a change that was declined. Remove it if a
+later Calibre-Web accepts a binary named `kepubify`.
+
 ## The lesson worth keeping
 
 

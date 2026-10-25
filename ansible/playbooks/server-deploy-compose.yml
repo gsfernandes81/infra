@@ -43,6 +43,10 @@
 #                                                plan to mean anything (send2ereader: its
 #                                                image can be fetched from ghcr; torrents:
 #                                                the forwarded port before the change)
+#   ansible/deploy-hooks/<name>/prepare.yml     after you answer y and before `up`: host-side
+#                                                files the deployment needs, written only for
+#                                                a change you confirmed (calibre-web: the
+#                                                kepubify link Calibre-Web will accept)
 #   ansible/deploy-hooks/<name>/probe.yml       after a redeploy, once every container is up:
 #                                                end-to-end checks (send2ereader: the page,
 #                                                the image it runs, no published port;

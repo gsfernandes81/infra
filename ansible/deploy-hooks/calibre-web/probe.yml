@@ -1,0 +1,58 @@
+---
+# calibre-web's checks after a redeploy, included by playbooks/_deploy-compose-one.yml once
+# every container is up. Both are things deployments/calibre-web/README.md used to ask a
+# person to check by hand.
+
+- name: Run kepubify through the link, as the container sees it
+  # Proves the link resolves inside the container and the binary runs there. It does not
+  # prove Calibre-Web's own setting points at /config/kepubify: that is the one browser step
+  # left (README step 6), kept in the app's database.
+  ansible.builtin.command:
+    argv: [docker, exec, calibre-web, /config/kepubify/kepubify-linux-64bit, --version]
+  register: cw_kepubify
+  changed_when: false
+  failed_when: false
+  become: true
+  delegate_to: "{{ dep.host }}"
+
+- name: Check kepubify runs through the link
+  ansible.builtin.assert:
+    that: cw_kepubify.rc == 0
+    fail_msg: >-
+      /config/kepubify/kepubify-linux-64bit did not run inside calibre-web
+      ({{ cw_kepubify.stderr | default('') | trim }}). The link is made by
+      deploy-hooks/calibre-web/prepare.yml before `up`; if /usr/bin/kepubify is gone from the
+      image, the link dangles and needs repointing.
+    success_msg: "{{ cw_kepubify.stdout | trim }} runs through the link"
+
+- name: Read whether the memory controller is on
+  # The memory limits in compose.yaml are ignored without it: Docker accepts them and
+  # applies none. `one` has 1 GB and swap off, so this is the check that matters.
+  ansible.builtin.command:
+    argv: [grep, -o, memory, /sys/fs/cgroup/cgroup.controllers]
+  register: cw_cgroup
+  changed_when: false
+  failed_when: false
+  delegate_to: "{{ dep.host }}"
+
+- name: Read the memory limits Docker applied
+  ansible.builtin.command:
+    argv: [docker, inspect, --format, "{% raw %}{{.Name}} {{.HostConfig.Memory}}{% endraw %}", calibre-web, calibre-web-cloudflared]
+  register: cw_memory
+  changed_when: false
+  failed_when: false
+  become: true
+  delegate_to: "{{ dep.host }}"
+
+- name: Check both containers have a memory limit
+  ansible.builtin.assert:
+    that:
+      - cw_cgroup.rc == 0
+      - cw_memory.rc == 0
+      - cw_memory.stdout_lines | map('split', ' ') | map('last') | map('int') | select('gt', 0) | list | length == 2
+    fail_msg: >-
+      A memory limit is not in force: the memory controller is
+      {{ 'on' if cw_cgroup.rc == 0 else 'OFF in /sys/fs/cgroup/cgroup.controllers' }} and Docker reports
+      {{ cw_memory.stdout_lines | default([]) | join('; ') }}. A 0 means the limit in compose.yaml
+      is ignored.
+    success_msg: "memory limits in force: {{ cw_memory.stdout_lines | join('; ') }}"

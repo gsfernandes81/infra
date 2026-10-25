@@ -131,6 +131,18 @@
               ((dep_answer.user_input | default('') | lower) in ['y', 'yes'])) }}
 
     # ── do ───────────────────────────────────────────────────────────────────────
+    - name: Stat the prepare hook for {{ dep.name }}
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../deploy-hooks/{{ dep.name }}/prepare.yml"
+      register: dep_prepare
+      when: dep_go | bool
+
+    - name: "If going ahead and it has a prepare hook: run it"
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/../deploy-hooks/{{ dep.name }}/prepare.yml"
+      when:
+        - dep_go | bool
+        - dep_prepare.stat.exists | default(false)
+
     - name: "If going ahead: read container ids of {{ dep.name }}"
       ansible.builtin.command:
         cmd: docker compose ps -a --format '{% raw %}{{.Name}} {{.ID}}{% endraw %}'

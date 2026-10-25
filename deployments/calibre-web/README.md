@@ -143,7 +143,7 @@ play's header.
 cd ~/infra/deployments/calibre-web
 grep -c '^TUNNEL_' .env                            # 2 — the play's lines; PUID/PGID set at step 1
 grep -o memory /sys/fs/cgroup/cgroup.controllers   # must print `memory`, or mem_limit is ignored
-sudo docker compose up -d
+sudo docker compose up -d                          # or the deploy play, which also does the checks below
 sudo docker compose ps                             # both up; the sidecar healthy within a minute
 sudo docker inspect -f '{{.Name}} {{.HostConfig.Memory}}' calibre-web calibre-web-cloudflared
                                                    # 536870912 and 134217728, not 0
@@ -161,7 +161,14 @@ Log in through Access, then as `admin` / `admin123`, and **change that password 
   links only from an `X-Scheme` header (`cps/reverseproxy.py`), which Cloudflare does not
   send, so without the step-4 rule the links read `http://calibre-web.gsrpi.uk:443/…` and
   every book download fails while the library itself syncs (upstream: calibre-web#3595).
-- *External binaries*: kepubify at `/usr/bin/kepubify`.
+- *External binaries*, **Path to Kepubify E-Book Converter**: `/config/kepubify`, **the
+  directory, not the binary**. Typing `/usr/bin/kepubify` fails on save with *Kepubify
+  binary not found*: Calibre-Web 0.6.27 (`cps/binary_helper.py`) only accepts a file whose real
+  name is `kepubify-linux-64bit` or `-32bit`, and the image calls its arm64 binary `kepubify`.
+  A directory is searched for those names without that test, so the deploy play puts a symlink
+  of the right name in `/config/kepubify` (`ansible/deploy-hooks/calibre-web/prepare.yml`),
+  pointing at the image's own binary. The image also writes `/usr/bin/kepubify` into the
+  database on its first run, which is why the field may already show it; replace it and save.
 - Make a shelf (say *Kobo*), then in your user profile tick **Sync only books in selected
   shelves with Kobo** — **before the first sync**. Turned on later, it archives everything
   that was synced and is not on a shelf. With a migrated library, the default would send
