@@ -548,6 +548,7 @@ class CallbackModule(CallbackBase):
             if failed:
                 self._say(self._c(f'✗ {self._kind} failed after {took}', 'red'))
             else:
-                icon = {'Deployment': '🚀', 'Provisioning': '⚙️'}.get(self._kind, '✅')
+                # ✓ like every successful step above it; a deployment keeps prettify's rocket.
+                icon = {'Deployment': '🚀', 'Provisioning': '⚙️'}.get(self._kind, '✓')
                 self._say(self._c(f'{icon} {self._kind} completed successfully in {took}', 'green'))
             self._say('')
