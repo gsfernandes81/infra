@@ -20,8 +20,9 @@
 #   2. PLAN. Compose is asked what `up` would do, as a dry run, and the answer is printed:
 #      which containers would be created or recreated, and which images pulled. Nothing has
 #      changed. A deployment with nothing to do says so and is not asked about.
-#      Compose's dry run cannot plan past an image the host lacks, so a real run PULLS what is
-#      missing first. That touches no container, honours each service's pull_policy and leaves
+#      Compose's dry run cannot plan past an image the host lacks, so when one is missing a
+#      real run PULLS first (every pullable image; those already present only get a registry
+#      check). That touches no container, honours each service's pull_policy and leaves
 #      a buildable image to `up`; a "no" leaves the images on the host. Under --check nothing
 #      is pulled: the registry is asked that each one exists, and the plan names them.
 #   3. ASK, once, for this deployment: "Redeploy immich on zero? [y/N]". Anything but y/yes

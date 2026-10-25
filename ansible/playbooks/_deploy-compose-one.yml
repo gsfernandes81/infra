@@ -95,7 +95,8 @@
     # what the host lacks is read first. A real run pulls it before the plan; that touches no
     # container. Under --check, or for an image only `up` can build, the plan names it instead.
     - name: Read the images {{ dep.name }} uses
-      # Image references only: they are literals in compose.yaml, so no .env value is printed.
+      # Image references only, and each is pinned in compose.yaml or its override, so no .env
+      # value is printed.
       ansible.builtin.command:
         cmd: docker compose config --images
         chdir: "{{ dep_dir }}"
@@ -123,10 +124,10 @@
     - name: "If images are missing: pull images for {{ dep.name }}"
       # Under --check the module runs `pull --dry-run`, which still asks the registry for each
       # reference, so a pinned digest that does not exist fails here, before any question.
-      # The module's default policy passes NO --policy flag, and that is the point: --policy,
-      # like `up --pull`, overrides every service's pull_policy (cmd/compose/pull.go), so
-      # garmin-mcp's `never` would look for its tag on Docker Hub. ignore_buildable leaves an
-      # image with a build: section to `up`.
+      # The module's default policy passes NO --policy flag: --policy, like `up --pull`,
+      # overrides every service's pull_policy (cmd/compose/pull.go). Without it a service that
+      # sets none is refreshed, which for a pinned digest already present is a registry check
+      # and no download. ignore_buildable leaves an image with a build: section to `up`.
       community.docker.docker_compose_v2_pull:
         project_src: "{{ dep_dir }}"
         ignore_buildable: true
@@ -152,7 +153,8 @@
       ansible.builtin.set_fact:
         dep_unplannable: >-
           {{ dep_missing if ansible_check_mode else
-             (dep_img_after.results | default([]) | rejectattr('rc', 'eq', 0) | map(attribute='item') | list) }}
+             (dep_img_after.results | default([]) | selectattr('rc', 'defined') | rejectattr('rc', 'eq', 0)
+              | map(attribute='item') | list) }}
 
     # ── the plan: Compose's own dry run, nothing changed ───────────────────────
     - name: "If no image is missing: plan {{ dep.name }}, dry run"

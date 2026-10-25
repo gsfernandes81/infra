@@ -1089,7 +1089,9 @@ the plan with "No such image". Compose's dry run fakes the pull and then asks th
 about the image when it plans the recreate (v5.6.1, `pkg/dryrun/dryrunclient.go`), so it
 cannot plan any image the host lacks. Every bump would have failed the same way.
 
-- **A real run pulls what is missing, before the question.** It touches no container, and a
+- **A real run pulls when anything is missing, before the question.** `compose pull`
+  refreshes every pullable image, so those already present get a registry check and no
+  download. It touches no container, and a
   "no" leaves only images on the host, which `up` would have pulled anyway. The plan you then
   answer is Compose's own, as before.
 - **Through `compose pull` with no `--policy`.** `--policy` overrides every service's
