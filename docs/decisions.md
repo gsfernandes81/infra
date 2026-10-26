@@ -584,7 +584,7 @@ comment keep the deployment's name. Without `subdomain:` nothing changes for the
 deployments.
 
 The cost is a short outage at cutover. The tunnel play points the existing `bookit` record
-at the new tunnel before the sidecar runs. `server-deploy-send2ereader.yml` imports that
+at the new tunnel before the sidecar runs. `server-deploy-send2ereader.yml` (since deleted) imports that
 play and starts the deployment later in the same run, so the gap is the build and the
 start: seconds with `one`'s build cache, minutes without it. A disposable service can take
 that, and avoiding it would have meant a second hostname or a tunnel play split around the
@@ -712,7 +712,7 @@ it safely; it is repo-owned code, so it waits until the scrolling of this one pr
 **What the templates have to rebuild,** because `diy` silences the default callback whenever a
 template renders: `display_ok_hosts = False` (an empty render), the DRY RUN marker (on the play
 banner), and `debug` messages in full, lists included. Without that last one, the MFA block and
-the Done block in `server-deploy-garmin-mcp.yml` would print as a bare "changed".
+the Done block in `server-deploy-garmin-mcp.yml` (since deleted) would print as a bare "changed".
 
 **The escape hatch** is `ANSIBLE_STDOUT_CALLBACK=default` for one run: a full transcript, or
 `-v`, which the templates ignore. **The known cost:** `diy` calls template APIs that
@@ -934,8 +934,8 @@ read `${VAR:?}` names out of `compose.yaml` to check `.env` instead of keeping l
 and leaves tunnel provisioning to `server-bring-up-deployment.yml`, because the tunnel play
 PUTs Access policies unconditionally and a routine image bump must not touch Cloudflare.
 As of 2026-10-25 `send2ereader` is on it and `garmin-mcp`'s play is still its own
-(`plans/deploy-play-unification.md`); `garmin-mcp` joined later that day, in the row
-*garmin-mcp joins the redeploy play*. The question is per **deployment**, never per container:
+(a plan, since done and deleted); `garmin-mcp` joined later that day, in the row
+*garmin-mcp joins the redeploy play*, and both old plays were deleted on 2026-10-26. The question is per **deployment**, never per container:
 gluetun and qBittorrent share a network namespace and must be recreated together, and
 Immich's four containers are one application, so a per-container question invites answering
 "no" to half a pair. `all` is the owner's addition: it goes through every deployment in turn,
@@ -1005,6 +1005,10 @@ The Garmin login moved to the end of the probe, where the play prints the login 
 pauses until it has been run. `tools/list` answers without a login, because upstream registers
 its tools at start-up and logs in on a background thread, so the allowlist is proved first,
 even on a first bring-up.
+
+**The two old plays were deleted on 2026-10-26**, after the owner's runs of this path:
+`garmin-mcp`'s `--check` planned nothing to change, and each deployment's `recreate=true` run
+recreated both its containers and passed every probe, the Garmin login included.
 
 ## `ionic-traces` comes off `hosts/one/`; its deployment stays
 

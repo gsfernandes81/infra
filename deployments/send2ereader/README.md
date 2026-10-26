@@ -28,29 +28,20 @@ ansible-playbook playbooks/server-deploy-compose.yml -e deployment=send2ereader 
 ansible-playbook playbooks/server-deploy-compose.yml -e deployment=send2ereader -K
 ```
 
-The older play below also works, and is deleted once this one has done a real deploy, which
-`-e recreate=true` makes without a change
-([`plans/deploy-play-unification.md`](../../plans/deploy-play-unification.md)).
-
-```fish
-cd ~/infra; git pull --ff-only; cd ansible
-ansible-playbook playbooks/server-deploy-send2ereader.yml --check -K
-ansible-playbook playbooks/server-deploy-send2ereader.yml -K
-```
-
-The dry run proves the API token, `one`'s checkout of this repo, and that `one` can fetch
-the pinned image from ghcr, and changes nothing. It should name the hostname `bookit.gsrpi.uk`
-and access `NONE`. Never add `-l one`; the play's header says why.
-
-A real run does this, in order:
+`-e recreate=true` makes a real deploy without a change. Never add `-l one`; the play's
+header says why. A redeploy does this, in order:
 
 1. pulls `one`'s checkout of this repo to the control node's commit;
-2. makes or finds the tunnel `send2ereader` and points the `bookit` DNS record at it;
-3. writes `TUNNEL_ID` and `TUNNEL_CREDENTIALS` into `.env` on `one`;
-4. checks `one` can fetch the pinned image from ghcr, anonymously;
-5. pulls the image if `one` lacks it and starts both services;
-6. fetches `https://bookit.gsrpi.uk` from the control node, as a browser and as a Kobo,
+2. checks `one` can fetch the pinned image from ghcr, anonymously;
+3. pulls the image if `one` lacks it, prints the plan and asks;
+4. after a y, recreates what the plan named;
+5. fetches `https://bookit.gsrpi.uk` from the control node, as a browser and as a Kobo,
    checks the app container runs the pinned image, and checks it publishes no port.
+
+**A first bring-up**, on a host that has never run it, is
+`server-bring-up-deployment.yml -e deployment=send2ereader -K`: the tunnel play first (it
+makes or finds the tunnel `send2ereader`, points the `bookit` DNS record at it and writes
+`TUNNEL_ID` and `TUNNEL_CREDENTIALS` into `.env`), then the redeploy above.
 
 Nothing is built on `one`. The image is the fork's, built by its CI
 (`.github/workflows/docker.yml` there) for arm64 and amd64, smoke-tested on native
@@ -58,11 +49,13 @@ runners, and tagged with the fork commit it was built from. An unchanged digest 
 on `one`, so the running container is left alone; a new one is pulled and the container
 recreated. The package is public, so `one` holds no credential for it.
 
-**The first run was the cutover, and it is done (owner-reported, 2026-10-25).** Sending a
-book failed from step 2 until step 5 ended: the image pull and a few seconds. The two
+**The first run was the cutover, and it is done (owner-reported, 2026-10-25).** It was run
+by the play this deployment had then, `server-deploy-send2ereader.yml`, deleted on 2026-10-26.
+Sending a book failed from the DNS record's move until both services had started: the image
+pull and a few seconds. The two
 paragraphs below are kept as the record of what it was and how it would have been undone.
 
-If that first run had stopped after step 2, `bookit` came back by pointing the record at
+If that first run had stopped after moving the DNS record, `bookit` came back by pointing the record at
 `one`'s host tunnel again: in the Cloudflare dashboard, DNS, set the `bookit` CNAME's
 target to `1e7fde2e-ac2f-4a5e-8ad4-591208c1e2a6.cfargotunnel.com`. That stopped working
 once the host configuration lost its `bookit` rule, so it is no longer a way back.
@@ -84,7 +77,7 @@ it.
 ## After a reboot
 
 Docker restarts both containers on its own (`restart: unless-stopped`). If they are
-absent, run the play again, or on `one`:
+absent, run the redeploy play above again, or on `one`:
 
 ```fish
 cd ~/infra/deployments/send2ereader

@@ -41,9 +41,6 @@ ansible-playbook playbooks/server-deploy-compose.yml -e deployment=garmin-mcp -K
 ansible-playbook playbooks/server-deploy-compose.yml -e deployment=garmin-mcp -e recreate=true -K   # with no change
 ```
 
-`server-deploy-garmin-mcp.yml`, the play this deployment had before, is kept until the first
-real run of this path and then deleted (`plans/deploy-play-unification.md`).
-
 **A first run pauses at the Garmin login**, with this block. It is the one step that cannot be
 automated: Garmin asks for the MFA code inside the same process that started the login.
 

@@ -14,9 +14,6 @@ cd ansible && ansible-playbook playbooks/server-deploy-compose.yml -e deployment
 cd ansible && ansible-playbook playbooks/server-deploy-compose.yml -e deployment=garmin-mcp -e recreate=true -K   # with no change
 ```
 
-`send2ereader` and `garmin-mcp` also keep their old plays, `server-deploy-<name>.yml`, until the first real run of
-the shared one with `recreate=true` exercises their checks ([`plans/deploy-play-unification.md`](plans/deploy-play-unification.md)).
-
 Any deployment starts with stock Compose, on its host, from its directory:
 
 ```sh

@@ -1,7 +1,8 @@
 ---
 # garmin-mcp's work before the .env check and the plan, included by
 # playbooks/_deploy-compose-one.yml (the contract is in server-deploy-compose.yml's header).
-# Moved from the deployment's own play, server-deploy-garmin-mcp.yml, on 2026-10-25.
+# Moved from the deployment's own play, server-deploy-garmin-mcp.yml, on 2026-10-25; that play
+# was deleted on 2026-10-26, after this path's first real run.
 #
 # 1. It refuses a Garmin email or password in .env, under --check too.
 # 2. It CREATES what a first bring-up lacks and nothing else, outside --check: the four .env
