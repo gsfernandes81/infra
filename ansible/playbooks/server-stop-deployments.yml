@@ -1,0 +1,285 @@
+---
+# STOP A HOST'S COMPOSE DEPLOYMENTS, OR START THEM AGAIN, recreating nothing. Run from the
+# control node:
+#
+#     cd ansible
+#     ansible-playbook playbooks/server-stop-deployments.yml -e target=one --check -K   # what would stop
+#     ansible-playbook playbooks/server-stop-deployments.yml -e target=one -K           # every deployment on one
+#     ansible-playbook playbooks/server-stop-deployments.yml -e deployment=torrents -K  # one deployment
+#     ansible-playbook playbooks/server-stop-deployments.yml -e deployment=torrents -e services=torrent -K
+#     ansible-playbook playbooks/server-stop-deployments.yml -e target=one -e start=true -K   # and back
+#
+# Name a host with -e target, or one deployment with -e deployment (its host comes from the
+# hosts/<host>/<name> symlink), never both. -e services=a,b narrows ONE named deployment to
+# those Compose services. NO --limit / -l, for the same reason as server-deploy-compose.yml:
+# the host is found by the play, and -l would skip the play that finds it. -K because docker
+# needs root and gavin is not in the docker group.
+#
+# `docker compose stop` and `docker compose start`, NEVER `up` and never `down`. `up` re-reads
+# the config and may recreate (CLAUDE.md § Verifying changes); `down` deletes the containers,
+# and with them anything a container keeps outside a volume. So a container that comes back
+# is the same container: the play reads every container id before and after and fails if
+# one changed. Starting a deployment that has no containers at all is refused, with the
+# play that creates them: that is a redeploy, which is server-deploy-compose.yml.
+#
+# WHAT ONE RUN DOES: reads each deployment's containers and their state, prints what would
+# stop (or start), and with them the containers this run would leave running on that host;
+# asks once for the whole run, "Stop 9 containers in 4 deployments on one? [y/N]"; then stops
+# or starts each deployment in turn, and reads the state again to prove it. A start waits
+# for healthchecks. --check stops after the print and never asks. -e assume_yes=true skips
+# the question.
+#
+# RESTART POLICIES DECIDE WHAT A DAEMON RESTART BRINGS BACK, and a stop here does not change
+# them. Docker remembers that a container was stopped by hand: on its next start dockerd
+# leaves an `unless-stopped` container stopped, but starts an `always` one again. On `one`
+# that means torrents' gluetun and qBittorrent come back by themselves after
+# `rc-service docker restart`, and everything else waits for `-e start=true`. Starting a
+# container that is already running is a no-op, so the start run covers both.
+#
+# WHAT IT WILL NOT TOUCH, and prints rather than silently skipping:
+#   a deployment not linked from hosts/   ionic-traces since 2026-10-25: never found
+#   a host outside `containerized`        `two`, whose podman is rootless under another account
+#   containers in no deployment found     listed as "left running", never stopped
+
+- name: Check the inventory is loaded
+  ansible.builtin.import_playbook: _assert-inventory.yml
+  vars:
+    required_group: fleet
+
+- name: Find the deployments to stop or start
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check what to stop or start was named
+      ansible.builtin.assert:
+        that:
+          - (target is defined) != (deployment is defined)
+          - target is not defined or target is match('^[a-z0-9][a-z0-9-]*$')
+          - deployment is not defined or deployment is match('^[a-z0-9][a-z0-9-]*$')
+          - services is not defined or deployment is defined
+          - services is not defined or services is match('^[a-zA-Z0-9][a-zA-Z0-9_.-]*(,[a-zA-Z0-9][a-zA-Z0-9_.-]*)*$')
+        fail_msg: >-
+          Say which, one of the two: -e target=<host> for every deployment on it, or
+          -e deployment=<name> for one. -e services=a,b names Compose services of ONE deployment,
+          so it needs -e deployment. -e start=true starts them again.
+        success_msg: "{{ target | default(deployment | default('?')) }}"
+
+    - name: Note whether this run stops or starts
+      ansible.builtin.set_fact:
+        sd_start: "{{ start | default(false) | bool }}"
+        sd_services: "{{ services.split(',') if services is defined else [] }}"
+
+    - name: Find the hosts/<host>/<name> symlinks
+      ansible.builtin.find:
+        paths: "{{ control_checkout }}/hosts"
+        patterns: "*"
+        file_type: link
+        recurse: true
+        depth: 2
+      register: sd_links
+
+    - name: Note the host and name of each symlink
+      ansible.builtin.set_fact:
+        sd_candidates: >-
+          {{ (sd_candidates | default([]))
+             + [{'host': item.path.split('/')[-2], 'name': item.path.split('/')[-1]}] }}
+      loop: "{{ sd_links.files }}"
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Find each candidate's compose.yaml
+      ansible.builtin.stat:
+        path: "{{ control_checkout }}/deployments/{{ item.name }}/compose.yaml"
+      loop: "{{ sd_candidates | default([]) }}"
+      loop_control:
+        label: "{{ item.host }}/{{ item.name }}"
+      register: sd_composes
+
+    - name: Note the docker deployments, by host and name
+      ansible.builtin.set_fact:
+        sd_known: >-
+          {{ sd_composes.results | selectattr('stat.exists') | map(attribute='item')
+             | selectattr('host', 'in', groups['containerized']) | sort(attribute='host,name') | list }}
+
+    - name: Pick what this run covers
+      ansible.builtin.set_fact:
+        sd_run: >-
+          {{ sd_known | selectattr('host', 'eq', target) | list if target is defined
+             else sd_known | selectattr('name', 'eq', deployment) | list }}
+
+    - name: Check there is something to stop or start
+      ansible.builtin.assert:
+        that: sd_run | length > 0
+        fail_msg: >-
+          No docker deployment for "{{ target | default(deployment) }}". Known:
+          {{ sd_known | map(attribute='host') | zip(sd_known | map(attribute='name'))
+             | map('join', '/') | join(', ') }}. A deployment needs a hosts/<host>/<name> symlink,
+          a compose.yaml, and a host in the containerized group.
+        success_msg: "{{ sd_run | map(attribute='name') | join(', ') }}"
+
+- name: Stop or start them, asking once
+  hosts: localhost
+  gather_facts: false
+  vars:
+    # Space-separated, Status last because it is the only field with spaces in it.
+    sd_format: "{% raw %}{{.Service}} {{.Name}} {{.ID}} {{.State}} {{.Status}}{% endraw %}"
+    sd_verb: "{{ 'start' if sd_start else 'stop' }}"
+    # What `compose stop` acts on, and what `compose start` acts on.
+    sd_from_states: "{{ ['exited', 'created'] if sd_start else ['running', 'restarting', 'paused'] }}"
+    sd_to_state: "{{ 'running' if sd_start else 'exited' }}"
+    sd_hosts: "{{ sd_run | map(attribute='host') | unique | list }}"
+  tasks:
+    - name: Read the containers of each deployment
+      ansible.builtin.command:
+        argv: "{{ ['docker', 'compose', 'ps', '-a', '--format', sd_format] + sd_services }}"
+        chdir: "{{ hostvars[item.host].infra_checkout }}/deployments/{{ item.name }}"
+      loop: "{{ sd_run }}"
+      loop_control:
+        label: "{{ item.host }}/{{ item.name }}"
+      register: sd_before
+      changed_when: false
+      check_mode: false
+      become: true
+      delegate_to: "{{ item.host }}"
+
+    - name: Note each container and its state
+      ansible.builtin.set_fact:
+        sd_rows: >-
+          {% set out = [] %}{% for r in sd_before.results %}{% for l in r.stdout_lines %}{% set f = l.split(' ', 4) %}{% set _ = out.append({'host': r.item.host, 'dep': r.item.name, 'service': f[0], 'name': f[1], 'id': f[2], 'state': f[3], 'status': f[4] | default('')}) %}{% endfor %}{% endfor %}{{ out }}
+        sd_empty: >-
+          {{ sd_before.results | rejectattr('stdout_lines') | map(attribute='item') | list }}
+
+    - name: Note the containers this run would change
+      ansible.builtin.set_fact:
+        sd_todo: "{{ sd_rows | selectattr('state', 'in', sd_from_states) | list }}"
+        sd_todo_deps: >-
+          {{ sd_rows | selectattr('state', 'in', sd_from_states)
+             | map(attribute='host') | zip(sd_rows | selectattr('state', 'in', sd_from_states) | map(attribute='dep'))
+             | map('join', '/') | unique | list }}
+
+    - name: "If starting: check every deployment has containers"
+      # `compose start` cannot create a container. One that is missing was never brought up,
+      # or was taken `down`, and making it again is a redeploy, which reads the config.
+      ansible.builtin.assert:
+        that: sd_empty | length == 0
+        fail_msg: >-
+          No containers to start for
+          {{ sd_empty | map(attribute='host') | zip(sd_empty | map(attribute='name')) | map('join', '/') | join(', ') }}.
+          Creating them is a redeploy: server-deploy-compose.yml -e deployment=<name> -K.
+          Nothing has been started.
+        success_msg: every deployment has its containers
+      when: sd_start
+
+    - name: Read every running container on {{ sd_hosts | join(', ') }}
+      ansible.builtin.command:
+        argv: [docker, ps, --format, "{% raw %}{{.ID}} {{.Names}}{% endraw %}"]
+      loop: "{{ sd_hosts }}"
+      register: sd_running
+      changed_when: false
+      check_mode: false
+      become: true
+      delegate_to: "{{ item }}"
+      when: not sd_start
+
+    - name: Note what this run would leave running
+      # Compared on the first 12 characters, the short id `docker ps` prints, so a compose
+      # that printed the full id would still match.
+      ansible.builtin.set_fact:
+        sd_others: >-
+          {% set ids = sd_rows | map(attribute='id') | map('truncate', 12, true, '') | list %}{% set out = [] %}{% for r in sd_running.results | default([]) if r.stdout_lines is defined %}{% for l in r.stdout_lines if (l.split(' ')[0] | truncate(12, true, '')) not in ids %}{% set _ = out.append(r.item ~ ': ' ~ l.split(' ', 1)[1]) %}{% endfor %}{% endfor %}{{ out }}
+      when: not sd_start
+
+    - name: Print what would {{ sd_verb }}
+      ansible.builtin.debug:
+        msg: >-
+          {% set out = ['Would ' ~ sd_verb ~ ':'] %}{% for t in sd_todo %}{% set _ = out.append('  ' ~ t.host ~ '/' ~ t.dep ~ ' ' ~ t.name ~ ' (' ~ t.id ~ '), ' ~ t.state) %}{% endfor %}{% if sd_todo | length == 0 %}{% set _ = out.append('  nothing: every container is already ' ~ sd_to_state) %}{% endif %}{% if sd_others | default([]) | length > 0 %}{% set _ = out.append('Left running:') %}{% for o in sd_others %}{% set _ = out.append('  ' ~ o) %}{% endfor %}{% endif %}{% for e in sd_empty %}{% set _ = out.append('No containers: ' ~ e.host ~ '/' ~ e.name) %}{% endfor %}{{ out }}
+      changed_when: true
+
+    - name: "If any and not --check: ask to {{ sd_verb }} them"
+      ansible.builtin.pause:
+        prompt: >-
+          {{ sd_verb | capitalize }} {{ sd_todo | length }} container{{ '' if sd_todo | length == 1 else 's' }}
+          in {{ sd_todo_deps | length }} deployment{{ '' if sd_todo_deps | length == 1 else 's' }}
+          on {{ sd_hosts | join(', ') }}? [y/N]
+      register: sd_answer
+      when:
+        - sd_todo | length > 0
+        - not ansible_check_mode
+        - not (assume_yes | default(false) | bool)
+
+    - name: Note whether to go ahead
+      ansible.builtin.set_fact:
+        sd_go: >-
+          {{ sd_todo | length > 0 and not ansible_check_mode and
+             ((assume_yes | default(false) | bool) or
+              ((sd_answer.user_input | default('') | lower) in ['y', 'yes'])) }}
+
+    - name: "If going ahead: {{ sd_verb }} each deployment"
+      ansible.builtin.command:
+        argv: "{{ ['docker', 'compose', sd_verb] + sd_services }}"
+        chdir: "{{ hostvars[item.split('/')[0]].infra_checkout }}/deployments/{{ item.split('/')[1] }}"
+      loop: "{{ sd_todo_deps }}"
+      become: true
+      delegate_to: "{{ item.split('/')[0] }}"
+      when: sd_go | bool
+
+    - name: "If going ahead: read the containers again"
+      # A start waits for healthchecks: `starting` has not answered yet, and `restarting`
+      # is a crash loop. A stop is done when `compose stop` returns.
+      ansible.builtin.command:
+        argv: "{{ ['docker', 'compose', 'ps', '-a', '--format', sd_format] + sd_services }}"
+        chdir: "{{ hostvars[item.host].infra_checkout }}/deployments/{{ item.name }}"
+      loop: "{{ sd_run }}"
+      loop_control:
+        label: "{{ item.host }}/{{ item.name }}"
+      register: sd_after
+      until: not sd_start or sd_after.stdout is not search('starting|restarting')
+      retries: 20
+      delay: 15
+      changed_when: false
+      become: true
+      delegate_to: "{{ item.host }}"
+      when: sd_go | bool
+
+    - name: "If going ahead: note the state now"
+      ansible.builtin.set_fact:
+        sd_now: >-
+          {% set out = {} %}{% for r in sd_after.results %}{% for l in r.stdout_lines %}{% set f = l.split(' ', 4) %}{% set _ = out.update({f[2]: {'name': f[1], 'state': f[3], 'status': f[4] | default('')}}) %}{% endfor %}{% endfor %}{{ out }}
+      when: sd_go | bool
+
+    - name: "If going ahead: check each one is {{ sd_to_state }}"
+      # By id, so a container that was recreated reads as missing rather than as fine.
+      ansible.builtin.assert:
+        that:
+          - sd_gone | length == 0
+          - sd_bad | length == 0
+        fail_msg: >-
+          After {{ sd_verb }}:
+          {{ (sd_gone + sd_bad) | join('; ') }}.
+          The rest of the run has stopped. `sudo docker compose logs` in the deployment says why.
+        success_msg: "{{ sd_todo | length }} {{ sd_to_state }}, same ids"
+      vars:
+        sd_gone: >-
+          {% set out = [] %}{% for t in sd_todo if t.id not in sd_now %}{% set _ = out.append(t.name ~ ' is gone or was recreated: id ' ~ t.id ~ ' is not there') %}{% endfor %}{{ out }}
+        sd_bad: >-
+          {% set out = [] %}{% for t in sd_todo if t.id in sd_now and (sd_now[t.id].state != sd_to_state or (sd_start and sd_now[t.id].status is search('unhealthy'))) %}{% set _ = out.append(t.name ~ ' is ' ~ sd_now[t.id].state ~ ', ' ~ sd_now[t.id].status) %}{% endfor %}{{ out }}
+      when: sd_go | bool
+
+    - name: "If going ahead: print what is {{ sd_to_state }} now"
+      # The ids are the point: a stop before a move of /var/lib/docker and a start after it
+      # should print the same ones.
+      ansible.builtin.debug:
+        msg: >-
+          {% set out = [] %}{% for t in sd_todo %}{% set _ = out.append(t.host ~ '/' ~ t.dep ~ ' ' ~ t.name ~ ' (' ~ t.id ~ '): ' ~ sd_now[t.id].state) %}{% endfor %}{{ out }}
+      changed_when: true
+      when: sd_go | bool
+
+    - name: "If declined: say so in the closing line"
+      ansible.builtin.set_stats:
+        data:
+          incomplete: "nothing was {{ 'started' if sd_start else 'stopped' }}: the question was not answered y"
+        per_host: false
+      when:
+        - sd_todo | length > 0
+        - not ansible_check_mode
+        - not (sd_go | bool)

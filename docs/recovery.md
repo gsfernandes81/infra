@@ -54,7 +54,8 @@ repairing it is for a person to decide, not a reboot. It is no longer linked fro
 `hosts/one/` (2026-10-25), so nothing that walks `hosts/` brings it back either.
 
 On `one`, state is on `/media` bind mounts, except `garmin-mcp`'s Garmin session, which is
-the named volume `garmin-tokens` on the SD card. Recreating a container loses nothing;
+the named volume `garmin-tokens` under `/var/lib/docker` (on the SD card until that moves to
+the array, below). Recreating a container loses nothing;
 `docker volume prune` or `docker compose down -v` loses that session, and logging in again
 needs the MFA step in its README.
 After gluetun is recreated, expect a new forwarded port
@@ -186,10 +187,16 @@ detected. On MicroOS, `RequiresMountsFor=` replaces it.
 ## Why a missing disk does not stop boot
 
 **`one`:** every `/media` mount is on the MX500 (`/dev/sda1`, the only disk), with
-`nofail`, and every bare mountpoint is immutable. All four were checked empty before the
-flag went on, in August 2026. `calibre-web` adds two more (`/media/calibre/library` and
-`/media/calibre/config`); the tracked fstab has carried them since 2026-10-24, and they
-get both guards when its README's step 2 creates them. OpenRC would boot without the array
+`nofail`, and every bare mountpoint is immutable. The first four were checked empty before
+the flag went on, in August 2026, and `calibre-web`'s two (`/media/calibre/library` and
+`/media/calibre/config`) came with its README's step 2, which puts both guards on;
+`sudo bin/check-mount-guards` is the proof for all six.
+**`/var/lib/docker` is going onto the same array** (decided 2026-10-26,
+[decisions.md](decisions.md); until the move is run it is still on the SD card), with the
+same two guards. After it, a missing array means dockerd cannot start, so **nothing at all
+runs on `one`**, `send2ereader` and `garmin-mcp` included, though neither touches `/media`.
+The box still boots and ssh still works: its tunnel is the host's `cloudflared`, not a
+container. That is the guard firing, not a Docker fault. OpenRC would boot without the array
 regardless: `critical_mounts` is empty in `/etc/conf.d/localmount`, so `localmount` exits
 0, and every `/media` entry has fsck pass 0. Only `/` and `/boot`, both on the SD card,
 are checked. A reboot with no hands was tested on 2026-08-24: every subvolume mounted,

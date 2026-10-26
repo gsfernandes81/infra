@@ -4,7 +4,8 @@
 # Verifies the two things standing between `zero` and a silently destroyed Immich
 # library:
 #
-#   1. Every /media data mount carries `nofail`, so a missing array cannot stall boot.
+#   1. Every data mount (each /media one, and /var/lib/docker where the array holds it)
+#      carries `nofail`, so a missing array cannot stall boot.
 #   2. Every BARE mountpoint — the directory on the root filesystem UNDERNEATH the
 #      btrfs mount — is `chattr +i`, so that if the array ever fails to mount, writes
 #      to that path fail with EPERM instead of Immich creating a blank library and
@@ -30,18 +31,18 @@
 set -u
 
 # Mounts are DISCOVERED from /etc/fstab, not hardcoded, so this works unchanged on
-# every host: /media/* entries that are not `noauto`. On `zero` that is 3, on `one` 4 —
-# 6 once calibre-web's two subvolumes are made and its tracked fstab installed.
-# A newly added data mount is therefore checked automatically — and correctly fails
-# until it has been guarded.
+# every host: /media/* entries that are not `noauto`, plus /var/lib/docker when fstab
+# mounts it (on `one`, since 2026-10-26: docs/decisions.md). On `zero` that is 3, on
+# `one` 6 — 7 once /var/lib/docker's fstab line is installed. A newly added data mount
+# is therefore checked automatically — and correctly fails until it has been guarded.
 #
 # Override by passing paths explicitly:  sudo bin/check-mount-guards /media/foo
 if [ "$#" -gt 0 ]; then
 	MOUNTS="$*"
 else
-	MOUNTS=$(awk '$1 !~ /^#/ && $2 ~ /^\/media\// && $4 !~ /noauto/ {print $2}' /etc/fstab | tr '\n' ' ')
+	MOUNTS=$(awk '$1 !~ /^#/ && ($2 ~ /^\/media\// || $2 == "/var/lib/docker") && $4 !~ /noauto/ {print $2}' /etc/fstab | tr '\n' ' ')
 fi
-[ -n "${MOUNTS# }" ] || { echo "check-mount-guards: no /media/* data mounts found in /etc/fstab"; exit 0; }
+[ -n "${MOUNTS# }" ] || { echo "check-mount-guards: no data mounts found in /etc/fstab"; exit 0; }
 
 VIEW=/tmp/.mount-guard-view
 rc=0
@@ -63,7 +64,7 @@ mkdir -p "$VIEW"
 mount -o bind / "$VIEW" || { echo "FAIL  could not bind-mount / at $VIEW" >&2; exit 2; }
 
 for m in $MOUNTS; do
-	name=${m#/media/}
+	name=${m#/media/}   # /var/lib/docker keeps its whole path
 
 	# --- 1. mounted? (informational, but a missing mount is worth shouting about)
 	if grep -q " $m " /proc/mounts; then
@@ -110,7 +111,8 @@ if [ "$rc" -eq 0 ]; then
 	echo "All mount guards intact."
 else
 	echo "One or more guards are MISSING. Until fixed, a failed array mount can let"
-	echo "Immich write a blank library and Postgres initdb over an empty directory."
+	echo "Immich write a blank library and Postgres initdb over an empty directory,"
+	echo "or dockerd start empty on the SD card."
 	echo "See docs/recovery.md, 'The trap that silently eats data'."
 fi
 exit "$rc"

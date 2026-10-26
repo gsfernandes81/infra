@@ -16,3 +16,8 @@ UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/torrents-config	btrfs	nofail,su
 UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/syncthing-config	btrfs	nofail,subvolid=259,autodefrag,noatime,acl,discard=async 0 0
 UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/calibre/library	btrfs	nofail,subvol=media-calibre-library,autodefrag,noatime,acl,discard=async 0 0
 UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/calibre/config	btrfs	nofail,subvol=media-calibre-config,autodefrag,noatime,acl,discard=async 0 0
+# Docker's whole state (images, containers and their logs, named volumes, build cache) on the
+# SSD rather than the SD card, decided 2026-10-26 (docs/decisions.md). nofail and an immutable
+# bare mountpoint, like every /media entry: a missing array stops dockerd, which would
+# otherwise start empty on the card and pull everything again onto it.
+UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/var/lib/docker		btrfs	nofail,subvol=var-lib-docker,autodefrag,noatime,acl,discard=async 0 0

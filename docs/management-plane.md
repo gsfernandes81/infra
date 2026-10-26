@@ -555,7 +555,9 @@ side is open: `max-concurrent-downloads` in `/etc/docker/daemon.json` (default 3
 one image at once) would lower it further. dockerd reloads that setting on SIGHUP (moby
 `daemon/reload.go`), so it touches no container and can be done any time, as a new tracked
 `hosts/zero/system/daemon.json`. Moving `/var/lib/docker` off the SD card is the larger fix,
-and belongs with the MicroOS move.
+and belongs with the MicroOS move. **`one` does it first, on Alpine** (decided 2026-10-26,
+[`decisions.md`](decisions.md)): a subvolume mounted over `/var/lib/docker`, which proves the
+procedure on the box where breakage costs nothing.
 
 **Filed 2026-10-24, no phase number — nothing alerts when `garmin-mcp`'s Garmin login lapses.**
 The cached Garmin session lasts about six months. When it ends, the tools fail while `/healthz`

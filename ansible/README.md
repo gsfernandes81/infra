@@ -45,6 +45,7 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 | give a compose deployment its own tunnel, for a `cloudflared` sidecar — plus an Access login if its `edge.yml` asks | `server-create-deployment-tunnel.yml -e deployment=calibre-web -K` · **never `-l`**: the host comes from the deployment's symlink · pulls the host's checkout to your commit itself | sudo, the API token, and `~/.config/cloudflare/access-emails` for a login |
 | redeploy a docker deployment whose compose files or pinned images changed — pulls the host's checkout to the reviewed commit, prints Compose's dry-run plan, asks once per deployment, runs `up` (an image the host lacks is pulled before the plan, since Compose cannot plan past it), compares container ids and waits for health; `deployment=all` goes through every one in turn, `one` before `zero`, stopping at the first failure. Runs a deployment's own checks from `ansible/deploy-hooks/<name>/`, if it has any (`immich`'s database dump before `up`, `garmin-mcp`'s pause at its Garmin login). `-e recreate=true` puts one deployment through it with nothing changed. Refuses `ionic-traces` (stopped) and `two` | `server-deploy-compose.yml -e deployment=immich -K` · **never `-l`** · `--check` stops at the plan | sudo |
 | first bring-up of a deployment with its own tunnel — the tunnel play, then the redeploy play above | `server-bring-up-deployment.yml -e deployment=calibre-web -K` · **never `-l`**, one deployment only | sudo, the API token |
+| stop every deployment on a host, one deployment, or some of its services, and start them again — `compose stop`/`start`, never `up`: prints what would stop and what stays running, asks once, then proves each container reached its state **with the same id** (a start also waits for health). Refuses to start a deployment with no containers; that is a redeploy, above | `server-stop-deployments.yml -e target=one -K` · `-e deployment=torrents` · `-e services=torrent` with a deployment · `-e start=true` to start · **never `-l`** · `--check` stops at the print | sudo |
 | move a Pi onto a new tunnel — **a deliberate outage** | `server-cutover-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | delete a Pi's tunnel — **irreversible** | `server-delete-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | update cloudflared on a Pi, deliberately | `server-update-cloudflared.yml -e target=<host> -e version=… -e sha256=… -K` | sudo; refuses while that host autoupdates, which today is all of them |
@@ -56,7 +57,8 @@ widen to the whole fleet. A fleet-wide play (packages, system files, the invento
 `fleet` and is narrowed with `-l <host>`. A deployment play
 (`server-create-deployment-tunnel.yml` and the two `server-deploy-` plays) reads its host
 from the `hosts/<host>/<name>` symlink and takes no `-l` at all, because `-l` would skip
-the play that finds the host.
+the play that finds the host. `server-stop-deployments.yml` is both: `-e target=<host>` for
+every deployment there, or `-e deployment=<name>` with the host from its symlink, never `-l`.
 
 `--check --diff` first is the habit; it is what caught the `docs` metapackage before it
 landed on a 1 GB Pi. **The tunnel plays are the exception** — `server-create-tunnel.yml`
@@ -72,8 +74,9 @@ node it writes the report and commits it. Every other `server-` play changes som
 packages, **boot-path `/etc` files**, the cloudflared binary, tunnels and DNS,
 `authorized_keys` on `zero`, Access in front of the fleet's ssh hostnames. **The two
 `server-deploy-` plays are the ones that start a deployment**, Phase 3's "Ansible drives
-deployments": `garmin-mcp` first, then `send2ereader`. `server-create-dev-container.yml`
-prints a secret that cannot be fetched again. `client-home-ssh-config.yml` writes ssh
+deployments": `garmin-mcp` first, then `send2ereader`. `server-stop-deployments.yml` stops
+and starts what those plays made, and never creates or recreates a container.
+`server-create-dev-container.yml` prints a secret that cannot be fetched again. `client-home-ssh-config.yml` writes ssh
 config and a 0600 service token on the client.
 
 The halves, for reading rather than running:
