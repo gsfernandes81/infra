@@ -7,7 +7,7 @@
 # MODEL_REVISION (below).
 #
 # THE PINS are v3.3.5, committed 2026-10-25 and deployed on `zero` through the redeploy play
-# (server-deploy-compose.yml -e deployment=immich) by 2026-10-26, owner-reported. It ran
+# (server-deploy-compose.yml -e deployment=immich) by 2026-10-26, confirmed by `docker ps`. It ran
 # v3.0.1 before; v3.0.1's digests were read off the box on 2026-10-25, and it had been
 # started from `IMMICH_VERSION=v3`, a floating major tag, so `.env`'s IMMICH_VERSION no
 # longer reaches the image and can be deleted. These digests are the multi-arch index ones

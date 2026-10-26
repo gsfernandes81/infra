@@ -1021,7 +1021,7 @@ exclusion as a second lock, and `fstab` keeps the mount, behind its guards.
 ## Immich to v3.3.5, with machine learning's v2 models
 
 **Decided 2026-10-25**, the owner's call, for memory on `zero`. **Deployed by 2026-10-26**
-(owner-reported) through the redeploy play, after a database dump off the array (its own
+through the redeploy play (`docker ps` on `zero` names v3.3.5 for both images), after a database dump off the array (its own
 hook, the next section), because the
 server migrates the database on its first v3.3.5 start and there is no way back but that
 dump. `compose.yaml` was already v3.3.5's release file, and its postgres and valkey lines are
@@ -1074,8 +1074,8 @@ be forgotten, and [`docs/recovery.md`](recovery.md) § *Immich's database* says 
 - **A prepare hook, not preflight.** Preflight runs before the question and under `--check`,
   so it would dump on every plan and every "no". Prepare runs only after you answer y, before
   `up`, which is the moment the old database is still the old one.
-- **Every confirmed redeploy, not only a version change.** It costs minutes and a few
-  hundred MB. Deciding from the plan which change can touch the database is a guess, and a
+- **Every confirmed redeploy, not only a version change.** It costs about a minute and
+  141 MB (the first, 2026-10-25). Deciding from the plan which change can touch the database is a guess, and a
   wrong guess is the one case the dump exists for.
 - **`/var/backups/immich` on the SD card, 0700, newest three kept.** Off the array is the
   point: Immich's nightly dump is on the array it would be needed for. Three, the owner's

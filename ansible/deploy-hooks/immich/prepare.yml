@@ -8,8 +8,8 @@
 # nightly dump lands in /media/immich-data/backups/, on the same array as the database, and
 # does not survive losing it. This one goes to /var/backups/immich, on the SD card.
 #
-# Every confirmed redeploy dumps, not only a version change: a few minutes and a few hundred
-# MB, against guessing from the plan which change can touch the database. The newest
+# Every confirmed redeploy dumps, not only a version change: about a minute and 141 MB the
+# first time, against guessing from the plan which change can touch the database. The newest
 # three are kept, so a dump from before a migration is pushed out by that
 # many later redeploys; copy it elsewhere first if it has to outlive them.
 #
@@ -22,8 +22,8 @@
     immich_dump_dir: /var/backups/immich
     immich_dump_keep: 3
     # Free space wanted before a dump starts: this, or twice the largest dump already kept,
-    # whichever is more. The SD card also holds /var/lib/docker. The first dump's size is
-    # worth reading off the summary line: search embeddings compress poorly.
+    # whichever is more. The SD card also holds /var/lib/docker. The first dump, before
+    # v3.3.5 on 2026-10-25, was 141 MB compressed and took about a minute.
     immich_dump_min_free_mib: 2048
     # To the second, so two runs in one minute cannot write the same name.
     immich_dump_stamp: "{{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}"
