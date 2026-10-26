@@ -566,6 +566,17 @@ written 2026-08-23. Docker does not use it: dockerd runs its own containerd, who
 some point. Neither is read by anything running. Deleting them is its own decision, measured
 first (CLAUDE.md § Landmines), and the containerd *package* stays either way.
 
+**Filed 2026-10-26, no phase number — `bin/install-system-file`'s backups land wherever `$HOME`
+is.** `BACKUP_ROOT` is `Path.home() / ".infra-backups"`, so the same install backs up to
+`~gavin/.infra-backups` run as `gavin` (the script calls `sudo` itself for each write) and to
+`/root/.infra-backups` run under `sudo` or from a `sudo su` shell, which is how `one`'s fstab
+backup of this date reached `/root`. A backup should be in one known place, and a backup of
+a secret-bearing file belongs in a root-only directory, not one `gavin` owns. **The fix, the
+owner's call:** always `/root/.infra-backups/<host>/<stamp>/`, created with
+`sudo install -d -m 700` since an unprivileged `mkdir` cannot make it, and the README's
+restore steps pointed there. Before it lands, look for older backups under
+`~gavin/.infra-backups` on every host, so none is forgotten in the old place.
+
 **Filed 2026-10-24, no phase number — nothing alerts when `garmin-mcp`'s Garmin login lapses.**
 The cached Garmin session lasts about six months. When it ends, the tools fail while `/healthz`
 stays green, and the only signal is a failed tool call in claude.ai. **`/readyz` cannot answer
