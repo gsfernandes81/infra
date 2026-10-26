@@ -13,3 +13,8 @@ UUID=813c830a-0892-41e8-b39b-32d661c79e2c	/mnt/ext			btrfs	subvolid=5,noauto,nof
 UUID=813c830a-0892-41e8-b39b-32d661c79e2c	/media/immich-data		btrfs	nofail,subvolid=280,autodefrag,noatime,acl,discard=async							0 0
 UUID=813c830a-0892-41e8-b39b-32d661c79e2c 	/media/immich-db		btrfs	nofail,subvolid=279,autodefrag,noatime,acl,discard=async							0 0
 UUID=813c830a-0892-41e8-b39b-32d661c79e2c	/media/syncthing		btrfs	nofail,subvolid=278,autodefrag,noatime,acl,discard=async							0 0
+# Docker's whole state on sda2, the SSD partition outside bcache, rather than the SD card,
+# decided 2026-10-26 (docs/decisions.md). Not on the array: its cache is writethrough, so
+# writes there run at the hard disks' speed. nofail and an immutable bare mountpoint, like
+# every /media entry: a missing SSD stops dockerd instead of letting it start empty on the card.
+UUID=7bebb62b-62b1-444c-a602-38d11022781a	/var/lib/docker		btrfs	nofail,subvol=var-lib-docker,compress=zstd:1,noatime,discard=async						0 0
