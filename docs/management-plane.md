@@ -559,6 +559,13 @@ and belongs with the MicroOS move. **`one` does it first, on Alpine** (decided 2
 [`decisions.md`](decisions.md)): a subvolume mounted over `/var/lib/docker`, which proves the
 procedure on the box where breakage costs nothing.
 
+**Filed 2026-10-26, no phase number — 7.3 GB of a dead containerd store on `one`'s SD card.**
+`/var/lib/containerd` is the standalone containerd service's root, and its `meta.db` was last
+written 2026-08-23. Docker does not use it: dockerd runs its own containerd, whose store is
+`/var/lib/docker/containerd`. `/var/lib/rancher` exists as well, so k3s was on this box at
+some point. Neither is read by anything running. Deleting them is its own decision, measured
+first (CLAUDE.md § Landmines), and the containerd *package* stays either way.
+
 **Filed 2026-10-24, no phase number — nothing alerts when `garmin-mcp`'s Garmin login lapses.**
 The cached Garmin session lasts about six months. When it ends, the tools fail while `/healthz`
 stays green, and the only signal is a failed tool call in claude.ai. **`/readyz` cannot answer
