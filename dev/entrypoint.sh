@@ -3,9 +3,12 @@
 # sessions' orphans get reaped).
 #
 # Order matters and is not arbitrary:
-#   ssh -> claude state -> pull -> sshd host key -> reconcile -> keep-alive skill
-#   -> [offloader (bg)]
-#   -> [tunnel(bg)] -> sshd(fg)
+#   ssh (+ the hub's key) -> claude state -> clone or pull -> env links -> child-init
+#   -> sshd host key -> reconcile -> keep-alive skill -> sshd(fg)
+#
+# NO OFFLOADER AND NO TUNNEL HERE since base 2026.10.26: both are the hub's (dev/hub/). The hub
+# runs `claude-sessions offload` in this container over ssh every three minutes, and the way in
+# is `ssh dev`, through the hub's own cloudflared sidecar.
 # Everything that could block on a prompt is settled first, because nothing in here
 # can answer one.
 #
@@ -22,9 +25,15 @@ set -u
 #
 #   DEV_NAME             the container's name in the lines this prints  (default: hostname)
 #   DEV_SECRETS_DIR      where the read-only secrets mount lands        (/run/infra-secrets)
-#   DEV_TUNNEL_HOSTNAME  cloudflared's ingress hostname                 (unset = no tunnel)
+#   DEV_REPO             owner/name cloned into an empty /workspace     (unset = no clone)
+#   DEV_ENV_FILES        workspace paths kept in ~/.env.d and linked in (".env" style; none)
 #   DEV_CHILD_INIT_TIMEOUT  seconds child-init.sh gets before it is killed        (600)
-#   DEV_IDLE_OFFLOAD     0 stops the idle-claude offloader starting      (1)
+#   CLAUDE_SESSIONS_OFFLOAD 0: the hub's offload passes stop nothing here, and the keep-alive
+#                        skill is not installed                         (1)
+#
+# DEV_TUNNEL_HOSTNAME AND DEV_IDLE_OFFLOAD WENT on 2026-10-26 with the tunnel and the offload
+# loop they switched (the hub has both now); DEV_IDLE_OFFLOAD lives on in dev/.env as what
+# compose turns into CLAUDE_SESSIONS_OFFLOAD.
 #
 # DEV_REMOTE_CONTROL IS GONE, 2026-08-25. Every container on this fleet is now reached the
 # same way — ssh in, work in a held session — and none of them ships a remote-control
@@ -177,6 +186,20 @@ else
     chmod 600 "$HOME/.ssh/authorized_keys"
 fi
 
+# THE HUB'S KEY, from the volume the hub publishes it in (read-only here). Appended with
+# `restrict,pty`: the hub runs commands and, for an attach, wants a terminal, and nothing
+# else — no forwarding, no agent, no X11, no ~/.ssh/rc. The key itself never leaves the hub
+# (decisions.md, the dev-pool rows); only its public half is here. A child whose drop-in
+# names its own AuthorizedKeysFile must list ~/.ssh/authorized_keys in it too, or sshd never
+# reads this line — compose.yaml's move-in steps say so.
+HUB_PUB=/opt/claude-sessions/hub.pub
+if [ -s "$HUB_PUB" ] && grep -q '^ssh-' "$HUB_PUB"; then
+    printf 'restrict,pty %s\n' "$(head -1 "$HUB_PUB")" >> "$HOME/.ssh/authorized_keys"
+    say "the hub's key is authorised (restrict,pty) — the hub can reach this container"
+else
+    say "WARNING: no hub key at $HUB_PUB — the hub cannot reach this container. Is the hub up?"
+fi
+
 # known_hosts = the fleet's own keys, then github.com's, written from scratch on every
 # start. `host_key_checking = True` in ansible.cfg means an unknown key FAILS rather
 # than prompting — there is no tty on an ansible connection to prompt on — so the fleet
@@ -293,7 +316,8 @@ git config --global --add safe.directory /workspace 2>/dev/null || true
 git config --global user.name  "${GIT_USER_NAME:-Gavin Fernandes}"
 git config --global user.email "${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}"
 
-# The host's clone has an https `origin`, and the only git credential in here is the
+# A clone's `origin` may be https (gh's default, or zero's own clone bind-mounted as or3's
+# is), and the only git credential in here is the
 # deploy key copied out of the secrets mount above — an ssh credential. Rewrite the
 # TRANSPORT rather than the remote: --global is /home/dev/.gitconfig, which is neither
 # the bind mount nor one of the four named volumes, so the host's .git/config is left
@@ -311,27 +335,79 @@ git config --global user.email "${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}"
 # Username", and the message in its failure branch names neither cause.
 git config --global url."git@github.com:".insteadOf "https://github.com/"
 
-# Pull on start. --ff-only, and never fatal: a container that will not come up because
-# the network is down, or because the tree has local work, is worse than one running a
-# slightly old checkout — and /workspace is the HOST's clone, so a merge started here
-# would be left half-done in the host's working tree.
+# ── the workspace: cloned once, pulled after ────────────────────────────────
+# SINCE 2026-10-26 /workspace IS THIS CONTAINER'S OWN, a named volume, not the host's clone
+# (dev/compose.yaml says why). An empty one is filled from DEV_REPO: with `gh repo clone` when
+# gh is logged in — the owner's choice — and otherwise over ssh with the deploy key from the
+# secrets mount, so a container's first start does not wait for `make login`. Bounded, like
+# everything ahead of sshd, and never fatal: a container with an empty workspace is one you
+# can ssh into and fix. A volume that already holds something that is not a checkout is left
+# alone and said so — it is somebody's work.
 #
-# ${PIPESTATUS[0]}, AND NOT THE PIPELINE'S OWN STATUS. `if git … | sed …` tests SED, so
-# the branch below had never once been taken — a failed pull printed git's error and then
-# nothing, which reads as a pull that worked. That is the trap CLAUDE.md § *Shell traps*
-# states in the abstract, sitting in this file.
+# With the insteadOf above, gh's https clone goes over ssh with the deploy key too, so the
+# two ways in differ only in what they need: gh a login, git nothing beyond the key.
 #
-# `set -o pipefail` was the first fix and is not the right one: it answers "did anything
-# in the pipeline fail", so a `sed` that dies on a full stdout would make a pull that
-# SUCCEEDED print "the checkout is unchanged" — a false statement about the tree, from
-# the fix for a false statement about the tree. PIPESTATUS[0] asks the question actually
-# being asked. It must be read before anything else runs; the assignment is that read.
-if [ -d /workspace/.git ]; then
+# Then the pull: --ff-only, and never fatal, as it always was. ${PIPESTATUS[0]}, and not the
+# pipeline's own status — `if git … | sed …` tests SED, which is CLAUDE.md § Shell traps'
+# entry for this very block; and not `set -o pipefail`, which would make a pull that SUCCEEDED
+# print "unchanged" when sed died.
+if [ ! -e /workspace/.git ] && [ -n "${DEV_REPO:-}" ]; then
+    if [ -n "$(ls -A /workspace 2>/dev/null)" ]; then
+        say "WARNING: /workspace holds files but no checkout — not cloning $DEV_REPO over them"
+    elif gh auth status >/dev/null 2>&1; then
+        say "cloning $DEV_REPO into /workspace with gh"
+        timeout 300 gh repo clone "$DEV_REPO" /workspace 2>&1 | sed 's/^/[entrypoint] gh: /'
+        [ "${PIPESTATUS[0]}" = 0 ] || say "WARNING: gh repo clone failed — make login clones it once gh works"
+    else
+        say "cloning $DEV_REPO into /workspace over ssh (gh is not logged in yet)"
+        timeout 300 git clone --quiet "git@github.com:$DEV_REPO.git" /workspace 2>&1 \
+            | sed 's/^/[entrypoint] git: /'
+        [ "${PIPESTATUS[0]}" = 0 ] || \
+            say "WARNING: the clone failed — the workspace is empty; make login clones it with gh"
+    fi
+elif [ -d /workspace/.git ]; then
     git -C /workspace pull --ff-only 2>&1 | sed 's/^/[entrypoint] git: /'
     pull_rc=${PIPESTATUS[0]}
     [ "$pull_rc" = 0 ] || \
         say "pull skipped (not fast-forward, or offline) — the checkout is unchanged"
 fi
+
+# ── the repo's untracked secrets: in their own volume, linked into the workspace ──
+# DEV_ENV_FILES names the files a repo expects beside its tracked ones (".env", say). Each
+# lives in ~/.env.d — a volume of its own, so the workspace volume, which a clone can be
+# thrown away and remade in, never holds one — and the workspace gets a symlink to it. A
+# HARD link cannot cross two volumes (they are two mounts, and link(2) refuses across mounts),
+# so it is a symlink; editing /workspace/.env writes through it.
+#
+# Never clobbered: a REGULAR file where the link should be is said and left — an editor that
+# saves by rename, or `sed -i`, replaces a symlink with a file, and that file is the newest
+# copy. Moving it back is a person's call: `mv /workspace/.env ~/.env.d/.env`, then restart.
+# Each link is added to the checkout's .git/info/exclude, so it is never committed whatever
+# the repo's .gitignore says.
+mkdir -p "$HOME/.env.d"
+chmod 700 "$HOME/.env.d"
+for f in ${DEV_ENV_FILES:-}; do
+    case $f in /*|*..*) say "WARNING: DEV_ENV_FILES entry $f is not a plain workspace path — skipped"; continue ;; esac
+    link="/workspace/$f"
+    target="$HOME/.env.d/$f"
+    if [ -L "$link" ]; then
+        :
+    elif [ -e "$link" ]; then
+        say "WARNING: $link is a regular file, not the link to $target — it holds the newest copy;"
+        say "         move it back with: mv $link $target   (then restart)"
+        continue
+    elif [ -d /workspace/.git ]; then
+        mkdir -p "$(dirname "$link")" "$(dirname "$target")"
+        ln -s "$target" "$link"
+        [ -e "$target" ] || say "$f: linked to $target, which is empty until you write it"
+    else
+        continue
+    fi
+    ex=/workspace/.git/info/exclude
+    if [ -d /workspace/.git ] && ! grep -qxF "/$f" "$ex" 2>/dev/null; then
+        mkdir -p "$(dirname "$ex")" && printf '/%s\n' "$f" >> "$ex"
+    fi
+done
 
 # ── the child's own start-up, if it ships one ───────────────────────────────
 # THE FIFTH SEAM, added 2026-08-24 for dd-dev and ds-dev. Both bake their dependencies
@@ -407,7 +483,10 @@ chmod 600 "$HOME/.ssh/environment"
 # session in, and as `dev` because that is who runs claude. Non-zero only
 # on a real error, which is printed and does not stop the door. Time-bounded for the
 # reason child-init.sh is: anything ahead of sshd that hangs costs the door.
-if out=$(timeout 30 claude-sessions reconcile 2>&1); then
+if ! command -v claude-sessions >/dev/null 2>&1; then
+    say "WARNING: no claude-sessions on PATH — the hub's volume is not mounted at /opt/claude-sessions,"
+    say "         so there are no hooks and the hub cannot see this container's sessions"
+elif out=$(timeout 30 claude-sessions reconcile 2>&1); then
     say "claude-sessions ${out:-reconcile: said nothing}"
 else
     say "claude-sessions reconcile FAILED (exit $?) — the registry may name dead sessions:"
@@ -418,193 +497,41 @@ fi
 # Since v0.4.7 the offloader stops a detached slot that is measured quiet for 10 minutes,
 # and nothing it reads can tell a quiet WAIT (a sleep before a check, CI, a ScheduleWakeup)
 # from an idle session. `claude-sessions keepalive <duration>` holds the slot, and this
-# skill, printed by the pinned binary, is what tells claude to use it and for how short.
-# Claude Code's config directory is a volume, so the image cannot carry the file; written
-# at every start, which also brings it up to date with a new pin. Through a temp file and
+# skill, which the hub's `claude-sessions install` puts in its volume beside the binary, is
+# what tells claude to use it and for how short. Claude Code's config directory is a volume,
+# so the image cannot carry the file; copied at every start, which also brings it up to date
+# with the hub's version. Through a temp file and
 # a rename, never a redirection onto the target: `>` truncates before the command runs and
 # follows a symlink, so a failed `skill` would leave an empty file, and a re-pointed path
 # would be written through; the temp path is cleared first for the same reason, and `mv -T`
 # refuses to move INTO a directory (or a link to one) where the file should be.
-# ONLY WHILE THE OFFLOADER RUNS, and removed otherwise: with DEV_IDLE_OFFLOAD=0 nothing honours
-# a keep-alive, and a binary that cannot print the skill (a rollback past v0.4.7) has no
+# ONLY WHILE OFFLOADING IS ON HERE, and removed otherwise: with CLAUDE_SESSIONS_OFFLOAD=0
+# nothing honours a keep-alive, and a hub volume with no skill (a rollback past v0.4.7) has no
 # `keepalive` either — a stale file would tell every claude to run a command that does
 # nothing or does not exist. A failure is said and does not stop the door; the cost is a
 # claude that does not know to ask, so a quiet wait in a detached slot can be offloaded.
 skill_dir="$CFG/skills/keepalive"
+skill_src=/opt/claude-sessions/skills/keepalive/SKILL.md
 rm -f "$skill_dir/.SKILL.md.tmp"
-if [ "${DEV_IDLE_OFFLOAD:-1}" != "1" ]; then
+if [ "${CLAUDE_SESSIONS_OFFLOAD:-1}" != "1" ]; then
     rm -f "$skill_dir/SKILL.md"
-    say "claude-sessions keep-alive skill not installed — the offloader is off, so nothing needs one"
+    say "claude-sessions keep-alive skill not installed — offloading is off here, so nothing needs one"
 elif mkdir -p "$skill_dir" \
-    && timeout 10 claude-sessions skill > "$skill_dir/.SKILL.md.tmp" \
-    && [ -s "$skill_dir/.SKILL.md.tmp" ] \
+    && [ -s "$skill_src" ] \
+    && cp "$skill_src" "$skill_dir/.SKILL.md.tmp" \
     && mv -fT "$skill_dir/.SKILL.md.tmp" "$skill_dir/SKILL.md"; then
-    say "claude-sessions keep-alive skill: $skill_dir/SKILL.md"
+    say "claude-sessions keep-alive skill: $skill_dir/SKILL.md (from the hub's $skill_src)"
 else
     rm -f "$skill_dir/.SKILL.md.tmp" "$skill_dir/SKILL.md"
     say "claude-sessions keep-alive skill NOT installed (and any old copy removed) — claude will not know to ask for time before a quiet wait"
 fi
 
-# ── the idle-claude offloader ───────────────────────────────────────────────
-# WHAT USED TO BE HERE was the Claude Remote Control hook: a child baked an
-# rc-supervisor.sh, set DEV_REMOTE_CONTROL=1, and this started it. Remote control is off
-# this fleet as of 2026-08-25 — every container is reached the same way now, by ssh with
-# the work held in a session — so the hook has gone with the daemons it started.
-#
-# WHAT REPLACES IT IS THE OPPOSITE JOB. A held session is why a conversation nobody has
-# touched since Tuesday is still resident: measured on infra-dev, one idle session's
-# process tree held 1,146 MB. `claude-sessions offload` stops those every three minutes and
-# leaves each conversation resumable from the menu. SINCE v0.4.7 IT READS THE KERNEL, NOT
-# CLAUDE CODE: a slot is stopped when it is detached at the pass, not under a keep-alive,
-# and measured quiet — no window over its byte budget or 3000 ms of CPU — for 10 minutes,
-# by its own readings of the slot's current claude. Timers, background work, waiting on
-# you and the idle-since-`Stop` clock no longer hold a slot; a slot waiting on the owner is
-# offloaded too (owner, 2026-10-08). A slot with nothing to resume is closed instead. THE
-# 3-MINUTE CADENCE IS LOAD-BEARING: the CPU budget per window is fixed, so a slower timer
-# lets an idle claude's own CPU read as activity — much past 4 minutes no slot would ever
-# go (claude-sessions' design, § How offload reads those rules). The same pass runs the orphan sweep,
-# which kills a transient `claude daemon` tree whose claude has gone — safe only with the
-# agent view off, which this image enforces. dev/README.md § claude-sessions has the rules.
-#
-# STAGE B OF plans/claude-sessions.md's PHASE 5, in base 2026.10.06: live from each
-# container's recreate onto it. It was a dry run beside offload-idle-claude.sh before
-# (Stage A); that script is deleted, and abduco with it — a slot is a zmx session since
-# claude-sessions v0.4.0 and the script could see only abduco's. Armed on v0.4.1, which
-# fixed claude-sessions#9: a slot running background subagents, forks, Workflow or
-# Monitor used to read as idle ten minutes after its parent's `Stop`. The evidence and the
-# reproduction are in docs/decisions.md.
-#
-# EVERY PASS IS KEPT, TIMESTAMPED, in ~/.local/share/claude-sessions-passes.log — its
-# verdicts, so an offloader that keeps everything (zmx not answering, say) still leaves a
-# trace, and a pass that exits non-zero (124 is the timeout) gets a line of its own. Real
-# stops and sweep lines are also in the binary's own ~/.local/share/claude-sessions/
-# offload.log. The output is captured, not piped, so `$?` is the command's own status: the
-# Stage A loop piped through sed and lost every exit status. Past 16 MB the log keeps its
-# newest 8 MB (raised from 4 and 2 on 2026-10-07, when each pass gained a measured line per
-# slot, about 110 KB a day each; kept at that since v0.4.7 because those lines are now the
-# offloader's own reasons — the record to read when a slot was stopped that should not
-# have been — and 4 MB would have kept three days on a five-slot box), from
-# the first whole line, through a temp file and a rename, never a redirection onto itself.
-# Stage A's ~/.local/share/claude-sessions-dry-run.log is left alone — it is the evidence
-# Stage B was read against; plans/claude-sessions.md says when to remove it. Backgrounded
-# with setsid and its own output discarded, like every daemon here; each pass is
-# time-bounded, so a hang costs one pass.
-if [ "${DEV_IDLE_OFFLOAD:-1}" = "1" ]; then
-    setsid bash -c '
-        while :; do
-            start=$(date +%s)
-            stamp=$(date -u "+%Y-%m-%dT%H:%M:%SZ")
-            out=$(timeout 120 claude-sessions offload 2>&1)
-            rc=$?
-            [ -n "$out" ] && printf "%s\n" "$out" | sed "s/^/$stamp /" >> "$1"
-            if [ "$rc" -ne 0 ]; then
-                printf "%s offload pass failed: exit %s%s\n" "$stamp" "$rc" \
-                    "$([ "$rc" -eq 124 ] && echo " (timed out after 120 s)")" >> "$1"
-            fi
-            if [ "$(stat -c %s "$1" 2>/dev/null || echo 0)" -gt 16777216 ]; then
-                tail -c 8388608 "$1" | tail -n +2 > "$1.tmp" && mv -f "$1.tmp" "$1"
-            fi
-            # Fixed-rate, not fixed-sleep: the window between readings is what the CPU
-            # budget is per, so a slow pass must not stretch the next one past 3 minutes.
-            elapsed=$(( $(date +%s) - start ))
-            sleep $(( elapsed < 179 ? 180 - elapsed : 1 ))
-        done' _ "$HOME/.local/share/claude-sessions-passes.log" </dev/null >/dev/null 2>&1 &
-    say "claude-sessions offload: every 3m — stops detached, idle claudes and leaves them resumable"
-    say "    every pass: ~/.local/share/claude-sessions-passes.log; stops and sweep: ~/.local/share/claude-sessions/offload.log"
-else
-    say "idle-claude offloader off (DEV_IDLE_OFFLOAD=${DEV_IDLE_OFFLOAD}, and only 1 turns it on) — idle sessions keep their memory"
-fi
-
-# ── the tunnel — INERT unless asked for ─────────────────────────────────────
-# Two things must both be true or nothing starts: DEV_TUNNEL_HOSTNAME is set, and a
-# credentials file exists in the read-only secrets mount. That is deliberate — the
-# container must come up and be usable through `docker exec` on a box that has never
-# had a tunnel created for it, which is every box before the tunnel playbook is run.
-#
-# LOCALLY-MANAGED, not token-based, and that is the whole reason this is shaped the way
-# it is. The host tunnels use `--token <secret>`, which puts a live credential in argv —
-# host-setup.md's token-in-argv leak, and management-plane.md's rule that secrets never
-# go in command_args. In a container there is no supervise-daemon writing argv to
-# syslog, but `docker inspect` shows both argv and env, and .Config.Env is exactly what
-# server-generate-fleet-inventory.yml refuses to read because it holds secrets. A credentials
-# FILE, mounted read-only, is the spelling that puts the secret in neither.
-#
-# The second dividend is that ingress lives in a config file rather than in the
-# Cloudflare dashboard, so what this container answers on is reviewable here.
-TUNNEL_CREDS="$SECRETS/tunnel.json"
-if [ -n "${DEV_TUNNEL_HOSTNAME:-}" ] && [ -s "$TUNNEL_CREDS" ]; then
-    mkdir -p "$HOME/.cloudflared"
-    chmod 700 "$HOME/.cloudflared"
-
-    # The tunnel UUID comes out of the credentials file rather than being a second
-    # setting. One source, so a config naming one tunnel and a credentials file for
-    # another is not a state this can be in.
-    TUNNEL_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["TunnelID"])' \
-                 "$TUNNEL_CREDS" 2>/dev/null || true)"
-
-    if [ -z "$TUNNEL_ID" ]; then
-        say "WARNING: $TUNNEL_CREDS has no TunnelID — not starting the tunnel."
-        say "         Re-run ansible/playbooks/server-create-dev-container.yml; make shell works."
-    else
-        # metrics on 20241 to match what the host tunnels use, because that is the probe
-        # recovery.md already trusts: /ready with readyConnections >= 1 was chosen there
-        # over port-7844 socket counts and the log file, both of which read DEAD against
-        # a tunnel that was serving normally. Reusing a probe that has been calibrated
-        # against known-good state beats inventing a second one.
-        cat > "$HOME/.cloudflared/config.yml" <<EOF
-tunnel: $TUNNEL_ID
-credentials-file: $TUNNEL_CREDS
-metrics: 127.0.0.1:20241
-no-autoupdate: true
-ingress:
-  - hostname: $DEV_TUNNEL_HOSTNAME
-    service: ssh://localhost:2222
-  - service: http_status:404
-EOF
-        # Bounded retry, and the bound counts CONSECUTIVE failures rather than restarts.
-        # A transient edge or DNS failure at start must not leave the tunnel down for the
-        # life of the container; a bad credentials file must not spin forever pretending
-        # it might come good. Those want opposite treatment, and what tells them apart is
-        # whether the last run achieved anything.
-        #
-        # ANY REAL UPTIME RESETS THE COUNT — or3's fetch_payload.py arrived at the same
-        # rule for the same reason: "any forward progress resets the retry count, so a
-        # flaky link is not mistaken for a dead one". A plain counter spends its six lives
-        # on six ordinary reconnections over a fortnight and then quits on a tunnel that
-        # had been serving perfectly, at an hour nobody chose. 60s is the line: an auth or
-        # config failure is over in under a second, and anything that stayed up a minute
-        # was connected.
-        setsid bash -c '
-            fails=0
-            while [ "$fails" -lt 6 ]; do
-                started=$(date +%s)
-                echo "[tunnel] $(date -u +%FT%TZ) starting cloudflared (consecutive failures: $fails)"
-                cloudflared --no-autoupdate --config "$HOME/.cloudflared/config.yml" --loglevel info tunnel run
-                rc=$?
-                ran=$(( $(date +%s) - started ))
-                if [ "$ran" -ge 60 ]; then
-                    echo "[tunnel] exited rc=$rc after ${ran}s of uptime — that was a real"
-                    echo "[tunnel] connection, so the failure count resets to 0"
-                    fails=0
-                else
-                    fails=$(( fails + 1 ))
-                    echo "[tunnel] exited rc=$rc after only ${ran}s — failure $fails of 6"
-                fi
-                sleep $(( fails * 10 + 5 ))
-            done
-            echo "[tunnel] GAVE UP: six consecutive failures, none lasting 60s. That is a"
-            echo "[tunnel] configuration or credentials problem, not a flaky link."
-            echo "[tunnel] The container is unaffected; the way in is on the host:"
-            echo "[tunnel]   ssh -t zero 'cd ~/infra/dev && make shell'"
-        ' </dev/null >>"$HOME/.local/share/tunnel.log" 2>&1 &
-        say "tunnel starting for $DEV_TUNNEL_HOSTNAME (log: ~/.local/share/tunnel.log)"
-    fi
-elif [ -n "${DEV_TUNNEL_HOSTNAME:-}" ]; then
-    say "DEV_TUNNEL_HOSTNAME is set but $TUNNEL_CREDS is missing — no tunnel."
-    say "    Run ansible/playbooks/server-create-dev-container.yml. make shell is unaffected."
-else
-    say "no tunnel (DEV_TUNNEL_HOSTNAME unset — see dev/README.md § Cloudflare)"
-fi
+# ── the offloader and the tunnel: the hub's, since base 2026.10.26 ────────────
+# This entrypoint started both until then: a fixed-rate loop running `claude-sessions offload`
+# every three minutes, and cloudflared for DEV_TUNNEL_HOSTNAME. The hub runs the first for
+# every container at once, over ssh (`claude-sessions offload-all`, dev/hub/entrypoint.sh, its
+# pass log in the hub's ~/.hub/passes.log), and its sidecar is the only tunnel. Git history
+# has both blocks, and their reasoning moved with them.
 
 # ── sshd, in the foreground ─────────────────────────────────────────────────
 # The container's payload. exec, so sshd IS this process: signals from `docker stop`
@@ -667,7 +594,6 @@ if ! sshd_err="$(/usr/sbin/sshd -t -f "$SSHD_CONF" 2>&1)"; then
     fi
 fi
 
-say "sshd on :2222 in the foreground — ssh in and pick a session from the menu"
-say "    ssh $DEV_NAME        the claude-sessions menu (Enter attaches, n is a new one)"
-say "    ssh -t $DEV_NAME in-workspace   a shell in /workspace (ssh $DEV_NAME <cmd> runs it in ~)"
+say "sshd on :2222 in the foreground — reached through the hub: ssh dev, then $DEV_NAME"
+say "    from zero: make shell C=$DEV_NAME   (a shell here, without the hub)"
 exec /usr/sbin/sshd -D -e -f "$SSHD_CONF"

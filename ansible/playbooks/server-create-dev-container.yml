@@ -4,6 +4,7 @@
 #     cd ansible
 #     ansible-playbook playbooks/server-create-dev-container.yml --check          # prove
 #     ansible-playbook playbooks/server-create-dev-container.yml                  # infra-dev
+#     ansible-playbook playbooks/server-create-dev-container.yml -e container=dev      # the hub (`ssh dev`)
 #     ansible-playbook playbooks/server-create-dev-container.yml -e container=or3-dev  # another container
 #
 # Then, in that order:
@@ -21,12 +22,14 @@
 #                                 NO policy — each client adds its own service token to
 #                                 it when client-home-ssh-config.yml runs there. Nothing is
 #                                 printed. Idempotent — re-run after a partial failure.
-#   2. _dev-container-host.yml    the HOST, infra-dev ONLY: secrets dir, deploy key,
-#                                 authorized_keys, and dev/.env with the hostname the edge
-#                                 half just created. Other containers keep their host side
-#                                 in their own repos (decisions.md, "Claude dev containers
-#                                 stay in their own app repos"), so for them this play
-#                                 does the edge half and says so.
+#   2. the HOST half, by container:
+#        dev        _dev-hub-host.yml       the hub: its secrets dir, authorized_keys, and
+#                                           HUB_SECRETS + HUB_TUNNEL_ID in dev/.env
+#        infra-dev  _dev-container-host.yml secrets dir, deploy key, authorized_keys, and
+#                                           INFRA_SECRETS in dev/.env
+#        others     nothing yet — made by hand at move-in (dev/README.md), and since
+#                   2026-10-26 they need no tunnel: the hub's is the way in. Their old
+#                   per-container tunnels go once each has moved in.
 #
 # WHY ONE PLAY NOW, when the README spent a paragraph defending three. Until 2026-10-04
 # the sequence was host half → make up → edge half → host half again with -e
@@ -36,11 +39,10 @@
 # different half (client-home-ssh-config.yml, run on each client), and the API token is
 # still never on a command line. The decision is a row in docs/decisions.md.
 #
-# The edge half runs first so the host half can write the hostname into dev/.env in the
-# same run, and so the first `make up` brings the container up WITH its tunnel. The handoff
-# is one host fact (dev_tunnel_hostname_from_edge); on its own, _dev-container-host.yml
-# still wants -e tunnel_hostname= spelled out, because there an absent value means
-# "preserve what dev/.env says", not "turn the tunnel on" (CLAUDE.md § Repo invariants).
+# The edge half runs first so the host half can write what it learned into dev/.env in the
+# same run: the hub's tunnel id (HUB_TUNNEL_ID) beside the credentials it came from. Since
+# 2026-10-26 no dev container has a tunnel of its own, so there is no hostname to hand over;
+# the hub's is `dev.<dns_zone>`, derived on both sides (CLAUDE.md § Repo invariants).
 #
 # NO TASKS OF ITS OWN beyond one message: this file is composition. Everything it runs
 # belongs to the two halves.
@@ -61,11 +63,15 @@
       ansible.builtin.debug:
         msg: >-
           The host half (secrets dir, deploy key, authorized_keys, dev/.env) runs for
-          infra-dev only, because it writes dev/.env in THIS repo's checkout.
-          {{ container | default('infra-dev') }}'s is in its own repo: set DEV_TUNNEL_HOSTNAME
-          there to the hostname printed above, then `make up` in that repo's dev/.
+          infra-dev and the hub only. {{ container | default('infra-dev') }} is reached
+          through the hub since 2026-10-26 and needs no tunnel of its own: its secrets dir
+          and its paths in dev/.env are made by hand at move-in (dev/README.md).
       changed_when: true
-      when: (container | default('infra-dev')) != 'infra-dev'
+      when: (container | default('infra-dev')) not in ['infra-dev', 'dev']
+
+- name: "dev only: create the hub's host side on zero"
+  ansible.builtin.import_playbook: _dev-hub-host.yml
+  when: (container | default('infra-dev')) == 'dev'
 
 - name: "infra-dev only: create the host side on zero"
   ansible.builtin.import_playbook: _dev-container-host.yml

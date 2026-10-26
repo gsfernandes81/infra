@@ -5,7 +5,8 @@
 # ansible/templates/ssh-dev-block.j2 and re-run playbooks/client-home-ssh-config.yml, not this.
 # Why any of it is shaped this way: docs/ssh-clients.md
 #
-#   ssh {{ dev_alias }}          the claude-sessions menu: every session in the container,
+#   ssh {{ dev_alias }}          the claude-sessions menu ({{ 'every dev container: Enter on one for its sessions'
+                              if dev_alias == 'dev' else 'every session in the container' }}),
 #                            Enter to attach or resume, n for a new one, q to leave.
 #   ssh {{ dev_alias }} <cmd>    runs <cmd> in ~, as any ssh would; `in-workspace <cmd>` for
 #                            /workspace. scp, sftp, rsync-style tools and Zed work too.

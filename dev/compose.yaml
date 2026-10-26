@@ -1,154 +1,313 @@
-# infra-dev — see dev/README.md. Bring it up with `make up` in this directory
-# (gavin is not in the docker group, so nothing here runs from an agent session).
+# Every dev container on zero, in one Compose project, with the hub that is the way in to
+# all of them (decided 2026-10-25, built 2026-10-26 — docs/decisions.md § "Dev containers:
+# one compose file in infra"; plans/dev-pool.md has what is left). Bring it up with
+# `make up` in this directory; `gavin` is not in the docker group, so nothing here runs
+# from an agent session.
 #
-# The three invariants in ../README.md apply to this file as much as to anything in
-# deployments/, and this is the repo that states them:
-#   - no `..` in a path
-#   - `name:` is declared, so Compose never invents a project name from the dir
-#     (this dir is `dev`, which is exactly the collision that rule exists for —
-#     or3's dev/ would otherwise claim the same project name on the same host)
-#   - host-specific paths come from the gitignored .env, never from $HOME
-name: infra-dev
+#   hub          claude-sessions' menu over every container, and the offload timer. `ssh dev`.
+#   cloudflared  the hub's tunnel, a sidecar as Phase 3 settled for deployments.
+#   infra-dev    this repo's container. or3-dev, dd-dev, ds-dev: each repo's, behind a
+#                profile until it has moved in (COMPOSE_PROFILES in dev/.env).
+#
+# The invariants in ../README.md apply here as everywhere: no `..`; `name:` declared;
+# host-specific values only from the gitignored .env, `${VAR:?}` where absence must stop
+# Compose. A REQUIRED VARIABLE STOPS COMPOSE EVEN FOR A SERVICE WHOSE PROFILE IS OFF —
+# checked with Compose 5.6.1 on 2026-10-26 — so every container's paths are in .env from the
+# start; the profile is what keeps one from starting.
+name: dev
+
+# What every dev container shares. A child sets its own build, name, repo, secrets and
+# volumes beside these.
+x-dev: &dev
+  init: true
+  # restart: no, as every dev container always was: each holds live claude sessions, and an
+  # unattended restart at 03:00 would bring them back with nobody watching. A reboot leaves
+  # them down, which recovery.md says is the expected resting state. The hub is the exception
+  # (below): it runs no claude.
+  restart: "no"
+  networks: [dev]
+  # The hub installs the binary every container's hooks, agent and offload pass run before
+  # any container starts, and the drop-in below is a subpath of its volume that must exist
+  # to be mounted at all.
+  depends_on:
+    hub:
+      condition: service_healthy
+  # ONE MEMORY POOL for every dev container (plans/dev-pool.md): a parent cgroup whose limit
+  # the boot file in hosts/zero/system/ writes. Empty — the default until that file is
+  # installed and proved — leaves each container under Docker's own parent, exactly as today;
+  # Compose drops an empty cgroup_parent rather than passing it (checked, Compose 5.6.1). Set
+  # DEV_CGROUP_PARENT=/devpool in .env once the pool exists. The per-container mem_limit
+  # stays either way, as a ceiling inside it.
+  cgroup_parent: ${DEV_CGROUP_PARENT:-}
+
+# What every dev container mounts from the hub's volume, read-only: the binary at
+# /opt/claude-sessions/bin (on the base's PATH), the skill, the hub's public key — and the
+# hooks drop-in as Claude Code's managed-settings.d, a subpath mount rather than a symlink so
+# Claude Code reads a plain directory of plain files. Read-only, so no claude in a container
+# can rewrite the hooks every claude runs.
+x-opt: &opt
+  type: volume
+  source: claude-sessions
+  target: /opt/claude-sessions
+  read_only: true
+x-managed: &managed
+  type: volume
+  source: claude-sessions
+  target: /etc/claude-code/managed-settings.d
+  read_only: true
+  volume:
+    subpath: managed-settings.d
 
 services:
-  dev:
+  # ── the hub ───────────────────────────────────────────────────────────────────
+  hub:
+    build:
+      context: hub
+      args:
+        USER_UID: ${HOST_UID:?run make, which passes the checkout owner's uid}
+        USER_GID: ${HOST_GID:?run make, which passes the checkout owner's gid}
+    image: dev-hub
+    container_name: dev-hub
+    # `dev` is what the menu's home is headed with, and what `ssh dev` names.
+    hostname: dev
+    init: true
+    # The door, and it runs no claude: back after a reboot with nobody needing to start it.
+    restart: unless-stopped
+    networks: [dev]
+    environment:
+      # The containers the menu and the offloader reach, by name on the `dev` network — only
+      # those on a base new enough to have /opt/claude-sessions mounted (base 2026.10.26).
+      CLAUDE_SESSIONS_HOSTS: ${HUB_HOSTS:?set HUB_HOSTS in dev/.env — the containers the hub manages, e.g. infra-dev}
+      CLAUDE_SESSIONS_REMOTE: /opt/claude-sessions/bin/claude-sessions
+      HUB_OFFLOAD: ${HUB_OFFLOAD:-1}
+    volumes:
+      - claude-sessions:/opt/claude-sessions
+      # The hub's key, its known_hosts, its sshd host key and its pass log.
+      - hub-state:/home/dev/.hub
+      # Mode-700 directory on zero holding the hub's authorized_keys (the clients' keys)
+      # and its tunnel credentials. Read-only.
+      - ${HUB_SECRETS:?set HUB_SECRETS in dev/.env — server-create-dev-container.yml -e container=dev writes it}:/run/hub-secrets:ro
+      # THE POOL'S MEMORY, for the home's header, once the pool exists — uncomment then.
+      # Long form with create_host_path false, so a path that is not there fails the start
+      # rather than having Docker mkdir a cgroup under /sys/fs/cgroup.
+      # - type: bind
+      #   source: /sys/fs/cgroup/devpool
+      #   target: /run/devpool
+      #   read_only: true
+      #   bind: { create_host_path: false }
+    healthcheck:
+      # Healthy once the install has put what every container mounts in place.
+      test: ["CMD", "sh", "-c", "test -x /opt/claude-sessions/bin/claude-sessions && test -s /opt/claude-sessions/hub.pub && test -d /opt/claude-sessions/managed-settings.d"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    mem_limit: 128m
+
+  # ── the tunnel ────────────────────────────────────────────────────────────────
+  # A sidecar, as Phase 3 settled for deployments (decisions.md § "Sidecar, not baked-in"),
+  # pinned identically to theirs. One hostname, the hub's (cloudflared.yml).
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39
+    container_name: dev-cloudflared
+    restart: unless-stopped
+    networks: [dev]
+    # As the checkout's owner, not the image's 65532: the credentials are written by the
+    # dev-container edge play, which leaves them owned by gavin at 0600, and a file the
+    # connector cannot read kills it on start. cloudflared needs no home and no shell.
+    user: "${HOST_UID:?run make}:${HOST_GID:?run make}"
+    profiles: [tunnel]
+    # THE PROFILE IS THE SWITCH, not the id: `tunnel` in COMPOSE_PROFILES once
+    # server-create-dev-container.yml -e container=dev has made the tunnel. `:-`, not `:?`,
+    # for the one reason the invariant allows — a required variable stops Compose even with
+    # this profile off, so `:?` would hold every container hostage to a tunnel. With the
+    # profile on and no id, the connector refuses at start and says so in `make tunnel-log`.
+    command: tunnel --config /etc/cloudflared/config.yml run ${HUB_TUNNEL_ID:-}
+    volumes:
+      - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
+      # Long form, so a missing file fails the start rather than Docker making a directory
+      # called tunnel.json in the secrets directory.
+      - type: bind
+        source: ${HUB_SECRETS:?set HUB_SECRETS in dev/.env}/tunnel.json
+        target: /etc/cloudflared/creds.json
+        read_only: true
+        bind: { create_host_path: false }
+    depends_on: [hub]
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:20241", "ready"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    mem_limit: 128m
+
+  # ── the dev containers ────────────────────────────────────────────────────────
+  infra-dev:
+    <<: *dev
     build:
       context: .
       dockerfile: Dockerfile
-      # No USER_UID/USER_GID here any more: the dev user is built in the BASE image
-      # (Dockerfile.base), which `make base` builds at the checkout owner's uid/gid —
-      # the same guard as before, one layer down. This child only adds ansible on top
-      # and never touches accounts. The tag below is a FALLBACK: `make up` passes
-      # BASE_TAG from the Makefile, which is the single source. `up` does NOT depend on
-      # `base` — the FROM pulls the tag from ghcr — so a tag bumped here and not yet
-      # built by dev-base.yml fails on the pull until `make base` builds it locally.
+      # The tag is the Makefile's BASE_TAG, the single source; this is its fallback.
       args:
-        BASE_TAG: ${BASE_TAG:-2026.10.16}
+        BASE_TAG: ${BASE_TAG:-2026.10.26}
     image: infra-dev
     container_name: infra-dev
-    hostname: ${DEV_HOSTNAME:-infra-dev}  # Claude Code shows this as the machine title
-    init: true                            # reap the background processes the entrypoint leaves
-
-    # No tty/stdin_open. sshd is the foreground process and wants neither: every
-    # interactive thing in here gets its pty from the ssh session or from the
-    # `docker exec -it` that carried it. `docker attach` would show sshd's log and
-    # no prompt, which is the point.
-
-    # A cap, not a reservation. Confines an OOM kill to this container's own cgroup
-    # so a runaway in here cannot reap Immich or one of the other dev containers on
-    # the same 4 GB Pi.
-    #
-    # LOWER THAN or3-dev's 1536m, deliberately. That container does Python work with
-    # C extensions; this one runs ansible, which is a few hundred processes' worth of
-    # nothing, and a claude. If a run is OOM-killed the fix is to raise this on
-    # purpose — `make status` prints oom=true — not to have started high enough that
-    # zero's own services are what gets reaped instead.
+    hostname: infra-dev   # Claude Code shows this as the machine title
+    # A cap, not a reservation; dev/README.md has why it is lower than or3-dev's.
     mem_limit: ${DEV_MEM_LIMIT:-1024m}
     memswap_limit: ${DEV_MEMSWAP_LIMIT:-1536m}
-
-    # restart: no, matching every other dev container on zero. This holds a live
-    # claude session; an unattended restart at 03:00 would resurrect it with no one
-    # watching and no idea what it was mid-way through. It also means a reboot leaves
-    # it down, which recovery.md now says is the expected resting state.
-    restart: "no"
-
-    # .env is read by Compose for INTERPOLATION only — a name in it does not reach
-    # the container unless it is named here too.
     environment:
       GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
-
-      # The tunnel's hostname, and the ONLY switch it has: unset means no tunnel at
-      # all, and the container is reached with `make shell` on the host as before. The
-      # credentials arrive separately, through the secrets mount, written there by
-      # ansible/playbooks/server-create-dev-container.yml — so a hostname set with no
-      # credentials present is a warning at start, not a failure to come up.
-      #
-      # Read by the entrypoint at start, so it lands on `make up`, never on `restart`.
-      DEV_TUNNEL_HOSTNAME: ${DEV_TUNNEL_HOSTNAME:-}
-      DEV_IDLE_OFFLOAD: ${DEV_IDLE_OFFLOAD:-1}   # 0 in dev/.env, then make up: the offloader does not start
-
-      # NO remote-control switch, and as of 2026-08-25 there is no such switch to set:
-      # DEV_REMOTE_CONTROL is gone from the base along with the hook that read it, and no
-      # dev container on this fleet ships a remote-control daemon. Every one of them is
-      # reached the same way — ssh in, hold the work in a zmx session — which is what
-      # this container was built to be in the first place.
-      #
-      # THE IDLE OFFLOADER IS ON BY DEFAULT. `claude-sessions offload` stops, every three
-      # minutes, a detached slot that has been quiet long enough, and leaves the
-      # conversation resumable from the menu; the rule — measured, with
-      # `claude-sessions keepalive` for quiet waits — is dev/README.md § claude-sessions,
-      # *The rules*, and is not restated here. `make idle` asks it what it would do now;
-      # `make offload-log` shows what it did. DEV_IDLE_OFFLOAD, above, is its switch:
-      # `DEV_IDLE_OFFLOAD=0` in dev/.env and a `make up` — which recreates the container,
-      # ends every slot, and (since v0.4.7) leaves the keep-alive skill uninstalled.
-      #
-      # DEV_IDLE_OFFLOAD_SECONDS and DEV_IDLE_POLL_SECONDS went with the old script on
-      # 2026-10-06 (Stage B); the new rules are fixed and have no floor to refuse under.
-
-      # CLAUDE CODE UPDATES ITSELF, and nothing here switches that on: it is the image's
-      # npm prefix being writable by `dev` that does (dev/Dockerfile.base's node block).
-      # The container starts on the version its BASE_TAG was built with and moves past it
-      # on its own, in the background, taking effect at the next `claude`. `make verify`
-      # prints whether it can — the `autoupdate:` line — and `make claude-update` does it
-      # now rather than waiting. It follows the STABLE channel, set in the base's managed
-      # settings (dev/claude-managed-settings.json), not here — forward only: a new
-      # container starts on the version the image carries (whatever `latest` was when its
-      # cached npm layer last ran) and stays there until stable passes it. A claude left
-      # running across an update reinstalls every 30 minutes until it is restarted — the
-      # base's node block has the measurement.
-      #
-      # To STOP it, and stay on exactly what the image shipped:
-      #
-      #   DISABLE_AUTOUPDATER: "1"
-      #
-      # Claude Code's own variable, not a DEV_* of ours. The release CHANNEL is not a
-      # variable at all, and not this file's: it is `autoUpdatesChannel` in the base's
-      # managed settings, which outrank ~/.claude/settings.json, so setting it there changes
-      # nothing. "stable" is roughly a week behind and skips releases with known major
-      # regressions.
-
+      # The repo cloned into the workspace volume at first start — by gh when it is logged
+      # in, else over ssh with the deploy key (entrypoint.sh).
+      DEV_REPO: gsfernandes81/infra
+      # Files the repo expects beside its tracked ones, kept in the env volume and linked into
+      # the workspace (entrypoint.sh). None for infra: its .env files live on the hosts.
+      DEV_ENV_FILES: ""
+      CLAUDE_SESSIONS_OFFLOAD: ${DEV_IDLE_OFFLOAD:-1}
     volumes:
-      # The host clone. `git pull` in the container and on the host are the same
-      # pull — there is one working tree, not two that can drift.
-      - ${INFRA_SRC:?set INFRA_SRC in dev/.env to the absolute path of the infra clone on this host}:/workspace
-
-      # Mode-700 directory outside the repo holding the GitHub deploy key, the key
-      # that reaches the fleet, the authorized_keys this sshd serves, and the two
-      # host-specific ssh fragments. Read-only — the entrypoint copies out of it and
-      # never writes back.
+      - *opt
+      - *managed
+      # THE WORKSPACE IS A VOLUME, cloned into, and no longer zero's own checkout. zero's
+      # ~gavin/infra is now only what the box runs; the container's tree is its own, so a
+      # commit in here never leaves zero's checkout diverged again (CLAUDE.md § Git, the
+      # 2026-10-25 divergence). Push to share work, as from anywhere else.
+      - infra-workspace:/workspace
+      # The repo's untracked secrets, in a volume of their own, linked into the workspace.
+      - infra-env:/home/dev/.env.d
+      # Mode-700 directory outside the repo: the deploy key, the fleet key if any, the
+      # owner's authorized_keys, the host-specific ssh fragments. Read-only.
       - ${INFRA_SECRETS:?set INFRA_SECRETS in dev/.env to the absolute path of the secrets dir}:/run/infra-secrets:ro
-
-      - infra-claude:/home/dev/.claude           # login + config (CLAUDE_CONFIG_DIR points here)
-      - infra-gh:/home/dev/.config/gh            # `gh auth login` (GH_CONFIG_DIR points here)
-      - infra-ssh-host:/home/dev/.ssh-host       # sshd host key -> stable known_hosts across rebuilds
-      - infra-local-share:/home/dev/.local/share # shell history, claude-sessions' state, Crush's provider key
-      - infra-jcode:/home/dev/.jcode            # jcode's state, builds and provider login (so its updater works)
-
-      # NO /var/run/docker.sock, and this is the one line most likely to be added by
-      # someone in a hurry. decisions.md: the docker group is root-equivalent, because
-      # anyone holding the socket can bind-mount / into a container. Handing it to a
-      # container that also runs a claude and holds ssh keys to all three hosts is that
-      # same grant with two more ways to reach it. Ansible drives docker on zero the
-      # same way it drives docker on one — over ssh, as a host — and community.docker's
-      # docker_compose_v2 needs no local socket and no SDK to do it.
-
-    # The container has to reach the host it runs on — it is a control node, and that
-    # host is in the inventory. Nothing else in the fleet needs this: `one` and `two` are
-    # ordinary LAN addresses, reachable from a bridged container with no help. Its OWN
-    # host is the awkward one, because from in here the host is the bridge gateway and
-    # not an address anybody has written down.
-    #
-    # host-gateway is Docker's own name for it, so `ssh zero` works from inside without a
-    # hardcoded 172.17.0.1 that is wrong the moment the bridge is renumbered. Aliased to
-    # the fleet name rather than to host.docker.internal so the inventory, ~/.ssh/config
-    # and this all say the same word.
+      # The logins, history and state, kept from the infra-dev project they were made in, so
+      # moving into this one costs no login and loses no conversation.
+      - infra-claude:/home/dev/.claude
+      - infra-gh:/home/dev/.config/gh
+      - infra-ssh-host:/home/dev/.ssh-host
+      - infra-local-share:/home/dev/.local/share
+      - infra-jcode:/home/dev/.jcode
+    # The container no longer needs to reach zero for ansible's sake (no fleet key, by
+    # decision); kept so the inventory's `zero` still resolves if fleet access is ever given.
     extra_hosts:
       - "${DEV_HOST_ALIAS:-zero}:host-gateway"
 
+  # ── each other repo's container, behind its profile until it moves in ──────────
+  # Moving one in, in its own repo first: bump its BASE_TAG to 2026.10.26 or later; drop its
+  # compose.yaml; and if an sshd_config.d drop-in sets AuthorizedKeysFile, add
+  # `.ssh/authorized_keys` to it, which is where the entrypoint puts the hub's key. Then here:
+  # check its volume names below with `docker volume ls` (these are guesses that `up` will
+  # refuse loudly if wrong), add its profile to COMPOSE_PROFILES and its name to HUB_HOSTS,
+  # and `make up`. dev/README.md § "Moving a container in" has the order.
+  or3-dev:
+    <<: *dev
+    profiles: [or3-dev]
+    build:
+      context: ${OR3_SRC:?set OR3_SRC in dev/.env to the absolute path of the or3 checkout on this host}/dev
+    image: or3-dev
+    container_name: or3-dev
+    hostname: or3-dev
+    mem_limit: 1536m
+    environment:
+      DEV_SECRETS_DIR: /run/or3-secrets
+      DEV_REPO: gsfernandes81/or3
+      DEV_ENV_FILES: ".env"
+      CLAUDE_SESSIONS_OFFLOAD: ${DEV_IDLE_OFFLOAD:-1}
+    volumes:
+      - *opt
+      - *managed
+      # or3's /workspace is zero's own clone, BY or3's DESIGN (management-plane.md, "The
+      # or3-dev caveat"), so it stays a bind mount until or3 decides otherwise — the open
+      # item in plans/dev-pool.md. Every other container clones into a volume.
+      - ${OR3_SRC:?set OR3_SRC}:/workspace
+      - or3-env:/home/dev/.env.d
+      - ${OR3_SECRETS:?set OR3_SECRETS in dev/.env}:/run/or3-secrets:ro
+      - or3-claude:/home/dev/.claude
+      - or3-gh:/home/dev/.config/gh
+      - or3-ssh-host:/home/dev/.ssh-host
+      - or3-local-share:/home/dev/.local/share
+
+  dd-dev:
+    <<: *dev
+    profiles: [dd-dev]
+    build:
+      context: ${DD_SRC:?set DD_SRC in dev/.env to the absolute path of the destiny-director checkout on this host}/dev
+    image: dd-dev
+    container_name: dd-dev
+    hostname: dd-dev
+    mem_limit: 1024m
+    environment:
+      DEV_SECRETS_DIR: /run/dd-secrets
+      DEV_REPO: gsfernandes81/destiny-director
+      DEV_ENV_FILES: ".env"
+      CLAUDE_SESSIONS_OFFLOAD: ${DEV_IDLE_OFFLOAD:-1}
+    volumes:
+      - *opt
+      - *managed
+      - dd-workspace:/workspace
+      - dd-env:/home/dev/.env.d
+      - ${DD_SECRETS:?set DD_SECRETS in dev/.env}:/run/dd-secrets:ro
+      - dd-claude:/home/dev/.claude
+      - dd-gh:/home/dev/.config/gh
+      - dd-ssh-host:/home/dev/.ssh-host
+      - dd-local-share:/home/dev/.local/share
+
+  ds-dev:
+    <<: *dev
+    profiles: [ds-dev]
+    build:
+      context: ${DS_SRC:?set DS_SRC in dev/.env to the absolute path of the ds checkout on this host}/dev
+    image: ds-dev
+    container_name: ds-dev
+    hostname: ds-dev
+    mem_limit: 1024m
+    environment:
+      DEV_SECRETS_DIR: /run/ds-secrets
+      DEV_REPO: ${DS_REPO:?set DS_REPO in dev/.env — owner/name of the ds repo}
+      DEV_ENV_FILES: ".env"
+      CLAUDE_SESSIONS_OFFLOAD: ${DEV_IDLE_OFFLOAD:-1}
+    volumes:
+      - *opt
+      - *managed
+      - ds-workspace:/workspace
+      - ds-env:/home/dev/.env.d
+      - ${DS_SECRETS:?set DS_SECRETS in dev/.env}:/run/ds-secrets:ro
+      - ds-claude:/home/dev/.claude
+      - ds-gh:/home/dev/.config/gh
+      - ds-ssh-host:/home/dev/.ssh-host
+      - ds-local-share:/home/dev/.local/share
+
+networks:
+  # The hub reaches each container's sshd by name here. Nothing is published on zero.
+  dev:
+
 volumes:
-  infra-claude:
-  infra-gh:
-  infra-ssh-host:
-  infra-local-share:
-  infra-jcode:
+  claude-sessions:
+  hub-state:
+  infra-workspace:
+  infra-env:
+  # infra-dev's, made under its old project name `infra-dev` and kept by name, so the
+  # logins, the host key and the conversation history move with it.
+  infra-claude: { external: true, name: infra-dev_infra-claude }
+  infra-gh: { external: true, name: infra-dev_infra-gh }
+  infra-ssh-host: { external: true, name: infra-dev_infra-ssh-host }
+  infra-local-share: { external: true, name: infra-dev_infra-local-share }
+  infra-jcode: { external: true, name: infra-dev_infra-jcode }
+  or3-env:
+  # or3-dev_or3-claude is the name management-plane.md records; the rest follow its
+  # pattern and are checked at move-in.
+  or3-claude: { external: true, name: or3-dev_or3-claude }
+  or3-gh: { external: true, name: or3-dev_or3-gh }
+  or3-ssh-host: { external: true, name: or3-dev_or3-ssh-host }
+  or3-local-share: { external: true, name: or3-dev_or3-local-share }
+  dd-workspace:
+  dd-env:
+  dd-claude: { external: true, name: dd-dev_dd-claude }
+  dd-gh: { external: true, name: dd-dev_dd-gh }
+  dd-ssh-host: { external: true, name: dd-dev_dd-ssh-host }
+  dd-local-share: { external: true, name: dd-dev_dd-local-share }
+  ds-workspace:
+  ds-env:
+  ds-claude: { external: true, name: ds-dev_ds-claude }
+  ds-gh: { external: true, name: ds-dev_ds-gh }
+  ds-ssh-host: { external: true, name: ds-dev_ds-ssh-host }
+  ds-local-share: { external: true, name: ds-dev_ds-local-share }

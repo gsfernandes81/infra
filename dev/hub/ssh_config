@@ -1,0 +1,34 @@
+# How the hub reaches the dev containers — every one the same way, so one block.
+#
+# Each is reached BY NAME on the compose project's `dev` network, at its in-container sshd
+# on 2222, as `dev`, with the hub's own key. Nothing here names a host on the fleet: the
+# containers are the only things on that network to resolve.
+#
+# StrictHostKeyChecking accept-new, and why that is enough here: a container's host key
+# lives in its own ssh-host volume and survives recreates, so a key is learnt once and
+# then pinned in ~/.hub/known_hosts (a volume, so it survives the hub's recreates too). A
+# CHANGED key still refuses. The first contact is on a bridge network nothing outside the
+# compose project joins. To forget one after a container's volumes were dropped on
+# purpose: ssh-keygen -f ~/.hub/known_hosts -R <container>
+#
+# BatchMode, because nothing may ever prompt: the hub's message channel to a container has
+# no terminal to prompt on, and a prompt there would sit for ever. claude-sessions passes it
+# on the command line as well.
+#
+# ControlMaster: the menu holds one channel per container open while it runs, and every
+# action that needs the owner's terminal (`ssh -t <c> … agent exec`) rides it — a round
+# trip instead of a handshake, on a Pi. claude-sessions' design § The hub.
+Host *
+  Port 2222
+  User dev
+  IdentityFile ~/.hub/id_ed25519
+  IdentitiesOnly yes
+  UserKnownHostsFile ~/.hub/known_hosts
+  StrictHostKeyChecking accept-new
+  BatchMode yes
+  ControlMaster auto
+  ControlPath ~/.ssh/cm/%C
+  ControlPersist 10m
+  ServerAliveInterval 30
+  ServerAliveCountMax 3
+  ConnectTimeout 10

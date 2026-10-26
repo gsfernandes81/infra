@@ -1,0 +1,37 @@
+# The hub's sshd — the door `ssh dev` lands on. Non-root, key-only, no forwarding: the
+# dev containers' own sshd_config without its child seams, since nothing builds on this.
+#
+# Reached only through the cloudflared sidecar on the compose network (`ssh://hub:2222` in
+# dev/cloudflared.yml); nothing is published on zero.
+
+Port 2222
+ListenAddress 0.0.0.0
+HostKey /home/dev/.hub/ssh_host_ed25519_key
+PidFile /home/dev/.hub/sshd.pid
+AuthorizedKeysFile /home/dev/.ssh/authorized_keys
+
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+UsePAM no                 # PAM needs root; a non-root sshd must disable it
+
+AllowTcpForwarding no
+AllowAgentForwarding no
+GatewayPorts no
+X11Forwarding no
+
+# The menu's settings (CLAUDE_SESSIONS_HOSTS and the rest) reach a login through
+# ~/.ssh/environment, which the entrypoint writes from the container's environment.
+PermitUserEnvironment yes
+# The three scrollback variables a client may send for the slot it opens
+# (claude-sessions' design § "Binding a hook to a slot"): the menu passes what the login
+# brought on to the container it acts in.
+AcceptEnv CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN CLAUDE_CODE_DISABLE_MOUSE CLAUDE_CODE_DISABLE_VIRTUAL_SCROLL
+
+Compression yes
+ClientAliveInterval 30
+ClientAliveCountMax 3
+StrictModes yes
+
+ForceCommand /usr/local/bin/hub-door

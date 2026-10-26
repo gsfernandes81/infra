@@ -2,9 +2,12 @@
 
 **Proposed 2026-10-25, and its main choices decided the same day by the owner: one compose
 file in `infra`, cgroup v2, `claude-sessions` only in the hub** ([`docs/decisions.md`](../docs/decisions.md),
-*Dev containers: one compose file in `infra`, …*). **Nothing is built.** It belongs to Phase 5 ([`docs/management-plane.md`](../docs/management-plane.md),
-the phase table) and changes what that phase builds. This file holds the shape and what is
-left; the reasons are in decisions.md.
+*Dev containers: one compose file in `infra`, …*). **Steps 2 and 3 were built on 2026-10-26, on
+the `ccr-87300a0c-3kalf9` branch of both repos, and none of it is on the fleet**
+(decisions.md, *The hub, as built*; the bring-up order is
+[`docs/handoff/2026-10-26-dev-hub.md`](../docs/handoff/2026-10-26-dev-hub.md)). It belongs to
+Phase 5 ([`docs/management-plane.md`](../docs/management-plane.md), the phase table). This file
+holds the shape and what is left; the reasons are in decisions.md.
 
 ## Why
 
@@ -75,9 +78,10 @@ limits the owner is having to manage each container separately.
    reached on it by name. Nothing is published on `zero`, so the loopback ports `dd`, `ds` and
    `or3` still publish go.
 
-5. **One `cloudflared` sidecar, one tunnel.** It serves the hub's hostname, plus a direct
-   hostname per container as a break-glass path. This replaces `infra-dev`'s connector started
-   from its own entrypoint, and matches Phase 5's sidecar leaning.
+5. **One `cloudflared` sidecar, one tunnel.** It serves the hub's hostname, `dev.<dns_zone>`.
+   This replaces `infra-dev`'s connector started from its own entrypoint, and matches Phase 5's
+   sidecar leaning. **As built, no per-container hostname**: the break-glass path is
+   `make shell C=<c>` on `zero`, which never depended on a tunnel.
 
 ## Open, the owner's
 
@@ -87,14 +91,24 @@ limits the owner is having to manage each container separately.
   (management-plane.md, *The `or3-dev` caveat*); moving its definition into `infra` can keep
   that bind mount, but it is or3's trade to confirm.
 
-## Order, once taken
+## Order, and where each step stands
 
-1. The pool file on `zero`, proved by attempting to over-allocate inside the pool and
-   requiring the kill to land there (CLAUDE.md: calibrate the check first).
-2. The hub rewrite, in the claude-sessions repo.
-3. The one compose file in `infra`: the hub, the sidecar, the network, and `infra-dev` first.
-4. Each child moves in, joins the pool, and drops its published port; its repo keeps the
-   Dockerfile and loses its compose file.
+1. **Not started.** The pool file on `zero`, proved by attempting to over-allocate inside the
+   pool and requiring the kill to land there (CLAUDE.md: calibrate the check first). Until it
+   exists, `DEV_CGROUP_PARENT` stays empty in `dev/.env` and Compose sets no parent.
+2. **Built, unreleased.** The hub rewrite, in the claude-sessions repo: `agent`, `install`,
+   `offload-all` and the containers-first menu, as 0.5.0. It is released by merging that
+   repo's branch to `main` (a version bump there is a publish), and then
+   `dev/hub/Dockerfile`'s two `CLAUDE_SESSIONS_SHA256_*` placeholders take the release's
+   checksums.
+3. **Built, not brought up.** The one compose file in `infra`: the hub, the sidecar, the
+   network, and `infra-dev` first, with its workspace and `.env` files in volumes. Bring-up is
+   the owner's, in the handoff's order.
+4. **Defined, not moved.** `or3-dev`, `dd-dev` and `ds-dev` are in `dev/compose.yaml` behind
+   profiles, with their sources and secrets as required paths in `dev/.env`. Each still has to
+   be moved in from its own repo: the base tag bumped to `2026.10.26`, its published port and
+   its compose file dropped there, and its old login volumes' names checked against the
+   `external:` names guessed here before its profile is turned on.
 
 ## Done when
 

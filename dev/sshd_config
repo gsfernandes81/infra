@@ -92,10 +92,10 @@ PermitUserEnvironment yes
 #
 # It is worth having on THIS session, which is not true of every sshd. or3's ssh_config
 # has the argument: compression belongs on the session whose plaintext it is, because it
-# happens before encryption, and ciphertext does not compress. Here the phone's ssh client
-# terminates on this sshd — cloudflared is transport underneath, not another ssh session —
-# so this IS that session, and what it compresses is claude's output on its way to a
-# metered radio. or3's own sshd is the other case: it carries an inner session that is
+# happens before encryption, and ciphertext does not compress. Since 2026-10-26 the phone's
+# ssh session terminates on the HUB's sshd (dev/hub/sshd_config, which compresses too), and
+# this one is the hub's own hop across the compose network, where compression buys little and
+# costs little; kept so a break-glass session straight to a container still has it. or3's own sshd is the other case: it carries an inner session that is
 # already ciphertext, and setting it there would buy nothing.
 Compression yes
 
@@ -107,15 +107,16 @@ ClientAliveCountMax 3
 
 # EVERY SESSION GOES THROUGH THE DOOR (2026-10-04, infra#7). The image names the door,
 # not each client's ssh config, so a client cannot ask for a program this image lacks,
-# and one alias does everything: the door gives a terminal with no command the menu,
-# runs a forwarded command (`ssh <c> cmd`, scp, Zed, ansible) as sshd would have —
-# in $HOME — and gives anything else a login shell. `ssh -N` opens no session, so a
+# and one alias does everything: the door runs a forwarded command (`ssh <c> cmd`, scp,
+# Zed, ansible, and the hub's `claude-sessions agent`) as sshd would have — in $HOME — and
+# gives anything else a login shell in /workspace. (It gave a terminal the menu until
+# 2026-10-26; the menu is the hub's now, dev/hub/.) `ssh -N` opens no session, so a
 # forward never meets it. A child that must not have it sets `ForceCommand none` in its
 # drop-in, which wins for the reason the Include is at the top.
 #
 # This reverses a rejection in dev/in-workspace's header; the reasons it was rejected,
 # and why each no longer holds, are in docs/decisions.md.
-ForceCommand /usr/local/bin/claude-sessions-door
+ForceCommand /usr/local/bin/dev-door
 
 # A REAL BINARY, NOT internal-sftp, because of the line above. Under ForceCommand sshd
 # hands a subsystem request to the forced command with SSH_ORIGINAL_COMMAND set to the

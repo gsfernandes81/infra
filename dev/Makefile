@@ -1,36 +1,43 @@
-# infra-dev, from a terminal on zero. **This file is the container's management
-# interface** — the docker commands live here and nowhere else.
+# The dev containers and their hub, from a terminal on zero. **This file is their
+# management interface** — the docker commands live here and nowhere else. One Compose
+# project (compose.yaml, `name: dev`): the hub, its cloudflared sidecar, infra-dev, and each
+# other repo's container behind its profile until it moves in.
 #
-#   make dev         up, then walk through whatever is not logged in yet
-#   make up          build the image and (re)create the container
-#   make restart     stop + start, NO re-evaluation of the config
-#   make status      one-screen health check
+#   make dev         up, then walk infra-dev through whatever is not logged in yet
+#   make up          build and (re)create everything the profiles in .env name; S=<service>
+#                    for one service (and the hub it depends on)
+#   make restart     stop + start one container, NO re-evaluation of the config
+#   make stop        stop one container (its sessions end; its volumes stay)
+#   make status      one-screen health check of one container
 #   make verify      status + the tools + the collections + the fleet, after a rebuild
-#   make login       log this container into GitHub and claude.ai (idempotent)
+#   make login       log a container into GitHub and claude.ai, and clone its workspace
 #   make fleet       prove zero, one and two answer — by ssh, then by ansible
 #   make collections check the image's collections against ansible/requirements.yml
-#   make claude      the claude-sessions menu, as `ssh infra-dev` lands on it
-#   make claude-update  update Claude Code now, and say whether it updates itself
-#   make shell       a fish shell in the container
-#   make logs        follow the container log (= sshd's)
-#   make boot-log    the entrypoint's start-up lines, from the top
-#   make tunnel-log  what cloudflared has been saying, if the tunnel is on
-#   make idle        what the offloader would do to each slot, right now (stops nothing)
+#   make claude      the hub's menu, as `ssh dev` lands on it
+#   make claude-update  update Claude Code now in one container, and say whether it updates itself
+#   make shell       a login shell in one container
+#   make logs        follow one container's log (= its sshd's)
+#   make boot-log    one container's start-up lines, from the top
+#   make tunnel-log  what the hub's cloudflared has been saying
+#   make idle        what the offloader would do in every container, right now (stops nothing)
 #   make offload-log what it has stopped or swept, failed passes, and the last pass
-#   make sessions    claude-sessions doctor: the registry, and whether the hooks fire
-#   make down        stop and remove the container (volumes stay)
-#   make down-volumes  also drop the volumes — logins and host key go with them
+#   make sessions    claude-sessions doctor in one container: the registry, and the hooks
+#   make down        stop and remove EVERY container in the project (volumes stay)
+#   make down-volumes  also drop the project's own volumes — workspaces, env files, the hub key
 #
-# The same targets are `make dev-up`, `make dev-login` … from the repo root.
+# C=<container> picks the container for the targets that take one — infra-dev unless said;
+# C=hub is the hub. The same targets are `make dev-up`, `make dev-login` … from the repo root.
 #
 # NOT runnable from an agent session: `gavin` is not in the docker group and sudo
 # wants a password. This is for your own terminal on zero.
 #
-# The container is USED over ssh, not from here — `ssh infra-dev` from Termux or a PC,
-# and a zmx session (abduco's, before claude-sessions v0.4.0) to hold the work. These targets stand it up and tell you what state
-# it is in; they are not the daily interface. dev/README.md.
+# The containers are USED over ssh, not from here — `ssh dev` from Termux or a PC lands on
+# the hub's menu over every one of them, and a zmx session holds each claude. These targets
+# stand them up and tell you what state they are in; they are not the daily interface.
+# dev/README.md.
 
-CONTAINER := infra-dev
+C ?= infra-dev
+CONTAINER := $(if $(filter hub,$(C)),dev-hub,$(C))
 
 # `sudo` unless already root, so both `make up` and `sudo make up` work.
 SUDO := $(if $(filter 0,$(shell id -u)),,sudo)
@@ -64,11 +71,11 @@ DOCKER  := $(SUDO) docker
 # is bump, push, wait (about five minutes — see dev/README.md, where that number is
 # measured rather than guessed), then `make up`. Or `make base` below, which builds the
 # same image locally and waits for nobody.
-BASE_TAG := 2026.10.16
+BASE_TAG := 2026.10.26
 
-.PHONY: help dev base up restart down down-volumes status verify collections logs \
+.PHONY: help dev base up restart stop down down-volumes status verify collections logs \
 	boot-log tunnel-log idle offload-log sessions login claude claude-update shell fleet \
-	_require-env _require-secrets _require-uid
+	_require-env _require-secrets _require-uid _require-own-names
 
 help:
 	@awk '/^#/ { sub(/^# ?/, ""); print; next } { exit }' $(MAKEFILE_LIST)
@@ -76,9 +83,29 @@ help:
 # ── guards ──────────────────────────────────────────────────────────────────
 # Prerequisites rather than checks inside `up`, so each says which thing is missing
 # and nothing gets as far as docker with a name it cannot resolve.
+# Every name in .env.example is required (its header says why), so a .env from before
+# 2026-10-26 — infra-dev's alone — is refused here with the whole list, rather than by
+# Compose one variable at a time.
 _require-env:
 	@[ -f $(CURDIR)/.env ] || { \
 	  echo "no $(CURDIR)/.env — copy .env.example to .env and edit it." >&2; exit 1; }
+	@missing=$$(grep -oE '^[A-Z][A-Z0-9_]*=' $(CURDIR)/.env.example | while read -r k; do \
+	  grep -q "^$$k" $(CURDIR)/.env || printf ' %s' "$${k%=}"; done); \
+	[ -z "$$missing" ] || { \
+	  echo "dev/.env lacks:$$missing — copy each line from .env.example and set it." >&2; exit 1; }
+
+# A container of the same name from ANOTHER compose project — infra-dev's old one, `infra-dev`,
+# or a child's from its own repo — makes `up` fail half way with "name already in use",
+# after the hub has started. Refuse first and name the command. `down` there, never `down -v`:
+# its login volumes are this project's external ones.
+_require-own-names:
+	@for c in infra-dev or3-dev dd-dev ds-dev dev-hub dev-cloudflared; do \
+	  p=$$($(DOCKER) inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' $$c 2>/dev/null) || continue; \
+	  [ "$$p" = dev ] && continue; \
+	  echo "container $$c belongs to compose project '$${p:-none}', not dev. Stop it there first:" >&2; \
+	  echo "  sudo docker compose -p $$p down      # NOT -v: its volumes are kept by name" >&2; \
+	  exit 1; \
+	done
 
 _require-uid:
 	@[ "$(HOST_UID)" != "0" ] || { \
@@ -90,6 +117,11 @@ _require-uid:
 # container is still worth having up without it. The mode check is not cosmetic — ssh
 # refuses a key it considers group- or world-readable.
 _require-secrets:
+	@hub=$$(grep -E '^HUB_SECRETS=' $(CURDIR)/.env | cut -d= -f2-); \
+	[ -n "$$hub" ] || { echo "HUB_SECRETS is not set in .env" >&2; exit 1; }; \
+	[ -s "$$hub/authorized_keys" ] || { \
+	  echo "WARNING — no $$hub/authorized_keys: the hub will start and NOTHING can ssh in." >&2; \
+	  echo "          ansible/playbooks/server-create-dev-container.yml -e container=dev writes it." >&2; }
 	@dir=$$(grep -E '^INFRA_SECRETS=' $(CURDIR)/.env | cut -d= -f2-); \
 	[ -n "$$dir" ] || { echo "INFRA_SECRETS is not set in .env" >&2; exit 1; }; \
 	[ -d "$$dir" ] || { echo "INFRA_SECRETS=$$dir does not exist. From a control node:" >&2; \
@@ -134,8 +166,8 @@ base: _require-uid
 # No `base` dependency: the FROM pulls from ghcr when the tag is absent locally, so
 # the cross-repo build order 2d started with is gone — that was the point of the
 # registry. `make base` above exists for the days the registry does not.
-up: _require-env _require-uid _require-secrets
-	$(COMPOSE) up -d --build
+up: _require-env _require-uid _require-secrets _require-own-names
+	$(COMPOSE) up -d --build $(S)
 	@printf '\n'
 	@$(MAKE) --no-print-directory status
 
@@ -160,21 +192,27 @@ restart:
 	@printf '\n'
 	@$(MAKE) --no-print-directory status
 
+# One container down, the rest and the hub untouched. Its sessions end with it; `make up`
+# or `make restart` brings it back.
+stop:
+	$(DOCKER) stop $(CONTAINER)
+
 down:
 	$(COMPOSE) down
 
-# The volumes hold the claude login, the gh login, the sshd HOST key, the shell
-# history, Crush's provider key and jcode's state. Dropping them means logging in again and every client being asked to accept
-# a changed host key — which is the moment a real key change would be waved through.
-# So it takes a word on the command line, not just a target name.
+# The project's OWN volumes: each cloned workspace, each env-file volume, the shared
+# claude-sessions volume and the hub's key, known_hosts and host key. NOT the logins, history
+# and host keys of the containers that moved in — those are external volumes kept from each
+# container's old project, and `down -v` leaves an external volume alone. Dropping these
+# means re-cloning (unpushed work in a workspace goes with it), rewriting each env file, and
+# a new hub key, which every container authorises again at its next start.
 down-volumes:
 	@[ "$(CONFIRM)" = yes ] || { \
-	  echo "This drops infra-claude, infra-gh, infra-ssh-host, infra-local-share and infra-jcode:" >&2; \
-	  echo "  - claude and gh logins go, and must be done again (make login)" >&2; \
-	  echo "  - Crush's provider key goes; its first start asks again" >&2; \
-	  echo "  - jcode's state and provider login go; its first start asks again" >&2; \
-	  echo "  - the sshd host key goes, so the phone and any PC will be asked to" >&2; \
-	  echo "    accept a new one — clear their known_hosts entry yourself" >&2; \
+	  echo "This drops the dev project's own volumes:" >&2; \
+	  echo "  - every cloned /workspace — UNPUSHED WORK IN ONE IS LOST" >&2; \
+	  echo "  - every env-file volume (~/.env.d) — the repos' .env files" >&2; \
+	  echo "  - the hub's key and known_hosts; containers re-authorise a new one at start" >&2; \
+	  echo "Logins, conversation history and container host keys are external and stay." >&2; \
 	  echo "Say you mean it:  make down-volumes CONFIRM=yes" >&2; exit 1; }
 	$(COMPOSE) down -v
 
@@ -182,28 +220,31 @@ down-volumes:
 # status.sh is one script rather than several recipes because these are long, and a
 # health check spelled in Makefile line-continuations is a health check nobody will
 # correct. It reads the container and prints; it changes nothing.
-status verify collections boot-log tunnel-log fleet:
+status verify collections boot-log fleet:
 	@SUDO="$(SUDO)" CONTAINER=$(CONTAINER) bash $(CURDIR)/status.sh $@
+
+tunnel-log:
+	$(DOCKER) logs --tail 60 dev-cloudflared
 
 logs:
 	$(DOCKER) logs -f --tail 100 $(CONTAINER)
 
-# The offloader's own two questions. `idle` is a DRY RUN — its verdict on every slot now,
-# nothing stopped (a dry run's sweep still writes its `WOULD KILL` / `would keep` lines to
-# offload.log, and since v0.4.5 it writes the activity state as a live pass does, so the
-# loop's next window may be too short to count). `offload-log` is what the live loop has done: real stops and the sweep
-# (the binary's own offload.log), then failed passes and the last pass's verdicts (the
-# loop's own claude-sessions-passes.log).
+# The offloader's own two questions, asked of the hub, which runs it for every container.
+# `idle` is a DRY RUN in every container at once — each one's verdict on each slot now,
+# nothing stopped (a dry run still writes the activity state, so the loop's next window may
+# be too short to count). `offload-log` is what the live loop has done: real stops and the
+# sweep from one container's own offload.log, then failed passes and the last pass from the
+# hub's pass log.
 idle:
-	$(DOCKER) exec $(CONTAINER) claude-sessions offload --dry-run
+	$(DOCKER) exec dev-hub claude-sessions offload-all --dry-run
 
 offload-log:
-	@echo '── claude-sessions: offload.log (real stops, and the orphan sweep) ──'
+	@echo '── $(CONTAINER): offload.log (real stops, and the orphan sweep) ──'
 	@$(DOCKER) exec $(CONTAINER) sh -c 'tail -n 40 /home/dev/.local/share/claude-sessions/offload.log 2>/dev/null || echo "nothing offloaded yet"'
-	@echo '── failed passes ──'
-	@$(DOCKER) exec $(CONTAINER) sh -c 'f=/home/dev/.local/share/claude-sessions-passes.log; t=$$(grep -h "pass failed" "$$f" 2>/dev/null | tail -n 5 | cut -d" " -f1); [ -n "$$t" ] || { echo "none"; exit 0; }; for s in $$t; do grep -F "$$s" "$$f"; done'
-	@echo '── the last pass ──'
-	@$(DOCKER) exec $(CONTAINER) sh -c 'f=/home/dev/.local/share/claude-sessions-passes.log; [ -f "$$f" ] && grep -F "$$(tail -n 1 "$$f" | cut -d" " -f1)" "$$f" || echo "no pass yet"'
+	@echo '── failed passes (the hub) ──'
+	@$(DOCKER) exec dev-hub sh -c 'f=/home/dev/.hub/passes.log; t=$$(grep -h "pass failed" "$$f" 2>/dev/null | tail -n 5 | cut -d" " -f1); [ -n "$$t" ] || { echo "none"; exit 0; }; for s in $$t; do grep -F "$$s" "$$f"; done'
+	@echo '── the last pass (the hub) ──'
+	@$(DOCKER) exec dev-hub sh -c 'f=/home/dev/.hub/passes.log; [ -f "$$f" ] && grep -F "$$(tail -n 1 "$$f" | cut -d" " -f1)" "$$f" || echo "no pass yet"'
 
 # Read-only. "events: none seen" on a slot means the hooks are not firing — the first
 # thing to check after a rebuild, since a hooks file Claude Code ignored says nothing.
@@ -217,19 +258,17 @@ sessions:
 login:
 	$(DOCKER) exec -it $(CONTAINER) bash /home/dev/login.sh
 
-# The door — the same claude-sessions menu the phone's `ssh infra-dev` lands on, so it
-# lists the same sessions whichever way you came in: Enter attaches or resumes one, `n`
-# starts another, `q` leaves. Each session is a zmx session: Ctrl-\ detaches, the
-# menu comes back, and the claude keeps running, container and all.
-#
-# No `in-workspace` here, and that is not an inconsistency: `docker exec` honours the
-# image's WORKDIR, so this already starts in /workspace. Only sshd's remote-command path
-# ignores it, which is the one place the wrapper is needed.
+# The hub's menu, the same one `ssh dev` lands on, so it lists the same sessions whichever
+# way you came in: Enter on a container shows its sessions, Enter on one attaches or
+# resumes it, `n` starts another, `q` leaves. Each session is a zmx session: Ctrl-\
+# detaches, the menu comes back, and the claude keeps running.
 claude:
-	$(DOCKER) exec -it $(CONTAINER) claude-sessions-door
+	$(DOCKER) exec -it dev-hub claude-sessions
 
+# The container's own login shell — fish in infra-dev, bash in the hub — from passwd, as
+# sshd would pick it.
 shell:
-	$(DOCKER) exec -it $(CONTAINER) fish
+	$(DOCKER) exec -it $(CONTAINER) sh -c 'exec "$$(getent passwd "$$(id -u)" | cut -d: -f7)" -l'
 
 # Claude Code updates ITSELF in the background and the new version takes effect at the
 # next `claude`, so this is not how it normally moves — it is how you move it NOW,

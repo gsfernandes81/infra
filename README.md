@@ -66,7 +66,7 @@ hosts/<host>/          where it runs — symlinks into deployments/, tracked /et
 hosts/two/setup/       how `two` was built — one reviewed root script, not on any PATH
 bin/                   the scripts above (_infra.py is their shared header parser)
 ansible/               the management plane — playbooks, the fleet-inventory generator
-dev/                   the infra-dev container on zero: work on this repo, from a phone
+dev/                   every dev container on zero, one compose project, behind `ssh dev`
 docs/                  read these
 ```
 
@@ -127,6 +127,12 @@ which case each is, and its Listening section is the answer that covers all of t
 Four. Each is driven by `make dev` **in the repo it belongs to**, each is `restart=no`,
 and each holds live sessions and uncommitted worktrees. See
 [decisions.md](docs/decisions.md).
+
+**⚠︎ Built 2026-10-26, not yet on the box:** all four move into one `dev/compose.yaml`
+behind a hub — `ssh dev` opens a menu of every container's sessions, and nothing publishes
+a port. The table below is what `zero` runs until the owner brings it up
+([`docs/handoff/2026-10-26-dev-hub.md`](docs/handoff/2026-10-26-dev-hub.md)); `infra-dev`
+is the first to move, the others follow one at a time.
 
 | Container | Repo | SSH | Defined in |
 |---|---|---|---|

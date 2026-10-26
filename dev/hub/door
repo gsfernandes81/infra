@@ -1,0 +1,35 @@
+#!/bin/sh
+# What every ssh session into the hub runs (dev/hub/sshd_config, ForceCommand): the
+# claude-sessions menu over every dev container at a terminal, a forwarded command as given,
+# and a login shell for anything else or when the menu fails.
+#
+# The dev containers' door had this job until 2026-10-26 (dev/dev-door says what is left of
+# it there); the reasoning is unchanged and is decisions.md's door rows: ONLY AN INTERACTIVE
+# LOGIN GETS THE MENU, because a full-screen program on the far end of `ssh dev cmd` corrupts
+# the stream; and THE MENU FAILING MUST NEVER LOCK THE DOOR — exit 0 is the owner quitting,
+# anything else is one line and a login shell, so a broken menu costs a keypress.
+set -u
+
+shell="${SHELL:-$(getent passwd "$(id -u)" | cut -d: -f7)}"
+shell="${shell:-/bin/sh}"
+
+if [ -n "${SSH_ORIGINAL_COMMAND:-}" ]; then
+    cmd=$SSH_ORIGINAL_COMMAND
+    unset SSH_ORIGINAL_COMMAND
+    exec "$shell" -c "$cmd"
+fi
+
+if [ ! -t 0 ] || [ ! -t 1 ]; then
+    exec "$shell" -l
+fi
+
+# A handler, not `trap ''`, for the reason the dev door's history gives: an ignored SIGINT
+# is inherited across exec by the menu and every ssh under it.
+trap : INT
+claude-sessions
+status=$?
+trap - INT
+[ "$status" -eq 0 ] && exit 0
+
+echo "hub-door: the menu exited $status (its reason is above); here is a login shell instead" >&2
+exec "$shell" -l

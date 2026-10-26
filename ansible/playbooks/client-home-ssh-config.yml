@@ -25,15 +25,15 @@
 #
 # ── THE REGISTRY ────────────────────────────────────────────────────────────────
 #
-# Four dev containers run on `zero`, one tunnel each, with its own hostname
-# (`<alias>.<dns_zone>`) and a connector inside it — the tunnel's identity travels with the
-# container, so moving one to `one` changes no ingress rule anywhere
-# (docs/management-plane.md § Addressing). `infra-dev` and `or3-dev` have tunnels; `dd-dev`
-# and `ds-dev` do not yet (Phase 5) and are not running. Every one gets its ssh block; a
-# container with no Access application yet gets no token, and `ssh <alias>` says so.
+# SINCE 2026-10-26 THE WAY IN IS `dev`, the hub: one tunnel, one hostname
+# (`dev.<dns_zone>`), its connector a sidecar in dev/compose.yaml, and the hub's menu lists
+# every dev container's sessions (dev/README.md). The four blocks below it are the old way, a
+# tunnel per container, kept for each container until it has moved into the one compose file
+# and dropped its own tunnel — then its import goes from here, in the same commit.
 #
 #   container   image lives in
 #   ─────────   ──────────────────
+#   dev         this repo, dev/hub/ — the hub
 #   infra-dev   this repo, dev/
 #   or3-dev     or3
 #   dd-dev      destiny-director
@@ -58,7 +58,7 @@
 #     ansible-playbook playbooks/client-home-ssh-config.yml --tags ssh       # blocks only, no API token needed
 #     ansible-playbook playbooks/client-home-ssh-config.yml --tags access    # tokens only
 #
-# The order below is deliberate: the two containers with tunnels first.
+# The order below is deliberate: the hub first, then the old per-container doors.
 #
 # ── ADDING A FIFTH ──────────────────────────────────────────────────────────────
 #
@@ -68,11 +68,10 @@
 #     ansible-playbook playbooks/server-create-dev-container.yml -e container=<alias> -e secrets_dir=<its mount>
 #     ansible-playbook playbooks/client-home-ssh-config.yml
 #
-# The first line is the edge half for any container and, for infra-dev only, the host
-# half as well — the other containers' host side lives in their own repos. The host half
-# learns the hostname from the edge half within that one run; on its own command line
-# `tunnel_hostname` stays explicit, because there an absent value means "preserve what
-# dev/.env already says" rather than "turn the tunnel on" (CLAUDE.md § Repo invariants).
+# The first line is the edge half for any alias and, for `dev` and infra-dev, the host
+# half as well. Since 2026-10-26 a new dev container needs no alias at all — the hub's menu
+# lists it once it is in dev/compose.yaml and HUB_HOSTS — so a fifth row here is for a
+# second door, not for another container.
 #
 # NO NEW COLLECTIONS, and no tasks of its own: this file is composition and a table.
 # Everything it runs belongs to the two plays it imports.
@@ -86,8 +85,8 @@
   tasks:
     - name: Check -e container, if given, names a known dev container
       ansible.builtin.assert:
-        that: container is not defined or container in ['infra-dev', 'or3-dev', 'dd-dev', 'ds-dev']
-        fail_msg: "-e container={{ container | default('') }} names no dev container; the registry in this file's header has the four"
+        that: container is not defined or container in ['dev', 'infra-dev', 'or3-dev', 'dd-dev', 'ds-dev']
+        fail_msg: "-e container={{ container | default('') }} names no dev container; the registry in this file's header has the five"
         success_msg: "{{ 'one container: ' ~ container if container is defined else 'every container' }}"
 
 # ── the servers: the fleet, the mesh, and the LAN and cross-box rescue paths ────
@@ -114,6 +113,12 @@
 # inside `loop:` results, where `no_log` hides which iteration is which and a mistake
 # becomes a mistake about a secret. Static imports keep the reviewed
 # single-alias play exactly as it is, and each stanza reads as the fact it asserts.
+- name: Write ssh block and token for dev, the hub
+  ansible.builtin.import_playbook: _client-dev-ssh.yml
+  vars:
+    alias: dev
+  when: container is not defined or container == 'dev'
+
 - name: Write ssh block and token for infra-dev
   ansible.builtin.import_playbook: _client-dev-ssh.yml
   vars:

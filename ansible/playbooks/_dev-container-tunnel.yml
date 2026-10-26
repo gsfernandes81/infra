@@ -232,19 +232,8 @@
           - "access    application, no identity provider; each client adds its own token"
           - "          to the policy when client-home-ssh-config.yml runs there"
           - ""
-          - "{{ 'infra-dev: the host half writes DEV_TUNNEL_HOSTNAME=' ~ cf_hostname ~ ' into dev/.env next.'
-                if cf_name == 'infra-dev' else
-                cf_name ~ ' lives in its own repo: set DEV_TUNNEL_HOSTNAME=' ~ cf_hostname ~ ' in ITS .env.' }}"
-          - "Then `make up` on {{ inventory_hostname }} — NOT restart: the entrypoint reads it at start."
+          - "{{ 'the hub: its host half writes HUB_TUNNEL_ID into dev/.env next; then `make up`.'
+                if cf_name == 'dev' else
+                cf_name ~ ': since 2026-10-26 a dev container has no tunnel of its own; the hub tunnel'
+                ~ ' (-e container=dev) is the way in. This one serves its old setup until it moves in.' }}"
       changed_when: true
-
-    - name: Note {{ cf_hostname }} for dev/.env
-      # A host fact survives into the next play of the same run, and that is the only
-      # way the host half learns it: _dev-container-host.yml keeps `tunnel_hostname`
-      # explicit on its own command line, because there an absent value means "preserve
-      # what dev/.env already says" (CLAUDE.md § Repo invariants). Here the value is not
-      # absent — this play just created or confirmed the tunnel it names — so deriving is
-      # right, and it is derived from the one expression that builds the CNAME.
-      ansible.builtin.set_fact:
-        dev_tunnel_hostname_from_edge: "{{ cf_hostname }}"
-

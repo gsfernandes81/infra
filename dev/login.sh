@@ -103,13 +103,28 @@ else
     && claude auth login --claudeai --email "${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}"
 fi
 
+# ── the workspace ────────────────────────────────────────────────────────────
+# Since 2026-10-26 /workspace is this container's own volume, cloned at first start from
+# DEV_REPO. A start before the deploy key was registered, or before gh was logged in, leaves
+# it empty; with gh now logged in (above), this is where it gets filled.
+bold "the workspace (/workspace)"
+if [ -d /workspace/.git ]; then
+  ok "$(git -C /workspace remote get-url origin 2>/dev/null) at $(git -C /workspace log --oneline -1 2>/dev/null)"
+elif [ -z "${DEV_REPO:-}" ]; then
+  warn "No DEV_REPO set for this container, so nothing to clone — see dev/compose.yaml."
+elif [ -n "$(ls -A /workspace 2>/dev/null)" ]; then
+  warn "/workspace holds files but no checkout; not cloning ${DEV_REPO} over them."
+else
+  ask "Clone ${DEV_REPO} into /workspace now?" && gh repo clone "$DEV_REPO" /workspace
+fi
+
 bold "Done."
 cat <<'EOF'
 
-  This container is used over ssh. From the phone or a PC:
+  This container is reached through the hub. From the phone or a PC:
 
-      ssh infra-dev                                  the session menu
-      ssh -t infra-dev in-workspace                  a shell in /workspace
+      ssh dev                 every container; Enter on this one for its sessions,
+                              s for a shell in it
 
   Every session the menu opens is a zmx session: Ctrl-\ detaches and the menu
   comes back, and a dropped connection costs nothing — ssh in again and press Enter.
@@ -119,5 +134,5 @@ cat <<'EOF'
   Neither touches the phone's radio. What crosses it is your keystrokes.
 
   From a terminal on zero:  cd ~/infra/dev && make shell | make claude | make status
-  Re-run these logins:      make login
+  Re-run these logins:      make login        (C=<container> for another one)
 EOF

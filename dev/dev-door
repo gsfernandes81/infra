@@ -1,0 +1,36 @@
+#!/bin/sh
+# What every ssh session into a dev container runs (dev/sshd_config, ForceCommand): a
+# forwarded command as given, and otherwise a login shell in /workspace.
+#
+# THE MENU IS NOT HERE ANY MORE (2026-10-26). It is the hub's — `ssh dev` — and reaches this
+# container the way any forwarded command does: the hub runs `ssh <c> claude-sessions agent`
+# for its rows and actions, and `ssh -t <c> claude-sessions agent exec <hex>` for the one
+# child an action needs at the owner's terminal (claude-sessions' design § The hub). Both are
+# forwarded commands, so this door's only job for the hub is to run them as given.
+#
+# Until then this file was claude-sessions-door and opened the menu at a terminal; its
+# reasoning is decisions.md's door rows and is kept: a forwarded command runs as given, in
+# $HOME where sshd put it (scp, sftp, Zed, ansible all saw no change when the door was
+# forced); `ssh <c> in-workspace cmd` asks for the repo; a login lands in /workspace.
+#
+# `$SHELL`, never a named shell: infra-dev logs in to fish, others to bash. sshd sets it;
+# `docker exec` does not, so the account's passwd shell is the next answer and /bin/sh the
+# last.
+set -u
+
+shell="${SHELL:-$(getent passwd "$(id -u)" | cut -d: -f7)}"
+shell="${shell:-/bin/sh}"
+
+if [ -n "${SSH_ORIGINAL_COMMAND:-}" ]; then
+    # Unset before it runs, so a command that leads back here sees a login, not itself.
+    cmd=$SSH_ORIGINAL_COMMAND
+    unset SSH_ORIGINAL_COMMAND
+    exec "$shell" -c "$cmd"
+fi
+
+# Where the work is, for a login. Warn and carry on: with the workspace missing you want the
+# way in anyway, most likely to find out why.
+if ! cd /workspace 2>/dev/null; then
+    echo "dev-door: /workspace is not there; staying in $(pwd)" >&2
+fi
+exec "$shell" -l

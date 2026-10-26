@@ -10,9 +10,11 @@ off* to *The offloader acts on measured activity alone*, and in `dev/README.md` 
 *claude-sessions*. The full plan, with its Phase 0 findings and the approved mockups, is
 in git history before 2026-10-25.
 
-**What comes next is [`dev-pool.md`](dev-pool.md)**: decided 2026-10-25, `claude-sessions` moves
-out of the dev containers into a hub that manages them all over ssh. The items below are about
-today's per-container layout and stay open until that is built.
+**What comes next is [`dev-pool.md`](dev-pool.md)**: decided 2026-10-25, the menu and the
+offloader move out of the dev containers into a hub that manages them all over ssh. **Built
+2026-10-26 on a branch, not on the fleet** (claude-sessions 0.5.0, unreleased). The items below
+are about today's per-container layout and stay open until the hub is brought up; item 2 then
+reads "base `2026.10.26`", the first base without claude-sessions baked in.
 
 ## Open, on the boxes (the owner's)
 

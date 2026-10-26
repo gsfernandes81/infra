@@ -38,9 +38,14 @@ Full orientation is `README.md`; the reasoning is `docs/decisions.md`. Quick map
   control node, never from a Pi**: there is no `ansible` on the boxes and there must not be.
   `infra-dev` carries it as a *development* tool (syntax-check, `--check` against stubs),
   not a control plane.
-- **`dev/`** — the `infra-dev` container. Lifecycle is `dev/Makefile` only (it computes
-  `HOST_UID` from the checkout's owner; a second copy of that guard is how root-owned
-  files end up in the bind mount). The top-level `Makefile` forwards `dev-*` to it.
+- **`dev/`** — every dev container, in one `dev/compose.yaml` (project `dev`): the hub
+  (`dev/hub/`, the menu behind `ssh dev`, and the offloader), its `cloudflared` sidecar,
+  `infra-dev`, and the children behind profiles. **Built 2026-10-26, not yet brought up** —
+  until the owner does, the box still runs the old single-container layout
+  ([`docs/handoff/2026-10-26-dev-hub.md`](docs/handoff/2026-10-26-dev-hub.md)). Lifecycle is
+  `dev/Makefile` only (it computes `HOST_UID` from the checkout's owner; a second copy of
+  that guard is how root-owned files end up in a mount). The top-level `Makefile` forwards
+  `dev-*` to it.
 - **`docs/`, `plans/`, `docs/handoff/`** — see the next section. **`docs/history/`** holds
   one finished plan, kept as a record of how the design was arrived at and marked *do
   not follow*; it is not a destination.
@@ -140,8 +145,10 @@ end of a session for the next one. Two rules, both of which have bitten:
 - **A host checkout that will not fast-forward is not reset until every local commit is
   accounted for.** `git log --left-right --cherry-mark HEAD...origin/main` must show each
   `<` commit with a `=` twin upstream; a `<` without one is work that exists nowhere else.
-  `zero`'s diverged on 2026-10-25: its checkout is also `infra-dev`'s `/workspace`, so a
-  session committing there and pushing a rebased copy leaves the originals behind.
+  `zero`'s diverged on 2026-10-25: its checkout was also `infra-dev`'s `/workspace`, so a
+  session committing there and pushing a rebased copy left the originals behind. From the
+  hub's bring-up `infra-dev` works in its own cloned volume and the host checkout is only
+  what the box runs; until then the bind mount, and this trap, are live.
 - **Read `git diff --stat` before every commit** and revert any file the change has no
   business touching.
 
@@ -405,14 +412,13 @@ a block the play no longer finds, and the next run writes a second one *below* i
 ssh never reads. The 2026-08-29 rename did this and nobody saw it for five weeks — see
 the row in [`docs/decisions.md`](docs/decisions.md).
 
-**A dev container's tunnel hostname is `<alias>.<dns_zone>` and is never written beside
-the alias it is built from** — `dns_zone` lives in `ansible/group_vars/all.yml`, and
+**A tunnel hostname is `<alias>.<dns_zone>` and is never written beside the alias it is
+built from** — `dns_zone` lives in `ansible/group_vars/all.yml`, and
 `server-create-dev-container.yml` and `client-home-ssh-config.yml` both derive from it, so
-the two cannot name different hostnames. Generally: derive where the value is a *name*;
-never where absence is itself a setting, which is why the host half of
-`server-create-dev-container.yml` keeps `tunnel_hostname` explicit on its own command
-line and only takes the derived value from the edge half within one run. The reasoning is one row in
-[`docs/decisions.md`](docs/decisions.md).
+the two cannot name different hostnames. Since 2026-10-26 the only dev alias with a tunnel is
+the hub's, `dev`, and `dev/cloudflared.yml` spells `dev.gsrpi.uk` out because cloudflared
+reads no variables. Generally: derive where the value is a *name*; never where absence is
+itself a setting. The reasoning is one row in [`docs/decisions.md`](docs/decisions.md).
 
 `/etc` copies under `hosts/<host>/system/` each declare where they install, in an
 `infra-` header carried by **both** the repo copy and the live file — see

@@ -6,10 +6,12 @@
 #   make dev-verify  status + tools + collections + the fleet
 #   make dev-login   re-run the logins
 #   make dev-fleet   prove zero, one and two answer
-#   make dev-shell   a fish shell in it
-#   make dev-claude  the claude-sessions menu, as ssh lands on it
-#   make dev-tunnel-log  what cloudflared is saying, if the tunnel is on
-#   make dev-logs / dev-boot-log / dev-restart / dev-down
+#   make dev-shell   a login shell in it
+#   make dev-claude  the hub's menu over every dev container, as `ssh dev` lands on it
+#   make dev-tunnel-log  what the hub's cloudflared is saying
+#   make dev-logs / dev-boot-log / dev-restart / dev-stop / dev-down
+#
+# C=<container> passes through for the targets that take one (default infra-dev).
 #
 # Everything above forwards into dev/Makefile, which is where the docker commands
 # live. Nothing here is runnable from an agent session: `gavin` is not in the docker
@@ -36,8 +38,8 @@
 # a confusing one two directories down. It is also what makes .PHONY work: make does
 # not apply implicit rules to a phony target, so a bare `dev-%:` pattern silently
 # matches nothing and prints "Nothing to be done".
-DEV_TARGETS := up restart down down-volumes status verify collections login fleet \
-	claude shell logs boot-log tunnel-log
+DEV_TARGETS := up restart stop down down-volumes status verify collections login fleet \
+	claude shell logs boot-log tunnel-log idle offload-log sessions
 
 .PHONY: help dev $(addprefix dev-,$(DEV_TARGETS))
 

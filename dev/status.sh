@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The readouts for infra-dev, on the HOST side: what state the container is in, what a
+# The readouts for one dev container (infra-dev unless CONTAINER says), on the HOST side: what state the container is in, what a
 # rebuild landed, and the start-up lines. Called by dev/Makefile —
 #
 #     make status | make verify | make boot-log | make fleet
@@ -64,11 +64,12 @@ status() {
         | grep -vE 'claude-sessions|/proc/' | grep -q . \
         && echo 'a claude is running in this container' || echo 'no claude running')"
 
-    # The offloader's loop, by the age of the log it writes every pass. Read by file age,
-    # not by matching argv — `pgrep -f` on the loop's own words is the self-match trap
-    # CLAUDE.md records.
-    printf 'offloader : %s\n' "$(d exec "$CONTAINER" sh -c '[ "${DEV_IDLE_OFFLOAD:-1}" = 1 ] || { echo "off (DEV_IDLE_OFFLOAD=$DEV_IDLE_OFFLOAD)"; exit 0; }; f=$HOME/.local/share/claude-sessions-passes.log; [ -f "$f" ] || { echo "no pass log — off (DEV_IDLE_OFFLOAD=0), or not started: make boot-log"; exit 0; }; a=$(( $(date +%s) - $(stat -c %Y "$f") )); if [ "$a" -le 600 ]; then echo "live, last pass $((a / 60))m ago (make offload-log)"; else echo "NO PASS in $((a / 60))m — the loop has stopped; see make boot-log"; fi' 2>/dev/null \
-        || echo 'could not ask the container')"
+    # The offloader is the HUB's since 2026-10-26: its loop, by the age of the log it writes
+    # every pass, and whether this container is one it reaches. Read by file age, not by
+    # matching argv — `pgrep -f` on the loop's own words is the self-match trap CLAUDE.md
+    # records.
+    printf 'offloader : %s\n' "$(d exec dev-hub sh -c 'f=$HOME/.hub/passes.log; [ "${HUB_OFFLOAD:-1}" = 1 ] || { echo "off at the hub (HUB_OFFLOAD=$HUB_OFFLOAD)"; exit 0; }; case " $CLAUDE_SESSIONS_HOSTS " in *" $1 "*) ;; *) echo "the hub does not reach $1 — not in HUB_HOSTS"; exit 0 ;; esac; [ -f "$f" ] || { echo "no pass yet at the hub — make boot-log C=hub"; exit 0; }; a=$(( $(date +%s) - $(stat -c %Y "$f") )); if [ "$a" -le 600 ]; then echo "the hub'"'"'s, last pass $((a / 60))m ago (make offload-log)"; else echo "NO PASS in $((a / 60))m at the hub — its loop has stopped; make boot-log C=hub"; fi' _ "$CONTAINER" 2>/dev/null \
+        || echo 'could not ask the hub — is it up? (make status C=hub)')"
 
     # `claude auth status`, not "is there a credentials file" — a file holding empty
     # tokens exists and reports logged out, so the file's presence proves nothing.
@@ -112,25 +113,33 @@ fleet_files_line() {
     esac
 }
 
-# ── tunnel ──────────────────────────────────────────────────────────────────
-# Three distinguishable answers, because they mean three different things and a single
-# up/down would collapse them: not configured at all (normal — `make shell` is the
-# way in), configured but not connected (the interesting failure), and serving.
-tunnel_line() {
-    local host ready
-    host="$(d exec "$CONTAINER" printenv DEV_TUNNEL_HOSTNAME 2>/dev/null || true)"
-    if [ -z "$host" ]; then
-        echo 'off (DEV_TUNNEL_HOSTNAME unset — make shell is the way in)'
-        return
-    fi
-    ready="$(d exec "$CONTAINER" curl -fsS --max-time 3 http://127.0.0.1:20241/ready 2>/dev/null || true)"
-    if [ -z "$ready" ]; then
-        echo "$host — metrics endpoint silent, tunnel NOT up (make tunnel-log)"
-    elif printf '%s' "$ready" | grep -qE '"readyConnections": *[1-9]'; then
-        echo "$host — $(printf '%s' "$ready" | tr -d '\n' | head -c 90)"
+# ── the hub's reach into this container ─────────────────────────────────────
+hub_line() {
+    local key here there
+    if d exec "$CONTAINER" sh -c 'grep -q "^restrict,pty ssh-" "$HOME/.ssh/authorized_keys"' 2>/dev/null; then
+        key='key authorised'
     else
-        echo "$host — zero ready connections, NOT serving (make tunnel-log)"
+        key='hub key NOT authorised: is the hub up? make status C=hub, then make restart'
     fi
+    here="$(d exec "$CONTAINER" claude-sessions --version 2>/dev/null || echo 'no claude-sessions')"
+    there="$(d exec dev-hub claude-sessions --version 2>/dev/null || echo 'no hub')"
+    echo "$key; $here here, $there at the hub"
+}
+
+# ── tunnel ──────────────────────────────────────────────────────────────────
+# The hub's sidecar since 2026-10-26 — no dev container has a tunnel of its own. Its
+# healthcheck is the probe recovery.md calibrated (/ready, readyConnections >= 1), so the line
+# reads Docker's verdict on it rather than probing again: not running (the `tunnel` profile is
+# off, or it died), running and unhealthy (the interesting failure), or healthy.
+tunnel_line() {
+    local st
+    st="$(d inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' dev-cloudflared 2>/dev/null || true)"
+    case "$st" in
+        '')            echo 'no dev-cloudflared — the tunnel profile is off (COMPOSE_PROFILES in .env)' ;;
+        'running healthy') echo 'the hub'"'"'s, serving dev — ready connections >= 1' ;;
+        running*)      echo "the hub's, $st — NOT serving yet (make tunnel-log)" ;;
+        *)             echo "the hub's, $st (make tunnel-log)" ;;
+    esac
 }
 
 # ── fleet ───────────────────────────────────────────────────────────────────
@@ -304,7 +313,7 @@ print("managed settings say off" if v is True else
     # more, so no field in its binary is load-bearing for the offloader (the timer tools'
     # names, claude-sessions#13, were never added for the same reason).
     tool cloudflared 'the hash-pinned download did not land' cloudflared --version
-    tool sessions 'no claude-sessions — this image predates it (rebuild: make up)' claude-sessions --version
+    tool sessions 'no claude-sessions — the hub'"'"'s volume is not mounted at /opt/claude-sessions' claude-sessions --version
     # Unpinned (the latest at the base's build), so this is the only readout of which one a
     # container has once CI's log has expired. MISSING is also what a base built with
     # CRUSH_VERSION=none looks like.
@@ -350,9 +359,13 @@ print((" ".join(sorted(h)) if h else "PRESENT BUT EMPTY — no hooks in it")
     # refused, and a readout of the other file would report a child's `ForceCommand none`
     # the live daemon never read. The path comes out of its process title (OpenSSH 10 writes
     # argv there as one string); `-C user=dev` takes any `Match` for this account into the
-    # answer. `none` on a base that should have the door means `ssh <c>` lands on a plain
-    # shell rather than the menu — an image that predates 2026-10-04 or a drop-in that
-    # switched it off, not a client problem.
+    # answer. Since base 2026.10.26 the door is /usr/local/bin/dev-door — a login shell in
+    # /workspace, and a forwarded command as given; the menu is the hub's.
+    #
+    # The hub's reach into this container: its key authorised (restrict,pty), and the binary
+    # here the one the hub installed — the same bytes as the hub's own, since this container
+    # runs it from the hub's volume.
+    printf 'hub       : %s\n' "$(hub_line)"
     printf 'door      : %s\n' "$(d exec "$CONTAINER" sh -c 'f=$(tr "\0" " " < /proc/$(cat /home/dev/.ssh-host/sshd.pid)/cmdline | sed -n "s/.* -f \([^ ]*\).*/\1/p"); /usr/sbin/sshd -T -C user=dev,host=localhost,addr=127.0.0.1 -f "${f:-/home/dev/sshd_config}" 2>/dev/null | sed -n "s/^forcecommand //p"' 2>/dev/null \
         | grep . || echo 'could not ask sshd')"
     printf '\n'
@@ -403,17 +416,11 @@ boot_log() {
       | grep -v '^[[:space:]]*$' | head -n "${1:-80}"
 }
 
-tunnel_log() {
-    d exec "$CONTAINER" sh -c 'tail -n "${1:-60}" "$HOME/.local/share/tunnel.log" 2>/dev/null' \
-        -- "${1:-60}" || echo 'no tunnel log — the tunnel has never been started'
-}
-
 case "${1:-status}" in
     status)      status ;;
-    tunnel-log)  tunnel_log "${2:-60}" ;;
     verify)      verify ;;
     collections) collections ;;
     boot-log)    boot_log "${2:-80}" ;;
     fleet)       fleet ;;
-    *) printf 'status.sh: unknown readout "%s" — status | verify | collections | boot-log | fleet | tunnel-log\n' "$1" >&2; exit 1 ;;
+    *) printf 'status.sh: unknown readout "%s" — status | verify | collections | boot-log | fleet\n' "$1" >&2; exit 1 ;;
 esac

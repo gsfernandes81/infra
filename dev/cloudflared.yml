@@ -1,0 +1,22 @@
+# The ingress of the dev hub's tunnel — mounted read-only into the cloudflared sidecar in
+# dev/compose.yaml. This file IS the routing: the tunnel is locally-managed, so there is no
+# dashboard copy to disagree with it. The tunnel id is an argument from dev/.env, written
+# beside the credentials, so a `tunnel:` key here could only ever disagree with it.
+#
+# ONE HOSTNAME: dev.<dns_zone>, the hub's sshd. The dev containers have no hostname of their
+# own any more; `ssh dev` is the way in to every one of them, and the break-glass path is the
+# one that never depended on a tunnel: `ssh -t zero 'cd ~/infra/dev && make shell C=<c>'`.
+#
+# A service name, not 127.0.0.1: on the project network the name is the stable address,
+# and the hub is the only service the tunnel may reach.
+
+credentials-file: /etc/cloudflared/creds.json
+
+# The same port the host tunnels and the deployment sidecars pin, inside this container's own
+# network namespace, so the healthcheck reads the same way theirs do.
+metrics: 127.0.0.1:20241
+
+ingress:
+  - hostname: dev.gsrpi.uk
+    service: ssh://hub:2222
+  - service: http_status:404

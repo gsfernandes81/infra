@@ -1147,7 +1147,8 @@ is owner-reported.
 ## Dev containers: one compose file in `infra`, one memory pool, `claude-sessions` only in a hub
 
 **Decided 2026-10-25**, the owner's three calls on [`plans/dev-pool.md`](../plans/dev-pool.md).
-**None of it is built.** Until it is, every row it marks ⚠︎ above still describes the boxes.
+**Built 2026-10-26 on a branch and not yet on the fleet** (*The hub, as built* below). Until
+the owner brings it up, every row it marks ⚠︎ above still describes the boxes.
 
 - **One compose file in `infra` for every dev container**, the hub and the sidecar, so
   starting, stopping and limiting them is one place. This reverses *Claude dev containers
@@ -1169,6 +1170,75 @@ public-key auth and a Cloudflare Access login, and an ssh login on `zero` alread
 every container (an attacker there waits for the next `sudo`). The rule that comes with it:
 the key lives only in the hub, which runs no agent, and is never mounted into a dev
 container.
+
+### The hub, as built (2026-10-26)
+
+The owner's request that day: "All dev containers move into one compose. One claude sessions
+door container runs cloudflared and claude sessions door … manages all the other containers'
+claude sessions via ssh including offload. Still one container per repo but favour just using
+gh to clone the repo to a volume and maybe another volume for .env … Your call on that." Then,
+during the build: a sidecar for cloudflared is fine, the alias is `ssh dev`, and the menu's
+shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, released as 0.5.0.
+
+- **claude-sessions still RUNS in every dev container; it is only pinned in the hub.** The
+  offloader's measurement reads `/proc` and the socket-diagnostics netlink, which answer only
+  inside a container's own namespaces, and a slot's lock is a `flock` in the container's own
+  registry — so a hub reading containers from outside would have had to re-implement both
+  over ssh, worse. What moved is the menu and the timer. The binary reaches the containers by
+  the hub's start running `claude-sessions install /opt/claude-sessions` into a volume every
+  container mounts **read-only**: one pin, in `dev/hub/Dockerfile`, the same bytes on both
+  ends of every ssh call, and a release reaches every container at the hub's next start with
+  no base or child bump. The 2026-10-25 wording "`claude-sessions` runs only in a hub" is
+  read as *the menu and the offloader run only in the hub*.
+- **The hooks drop-in is the volume's `managed-settings.d` subpath, mounted over
+  `/etc/claude-code/managed-settings.d`**, not a symlink into the volume: Claude Code then
+  reads a plain directory of plain files, and nothing depends on how it treats a link.
+  Read-only, so no claude can rewrite the hooks every claude runs. Every container
+  `depends_on` the hub being healthy — the install done — because a subpath that does not
+  exist cannot be mounted at all.
+- **The hub's key is made in the hub's own volume at first start and never leaves it**; only
+  its public half is published in the shared volume, and each container's entrypoint
+  authorises it as `restrict,pty` — commands and a terminal, no forwarding, no agent. The
+  hub learns each container's host key on first contact (`accept-new`) over the compose
+  network nothing else joins, and pins it in its volume; a changed key still refuses.
+- **cloudflared is a sidecar** with one hostname, `dev.<dns_zone>`, the owner allowing either
+  and Phase 3 having settled sidecars for deployments. It runs as the checkout's owner rather
+  than the image's 65532, so the dev-container edge play's credentials (gavin, 0600) serve it
+  unchanged, and it is behind a `tunnel` profile so the rest comes up before the tunnel
+  exists. The dev containers lose their own tunnels and their per-container hostnames; the
+  break-glass path is the one that never needed a tunnel, `make shell C=<c>` on zero.
+- **The alias is `dev`** (owner), through the existing dev-container edge and client plays
+  with `-e container=dev`, so the tunnel, the Access application and each client's service
+  token are made the way every container's always were.
+- **Each workspace is a volume, cloned once from `DEV_REPO`** — with `gh repo clone` when gh
+  is logged in (the owner's preference), else over ssh with the deploy key, so a first start
+  does not wait on `make login`; `make login` clones when neither worked. It ends the shared
+  working tree with the host: zero's `~gavin/infra` is only what the box runs, and the
+  2026-10-25 divergence (a container commit left behind in the host checkout) cannot recur.
+  **or3-dev keeps its bind mount**, which is or3's design and its call (plans/dev-pool.md).
+- **A repo's untracked secrets live in a second volume, `~/.env.d`, symlinked into the
+  workspace** (`DEV_ENV_FILES`). Not hard links: two volumes are two mounts and `link(2)`
+  refuses across mounts. A regular file found where a link should be — an editor that saves by
+  rename — is reported and left, being the newest copy; each link goes into the checkout's
+  `.git/info/exclude`, so it is never committed whatever `.gitignore` says.
+- **The menu is containers first** (owner: "the highest part of the hierarchy is the
+  container, followed by loaded / offloaded / archived one level deeper"), and inside one
+  **Loaded, Offloaded and a folded Archived** holding everything closed, with a session
+  waiting for the owner **marked by an amber `!`** rather than grouped (owner: "make needs
+  you just a yellow highlight or icon … keep loaded / offloaded and a click to expand archived
+  section"). claude-sessions' mockups 1 to 15 were redrawn for it.
+- **The base drops claude-sessions and cloudflared**, keeping the two mountpoints, and the
+  per-container offload loop, tunnel and menu door go with them; `DEV_TUNNEL_HOSTNAME` and
+  `DEV_IDLE_OFFLOAD` leave the containers (the latter survives in `dev/.env` as what compose
+  turns into `CLAUDE_SESSIONS_OFFLOAD=0`). Base `2026.10.26`.
+- **`dev/.env` now serves the whole project, so the plays write it by line**, starting one
+  from `.env.example` when there is none; `_dev-container-host.yml` used to write it whole,
+  which would now wipe the hub's lines. Every container's paths are required from the start:
+  Compose refuses a required variable even in a service whose profile is off (measured,
+  Compose 5.6.1); the profile is what keeps a container from starting.
+- **The pool is opt-in until its boot file exists**: `cgroup_parent: ${DEV_CGROUP_PARENT:-}`,
+  which Compose drops when empty (measured). `:-` and not `:?`, because absence here is the
+  supported state, not a mistake to stop on.
 
 ## The lesson worth keeping
 

@@ -5,16 +5,18 @@
 # This is dev/README.md § *Four copies of this* built: the ~700 lines that dd-dev,
 # ds-dev, or3-dev and infra-dev agreed on, in one place. Debian trixie slim (glibc 2.41
 # since 2026-09-21; bookworm and its 2.36 before that), Node + Claude Code (with the agent
-# view off by baked managed settings), claude-sessions and the hooks that feed it, gh,
-# zmx (what a slot lives in), Crush (on trial, the latest at build), sshd, fish, the dev user, cloudflared, the entrypoint and every dotfile. A repo's own dev/Dockerfile becomes a FROM line
+# view off by baked managed settings), gh, zmx (what a slot lives in), Crush (on trial, the
+# latest at build), sshd, fish, the dev user, the entrypoint and every dotfile, and the two
+# mountpoints claude-sessions arrives through from the hub. A repo's own dev/Dockerfile becomes a FROM line
 # plus whatever that repo needs on top — see dev/Dockerfile here for the shape
 # (ansible), or or3's for the other one (uv, and its own ssh identity).
 #
 # WHAT A CHILD IS EXPECTED TO CHANGE, and how. Five seams, none of which is a fork of a
 # file in here:
 #
-#   environment    DEV_NAME, DEV_SECRETS_DIR, DEV_TUNNEL_HOSTNAME, DEV_IDLE_OFFLOAD —
-#                  entrypoint.sh lists what each does. Set in the repo's compose.yaml.
+#   environment    DEV_NAME, DEV_SECRETS_DIR, DEV_REPO, DEV_ENV_FILES —
+#                  entrypoint.sh lists what each does. Set in infra's dev/compose.yaml,
+#                  where every dev container's service is (2026-10-26).
 #   ssh_config     COPY its own over /home/dev/ssh_config. The entrypoint reads that
 #                  path, so a child's identities and hosts are its own business.
 #   known_hosts.extra   COPY one in to pin a host key in ITS repo's tracked content
@@ -47,9 +49,10 @@
 # here: a child baked an rc-supervisor.sh, set DEV_REMOTE_CONTROL=1, and the
 # entrypoint started it. Every container
 # is now reached one way — ssh in, hold the work in a session (abduco until v0.4.0, zmx since) — so no child ships
-# an rc-supervisor.sh and nothing here starts one. What the entrypoint runs in its place
-# is the opposite job: `claude-sessions offload`, from the pinned binary below, which STOPS
-# a detached claude measured quiet for 10 minutes, and leaves the conversation resumable.
+# an rc-supervisor.sh and nothing here starts one. What runs in its place is the opposite
+# job: `claude-sessions offload`, which STOPS a detached claude measured quiet for 10
+# minutes, and leaves the conversation resumable — run in each container by the hub's timer
+# over ssh since 2026-10-26, by this image's entrypoint before.
 # The session holder is what makes a session survive a dropped link, and was therefore
 # also what made an abandoned one hold a gigabyte of RAM for days. (Until 2026-10-06 that
 # was offload-idle-claude.sh, with the new one as a dry run beside it — Stage A of
@@ -237,7 +240,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # from the claude-code package and nothing else, because that package's payload is a
 # native binary that does not run on node.
 ENV NPM_CONFIG_PREFIX=/opt/npm-global \
-    PATH=/home/dev/.local/bin:/opt/npm-global/bin:$PATH
+    PATH=/home/dev/.local/bin:/opt/npm-global/bin:/opt/claude-sessions/bin:$PATH
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/* \
@@ -267,36 +270,11 @@ RUN set -eux; \
       | tar -xz -C /usr/local/bin --strip-components=2 "gh_${GH_VERSION}_linux_${arch}/bin/gh"; \
     gh --version
 
-# cloudflared. Present in the image but INERT unless DEV_TUNNEL_HOSTNAME is set and a
-# credentials file exists — see entrypoint.sh. Baked in rather than downloaded at start
-# for the same reason the collections are: a start that needs the network is a start
-# that fails when the network is down.
-#
-# Hash-pinned per architecture, like zmx and claude-sessions and unlike gh. The difference from gh is not
-# the vendor, it is what the binary does: this one holds the credentials that put an ssh
-# endpoint on the public internet, and it is the process that puts it there. A pin alone
-# says "the same version"; a hash says "the same bytes".
-#
-# Measured 2026-08-22 by downloading both and checking them: 37,404,344 B (arm64) and
-# 39,799,316 B (amd64), and BOTH ARE FULLY STATIC — `readelf -l` finds no INTERP segment
-# and there is no dynamic section at all. That fact is the one that matters off this
-# image: it is why the same binary runs under Termux, which is bionic and would refuse a
-# glibc-linked one. dev/README.md § *Reaching it from Termux* has the rest of it.
-ARG CLOUDFLARED_VERSION=2026.8.2
-ARG CLOUDFLARED_SHA256_arm64=7747d94570fb390cf47dcb4f9555c193c6355cda9793f0d878d9049e5d6a7790
-ARG CLOUDFLARED_SHA256_amd64=fcfb02b575a52ca1af2e3267af4e1517bcdeb30ac48c834c69abaed3c0576ad2
-RUN set -eux; \
-    arch="$(dpkg --print-architecture)"; \
-    case "$arch" in \
-      arm64) sha="${CLOUDFLARED_SHA256_arm64}" ;; \
-      amd64) sha="${CLOUDFLARED_SHA256_amd64}" ;; \
-      *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
-    esac; \
-    curl -fsSLo /usr/local/bin/cloudflared \
-      "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-${arch}"; \
-    echo "${sha}  /usr/local/bin/cloudflared" | sha256sum -c -; \
-    chmod 0755 /usr/local/bin/cloudflared; \
-    cloudflared --version
+# cloudflared WAS BAKED HERE until 2026-10-26, hash-pinned, and started by the entrypoint
+# when DEV_TUNNEL_HOSTNAME was set. The dev containers have no tunnel of their own any more:
+# the hub is the way in (`ssh dev`), its tunnel a cloudflared sidecar in dev/compose.yaml,
+# pinned there by digest. An inert 37 MB binary on a deprecation clock was all that was
+# left of it here, so it went too.
 
 # ── Crush: a second agent harness, on trial (owner, 2026-10-11) ──────────────────
 # charmbracelet/crush, reached the plain way: `ssh -t <c> in-workspace`, then `crush`. No
@@ -528,71 +506,26 @@ COPY claude-managed-settings.json /etc/claude-code/managed-settings.json
 RUN chmod 0644 /etc/claude-code/managed-settings.json \
     && python3 -c 'import json, sys; json.load(open(sys.argv[1]))' /etc/claude-code/managed-settings.json
 
-# ── claude-sessions: the session registry, and the hooks that feed it ───────
-# One static binary from github.com/gsfernandes81/claude-sessions (public, AGPL-3.0) —
-# plans/claude-sessions.md is the design, and docs/decisions.md has why it is its own repo.
-# It keeps one JSON file per slot (a zmx session since v0.4.0) under ~/.local/share/claude-sessions, and
-# Claude Code's own hooks keep that up to date by calling `claude-sessions hook`.
+# ── claude-sessions: NOT IN THIS IMAGE since 2026.10.26 — the hub installs it ───────
+# The binary, the hooks drop-in that names it and the keep-alive skill arrive from the hub's
+# `claude-sessions` volume, which dev/compose.yaml mounts read-only at /opt/claude-sessions in
+# every dev container, and its managed-settings.d subpath over
+# /etc/claude-code/managed-settings.d. So the version a container's hooks, agent and offload
+# pass run is pinned once, in dev/hub/Dockerfile, and reaches every container at the hub's
+# next start, with no base bump and no child bump (decisions.md, the hub rows).
+# claude-sessions' docs/design.md § "The hub" is the design.
 #
-# A PINNED RELEASE, HASH-CHECKED PER ARCHITECTURE — the cloudflared shape above, and for
-# the same reason: this is a program every claude in the container runs, on every prompt,
-# so "the same bytes" is the claim, not "the same version". A release tag is never re-cut;
-# a new version is a new tag and two new hashes here, followed by a BASE_TAG bump. The
-# release names architectures the way Rust does, so dpkg's names are mapped rather than
-# passed through. NEVER COMPILED HERE: the arm64 leg of dev-base.yml runs under QEMU, and a
-# Rust build there is unusable.
+# What stays here is the two MOUNTPOINTS, root-owned and empty: /opt/claude-sessions, on
+# PATH since the node block, and the managed-settings.d directory beside the agent-view file.
+# A container started without the hub's volume — `docker run` by hand — therefore has no
+# claude-sessions at all and no hooks: Claude Code reads an empty managed-settings.d as no
+# drop-in, and the entrypoint says so. The hub's healthcheck is what keeps compose from ever
+# starting one that way (depends_on: service_healthy).
 #
-# `--version` IS FATAL, unlike claude's below, and compared exactly. claude's is a large
-# self-contained binary an emulator may decline to run; this is a static musl one that
-# needs no config, no network and no home directory, so not answering is a broken
-# download, not a QEMU quirk.
-#
-# THE HOOKS ARE GENERATED BY THE BINARY, AT BUILD TIME, AND NOT COMMITTED. `hooks-config`
-# prints exactly the events its own code handles, so the hooks installed and the hooks
-# understood are one version of one program and cannot drift apart — a tracked copy here
-# would be a second source that only drifts. The file is parsed after it is written, for
-# the reason `make verify` parses the agent-view file: Claude Code ignores a malformed
-# settings file WHOLE and says nothing, which reads as "the hooks never fire".
-#
-# A DROP-IN, managed-settings.d/, not managed-settings.json: Claude Code reads the .json
-# first and then every .d/*.json in name order, so this tool owns a file of its own and
-# the agent-view and update-channel policy above stays its own file. Managed settings because a
-# user's `disableAllHooks` cannot switch these off, and a repo's .claude/ does not have to
-# know about them. The FILE-based kind deliberately: server-managed settings (the claude.ai
-# admin console) put hooks behind an approval dialog, and would replace this file outright
-# — so these hooks must never be delivered that way too. That a file here raises no dialog
-# is established from the vendor's docs and NOT yet on a box (claude-sessions'
-# docs/design.md § "Where the hooks live"); the first `claude` in a rebuilt container is the
-# check, and it is a bring-up step in plans/claude-sessions.md.
-#
-# THE SAME FILE CARRIES A STATUS LINE since v0.4.5 — `claude-sessions statusline`, RAM and
-# load in yellow and red, refreshed every minute; the owner asked for it upstream. As
-# managed settings it outranks any user `statusLine` — none in this repo or on
-# infra-dev's volume; the other children's volumes are checked at their bump. `make verify`'s `hooks` line names it.
-#
-# 0644 IS LOAD-BEARING: every session runs as `dev`, and a file it cannot read means
-# sessions start with no hooks and nothing on screen says so.
-ARG CLAUDE_SESSIONS_VERSION=0.4.7
-ARG CLAUDE_SESSIONS_SHA256_arm64=f9f4f179d1fd5c1a99f81d6ffb1e9ecd900d3002a5567ced25bc11974637bb1f
-ARG CLAUDE_SESSIONS_SHA256_amd64=4317ea920ee0f8512c61c0df304efa9e6d8e0673a5331e177f7e00711b307d3d
-RUN set -eux; \
-    arch="$(dpkg --print-architecture)"; \
-    case "$arch" in \
-      arm64) triple=aarch64; sha="${CLAUDE_SESSIONS_SHA256_arm64}" ;; \
-      amd64) triple=x86_64;  sha="${CLAUDE_SESSIONS_SHA256_amd64}" ;; \
-      *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
-    esac; \
-    curl -fsSLo /usr/local/bin/claude-sessions \
-      "https://github.com/gsfernandes81/claude-sessions/releases/download/v${CLAUDE_SESSIONS_VERSION}/claude-sessions-v${CLAUDE_SESSIONS_VERSION}-${triple}-linux-musl"; \
-    echo "${sha}  /usr/local/bin/claude-sessions" | sha256sum -c -; \
-    chmod 0755 /usr/local/bin/claude-sessions; \
-    test "$(claude-sessions --version)" = "claude-sessions ${CLAUDE_SESSIONS_VERSION}"; \
-    mkdir -p /etc/claude-code/managed-settings.d; \
-    claude-sessions hooks-config /usr/local/bin/claude-sessions \
-      > /etc/claude-code/managed-settings.d/claude-sessions.json; \
-    chmod 0644 /etc/claude-code/managed-settings.d/claude-sessions.json; \
-    python3 -c 'import json, sys; h = json.load(open(sys.argv[1]))["hooks"]; assert h, "no hooks"; print("claude-sessions hooks:", " ".join(sorted(h)))' \
-      /etc/claude-code/managed-settings.d/claude-sessions.json
+# Until base 2026.10.26 the binary was pinned here (v0.4.7 last), with the drop-in generated
+# from it at build time; git history has that block.
+RUN mkdir -p /opt/claude-sessions /etc/claude-code/managed-settings.d \
+    && chmod 0755 /opt/claude-sessions /etc/claude-code/managed-settings.d
 
 # ── zmx: what a claude-sessions slot lives in (since claude-sessions v0.4.0) ──────
 # Each slot is a zmx session: it holds claude across a dropped link, as abduco did, and
@@ -648,14 +581,13 @@ RUN set -eux; \
     test "$(ZMX_DIR=/tmp/zmx-build-check zmx version | awk '$1 == "zmx" { print $2 }')" = "${ZMX_VERSION}"; \
     rm -rf /tmp/zmx-build-check
 
-# THE DOOR — what every ssh session runs, as sshd_config's ForceCommand (2026-10-04): the
-# claude-sessions menu at a terminal, a forwarded command as given, a login shell for
-# anything else or if the menu fails. infra's half of the contract in claude-sessions'
-# docs/design.md § "The door", and why it is shaped that way is in the file's own header.
-# Root-owned beside in-workspace for the same reason. The image that names it is the
-# image that has it, so it cannot be missing the way a client's RemoteCommand allowed.
-COPY claude-sessions-door /usr/local/bin/claude-sessions-door
-RUN chmod 0755 /usr/local/bin/claude-sessions-door
+# THE DOOR — what every ssh session runs, as sshd_config's ForceCommand (2026-10-04): a
+# forwarded command as given, and otherwise a login shell in /workspace. Until 2026-10-26 it
+# opened the claude-sessions menu at a terminal; the menu is the hub's now (dev/hub/door), and
+# what reaches a container's door is the hub's own `ssh <c> claude-sessions agent` or a
+# person's shell. Root-owned beside in-workspace for the same reason.
+COPY dev-door /usr/local/bin/dev-door
+RUN chmod 0755 /usr/local/bin/dev-door
 
 USER ${USERNAME}
 WORKDIR /workspace
