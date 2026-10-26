@@ -558,6 +558,9 @@ one image at once) would lower it further. dockerd reloads that setting on SIGHU
 and belongs with the MicroOS move. **`one` did it first, on Alpine, on 2026-10-26**
 ([`decisions.md`](decisions.md)): a subvolume mounted over `/var/lib/docker`, copied with every
 container id intact, which proves the procedure on the box where breakage costs nothing.
+**`zero` followed the same day**, onto the SSD's `sda2` rather than its array, so the SD
+card no longer carries image pulls on either box; the pull throttling above stays, as the
+smaller fix for what is left.
 
 **Filed 2026-10-26, no phase number — 7.3 GB of a dead containerd store on `one`'s SD card.**
 `/var/lib/containerd` is the standalone containerd service's root, and its `meta.db` was last

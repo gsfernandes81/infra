@@ -214,6 +214,11 @@ degraded RAID1 mount without `degraded`. `/etc/init.d/bcache-register` registers
 waits up to 30 seconds for `/dev/bcache0` and `/dev/bcache1`. It always exits 0, so a
 failure there never stops the boot, and the immutable mountpoints mean nothing is written
 while the array is absent.
+**`/var/lib/docker` is not on the array** but on the SSD's `sda2`, outside bcache, since
+2026-10-26 ([decisions.md](decisions.md)), with the same two guards. So a missing array
+takes Immich and Syncthing down while Docker and the dev containers still run; a missing
+SSD stops dockerd, so **nothing runs on `zero`, the dev containers included**, and the
+array would also lose its cache. The box still boots and ssh still works, as on `one`.
 
 **`two`:** root on `/dev/mmcblk0p2`, an ordinary writable install, and no `/media` data
 mounts, so neither guard applies. Diskless mode is planned, not done

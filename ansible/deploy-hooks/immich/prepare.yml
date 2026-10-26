@@ -22,7 +22,8 @@
     immich_dump_dir: /var/backups/immich
     immich_dump_keep: 3
     # Free space wanted before a dump starts: this, or twice the largest dump already kept,
-    # whichever is more. The SD card also holds /var/lib/docker. The first dump, before
+    # whichever is more. The SD card held /var/lib/docker until 2026-10-26, when it moved to
+    # sda2 (docs/decisions.md); the floor stays, as cheap. The first dump, before
     # v3.3.5 on 2026-10-25, was 141 MB compressed and took about a minute.
     immich_dump_min_free_mib: 2048
     # To the second, so two runs in one minute cannot write the same name.
