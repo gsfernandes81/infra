@@ -46,7 +46,7 @@ services:
           memory: '256M'
 
   syncthing:
-    image: syncthing/syncthing:2.0.14@sha256:6d2ab058383b533e045cf2c32fc4c6bbe87c612c92bc2aca9f552fb099b2e123
+    image: syncthing/syncthing:2.1.7@sha256:2b71da7c0d0a91a6ae5285ad079226fecc0a365d08b27720e1f7037b018f7546
     container_name: syncthing
     hostname: syncthing-torrents.gsrpi.uk
     environment:
