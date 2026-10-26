@@ -16,6 +16,8 @@ cd ~/infra/ansible
 ansible-playbook playbooks/client-home-ssh-config.yml
 ```
 
+`-e container=dev` writes the hub's block and token alone — the one a new client needs.
+
 Run it **wherever the client is** — the phone, or WSL on the laptop, where the same run
 also writes the Windows side. It reaches no host in the fleet; it writes files on the
 machine executing it. `ansible/README.md` is how to run it, including the flag for a
@@ -26,7 +28,7 @@ Two blocks land in `~/.ssh/config`, each edited in place on re-runs:
 | Marker | Written by | Holds |
 |---|---|---|
 | `# BEGIN infra-fleet` | `client-home-ssh-config.yml` (its fleet half) → `templates/ssh-fleet-block.j2` | the three Pis, three ways each; their ProxyCommand is `~/.config/fleet/access-ssh` |
-| `# BEGIN <alias>` | `client-home-ssh-config.yml` (its dev half, once per container) → `templates/ssh-dev-block.j2` | one dev container, two ways |
+| `# BEGIN <alias>` | `client-home-ssh-config.yml` (its dev half, once per alias) → `templates/ssh-dev-block.j2` | `dev`, the hub — and each container's old block until it moves in |
 
 Do not hand-edit between the markers. Change the template and re-run — a hand edit
 survives until the next run and then vanishes, which is the worst of both.
@@ -57,47 +59,64 @@ a file with no defaults section to lose to.
 A note that must stay next to `Host *` belongs **inside** that block, indented, not above
 it — anything above it is separated from it by the next block a playbook inserts.
 
-## Three routes to a dev container
+## The way in: `ssh dev`
 
-Each container gets **one route and one alias**; `<alias>-sh` is a second name for it.
+**Since 2026-10-26 one alias reaches every dev container: `dev`, the hub** (`dev/README.md`
+§ *The hub*). It has one route — the hub's tunnel → Access → the `dev-cloudflared` sidecar →
+the hub's sshd — and `dev-sh` is a second name for it.
 
 | Alias | Route | Fails when |
 |---|---|---|
-| `<alias>` (and `<alias>-sh`) | its own tunnel → Access → the container's sshd | its tunnel, its Access app, its token, or Cloudflare |
+| `dev` (and `dev-sh`) | the hub's tunnel → Access → the hub's sshd | its tunnel, its Access app, this client's token, Cloudflare, or the hub |
 
-**The container decides what a login runs, not the client** (2026-10-04, infra#7). Its sshd
-forces every session through `claude-sessions-door` (`dev/sshd_config`, `ForceCommand`),
-and the client block is transport only — `HostName`, `User`, `ProxyCommand`, the host key
-and the identity. So:
+**The hub decides what a login runs, not the client.** Its sshd forces every session through
+`hub-door` (`dev/hub/sshd_config`, `ForceCommand`), and the client block is transport only —
+`HostName`, `User`, `ProxyCommand`, the host key and the identity. So:
 
 | You run | You get |
 |---|---|
-| `ssh <alias>` | **the session menu** — every session in the container, `Enter` to attach or resume, `n` for a new one, `q` to leave |
-| `ssh <alias> 'git log'` | the command, in `~`, exactly as any ssh runs it — `ssh <alias> in-workspace git log` for the repo |
-| `scp`, `sftp`, Zed, ansible | work, as against any sshd; `scp file <alias>:` lands in `~` |
+| `ssh dev` | **the session menu over every container** — `Enter` on a container for its sessions (straight in while there is only one), `Enter` to attach or resume, `n` for a new one, `s` for a shell in that container, `Esc` back, `q` to leave |
+| `ssh dev '<cmd>'` | the command, in the hub's `~` — `ssh dev ssh infra-dev '<cmd>'` for a container, two rounds of quoting |
+| `ssh -T dev` | a login shell in the hub, with no terminal |
+| scp, sftp, Zed, `ssh -L/-R` | **nothing in a container** — the hub's sshd forwards nothing and its key in each container is `restrict`; a gap this layout opened and has not closed |
+
+Each session the menu opens is a zmx session in its container, so it outlives the link: an
+ssh session from a phone dies at the lock screen, and the work must not. The door never
+locks you out: a menu that cannot run (too narrow a terminal, a broken release) says why and
+drops to a login shell in the hub, from which `ssh <container>` still works.
+
+**Behind the hub, each container's own door is `dev-door`** (`dev/sshd_config`), which was
+`claude-sessions-door` until 2026-10-26 and opened the menu: now it runs a forwarded command
+as given — the hub's calls are forwarded commands — and gives anything else a login shell in
+`/workspace`.
+
+### The old per-container blocks, kept until each container moves in
+
+`client-home-ssh-config.yml` still writes a block for `infra-dev`, `or3-dev`, `dd-dev` and
+`ds-dev` beside `dev`: **each reached that container over its own tunnel, and works only
+while the container still runs its old, pre-hub setup.** A container that has moved into
+`dev/compose.yaml` runs no connector — the base no longer carries cloudflared — so its old
+alias names a hostname with nothing behind it and fails at Cloudflare, which looks exactly
+like the container being down. Each block, and its import in the play, goes in the same
+commit that retires that container's old tunnel. Until then this is how those aliases
+behave against a container that has *not* moved:
+
+| You run | You get |
+|---|---|
+| `ssh <alias>` | that container's own claude-sessions menu, from before the hub (its door, `claude-sessions-door`) |
+| `ssh <alias> 'git log'` | the command, in `~` — `ssh <alias> in-workspace git log` for the repo |
+| `scp`, `sftp`, Zed, ansible | work, as against any sshd |
 | `ssh -t <alias> in-workspace` | a login shell in `/workspace` |
-| `ssh -T <alias>` | a login shell with no terminal |
 | `ssh -N -L/-R …` | the forward, untouched — `-N` opens no session, so the door never runs |
-
-Each session the menu opens is a zmx session (abduco before claude-sessions v0.4.0), so it outlives the link: an ssh session
-from a phone dies at the lock screen, and the work must not. The door never locks you out:
-a menu that cannot run (too narrow a terminal, a missing binary) says why and drops to a
-login shell.
-
-**A container whose base predates 2026-10-04 answers `ssh <alias>` with its plain login
-shell** — the old `-sh` behaviour, not an error — until its repo bumps `BASE_TAG`; the
-menu is then `claude-sessions-door` by hand. The client cannot name a program the image
-lacks any more, which is what used to make a not-yet-bumped child answer `exec:
-claude-sessions-door: not found`.
 
 **Before 2026-10-04** the main alias carried `RequestTTY yes` and `RemoteCommand
 in-workspace claude-sessions-door`, which made `ssh <alias> <cmd>` a client-side error
 (*cannot execute command-line and remote command*) and scp/sftp to it unreliable;
 `<alias>-sh` existed for both. A client not yet re-run still has that block and keeps
-working: its `RemoteCommand` arrives at the forced door as a command, and the door runs it
-— `in-workspace` then starts the door again, which this time sees a login. `<alias>-sh` is
-kept as a name so tools that use it (`server-add-authorized-keys.yml`, or3's phone tunnel)
-need no change, and goes once nothing does.
+working against an old-setup container: its `RemoteCommand` arrives at the forced door as a
+command, and the door runs it. `<alias>-sh` is kept as a name so tools that use it
+(`server-add-authorized-keys.yml`, or3's phone tunnel) need no change, and goes once nothing
+does.
 
 ### Break glass by hand — there is no third alias, and no port
 
@@ -106,11 +125,14 @@ need no change, and goes once nothing does.
 `docker exec` on the container's host, through the host's own ssh:
 
 ```sh
-ssh -t <host> 'cd ~/infra/dev && make shell'     # zero today; the container's host, whichever it is
+ssh -t <host> 'cd ~/infra/dev && make shell'          # infra-dev; zero today, the project's host whichever it is
+ssh -t <host> 'cd ~/infra/dev && make shell C=<c>'    # another container; C=hub for the hub
+ssh -t <host> 'cd ~/infra/dev && make claude'         # the hub's menu, as ssh dev lands on it
 ```
 
-`-t` because `make` sudos and sudo asks. `make claude` lands on the claude-sessions menu
-the same way. The other containers' repos have their own `make`.
+`-t` because `make` sudos and sudo asks. `make shell` is `docker exec`, so it reaches a
+container with the hub down as well as the tunnel. A container that has not moved in yet is
+still its own repo's `make`.
 
 **Why an alias was the wrong shape for it.** The generated block had `ProxyCommand ssh
 zero nc %h %p` with `zero` written in, because a client-side alias must name the host the
@@ -200,8 +222,10 @@ Without a shared `HostKeyAlias`, each route keeps its own `known_hosts` entry. A
 rarely-used path then has no stored key and simply prompts you to accept whatever it is
 handed — during a rescue, which is exactly when you are least likely to check.
 
-A container's key lives in a docker volume and survives rebuilds, so all three of its
-routes meet the same key. To clear one later: `ssh-keygen -R <alias>`.
+A container's key lives in a docker volume and survives rebuilds, so every route to it
+meets the same key. **The hub's is in its `hub-state` volume**, which `make down-volumes`
+drops: after that, `ssh dev` meets a new key and refuses it, correctly — expect it then, and
+only then. To clear one: `ssh-keygen -R <alias>`.
 
 ## Compression, and which end turns it on
 
@@ -210,7 +234,8 @@ output, which is text and compresses hard, and it is compressed before it is enc
 so what crosses the phone's radio is the smaller thing.
 
 **The client is the half that turns it on.** sshd already permits it by default and
-`dev/sshd_config` says so out loud, but ssh's own default is `no` and nothing is
+`dev/hub/sshd_config` — the end of the phone's session since 2026-10-26 — says so out loud,
+as `dev/sshd_config` does, but ssh's own default is `no` and nothing is
 negotiated unless both ends offer it. On a break-glass session from the LAN it costs a
 little CPU on a Pi for no metered link, which is not worth a second `Host` block to
 avoid; a rescue session is not where you tune throughput.
@@ -261,8 +286,8 @@ cable. This exists for the ship: the laptop has no internet, the phone does.
 
 ## The service token, and where it is allowed to live
 
-Each dev container sits behind a Cloudflare Access application admitting one service
-token. The client holds it at `~/.config/<alias>/token`, mode 600, and the
+The hub — and, until each moves in, every old per-container tunnel — sits behind a
+Cloudflare Access application admitting service tokens, one per client. The client holds it at `~/.config/<alias>/token`, mode 600, and the
 `ProxyCommand` sources it:
 
 ```
@@ -363,37 +388,51 @@ Windows.
 ## Letting a new client in
 
 Two halves. The ssh block and the service token are things a client *holds*;
-`client-home-ssh-config.yml` writes those. The key that admits it is a fact about the **container**:
+`client-home-ssh-config.yml` writes those. The key that admits it is a fact about the **hub**
+— since 2026-10-26 the only sshd a client reaches — and lives in `~/.dev-secrets/authorized_keys`
+on zero:
 
 ```sh
-ansible-playbook playbooks/server-add-authorized-keys.yml -e client_pubkey_file=~/laptop.pub
+ansible-playbook playbooks/server-add-authorized-keys.yml -e client_pubkey_file=~/laptop.pub \
+  -e containers='["dev"]'
 ```
+
+`-e containers='["dev"]'` because the play's default list, `infra-dev` and `or3-dev`, predates
+the hub. `dev` fits its convention as it stands — secrets in `~/.dev-secrets`, reached over
+`dev-sh` — so the host-side append and the refresh below both work unchanged. The hub's first
+key, the control node's own, is written by `server-create-dev-container.yml -e container=dev`.
 
 `Permission denied (publickey)` with a key visible in `ssh -v` means the client half is
 right and this one has not been run.
 
-**It does not restart anything, and must not.** `dev/entrypoint.sh` copies the
-`authorized_keys` out of the read-only secrets mount at start-up, and `sshd_config` names
-that copy — so the play refreshes the copy inside each container over its `-sh` alias.
+**It does not restart anything, and must not.** Each entrypoint — the hub's and every dev
+container's — copies the `authorized_keys` out of its read-only secrets mount at start-up,
+and `sshd_config` names that copy, so the play refreshes the copy over the `-sh` alias.
 Restarting sshd would be the wrong tool: sshd is **exec'd as PID 1**, so restarting it
-restarts the container and every detached session goes with it. It is also
-unnecessary — sshd reads `AuthorizedKeysFile` on each authentication attempt, not at
+restarts the container — and in a dev container every detached session goes with it. It is
+also unnecessary — sshd reads `AuthorizedKeysFile` on each authentication attempt, not at
 start-up.
 
-`dd-dev` and `ds-dev` are excluded: their drop-in names its own `AuthorizedKeysFile` and
-serves the host account's keys, so add the key to `gavin`'s `~/.ssh/authorized_keys` on
-zero for those.
+**The refresh cannot drop the hub's key from a dev container**: the entrypoint writes that key
+to its own file, `~/.ssh/authorized_keys.hub`, which `sshd_config` reads beside the copy the
+refresh overwrites. A moved-in container is not reached by the refresh anyway — its old `-sh`
+alias names a tunnel with no connector, so that step reports it could not refresh, and the key
+lands at the container's next start.
+
+`dd-dev` and `ds-dev`, on their old setup, are excluded: their drop-in names its own
+`AuthorizedKeysFile` and serves the host account's keys, so add the key to `gavin`'s
+`~/.ssh/authorized_keys` on zero for those.
 
 ## The dev containers' second door
 
 `ssh-zero-dev-dd.gsrpi.uk` and `ssh-zero-dev-ds.gsrpi.uk` are rules on **zero's** host
-tunnel pointing at those containers' loopback ports. Now that every container runs its own
-connector behind its own hostname and token, they are a second door to each — a different
-door with a different trust story.
+tunnel pointing at those containers' loopback ports. Beside the hub — and, before it, beside
+each container's own connector — they are a second door to each, with a different trust
+story.
 
-No client alias points at them. `dd-dev` and `ds-dev` are not running until they are
-deployed with a connector of their own, at which point `client-home-ssh-config.yml` gives them the
-same block every other container has, one route under two names — so an alias for the old door would name a
+No client alias points at them. `dd-dev` and `ds-dev` are not running, and since 2026-10-26
+neither gets a connector of its own: each moves into `dev/compose.yaml` behind the hub, and is
+reached by `ssh dev` like every other container. An alias for the old door would name a
 hostname with nothing behind it, which fails exactly like a container being down.
 
 Dropping the alias does not close the door, and nothing about this pretends it does. The

@@ -186,15 +186,22 @@ else
     chmod 600 "$HOME/.ssh/authorized_keys"
 fi
 
-# THE HUB'S KEY, from the volume the hub publishes it in (read-only here). Appended with
+# THE HUB'S KEY, from the volume the hub publishes it in (read-only here), with
 # `restrict,pty`: the hub runs commands and, for an attach, wants a terminal, and nothing
 # else — no forwarding, no agent, no X11, no ~/.ssh/rc. The key itself never leaves the hub
-# (decisions.md, the dev-pool rows); only its public half is here. A child whose drop-in
-# names its own AuthorizedKeysFile must list ~/.ssh/authorized_keys in it too, or sshd never
-# reads this line — compose.yaml's move-in steps say so.
+# (decisions.md, the dev-pool rows); only its public half is here.
+#
+# ITS OWN FILE, NOT A LINE APPENDED TO authorized_keys: server-add-authorized-keys.yml
+# refreshes that file in a running container by copying the secrets dir's over it, which
+# would drop the hub's line until the next start and take the container out of the menu.
+# sshd_config lists both files. A child whose drop-in names its own AuthorizedKeysFile must
+# list this one too, or sshd never reads it — compose.yaml's move-in steps say so.
+# rm -f first: a write follows a symlink, and nothing else should own this path.
 HUB_PUB=/opt/claude-sessions/hub.pub
+rm -f "$HOME/.ssh/authorized_keys.hub"
 if [ -s "$HUB_PUB" ] && grep -q '^ssh-' "$HUB_PUB"; then
-    printf 'restrict,pty %s\n' "$(head -1 "$HUB_PUB")" >> "$HOME/.ssh/authorized_keys"
+    printf 'restrict,pty %s\n' "$(head -1 "$HUB_PUB")" > "$HOME/.ssh/authorized_keys.hub"
+    chmod 600 "$HOME/.ssh/authorized_keys.hub"
     say "the hub's key is authorised (restrict,pty) — the hub can reach this container"
 else
     say "WARNING: no hub key at $HUB_PUB — the hub cannot reach this container. Is the hub up?"

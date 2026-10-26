@@ -60,8 +60,10 @@ ListenAddress 0.0.0.0
 HostKey /home/dev/.ssh-host/ssh_host_ed25519_key
 PidFile /home/dev/.ssh-host/sshd.pid
 
-# Key-only, `dev` only. A non-root sshd can only ever serve its own account.
-AuthorizedKeysFile /home/dev/.ssh/authorized_keys
+# Key-only, `dev` only. A non-root sshd can only ever serve its own account. The second
+# file is the hub's key alone, written by entrypoint.sh, kept apart so that refreshing the
+# first (server-add-authorized-keys.yml copies over it) cannot drop the hub.
+AuthorizedKeysFile /home/dev/.ssh/authorized_keys /home/dev/.ssh/authorized_keys.hub
 PubkeyAuthentication yes
 PasswordAuthentication no
 KbdInteractiveAuthentication no

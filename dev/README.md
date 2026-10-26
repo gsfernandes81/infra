@@ -1,10 +1,22 @@
-# infra-dev — the development container on `zero`
+# dev — the dev containers on `zero`, and the hub in front of them
 
-Runs Claude Code against **this** repo on `zero` (Pi 5, arm64), reached by ssh, with
-Ansible in the image — though **it is not a control node by default**: no fleet key, no
-route to `zero`, `one` or `two`. That is a decision, not an omission; see *Not a control
-node, by default* below and `../docs/management-plane.md` § *A control node inside the
-fleet*, where making it one is filed as OPEN.
+This directory is one Compose project, `name: dev`, holding every dev container on `zero`
+(Pi 5, arm64) and the **hub** that is the way in to all of them: `ssh dev` lands on one
+claude-sessions menu over every container. **`infra-dev`** is this repo's own container —
+Claude Code against **this** repo, with Ansible in the image — and most of this README is
+about it. It **is not a control node by default**: no fleet key, no route to `zero`, `one`
+or `two`. That is a decision, not an omission; see *The control-node question, deferred*
+below and `../docs/management-plane.md` § *A control node inside the fleet*.
+
+> **⚠︎ Built 2026-10-26, not yet on the fleet.** Until the owner brings it up, zero still
+> runs the old layout: `infra-dev` alone in a project of its own name, its `/workspace` a bind
+> mount of `~gavin/infra`, with its own tunnel, its own offload loop and the menu inside it.
+> git history has the README that described that. Two things stand between this file and the
+> box: **claude-sessions 0.5.0 is not released**, so the two hashes in `hub/Dockerfile` are
+> placeholders (`FILL-FROM-THE-v0.5.0-RELEASE`) and the hub's build fails at `sha256sum -c`,
+> on purpose, until they are filled from the release; and base `2026.10.26` is published by
+> CI only when this reaches `main` (`make base` builds it locally meanwhile). Then the move
+> itself, which is the owner's — *Moving a container in* below has the order.
 
 ## Why this exists
 
@@ -30,8 +42,8 @@ been consciously postponed rather than an omission.
 
 ## What it is not
 
-- **Not a tunnel endpoint.** `or3-dev` publishes an sshd that the phone terminates a
-  reverse forward on, to reach the vessel LAN. Nothing tunnels back through this one,
+- **Not a tunnel endpoint.** `or3-dev` runs an sshd that the phone terminates a reverse
+  forward on, to reach the vessel LAN. Nothing tunnels back through this one,
   and its `sshd_config` sets `AllowTcpForwarding no` to keep it that way.
 - **Not a Remote Control host — and since 2026-08-25 neither is anything else here.**
   This container existed to replace driving Claude from the phone, so shipping a disabled
@@ -40,11 +52,12 @@ been consciously postponed rather than an omission.
   the container's payload, `or3-dev` shipped one defaulted off, and three arrangements for
   one capability is three things to remember and three ways to be confused at 2am. All of
   it is deleted — the supervisors in their repos, the hook and `DEV_REMOTE_CONTROL` here.
-  **One way in, everywhere: `ssh <alias>`**, which lands on the `claude-sessions` menu
-  (since 2026-10-02; it was `abduco -A claude claude`). Every session it opens survives
-  a dropped link, and it does not put a permission classifier in charge of a container
-  holding deploy keys. Adding remote control back is a decision with reasoning attached,
-  not a variable somebody sets.
+  **One way in, everywhere: `ssh dev`**, which lands on the hub's `claude-sessions` menu
+  over every container (since 2026-10-26; before that `ssh <alias>` landed on each
+  container's own menu, and before 2026-10-02 on `abduco -A claude claude`). Every session
+  it opens survives a dropped link, and it does not put a permission classifier in charge
+  of a container holding deploy keys. Adding remote control back is a decision with
+  reasoning attached, not a variable somebody sets.
 - **Not a holder of the docker socket.** See *The socket line somebody will add* below.
 - **Not a control node, by default.** It ships ansible but no route to the fleet. See
   *The control-node question, deferred*.
@@ -53,100 +66,305 @@ been consciously postponed rather than an omission.
 
 | | |
 |---|---|
-| `Makefile` | **the management interface** — `make up`, `make login`, `make status`, … |
-| `compose.yaml` | the Compose project — `name: infra-dev`, one service, nothing published |
-| `Dockerfile` | Debian slim + Node 22 + Claude Code + gh + zmx + screen + sshd + **ansible** |
-| `entrypoint.sh` | ssh material → Claude config → `git pull` → **sshd(fg)** |
-| `login.sh` | in the image: the interactive logins, idempotent — `make login` |
+| `Makefile` | **the management interface** — `make up`, `make login`, `make status`, …; `C=<container>` picks the container (infra-dev unless said, `C=hub` the hub), `S=<service>` limits `make up` to one |
+| `compose.yaml` | the Compose project — `name: dev`: `hub`, its `cloudflared` sidecar (profile `tunnel`), `infra-dev`, and `or3-dev`, `dd-dev`, `ds-dev` each behind a profile of its own name; one network, `dev`; **nothing published on the host** |
+| `hub/` | the hub's image: `Dockerfile` (claude-sessions pinned by release and per-arch SHA-256), `entrypoint.sh`, `door` (installed as `hub-door`, its sshd's `ForceCommand`), `sshd_config`, and `ssh_config` — how it reaches each container |
+| `cloudflared.yml` | the hub tunnel's ingress, and the whole of it: `dev.gsrpi.uk` → `ssh://hub:2222` |
+| `Dockerfile.base` | `gsrpi-dev-base`, which every dev container is `FROM` — Debian trixie slim + Node 22 + Claude Code + gh + zmx + screen + sshd |
+| `Dockerfile` | infra-dev: the base + **ansible** |
+| `entrypoint.sh` | ssh material and the hub's key → Claude config → clone or pull the workspace → link the env files → `reconcile` → **sshd(fg)** |
+| `login.sh` | in the image: the interactive logins, and the clone if start-up could not make it — idempotent, `make login` |
 | `status.sh` | on the host: the readouts — `make status`, `verify`, `fleet`, `collections` |
 | `in-workspace` | in the image, on PATH: run a command where the work is, so no client names the path |
-| `claude-sessions-door` | in the image, on PATH, and sshd's `ForceCommand`: what every ssh session runs — the `claude-sessions` menu at a terminal, a forwarded command as given, a login shell for anything else or if the menu fails (see *claude-sessions*) |
+| `dev-door` | in the image, on PATH, and sshd's `ForceCommand`: a forwarded command as given — the hub's calls among them — and otherwise a login shell in `/workspace`. It was `claude-sessions-door`, and opened the menu, until 2026-10-26 |
 | *(no setup script)* | the host side is `ansible/playbooks/server-create-dev-container.yml`, run from a control node |
 | `sshd_config` / `ssh_config` | the in-container daemon, and the baked half of how it reaches out |
 | `config.fish` | fish's config, baked in — puts every login shell in `/workspace` |
-| `.env.example` | copy to `.env` on zero and edit |
+| `.env.example` | copy to `.env` on zero; **one `.env` for the whole project, and every line in it is required** — Compose refuses a required variable it cannot fill even for a service whose profile is off |
 
 ## Bring-up, from nothing
 
-**This is the whole of it. No fleet access, no Cloudflare** — both are additions, decided
-separately, and neither is needed for a claude running on zero.
-
-**Two commands, from two places.** The host side is a playbook, run from a control node
-— the phone — because that is where ansible is and because the setup is not something
-zero should have a script for:
+**No fleet access, and one Cloudflare tunnel — the hub's.** The host side is two runs of a
+playbook from a control node — the phone — because that is where ansible is and because the
+setup is not something zero should have a script for:
 
 ```sh
 # on the control node
 cd ~/infra/ansible
-ansible-playbook playbooks/server-create-dev-container.yml --check --diff    # prove first
-ansible-playbook playbooks/server-create-dev-container.yml                  # edge + host halves, one run
+ansible-playbook playbooks/server-create-dev-container.yml --check --diff     # prove first
+ansible-playbook playbooks/server-create-dev-container.yml                    # infra-dev
+ansible-playbook playbooks/server-create-dev-container.yml -e container=dev   # the hub
 ```
 
-That creates the secrets directory, generates the GitHub deploy key, authorises **this
-control node's own public key** so it can ssh in, and writes `dev/.env`. It prints the one
-`gh repo deploy-key add …` command it cannot run itself. Then, on zero, in your own
-terminal — `gavin` is not in the docker group, so this half is never an ansible job:
+**The plain run is infra-dev's host side.** It creates the secrets directory, generates the
+GitHub deploy key, authorises this control node's own public key, starts `dev/.env` from
+`.env.example` if there is none, and writes `INFRA_SECRETS` into it — by line, because that
+file now serves every container in the project and the hub. It prints the one `gh repo
+deploy-key add …` command it cannot run itself. Its edge half still makes or confirms
+infra-dev's *own* tunnel, DNS record and Access application, the pre-hub way in; nothing
+uses them once infra-dev runs here, and retiring them is a change of its own.
+
+**`-e container=dev` is the hub's.** The edge half makes the tunnel `dev`, the record
+`dev.gsrpi.uk` and an Access application with no policy yet; then `_dev-hub-host.yml` makes
+`~/.dev-secrets` (0700) — `tunnel.json`, gavin-owned 0600 so the sidecar can read it, and
+`authorized_keys` with this control node's key, the clients allowed to `ssh dev` — and writes
+`HUB_SECRETS` and `HUB_TUNNEL_ID` into `dev/.env`, the id beside the credentials it came from,
+in the same run. **The hub's own key is not made here and never is**: the hub makes it at
+first start, in its own volume (*The hub*, below).
+
+Then, on zero, in your own terminal — `gavin` is not in the docker group, so this half is
+never an ansible job:
 
 ```sh
-cd ~/infra/dev && make dev             # build, start, then walk the two logins
+cd ~/infra/dev && make dev     # build, start the hub, its tunnel and infra-dev, then walk the logins
 ```
 
-That gives you a container reachable from zero — `make claude` or `make shell` there,
-`ssh -t zero 'cd ~/infra/dev && make shell'` from the phone — and over its own tunnel
-once that is provisioned. The two optional additions, each with its own
-section below and each safe to skip indefinitely:
+And on each client — the machine you ssh *from*:
+
+```sh
+ansible-playbook playbooks/client-home-ssh-config.yml -e container=dev
+ssh dev
+```
+
+`make dev` is `make up` followed by `make login`. `make up` builds and starts whatever the
+profiles in `.env` name — the hub always, `cloudflared` with `tunnel` in `COMPOSE_PROFILES`
+(the example has it), and infra-dev — with every dev container waiting for the hub to be
+healthy first. `make login` is the walkthrough in `login.sh`: the deploy key, the fleet
+(reported as not configured, which is the default), `gh auth login`, `claude auth login`, and
+the workspace clone if start-up could not make it. Every step reads the current state first
+and only prompts for what is not done, so re-running it is safe and usually silent. Only the
+logins are interactive, and both need a tty — which is why they are in the image rather than
+in a playbook.
+
+Then `make verify` should read `sshd: running in the foreground`, `auth: claude logged
+in`, `colls: all of requirements.yml is installed`, `hub: key authorised; claude-sessions
+0.5.0 here, claude-sessions 0.5.0 at the hub`, and `fleet: no route to zero/one/two` — that
+last one is the default, not a fault. `make status` also shows `tunnel: the hub's, serving
+dev`, and `make status C=hub` is the hub's own.
 
 | | What it adds | Why it is off |
 |---|---|---|
 | *(not built)* | ssh to zero, one and two | makes this a control node on a box it controls — deferred |
-| `DEV_TUNNEL_HOSTNAME=…` + the playbook | reach it without `ssh zero` first | needs a Cloudflare API token and three objects, plus a token per client |
+| `DEV_CGROUP_PARENT=/devpool` | one memory pool over every dev container | the pool's boot file is not installed yet — [`../plans/dev-pool.md`](../plans/dev-pool.md), step 1 |
 
-`make dev` is `make up` followed by `make login`, which is the walkthrough in
-`login.sh`: the deploy key, the fleet (reported as not configured, which is the default),
-`gh auth login`, `claude auth login`. Every step reads the current state first and only
-prompts for what is not done, so re-running it is safe and usually silent. Only the last
-two are interactive, and both need a tty — which is why they are in the image rather than
-in a playbook.
+The tunnel is a profile, not a requirement: with `tunnel` out of `COMPOSE_PROFILES` the hub
+and the containers come up anyway, and `make claude` on zero is the menu `ssh dev` would have
+given.
 
-Then `make verify` should read `sshd: running in the foreground`, `auth: claude logged
-in`, `colls: all of requirements.yml is installed`, and `fleet: no route to zero/one/two`
-— that last one is the default, not a fault. With the tunnel provisioned, `make status`
-also shows `tunnel:` with a `readyConnections` count.
+## The hub
+
+`dev-hub`, built from `hub/`: a small image with no Claude Code, no node and no repo. It is
+the one container an ssh login lands on, and it does four things.
+
+**The menu.** Its sshd's `ForceCommand` is `hub-door`: the claude-sessions menu over every
+container at a terminal, a forwarded command as given, and a login shell for anything else —
+or when the menu exits non-zero, after one line saying why, so a broken menu costs a
+keypress and never locks the door. The hub is `restart: unless-stopped`, the one container
+here that is: it runs no claude, so coming back after a reboot with nobody watching is what
+a door should do. The dev containers stay `restart: "no"`.
+
+**The install.** At every start the hub runs `claude-sessions install /opt/claude-sessions`
+into the shared `claude-sessions` volume: the binary in `bin/`, the hooks drop-in in
+`managed-settings.d/`, the keep-alive skill in `skills/keepalive/`, and beside them
+`hub.pub`. Every dev container mounts that volume **read-only** at `/opt/claude-sessions`
+(on the base's `PATH`) and its `managed-settings.d` subpath over
+`/etc/claude-code/managed-settings.d`. So the version every container's hooks, agent and
+offload pass run is pinned **once**, in `hub/Dockerfile`, and reaches them at the hub's next
+start — no base bump, no child bump. Each file goes in through a temporary name and a
+rename, so a hook already running keeps the binary it started from. The hub's healthcheck
+passes once the binary, `hub.pub` and the drop-in directory exist, and every dev container
+`depends_on` it being healthy, because a subpath that does not exist cannot be mounted at
+all.
+
+**The key.** The hub makes an ed25519 key at its first start in its own `hub-state` volume
+(`~/.hub/id_ed25519`), and it is never anywhere else — not on zero, not on a control node,
+not in any other container; that is why the hub runs no agent of any kind. Only the public
+half leaves, as `hub.pub`, and each dev container's entrypoint appends it to its
+`authorized_keys` at start as `restrict,pty <key>`: commands and a terminal, no forwarding,
+no agent. The hub's `ssh_config` is one `Host *`: port 2222, user `dev`, that key,
+`accept-new` into `~/.hub/known_hosts` — learned on first contact over a network nothing
+else joins, then pinned, so a changed key still refuses — `BatchMode`, and a `ControlMaster`
+at `~/.ssh/cm/%C`, which is what makes the menu's second connection for an attach cost a
+round trip rather than a handshake.
+
+**The offloader.** The per-container offload loops are gone; the hub runs `claude-sessions
+offload-all` every three minutes at a fixed rate, which runs `claude-sessions offload` in
+every container at once over ssh, each line prefixed with its container. The measurement
+still happens *inside* each container — it reads `/proc` and the socket-diagnostics
+netlink, which answer only in the container's own namespaces — so only the timer moved.
+Each pass goes timestamped to `~/.hub/passes.log` in the hub (capped near 16 MB, trimmed to
+the newest 8 MB). `HUB_OFFLOAD=0` in `.env` stops the timer for everyone;
+`DEV_IDLE_OFFLOAD=0` stops it stopping anything in infra-dev, which compose passes on as
+`CLAUDE_SESSIONS_OFFLOAD=0` — that container's pass says so and looks at nothing.
+
+**Which containers** is `HUB_HOSTS` in `.env` — names on the `dev` network,
+space-separated, in the order the menu shows them, and only containers on base `2026.10.26`
+or later, which mount the hub's volume. With one name there, as today, there is no home
+screen: the menu is that container's, exactly as it was inside it.
+
+### The menu, two levels deep
+
+The owner's shape (2026-10-26), drawn in claude-sessions'
+[`docs/mockups.md`](https://github.com/gsfernandes81/claude-sessions/blob/main/docs/mockups.md),
+mockups 12 to 15, and binding as the rest of that file is:
+
+- **The home is the containers**, one row each, in `HUB_HOSTS` order, with what is in it in
+  words — `3 loaded · 1 offloaded`, `nothing open`, `not answering`. A container with a
+  session waiting for you is marked with an amber `!`; one with something unread is bold.
+  Marked, never moved. `Enter` opens one; `n` and `s` act in the container under the cursor.
+- **Inside a container: Loaded, Offloaded, and Archived**, which holds everything closed,
+  starts folded, and opens with `Enter` or a click on its heading — the heading says `Enter
+  shows` or `Enter hides`. A session waiting for you is an amber `!` on its row rather than a
+  group of its own. Every key is the single-container menu's, plus `Esc` back to the home.
+- **A container that does not answer** says so, and is asked again every 15 seconds without
+  redrawing — an idle hub still sends nothing down the metered link. `s` on it tries a shell
+  there anyway, which may answer where the agent did not.
+
+## The workspace and the env volume
+
+**`/workspace` is the container's own named volume, `infra-workspace`, cloned into — no
+longer zero's checkout.** zero's `~gavin/infra` is now only what the box runs; the
+container's tree is its own, so a commit made in here can never again leave zero's checkout
+diverged (`../CLAUDE.md` § *Git*, the 2026-10-25 divergence). **Push to share work**, as
+from anywhere else.
+
+At start the entrypoint fills an empty `/workspace` from `DEV_REPO` (set per service in
+`compose.yaml`): with `gh repo clone` when gh is logged in, and otherwise with `git clone
+git@github.com:$DEV_REPO` and the deploy key from the secrets mount, so a first start does
+not wait for `make login`. The global `insteadOf` rewrite turns gh's https URL into ssh, so
+both ways go out with the deploy key and differ only in what they need. A volume that holds
+files but no checkout is left alone with a warning — it is somebody's work. After that,
+every start pulls `--ff-only`, best-effort, as it always did. If both clones failed (the
+deploy key not yet registered, no network), `make login` clones once gh works.
+
+**A repo's untracked secrets live in a second volume, `~/.env.d`, linked into the
+workspace.** `DEV_ENV_FILES` (per service, space-separated workspace paths; `.env` for the
+children, none for infra, whose `.env` files live on the hosts) names them. Each becomes
+`/workspace/<f>` → `~/.env.d/<f>`, so the workspace volume — which can be thrown away and
+re-cloned — never holds a secret, and editing `/workspace/.env` writes through to the env
+volume. **Symlinks, not hard links:** two volumes are two mounts, and `link(2)` refuses
+across mounts. Rules the entrypoint keeps:
+
+- **Never clobbered.** A *regular* file where the link should be — an editor that saves by
+  rename, `sed -i` — is the newest copy, so it is reported and left: `mv /workspace/.env
+  ~/.env.d/.env`, then `make restart`, puts it back.
+- **Never committed.** Each link goes into the checkout's `.git/info/exclude`, whatever the
+  repo's `.gitignore` says.
+- **Only plain paths.** An entry that is absolute or contains `..` is refused with a
+  warning.
+
+**`make down-volumes` drops both kinds** — every cloned workspace, with any unpushed work in
+it, and every env volume — along with the hub's key. **or3-dev keeps its bind mount**: its
+`/workspace` is zero's own clone of or3 by or3's design, and changing that is or3's call
+([`../plans/dev-pool.md`](../plans/dev-pool.md)).
+
+## Moving a container in
+
+### infra-dev itself — the first move
+
+The old `infra-dev` project and this one cannot both run: they name the same container.
+**Every live session in infra-dev ends at the move.** The conversations do not — the
+`~/.claude` volume moves across — and each is resumable from Archived afterwards.
+
+1. **Release claude-sessions 0.5.0, and fill the two hashes** in `hub/Dockerfile` from the
+   release's `SHA256SUMS` asset (also in its notes), in a commit here.
+2. **Push everything first.** `/workspace` stops being zero's checkout and becomes a fresh
+   clone, so a commit that exists only in `~gavin/infra` on zero is not in the new container.
+   Nothing is deleted — the host checkout stays where it is — but account for every local
+   commit before moving on: `git log --left-right --cherry-mark HEAD...origin/main` in
+   `~gavin/infra`, and each `<` needs a `=` twin upstream (`../CLAUDE.md` § *Git*).
+3. **The two playbook runs** from *Bring-up, from nothing* above, from the control node.
+   They start nothing. On an existing `dev/.env` the plain run only sets `INFRA_SECRETS`,
+   and the old file's other lines are the old layout's, so on zero move it aside first
+   (`mv ~/infra/dev/.env ~/infra/dev/.env.old`) and let the runs start the new one from
+   `.env.example`.
+4. **Stop the old project, keeping its volumes, then start this one.** `ssh -t zero`, then
+   inside it:
+
+   ```sh
+   cd ~ && sudo docker compose -p infra-dev down     # from ~, so it reads no compose file
+   cd ~/infra/dev && make dev
+   ```
+
+   `down` without `-v` removes the container and its network and leaves every volume. Not
+   from `dev/`, where it would read the new `compose.yaml`, and not `make down`, which now
+   means project `dev`. The new file names the old volumes as **external** —
+   `infra-dev_infra-claude`, `_infra-gh`, `_infra-ssh-host`, `_infra-local-share`,
+   `_infra-jcode` — so the logins, the conversation history and the sshd host key move
+   with it.
+5. **On each client**, `client-home-ssh-config.yml -e container=dev`, then `ssh dev`. The
+   old `infra-dev` block stays in `~/.ssh/config` for now, and once the move is done it
+   names a tunnel with no connector behind it — infra-dev's base no longer carries
+   cloudflared — so `ssh infra-dev` fails at Cloudflare. That is expected.
+
+### Another repo's container
+
+`or3-dev`, `dd-dev` and `ds-dev` are already in `compose.yaml`, each behind its profile.
+Moving one in is, **in its own repo first**:
+
+- bump its `BASE_TAG` to `2026.10.26` or later;
+- drop its own `compose.yaml` — this one is its compose file now;
+- if an `sshd_config.d` drop-in sets `AuthorizedKeysFile` (dd-dev's and ds-dev's
+  `10-authorized-keys.conf` do), add `.ssh/authorized_keys.hub` to it, which is where the
+  entrypoint puts the hub's key.
+
+**Then here:**
+
+1. Its secrets directory exists at the path its `*_SECRETS` line in `.env` names. No
+   playbook makes one for these three yet, so by hand — mode 700, the contents its old
+   setup had.
+2. `docker volume ls`, and check the external names in `compose.yaml` against what is there.
+   They are guesses that follow the old project's pattern, and `up` refuses loudly if one is
+   wrong.
+3. Stop its old project the way infra-dev's was: `sudo docker compose -p <old-project> down`,
+   no `-v`.
+4. Add its profile to `COMPOSE_PROFILES` and its name to `HUB_HOSTS`, then `make up`. The
+   hub's environment changed, so the hub is recreated too: every `ssh dev` session drops,
+   and no claude does.
+5. Its `.env`, if it has one: write it at `~/.env.d/.env` inside the container (`make shell
+   C=<c>`), and restart it to link it. For or3, whose workspace is still the host clone, the
+   existing `.env` there is a regular file, so the entrypoint reports it and leaves it —
+   moving it into the env volume is or3's call.
+
+Its old tunnel and the client block that points at it are retired in a change of their own.
 
 ## How this container is used
 
-**You ssh into it and pick a session from the menu** — from Termux on the phone, or from
-a PC:
+**You `ssh dev` and pick a session from the menu** — from Termux on the phone, or from a
+PC. `Enter` on infra-dev (or straight in, while it is the only container), then `Enter`
+attaches or resumes, `n` starts a session in `/workspace`, `s` gives a login shell there.
 
-```sh
-ssh infra-dev                  # the claude-sessions menu: Enter attaches or resumes, n starts one
-ssh infra-dev in-workspace git log   # a command, in the repo (a bare `ssh infra-dev cmd` runs in ~)
-ssh -t infra-dev in-workspace  # a login shell in /workspace
-```
+**What a login to the container runs is the container's decision.** sshd forces every
+session through `dev-door` (`sshd_config`'s `ForceCommand`): a forwarded command runs as
+given, in `~`, exactly as it would without the door — the hub's `claude-sessions agent`
+and `agent exec` calls are forwarded commands, so this is all the hub needs of it — and
+anything else gets a login shell in `/workspace`. The menu is not in here any more; it is
+the hub's.
 
-**What a login runs is the container's decision.** sshd forces every session through
-`claude-sessions-door` (`sshd_config`'s `ForceCommand`, since 2026-10-04): a terminal with
-no command gets the menu, in `/workspace`; a forwarded command — `ssh … 'git log'`, scp,
-sftp, Zed, ansible — runs as given, in `~`, exactly as it would without the door; anything
-else gets a login shell. The client's ssh block is transport only, so it cannot name a
-program this image lacks. `infra-dev-sh` is the same alias under its old name.
+**Through the hub, a command is two hops:** `ssh dev ssh infra-dev 'in-workspace git log'`
+— the outer `ssh` runs `ssh infra-dev …` in the hub with the hub's key, and the inner one
+runs the rest in the container. Two rounds of shell quoting, so keep the inner command
+simple. **scp, sftp, Zed and `ssh -L`/`-R` to a container have no route at all** since the
+container lost its own tunnel: the hub's sshd forwards nothing, and its key in each
+container is `restrict`. That is a gap this change opened and has not closed; until it is,
+a file goes over as a stream (`ssh dev ssh infra-dev 'cat /workspace/f' > f`), or you work
+on it in the container.
 
 **`in-workspace` is a program in the image** for the commands that want the repo. It cds
 to `/workspace` and execs whatever it was handed — the directory and nothing else. *Where
-the work is* is the container's business: it is the container's bind mount, and no client
-should have to name the path. *Whether to hold the session across a dropped link* is the
-menu's: what it opens is a zmx session, because ssh dies at the phone's lock screen,
-while a laptop running a one-shot command wants no session holder at all.
+the work is* is the container's business: no client should have to name the path. *Whether
+to hold the session across a dropped link* is the menu's: what it opens is a zmx session,
+because ssh dies at the phone's lock screen, while a laptop running a one-shot command wants
+no session holder at all.
 
 The `cd` is needed for a reason worth knowing, because the symptom is baffling: sshd runs
 a remote command as `$SHELL -c '…'`, which is **not a login shell**, so `config.fish`'s
-`status is-login` guard is false and its cd never fires. A plain `ssh` with no command
-*does* get a login shell and lands correctly, and `docker exec` is fine too because it
-honours the image's `WORKDIR` — so `make claude` needs no wrapper. Only the remote-command
-path is affected — which is why, under the forced door, a forwarded command lands in `~`
-and `in-workspace` is how one asks for the repo. And it matters
-because the entrypoint seeds Claude Code's trust dialog for `/workspace`: a session started
-in `/home/dev` asks you to trust a directory that is not the repo.
+`status is-login` guard is false and its cd never fires. A plain login *does* get a login
+shell and lands correctly, and `docker exec` is fine too because it honours the image's
+`WORKDIR`. Only the remote-command path is affected — which is why a forwarded command
+lands in `~` and `in-workspace` is how one asks for the repo. And it matters because the
+entrypoint seeds Claude Code's trust dialog for `/workspace`: a session started in
+`/home/dev` asks you to trust a directory that is not the repo.
 
 Each slot is a **zmx** session (since claude-sessions v0.4.0; abduco before). The menu
 starts it and attaches it; **Ctrl-\\** detaches; what is under it keeps running, and a
@@ -156,40 +374,28 @@ at 80 columns), so one lock-screen drop on the phone costs one replay — and, u
 abduco, never switches the terminal to the alternate screen, which is what lets a wheel
 or a swipe scroll the terminal's own buffer instead of arriving in claude as arrow keys.
 Detaching sends `ESC c`, which clears Termux's scrollback; the history comes back with
-the next attach. A claude
-started *outside* a session dies with the ssh link that carried it, which on a phone
-means dies at the first lock screen.
+the next attach. A claude started *outside* a session dies with the ssh link that carried
+it, which on a phone means dies at the first lock screen.
 
-**There are two ways in and you want both.** Cloudflare is the normal one, and it is the
-only one with an alias:
+**There are two ways in and you want both.** `ssh dev` is the normal one — Cloudflare,
+Access, the sidecar, the hub's sshd — and the only one with an alias. The break-glass one
+is `docker exec` through zero's own ssh, typed rather than aliased:
 
-```
-Host infra-dev                     # normal — no dependency on zero's sshd
-  HostName infra-dev.gsrpi.uk
-  User dev
-  IdentityFile ~/.ssh/id_ed25519
-  ProxyCommand cloudflared access ssh --hostname %h
+```sh
+ssh -t zero 'cd ~/infra/dev && make shell'        # a shell in infra-dev; C=<c> for another, C=hub the hub
+ssh -t zero 'cd ~/infra/dev && make claude'       # the hub's menu, as ssh dev lands on it
 ```
 
-The break-glass one is `docker exec` through zero's own ssh, typed rather than aliased:
-`ssh -t zero 'cd ~/infra/dev && make shell'`. It had an alias until 2026-08-31 and a
-published loopback port until 2026-10-04; the alias went because a client-side alias must
-name the host the container sits on, which a movable container does not have, and the
+It survives a broken tunnel, Access application or token, and a hub whose sshd is down —
+`make shell` reaches a container without the hub at all. It had an alias until 2026-08-31
+and a published loopback port until 2026-10-04; the alias went because a client-side alias
+must name the host the container sits on, which a movable container does not have, and the
 port went because it only ever bought a passwordless hop through the same sshd.
-[`../docs/ssh-clients.md`](../docs/ssh-clients.md) has the reasoning. See *Cloudflare*
-below for why keeping the second way in
-at all is not belt-and-braces.
+[`../docs/ssh-clients.md`](../docs/ssh-clients.md) has the reasoning.
 
-Reaching that port from a client is a `ProxyCommand` running `nc`, never a `ProxyJump`,
-for the reason `or3/dev/README.md` § *`ProxyJump zero` does not work* sets out at length:
-zero's sshd sets `AllowTcpForwarding no`, which refuses the `direct-tcpip` channel
-`ProxyJump` opens, and flipping that setting would weaken the internet-facing box that
-runs Immich. The tunnel path needs no such workaround, which is one of the things it buys.
-
-The Makefile is how the container is stood up and looked at, not how it is used.
-`make claude` and `make shell` are the same two sessions reached from a terminal on
-zero instead — `make claude` attaches the *same* `claude` session the ssh line above
-does, not a second one.
+The Makefile is how the containers are stood up and looked at, not how they are used.
+`make claude` is the same menu `ssh dev` lands on, reached from a terminal on zero — the
+same sessions, not a second set.
 
 ## Crush, on trial
 
@@ -198,14 +404,9 @@ container on that base or later has it. The way in is the plain one, with nothin
 around it:
 
 ```sh
-ssh -t infra-dev in-workspace  # a login shell in the repo
+ssh dev                        # then s on infra-dev: a login shell in the repo
 crush                          # first start asks for a provider and its key
 ```
-
-A client whose ssh block still carries a `RemoteCommand` (one from before 2026-10-04 that
-has not re-run `client-home-ssh-config.yml`) refuses that first line client-side with
-*Cannot execute command-line and remote command*; `ssh -t infra-dev-sh in-workspace` gives
-the same shell there, or re-run the play ([`../docs/ssh-clients.md`](../docs/ssh-clients.md)).
 
 - **No slot.** The claude-sessions menu, its hooks and the offloader know nothing about
   Crush. It is not in a zmx session, so a dropped connection ends it — on the phone that
@@ -238,7 +439,7 @@ the same shell there, or re-run the play ([`../docs/ssh-clients.md`](../docs/ssh
 alongside Crush. Same plain way in:
 
 ```sh
-ssh -t infra-dev in-workspace  # a login shell in the repo
+ssh dev                        # then s on infra-dev: a login shell in the repo
 jcode                          # first start offers provider OAuth or a key
 ```
 
@@ -293,8 +494,8 @@ ansible-playbook playbooks/server-generate-fleet-inventory.yml -K
 phone, `ansible.cfg` is found only in the cwd, so every run needs `cd ~/infra/ansible`
 first and forgetting it produces `No inventory was parsed` — which reads as a broken
 inventory rather than a wrong directory, and cost half an hour once. Naming the file
-absolutely removes that failure. It points *into the bind mount*, so the config in
-force is the repo's and there is no second copy in the image to drift from it.
+absolutely removes that failure. It points *into the workspace*, so the config in
+force is the checkout's and there is no second copy in the image to drift from it.
 
 That works because a relative path inside `ansible.cfg` resolves against **the config
 file's own directory**, not the cwd — which is the part worth having checked rather than
@@ -537,6 +738,13 @@ way back to a session after a disconnect is the rest.
 
 ## Cloudflare
 
+**Since 2026-10-26 there is one tunnel for every dev container, the hub's**, and its
+connector is a sidecar: `dev-cloudflared`, in the `tunnel` profile, the image pinned by
+digest exactly as the deployment sidecars pin theirs. One hostname, `dev.gsrpi.uk`, whose
+one ingress rule is the hub's sshd on the project network (`cloudflared.yml`). The
+dev containers have no tunnel and no hostname of their own any more, and the base no longer
+carries cloudflared at all.
+
 ### The order
 
 Both playbooks run from the control node — **there is no ansible on zero and there should
@@ -546,27 +754,30 @@ direction, and this container is what zero's control node is *for*.
 ```sh
 cd ~/infra/ansible
 
-# 1. the SERVER side, one run: the EDGE (tunnel, DNS, an Access application with no
-#    policy yet) and then the HOST (secrets dir, deploy key, authorized_keys, dev/.env
-#    with the hostname). Reads the Cloudflare API token from ~/.config/cloudflare/api-token
-#    and prints how to mint one if it is missing — ../ansible/README.md § The Cloudflare API token.
-ansible-playbook playbooks/server-create-dev-container.yml --check
-ansible-playbook playbooks/server-create-dev-container.yml
+# 1. the SERVER side, one run: the EDGE (tunnel `dev`, its DNS record, an Access
+#    application with no policy yet) and then the hub's HOST half (~/.dev-secrets with
+#    tunnel.json and authorized_keys, HUB_SECRETS and HUB_TUNNEL_ID in dev/.env). Reads the
+#    Cloudflare API token from ~/.config/cloudflare/api-token and prints how to mint one if
+#    it is missing — ../ansible/README.md § The Cloudflare API token.
+ansible-playbook playbooks/server-create-dev-container.yml -e container=dev --check
+ansible-playbook playbooks/server-create-dev-container.yml -e container=dev
 
-# 2. start it, with the tunnel already in dev/.env
+# 2. start it, with `tunnel` in COMPOSE_PROFILES in dev/.env
 ssh -t zero 'cd ~/infra/dev && make up'
 
 # 3. the CLIENT — the machine you ssh FROM. Mints this client's own service token over
 #    the API and adds it to the application's policy; nothing is typed. See below.
-#    Every dev container and the fleet in one run; -e container=<alias> for one container,
-#    which is also the rotation path (-e replace_token=true).
-ansible-playbook playbooks/client-home-ssh-config.yml
+#    Every block and the fleet in one run; -e container=dev for the hub's alone, which is
+#    also the rotation path (-e replace_token=true).
+ansible-playbook playbooks/client-home-ssh-config.yml -e container=dev
 ```
 
-Until 2026-10-04 this was three plays and the container was started between them, so
-the host half ran twice; the edge half now runs first and hands the hostname to the
-host half inside the one run. The host half is for `infra-dev` only — the other
-containers keep theirs in their own repos — and the play says so for any other `-e container=`.
+The edge half is the one every dev container's tunnel was always made with, named `dev`;
+only the host half is the hub's own (`_dev-hub-host.yml`). `HUB_TUNNEL_ID` is written beside
+the credentials it came from in the same run, so the two cannot name different tunnels; the
+sidecar needs it on its command line because its image has no shell to read it out of the
+file. Under `--check` a tunnel that does not exist yet has no id, and the line is not written
+— never a placeholder, which would read as configured.
 
 **Step 3 is per client, and the laptop counts as two of them.** Windows' `ssh.exe` and
 WSL's `ssh` read different configs from different homes. Run this play *in WSL* and it
@@ -579,25 +790,26 @@ why the Windows token's permissions are printed rather than asserted, are in
 ### The service token is minted, not typed
 
 Since 2026-10-04 `client-home-ssh-config.yml` mints this client's own Access service token
-over the Cloudflare API — named `<alias>-<client>`, added to the container's Access
-policy, written straight to `~/.config/<alias>/token` at mode 600 — using the API token
-at `~/.config/cloudflare/api-token` on the same machine. Nothing is shown and nothing is
-pasted. If that file is missing the play prints how to mint one and stops;
-[`../ansible/README.md`](../ansible/README.md) § *The Cloudflare API token* is the same text.
+over the Cloudflare API — named `<alias>-<client>`, `dev-<client>` for the hub, added to the
+application's Access policy, written straight to `~/.config/<alias>/token` at mode 600 —
+using the API token at `~/.config/cloudflare/api-token` on the same machine. Nothing is
+shown and nothing is pasted. If that file is missing the play prints how to mint one and
+stops; [`../ansible/README.md`](../ansible/README.md) § *The Cloudflare API token* is the
+same text.
 
 One token per client means a lost laptop is one token to delete in Zero Trust and no other
 client notices. Re-running leaves an existing file alone; `-e replace_token=true` rotates
 this client's token and rewrites the file. The edge play creates the Access application
-with no policy, so a freshly created container admits nobody until a client has run.
+with no policy, so a freshly created tunnel admits nobody until a client has run.
 
-Then on zero: `cd ~/infra/dev && make up` — **not** `restart`, which does not re-read
-`compose.yaml`. After that `ssh infra-dev` works from the phone with no `ssh zero` hop.
-
-`cloudflared` runs **inside** this container, not on zero, which is
-[`../docs/management-plane.md`](../docs/management-plane.md) § *Addressing*'s decision
-and still the right one: the tunnel's identity travels with the container, so moving it
-to `one` changes no ingress rule anywhere. Every host-side alternative — extra rules on
-zero's existing tunnel, or a shared ingress container — breaks exactly there.
+**A sidecar, where the per-container tunnels ran inside each container.** Those followed
+[`../docs/management-plane.md`](../docs/management-plane.md) § *Addressing*: the tunnel's
+identity travelled with the container, so moving one to `one` changed no ingress rule. With
+one door for every container that argument applies to the hub instead — the hub, its
+sidecar and `cloudflared.yml` move together as one project — and a sidecar is the shape
+Phase 3 settled for deployments (`decisions.md`, *Sidecar, not baked-in*). It runs as the
+checkout's owner rather than the image's 65532, so the credentials the edge play leaves
+gavin-owned at 0600 serve it unchanged.
 
 **A playbook, not a script.** It was written as `dev/cf-provision.sh` first and that was
 the same instinct that put `bin/compose` in this repo. Provisioning the way in to a
@@ -608,9 +820,12 @@ discipline, and an API token that could have become a Vault variable at Phase 4 
 
 ### It is additive, and that is load-bearing
 
-`DEV_TUNNEL_HOSTNAME` unset means **no tunnel at all** and the container is reached with
-`make shell` on zero exactly as if none of this existed. Set but with no credentials
-present is a warning at start, not a failure to come up.
+`tunnel` out of `COMPOSE_PROFILES` means **no tunnel at all**: the hub and every container
+come up anyway, and `make claude` or `make shell` on zero is the way in exactly as if none of
+this existed. That is why the sidecar's tunnel id is `${HUB_TUNNEL_ID:-}` and not `:?` — a
+required variable stops Compose even with the profile off, so `:?` would hold every
+container hostage to a tunnel. With the profile on and no id or no credentials, the
+connector refuses at start and says so in `make tunnel-log`; nothing else is affected.
 
 **⚠︎ The loopback publish went on 2026-10-04.** This section used to argue for keeping
 it so that `docker exec` — needing sudo — was not the only fallback. Both paths ran
@@ -635,8 +850,8 @@ ELF 64-bit LSB executable, ARM aarch64, statically linked
 readelf -l : no INTERP segment      readelf -d : no dynamic section
 ```
 
-Fully static, no loader needed. The same hash is pinned in the `Dockerfile`. **The
-35.7 MiB is metered on the phone** and is priced in or3's `docs/data-ledger.md`.
+Fully static, no loader needed. (The base pinned the same build until 2026-10-26; the
+container side is the sidecar's image now.) **The 35.7 MiB is metered on the phone** and is priced in or3's `docs/data-ledger.md`.
 
 **Access does not add a browser.** `cloudflared access login --help` says, in its own
 words, *"The subcommand will launch a browser. For headless systems, a url is
@@ -655,7 +870,7 @@ This cost a round of confusion, so it is worth stating flatly before anything el
 | | Where | What it is | Who holds it |
 |---|---|---|---|
 | **API token** | My Profile → API Tokens | authorises the *playbook* to call the Cloudflare API | each machine that runs playbooks, at `~/.config/cloudflare/api-token` (0600); one per machine |
-| **Access service token** | Zero Trust → Access → Service credentials | a `client_id`/`client_secret` a *machine* presents to get **through** Access | each client, at `~/.config/infra-dev/token`; one per client, named `infra-dev-<client>`, minted by the client play |
+| **Access service token** | Zero Trust → Access → Service credentials | a `client_id`/`client_secret` a *machine* presents to get **through** Access | each client, at `~/.config/dev/token`; one per client, named `dev-<client>`, minted by the client play |
 
 They are different objects with different lifetimes and different homes, and naming an
 API token "service_token" — which is an entirely reasonable thing to do — makes them look
@@ -669,8 +884,8 @@ token (`400`, `service_token_in_use`), and the policy the client play writes *is
 reference.
 
 **The API token is a file, one per machine.** `~/.config/cloudflare/api-token` on each
-machine that runs playbooks, mode 600, outside the repo (the checkout is bind-mounted into
-this container) and outside `$INFRA_SECRETS` (mounted into it). Rolling or deleting it in
+machine that runs playbooks, mode 600, outside the repo (a checkout is where a secret gets
+committed) and outside every secrets directory here (each is mounted into a container). Rolling or deleting it in
 the dashboard breaks nothing already built — the tunnel, the DNS record, the Access
 application and the service tokens do not authenticate with it — so rotation is: roll it,
 overwrite the file. **It is the one thing that cannot be minted from the command line**,
@@ -696,15 +911,15 @@ broken rather than as the wrong policy type.
 
 | Secret | Lives | Must never be |
 |---|---|---|
-| Cloudflare **API token** | nowhere — `vars_prompt`, in memory for one run | in `$INFRA_SECRETS` |
-| Tunnel **credentials file** | `$INFRA_SECRETS/tunnel.json`, mode 600, mounted read-only | in argv or env |
-| Access **service token** | the phone's environment, mode-600 fish conf.d | in the container, or in a `ProxyCommand` |
+| Cloudflare **API token** | `~/.config/cloudflare/api-token` on each machine that runs playbooks | in `$HUB_SECRETS` or `$INFRA_SECRETS` |
+| Tunnel **credentials file** | `$HUB_SECRETS/tunnel.json`, mode 600, mounted read-only into the sidecar alone | in argv or env |
+| Access **service token** | each client's `~/.config/dev/token`, mode 600 | in a container, or in a `ProxyCommand` |
 
 Each of those "must never" is a specific failure, not tidiness:
 
-- **The API token cannot go in the secrets directory** because that directory is mounted
-  into the container. A container able to rewrite the Access policy in front of itself
-  is not protected by it. Nothing the running container does needs that token.
+- **The API token cannot go in a secrets directory** because each is mounted into a
+  container. A container able to rewrite the Access policy in front of itself is not
+  protected by it. Nothing the running container does needs that token.
 - **The tunnel credentials are a file, not `--token`.** ⚠︎ **So are the host tunnels'
   now** — that stopped being a difference on 2026-08-29, when 2g finished and every host
   moved to `--config` with its secret in `/etc/cloudflared/<host>.json` at 0600. The
@@ -715,20 +930,22 @@ Each of those "must never" is a specific failure, not tidiness:
   because it holds live secrets. A read-only tunnel credentials file is the spelling that
   is in neither.
 - **The service token must not be in the container**, because it authorises *reaching*
-  the container — putting it inside is the same mistake in the other direction. On the
-  phone it goes in the environment rather than the `ProxyCommand`, because a secret on a
-  command line is a secret in `ps` output and in shell history.
+  the containers — putting it inside is the same mistake in the other direction. On a
+  client it is a file the `ProxyCommand` sources rather than part of it, because a secret on
+  a command line is a secret in `ps` output and in shell history.
 
 ### Health
 
-`make status` reads a `tunnel` line with three distinguishable answers — off, configured
-but not connected, and serving — because a single up/down collapses the interesting
-middle case. The probe is `readyConnections` from cloudflared's own metrics endpoint on
-`127.0.0.1:20241`, which is the probe [`../docs/recovery.md`](../docs/recovery.md)
-already calibrated: counting sockets on port 7844 and reading the log were both tried on
-`one` and **both read dead against a tunnel that was serving normally**. A process check
-would repeat that mistake here in a new way — cloudflared is running the whole time it
-retries a tunnel that will never connect. `make tunnel-log` is what it points you at.
+`make status` reads a `tunnel` line with three distinguishable answers — no sidecar (the
+profile is off), running but not healthy, and serving — because a single up/down collapses
+the interesting middle case. It reads Docker's verdict on the sidecar's healthcheck rather
+than probing again, and that healthcheck is `cloudflared tunnel ready` against its own
+metrics endpoint on `127.0.0.1:20241` — `readyConnections` of at least one, the probe
+[`../docs/recovery.md`](../docs/recovery.md) already calibrated: counting sockets on port
+7844 and reading the log were both tried on `one` and **both read dead against a tunnel that
+was serving normally**. A process check would repeat that mistake here in a new way —
+cloudflared is running the whole time it retries a tunnel that will never connect. `make
+tunnel-log` (`docker logs dev-cloudflared`) is what it points you at.
 
 ## The control-node question, deferred
 
@@ -791,7 +1008,7 @@ is off.
 | git | `gsfernandes81/infra`, read-write | deploy key, generated on zero, never transmitted |
 | `gh` | your GitHub account, at whatever scope the token has | a login in the `infra-gh` volume |
 | the fleet | **nothing, by default** — see above | `id_ed25519_fleet`, opt-in, generated on zero |
-| the tunnel | outbound to Cloudflare's edge; publishes this sshd at one hostname | `tunnel.json`, read-only, written by the playbook |
+| the hub | nothing outward — the hub reaches *in*: its key, `restrict,pty`, runs commands and terminals here | `hub.pub`, written to `~/.ssh/authorized_keys.hub` at every start |
 
 **The fleet key is the one that would be new, and it is a bigger prize than anything
 `or3-dev` holds** — which is why it is off by default and why the section above exists.
@@ -809,7 +1026,10 @@ builds it has to maintain all three:
   repo refuses NOPASSWD. Read the fleet freely; change it only with someone present.
 
 Nothing is published on the host for the same reason: a shell in here holds all three of
-the above, and the ways to one are the tunnel's Access policy and `docker exec` on zero.
+the above, and the ways to one are the hub — behind the tunnel's Access policy — and
+`docker exec` on zero. **The hub is therefore as good as a shell in every container**: its
+key is authorised in all of them, which is why it lives in the hub's volume alone and the hub
+runs no agent and no claude.
 
 ## The socket line somebody will add
 
@@ -981,7 +1201,9 @@ The shape as originally designed, kept for the reasoning:
 - **The entrypoint, sshd config and Makefile ship in the base image** and are
   parameterised by environment, which is most of the way to how they already work.
 - **`compose.yaml` and `.env` stay per-repo.** They are the six values that genuinely
-  differ, and they are already the only place those values live.
+  differ, and they are already the only place those values live. ⚠︎ **Reversed
+  2026-10-25, built 2026-10-26:** every dev container is a service in this directory's one
+  `compose.yaml`, with one `.env` (*The hub*, above, and `docs/decisions.md`).
 
 Three things make it worth doing rather than tidy-minded. The layer-sharing above
 becomes guaranteed instead of a convention nobody can check. A fix to the entrypoint —
@@ -991,7 +1213,9 @@ And the third is the one with a clock on it: **cloudflared is hash-pinned in fou
 Dockerfiles.** Bumping it means a version and two SHA256s, four times, and Cloudflare
 deprecates old client versions — the edge eventually refuses them, and it presents as a
 broken tunnel rather than as "your client is old". So there is a slow deadline on four
-separate files and no single place to wind it.
+separate files and no single place to wind it. ⚠︎ Since 2026-10-26 there is one connector for
+every dev container, the hub's sidecar, pinned by digest in `compose.yaml`; the base carries
+none.
 
 That is also the answer to "is the pin too conservative". It is not: a container's update
 path is a rebuild, and a hash is what makes the rebuild reproducible — the argument in
@@ -1037,8 +1261,10 @@ transient daemon, and 819 MB across four `bg-pty-host`/`bg-spare` helpers. Four 
 containers on a 4 GB Pi that also runs Immich cannot each hold a gigabyte for a
 conversation that ended.
 
-**From base `2026.10.06` the entrypoint runs `claude-sessions offload` every three
-minutes, live** — Stage B of [`../plans/claude-sessions.md`](../plans/claude-sessions.md),
+**Since 2026-10-26 the hub runs it, for every container** — `claude-sessions offload-all`
+every three minutes, which runs `claude-sessions offload` in each one over ssh (*The hub*,
+above). **From base `2026.10.06` until then each entrypoint ran its own `claude-sessions
+offload` every three minutes, live** — Stage B of [`../plans/claude-sessions.md`](../plans/claude-sessions.md),
 in force on each container from its recreate onto that base. It stops a slot that is
 detached and idle — since v0.4.7 (base `2026.10.08`) *measured* quiet by the kernel, with
 a keep-alive for quiet waits — and leaves the conversation resumable from the menu;
@@ -1067,11 +1293,23 @@ JSON file per slot under `~/.local/share/claude-sessions/` (on the volume, so it
 outlives the container), kept current by Claude Code's own hooks — and, since v0.3.5, an
 `archive/` beside them: one small file per conversation `c` has put away (`archived <ms>`)
 or taken back out (`kept <ms>`) — age-archiving writes nothing, being worked out as the
-list is read. The base installs
-**v0.4.7** — a static binary, pinned by tag and SHA-256 per architecture, at
-`/usr/local/bin/claude-sessions`.
+list is read. Since 2026-10-26
+the **hub** pins it — **v0.5.0**, not yet released as this is written — a static binary, by
+tag and SHA-256 per architecture, and installs it into the volume every container runs it
+from, `/opt/claude-sessions/bin/claude-sessions` (*The hub*, above). Until then each base
+installed its own at `/usr/local/bin`, v0.4.7 the last.
 
-**The menu is in this release, and it is where `ssh infra-dev` lands.** `claude-sessions`
+**The menu is the hub's since v0.5.0, and it is where `ssh dev` lands** — containers first,
+then Loaded, Offloaded and a folded Archived inside each (*The menu, two levels deep*,
+above). Each container's rows still come from that container: the hub runs `claude-sessions
+agent` there over ssh for its rows and actions, and `agent exec` for the one child an action
+needs at your terminal, so every lock and every launch is decided inside the container as
+before. What follows is the single-container menu's history, which 0.5.0 keeps inside each
+container except for the grouping: the state groups it names (`Needs you`, `Working`,
+`Idle`, `Offloaded`, `Closed`) became Loaded, Offloaded and Archived, with a waiting session
+an amber `!` on its row.
+
+**Until v0.5.0** `claude-sessions`
 with no arguments, at a terminal, lists the live and offloaded slots, any zmx session it
 did not start, and under
 `Closed` every workspace conversation on disk —
@@ -1124,25 +1362,23 @@ come from inside Claude Code's binary, which updates itself here, so **`make ver
 rename, and an issue for claude-sessions. **A row's title is what Claude Code's own
 `/resume` picker shows** (v0.3.1): the `/rename` name, else Claude Code's generated title,
 else the first prompt — read from the transcript by the hook at `SessionStart` and `Stop`.
-A recreate ends every slot anyway, and each one takes its new title when it is resumed. **`claude-sessions-door`**
-is what every ssh session runs — sshd's `ForceCommand` since 2026-10-04, and `make
-claude` — the menu at a terminal; a login shell when there is no terminal or the menu
-exits non-zero (it has said why on stderr by then); a forwarded `SSH_ORIGINAL_COMMAND`
-run as given, in `~` — except an abduco-era client block's `abduco -A claude claude`, with
-or without `in-workspace`, which gets a re-run hint and the menu at a terminal, exit 127
-without one, because abduco left the image on 2026-10-06. A container whose base predates the forced door answers `ssh <it>`
-with a plain login shell until its repo bumps (*How this container is used*).
+A recreate ends every slot anyway, and each one takes its new title when it is resumed. **The
+door was `claude-sessions-door`** from 2026-10-04 until 2026-10-26 — sshd's `ForceCommand`
+here and `make claude`: the menu at a terminal, a login shell with no terminal or when the
+menu exited non-zero, a forwarded command run as given in `~`. Its menu half is the hub's
+`hub-door` now, and what is left in here is `dev-door` (*How this container is used*).
 
 | Piece | Where | What it does |
 |---|---|---|
-| the hooks | `/etc/claude-code/managed-settings.d/claude-sessions.json`, 0644 | `SessionStart`, `UserPromptSubmit`, `Stop`, `Notification` and `SessionEnd` — five since v0.4.7, which feed the **menu only** (titles, who is busy); no offload rule reads them, so `PostToolUse`, `SubagentStart` and `SubagentStop` went. Each calls `claude-sessions hook`, which always exits 0 and prints nothing. Every event but `SessionStart` (30 s timeout) and `SessionEnd` (1 s) runs **async** (v0.4.6) — Claude Code neither waits for it nor kills it, so no hook of ours can hold a prompt — because a millisecond hook stalled past its 5 s timeout on a loaded box (or3's); late events are applied in the order Claude Code forked them. Exit 0 and silence still matter for the two synchronous hooks: a `SessionStart` failure is shown to you, and its output would reach claude as context |
-| the keep-alive skill | `~/.claude/skills/keepalive/SKILL.md`, written by the entrypoint at every start (v0.4.7) | `claude-sessions skill`'s text: when to run `claude-sessions keepalive`, and for how short. On the config volume, so the image cannot carry it; a failed write says so in the boot log and leaves the old file |
+| the hooks | `/etc/claude-code/managed-settings.d/claude-sessions.json` — the hub volume's `managed-settings.d`, mounted read-only | `SessionStart`, `UserPromptSubmit`, `Stop`, `Notification` and `SessionEnd` — five since v0.4.7, which feed the **menu only** (titles, who is busy); no offload rule reads them, so `PostToolUse`, `SubagentStart` and `SubagentStop` went. Each calls `claude-sessions hook`, which always exits 0 and prints nothing. Every event but `SessionStart` (30 s timeout) and `SessionEnd` (1 s) runs **async** (v0.4.6) — Claude Code neither waits for it nor kills it, so no hook of ours can hold a prompt — because a millisecond hook stalled past its 5 s timeout on a loaded box (or3's); late events are applied in the order Claude Code forked them. Exit 0 and silence still matter for the two synchronous hooks: a `SessionStart` failure is shown to you, and its output would reach claude as context |
+| the keep-alive skill | `~/.claude/skills/keepalive/SKILL.md`, copied by the entrypoint at every start from the hub's `/opt/claude-sessions/skills/keepalive/` — only while `CLAUDE_SESSIONS_OFFLOAD=1`, and removed otherwise | when to run `claude-sessions keepalive`, and for how short. On the config volume, so the image cannot carry it; a failed copy says so in the boot log and removes any old one, which would name a command that might not exist |
 | the status line | the same file's `statusLine` (v0.4.5) | `claude-sessions statusline` every minute: the container's RAM and load, yellow then red as they rise, and its name. Managed settings, so it outranks a user `statusLine` — Claude Code's `/statusline` command writes one that never shows here; `make verify`'s `hooks` line names it |
-| `reconcile` | the entrypoint, before the offloader and sshd | marks slots whose process died with the last container; since v0.4.0 it sweeps no sockets — `zmx list` clears a dead daemon's own, and zmx's socket directory, `/tmp/zmx-<uid>`, empties with a recreate (a `make restart` keeps /tmp; a stale socket there is cleared by the next `zmx list`) |
-| `offload` | the entrypoint, every 3 minutes | stops a detached slot measured quiet for 10 minutes (v0.4.7, *The rules* below) and runs the orphan sweep — live from base `2026.10.06` (a dry run before it, as Stage A). Each pass's verdicts, and any failed pass with its exit code, go timestamped to `~/.local/share/claude-sessions-passes.log` (capped near 16 MB, trimmed to the newest 8 MB — weeks at today's slots); stops and sweep lines also go to `offload.log`. Each pass prints, per slot, its measured line — bytes (TCP included), CPU, its line and how long it has been quiet — which since v0.4.7 is the offloader's own reason, and only on stdout: this log is the record to read when a slot was stopped that should not have been. `make idle` is `--dry-run`: verdicts, nothing stopped — though since v0.4.5 it writes the activity state as a live pass does, so a hand pass just before the loop's leaves the loop a window too short to count, and the next one counts it |
+| `reconcile` | the entrypoint, before sshd | marks slots whose process died with the last container; since v0.4.0 it sweeps no sockets — `zmx list` clears a dead daemon's own, and zmx's socket directory, `/tmp/zmx-<uid>`, empties with a recreate (a `make restart` keeps /tmp; a stale socket there is cleared by the next `zmx list`) |
+| `offload` | run in here by the hub's `offload-all`, every 3 minutes (the entrypoint's own loop until 2026-10-26) | stops a detached slot measured quiet for 10 minutes (v0.4.7, *The rules* below) and runs the orphan sweep — live from base `2026.10.06` (a dry run before it, as Stage A). Each pass's verdicts, and any failed pass with its exit code, go timestamped to the hub's `~/.hub/passes.log`, every container's lines prefixed with its name (capped near 16 MB, trimmed to the newest 8 MB; the per-container `~/.local/share/claude-sessions-passes.log` before it stays on the volume); stops and sweep lines also go to this container's `offload.log`. Each pass prints, per slot, its measured line — bytes (TCP included), CPU, its line and how long it has been quiet — which since v0.4.7 is the offloader's own reason, and only on stdout: this log is the record to read when a slot was stopped that should not have been. `make idle` is `offload-all --dry-run` in the hub: verdicts for every container, nothing stopped — though since v0.4.5 it writes the activity state as a live pass does, so a hand pass just before the loop's leaves the loop a window too short to count, and the next one counts it |
 
-**The hooks file is generated by the binary at build time and is not in this repo.**
-`claude-sessions hooks-config` prints exactly the events its code handles, so the hooks
+**The hooks file is written by the binary and is not in this repo** — by the hub's
+`claude-sessions install` at every hub start, into the volume (before 2026-10-26, by the base
+at build time). `claude-sessions hooks-config` prints exactly the events its code handles, so the hooks
 installed and the hooks understood cannot drift apart. It is a managed-settings *drop-in*:
 a user's `disableAllHooks` cannot turn it off, no repo's `.claude/` has to know about it,
 and the agent-view file beside it stays its own. **Never also deliver these hooks from the
@@ -1185,10 +1421,10 @@ attached cannot be ruled out.
 Reading it:
 
 ```
-make idle          the offloader's verdict on every slot, now — a dry run, nothing stopped
-make offload-log   what it stopped or swept, failed passes, and the last pass's verdicts
+make idle          the offloader's verdict on every slot in every container, now — a dry run, nothing stopped
+make offload-log   what it stopped or swept in one container, and the hub's failed passes and last pass
 make sessions      claude-sessions doctor — per slot, how long since each hook event
-make status        includes `offloader : live, last pass Nm ago`, or why not
+make status        includes `offloader : the hub's, last pass Nm ago`, or why not
 make verify        the binary's version, the hooks file parsed as dev, and the keep-alive skill as installed
 ```
 
@@ -1225,29 +1461,38 @@ the same figure, so a burst of file I/O no longer reads as a session's worth of 
 menu: `claude-sessions doctor` prints each slot's session id, then `claude --resume <id>`
 in its directory.
 
-`DEV_IDLE_OFFLOAD=0` in `dev/.env` (compose passes it through) and a `make up` turn off
-the offloader. Overrides, neither normally worth setting: `CLAUDE_SESSIONS_DIR` (the
+`DEV_IDLE_OFFLOAD=0` in `dev/.env` and a `make up` turn off offloading in infra-dev
+(compose passes it on as `CLAUDE_SESSIONS_OFFLOAD=0`, and that container's pass then looks at
+nothing); `HUB_OFFLOAD=0` turns off the hub's timer for every container. Overrides, neither normally worth setting: `CLAUDE_SESSIONS_DIR` (the
 registry) and zmx's own `ZMX_DIR` (its sockets, and its logs — `$ZMX_DIR/logs` instead of
 `~/.local/state/zmx/logs`) — each must be
-the same for every login and the offload loop, so set one in compose or not at all. Never
+the same for every login and the hub's offload pass, so set one in compose or not at all. Never
 set `ZMX_SESSION_PREFIX`: claude-sessions strips it, and slot names would disagree. Do not put a source checkout
 at `~/.local/share/claude-sessions` — that is the registry; dev containers check the source
 out at `~/.local/share/src/claude-sessions`.
 
 ## Secrets
 
-None are in git. `.env` and `.env.*` are gitignored; everything else lives in a
-mode-700 directory on zero (`INFRA_SECRETS`, default `~/.infra-dev-secrets`), mounted
-read-only at `/run/infra-secrets`:
+None are in git. `.env` and `.env.*` are gitignored; everything else lives in mode-700
+directories on zero, each mounted read-only. infra-dev's is `INFRA_SECRETS`, default
+`~/.infra-dev-secrets`, at `/run/infra-secrets`:
 
 | File | What it is |
 |---|---|
-| `authorized_keys` | public keys allowed to ssh **into** the container |
+| `authorized_keys` | public keys allowed to ssh **into** the container. Nothing outside the project network reaches its sshd now, so in practice the one key that logs in is the hub's, which the entrypoint writes to `~/.ssh/authorized_keys.hub` at every start — its own file, so refreshing this one cannot drop it |
 | `id_ed25519_infra_deploy` | GitHub deploy key for this repo, read-write, generated on zero |
 | `id_ed25519_fleet` | **not built** — would reach all three as `gavin`; see the deferred question above |
 | `ssh_config.fleet` | **not built** — the three `Host` blocks |
 | `known_hosts.fleet` | **not built** — their host keys |
-| `tunnel.json` | Cloudflare tunnel credentials — written by `server-create-dev-container.yml` |
+| `tunnel.json` | infra-dev's own pre-hub tunnel's credentials, which the plain run's edge half still writes — unused here: the container sees it in this mount and runs no connector |
+
+The hub's is `HUB_SECRETS`, default `~/.dev-secrets`, at `/run/hub-secrets` in the hub —
+`authorized_keys`, the clients allowed to `ssh dev` — and its `tunnel.json` is mounted into
+the sidecar alone. Both are written by `server-create-dev-container.yml -e container=dev`.
+**The hub's own private key is in neither**: it is made in, and never leaves, the
+`hub-state` volume, which `make down-volumes` drops — the containers then authorise the new
+one at their next start. A repo's own `.env` files are in its env volume (*The workspace and
+the env volume*).
 
 **Two credentials live on volumes, not here**, and `make down-volumes` takes both: the
 Claude login (`infra-claude`) and **Crush's provider API key**, typed at its first start
@@ -1281,34 +1526,46 @@ claude, and PID 1 has not moved.
 **A session that is not held dies with the link that carried it.** On a phone that is
 not a corner case: the ssh session ends at the lock screen, and an unwrapped claude ends
 with it, mid-edit. The menu is the habit — every session it opens is a zmx session, and
-`make claude` and `ssh infra-dev` both land on it, so they list the same sessions
+`make claude` and `ssh dev` both land on the hub's menu, so they list the same sessions
 whichever way you came in. `screen` is also in the image and is better for ordinary shell
 work. abduco left the image on 2026-10-06, with the old offloader that was its last user.
 
-**`/workspace` is a bind mount of the host's checkout, not a second one.** A `git
-pull` in the container and one on zero are the same pull, on one working tree — there
-is nothing that can drift. The entrypoint pulls `--ff-only` on start, best-effort: a
-container that will not come up because the network is down, or because the tree has
-local work, is worse than one running a slightly old checkout.
+**`/workspace` is the container's own clone, in a volume, not the host's checkout**
+(since 2026-10-26; it was a bind mount of `~gavin/infra` before, one working tree shared
+with the box, which is how zero's checkout came to diverge on 2026-10-25). The entrypoint
+clones it once and pulls `--ff-only` on every start after, best-effort: a container that
+will not come up because the network is down, or because the tree has local work, is worse
+than one running a slightly old checkout. Work leaves by `git push`, and nothing in here
+can change what the box runs.
 
 ## The targets
 
 ```sh
 cd ~/infra/dev
 make              # the header of the Makefile: every target, one line each
-make up           # build + (re)create — drops every session in the container
-make restart      # stop + start; does NOT re-read compose.yaml
-make status       # one screen: container, sshd, sessions, logins, fleet files, ansible
+make up           # build + (re)create everything the profiles name — drops the sessions of
+                  # every container it recreates; S=<service> for one (and the hub)
+make restart      # stop + start one container; does NOT re-read compose.yaml
+make stop         # stop one container; its sessions end, its volumes stay
+make status       # one screen: container, sshd, sessions, logins, the hub, the tunnel, ansible
 make verify       # status + the tools + the collections + the fleet
-make login        # the logins, again
+make login        # the logins, again, and the workspace clone if it is missing
 make fleet        # ssh to each host, then `ansible fleet -m ping`
 make collections  # the image's collections vs ansible/requirements.yml
-make claude       # the claude-sessions menu, as `ssh infra-dev` lands on it
-make shell        # a fish shell in the container
-make logs         # follow the container log (= sshd's)
-make boot-log     # the entrypoint's lines, from the top, ANSI stripped
-make tunnel-log   # what cloudflared has been saying, if the tunnel is on
+make claude       # the hub's menu, as `ssh dev` lands on it
+make shell        # a login shell in one container (fish in infra-dev, bash in the hub)
+make logs         # follow one container's log (= its sshd's)
+make boot-log     # one container's entrypoint lines, from the top, ANSI stripped
+make tunnel-log   # what the hub's cloudflared has been saying
+make idle         # the offloader's verdict in every container, now (stops nothing)
+make offload-log  # one container's stops and sweeps, and the hub's failed and last passes
+make sessions     # claude-sessions doctor in one container: the registry, and the hooks
+make down         # stop and remove every container in the project (volumes stay)
+make down-volumes # also drop the project's own volumes — CONFIRM=yes
 ```
+
+`C=<container>` picks the container for the targets that take one — infra-dev unless said,
+`C=hub` for the hub (`dev-hub`), `C=or3-dev` and so on for the others once they are in.
 
 They work with or without `sudo` — the Makefile adds one when it is not already root —
 and the same set is available from the repo root as `make dev-up`, `make dev-login` and
@@ -1316,17 +1573,24 @@ so on. `make dev` at either level is the bring-up above.
 
 The uid the container's `dev` user is built at comes from the **owner of the
 checkout**, read with `stat`, not from `id -u`: under `sudo` that is 0, and a dev user
-at uid 0 writes root-owned files into the bind-mounted checkout. It refuses to build at 0
-rather than doing it.
+at uid 0 writes root-owned files into whatever it shares with the host — or3-dev's
+bind-mounted clone today. The same uid is what the hub's sidecar runs as, to read the
+gavin-owned `tunnel.json`. It refuses to build at 0 rather than doing it.
 
 `restart` is `stop`/`start` deliberately — `up -d` re-evaluates the config and may
 recreate the container, throwing away every live session in it. The corollary: a
 change to `compose.yaml` only lands on `up`. This is the same rule
 [`../CLAUDE.md`](../CLAUDE.md) states for the deployments, for the same reason.
 
-`make down-volumes` takes `CONFIRM=yes`, because the volumes hold the claude and gh
-logins and the sshd **host key**: dropping them asks every client to accept a changed
-host key, which is the moment a real one would be waved through.
+`make down-volumes` takes `CONFIRM=yes`. It drops **the project's own volumes** — every
+cloned workspace, with any unpushed work in it; every env volume, with the repos' `.env`
+files; the shared `claude-sessions` volume; and `hub-state`, which holds the hub's key, its
+known_hosts and **the hub's sshd host key**. So afterwards every container authorises a new
+hub key at its next start, and every client is asked to accept a changed host key for `dev`
+— the moment a real one would be waved through, so expect it before you run this. The claude
+and gh logins, the conversation history and each container's own host key are in
+**external** volumes, kept from each container's old project, and `down -v` leaves those
+alone.
 
 `logs` follows sshd's output. When the question is why a start went wrong, use
 `boot-log`: the top of the log, where the entrypoint's lines are.

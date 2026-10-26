@@ -194,7 +194,7 @@ services:
   # ── each other repo's container, behind its profile until it moves in ──────────
   # Moving one in, in its own repo first: bump its BASE_TAG to 2026.10.26 or later; drop its
   # compose.yaml; and if an sshd_config.d drop-in sets AuthorizedKeysFile, add
-  # `.ssh/authorized_keys` to it, which is where the entrypoint puts the hub's key. Then here:
+  # `.ssh/authorized_keys.hub` to it, which is where the entrypoint puts the hub's key. Then here:
   # check its volume names below with `docker volume ls` (these are guesses that `up` will
   # refuse loudly if wrong), add its profile to COMPOSE_PROFILES and its name to HUB_HOSTS,
   # and `make up`. dev/README.md § "Moving a container in" has the order.

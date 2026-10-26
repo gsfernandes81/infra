@@ -103,7 +103,7 @@ _require-own-names:
 	  p=$$($(DOCKER) inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' $$c 2>/dev/null) || continue; \
 	  [ "$$p" = dev ] && continue; \
 	  echo "container $$c belongs to compose project '$${p:-none}', not dev. Stop it there first:" >&2; \
-	  echo "  sudo docker compose -p $$p down      # NOT -v: its volumes are kept by name" >&2; \
+	  echo "  cd ~ && sudo docker compose -p $$p down   # from ~, not here: this dir's compose.yaml is the new one. NOT -v" >&2; \
 	  exit 1; \
 	done
 
@@ -212,6 +212,7 @@ down-volumes:
 	  echo "  - every cloned /workspace — UNPUSHED WORK IN ONE IS LOST" >&2; \
 	  echo "  - every env-file volume (~/.env.d) — the repos' .env files" >&2; \
 	  echo "  - the hub's key and known_hosts; containers re-authorise a new one at start" >&2; \
+	  echo "  - the hub's HOST key: every client's known_hosts entry for 'ssh dev' then refuses it" >&2; \
 	  echo "Logins, conversation history and container host keys are external and stay." >&2; \
 	  echo "Say you mean it:  make down-volumes CONFIRM=yes" >&2; exit 1; }
 	$(COMPOSE) down -v
