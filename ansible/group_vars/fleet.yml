@@ -27,9 +27,9 @@ ansible_python_interpreter: /usr/bin/python3
 # the bug.
 #
 # INSTALLING A TOOL IS NOT ENABLING IT.
-#   zram-init on `zero` does not mean zero runs zram — host-setup.md says it has the RAM
-#   and does not, and Alpine's package is a wrapper script plus a modprobe.d conf with no
-#   service to start. smartmontools on `two` does not mean anything polls: two has no
+#   zram-init on `zero` is not what gives zero zram: that is hosts/zero/system/zram-swap,
+#   which writes sysfs directly, and Alpine's package is a wrapper script plus a modprobe.d
+#   conf with no service to start. smartmontools on `two` does not mean anything polls: two has no
 #   hw-inventory.toml, so SMART is skipped there entirely, and `smartd` must never be put
 #   in a runlevel on `one` — see the landmine in CLAUDE.md. Having the tool present means
 #   it is there when a box is broken and the network is not helping.

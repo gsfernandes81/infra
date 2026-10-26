@@ -348,9 +348,8 @@ including the record of its failing disk, with `zero`'s hardware.
 The cost is real and accepted: facts about `one` and `two` cannot be verified from
 `zero`, so anything unconfirmed is marked unverified in the docs rather than guessed —
 `one`'s file modes are the current example. (Zram on `zero` was one until the owner's
-`/proc/swaps` of 2026-10-26 showed none, only `/dev/sda3`; *Zram swap on `zero`* below.
-`one`'s zram was
-confirmed by the owner on 2026-10-25: `/dev/zram0`, 768 MB zstd, is its first swap at
+`/proc/swaps` of 2026-10-26 showed none, only `/dev/sda3`; see *Zram swap on `zero`* below.
+`one`'s zram was confirmed by the owner on 2026-10-25: `/dev/zram0`, 768 MB zstd, is its first swap at
 priority 16383, holding ~400 MB in ~118 MB of RAM, with `sda2` behind it at −2 and empty.)
 
 ### The mesh, and why it does not breach any of the above — 2026-08-23
@@ -1122,12 +1121,13 @@ already swapped to the SSD. **Tracked, not yet installed**: `hosts/zero/system/z
   compressed in RAM; `/dev/sda3` at −2 stays behind it as the overflow, so a full or failed
   zram costs nothing that is there today.
 - **1 GiB of capacity, zstd.** The size is what it can hold uncompressed, and RAM is taken
-  only as pages arrive: full, it holds roughly 300 to 400 MB. `one` runs 768 MB of zstd on
+  only as pages arrive: full, it typically holds 300 to 400 MB, and up to the full 1 GiB if the
+  pages do not compress. `one` runs 768 MB of zstd on
   1 GB of RAM; a quarter of `zero`'s 3.9 GB is the same order.
 - **An OpenRC service, not an `/etc/local.d` script**, so `rc-status` shows it, `rc-service
   zram-swap stop` removes it, and `install-system-file` checks its syntax. `before docker`,
-  so at shutdown it stops after the containers, since stopping is a swapoff that reads every
-  page back into RAM. A failed start leaves the SSD swap as it was.
+  so it stops after the containers, and it skips the swapoff at shutdown or reboot, where
+  bringing every page back is wasted work. A failed start leaves the SSD swap as it was.
 - **No sysctl change with it.** `vm.swappiness` and `vm.page-cluster` are often tuned with
   zram. They are global and would change how the SSD swap behaves too, so they wait until
   zram alone has been measured.

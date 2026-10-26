@@ -6,18 +6,21 @@
 # infra-mode: 0755
 # Compressed swap in RAM, used before the SSD swap partition (/dev/sda3, priority -2).
 #
-# zero swaps to the SSD today, beside Immich, Postgres and the dev containers in 3.9 GB. A
-# page compressed into RAM comes back far faster than one read from the SSD, and costs the
-# SSD no writes. sda3 stays behind it as the overflow, so nothing is lost if this is off.
+# zero swapped only to the SSD before this, beside Immich, Postgres and the dev containers in
+# 3.9 GB. A page compressed into RAM comes back faster than one read from the SSD, and costs
+# the SSD no writes. sda3 stays behind it as the overflow, so nothing is lost if this is off.
 #
-# ZRAM_SIZE is the UNCOMPRESSED capacity, not the RAM it takes: zstd typically packs swapped
-# pages 3:1 or better, so 1G full holds roughly 300-400 MB of RAM. The RAM is taken only as
-# pages arrive. `zramctl` or /sys/block/zram0/mm_stat shows the real figure.
+# ZRAM_SIZE is the UNCOMPRESSED capacity, not the RAM it takes, and RAM is taken only as pages
+# arrive. zstd typically packs swapped pages 3:1, so 1G full typically holds 300-400 MB; a
+# page that does not compress is stored as it is, so the bound is 1G. `zramctl` or
+# /sys/block/zram0/mm_stat shows the real figure.
 #
-# Not boot-critical: nothing depends on it, and a failed start leaves the SSD swap exactly
-# as it was. It is a service rather than an /etc/local.d script so that rc-status shows it
-# and `rc-service zram-swap stop` takes it away. `before docker`, so at shutdown it stops
-# after the containers: stopping means swapoff, which reads every page back into RAM.
+# Not boot-critical: nothing depends on it, and a failed start leaves the SSD swap as it was.
+# It is a service rather than an /etc/local.d script so that rc-status shows it and
+# `rc-service zram-swap stop` takes it away. Stopping is a swapoff: every page comes back
+# into RAM, or out to sda3 if RAM is short, so a stop under pressure is slow. At shutdown or
+# reboot it skips the swapoff, which would be wasted work there. `before docker` orders it to
+# start before the containers and stop after them.
 
 name="zram swap"
 description="Compressed swap in RAM, ahead of the SSD swap partition"
@@ -42,24 +45,26 @@ start() {
 		eend 0
 		return 0
 	fi
-	if ! modprobe -q zram; then
-		eend 1 "no zram module in this kernel"
-		return 1
-	fi
-	# mdev makes the node shortly after the module loads; wait for it, bounded.
+	# Not fatal on its own: a zram built into the kernel has no module to load. The device
+	# check below is the real test.
+	modprobe -q zram 2>/dev/null || true
+	# The node normally exists once the module is in; wait for it, bounded, all the same.
 	i=0
 	while [ ! -b /dev/zram0 ] && [ "$i" -lt 5 ]; do
 		sleep 1
 		i=$((i + 1))
 	done
 	if [ ! -b /dev/zram0 ]; then
-		eend 1 "/dev/zram0 did not appear"
+		eend 1 "/dev/zram0 did not appear: no zram in this kernel?"
 		return 1
 	fi
 	# A device sized by an earlier, failed start cannot be sized again until it is reset.
-	echo 1 > /sys/block/zram0/reset 2>/dev/null
+	if ! echo 1 > /sys/block/zram0/reset 2>/dev/null; then
+		eend 1 "could not reset /dev/zram0: something holds it open"
+		return 1
+	fi
 	if ! echo "$ZRAM_ALGO" > /sys/block/zram0/comp_algorithm 2>/dev/null; then
-		eend 1 "$ZRAM_ALGO not offered; the kernel offers: $(cat /sys/block/zram0/comp_algorithm)"
+		eend 1 "could not set $ZRAM_ALGO; the kernel offers: $(cat /sys/block/zram0/comp_algorithm)"
 		return 1
 	fi
 	echo "$ZRAM_SIZE" > /sys/block/zram0/disksize &&
@@ -70,6 +75,12 @@ start() {
 
 stop() {
 	ebegin "Stopping zram swap"
+	case "$RC_RUNLEVEL" in
+	shutdown|reboot)
+		eend 0
+		return 0
+		;;
+	esac
 	if zram_on && ! swapoff /dev/zram0; then
 		eend 1 "swapoff failed, so zram swap is left on"
 		return 1
