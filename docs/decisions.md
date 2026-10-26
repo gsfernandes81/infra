@@ -1120,10 +1120,13 @@ already swapped to the SSD. **Tracked, not yet installed**: `hosts/zero/system/z
 - **Ahead of the SSD, not instead of it.** zram at priority 100 takes swapped pages first,
   compressed in RAM; `/dev/sda3` at −2 stays behind it as the overflow, so a full or failed
   zram costs nothing that is there today.
-- **1 GiB of capacity, zstd.** The size is what it can hold uncompressed, and RAM is taken
-  only as pages arrive: full, it typically holds 300 to 400 MB, and up to the full 1 GiB if the
-  pages do not compress. `one` runs 768 MB of zstd on
-  1 GB of RAM; a quarter of `zero`'s 3.9 GB is the same order.
+- **2 GiB of capacity, zstd.** The size is what it can hold uncompressed, and RAM is taken
+  only as pages arrive. `one`'s zram holds ~400 MB in ~118 MB, about 3.4:1, so a full 2 GiB
+  typically takes ~600 MB, and up to the full 2 GiB if the pages do not compress. Half of RAM
+  is the default of Fedora and systemd's zram-generator; `one` runs 768 MB on 1 GB. The
+  first draft said 1 GiB, and the owner questioned it before install: `zero` already had
+  624 to 660 MB on the SSD, which 1 GiB would have held with little room for a peak. The
+  size is revisited from `/sys/block/zram0/mm_stat` and `/proc/swaps` after a few days.
 - **An OpenRC service, not an `/etc/local.d` script**, so `rc-status` shows it, `rc-service
   zram-swap stop` removes it, and `install-system-file` checks its syntax. `before docker`,
   so it stops after the containers, and it skips the swapoff at shutdown or reboot, where

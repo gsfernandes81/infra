@@ -11,8 +11,9 @@
 # the SSD no writes. sda3 stays behind it as the overflow, so nothing is lost if this is off.
 #
 # ZRAM_SIZE is the UNCOMPRESSED capacity, not the RAM it takes, and RAM is taken only as pages
-# arrive. zstd typically packs swapped pages 3:1, so 1G full typically holds 300-400 MB; a
-# page that does not compress is stored as it is, so the bound is 1G. `zramctl` or
+# arrive. zstd packed `one`'s swapped pages about 3.4:1, so 2G full typically holds about
+# 600 MB; a page that does not compress is stored as it is, so the bound is 2G. Half of RAM,
+# the default of Fedora and systemd's zram-generator. `zramctl` or
 # /sys/block/zram0/mm_stat shows the real figure.
 #
 # Not boot-critical: nothing depends on it, and a failed start leaves the SSD swap as it was.
@@ -25,7 +26,7 @@
 name="zram swap"
 description="Compressed swap in RAM, ahead of the SSD swap partition"
 
-ZRAM_SIZE=1G
+ZRAM_SIZE=2G
 ZRAM_ALGO=zstd
 ZRAM_PRIO=100
 
