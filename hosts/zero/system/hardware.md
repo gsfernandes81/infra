@@ -22,7 +22,7 @@ readable here — fill it in via the overrides file rather than guessing.
 | Index | Dev | Bay | Role | Model | Serial |
 |---|---|---|---|---|---|
 | `128G-?-SD-?` | mmcblk0 | onboard | boot + root | YD4QD | 0x712f66af |
-| `500G-2.5in-SSD-2022-02` | sda | 0 | bcache cache (sda1) + swap (sda3); sda2 unused | CT500MX500SSD1 | 2206E60AB234 |
+| `500G-2.5in-SSD-2022-02` | sda | 0 | bcache cache (sda1) + swap (sda3, on, behind zram0); sda2 unused | CT500MX500SSD1 | 2206E60AB234 |
 | `1T-2.5in-HDD-?` | sdb | 1 | btrfs RAID1 member, backing disk for bcache1 | WDC WD10SPZX-60Z10T0 | WD-WXP1A39702NU |
 | `1T-?-HDD-?` | sdc | external | btrfs RAID1 member, backing disk for bcache0 | WDC WD10JMVW-11AJGS4 | WD-WXC1A47JYJ7R |
 

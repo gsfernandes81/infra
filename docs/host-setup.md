@@ -93,7 +93,7 @@ install `libcap`.
 ## zram — and what this section got wrong
 
 `zero` did not run it until 2026-10-26: its swap is now `hosts/zero/system/zram-swap`, an
-OpenRC service that writes sysfs directly, **tracked and not yet installed**
+OpenRC service that writes sysfs directly, **installed 2026-10-26**
 ([`decisions.md`](decisions.md) § *Zram swap on `zero`*). `one` runs it, confirmed 2026-10-25.
 
 **This section previously described Gentoo's packaging, not Alpine's.** Corrected
@@ -265,7 +265,7 @@ network namespace or port forwarding breaks silently.
 | | `one` (Pi 4) | `two` (Pi 1 B+, armv6) | `zero` (Pi 5) |
 |---|---|---|---|
 | cloudflared build | `arm` (uniform by decision) | `arm` (native) | `arm` (uniform by decision) |
-| zram | yes: 768 MB zstd ahead of `sda2` (confirmed 2026-10-25) | **no swap at all** (verified Aug 2026) | `zram-swap` tracked 2026-10-26, **not yet installed** |
+| zram | yes: 768 MB zstd ahead of `sda2` (confirmed 2026-10-25) | **no swap at all** (verified Aug 2026) | yes: 2 GiB zstd ahead of `sda3` (`zram-swap`, installed 2026-10-26) |
 | container runtime | docker | rootless podman + podman-compose | docker |
 | bcache-tools | no | no | yes |
 | Target OS | MicroOS | stays Alpine | MicroOS |

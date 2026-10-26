@@ -1115,7 +1115,9 @@ cannot plan any image the host lacks. Every bump would have failed the same way.
 ## Zram swap on `zero`
 
 **Decided 2026-10-26**, the owner's ask, after `free` showed 1.1 GB available with 660 MB
-already swapped to the SSD. **Tracked, not yet installed**: `hosts/zero/system/zram-swap`.
+already swapped to the SSD. **Installed 2026-10-26**: `hosts/zero/system/zram-swap`, read back from
+`/proc/swaps` (`/dev/zram0`, 2 GiB, priority 100, `[zstd]`); its place in the default runlevel
+is owner-reported.
 
 - **Ahead of the SSD, not instead of it.** zram at priority 100 takes swapped pages first,
   compressed in RAM; `/dev/sda3` at −2 stays behind it as the overflow, so a full or failed

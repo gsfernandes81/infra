@@ -38,7 +38,7 @@ kind = "SD"
 # enclosure. That matches the SMART blast-radius note below, which already said
 # sdc is alone on its bridge and sda/sdb share one.
 bay = "0"
-role = "bcache cache (sda1) + swap (sda3); sda2 unused"
+role = "bcache cache (sda1) + swap (sda3, on, behind zram0); sda2 unused"
 kind = "SSD"
 form_factor = "2.5in"
 # sysfs reports rotational=1 for this device. That is the USB bridge answering, not the
