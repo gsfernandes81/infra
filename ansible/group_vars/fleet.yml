@@ -67,6 +67,13 @@ base_packages:
   - usbutils          # lsusb -t — absent on one, where BusyBox answers -t with a flat list
   - zram-init
 
+# Images server-prune-images.yml keeps although no container uses them and no tracked
+# compose file names them: whole repositories, every tag. Only what a rebuild needs belongs
+# here, never "might want it later": the dev containers' base, which their Dockerfiles build
+# FROM and which `make base` on zero would otherwise have to fetch or rebuild first.
+prune_keep_images:
+  - ghcr.io/gsfernandes81/gsrpi-dev-base
+
 # This repo's checkout on each host, which the deployment, system-file and cutover plays
 # pull and read. ~gavin/infra on every host today, `two` included. A host that ever
 # differs sets `infra_checkout` in its host_vars file, which outranks this; a play must

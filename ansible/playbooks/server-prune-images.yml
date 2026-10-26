@@ -1,0 +1,188 @@
+---
+# PRUNE A HOST'S UNUSED DOCKER IMAGES AND ITS STALE BUILD CACHE. Run from the control node:
+#
+#     cd ansible
+#     ansible-playbook playbooks/server-prune-images.yml -e target=zero --check -K   # the plan only
+#     ansible-playbook playbooks/server-prune-images.yml -e target=zero -K           # ask, then prune
+#     ansible-playbook playbooks/server-prune-images.yml -e target=one -e build_cache_days=0 -K
+#
+# One host per run, named with -e target (no -l, and no default: a prune is never aimed at a
+# host by falling back). -K because docker needs root.
+#
+# AN IMAGE IS KEPT, and the plan says which rule kept it, when:
+#   in use       a container was made from it, running OR stopped. A stopped container is
+#                still a deployment (ionic-traces on one, dd-mysql on zero) or a dev
+#                container between sessions, and its image is its root filesystem.
+#   compose      a tracked compose file on this host names it: `docker compose config
+#                --images` for every hosts/<host>/<name> deployment. An image pulled ahead
+#                of its `up` (server-deploy-compose.yml pulls before it plans) is not in use
+#                yet and must survive.
+#   keep list    its repository is in `prune_keep_images` (group_vars/fleet.yml): an image
+#                nothing runs from but a rebuild needs, such as the dev containers' base.
+# Every other image is removed with `docker image rm`, by name, WITHOUT -f, so the daemon
+# itself refuses anything a container does use; a refusal is printed and is not a failure.
+#
+# BUILD CACHE: entries not used for `build_cache_days` days (default 7) are pruned, so a
+# recent build stays fast; -e build_cache_days=0 prunes it all. Dangling images go too.
+#
+# NEVER: volumes (the dev containers' logins, garmin-tokens, model caches) and containers,
+# stopped ones included. `docker system prune` is not used here for that reason.
+#
+# --check reads everything and prints the plan, the sizes and docker system df, and asks
+# nothing. -e assume_yes=true skips the question.
+
+- name: Check the inventory is loaded
+  ansible.builtin.import_playbook: _assert-inventory.yml
+  vars:
+    required_group: fleet
+
+- name: Prune unused images on one host, asking once
+  hosts: localhost
+  gather_facts: false
+  vars:
+    pi_days: "{{ build_cache_days | default(7) | int }}"
+  tasks:
+    - name: Check which host to prune was named
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target in groups['containerized']
+          - (build_cache_days | default(7) | string) is match('^[0-9]+$')
+        fail_msg: >-
+          Name one docker host: -e target=<host>, one of {{ groups['containerized'] | join(', ') }}.
+          -e build_cache_days=<n> keeps build cache used in the last n days (default 7, 0 = none).
+        success_msg: "{{ target | default('?') }}"
+
+    - name: Find the deployments linked on {{ target }}
+      ansible.builtin.find:
+        paths: "{{ control_checkout }}/hosts/{{ target }}"
+        file_type: link
+      register: pi_links
+
+    - name: Note their directories on {{ target }}
+      ansible.builtin.set_fact:
+        pi_dep_dirs: >-
+          {{ pi_links.files | map(attribute='path') | map('basename')
+             | map('regex_replace', '^', hostvars[target].infra_checkout ~ '/deployments/') | list }}
+
+    - name: Read every image on {{ target }} and who uses it
+      # One line per image: short id, repository, tag, size, then 1/0 for "a container was
+      # made from it" and "a tracked compose file names it". Names and sizes only; nothing
+      # from any .env reaches the output, because `config --images` prints image references.
+      ansible.builtin.shell:
+        executable: /bin/sh
+        cmd: |
+          compose_ids=
+          for d in {{ pi_dep_dirs | map('quote') | join(' ') }}; do
+            [ -f "$d/compose.yaml" ] || continue
+            for ref in $(cd "$d" && docker compose config --images 2>/dev/null); do
+              id=$(docker image inspect --format '{% raw %}{{.Id}}{% endraw %}' "$ref" 2>/dev/null) || continue
+              compose_ids="$compose_ids $(echo "${id#sha256:}" | cut -c1-12)"
+            done
+          done
+          docker images --no-trunc --format '{% raw %}{{.ID}} {{.Repository}} {{.Tag}} {{.Size}}{% endraw %}' |
+          while read -r id repo tag size; do
+            short=$(echo "${id#sha256:}" | cut -c1-12)
+            used=0; [ -n "$(docker ps -aq --filter ancestor="$short")" ] && used=1
+            comp=0; case " $compose_ids " in *" $short "*) comp=1 ;; esac
+            echo "$short $repo $tag $size $used $comp"
+          done
+      register: pi_images
+      changed_when: false
+      check_mode: false
+      become: true
+      delegate_to: "{{ target }}"
+
+    - name: Read docker system df on {{ target }}
+      ansible.builtin.command:
+        argv: [docker, system, df]
+      register: pi_df_before
+      changed_when: false
+      check_mode: false
+      become: true
+      delegate_to: "{{ target }}"
+
+    - name: Sort each image into kept or pruned
+      # An image with no tag is removed by id; a tagged one by repository:tag, because an id
+      # with two tags is refused unless forced, and this play never forces.
+      ansible.builtin.set_fact:
+        pi_rows: >-
+          {% set keep = hostvars[target].prune_keep_images | default([]) %}{% set out = [] %}{% for l in pi_images.stdout_lines if l.split(' ') | length == 6 %}{% set f = l.split(' ') %}{% set _ = out.append({'id': f[0], 'repo': f[1], 'tag': f[2], 'size': f[3],
+             'ref': (f[0] if f[1] == '<none>' or f[2] == '<none>' else f[1] ~ ':' ~ f[2]),
+             'why': ('in use' if f[4] == '1' else 'compose' if f[5] == '1' else 'keep list' if f[1] in keep else '')}) %}{% endfor %}{{ out }}
+
+    - name: Note the images to prune
+      ansible.builtin.set_fact:
+        pi_prune: "{{ pi_rows | selectattr('why', 'eq', '') | list }}"
+
+    - name: Print the plan for {{ target }}
+      ansible.builtin.debug:
+        msg: >-
+          {% set out = ['Would remove:'] %}{% for r in pi_prune %}{% set _ = out.append('  ' ~ r.ref ~ '  ' ~ r.size) %}{% endfor %}{% if pi_prune | length == 0 %}{% set _ = out.append('  no image: every one is in use, named by compose, or on the keep list') %}{% endif %}{% set _ = out.append('Kept:') %}{% for r in pi_rows if r.why %}{% set _ = out.append('  ' ~ r.ref ~ '  ' ~ r.size ~ '  (' ~ r.why ~ ')') %}{% endfor %}{% set _ = out.append('Build cache unused for ' ~ (pi_days ~ ' days' if pi_days | int > 0 else 'any time, so all of it') ~ ', and dangling images, go too.') %}{% set _ = out.append('docker system df, before:') %}{% for l in pi_df_before.stdout_lines %}{% set _ = out.append('  ' ~ l) %}{% endfor %}{{ out }}
+      changed_when: true
+
+    - name: "If not --check: ask to prune {{ target }}"
+      ansible.builtin.pause:
+        prompt: >-
+          Remove {{ pi_prune | length }} image{{ '' if pi_prune | length == 1 else 's' }} and the stale
+          build cache on {{ target }}? Volumes and containers are not touched. [y/N]
+      register: pi_answer
+      when:
+        - not ansible_check_mode
+        - not (assume_yes | default(false) | bool)
+
+    - name: Note whether to go ahead
+      ansible.builtin.set_fact:
+        pi_go: >-
+          {{ not ansible_check_mode and
+             ((assume_yes | default(false) | bool) or
+              ((pi_answer.user_input | default('') | lower) in ['y', 'yes'])) }}
+
+    - name: "If going ahead: remove each image, never forced"
+      ansible.builtin.command:
+        argv: [docker, image, rm, "{{ item.ref }}"]
+      loop: "{{ pi_prune }}"
+      loop_control:
+        label: "{{ item.ref }}"
+      register: pi_rm
+      failed_when: false
+      become: true
+      delegate_to: "{{ target }}"
+      when: pi_go | bool
+
+    - name: "If going ahead: prune build cache and dangling images"
+      # `until` is the cache entry's last use, so recent builds keep theirs.
+      ansible.builtin.shell:
+        executable: /bin/sh
+        cmd: >-
+          docker builder prune -af {{ ('--filter until=' ~ (pi_days | int * 24) ~ 'h') if pi_days | int > 0 else '' }}
+          | tail -n 1 && docker image prune -f | tail -n 1
+      register: pi_cache
+      become: true
+      delegate_to: "{{ target }}"
+      when: pi_go | bool
+
+    - name: "If going ahead: read docker system df again"
+      ansible.builtin.command:
+        argv: [docker, system, df]
+      register: pi_df_after
+      changed_when: false
+      become: true
+      delegate_to: "{{ target }}"
+      when: pi_go | bool
+
+    - name: "If going ahead: print what was removed"
+      ansible.builtin.debug:
+        msg: >-
+          {% set out = [] %}{% for r in pi_rm.results | default([]) if r.rc is defined %}{% set _ = out.append(('removed  ' if r.rc == 0 else 'REFUSED  ') ~ r.item.ref ~ ('' if r.rc == 0 else ': ' ~ (r.stderr | default('') | trim))) %}{% endfor %}{% for l in pi_cache.stdout_lines | default([]) %}{% set _ = out.append(l) %}{% endfor %}{% set _ = out.append('docker system df, after:') %}{% for l in pi_df_after.stdout_lines | default([]) %}{% set _ = out.append('  ' ~ l) %}{% endfor %}{{ out }}
+      changed_when: true
+      when: pi_go | bool
+
+    - name: "If declined: say so in the closing line"
+      ansible.builtin.set_stats:
+        data:
+          incomplete: "nothing was pruned on {{ target }}: the question was not answered y"
+        per_host: false
+      when:
+        - not ansible_check_mode
+        - not (pi_go | bool)
