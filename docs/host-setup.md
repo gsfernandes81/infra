@@ -157,7 +157,7 @@ resolves the order itself and containerd is never removed alone.
 
 Docker's init declares only `need sysfs cgroups net`, so it starts whether or not
 `/media/*` mounted. On `one`, `/var/lib/docker` itself is a subvolume on the array
-(decided 2026-10-26, [decisions.md](decisions.md)), guarded the same way, so a rebuild of
+(since 2026-10-26, [decisions.md](decisions.md)), guarded the same way, so a rebuild of
 `one` makes that subvolume and installs the tracked fstab before Docker first starts.
 Put the mount guards in before running any deployment that
 bind-mounts an array: [recovery.md](recovery.md#-the-trap-that-silently-eats-data--and-the-flag-that-stops-it),

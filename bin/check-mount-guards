@@ -33,7 +33,7 @@ set -u
 # Mounts are DISCOVERED from /etc/fstab, not hardcoded, so this works unchanged on
 # every host: /media/* entries that are not `noauto`, plus /var/lib/docker when fstab
 # mounts it (on `one`, since 2026-10-26: docs/decisions.md). On `zero` that is 3, on
-# `one` 6 — 7 once /var/lib/docker's fstab line is installed. A newly added data mount
+# `one` 7. A newly added data mount
 # is therefore checked automatically — and correctly fails until it has been guarded.
 #
 # Override by passing paths explicitly:  sudo bin/check-mount-guards /media/foo
