@@ -1,0 +1,79 @@
+#!/sbin/openrc-run
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /etc/init.d
+# infra-name: zram-swap
+# infra-mode: 0755
+# Compressed swap in RAM, used before the SSD swap partition (/dev/sda3, priority -2).
+#
+# zero swaps to the SSD today, beside Immich, Postgres and the dev containers in 3.9 GB. A
+# page compressed into RAM comes back far faster than one read from the SSD, and costs the
+# SSD no writes. sda3 stays behind it as the overflow, so nothing is lost if this is off.
+#
+# ZRAM_SIZE is the UNCOMPRESSED capacity, not the RAM it takes: zstd typically packs swapped
+# pages 3:1 or better, so 1G full holds roughly 300-400 MB of RAM. The RAM is taken only as
+# pages arrive. `zramctl` or /sys/block/zram0/mm_stat shows the real figure.
+#
+# Not boot-critical: nothing depends on it, and a failed start leaves the SSD swap exactly
+# as it was. It is a service rather than an /etc/local.d script so that rc-status shows it
+# and `rc-service zram-swap stop` takes it away. `before docker`, so at shutdown it stops
+# after the containers: stopping means swapoff, which reads every page back into RAM.
+
+name="zram swap"
+description="Compressed swap in RAM, ahead of the SSD swap partition"
+
+ZRAM_SIZE=1G
+ZRAM_ALGO=zstd
+ZRAM_PRIO=100
+
+depend() {
+	need sysfs dev
+	after modules localmount
+	before docker
+}
+
+zram_on() {
+	grep -q '^/dev/zram0 ' /proc/swaps
+}
+
+start() {
+	ebegin "Starting zram swap (${ZRAM_SIZE}, ${ZRAM_ALGO})"
+	if zram_on; then
+		eend 0
+		return 0
+	fi
+	if ! modprobe -q zram; then
+		eend 1 "no zram module in this kernel"
+		return 1
+	fi
+	# mdev makes the node shortly after the module loads; wait for it, bounded.
+	i=0
+	while [ ! -b /dev/zram0 ] && [ "$i" -lt 5 ]; do
+		sleep 1
+		i=$((i + 1))
+	done
+	if [ ! -b /dev/zram0 ]; then
+		eend 1 "/dev/zram0 did not appear"
+		return 1
+	fi
+	# A device sized by an earlier, failed start cannot be sized again until it is reset.
+	echo 1 > /sys/block/zram0/reset 2>/dev/null
+	if ! echo "$ZRAM_ALGO" > /sys/block/zram0/comp_algorithm 2>/dev/null; then
+		eend 1 "$ZRAM_ALGO not offered; the kernel offers: $(cat /sys/block/zram0/comp_algorithm)"
+		return 1
+	fi
+	echo "$ZRAM_SIZE" > /sys/block/zram0/disksize &&
+		mkswap /dev/zram0 >/dev/null &&
+		swapon -p "$ZRAM_PRIO" /dev/zram0
+	eend $?
+}
+
+stop() {
+	ebegin "Stopping zram swap"
+	if zram_on && ! swapoff /dev/zram0; then
+		eend 1 "swapoff failed, so zram swap is left on"
+		return 1
+	fi
+	echo 1 > /sys/block/zram0/reset 2>/dev/null
+	eend 0
+}

@@ -6,9 +6,9 @@
 # limits (measured on the host it runs on, not Immich's advice), and machine learning's
 # MODEL_REVISION (below).
 #
-# THE PINS are v3.3.5, committed 2026-10-25 and NOT YET DEPLOYED: `zero` runs v3.0.1 until
-# the owner runs the redeploy play (server-deploy-compose.yml -e deployment=immich), which
-# shows the plan first. v3.0.1's digests were read off the box the same day; it had been
+# THE PINS are v3.3.5, committed 2026-10-25 and deployed on `zero` through the redeploy play
+# (server-deploy-compose.yml -e deployment=immich) by 2026-10-26, owner-reported. It ran
+# v3.0.1 before; v3.0.1's digests were read off the box on 2026-10-25, and it had been
 # started from `IMMICH_VERSION=v3`, a floating major tag, so `.env`'s IMMICH_VERSION no
 # longer reaches the image and can be deleted. These digests are the multi-arch index ones
 # from the registry, as v3.0.1's were. Both images are ONE version, so they move together;

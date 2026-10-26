@@ -347,7 +347,9 @@ including the record of its failing disk, with `zero`'s hardware.
 
 The cost is real and accepted: facts about `one` and `two` cannot be verified from
 `zero`, so anything unconfirmed is marked unverified in the docs rather than guessed —
-zram on `zero`, and `one`'s file modes, are the current examples. (`one`'s zram was
+`one`'s file modes are the current example. (Zram on `zero` was one until the owner's
+`/proc/swaps` of 2026-10-26 showed none, only `/dev/sda3`; *Zram swap on `zero`* below.
+`one`'s zram was
 confirmed by the owner on 2026-10-25: `/dev/zram0`, 768 MB zstd, is its first swap at
 priority 16383, holding ~400 MB in ~118 MB of RAM, with `sda2` behind it at −2 and empty.)
 
@@ -1018,9 +1020,9 @@ exclusion as a second lock, and `fstab` keeps the mount, behind its guards.
 
 ## Immich to v3.3.5, with machine learning's v2 models
 
-**Decided 2026-10-25**, the owner's call, for memory on `zero`. Committed, **not yet
-deployed**: the redeploy play does that, after a database dump off the array (its own hook,
-the next section), because the
+**Decided 2026-10-25**, the owner's call, for memory on `zero`. **Deployed by 2026-10-26**
+(owner-reported) through the redeploy play, after a database dump off the array (its own
+hook, the next section), because the
 server migrates the database on its first v3.3.5 start and there is no way back but that
 dump. `compose.yaml` was already v3.3.5's release file, and its postgres and valkey lines are
 what `zero` runs, so the change is the two app images in the override and one variable.
@@ -1051,6 +1053,11 @@ compose file or any variable. Behaviour changes worth knowing: v3.1.0 drops iOS 
 an OIDC role claim to `isAdmin` on later logins; v3.3.0 syncs quota, role and username
 claims on every login; new thumbnail settings reach existing assets only if thumbnail
 generation is re-run for all. v3.2.0's notes were read only in part.
+
+**`MALLOC_ARENA_MAX` was considered for the server and dropped, 2026-10-26.** It caps
+glibc's per-thread memory pools, a known fix for Node processes that hold memory after
+image work, but v3.3.5's `server/bin/start.sh` preloads mimalloc, so glibc's allocator is
+not the one in use and the setting would do nothing.
 
 **Job concurrency is left in the web UI.** The config file Immich offers replaces every
 setting saved from the UI — the code reads the file *instead of* the database, and a key the
@@ -1105,6 +1112,25 @@ cannot plan any image the host lacks. Every bump would have failed the same way.
   `zero`'s load at 11.2 and dropped the run's ssh session. `COMPOSE_PARALLEL_LIMIT=1` and
   `async` answer that from the play; the daemon's own download limit is filed in
   [`management-plane.md`](management-plane.md), as a host file rather than a play setting.
+
+## Zram swap on `zero`
+
+**Decided 2026-10-26**, the owner's ask, after `free` showed 1.1 GB available with 660 MB
+already swapped to the SSD. **Tracked, not yet installed**: `hosts/zero/system/zram-swap`.
+
+- **Ahead of the SSD, not instead of it.** zram at priority 100 takes swapped pages first,
+  compressed in RAM; `/dev/sda3` at −2 stays behind it as the overflow, so a full or failed
+  zram costs nothing that is there today.
+- **1 GiB of capacity, zstd.** The size is what it can hold uncompressed, and RAM is taken
+  only as pages arrive: full, it holds roughly 300 to 400 MB. `one` runs 768 MB of zstd on
+  1 GB of RAM; a quarter of `zero`'s 3.9 GB is the same order.
+- **An OpenRC service, not an `/etc/local.d` script**, so `rc-status` shows it, `rc-service
+  zram-swap stop` removes it, and `install-system-file` checks its syntax. `before docker`,
+  so at shutdown it stops after the containers, since stopping is a swapoff that reads every
+  page back into RAM. A failed start leaves the SSD swap as it was.
+- **No sysctl change with it.** `vm.swappiness` and `vm.page-cluster` are often tuned with
+  zram. They are global and would change how the SSD swap behaves too, so they wait until
+  zram alone has been measured.
 
 ## Dev containers: one compose file in `infra`, one memory pool, `claude-sessions` only in a hub
 
