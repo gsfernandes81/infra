@@ -77,7 +77,11 @@ fi
 # releases, `gh api` — and it is a login rather than a mounted key, which is why it is
 # a step here at all.
 bold "3/4  GitHub CLI (gh)"
-if gh auth status >/dev/null 2>&1; then
+# THE HUB'S TOKEN FIRST, and not through `gh auth status`: an installation token has no user
+# behind it, so that command fails for it while every gh command a repo needs works.
+if [ -s /run/github/token ]; then
+  ok "the hub's token for ${DEV_REPO:-this repo}, renewed every 30 min — no login needed here"
+elif gh auth status >/dev/null 2>&1; then
   ok "$(gh auth status 2>&1 | grep -m1 'Logged in' | sed 's/^[[:space:]]*//')"
 else
   warn "Not logged in."

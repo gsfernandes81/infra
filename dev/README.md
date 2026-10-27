@@ -154,7 +154,8 @@ given.
 ## The hub
 
 `dev-hub`, built from `hub/`: a small image with no Claude Code, no node and no repo. It is
-the one container an ssh login lands on, and it does four things.
+the one container an ssh login lands on, and it does four things — five with the GitHub
+token broker on (*GitHub tokens, one repo each*, below).
 
 **The menu.** Its sshd's `ForceCommand` is `hub-door`: the claude-sessions menu over every
 container at a terminal, a forwarded command as given, and a login shell for anything else —
@@ -219,6 +220,63 @@ mockups 12 to 15, and binding as the rest of that file is:
 - **A container that does not answer** says so, and is asked again every 15 seconds without
   redrawing — an idle hub still sends nothing down the metered link. `s` on it tries a shell
   there anyway, which may answer where the agent did not.
+
+## GitHub tokens, one repo each
+
+**The hub can hold the one GitHub credential, and hand each container a token for its own repo
+and nothing else** (owner, 2026-10-27). Off until `HUB_GITHUB_APP_ID` is set; until then every
+container keeps its own `gh` login and deploy key, exactly as before.
+
+How it works:
+
+- **A GitHub App, made once by you, is the credential.** Its private key is
+  `github-app.pem` in `$HUB_SECRETS` (`~/.dev-secrets`), mounted read-only into the hub and
+  into nothing else — the same rule as the hub's ssh key.
+- **`hub/github-tokens` mints an installation token per container**, asking GitHub for exactly
+  one repository — the container's, from the anchors at the top of `compose.yaml`, the same
+  ones its `DEV_REPO` clones — and for `HUB_GITHUB_PERMISSIONS`. It checks the answer names
+  that one repo and writes nothing otherwise. A token lasts an hour; the hub renews every 30
+  minutes, and a failed pass keeps the old token and retries in 2.
+- **Each container mounts only its own directory** of the `github-tokens` volume, read-only,
+  at `/run/github` (a subpath mount, like the hooks drop-in). A claude in `or3-dev` can read
+  or3's token and no other container's, and the token itself can reach or3 alone.
+- **In the container nothing needs logging in.** `/usr/local/bin/gh` is a wrapper that hands
+  the real gh the token, read fresh on each call; git uses `git-credential-hub` for
+  `https://github.com`, so a clone, pull or push over https uses it too; the entrypoint clones
+  over https with it on a first start. An explicit `GH_TOKEN` still wins.
+
+What changes for you:
+
+- **PRs, issues and comments made from a container appear as the App** (`<app-name>[bot]`),
+  not as you; commits are still authored by `GIT_USER_NAME`. That is the price of a token
+  scoped to one repo: GitHub mints those only for an App's installation.
+- **A container reaches its own repo only.** `gh` in infra-dev cannot open a PR on
+  claude-sessions any more; that is the point, and a container that needs a second repo is a
+  second line in `compose.yaml`, not a wider token.
+- `gh auth status` reports failure on an installation token (it asks for a user the token does
+  not have) while every repo command works; `make login` and the entrypoint check the token
+  file instead, and `make status` prints `github: the hub's token for <repo>, until <time>`.
+
+**Turning it on, once** — the browser half is yours, everything else is in the repo:
+
+1. On GitHub, *Settings → Developer settings → GitHub Apps → New GitHub App*: any name and
+   homepage; *Webhook* unticked; *Repository permissions* Contents, Pull requests, Issues and
+   Workflows **read and write**, Actions, Checks and Commit statuses **read**; *Only on this
+   account*. Create it and note its **App ID**.
+2. On the App's page, *Generate a private key* — a `.pem` downloads — then *Install App* on your
+   account, *Only select repositories*: infra, or3, destiny-director, dossier.
+3. The key to zero, never into a repo: from the phone, `scp <the.pem> zero:.dev-secrets/github-app.pem`,
+   then on zero `chmod 600 ~/.dev-secrets/github-app.pem` and delete the phone's copy.
+4. `HUB_GITHUB_APP_ID=<id>` in `dev/.env`, then `make up` (the hub is recreated) and
+   `make restart C=<c>` for each running container, so its git picks the helper up.
+5. Proof, from `make shell C=infra-dev`: `git ls-remote https://github.com/gsfernandes81/infra`
+   answers, and `git ls-remote https://github.com/gsfernandes81/or3` is refused — or3 is
+   private, and the token is infra's alone. (A public repo is no test: anything can read one.) `~/.hub/github-tokens.log` in the hub has each pass, never a token.
+
+Asking for a permission the App was not granted fails every token with GitHub's reason in the
+log (HTTP 422); narrow `HUB_GITHUB_PERMISSIONS` in `.env` or widen the App. The checks are
+`python3 hub/test_github_tokens.py`, offline, against a stand-in GitHub that verifies each
+JWT's signature.
 
 ## The workspace and the env volume
 

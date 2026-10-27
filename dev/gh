@@ -1,0 +1,13 @@
+#!/bin/sh
+# /usr/local/bin/gh in gsrpi-dev-base: the real gh, with the hub's token for this container's
+# repo when there is one (dev/README.md § "GitHub tokens, one repo each").
+#
+# The token is read on EVERY call, not once into the environment, because the hub renews it
+# every 30 minutes and a token in a long-lived shell's environment would expire in an hour.
+# An explicit GH_TOKEN or GITHUB_TOKEN wins, so a person can still override it per command.
+# With no token file — the broker off — this is exactly the real gh and its own login.
+if [ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] && [ -s /run/github/token ]; then
+    GH_TOKEN=$(cat /run/github/token)
+    export GH_TOKEN
+fi
+exec /usr/local/libexec/gh "$@"

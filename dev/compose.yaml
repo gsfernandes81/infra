@@ -89,10 +89,24 @@ services:
       CLAUDE_SESSIONS_HOSTS: ${HUB_HOSTS:?set HUB_HOSTS in dev/.env — the containers the hub manages, e.g. infra-dev}
       CLAUDE_SESSIONS_REMOTE: /opt/claude-sessions/bin/claude-sessions
       HUB_OFFLOAD: ${HUB_OFFLOAD:-1}
+      # THE TOKEN BROKER (hub/github-tokens). Empty app id is OFF — a setting, not a mistake,
+      # so `:-` — and every container keeps its own gh login and deploy key. The App's key is
+      # github-app.pem in HUB_SECRETS. What each token may do is the list below, never more
+      # than the App was granted; which repo, the anchors at the top of this file.
+      HUB_GITHUB_APP_ID: ${HUB_GITHUB_APP_ID:-}
+      HUB_GITHUB_KEY: /run/hub-secrets/github-app.pem
+      HUB_GITHUB_PERMISSIONS: ${HUB_GITHUB_PERMISSIONS:-contents=write,pull_requests=write,issues=write,workflows=write,actions=read,checks=read,statuses=read}
+      HUB_GITHUB_TOKENS: /home/dev/tokens
+      HUB_REPO_INFRA_DEV: *repo-infra
+      HUB_REPO_OR3_DEV: *repo-or3
+      HUB_REPO_DD_DEV: *repo-dd
+      HUB_REPO_DS_DEV: *repo-ds
     volumes:
       - claude-sessions:/opt/claude-sessions
       # The hub's key, its known_hosts, its sshd host key and its pass log.
       - hub-state:/home/dev/.hub
+      # Every container's token, one directory each; each container mounts only its own.
+      - github-tokens:/home/dev/tokens
       # Mode-700 directory on zero holding the hub's authorized_keys (the clients' keys)
       # and its tunnel credentials. Read-only.
       - ${HUB_SECRETS:?set HUB_SECRETS in dev/.env — server-create-dev-container.yml -e container=dev writes it}:/run/hub-secrets:ro
@@ -105,8 +119,9 @@ services:
       #   read_only: true
       #   bind: { create_host_path: false }
     healthcheck:
-      # Healthy once the install has put what every container mounts in place.
-      test: ["CMD", "sh", "-c", "test -x /opt/claude-sessions/bin/claude-sessions && test -s /opt/claude-sessions/hub.pub && test -d /opt/claude-sessions/managed-settings.d"]
+      # Healthy once the install has put what every container mounts in place, and the
+      # token broker has made every container's directory and tried its first pass.
+      test: ["CMD", "sh", "-c", "test -x /opt/claude-sessions/bin/claude-sessions && test -s /opt/claude-sessions/hub.pub && test -d /opt/claude-sessions/managed-settings.d && test -e /home/dev/tokens/.ready"]
       interval: 10s
       timeout: 5s
       retries: 30
@@ -183,6 +198,9 @@ services:
       # ~gavin/infra is now only what the box runs; the container's tree is its own, so a
       # commit in here never leaves zero's checkout diverged again (CLAUDE.md § Git, the
       # 2026-10-25 divergence). Push to share work, as from anywhere else.
+      # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
+      # no other container's (hub/github-tokens). Empty when the broker is off.
+      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: infra-dev } }
       - infra-workspace:/workspace
       # The repo's untracked secrets, in a volume of their own, linked into the workspace.
       - infra-env:/home/dev/.env.d
@@ -242,6 +260,9 @@ services:
     volumes:
       - *opt
       - *managed
+      # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
+      # no other container's (hub/github-tokens). Empty when the broker is off.
+      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: or3-dev } }
       - or3-workspace:/workspace
       - or3-env:/home/dev/.env.d
       # The or3ecr key, the deploy key and the phone's authorized_keys (or3's
@@ -289,6 +310,9 @@ services:
     volumes:
       - *opt
       - *managed
+      # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
+      # no other container's (hub/github-tokens). Empty when the broker is off.
+      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: dd-dev } }
       - dd-workspace:/workspace
       - dd-env:/home/dev/.env.d
       # What was the clone's .dev-ssh/, moved out of it at the cutover: mode 700, read-only.
@@ -356,6 +380,9 @@ services:
     volumes:
       - *opt
       - *managed
+      # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
+      # no other container's (hub/github-tokens). Empty when the broker is off.
+      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: ds-dev } }
       - ds-workspace:/workspace
       - ds-env:/home/dev/.env.d
       - ${DS_SECRETS:?set DS_SECRETS in dev/.env}:/run/ds-secrets:ro
@@ -375,6 +402,7 @@ networks:
 volumes:
   claude-sessions:
   hub-state:
+  github-tokens:
   infra-workspace:
   infra-env:
   # infra-dev's, made under its old project name `infra-dev` and kept by name, so the

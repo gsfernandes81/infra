@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # PID 1 of the hub (under `init: true`). In order, because each step needs the one before:
 #
-#   hub key -> install into the shared volume -> sshd host key and authorized_keys
-#   -> environment for logins -> [offloader (bg)] -> sshd (fg)
+#   hub key -> install into the shared volume -> GitHub tokens (first pass, then bg)
+#   -> sshd host key and authorized_keys -> environment for logins -> [offloader (bg)]
+#   -> sshd (fg)
 #
 # Everything ahead of sshd is bounded and non-fatal, as in the dev containers' entrypoint:
 # the door is the one thing that must come up. The compose healthcheck reads what the
@@ -13,6 +14,7 @@
 #   CLAUDE_SESSIONS_HOSTS   the containers, by name on the `dev` network
 #   CLAUDE_SESSIONS_REMOTE  the binary's path inside them (/opt/claude-sessions/bin/…)
 #   HUB_OFFLOAD             0 stops the offload timer starting                     (1)
+#   HUB_GITHUB_*, HUB_REPO_*  the token broker's; github-tokens' own header lists them
 set -u
 
 say() { printf '[hub] %s\n' "$*"; }
@@ -51,6 +53,28 @@ else
     rm -f "$SHARED/.hub.pub.tmp"
     say "WARNING: could not publish the hub key — no container will let the hub in"
 fi
+
+# ── GitHub tokens: one per container, each restricted to that container's repo ─────
+# Each dev container mounts only its own directory of the tokens volume, read-only, as a
+# SUBPATH — which must exist before the container can start at all. So the directories are
+# made unconditionally, the first pass runs before the hub reports healthy (bounded: GitHub
+# being down must not keep every container from starting; each then falls back to its own gh
+# login and deploy key), and only then is .ready written, which the healthcheck waits for.
+# With HUB_GITHUB_APP_ID empty the broker is off and says so once; nothing else changes.
+TOKENS="${HUB_GITHUB_TOKENS:-$HOME/tokens}"
+rm -f "$TOKENS/.ready"   # a marker from the last start would report this one ready early
+if github-tokens dirs; then
+    timeout 60 github-tokens once >> "$STATE/github-tokens.log" 2>&1 \
+        || say "WARNING: the first GitHub token pass failed or timed out — ~/.hub/github-tokens.log"
+    tail -n 5 "$STATE/github-tokens.log" 2>/dev/null | sed 's/^/[hub] github: /'
+    if [ -n "${HUB_GITHUB_APP_ID:-}" ]; then
+        setsid github-tokens loop "$STATE/github-tokens.log" </dev/null \
+            >> "$STATE/github-tokens.log" 2>&1 &
+    fi
+else
+    say "WARNING: could not make the token directories — containers whose mount needs one will not start"
+fi
+: > "$TOKENS/.ready"
 
 # ── sshd: host key, and who may log in ─────────────────────────────────────────
 [ -f "$STATE/ssh_host_ed25519_key" ] || \

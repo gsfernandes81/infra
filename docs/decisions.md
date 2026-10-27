@@ -1251,6 +1251,22 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   worktrees and ignored directories are listed first and stay behind on the host, untouched.
   dd's compose-level `env_file` is dropped rather than pointed at a host file: dd reads its
   `.env` itself, and a host path would be secrets outside their volume again.
+- **The hub holds one GitHub App key and mints each container an hourly token for its own repo
+  only** (owner, 2026-10-27: "bonus points if claude sessions door can hold a GitHub token …
+  restricted to that repo only"). **An App, because nothing else can be restricted to one repo
+  and minted by a program**: a classic token or a gh login spans every repo the account can
+  reach; a fine-grained PAT can be scoped to one repo but only made by hand in a browser, one
+  per container and per expiry; an App's installation token takes a `repositories` list at
+  mint time. The cost is authorship — PRs and issues from a container appear as the App's bot,
+  commits are still authored by the owner. **The key lives only in the hub**, as its ssh key
+  does, and widens nothing: the hub already reaches every container. **Delivered by volume,
+  not ssh**: each container mounts its own subpath of a tokens volume read-only, so a
+  container reads only its own token and gets it before its first clone (the hub's healthcheck
+  waits on the first pass, bounded, so GitHub being down delays nothing past a minute). The
+  broker checks GitHub's answer names exactly that one repo and writes nothing otherwise.
+  **Off by default**, with every container's own gh login and deploy key as before: the App is
+  the owner's to make (dev/README.md). Built in Python's standard library plus `openssl`, in
+  infra's hub image and not in claude-sessions, whose zero-dependency build has no TLS.
 - **A repo's untracked secrets live in a second volume, `~/.env.d`, symlinked into the
   workspace** (`DEV_ENV_FILES`). Not hard links: two volumes are two mounts and `link(2)`
   refuses across mounts. A regular file found where a link should be — an editor that saves by

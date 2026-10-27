@@ -116,7 +116,7 @@ fleet_files_line() {
 # ── the hub's reach into this container ─────────────────────────────────────
 hub_line() {
     local key here there
-    if d exec "$CONTAINER" sh -c 'grep -q "^restrict,pty ssh-" "$HOME/.ssh/authorized_keys"' 2>/dev/null; then
+    if d exec "$CONTAINER" sh -c 'grep -q "^restrict,pty ssh-" "$HOME/.ssh/authorized_keys.hub"' 2>/dev/null; then
         key='key authorised'
     else
         key='hub key NOT authorised: is the hub up? make status C=hub, then make restart'
@@ -124,6 +124,14 @@ hub_line() {
     here="$(d exec "$CONTAINER" claude-sessions --version 2>/dev/null || echo 'no claude-sessions')"
     there="$(d exec dev-hub claude-sessions --version 2>/dev/null || echo 'no hub')"
     echo "$key; $here here, $there at the hub"
+}
+
+# The hub's token for this container, by what the broker wrote beside it (never the token).
+github_line() {
+    d exec "$CONTAINER" sh -c '
+        if [ ! -s /run/github/token ]; then echo "no hub token — the broker is off; gh and the deploy key are this container'"'"'s own"
+        else sed -n "s/.*\"repo\": \"\([^\"]*\)\".*\"expires_at\": \"\([^\"]*\)\".*/the hub'"'"'s token for \1, until \2/p" /run/github/meta.json; fi' 2>/dev/null \
+        || echo 'could not ask the container'
 }
 
 # ── tunnel ──────────────────────────────────────────────────────────────────
@@ -366,6 +374,7 @@ print((" ".join(sorted(h)) if h else "PRESENT BUT EMPTY — no hooks in it")
     # here the one the hub installed — the same bytes as the hub's own, since this container
     # runs it from the hub's volume.
     printf 'hub       : %s\n' "$(hub_line)"
+    printf 'github    : %s\n' "$(github_line)"
     printf 'door      : %s\n' "$(d exec "$CONTAINER" sh -c 'f=$(tr "\0" " " < /proc/$(cat /home/dev/.ssh-host/sshd.pid)/cmdline | sed -n "s/.* -f \([^ ]*\).*/\1/p"); /usr/sbin/sshd -T -C user=dev,host=localhost,addr=127.0.0.1 -f "${f:-/home/dev/sshd_config}" 2>/dev/null | sed -n "s/^forcecommand //p"' 2>/dev/null \
         | grep . || echo 'could not ask sshd')"
     printf '\n'

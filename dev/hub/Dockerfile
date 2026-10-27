@@ -27,7 +27,7 @@ ARG USER_GID=1000
 # openssh-server is the door; openssh-client reaches the containers; procps for whoever
 # debugs it; curl and ca-certificates for the download below and nothing at run time.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        openssh-server openssh-client procps curl ca-certificates tzdata less \
+        openssh-server openssh-client procps curl ca-certificates tzdata less openssl \
     && rm -rf /var/lib/apt/lists/*
 
 # ── claude-sessions: the hub's menu, and every container's hooks, agent and offloader ──
@@ -61,7 +61,10 @@ RUN set -eux; \
 # The door — sshd's ForceCommand: the menu at a terminal, a shell otherwise or if it fails.
 # Root-owned, on PATH, above the USER line for the reason Dockerfile.base gives for its own.
 COPY door /usr/local/bin/hub-door
-RUN chmod 0755 /usr/local/bin/hub-door
+# The GitHub token broker (dev/README.md § "GitHub tokens, one repo each"). Python's standard
+# library, which this image is built on, and openssl for the App's RS256 signature.
+COPY github-tokens /usr/local/bin/github-tokens
+RUN chmod 0755 /usr/local/bin/hub-door /usr/local/bin/github-tokens
 
 # The dev user, at the uid that owns the checkout — the same uid as every dev container's
 # `dev`, so the files this writes into the shared volume read as their own user's there

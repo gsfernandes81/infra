@@ -267,8 +267,16 @@ RUN set -eux; \
       *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
     esac; \
     curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${arch}.tar.gz" \
-      | tar -xz -C /usr/local/bin --strip-components=2 "gh_${GH_VERSION}_linux_${arch}/bin/gh"; \
-    gh --version
+      | tar -xz -C /usr/local/libexec --strip-components=2 "gh_${GH_VERSION}_linux_${arch}/bin/gh"; \
+    /usr/local/libexec/gh --version
+
+# THE REAL gh IS IN libexec, and /usr/local/bin/gh is a three-line wrapper that hands it the
+# hub's token for this container's repo, read fresh on each call (dev/gh says why). Beside it,
+# git's credential helper for the same token, so a push over https uses it too. Both do
+# nothing when /run/github/token is empty — the hub's broker off — and gh is then its own.
+COPY gh /usr/local/bin/gh
+COPY git-credential-hub /usr/local/bin/git-credential-hub
+RUN chmod 0755 /usr/local/bin/gh /usr/local/bin/git-credential-hub && gh --version
 
 # cloudflared WAS BAKED HERE until 2026-10-26, hash-pinned, and started by the entrypoint
 # when DEV_TUNNEL_HOSTNAME was set. The dev containers have no tunnel of their own any more:

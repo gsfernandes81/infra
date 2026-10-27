@@ -1,0 +1,215 @@
+#!/usr/bin/env python3
+"""Mint each dev container's GitHub token, restricted to that container's own repo.
+
+Runs in the hub, which holds a GitHub App's private key and nothing in a dev container does.
+For every container named by a HUB_REPO_<NAME> variable it asks GitHub for an installation
+access token limited to that ONE repository and to HUB_GITHUB_PERMISSIONS, and writes it to
+<tokens>/<name>/token. Each dev container mounts only its own <name> directory, read-only, at
+/run/github, so a claude in or3-dev can read or3's token and no other. A token lasts an hour;
+`loop` renews every 30 minutes, so one is always at least half an hour from expiring.
+
+    github-tokens dirs    make <tokens>/<name>/ for every container (their mounts need them)
+    github-tokens once    mint every token now; exit 1 if any failed
+    github-tokens loop    `once`, then again every 30 minutes (2 after a failure), forever
+
+Environment (dev/compose.yaml sets each):
+    HUB_GITHUB_APP_ID       the App's id. Empty means OFF: `dirs` still runs, nothing is minted,
+                            and each container keeps its own gh login and deploy key.
+    HUB_GITHUB_KEY          the App's private key, PEM        (/run/hub-secrets/github-app.pem)
+    HUB_GITHUB_PERMISSIONS  name=level,... asked for on every token
+    HUB_GITHUB_TOKENS       where the tokens go                (/home/dev/tokens)
+    HUB_GITHUB_API          the API's base URL; tests point it at a stand-in
+    HUB_REPO_<NAME>         owner/repo for container <name> (INFRA_DEV -> infra-dev)
+
+It never prints a token, a JWT or a request header. What it prints about a refusal is the
+status and GitHub's own `message`, which is where GitHub puts the reason.
+
+Python's standard library and the `openssl` command only: the hub image has both, and a JWT is
+one RS256 signature, which `openssl dgst -sign` makes from the PEM as it is.
+"""
+
+import base64
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+
+RENEW = 30 * 60
+RETRY = 2 * 60
+LOG_MAX = 1 << 20
+REPO = re.compile(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+")
+
+
+def say(msg):
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    print(f"{stamp} {msg}", flush=True)
+
+
+def repos(env):
+    """{container: "owner/repo"} from HUB_REPO_* — refusing anything that is not owner/repo."""
+    out = {}
+    for key, value in env.items():
+        if not key.startswith("HUB_REPO_"):
+            continue
+        name = key[len("HUB_REPO_"):].lower().replace("_", "-")
+        if not REPO.fullmatch(value):
+            raise SystemExit(f"github-tokens: {key}={value!r} is not owner/repo")
+        out[name] = value
+    return out
+
+
+def b64url(raw):
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+
+def app_jwt(app_id, key, now):
+    """The App's own credential: ten minutes at most, by GitHub's rule, backdated a minute
+    for clock skew. Signed by openssl over stdin, so the key never leaves its file."""
+    head = b64url(json.dumps({"alg": "RS256", "typ": "JWT"}, separators=(",", ":")).encode())
+    body = b64url(json.dumps({"iat": now - 60, "exp": now + 540, "iss": str(app_id)},
+                             separators=(",", ":")).encode())
+    signing = f"{head}.{body}".encode()
+    sig = subprocess.run(["openssl", "dgst", "-sha256", "-sign", key, "-binary"],
+                         input=signing, capture_output=True, check=False, timeout=30)
+    if sig.returncode != 0 or not sig.stdout:
+        raise RuntimeError(f"openssl could not sign with {key}: "
+                           f"{sig.stderr.decode(errors='replace').strip()[:200]}")
+    return f"{head}.{body}.{b64url(sig.stdout)}"
+
+
+class Refused(Exception):
+    pass
+
+
+def call(api, method, path, jwt, body=None):
+    data = None if body is None else json.dumps(body).encode()
+    req = urllib.request.Request(api.rstrip("/") + path, data=data, method=method, headers={
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {jwt}",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "dev-hub-github-tokens",
+        **({"Content-Type": "application/json"} if data else {}),
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read() or b"{}")
+    except urllib.error.HTTPError as err:
+        try:
+            msg = json.loads(err.read() or b"{}").get("message", "")
+        except ValueError:
+            msg = ""
+        raise Refused(f"{method} {path}: HTTP {err.code} {msg}".rstrip()) from None
+
+
+def write_atomic(path, text, mode):
+    tmp = f"{path}.tmp"
+    try:
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def permissions(spec):
+    out = {}
+    for item in filter(None, (s.strip() for s in spec.split(","))):
+        name, _, level = item.partition("=")
+        if level not in ("read", "write"):
+            raise SystemExit(f"github-tokens: permission {item!r} is not name=read|write")
+        out[name] = level
+    return out
+
+
+def make_dirs(tokens, names):
+    os.makedirs(tokens, mode=0o755, exist_ok=True)
+    for name in names:
+        os.makedirs(os.path.join(tokens, name), mode=0o700, exist_ok=True)
+
+
+def mint_all(env, now=None):
+    """One pass. Returns the containers that failed; each keeps the token it had."""
+    tokens = env.get("HUB_GITHUB_TOKENS", "/home/dev/tokens")
+    table = repos(env)
+    make_dirs(tokens, table)
+    app_id = env.get("HUB_GITHUB_APP_ID", "").strip()
+    key = env.get("HUB_GITHUB_KEY", "/run/hub-secrets/github-app.pem")
+    if not app_id:
+        say("off: HUB_GITHUB_APP_ID is empty — containers use their own gh login and deploy key")
+        return []
+    if not os.path.isfile(key):
+        say(f"off: no App key at {key} — containers use their own gh login and deploy key")
+        return []
+    api = env.get("HUB_GITHUB_API", "https://api.github.com")
+    perms = permissions(env.get("HUB_GITHUB_PERMISSIONS", "contents=write"))
+    jwt = app_jwt(app_id, key, int(now if now is not None else time.time()))
+    failed, installs = [], {}
+    for name, repo in sorted(table.items()):
+        try:
+            if repo not in installs:
+                installs[repo] = call(api, "GET", f"/repos/{repo}/installation", jwt)["id"]
+            got = call(api, "POST", f"/app/installations/{installs[repo]}/access_tokens", jwt,
+                       {"repositories": [repo.split("/")[1]], "permissions": perms})
+            # THE WHOLE POINT, CHECKED RATHER THAN ASSUMED: a token GitHub widened — the
+            # repositories list absent, or naming anything else — is never written.
+            scope = [r.get("full_name", "") for r in got.get("repositories") or []]
+            if scope != [repo] or not got.get("token"):
+                raise Refused(f"token for {repo} came back scoped to {scope or 'every repo'} — not written")
+            write_atomic(os.path.join(tokens, name, "token"), got["token"], 0o600)
+            write_atomic(os.path.join(tokens, name, "meta.json"),
+                         json.dumps({"repo": repo, "expires_at": got.get("expires_at", ""),
+                                     "permissions": got.get("permissions", {})}) + "\n", 0o644)
+            say(f"{name}: token for {repo} until {got.get('expires_at', '?')}")
+        except (Refused, KeyError, OSError, urllib.error.URLError, ValueError) as err:
+            failed.append(name)
+            say(f"{name}: FAILED for {repo}: {err} — it keeps the token it had")
+    return failed
+
+
+def trim(log):
+    try:
+        if os.path.getsize(log) > LOG_MAX:
+            with open(log, "rb") as f:
+                f.seek(-LOG_MAX // 2, os.SEEK_END)
+                tail = f.read().split(b"\n", 1)[-1]
+            write_atomic(log, tail.decode(errors="replace"), 0o644)
+    except OSError:
+        pass
+
+
+def main(argv, env):
+    verb = argv[1] if len(argv) > 1 else "once"
+    if verb == "dirs":
+        make_dirs(env.get("HUB_GITHUB_TOKENS", "/home/dev/tokens"), repos(env))
+        return 0
+    if verb == "once":
+        try:
+            return 1 if mint_all(env) else 0
+        except (RuntimeError, OSError) as err:
+            say(f"FAILED: {err}")
+            return 1
+    if verb == "loop":
+        log = argv[2] if len(argv) > 2 else None
+        while True:
+            if log:
+                trim(log)
+            try:
+                failed = mint_all(env)
+            except (RuntimeError, OSError) as err:
+                say(f"FAILED: {err}")
+                failed = ["*"]
+            if not env.get("HUB_GITHUB_APP_ID", "").strip():
+                return 0
+            time.sleep(RETRY if failed else RENEW)
+    print(__doc__, file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv, dict(os.environ)))

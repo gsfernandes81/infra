@@ -333,7 +333,18 @@ git config --global user.email "${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}"
 #
 # Without this, the pull below has never once run on an https origin: it fails on "could not
 # read Username", and the message in its failure branch names neither cause.
-git config --global url."git@github.com:".insteadOf "https://github.com/"
+#
+# WITH A HUB TOKEN, THE OTHER WAY ROUND. When the hub's broker is on, /run/github/token holds
+# an hourly token for this container's repo only (dev/README.md § "GitHub tokens, one repo
+# each"): git keeps https and asks git-credential-hub, which reads that file on each call, and
+# gh is handed it by its wrapper. No rewrite then — it would send pushes back to the deploy
+# key. An ssh origin (git@) keeps using the key either way.
+if [ -s /run/github/token ]; then
+    git config --global credential.https://github.com.helper hub
+    say "github: the hub's token for ${DEV_REPO:-this repo} — git over https, gh, renewed every 30 min"
+else
+    git config --global url."git@github.com:".insteadOf "https://github.com/"
+fi
 
 # ── the workspace: cloned once, pulled after ────────────────────────────────
 # SINCE 2026-10-26 /workspace IS THIS CONTAINER'S OWN, a named volume, not the host's clone
@@ -354,6 +365,12 @@ git config --global url."git@github.com:".insteadOf "https://github.com/"
 if [ ! -e /workspace/.git ] && [ -n "${DEV_REPO:-}" ]; then
     if [ -n "$(ls -A /workspace 2>/dev/null)" ]; then
         say "WARNING: /workspace holds files but no checkout — not cloning $DEV_REPO over them"
+    elif [ -s /run/github/token ]; then
+        say "cloning $DEV_REPO into /workspace over https with the hub's token"
+        timeout 300 git clone --quiet "https://github.com/$DEV_REPO.git" /workspace 2>&1 \
+            | sed 's/^/[entrypoint] git: /'
+        [ "${PIPESTATUS[0]}" = 0 ] || \
+            say "WARNING: the clone failed — the workspace is empty; make login clones it"
     elif gh auth status >/dev/null 2>&1; then
         say "cloning $DEV_REPO into /workspace with gh"
         timeout 300 gh repo clone "$DEV_REPO" /workspace 2>&1 | sed 's/^/[entrypoint] gh: /'
