@@ -84,7 +84,7 @@ BASE_TAG := 2026.10.26
 
 .PHONY: help dev base up restart stop down down-volumes status verify collections logs \
 	boot-log tunnel-log idle offload-log sessions login claude claude-update shell fleet \
-	_require-env _require-secrets _require-uid _require-own-names
+	_require-env _require-secrets _require-uid _require-own-names _require-volumes volumes
 
 help:
 	@awk '/^#/ { sub(/^# ?/, ""); print; next } { exit }' $(MAKEFILE_LIST)
@@ -102,6 +102,28 @@ _require-env:
 	  grep -q "^$$k" $(CURDIR)/.env || printf ' %s' "$${k%=}"; done); \
 	[ -z "$$missing" ] || { \
 	  echo "dev/.env lacks:$$missing — copy each line from .env.example and set it." >&2; exit 1; }
+
+# THE EXTERNAL VOLUMES — each container's logins, history and host keys, kept by name from its
+# old project — must already exist: Compose refuses an external volume it cannot find, and
+# that refusal is the safety net at the cutover (a mistyped name is caught, not created empty
+# while the real one sits orphaned). So `up` lists every missing one and stops; on a box that
+# never had the old projects — a fresh install, the smoke test — `make volumes` creates them,
+# empty, once, on purpose. The names are read from compose.yaml's own `external: true, name:`
+# lines, so the volume table there must keep that one-line shape.
+EXTERNAL_VOLUMES = $(shell grep -oE 'external: true, name: [A-Za-z0-9_.-]+' $(CURDIR)/compose.yaml | sed 's/.*name: //')
+_require-volumes:
+	@missing=; for v in $(EXTERNAL_VOLUMES); do \
+	  $(DOCKER) volume inspect "$$v" >/dev/null 2>&1 || missing="$$missing $$v"; done; \
+	[ -z "$$missing" ] || { \
+	  echo "missing external volumes:$$missing" >&2; \
+	  echo "  at the cutover: a name in compose.yaml is wrong — check it against" >&2; \
+	  echo "      sudo docker volume ls   and fix compose.yaml, do NOT create it;" >&2; \
+	  echo "  on a box that never had them: make volumes   (creates them empty)" >&2; exit 1; }
+
+volumes:
+	@for v in $(EXTERNAL_VOLUMES); do \
+	  if $(DOCKER) volume inspect "$$v" >/dev/null 2>&1; then echo "kept    $$v"; \
+	  else $(DOCKER) volume create "$$v" >/dev/null && echo "created $$v"; fi; done
 
 # A container of the same name from ANOTHER compose project — infra-dev's old one, `infra-dev`,
 # or a child's from its own repo — makes `up` fail half way with "name already in use",
@@ -175,7 +197,7 @@ base: _require-uid
 # No `base` dependency: the FROM pulls from ghcr when the tag is absent locally, so
 # the cross-repo build order 2d started with is gone — that was the point of the
 # registry. `make base` above exists for the days the registry does not.
-up: _require-env _require-uid _require-secrets _require-own-names
+up: _require-env _require-uid _require-secrets _require-own-names _require-volumes
 	$(COMPOSE) up -d --build $(S)
 	@printf '\n'
 	@$(MAKE) --no-print-directory status

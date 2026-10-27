@@ -107,6 +107,14 @@ jobs:
       - name: Build the base (make base)
         run: make -C dev base SUDO=
 
+      # A runner never had the old projects, so the external volumes zero keeps are made here,
+      # empty — after checking that `make up` refuses without them, which is the cutover's net.
+      - name: Check make up refuses missing volumes, then create them (make volumes)
+        run: |
+          if make -C dev up SUDO= $SMOKE_OVERRIDE 2>err.txt; then echo "make up did NOT refuse"; exit 1; fi
+          grep -q 'missing external volumes' err.txt && echo "PASS  refused, naming the volumes"
+          make -C dev volumes SUDO=
+
       - name: Start the hub (make up S=hub)
         run: |
           make -C dev up S=hub SUDO= $SMOKE_OVERRIDE

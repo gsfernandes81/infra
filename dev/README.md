@@ -116,8 +116,12 @@ Then, on zero, in your own terminal — `gavin` is not in the docker group, so t
 never an ansible job:
 
 ```sh
-cd ~/infra/dev && make dev     # build, start the hub, its tunnel and infra-dev, then walk the logins
+cd ~/infra/dev && make volumes   # ONLY on a box that never had the old projects: the external volumes, empty
+cd ~/infra/dev && make dev       # build, start the hub, its tunnel and infra-dev, then walk the logins
 ```
+
+`make up` refuses, listing them, while any external volume is missing — at the cutover that is
+a mistyped name to fix in `compose.yaml`, never one to create.
 
 And on each client — the machine you ssh *from*:
 
