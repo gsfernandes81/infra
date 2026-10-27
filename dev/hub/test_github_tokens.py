@@ -157,6 +157,15 @@ class Broker(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(tokens, "kept-dev", "token")))
         self.assertNotIn("SECRET", out.stdout + out.stderr)
 
+    def test_loop_beats_and_an_off_broker_returns(self):
+        beat = os.path.join(self.tmp.name, "tokens.beat")
+        env = {"PATH": os.environ["PATH"], "HUB_GITHUB_TOKENS": tempfile.mkdtemp(dir=self.tmp.name),
+               "HUB_GITHUB_BEAT": beat, "HUB_REPO_X_DEV": "owner/x", "HUB_GITHUB_APP_ID": ""}
+        out = subprocess.run([sys.executable, BROKER, "loop"], env=env, capture_output=True,
+                             text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertTrue(os.path.exists(beat))
+
     def test_a_malformed_repo_stops_it(self):
         out, _ = self.run_broker({"Y": "a b/c"}, verb="dirs")
         self.assertNotEqual(out.returncode, 0)

@@ -14,7 +14,11 @@ access token limited to that ONE repository and to HUB_GITHUB_PERMISSIONS, and w
     github-tokens hosts   print the containers' names, sorted, one line: the hub's list
                           when HUB_HOSTS does not set one
     github-tokens once    mint every token now; exit 1 if any failed
-    github-tokens loop    `once`, then again every 30 minutes (2 after a failure), forever
+    github-tokens loop [LOG] [--skip-first]
+                          `once`, then again every 30 minutes (2 after a failure), forever;
+                          --skip-first waits before the first pass, for a caller that has
+                          just run `once`. Touches HUB_GITHUB_BEAT at start and after every
+                          pass, which the hub's healthcheck reads
 
 Environment (dev/compose.yaml sets each):
     HUB_GITHUB_APP_ID       the App's id. Empty means OFF: `dirs` still runs, nothing is minted,
@@ -187,6 +191,15 @@ def mint_all(env, now=None):
     return failed
 
 
+def touch(path):
+    try:
+        with open(path, "a"):
+            pass
+        os.utime(path)
+    except OSError:
+        pass
+
+
 def trim(log):
     try:
         if os.path.getsize(log) > LOG_MAX:
@@ -213,7 +226,13 @@ def main(argv, env):
             say(f"FAILED: {err}")
             return 1
     if verb == "loop":
-        log = argv[2] if len(argv) > 2 else None
+        args = argv[2:]
+        skip = "--skip-first" in args
+        log = next((a for a in args if not a.startswith("--")), None)
+        beat = env.get("HUB_GITHUB_BEAT", "/home/dev/.hub/tokens.beat")
+        touch(beat)
+        if skip:
+            time.sleep(RENEW)
         while True:
             if log:
                 trim(log)
@@ -222,6 +241,7 @@ def main(argv, env):
             except (RuntimeError, OSError) as err:
                 say(f"FAILED: {err}")
                 failed = ["*"]
+            touch(beat)
             if not env.get("HUB_GITHUB_APP_ID", "").strip():
                 return 0
             time.sleep(RETRY if failed else RENEW)

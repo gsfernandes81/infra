@@ -76,7 +76,9 @@ COPY door /usr/local/bin/hub-door
 # The GitHub token broker (dev/README.md § "GitHub tokens, one repo each"). Python's standard
 # library, which this image is built on, and openssl for the App's RS256 signature.
 COPY github-tokens /usr/local/bin/github-tokens
-RUN chmod 0755 /usr/local/bin/hub-door /usr/local/bin/github-tokens
+# The healthcheck, and `make status`'s word on the hub (health says why).
+COPY health /usr/local/bin/hub-health
+RUN chmod 0755 /usr/local/bin/hub-door /usr/local/bin/github-tokens /usr/local/bin/hub-health
 
 # The dev user, at the uid that owns the checkout — the same uid as every dev container's
 # `dev`, so the files this writes into the shared volume read as their own user's there

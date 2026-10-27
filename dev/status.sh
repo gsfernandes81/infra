@@ -375,6 +375,7 @@ print((" ".join(sorted(h)) if h else "PRESENT BUT EMPTY — no hooks in it")
     # here the one the hub installed — the same bytes as the hub's own, since this container
     # runs it from the hub's volume.
     printf 'hub       : %s\n' "$(hub_line)"
+    printf 'hub health: %s\n' "$(d exec dev-hub hub-health 2>&1 || true)"
     printf 'github    : %s\n' "$(github_line)"
     printf 'door      : %s\n' "$(d exec "$CONTAINER" sh -c 'f=$(tr "\0" " " < /proc/$(cat /home/dev/.ssh-host/sshd.pid)/cmdline | sed -n "s/.* -f \([^ ]*\).*/\1/p"); /usr/sbin/sshd -T -C user=dev,host=localhost,addr=127.0.0.1 -f "${f:-/home/dev/sshd_config}" 2>/dev/null | sed -n "s/^forcecommand //p"' 2>/dev/null \
         | grep . || echo 'could not ask sshd')"

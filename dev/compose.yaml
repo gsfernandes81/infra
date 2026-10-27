@@ -126,9 +126,9 @@ services:
       #   read_only: true
       #   bind: { create_host_path: false }
     healthcheck:
-      # Healthy once the install has put what every container mounts in place, and the
-      # token broker has made every container's directory and tried its first pass.
-      test: ["CMD", "sh", "-c", "test -x /opt/claude-sessions/bin/claude-sessions && test -s /opt/claude-sessions/hub.pub && test -d /opt/claude-sessions/managed-settings.d && test -e /home/dev/tokens/.ready"]
+      # hub/health: what every container mounts is in place, and the offload and token loops
+      # have beaten recently. Its header says what each part means.
+      test: ["CMD", "hub-health"]
       interval: 10s
       timeout: 5s
       retries: 30

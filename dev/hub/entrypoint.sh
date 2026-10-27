@@ -69,13 +69,26 @@ if github-tokens dirs; then
         || say "WARNING: the first GitHub token pass failed or timed out — ~/.hub/github-tokens.log"
     tail -n 5 "$STATE/github-tokens.log" 2>/dev/null | sed 's/^/[hub] github: /'
     if [ -n "${HUB_GITHUB_APP_ID:-}" ]; then
-        setsid github-tokens loop "$STATE/github-tokens.log" </dev/null \
-            >> "$STATE/github-tokens.log" 2>&1 &
+        # SUPERVISED: if the loop ever exits, it is said in the log and started again a minute
+        # later, minting at once; --skip-first only on the first launch, because the pass just
+        # above has minted already (one token per container per start, not two).
+        setsid bash -c '
+            first=--skip-first
+            while :; do
+                github-tokens loop "$1" $first
+                rc=$?
+                printf "%s the token loop exited (%s) — starting it again in 60 s\n" \
+                    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$rc" >> "$1"
+                first=
+                sleep 60
+            done' _ "$STATE/github-tokens.log" </dev/null >> "$STATE/github-tokens.log" 2>&1 &
     fi
+    # ONLY HERE: the directories exist, so every container's subpath mount can be made. Without
+    # them the hub stays unhealthy, which is true, and no dev container starts against it.
+    : > "$TOKENS/.ready"
 else
-    say "WARNING: could not make the token directories — containers whose mount needs one will not start"
+    say "WARNING: could not make the token directories — the hub stays unhealthy and no dev container starts"
 fi
-: > "$TOKENS/.ready"
 
 # ── which containers ───────────────────────────────────────────────────────────
 # ONE LIST: the containers the hub mints tokens for are the containers it manages, so without
@@ -120,6 +133,9 @@ chmod 600 "$HOME/.ssh/environment"
 # A container whose owner wants nothing stopped sets DEV_IDLE_OFFLOAD=0 in dev/.env, which its
 # compose service turns into CLAUDE_SESSIONS_OFFLOAD=0: its pass says so and stops nothing.
 if [ "${HUB_OFFLOAD:-1}" = "1" ]; then
+    # offload.beat is touched now and after every pass: hub-health reads its age, so a loop
+    # that dies or wedges turns the hub unhealthy rather than going quiet.
+    touch "$STATE/offload.beat"
     setsid bash -c '
         while :; do
             start=$(date +%s)
@@ -134,6 +150,7 @@ if [ "${HUB_OFFLOAD:-1}" = "1" ]; then
             if [ "$(stat -c %s "$1" 2>/dev/null || echo 0)" -gt 16777216 ]; then
                 tail -c 8388608 "$1" | tail -n +2 > "$1.tmp" && mv -f "$1.tmp" "$1"
             fi
+            touch "${1%/*}/offload.beat"
             elapsed=$(( $(date +%s) - start ))
             sleep $(( elapsed < 179 ? 180 - elapsed : 1 ))
         done' _ "$STATE/passes.log" </dev/null >/dev/null 2>&1 &

@@ -1,0 +1,33 @@
+#!/bin/sh
+# /usr/local/bin/hub-health — the hub's healthcheck (dev/compose.yaml), and `make status`'s
+# answer to "is the hub doing its job", in one place so the two cannot disagree.
+#
+# Healthy means: what every dev container mounts is in place (the binary, the hooks drop-in,
+# the hub's public key, every container's token directory), AND the hub's two loops are alive —
+# an offload pass in the last 10 minutes (passes are every 3) when the offloader is on, a token
+# pass in the last 40 (passes are every 30) when the broker is on. Each loop touches its beat
+# file when it starts and after every pass, so a hub that has only just started is not held
+# unhealthy, and a loop that has died or wedged is.
+#
+# Unhealthy is a report, not a restart: Docker restarts nothing for it. Every dev container
+# waits for healthy before it starts, so a dead loop also stops new containers starting until
+# it is looked at — which is the point of saying so.
+set -u
+shared=/opt/claude-sessions
+state=/home/dev/.hub
+tokens=${HUB_GITHUB_TOKENS:-/home/dev/tokens}
+
+fail() { echo "unhealthy: $*"; exit 1; }
+fresh() { [ -n "$(find "$1" -mmin "-$2" 2>/dev/null)" ]; }
+
+[ -x "$shared/bin/claude-sessions" ] || fail "claude-sessions is not installed into $shared"
+[ -s "$shared/hub.pub" ] || fail "the hub's public key is not published in $shared"
+[ -d "$shared/managed-settings.d" ] || fail "the hooks drop-in is missing from $shared"
+[ -e "$tokens/.ready" ] || fail "the token directories are not made (~/.hub/github-tokens.log)"
+if [ "${HUB_OFFLOAD:-1}" = 1 ]; then
+    fresh "$state/offload.beat" 10 || fail "no offload pass in 10 minutes (~/.hub/passes.log)"
+fi
+if [ -n "${HUB_GITHUB_APP_ID:-}" ]; then
+    fresh "$state/tokens.beat" 40 || fail "no GitHub token pass in 40 minutes (~/.hub/github-tokens.log)"
+fi
+echo healthy
