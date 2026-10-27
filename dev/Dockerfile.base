@@ -85,7 +85,8 @@
 # the node block below; it is stated here because this paragraph would otherwise read
 # as a promise the image no longer keeps.
 #
-# The repo is NOT copied in: each compose bind-mounts its host clone at /workspace.
+# The repo is NOT copied in: each container clones it into its own workspace volume at
+# /workspace on first start (entrypoint.sh).
 # Only the toolchain is baked. The entrypoint, sshd config and dotfiles here are
 # infra-dev's, which were written to be the last copy: everything repo-specific in
 # them is already an environment variable (dev/compose.yaml documents each).
@@ -457,7 +458,8 @@ RUN set -eux; \
     crush --version
 
 # Create the dev user at the HOST owner's uid/gid, passed by the Makefile as build
-# args, so the bind-mounted /workspace stays writable from both sides. Guard against a
+# args (`make base`; the published base bakes 1001), so what it shares with the host — the
+# secrets directories, the files a container writes into a mount — reads as gavin's. Guard against a
 # uid/gid the base image already uses so the build cannot hard-fail on a collision.
 # The login shell is fish, and that is the setting that makes it the default for
 # `ssh infra-dev`: sshd runs the shell out of /etc/passwd and consults nothing else,

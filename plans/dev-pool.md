@@ -27,7 +27,7 @@ limits the owner is having to manage each container separately.
 
 1. **One small container per repo, all in one compose file in `infra`.** The children keep
    their base, their seams, their own secrets and their own Dockerfiles in their repos; the
-   compose file builds each from an absolute checkout path in its `.env` (no `..`).
+   compose file builds each from its repo's GitHub URL (`main`).
 
 2. **One memory limit for all of them: a parent cgroup.** Every dev container sets
    `cgroup_parent: /devpool`, and the limit is written once, on the pool. Per-container

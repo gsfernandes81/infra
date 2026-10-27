@@ -1154,7 +1154,8 @@ the owner brings it up, every row it marks ⚠︎ above still describes the boxe
   starting, stopping and limiting them is one place. This reverses *Claude dev containers
   stay in their own app repos*, knowingly: `make dev` from a fresh app clone stops being
   the way in. The child repos keep their own Dockerfiles; the compose file builds them from
-  an absolute checkout path in its `.env`, never `..` (Repo invariants).
+  ~~an absolute checkout path in its `.env`, never `..` (Repo invariants)~~ — ⚠︎SUPERSEDED
+  2026-10-27: from each repo's GitHub URL (*The hub, as built*, below).
 - **cgroup v2, set up as Alpine recommends**, is what `zero` runs, on the owner's word; the
   pool file is written for v2 and its first step confirms it on the box.
 - **`claude-sessions` runs only in the hub**, which manages every other container over ssh:
