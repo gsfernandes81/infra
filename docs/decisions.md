@@ -1333,6 +1333,10 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   wrapper rather than the list back in compose.yaml, which would be the second copy the
   derivation exists to avoid; rather than a file the binary reads, which claude-sessions
   dropped the same day for the same reason.
+- **The base carries a language server only where Claude is likely to use it** (owner,
+  2026-10-27, asked whether Claude needs a Markdown one): marksman went, as it serves an
+  editor's link completion and nothing an agent reads Markdown for — and it needed .NET's
+  invariant-mode switch to start at all, which the smoke test found.
 - **A repo's untracked secrets live in a second volume, `~/.env.d`, symlinked into the
   workspace** (`DEV_ENV_FILES`). Not hard links: two volumes are two mounts and `link(2)`
   refuses across mounts. A regular file found where a link should be — an editor that saves by

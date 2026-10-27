@@ -494,7 +494,8 @@ The base, so every child has it by its `FROM` line (owner, 2026-10-27):
   plugins look for: `ty` and `ruff` (Python, Helix's defaults), `pyright-langserver`,
   `typescript-language-server` with TypeScript 5.9, `bash-language-server`,
   `yaml-language-server` and the compose one, `vscode-{json,html,css}-language-server`,
-  `docker-langserver`, `fish-lsp`, `marksman` (Markdown), `taplo` (TOML). A project's venv
+  `docker-langserver`, `fish-lsp`, `taplo` (TOML). No Markdown server: Claude reads Markdown
+  as text, and one would only serve an editor (owner, 2026-10-27). A project's venv
   comes first on `PATH` where its Dockerfile puts it there, so the repo's own pinned ruff and
   ty win inside it. Claude Code's LSP plugins are not enabled here; the binaries they need are.
 - **Command-line tools**: ripgrep, fd, jq, yq (mikefarah's), tree, file, zip/unzip, xz,

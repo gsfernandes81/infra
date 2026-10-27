@@ -179,7 +179,7 @@ jobs:
             for t in hx rg fd jq yq tree file unzip rsync sqlite3 shellcheck shfmt bat fzf delta \
                      uv ruff ty pyright-langserver typescript-language-server bash-language-server \
                      yaml-language-server docker-langserver vscode-json-language-server \
-                     marksman taplo fish-lsp gh zmx; do
+                     taplo fish-lsp gh zmx; do
               command -v "$t" >/dev/null || { echo "missing: $t"; exit 1; }
             done'
           check "helix has its grammars" docker exec infra-dev test -s /opt/helix/runtime/grammars/python.so
@@ -227,12 +227,12 @@ jobs:
           # ── the editor and its language servers actually run ──
           check "the language servers start (each --version)" docker exec infra-dev sh -c '
             for t in hx pyright typescript-language-server bash-language-server fish-lsp \
-                     marksman taplo ruff ty uv yq; do
+                     taplo ruff ty uv yq; do
               out=$("$t" --version 2>&1) || { echo "does not run: $t"; echo "$out" | head -20; exit 1; }
             done'
-          docker exec infra-dev sh -c 'for l in python bash yaml toml markdown typescript json dockerfile docker-compose fish; do echo "--- $l"; hx --health $l 2>&1 | sed -n "/language servers/,/^[^ ]/p"; done' | sed 's/^/    | /'
+          docker exec infra-dev sh -c 'for l in python bash yaml toml typescript json dockerfile docker-compose fish; do echo "--- $l"; hx --health $l 2>&1 | sed -n "/language servers/,/^[^ ]/p"; done' | sed 's/^/    | /'
           check "helix finds a language server for each language it is meant to" docker exec infra-dev sh -c '
-            for l in python bash yaml toml markdown typescript json dockerfile docker-compose fish; do
+            for l in python bash yaml toml typescript json dockerfile docker-compose fish; do
               hx --health $l 2>&1 | awk "/language servers/{f=1;next} /^[^ ]/{f=0} f && /✓/{ok=1} END{exit !ok}" \
                 || { echo "no server for $l"; exit 1; }
             done'
