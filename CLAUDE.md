@@ -40,9 +40,8 @@ Full orientation is `README.md`; the reasoning is `docs/decisions.md`. Quick map
   not a control plane.
 - **`dev/`** — every dev container, in one `dev/compose.yaml` (project `dev`): the hub
   (`dev/hub/`, the menu behind `ssh dev`, and the offloader), its `cloudflared` sidecar,
-  `infra-dev`, and the children behind profiles. **Built 2026-10-26, not yet brought up** —
-  until the owner does, the box still runs the old single-container layout
-  ([`docs/handoff/2026-10-26-dev-hub.md`](docs/handoff/2026-10-26-dev-hub.md)). Lifecycle is
+  `infra-dev`, and the children behind profiles. **Live on `zero` since 2026-10-27**; what the
+  cutover left open is [`docs/handoff/2026-10-26-dev-hub.md`](docs/handoff/2026-10-26-dev-hub.md). Lifecycle is
   `dev/Makefile` only (it computes `HOST_UID` from the checkout's owner; a second copy of
   that guard is how root-owned files end up in a mount). The top-level `Makefile` forwards
   `dev-*` to it.
@@ -146,9 +145,10 @@ end of a session for the next one. Two rules, both of which have bitten:
   accounted for.** `git log --left-right --cherry-mark HEAD...origin/main` must show each
   `<` commit with a `=` twin upstream; a `<` without one is work that exists nowhere else.
   `zero`'s diverged on 2026-10-25: its checkout was also `infra-dev`'s `/workspace`, so a
-  session committing there and pushing a rebased copy left the originals behind. From the
-  hub's bring-up `infra-dev` works in its own cloned volume and the host checkout is only
-  what the box runs; until then the bind mount, and this trap, are live.
+  session committing there and pushing a rebased copy left the originals behind. Since the
+  hub's bring-up (2026-10-27) `infra-dev` works in its own cloned volume and the host checkout
+  is only what the box runs, so no dev container commits there any more; the rule still holds
+  for anything that does.
 - **Read `git diff --stat` before every commit** and revert any file the change has no
   business touching.
 

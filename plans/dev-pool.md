@@ -2,10 +2,10 @@
 
 **Proposed 2026-10-25, and its main choices decided the same day by the owner: one compose
 file in `infra`, cgroup v2, `claude-sessions` only in the hub** ([`docs/decisions.md`](../docs/decisions.md),
-*Dev containers: one compose file in `infra`, …*). **Steps 2 and 3 were built on 2026-10-26, on
-the `ccr-87300a0c-3kalf9` branch of both repos, and none of it is on the fleet**
-(decisions.md, *The hub, as built*; the bring-up order is
-[`docs/handoff/2026-10-26-dev-hub.md`](../docs/handoff/2026-10-26-dev-hub.md)). It belongs to
+*Dev containers: one compose file in `infra`, …*). **Steps 2 to 4 are live on `zero` since the cutover of
+2026-10-27** (decisions.md, *The hub, as built*; what the cutover left open is
+[`docs/handoff/2026-10-26-dev-hub.md`](../docs/handoff/2026-10-26-dev-hub.md)). **Step 1, the
+pool itself, is what is left.** It belongs to
 Phase 5 ([`docs/management-plane.md`](../docs/management-plane.md), the phase table). This file
 holds the shape and what is left; the reasons are in decisions.md.
 
@@ -100,13 +100,12 @@ limits the owner is having to manage each container separately.
 2. **Released, 2026-10-27.** The hub rewrite, in the claude-sessions repo: `agent`, `install`,
    `offload-all` and the containers-first menu, as `v0.5.0`, pinned and checksummed in
    `dev/hub/Dockerfile`.
-3. **Built, not brought up.** The one compose file in `infra`: the hub, the sidecar, the
-   network, and `infra-dev` first, with its workspace and `.env` files in volumes. Bring-up is
-   the owner's, in the handoff's order.
-4. **Ported, moves at the same cutover as step 3.** `or3-dev`, `dd-dev` (with `dd-postgres`)
+3. **Live, 2026-10-27.** The one compose file in `infra`: the hub, the sidecar, the network,
+   and `infra-dev`, with its workspace and `.env` files in volumes.
+4. **Live, 2026-10-27, with step 3** (dd-dev and ds-dev stopped at rest, as before). `or3-dev`, `dd-dev` (with `dd-postgres`)
    and `ds-dev` are in `dev/compose.yaml`, built from their repos' own Dockerfiles on the new
    base, each working in its own clone in a volume, their old volumes named from the fleet
-   inventory. No child repo changes first; each drops its compose file afterwards. **or3-dev also re-points
+   inventory. Each child repo drops its compose file now that the cutover is done (the handoff). **or3-dev also re-points
    its hostname at the hub's tunnel** (`-e via_hub=true`), so the phone's `or3-tunnel` keeps
    reaching it; or3's `docs/dev-tunnel.md` then names `~/infra/dev` for `make tunnel-log`,
    `make up` and `make shell C=or3-dev` in place of `~/or3/dev`, which is or3's change to make.
