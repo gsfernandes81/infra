@@ -177,7 +177,7 @@ jobs:
             '[ "$(docker exec infra-dev git -C /workspace remote get-url origin)" = "https://github.com/gsfernandes81/infra.git" ]'
           check "the base carries its tools" docker exec infra-dev sh -c '
             for t in hx rg fd jq yq tree file unzip rsync sqlite3 shellcheck shfmt bat fzf delta \
-                     uv ruff ty pyright-langserver typescript-language-server bash-language-server \
+                     uv ruff ty typescript-language-server bash-language-server \
                      yaml-language-server docker-langserver vscode-json-language-server \
                      taplo fish-lsp gh zmx; do
               command -v "$t" >/dev/null || { echo "missing: $t"; exit 1; }
@@ -226,7 +226,7 @@ jobs:
 
           # ── the editor and its language servers actually run ──
           check "the language servers start (each --version)" docker exec infra-dev sh -c '
-            for t in hx pyright typescript-language-server bash-language-server fish-lsp \
+            for t in hx typescript-language-server bash-language-server fish-lsp \
                      taplo ruff ty uv yq; do
               out=$("$t" --version 2>&1) || { echo "does not run: $t"; echo "$out" | head -20; exit 1; }
             done'
@@ -236,6 +236,15 @@ jobs:
               hx --health $l 2>&1 | awk "/language servers/{f=1;next} /^[^ ]/{f=0} f && /✓/{ok=1} END{exit !ok}" \
                 || { echo "no server for $l"; exit 1; }
             done'
+
+          # ── Claude Code's code intelligence: the plugin is there and enabled, and ty speaks LSP ──
+          check "the local plugin marketplace validates" docker exec infra-dev claude plugin validate /opt/claude-plugins
+          docker exec infra-dev claude plugin list > plugins.txt 2>&1 || true
+          sed 's/^/    | /' plugins.txt
+          check "ty-lsp is listed by Claude Code" grep -q "ty-lsp@gsrpi-dev" plugins.txt
+          check "ty server answers an LSP initialize" docker exec infra-dev sh -c '
+            b="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"processId\":null,\"rootUri\":\"file:///workspace\",\"capabilities\":{}}}"
+            printf "Content-Length: %d\r\n\r\n%s" "${#b}" "$b" | (cat; sleep 5) | timeout 10 ty server 2>/dev/null | head -c 4000 | grep -q "\"capabilities\""'
 
           # ── the limits compose sets are the ones the kernel got ──
           check "infra-dev's limits: 2560m RAM, 8704m RAM+swap" sh -c \

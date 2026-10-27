@@ -348,14 +348,14 @@ RUN UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/usr/local/bin UV_PYTHON_DOWNLOADS
     && rm -rf /root/.cache/uv \
     && ruff --version && ty --version
 
-# The node language servers, version-pinned, into the same npm tree as Claude Code. pyright is
-# the one Claude Code's Python code-intelligence plugin drives (pyright-langserver); the rest
-# are Helix's defaults for TypeScript/JavaScript, Bash, YAML and compose, JSON/HTML/CSS,
+# The node language servers, version-pinned, into the same npm tree as Claude Code: Helix's
+# defaults for TypeScript/JavaScript, Bash, YAML and compose, JSON/HTML/CSS,
 # Dockerfiles and fish. TypeScript stays on 5.x: 7.x is the native compiler and ships no
 # tsserver, which typescript-language-server drives. NOT ansible-language-server: it wants
-# Node 24, and moving this image's Node major for one server is its own decision.
+# Node 24, and moving this image's Node major for one server is its own decision. NOT pyright:
+# Claude Code's Python server here is ty (claude-plugins/ below), which is lighter, and is what
+# the repos type-check with (owner, 2026-10-27).
 RUN npm install -g \
-        pyright@1.1.414 \
         typescript@5.9.3 typescript-language-server@6.0.2 \
         bash-language-server@5.8.1 \
         yaml-language-server@1.25.0 \
@@ -365,7 +365,7 @@ RUN npm install -g \
         fish-lsp@1.1.5 \
     && npm cache clean --force \
     && chown -R "${USER_UID}:${USER_GID}" /opt/npm-global \
-    && pyright --version && typescript-language-server --version && yaml-language-server --version
+    && typescript-language-server --version && yaml-language-server --version
 
 # cloudflared WAS BAKED HERE until 2026-10-26, hash-pinned, and started by the entrypoint
 # when DEV_TUNNEL_HOSTNAME was set. The dev containers have no tunnel of their own any more:
@@ -599,10 +599,19 @@ RUN chmod 0755 /usr/local/bin/in-workspace
 # every container after the one that created it. The cost, chosen: a container cannot be
 # switched back to `latest` from inside it — that is an edit here and a base bump.
 COPY claude-managed-settings.json /etc/claude-code/managed-settings.json
+# CLAUDE CODE'S CODE INTELLIGENCE: a local plugin marketplace, read in place from /opt (no
+# network, no auto-update), whose one plugin points Claude Code's LSP client at `ty server` for
+# .py files, enabled for every container by the managed settings above. One server per
+# extension is all Claude Code allows, so ruff stays the linter Claude runs, not a second .py
+# server. The server starts the first time Claude edits a Python file, not with the session.
+COPY claude-plugins /opt/claude-plugins
 # Parsed here because it is hand-edited and Claude Code ignores a malformed settings file
 # WHOLE and says nothing — the agent view would be back on and the channel back on latest.
 RUN chmod 0644 /etc/claude-code/managed-settings.json \
-    && python3 -c 'import json, sys; json.load(open(sys.argv[1]))' /etc/claude-code/managed-settings.json
+    && chmod -R a+rX /opt/claude-plugins \
+    && for f in /etc/claude-code/managed-settings.json /opt/claude-plugins/.claude-plugin/marketplace.json \
+                /opt/claude-plugins/ty-lsp/.claude-plugin/plugin.json /opt/claude-plugins/ty-lsp/.lsp.json; do \
+         python3 -c 'import json, sys; json.load(open(sys.argv[1]))' "$f" || exit 1; done
 
 # ── claude-sessions: NOT IN THIS IMAGE since 2026.10.26 — the hub installs it ───────
 # The binary, the hooks drop-in that names it and the keep-alive skill arrive from the hub's

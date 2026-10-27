@@ -1337,6 +1337,15 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   2026-10-27, asked whether Claude needs a Markdown one): marksman went, as it serves an
   editor's link completion and nothing an agent reads Markdown for — and it needed .NET's
   invariant-mode switch to start at all, which the smoke test found.
+- **Claude Code's code intelligence is on in every container, for Python only, through ty**
+  (owner, 2026-10-27: "drop pyright in favour of ty and ruff"). A local marketplace baked at
+  `/opt/claude-plugins`, enabled by managed settings, so it needs no network and cannot
+  auto-update. ty and not pyright: lighter (Rust, against a Node process that indexes the whole
+  repo) on a pool every session shares, and the type checker the repos already use. ty and not
+  ruff as the server, because Claude Code gives each extension one server, and ty's diagnostics
+  and navigation are what an agent cannot get by running a command; ruff stays that command.
+  No plugin for the other languages: they have no official one, and no repo here is mostly
+  them.
 - **A repo's untracked secrets live in a second volume, `~/.env.d`, symlinked into the
   workspace** (`DEV_ENV_FILES`). Not hard links: two volumes are two mounts and `link(2)`
   refuses across mounts. A regular file found where a link should be — an editor that saves by

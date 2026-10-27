@@ -1,0 +1,12 @@
+{
+  "name": "gsrpi-dev",
+  "owner": { "name": "infra" },
+  "description": "Plugins baked into gsrpi-dev-base and enabled for every dev container by /etc/claude-code/managed-settings.json (dev/README.md).",
+  "plugins": [
+    {
+      "name": "ty-lsp",
+      "source": "./ty-lsp",
+      "description": "ty as Claude Code's Python language server: diagnostics after edits and symbol navigation."
+    }
+  ]
+}

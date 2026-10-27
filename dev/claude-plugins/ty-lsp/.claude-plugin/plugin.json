@@ -1,0 +1,5 @@
+{
+  "name": "ty-lsp",
+  "version": "1.0.0",
+  "description": "ty as Claude Code's Python language server. The ty binary is the base image's (uv tool, version-pinned in dev/Dockerfile.base)."
+}

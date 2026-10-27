@@ -1,4 +1,13 @@
 {
   "disableAgentView": true,
-  "autoUpdatesChannel": "stable"
+  "autoUpdatesChannel": "stable",
+  "extraKnownMarketplaces": {
+    "gsrpi-dev": {
+      "source": { "source": "directory", "path": "/opt/claude-plugins" },
+      "autoUpdate": false
+    }
+  },
+  "enabledPlugins": {
+    "ty-lsp@gsrpi-dev": true
+  }
 }

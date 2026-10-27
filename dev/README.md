@@ -491,13 +491,20 @@ The base, so every child has it by its `FROM` line (owner, 2026-10-27):
 
 - **Helix** (`hx`, 25.07.1, with its compiled grammars), and `EDITOR`/`VISUAL` set to it.
 - **Language servers**, the ones Helix uses by default and Claude Code's code-intelligence
-  plugins look for: `ty` and `ruff` (Python, Helix's defaults), `pyright-langserver`,
+  plugins look for: `ty` and `ruff` (Python, Helix's defaults),
   `typescript-language-server` with TypeScript 5.9, `bash-language-server`,
   `yaml-language-server` and the compose one, `vscode-{json,html,css}-language-server`,
   `docker-langserver`, `fish-lsp`, `taplo` (TOML). No Markdown server: Claude reads Markdown
   as text, and one would only serve an editor (owner, 2026-10-27). A project's venv
   comes first on `PATH` where its Dockerfile puts it there, so the repo's own pinned ruff and
-  ty win inside it. Claude Code's LSP plugins are not enabled here; the binaries they need are.
+  ty win inside it.
+- **Claude Code's code intelligence, for Python, through ty** (owner, 2026-10-27): a local
+  plugin marketplace in `claude-plugins/`, baked at `/opt/claude-plugins` and enabled in
+  `claude-managed-settings.json`, so Claude gets ty's diagnostics after each edit and an `LSP`
+  tool for definitions and references. `ty server` starts the first time Claude edits a `.py`
+  file in a session, one per session. No pyright (heavier, and not what the repos check
+  with); ruff stays a command Claude runs, because Claude Code gives each extension one
+  server. Other languages have no plugin enabled; their servers are for Helix.
 - **Command-line tools**: ripgrep, fd, jq, yq (mikefarah's), tree, file, zip/unzip, xz,
   rsync, sqlite3, shellcheck, shfmt, bat, fzf, delta, htop, lsof, strace, dig, nc, wget,
   patch, bc, uv.
