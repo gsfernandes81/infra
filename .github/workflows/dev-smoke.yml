@@ -1,0 +1,178 @@
+name: dev-smoke
+
+# Bring the dev project (dev/compose.yaml) up on a runner, with stand-in keys, and check the
+# things no unit test can: that the hub reaches a container with its own key, that a client
+# key reaches the hub's door, that the hooks drop-in, the claude-sessions binary and the
+# container's GitHub token all arrive through their volume mounts, that the workspace is
+# cloned with that token, that the base carries its tools, and that a child builds straight
+# from its GitHub URL. Every check is named in the log, PASS or FAIL, and all of them run
+# before the job decides.
+#
+# WHAT IT CANNOT CHECK, so nobody reads a green run as more: the Pi itself (arm64 under
+# Alpine/OpenRC, cgroupfs; this is amd64 Ubuntu), the memory pool (hosts/zero/system/devpool
+# has its own proof, on zero), Cloudflare and the tunnel (no profile `tunnel` here), the
+# GitHub App (the token handed to infra-dev is this run's own GITHUB_TOKEN, written where the
+# broker would write it; hub/test_github_tokens.py covers the broker against a stand-in),
+# or3-dev (private: its image needs or3's deploy key), and Claude Code acting on the hooks
+# (it needs a login).
+#
+# UNRELEASED claude-sessions: while hub/Dockerfile's two hashes are placeholders the release
+# does not exist, so the hub is built with a binary compiled here from claude-sessions at
+# CLAUDE_SESSIONS_UNRELEASED_REF, swapped in for the image's `fetch` stage through
+# dev/ci/compose.smoke.yaml. Once the pin is filled, the hub builds exactly as on zero, from
+# the checksummed release. A dispatch can name any claude-sessions ref.
+#
+# Runs as the runner's own user, not under sudo (`make SUDO=`): the runner user is in the
+# docker group, and sudo would drop the environment the override file reads.
+
+on:
+  push:
+    paths: ['dev/**', '.github/workflows/dev-smoke.yml']
+  pull_request:
+    paths: ['dev/**', '.github/workflows/dev-smoke.yml']
+  workflow_dispatch:
+    inputs:
+      claude_sessions_ref:
+        description: claude-sessions ref to build the hub's binary from (empty = the pinned release)
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Delete this line, and the step that uses it, once hub/Dockerfile's hashes are filled.
+  CLAUDE_SESSIONS_UNRELEASED_REF: ccr-87300a0c-3kalf9
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decide where the hub's claude-sessions comes from
+        id: cs
+        env:
+          ASKED: ${{ inputs.claude_sessions_ref }}
+        run: |
+          ref="$ASKED"
+          if [ -z "$ref" ] && grep -q 'FILL-FROM-THE' dev/hub/Dockerfile; then
+            ref="$CLAUDE_SESSIONS_UNRELEASED_REF"
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "claude-sessions: ${ref:-the release hub/Dockerfile pins}"
+
+      - name: "If unreleased: build claude-sessions from source"
+        if: steps.cs.outputs.ref != ''
+        env:
+          REF: ${{ steps.cs.outputs.ref }}
+        run: |
+          git clone -q --depth 1 --branch "$REF" https://github.com/gsfernandes81/claude-sessions "$RUNNER_TEMP/cs"
+          rustup update stable --no-self-update && rustup default stable
+          rustup target add x86_64-unknown-linux-musl
+          cargo build --release --manifest-path "$RUNNER_TEMP/cs/Cargo.toml" --target x86_64-unknown-linux-musl
+          mkdir -p "$RUNNER_TEMP/fetch/out"
+          cp "$RUNNER_TEMP/cs/target/x86_64-unknown-linux-musl/release/claude-sessions" "$RUNNER_TEMP/fetch/out/"
+          "$RUNNER_TEMP/fetch/out/claude-sessions" --version
+          echo "SMOKE_CLAUDE_SESSIONS_DIR=$RUNNER_TEMP/fetch" >> "$GITHUB_ENV"
+          echo "SMOKE_OVERRIDE=COMPOSE_OVERRIDE=$GITHUB_WORKSPACE/dev/ci/compose.smoke.yaml" >> "$GITHUB_ENV"
+
+      - name: Write stand-in keys and dev/.env
+        run: |
+          s="$RUNNER_TEMP/secrets"
+          mkdir -p "$s/hub" "$s/infra"
+          chmod 700 "$s/hub" "$s/infra"
+          ssh-keygen -q -t ed25519 -N '' -C smoke-client -f "$s/client"
+          cp "$s/client.pub" "$s/hub/authorized_keys"
+          chmod 600 "$s/hub/authorized_keys"
+          sed -e "s#^HUB_SECRETS=.*#HUB_SECRETS=$s/hub#" \
+              -e "s#^INFRA_SECRETS=.*#INFRA_SECRETS=$s/infra#" \
+              -e 's#^COMPOSE_PROFILES=.*#COMPOSE_PROFILES=#' \
+              -e 's#^HUB_HOSTS=.*#HUB_HOSTS=infra-dev#' \
+              -e 's#^HUB_TUNNEL_ID=.*#HUB_TUNNEL_ID=none#' \
+              dev/.env.example > dev/.env
+          echo "SMOKE_SECRETS=$s" >> "$GITHUB_ENV"
+
+      - name: Check compose parses with every profile on
+        working-directory: dev
+        run: |
+          COMPOSE_PROFILES=tunnel,or3-dev,dd-dev,ds-dev HOST_UID=$(id -u) HOST_GID=$(id -g) \
+            docker compose config -q
+          docker version --format 'docker {{.Server.Version}}'; docker compose version
+
+      - name: Build the base (make base)
+        run: make -C dev base SUDO=
+
+      - name: Start the hub (make up S=hub)
+        run: |
+          make -C dev up S=hub SUDO= $SMOKE_OVERRIDE
+          timeout 120 sh -c 'until [ "$(docker inspect -f "{{.State.Health.Status}}" dev-hub)" = healthy ]; do sleep 2; done'
+
+      - name: Hand infra-dev a token where the broker would write it
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          printf %s "$TOKEN" | docker exec -i dev-hub sh -c \
+            'umask 077; d=/home/dev/tokens/infra-dev; cat > "$d/token.tmp" && mv -f "$d/token.tmp" "$d/token"'
+
+      - name: Start infra-dev (make up)
+        run: |
+          make -C dev up SUDO= $SMOKE_OVERRIDE
+          timeout 300 sh -c 'until docker exec dev-hub ssh -o BatchMode=yes -o ConnectTimeout=5 infra-dev true 2>/dev/null; do sleep 5; done'
+
+      - name: Check the project end to end
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          fails=0
+          check() { n="$1"; shift; if "$@"; then echo "PASS  $n"; else echo "FAIL  $n"; fails=$((fails + 1)); fi; }
+
+          check "the hub's key sits in authorized_keys.hub, restrict,pty" \
+            docker exec infra-dev grep -q '^restrict,pty ssh-ed25519 ' /home/dev/.ssh/authorized_keys.hub
+          check "the hub runs a command in infra-dev with it" \
+            docker exec dev-hub ssh -o BatchMode=yes infra-dev true
+          check "the same claude-sessions runs at both ends" sh -c \
+            '[ "$(docker exec dev-hub claude-sessions --version)" = "$(docker exec dev-hub ssh infra-dev /opt/claude-sessions/bin/claude-sessions --version)" ]'
+          check "the agent answers with a snapshot of /workspace" sh -c \
+            'docker exec dev-hub timeout 20 ssh -T infra-dev /opt/claude-sessions/bin/claude-sessions agent </dev/null | head -1 | grep -q "\"workspace\":\"/workspace\""'
+          docker exec -i dev-hub sh -c 'umask 077; cat > /tmp/client' < "$SMOKE_SECRETS/client"
+          check "a client key reaches the hub's door" sh -c \
+            '[ "$(docker exec dev-hub ssh -F /dev/null -i /tmp/client -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null dev@127.0.0.1 echo door-ok)" = door-ok ]'
+          check "the hooks drop-in is mounted" \
+            docker exec infra-dev test -s /etc/claude-code/managed-settings.d/claude-sessions.json
+          check "Claude Code is installed" docker exec infra-dev claude --version
+          check "/run/github holds this container's token and nothing else" sh -c \
+            '[ "$(docker exec infra-dev ls -A /run/github)" = token ]'
+          check "git asks the hub's helper for github.com" sh -c \
+            '[ "$(docker exec infra-dev git config --global credential.https://github.com.helper)" = hub ]'
+          check "gh uses the hub's token" sh -c \
+            '[ "$(docker exec infra-dev gh api "repos/$REPO" --jq .full_name)" = "$REPO" ]'
+          check "the workspace is a clone over https" sh -c \
+            '[ "$(docker exec infra-dev git -C /workspace remote get-url origin)" = "https://github.com/gsfernandes81/infra.git" ]'
+          check "the base carries its tools" docker exec infra-dev sh -c '
+            for t in hx rg fd jq yq tree file unzip rsync sqlite3 shellcheck shfmt bat fzf delta \
+                     uv ruff ty pyright-langserver typescript-language-server bash-language-server \
+                     yaml-language-server docker-langserver vscode-json-language-server \
+                     marksman taplo fish-lsp gh zmx; do
+              command -v "$t" >/dev/null || { echo "missing: $t"; exit 1; }
+            done'
+          check "helix has its grammars" docker exec infra-dev test -s /opt/helix/runtime/grammars/python.so
+          check "the token broker's own tests" python3 dev/hub/test_github_tokens.py
+
+          echo "$fails failed"
+          [ "$fails" = 0 ]
+
+      - name: Build ds-dev straight from its GitHub URL
+        working-directory: dev
+        run: |
+          HOST_UID=$(id -u) HOST_GID=$(id -g) BASE_TAG=$(sed -n 's/^BASE_TAG := //p' Makefile) \
+            docker compose build ds-dev
+
+      - name: "On failure: the containers' logs"
+        if: failure()
+        run: |
+          for c in dev-hub infra-dev; do echo "=== $c"; docker logs --tail 200 "$c" 2>&1 || true; done

@@ -1,0 +1,13 @@
+# Layered over compose.yaml by the smoke test ONLY (.github/workflows/dev-smoke.yml), through
+# the Makefile's COMPOSE_OVERRIDE. Never on zero.
+#
+# It replaces the hub image's `fetch` stage — the pinned, checksummed release download — with
+# a directory holding a claude-sessions binary the workflow built from source, at
+# out/claude-sessions. That is how an unreleased claude-sessions is tested against this
+# project before it is published. The hub's own `--version` check still compares it to the
+# version hub/Dockerfile pins.
+services:
+  hub:
+    build:
+      additional_contexts:
+        fetch: ${SMOKE_CLAUDE_SESSIONS_DIR:?the smoke test sets this}

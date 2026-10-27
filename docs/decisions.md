@@ -1276,7 +1276,15 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   swap unreachable. The cost until the pool is installed: a container may swap up to 6G on
   its own. **dd-postgres is in the pool too** — it is dev work's memory. **infra-dev's own
   limit rises from 1024m to 2560m**, or3-dev's figure (owner: "quite restrictive for work");
-  the pool, not each container, is what keeps the total off Immich. Each child builds
+  the pool, not each container, is what keeps the total off Immich.
+- **A smoke test brings the project up in CI** (owner, 2026-10-27), because most of what
+  could break at the cutover — mounts, keys, the door, the token path — was untested anywhere
+  but on zero. GitHub's runner, not zero: infra is public, so its minutes are free, and a
+  failed run there costs nothing on the fleet. It builds an unreleased claude-sessions from
+  source by replacing the hub image's `fetch` stage with a named build context, so the
+  Dockerfile zero builds is the one tested, with one stage swapped. Writing it found the
+  Makefile passing `BASE_TAG` to Compose empty since the tag moved there (`:=` before the
+  variable was set), which only worked because compose.yaml's fallback was kept in step. Each child builds
   from its repo on GitHub (`main`), so no clone on zero is read by anything.
 - **A repo's untracked secrets live in a second volume, `~/.env.d`, symlinked into the
   workspace** (`DEV_ENV_FILES`). Not hard links: two volumes are two mounts and `link(2)`

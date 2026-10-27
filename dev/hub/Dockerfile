@@ -18,33 +18,27 @@
 # SAME BOTTOM LAYERS AS gsrpi-dev-base, on purpose: the python base by the same digest
 # (Dockerfile.base explains the pin), so on zero, which already holds the base, this image
 # costs only its own few layers. Bump the two digests together.
-FROM python:3.13-slim-trixie@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c
-
-ARG USERNAME=dev
-ARG USER_UID=1000
-ARG USER_GID=1000
-
-# openssh-server is the door; openssh-client reaches the containers; procps for whoever
-# debugs it; curl and ca-certificates for the download below and nothing at run time.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        openssh-server openssh-client procps curl ca-certificates tzdata less openssl \
-    && rm -rf /var/lib/apt/lists/*
-
 # ── claude-sessions: the hub's menu, and every container's hooks, agent and offloader ──
 # A PINNED RELEASE, HASH-CHECKED PER ARCHITECTURE, the shape Dockerfile.base used for it and
 # for cloudflared: the claim is "the same bytes", and every claude on the fleet runs these
 # bytes on every prompt. NEVER COMPILED HERE (a Rust build under QEMU is unusable).
 #
+# IN A STAGE OF ITS OWN, `fetch`, so the smoke test (.github/workflows/dev-smoke.yml) can
+# put a binary built from claude-sessions' source in its place with a named build context —
+# that is how an UNRELEASED claude-sessions is tested against this image before it is
+# published. Nothing else ever overrides it: zero builds this stage as written.
+#
 # ⚠︎ v0.5.0 IS NOT RELEASED YET. It is on claude-sessions' branch of the same name as this
 # one, and merging that to its main is what publishes it (its CI tags and releases on the
 # version bump). The two hashes below are placeholders until then, so this build FAILS at
-# `sha256sum -c` — loudly, which is the point: fill them from the release's
-# claude-sessions-v0.5.0-<arch>-linux-musl.sha256 assets, then build.
-#
-# `--version` IS FATAL and compared exactly: a static musl binary has no excuse.
+# `sha256sum -c` — loudly, which is the point: fill them from the release's SHA256SUMS asset
+# (also in its notes), then build.
+FROM python:3.13-slim-trixie@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c AS fetch
 ARG CLAUDE_SESSIONS_VERSION=0.5.0
 ARG CLAUDE_SESSIONS_SHA256_arm64=FILL-FROM-THE-v0.5.0-RELEASE
 ARG CLAUDE_SESSIONS_SHA256_amd64=FILL-FROM-THE-v0.5.0-RELEASE
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
@@ -52,11 +46,29 @@ RUN set -eux; \
       amd64) triple=x86_64;  sha="${CLAUDE_SESSIONS_SHA256_amd64}" ;; \
       *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
     esac; \
-    curl -fsSLo /usr/local/bin/claude-sessions \
+    mkdir -p /out; \
+    curl -fsSLo /out/claude-sessions \
       "https://github.com/gsfernandes81/claude-sessions/releases/download/v${CLAUDE_SESSIONS_VERSION}/claude-sessions-v${CLAUDE_SESSIONS_VERSION}-${triple}-linux-musl"; \
-    echo "${sha}  /usr/local/bin/claude-sessions" | sha256sum -c -; \
-    chmod 0755 /usr/local/bin/claude-sessions; \
-    test "$(claude-sessions --version)" = "claude-sessions ${CLAUDE_SESSIONS_VERSION}"
+    echo "${sha}  /out/claude-sessions" | sha256sum -c -; \
+    chmod 0755 /out/claude-sessions
+
+FROM python:3.13-slim-trixie@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c
+
+ARG USERNAME=dev
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+# openssh-server is the door; openssh-client reaches the containers; procps for whoever
+# debugs it; openssl signs the GitHub App's JWT (github-tokens).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        openssh-server openssh-client procps ca-certificates tzdata less openssl \
+    && rm -rf /var/lib/apt/lists/*
+
+# `--version` IS FATAL and compared exactly: a static musl binary has no excuse, and it is
+# also what proves a binary the smoke test put in place is the version this file pins.
+ARG CLAUDE_SESSIONS_VERSION=0.5.0
+COPY --from=fetch /out/claude-sessions /usr/local/bin/claude-sessions
+RUN test "$(claude-sessions --version)" = "claude-sessions ${CLAUDE_SESSIONS_VERSION}"
 
 # The door — sshd's ForceCommand: the menu at a terminal, a shell otherwise or if it fails.
 # Root-owned, on PATH, above the USER line for the reason Dockerfile.base gives for its own.

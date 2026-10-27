@@ -476,6 +476,18 @@ A row in `compose.yaml` built like the three above, its old volumes named extern
 any, its profile in `COMPOSE_PROFILES` and its name in `HUB_HOSTS`, then `make up`. The hub's
 environment changes, so the hub is recreated: every `ssh dev` session drops, and no claude does.
 
+## The smoke test
+
+`.github/workflows/dev-smoke.yml` runs on every push that touches `dev/`: it builds the base,
+the hub and infra-dev on GitHub's runner, brings them up with `make` and stand-in keys, and
+checks, each by name — the hub reaching infra-dev with its own key, a client key reaching the
+hub's door, the hooks drop-in, the binary and the GitHub token arriving through their mounts,
+the workspace cloned over https with that token, the tools on `PATH`, and ds-dev building
+straight from its GitHub URL. Its header lists what it cannot check (the Pi, the pool,
+Cloudflare, the App, or3-dev). Until claude-sessions 0.5.0 is released it builds the hub's
+binary from that repo's branch, through `ci/compose.smoke.yaml` and the Makefile's
+`COMPOSE_OVERRIDE`; neither is ever used on zero.
+
 ## What every container carries for work
 
 The base, so every child has it by its `FROM` line (owner, 2026-10-27):

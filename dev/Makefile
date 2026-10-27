@@ -53,8 +53,17 @@ HOST_GID := $(shell stat -c '%g' $(CURDIR))
 # `sudo env VAR=…`, not `VAR=… sudo`: sudo resets the environment, so an assignment in
 # front of it never reaches docker and compose would silently build at the defaults in
 # compose.yaml. env is inside the sudo, so it survives.
-COMPOSE := $(SUDO) env HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) BASE_TAG=$(BASE_TAG) \
-	docker compose --project-directory $(CURDIR) -f $(CURDIR)/compose.yaml
+#
+# COMPOSE_OVERRIDE is a second compose file layered on top, for the smoke test only
+# (.github/workflows/dev-smoke.yml puts an unreleased claude-sessions into the hub's build).
+# Empty on zero, always.
+COMPOSE_OVERRIDE ?=
+# `=`, NOT `:=`: BASE_TAG is set further down, and an immediate expansion here passed it EMPTY
+# — every `make up` built at compose.yaml's fallback, which only matched by being kept in step
+# by hand (found 2026-10-27; true on main since the tag moved here).
+COMPOSE = $(SUDO) env HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) BASE_TAG=$(BASE_TAG) \
+	docker compose --project-directory $(CURDIR) -f $(CURDIR)/compose.yaml \
+	$(if $(COMPOSE_OVERRIDE),-f $(COMPOSE_OVERRIDE))
 DOCKER  := $(SUDO) docker
 
 # The base image tag (2d). Bump it HERE when Dockerfile.base changes, then move the
