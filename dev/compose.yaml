@@ -83,6 +83,26 @@ x-managed: &managed
     subpath: managed-settings.d
     nocopy: true
 
+# THE CLAUDE LOGIN, ONE SWITCH (owner, 2026-10-27): CLAUDE_UNDOCUMENTED_SHARED_LOGINS in .env.
+#   true    SHARED — every dev container on one login, in the claude-login volume; log in once,
+#           in any of them, and all follow
+#   false   EACH ITS OWN — each container's login in its own config volume, as before
+# Claude Code reads its login file and takes its refresh lock in CLAUDE_SECURESTORAGE_CONFIG_DIR
+# — UNDOCUMENTED, read from 2.1.311's code and proved with four containers against a stand-in
+# login server (decisions.md) — so containers sharing that directory refresh once between them,
+# as processes on one machine do. Config, history and device keys stay each container's own.
+# The switch picks the directory: ~/.claude-logins/true is the shared volume, ~/.claude-logins/
+# false is the container's own config volume mounted a second time, so `false` reads the very
+# file ~/.claude/.credentials.json is. Both are mounted always: flipping is the one value and a
+# redeploy (dev/Makefile refuses anything but true or false).
+x-claude-login-dir: &claude-login-dir /home/dev/.claude-logins/${CLAUDE_UNDOCUMENTED_SHARED_LOGINS:?set CLAUDE_UNDOCUMENTED_SHARED_LOGINS in dev/.env — true or false}
+x-claude-login: &claude-login
+  type: volume
+  source: claude-login
+  target: /home/dev/.claude-logins/true
+  volume:
+    nocopy: true
+
 services:
   # ── the hub ───────────────────────────────────────────────────────────────────
   hub:
@@ -122,6 +142,10 @@ services:
       - hub-state:/home/dev/.hub
       # Every container's token, one directory each; each container mounts only its own.
       - github-tokens:/home/dev/tokens
+      # The shared Claude login (x-claude-login above). Mounted here only so the volume is made
+      # from the hub's dev-owned mountpoint: the dev images lack the directory, and a volume made
+      # from a missing mountpoint is root's. The hub itself runs no claude and never reads it.
+      - claude-login:/home/dev/.claude-login
       # Mode-700 directory on zero holding the hub's authorized_keys (the clients' keys)
       # and its tunnel credentials. Read-only.
       - ${HUB_SECRETS:?set HUB_SECRETS in dev/.env — server-create-dev-container.yml -e container=dev writes it}:/run/hub-secrets:ro
@@ -205,12 +229,14 @@ services:
       # The repo cloned into the workspace volume at first start, over https with the hub's
       # token (entrypoint.sh).
       DEV_REPO: *repo-infra
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: *claude-login-dir
       # Files the repo expects beside its tracked ones, kept in the env volume and linked into
       # the workspace (entrypoint.sh). None for infra: its .env files live on the hosts.
       DEV_ENV_FILES: ""
     volumes:
       - *opt
       - *managed
+      - *claude-login
       # THE WORKSPACE IS A VOLUME, cloned into, and no longer zero's own checkout. zero's
       # ~gavin/infra is now only what the box runs; the container's tree is its own, so a
       # commit in here never leaves zero's checkout diverged again (CLAUDE.md § Git, the
@@ -227,6 +253,7 @@ services:
       # The logins, history and state, kept from the infra-dev project they were made in, so
       # moving into this one costs no login and loses no conversation.
       - infra-claude:/home/dev/.claude
+      - infra-claude:/home/dev/.claude-logins/false
       - infra-gh:/home/dev/.config/gh
       - infra-ssh-host:/home/dev/.ssh-host
       - infra-local-share:/home/dev/.local/share
@@ -273,11 +300,13 @@ services:
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
       DEV_NAME: or3-dev
       DEV_REPO: *repo-or3
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: *claude-login-dir
       DEV_ENV_FILES: ".env"
       DEV_SECRETS_DIR: /run/or3-secrets
     volumes:
       - *opt
       - *managed
+      - *claude-login
       # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
       # no other container's (hub/github-tokens). Empty until the hub's first mint.
       - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: or3-dev, nocopy: true } }
@@ -290,6 +319,7 @@ services:
       # the phone's key.
       - ${OR3_SECRETS:?set OR3_SECRETS in dev/.env}:/run/or3-secrets:ro
       - or3-claude:/home/dev/.claude
+      - or3-claude:/home/dev/.claude-logins/false
       - or3-gh:/home/dev/.config/gh
       - or3-ssh-host:/home/dev/.ssh-host
       - or3-local-share:/home/dev/.local/share
@@ -313,6 +343,7 @@ services:
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
       DEV_NAME: dd-dev
       DEV_REPO: *repo-dd
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: *claude-login-dir
       # DATABASE_URL, RAILWAY_API_TOKEN and the app's variables. dd reads the file itself
       # (dd.common.cfg's load_dotenv, `uv run --env-file .env`), so a link in the workspace
       # serves it; its old compose-level env_file is not carried over.
@@ -328,6 +359,7 @@ services:
     volumes:
       - *opt
       - *managed
+      - *claude-login
       # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
       # no other container's (hub/github-tokens). Empty until the hub's first mint.
       - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: dd-dev, nocopy: true } }
@@ -337,6 +369,7 @@ services:
       - ${DD_SECRETS:?set DD_SECRETS in dev/.env}:/run/dd-secrets:ro
       - dd-uv-cache:/home/dev/.cache/uv
       - dd-claude:/home/dev/.claude
+      - dd-claude:/home/dev/.claude-logins/false
       - dd-railway:/home/dev/.railway
       - dd-gh:/home/dev/.config/gh
       - dd-ssh-host:/home/dev/.ssh-host
@@ -388,11 +421,13 @@ services:
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
       DEV_NAME: ds-dev
       DEV_REPO: *repo-ds
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: *claude-login-dir
       DEV_ENV_FILES: ""
       DEV_SECRETS_DIR: /run/ds-secrets
     volumes:
       - *opt
       - *managed
+      - *claude-login
       # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
       # no other container's (hub/github-tokens). Empty until the hub's first mint.
       - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: ds-dev, nocopy: true } }
@@ -401,6 +436,7 @@ services:
       - ${DS_SECRETS:?set DS_SECRETS in dev/.env}:/run/ds-secrets:ro
       - ds-uv-cache:/home/dev/.cache/uv
       - ds-claude:/home/dev/.claude
+      - ds-claude:/home/dev/.claude-logins/false
       - ds-gh:/home/dev/.config/gh
       - ds-ssh-host:/home/dev/.ssh-host
       - ds-zed-server:/home/dev/.zed_server
@@ -414,6 +450,7 @@ volumes:
   claude-sessions:
   hub-state:
   github-tokens:
+  claude-login:
   infra-workspace:
   infra-env:
   # infra-dev's, made under its old project name `infra-dev` and kept by name, so the

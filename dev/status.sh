@@ -104,8 +104,7 @@ status() {
 
     # `claude auth status`, not "is there a credentials file" — a file holding empty
     # tokens exists and reports logged out, so the file's presence proves nothing.
-    printf 'auth      : %s\n' "$(d exec "$CONTAINER" claude auth status 2>/dev/null | grep -q '"loggedIn": *true' \
-        && echo 'claude logged in' || echo 'claude NOT logged in — run: make login')"
+    printf 'auth      : %s\n' "$(login_line)"
 
     # The two files that decide whether this container can reach the fleet at all.
     # Named separately because they fail differently: no ssh_config.fleet is "unknown
@@ -153,6 +152,40 @@ hub_line() {
     here="$(d exec "$CONTAINER" claude-sessions --version 2>/dev/null || echo 'no claude-sessions')"
     there="$(d exec dev-hub claude-sessions --version 2>/dev/null || echo 'no hub')"
     echo "$key; $here here, $there at the hub"
+}
+
+# Which Claude login this container is on (compose.yaml § THE CLAUDE LOGIN), and whether it is in.
+login_dir() { d exec "$CONTAINER" printenv CLAUDE_SECURESTORAGE_CONFIG_DIR 2>/dev/null; }
+logged_in() { d exec "$@" "$CONTAINER" claude auth status 2>/dev/null | grep -q '"loggedIn": *true'; }
+login_line() {
+    local dir which
+    dir="$(login_dir)"
+    case "$dir" in
+        /home/dev/.claude-logins/true)  which='the shared login' ;;
+        /home/dev/.claude-logins/false) which='its own login' ;;
+        '')                             which='its own login (no switch: compose.yaml predates it)' ;;
+        *)                              which="a login in $dir, which is neither setting (dev/.env.example)" ;;
+    esac
+    if logged_in; then echo "claude logged in — $which"
+    elif [ "$dir" = /home/dev/.claude-logins/true ]; then echo "claude NOT logged in — $which; make login in any one container logs in every one"
+    else echo "claude NOT logged in — $which; run: make login"; fi
+}
+
+# THE PROOF THAT CLAUDE CODE STILL READS CLAUDE_SECURESTORAGE_CONFIG_DIR, which is undocumented and
+# could be renamed by any update. Asked twice: as configured, then pointed at an empty directory.
+# Honoured, the second reads logged out; ignored, both read whatever ~/.claude holds, and the
+# container is quietly on a different login from the others.
+login_dir_line() {
+    local dir tmp
+    dir="$(login_dir)"
+    logged_in || { echo "cannot tell while logged out (make login)"; return; }
+    tmp="$(d exec "$CONTAINER" mktemp -d 2>/dev/null)" || { echo 'could not ask the container'; return; }
+    if logged_in -e CLAUDE_SECURESTORAGE_CONFIG_DIR="$tmp"; then
+        echo "NOT HONOURED — this claude ignores CLAUDE_SECURESTORAGE_CONFIG_DIR and is on ~/.claude's login, not ${dir:-the configured one} (decisions.md, the shared login)"
+    else
+        echo "honoured — the login is read from ${dir:-~/.claude}"
+    fi
+    d exec "$CONTAINER" rm -rf "$tmp" 2>/dev/null
 }
 
 # The hub's token for this container, by what the broker wrote beside it (never the token).
@@ -399,6 +432,7 @@ print((" ".join(sorted(h)) if h else "PRESENT BUT EMPTY — no hooks in it")
     printf 'hub       : %s\n' "$(hub_line)"
     printf 'hub health: %s\n' "$(d exec dev-hub hub-health 2>&1 || true)"
     printf 'github    : %s\n' "$(github_line)"
+    printf 'login dir : %s\n' "$(login_dir_line)"
     printf 'door      : %s\n' "$(d exec "$CONTAINER" sh -c '/usr/sbin/sshd -T -C user=dev,host=localhost,addr=127.0.0.1 -f /home/dev/sshd_config 2>/dev/null | sed -n "s/^forcecommand //p"' 2>/dev/null \
         | grep . || echo 'could not ask sshd')"
     printf '\n'

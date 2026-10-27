@@ -111,6 +111,9 @@ _require-env:
 	  grep -q "^$$k" $(CURDIR)/.env || printf ' %s' "$${k%=}"; done); \
 	[ -z "$$missing" ] || { \
 	  echo "dev/.env lacks:$$missing — copy each line from .env.example and set it." >&2; exit 1; }
+	@v=$$(sed -n 's/^CLAUDE_UNDOCUMENTED_SHARED_LOGINS=//p' $(CURDIR)/.env | tail -n 1); \
+	case "$$v" in true|false) ;; *) \
+	  echo "dev/.env: CLAUDE_UNDOCUMENTED_SHARED_LOGINS is '$$v' — it must be true or false" >&2; exit 1 ;; esac
 
 # THE EXTERNAL VOLUMES — each container's logins, history and host keys, kept by name from its
 # old project — must already exist: Compose refuses an external volume it cannot find, and

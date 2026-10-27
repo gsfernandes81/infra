@@ -130,7 +130,7 @@ jobs:
         run: |
           files="-f compose.yaml"; [ -n "${SMOKE_CLAUDE_SESSIONS_DIR:-}" ] && files="$files -f ci/compose.smoke.yaml"
           docker compose $files create
-          for v in claude-sessions github-tokens hub-state; do
+          for v in claude-sessions github-tokens hub-state claude-login; do
             owner=$(docker run --rm -v "dev_$v:/v" busybox stat -c %u /v)
             [ "$owner" = "$(id -u)" ] || { echo "FAIL  dev_$v is owned by uid $owner, not the hub's $(id -u)"; exit 1; }
             echo "PASS  dev_$v is the hub's after creating every container"
@@ -273,6 +273,24 @@ jobs:
       # The door, as the phone meets it: a terminal on the far end of `ssh dev`. And the rule the
       # metered link depends on, that a menu nobody touches sends nothing. Calibrated by the
       # first half: the menu must have drawn the containers, or "nothing was sent" is empty.
+      # CLAUDE_UNDOCUMENTED_SHARED_LOGINS=true (the .env.example default): infra-dev reads its
+      # login from the shared volume, and the check `make verify` uses to prove Claude Code still
+      # honours the undocumented variable tells honoured from ignored. A fake, unexpired login, so
+      # nothing reaches a login server; removed after.
+      - name: Check the shared Claude login is the one infra-dev reads
+        run: |
+          dir=$(docker exec infra-dev printenv CLAUDE_SECURESTORAGE_CONFIG_DIR)
+          [ "$dir" = /home/dev/.claude-logins/true ] || { echo "FAIL  CLAUDE_SECURESTORAGE_CONFIG_DIR is '$dir'"; exit 1; }
+          exp=$(( $(date +%s) * 1000 + 3600000 ))
+          printf '{"claudeAiOauth":{"accessToken":"at-smoke","refreshToken":"rt-smoke","expiresAt":%s,"scopes":["user:inference"],"subscriptionType":"max"}}' "$exp" \
+            | docker exec -i infra-dev sh -c 'umask 077; cat > "$CLAUDE_SECURESTORAGE_CONFIG_DIR/.credentials.json"'
+          make -s -C dev verify SUDO= | grep -E '^(auth|login dir)' | tee login.txt
+          grep -q '^auth      : claude logged in — the shared login' login.txt || { echo "FAIL  not logged in on the shared login"; exit 1; }
+          echo "PASS  logged in on the shared login"
+          grep -q '^login dir : honoured' login.txt || { echo "FAIL  the variable is not honoured"; exit 1; }
+          echo "PASS  the variable is honoured"
+          docker exec infra-dev rm -f /home/dev/.claude-logins/true/.credentials.json
+
       - name: Check the menu under a terminal, and that an idle one sends nothing
         run: |
           cmd="stty cols 80 rows 24; exec docker exec -it dev-hub ssh -tt -F /dev/null -i /tmp/client -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null dev@127.0.0.1"

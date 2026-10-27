@@ -1410,6 +1410,29 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   `ssh-agent` per build (machinery the podman move would not need). Set in `dev/Makefile`'s
   `COMPOSE`, which `make build` and `make up` use; the deploy play's own `up` builds nothing,
   because `make build` ran first.
+- **The dev containers share one Claude login, on an undocumented setting, behind one switch**
+  (owner, 2026-10-27): `CLAUDE_UNDOCUMENTED_SHARED_LOGINS` in `dev/.env`, `true` or `false`.
+  Wanted: one login for every container *with* Remote Control. A `setup-token` token is the only
+  documented shareable login and makes model requests only, so no Remote Control and no
+  claude.ai connectors; copying a full login is what failed on or3-dev (the copies refresh on
+  their own, the refresh token rotates, and all but one are logged out). Claude Code 2.1.311's
+  code reads its login file and takes its refresh lock in `CLAUDE_SECURESTORAGE_CONFIG_DIR`,
+  undocumented; after the lock it re-reads the file and uses another process's refresh rather
+  than refreshing again; and the lock's owner record carries the PID namespace, so a holder in
+  another container is never taken over as dead. **Proved, not inferred**, with that Claude Code
+  in four containers against a stand-in `platform.claude.com` that rotates refresh tokens and
+  refuses an old one, calibrated first: four *copies* of a login gave one refresh and three
+  logged out, as on or3-dev; one *shared* directory gave one refresh and four logged in, four
+  runs out of four, three with a slow refresh. A holder killed mid-refresh cost its peers that
+  one request ("retry in a minute") and no login; the stale lock cleared inside 90 seconds. Not
+  proved here: a real Remote Control session, and a long-running session picking up a refresh
+  made elsewhere (the code watches the file's mtime for it). **Reversible by design**: both
+  directories are mounted always, `false` being each container's own `*-claude` volume mounted a
+  second time, so the switch is one value and a redeploy, and nothing is deleted either way.
+  `make verify`'s `login dir` line asks for the login once as configured and once pointed at an
+  empty directory, so the day an update drops the variable it reads NOT HONOURED (calibrated by
+  passing a name Claude does not read). A logout in one container is a logout in all, and one
+  credential is reachable from every container, as with the token it was weighed against.
 
 ## The lesson worth keeping
 

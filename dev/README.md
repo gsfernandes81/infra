@@ -610,6 +610,34 @@ binary skips warm spares under ~1 GB free; the re-measure is open in
 `credentials.json` in: tried in or3-dev, claude blanked the copy within a second and refreshed
 the phone's login under it. An OAuth login belongs to the device that made it.
 
+### The login: shared, or each its own
+
+**One switch in `.env`, `CLAUDE_UNDOCUMENTED_SHARED_LOGINS`** (owner, 2026-10-27):
+
+- `true`, the default: every dev container is on **one** full Claude login, Remote Control
+  included. Log in once, in any container (`make login C=<c>`), and every one follows; a logout
+  in one is a logout in all.
+- `false`: each container has its own login, in its own `*-claude` volume, as before.
+
+Flipping it is that line and the deploy play, which recreates the dev containers, so their
+sessions end; then `make login C=<c>` wherever `make status` reads logged out. Nothing is
+deleted either way: the shared login stays in the `claude-login` volume and each container's
+own stays in its `*-claude` volume, so flipping back finds whichever was there, if it has not
+gone stale meanwhile.
+
+**It rests on an undocumented Claude Code setting**, hence the name:
+`CLAUDE_SECURESTORAGE_CONFIG_DIR` moves the login file and its refresh lock out of the config
+directory, so containers sharing one directory refresh the login once between them, as
+processes on one machine do. Read from Claude Code 2.1.311 and proved against a stand-in login
+server; the reasoning and the tests are in [`../docs/decisions.md`](../docs/decisions.md).
+Because Claude Code updates itself, **`make verify`'s `login dir` line proves it each time**: it
+asks for the login once as configured and once pointed at an empty directory, and reads
+`NOT HONOURED` the day an update stops reading the variable. The fix that day is `false`.
+
+The `auth` line in `make status` says which login a container is on. Where each lives:
+`~/.claude-logins/true` is the shared volume, `~/.claude-logins/false` the container's own
+`*-claude` volume mounted a second time, so `false` reads exactly `~/.claude/.credentials.json`.
+
 ## Ansible from in here
 
 **`ANSIBLE_CONFIG` is set in the image** to `/workspace/ansible/ansible.cfg`, so a run from
@@ -850,7 +878,8 @@ zero, each mounted read-only into the one container that needs it:
 `server-create-dev-container.yml` writes the first two, from nothing that crosses the radio
 but the control node's own public key. **The hub's private key is in none of them**: it is made
 in, and never leaves, the `hub-state` volume. A repo's `.env` files are in its env volume. The
-Claude login (`*-claude`), Crush's key (`~/.local/share/crush`) and jcode's login (`~/.jcode`)
+Claude login (`*-claude`, or the shared `claude-login` volume while
+`CLAUDE_UNDOCUMENTED_SHARED_LOGINS=true`), Crush's key (`~/.local/share/crush`) and jcode's login (`~/.jcode`)
 are on the containers' external volumes, which `make down-volumes` leaves alone.
 
 **What a container can reach:**
