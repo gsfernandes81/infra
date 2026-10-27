@@ -5,7 +5,7 @@ Runs in the hub, which holds a GitHub App's private key and nothing in a dev con
 For every container named by a HUB_REPO_<NAME> variable it asks GitHub for an installation
 access token limited to that ONE repository and to HUB_GITHUB_PERMISSIONS, and writes it to
 <tokens>/<name>/token. Each dev container mounts only its own <name> directory, read-only, at
-/run/github, so a claude in or3-dev can read or3's token and no other. A token lasts an hour;
+/run/github, so a claude in or3 can read or3's token and no other. A token lasts an hour;
 `loop` renews every 30 minutes, so one is always at least half an hour from expiring.
 
     github-tokens dirs    make <tokens>/<name>/ for every container (their mounts need them),
@@ -27,7 +27,7 @@ Environment (dev/compose.yaml sets each):
     HUB_GITHUB_PERMISSIONS  name=level,... asked for on every token
     HUB_GITHUB_TOKENS       where the tokens go                (/home/dev/tokens)
     HUB_GITHUB_API          the API's base URL; tests point it at a stand-in
-    HUB_REPO_<NAME>         owner/repo for container <name> (INFRA_DEV -> infra-dev)
+    HUB_REPO_<NAME>         owner/repo for container <name> (DESTINY_DIRECTOR -> destiny-director)
 
 It never prints a token, a JWT or a request header. What it prints about a refusal is the
 status and GitHub's own `message`, which is where GitHub puts the reason.

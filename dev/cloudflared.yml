@@ -4,13 +4,18 @@
 # beside the credentials, so a `tunnel:` key here could only ever disagree with it.
 #
 # TWO HOSTNAMES. dev.<dns_zone> is the hub's sshd, the way in to every dev container.
-# or3-dev.<dns_zone> is or3-dev's own sshd, kept because the phone's `or3-tunnel` holds a
-# reverse forward to the vessel LAN that must terminate INSIDE or3-dev (or3's
+# or3-dev.<dns_zone> is the or3 container's own sshd, kept because the phone's `or3-tunnel`
+# holds a reverse forward to the vessel LAN that must terminate INSIDE that container (or3's
 # docs/dev-tunnel.md): the phone's alias, its Access token and or3's tool stay exactly as
 # they were, and only the hostname's CNAME moves from or3-dev's old tunnel to this one, at
 # move-in (`server-create-dev-container.yml -e container=or3-dev -e via_hub=true`). Until
 # then the rule is unused — the CNAME still names the old tunnel — and harmless. No other
 # container gets one: the break-glass path is `make shell C=<c>` on zero.
+#
+# THE HOSTNAME KEPT ITS -dev WHEN THE CONTAINER LOST IT (2026-10-27): the container is `or3`,
+# the service below names it so, but the hostname, the phone's `or3-dev` alias, its Access
+# application and its token are Cloudflare's and the clients', and renaming them is its own
+# change (DNS, Access, every client's ssh block, or3's tool) — not a side effect of this one.
 #
 # A service name, not 127.0.0.1: on the project network the name is the stable address,
 # and the hub is the only service the tunnel may reach.
@@ -25,5 +30,5 @@ ingress:
   - hostname: dev.gsrpi.uk
     service: ssh://hub:2222
   - hostname: or3-dev.gsrpi.uk
-    service: ssh://or3-dev:2222
+    service: ssh://or3:2222
   - service: http_status:404

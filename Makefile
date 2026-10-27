@@ -1,6 +1,6 @@
 # infra, from the repo root.
 #
-#   make dev         stand up the infra-dev container on zero and walk the logins
+#   make dev         stand up the infra container on zero and walk the logins
 #   make dev-up      build + (re)create it
 #   make dev-status  one-screen health check
 #   make dev-verify  status + tools + collections + the fleet
@@ -11,7 +11,7 @@
 #   make dev-tunnel-log  what the hub's cloudflared is saying
 #   make dev-logs / dev-boot-log / dev-restart / dev-stop / dev-down
 #
-# C=<container> passes through for the targets that take one (default infra-dev).
+# C=<container> passes through for the targets that take one (default infra).
 #
 # Everything above forwards into dev/Makefile, which is where the docker commands
 # live. Nothing here is runnable from an agent session: `gavin` is not in the docker

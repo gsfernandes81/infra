@@ -1,9 +1,9 @@
 # The dev containers and their hub, from a terminal on zero. **This file is their
 # management interface** — the docker commands live here and nowhere else. One Compose
-# project (compose.yaml, `name: dev`): the hub, its cloudflared sidecar, infra-dev, and each
-# other repo's container behind its profile until it moves in.
+# project (compose.yaml, `name: dev`): the hub, its cloudflared sidecar, infra, and each
+# other repo's container behind its profile. Every container is named for its repo.
 #
-#   make dev         up, then walk infra-dev through whatever is not logged in yet
+#   make dev         up, then walk infra through whatever is not logged in yet
 #   make up          build and (re)create everything the profiles in .env name; S=<service>
 #                    for one service (and the hub it depends on)
 #   make restart     stop + start one container, NO re-evaluation of the config
@@ -25,7 +25,7 @@
 #   make down        stop and remove EVERY container in the project (volumes stay)
 #   make down-volumes  also drop the project's own volumes — workspaces, env files, the hub key
 #
-# C=<container> picks the container for the targets that take one — infra-dev unless said;
+# C=<container> picks the container for the targets that take one — infra unless said;
 # C=hub is the hub. The same targets are `make dev-up`, `make dev-login` … from the repo root.
 #
 # NOT runnable from an agent session: `gavin` is not in the docker group and sudo
@@ -36,7 +36,7 @@
 # stand them up and tell you what state they are in; they are not the daily interface.
 # dev/README.md.
 
-C ?= infra-dev
+C ?= infra
 CONTAINER := $(if $(filter hub,$(C)),dev-hub,$(C))
 
 # `sudo` unless already root, so both `make up` and `sudo make up` work.
@@ -92,7 +92,7 @@ BASE_TAG := $(shell sed -n 's/^x-base-tag: &base-tag //p' $(CURDIR)/compose.yaml
 
 .PHONY: help dev base up restart stop down down-volumes status verify collections logs \
 	boot-log tunnel-log idle offload-log sessions login claude claude-update shell fleet \
-	_require-env _require-secrets _require-uid _require-own-names _require-volumes volumes \
+	_require-env _require-secrets _require-uid _require-own-names _require-no-retired _require-volumes volumes \
 	check check-names build
 
 help:
@@ -104,6 +104,10 @@ help:
 # Every name in .env.example is required (its header says why), so a .env from before
 # 2026-10-26 — infra-dev's alone — is refused here with the whole list, rather than by
 # Compose one variable at a time.
+#
+# A profile in COMPOSE_PROFILES that no service has is IGNORED by Compose without a word
+# (checked, Compose 5.6.1): the container it meant simply never starts. The 2026-10-27 rename
+# made every old profile such a name, so each must be one compose.yaml declares.
 _require-env:
 	@[ -f $(CURDIR)/.env ] || { \
 	  echo "no $(CURDIR)/.env — copy .env.example to .env and edit it." >&2; exit 1; }
@@ -117,6 +121,13 @@ _require-env:
 	@! grep -qE '^[[:space:]]*(export[[:space:]]+)?CLAUDE_UNDOCUMENTED_SHARED_LOGINS=' $(CURDIR)/.env || { \
 	  echo "dev/.env sets CLAUDE_UNDOCUMENTED_SHARED_LOGINS; it lives in compose.yaml, so a .env line" >&2; \
 	  echo "  would override it unseen. Delete that line, and change compose.yaml to flip it." >&2; exit 1; }
+	@known=$$(sed -n 's/^[[:space:]]*profiles: \[\(.*\)\]$$/\1/p' $(CURDIR)/compose.yaml | tr -s ', ' '\n\n' | sort -u); \
+	for p in $$(sed -n 's/^COMPOSE_PROFILES=//p' $(CURDIR)/.env | tr -d "\"'" | tr ',' ' '); do \
+	  printf '%s\n' "$$known" | grep -qx "$$p" || { \
+	    echo "dev/.env: COMPOSE_PROFILES names '$$p', which no service in compose.yaml has, so Compose" >&2; \
+	    echo "  would skip it silently. Each container's profile is its repo's name:" >&2; \
+	    echo "  " $$known >&2; exit 1; }; \
+	done
 
 # THE EXTERNAL VOLUMES — each container's logins, history and host keys, kept by name from its
 # old project — must already exist: Compose refuses an external volume it cannot find, and
@@ -140,18 +151,35 @@ volumes:
 	  if $(DOCKER) volume inspect "$$v" >/dev/null 2>&1; then echo "kept    $$v"; \
 	  else $(DOCKER) volume create "$$v" >/dev/null && echo "created $$v"; fi; done
 
-# A container of the same name from ANOTHER compose project — infra-dev's old one, `infra-dev`,
-# or a child's from its own repo — makes `up` fail half way with "name already in use",
-# after the hub has started. Refuse first and name the command. `down` there, never `down -v`:
-# its login volumes are this project's external ones.
+# A container of the same name from ANOTHER compose project — a child's from its own repo, as
+# at the 2026-10-26 cutover — makes `up` fail half way with "name already in use", after the
+# hub has started. Refuse first and name the command. `down` there, never `down -v`: its login
+# volumes are this project's external ones. The names are compose.yaml's own container_name
+# lines, so a container added there is checked without being listed twice.
+OWN_NAMES = $(shell sed -n 's/^[[:space:]]*container_name: //p' $(CURDIR)/compose.yaml)
 _require-own-names:
-	@for c in infra-dev or3-dev dd-dev dd-postgres ds-dev dev-hub dev-cloudflared; do \
+	@for c in $(OWN_NAMES); do \
 	  p=$$($(DOCKER) inspect --type container -f '{{ index .Config.Labels "com.docker.compose.project" }}' $$c 2>/dev/null) || continue; \
 	  [ "$$p" = dev ] && continue; \
 	  echo "container $$c belongs to compose project '$${p:-none}', not dev. Stop it there first:" >&2; \
 	  echo "  cd ~ && sudo docker compose -p $$p down   # from ~, not here: this dir's compose.yaml is the new one. NOT -v" >&2; \
 	  exit 1; \
 	done
+
+# THE NAMES RETIRED ON 2026-10-27, when every container took its repo's name. Neither `make up`
+# nor the deploy play removes a container whose service has left compose.yaml, so after the
+# rename the old one would run on beside the new: two containers on one login, one history and
+# one set of host keys. Refuse while any exists, in any project. Removing one ends its
+# sessions; its volumes stay, being external and named.
+RETIRED_NAMES = infra-dev or3-dev dd-dev ds-dev invective-dev nibbles-dev ionic-dev
+_require-no-retired:
+	@found=; for c in $(RETIRED_NAMES); do \
+	  $(DOCKER) inspect --type container $$c >/dev/null 2>&1 && found="$$found $$c"; done; \
+	[ -z "$$found" ] || { \
+	  echo "containers under names retired on 2026-10-27:$$found" >&2; \
+	  echo "  each is now its repo's name (compose.yaml's header), and an old one left running" >&2; \
+	  echo "  would share its volumes with the new. Remove them; their volumes are kept:" >&2; \
+	  echo "      sudo docker stop$$found && sudo docker rm$$found" >&2; exit 1; }
 
 _require-uid:
 	@[ "$(HOST_UID)" != "0" ] || { \
@@ -222,14 +250,14 @@ base: _require-uid
 check: _require-env _require-uid _require-secrets _require-volumes
 	@echo "dev: .env, secrets and external volumes are in place"
 
-check-names: _require-own-names
-	@echo "dev: no other compose project holds a dev container's name"
+check-names: _require-own-names _require-no-retired
+	@echo "dev: no other compose project holds a dev container's name, and none has a retired one"
 
 # Builds what the enabled profiles name (or S=), and touches no container.
 build: _require-env _require-uid
 	$(COMPOSE) build $(S)
 
-up: _require-env _require-uid _require-secrets _require-own-names _require-volumes
+up: _require-env _require-uid _require-secrets _require-own-names _require-no-retired _require-volumes
 	$(COMPOSE) up -d --build $(S)
 	@printf '\n'
 	@$(MAKE) --no-print-directory status

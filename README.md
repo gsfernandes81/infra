@@ -115,7 +115,7 @@ exists, and the first run of it found exactly that on `one`.
 | Host | |
 |---|---|
 | `one` | **8080** qBittorrent (via gluetun) · ~~**7777** ionic-traces~~ — **stopped**, see [2c](docs/management-plane.md#sequencing-and-where-podman-fits) · **8384/22000** syncthing · *send2ereader, calibre-web and garmin-mcp publish nothing — each is reached only through its own tunnel's sidecar* |
-| `zero` | **2283** Immich · **8384/22000** syncthing · **127.0.0.1:2224** the `or3-dev` container (`infra-dev` publishes nothing — its tunnel, or `make shell`) |
+| `zero` | **2283** Immich · **8384/22000** syncthing · *the dev containers publish nothing — `ssh dev`, or `make shell` on zero* |
 | `two` | **none published** — the bot's web UI (8080) and break-glass sshd (2222) exist inside the container and are deliberately not mapped. See the commented `ports:` block in `deployments/destiny-director/compose.yaml` |
 
 Both Syncthings and `torrent` are on **host or shared networking**, so `docker ps` shows
@@ -124,42 +124,30 @@ which case each is, and its Listening section is the answer that covers all of t
 
 ### Dev containers on `zero`
 
-Four. Each is driven by `make dev` **in the repo it belongs to**, each is `restart=no`,
-and each holds live sessions and uncommitted worktrees. See
-[decisions.md](docs/decisions.md).
+One Compose project, [`dev/compose.yaml`](dev/compose.yaml), live since 2026-10-27: a hub
+that `ssh dev` lands on — a menu of every container's sessions — and one container per repo,
+**each named for its repo**: `infra` (this one), `or3`, `destiny-director` (+ `dd-postgres`),
+`dossier`, `invective`, `nibbles`, `ionic-traces`. Nothing publishes a port; the hub's
+tunnel is the way in, and `or3-dev.gsrpi.uk` reaches `or3`'s own sshd for the phone's vessel
+tunnel. Each is `restart: no` and holds live sessions; lifecycle is `dev/Makefile`.
+[`dev/README.md`](dev/README.md) is the whole of it.
 
-**⚠︎ Built 2026-10-26, not yet on the box:** all four move into one `dev/compose.yaml`
-behind a hub — `ssh dev` opens a menu of every container's sessions, and nothing publishes
-a port. The table below is what `zero` runs until the owner brings it up
-([`docs/handoff/2026-10-26-dev-hub.md`](docs/handoff/2026-10-26-dev-hub.md)), and all four
-move at once, in one cutover ([`dev/README.md`](dev/README.md) § *The cutover from the old
-layout*).
-
-| Container | Repo | SSH | Defined in |
-|---|---|---|---|
-| `dd-dev` (+ `dd-mysql`) | `destiny-director` | 2222 | that repo |
-| `ds-dev` | `dossier` | 2223 | that repo |
-| `or3-dev` | `or3` | `127.0.0.1:2224` | that repo |
-| `infra-dev` | **this one** | none published — `infra-dev.gsrpi.uk`, or `make shell` on zero | [`dev/`](dev/README.md) |
-
-**`infra-dev` is the exception to "dev containers stay in their own repo", and it is not
+**`infra` is the exception to "dev containers stay in their own repo", and it is not
 one.** That rule says a dev container belongs to the repo it develops; this one develops
-*this* repo, so `dev/` is exactly where it belongs. What it is not is a host service —
-nothing in `deployments/` or `hosts/` refers to it, and its lifecycle is `dev/Makefile`.
+*this* repo, so `dev/` is exactly where it belongs. The other repos' containers are built
+from each repo's own `Dockerfile.dev`; only their service blocks live here.
 
 It also carries `ansible-core` and the collections — but **it is not a control node, by
 decision**: no fleet key, no `ssh_config.fleet`, so it has no route to `zero`, `one` or
 `two` and cannot run a playbook against any of them. The owner decided on 2026-10-25 that
 it stays that way: [`docs/management-plane.md`](docs/management-plane.md) §
 *A control node inside the fleet* has the case that was made for it and why it was declined.
-[`dev/README.md`](dev/README.md).
 
-**Only `or3-dev` was up at the last audit**, and only its port was listening. The others
-being down is the normal resting state, not a fault: nothing starts them but a person.
-Their named volumes survive regardless, and those volumes are the thing that matters —
-`or3-dev_or3-claude` is 22 MB of login and session history, and a dev container that
-moves hosts without its volume arrives logged out and empty. The inventory lists every
-volume on both hosts for that reason.
+A stopped container is the normal resting state, not a fault: nothing starts one but a
+person. Their named volumes survive regardless, and those volumes are the thing that
+matters — `or3-dev_or3-claude` is 22 MB of login and session history (the volumes keep the
+containers' pre-rename names), and a container that moves hosts without its volume arrives
+logged out and empty. The inventory lists every volume on both hosts for that reason.
 
 ## Secrets
 
@@ -190,7 +178,7 @@ None are in git. `.gitignore` covers `.env`, `*.key`, `qBittorrent.conf`, `*.sql
 | [decisions.md](docs/decisions.md) | Why it looks like this. Don't relitigate. |
 | [plans/](plans/) | Deferred plans, one per topic. Deleted once executed. |
 | `docs/handoff/` | Session handoff notes, `YYYY-MM-DD-<topic>.md`. Deleted once their open items close — **the directory is empty today**, which is the intended resting state, and reappears when a note is written. |
-| [dev/README.md](dev/README.md) | The `infra-dev` container — working on this repo without paying for it. |
+| [dev/README.md](dev/README.md) | The dev containers and their hub — working on this repo, and the others, without paying for it. |
 | [ansible/README.md](ansible/README.md) | Running the management plane. |
 
 ## Three rules

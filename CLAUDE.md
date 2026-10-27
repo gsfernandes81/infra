@@ -10,9 +10,9 @@ as the management plane, and a handful of Python tools in `bin/`.
 
 > **Two places this repo is worked on, and neither can touch the fleet from an agent
 > session.** The owner's **phone (Termux)** is the control node — the only machine with a
-> route to every box, and the only one on a metered connection. **`infra-dev`**, a
-> container on `zero`, is where Claude usually runs: free data, `git`/`gh`/`ansible`
-> present, **no route to `zero`, `one` or `two` by decision** (`docs/management-plane.md`
+> route to every box, and the only one on a metered connection. **The `infra` container**
+> on `zero` (`infra-dev` until 2026-10-27; every dev container is now named for its repo) is
+> where Claude usually runs: free data, `git`/`gh`/`ansible` present, **no route to `zero`, `one` or `two` by decision** (`docs/management-plane.md`
 > § *A control node inside the fleet*). In both, `gavin` is not in the `docker` group and
 > `sudo` wants a password. Anything that changes a box is **handed over**, not run — see
 > *Privileged commands*.
@@ -36,12 +36,12 @@ Full orientation is `README.md`; the reasoning is `docs/decisions.md`. Quick map
   own change or not at all.
 - **`ansible/`** — host list, playbooks, the fleet-inventory generator. **Runs from the
   control node, never from a Pi**: there is no `ansible` on the boxes and there must not be.
-  `infra-dev` carries it as a *development* tool (syntax-check, `--check` against stubs),
-  not a control plane.
+  The `infra` container carries it as a *development* tool (syntax-check, `--check` against
+  stubs), not a control plane.
 - **`dev/`** — every dev container, in one `dev/compose.yaml` (project `dev`): the hub
   (`dev/hub/`, the menu behind `ssh dev`, and the offloader), its `cloudflared` sidecar,
-  `infra-dev`, and the children behind profiles. **Live on `zero` since 2026-10-27**; what the
-  cutover left open is [`docs/handoff/2026-10-26-dev-hub.md`](docs/handoff/2026-10-26-dev-hub.md). Lifecycle is
+  `infra`, and the other repos' containers behind profiles, each named for its repo. **Live
+  on `zero` since 2026-10-27**; what the cutover left open is [`docs/handoff/2026-10-26-dev-hub.md`](docs/handoff/2026-10-26-dev-hub.md). Lifecycle is
   `dev/Makefile` only (it computes `HOST_UID` from the checkout's owner; a second copy of
   that guard is how root-owned files end up in a mount). The top-level `Makefile` forwards
   `dev-*` to it.
@@ -112,7 +112,8 @@ end of a session for the next one. Two rules, both of which have bitten:
   - Merge it into `main` the moment it is complete and non-breaking, then delete the
     branch and the worktree. A worktree that outlives its work is the same stale-truth
     problem as a handoff that does.
-  - **In `infra-dev`, an Ansible change made in a worktree is not what your test runs.**
+  - **In the `infra` container, an Ansible change made in a worktree is not what your test
+    runs.**
     The image pins `ANSIBLE_CONFIG` at the MAIN checkout's `ansible.cfg` and it beats
     the cwd, so a playbook run inside a worktree loads the other copy's `inventory` and
     `group_vars`: a var you just added reads undefined while its neighbours in the same
@@ -146,9 +147,9 @@ end of a session for the next one. Two rules, both of which have bitten:
   `<` commit with a `=` twin upstream; a `<` without one is work that exists nowhere else.
   `zero`'s diverged on 2026-10-25: its checkout was also `infra-dev`'s `/workspace`, so a
   session committing there and pushing a rebased copy left the originals behind. Since the
-  hub's bring-up (2026-10-27) `infra-dev` works in its own cloned volume and the host checkout
-  is only what the box runs, so no dev container commits there any more; the rule still holds
-  for anything that does.
+  hub's bring-up (2026-10-27) the `infra` container works in its own cloned volume and the
+  host checkout is only what the box runs, so no dev container commits there any more; the
+  rule still holds for anything that does.
 - **Read `git diff --stat` before every commit** and revert any file the change has no
   business touching.
 

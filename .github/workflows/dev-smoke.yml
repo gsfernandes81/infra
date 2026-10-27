@@ -8,16 +8,16 @@ name: dev-smoke
 # the sshd every container shares forwards only -R and only for a key that is not the hub's,
 # that the menu draws under a terminal and then sends nothing while idle, that a recreate
 # keeps the workspace, the host keys and the tokens, that the deploy play's dev hooks pass,
-# that dd-dev comes up with its database and its env link as the cutover's step 6 does it,
+# that destiny-director comes up with its database and its env link as the cutover's step 6 does it,
 # and that a child builds straight from its GitHub URL. Every check is named in the log, PASS
 # or FAIL. The job summary carries each container's idle memory.
 #
 # WHAT IT CANNOT CHECK, so nobody reads a green run as more: the Pi itself (arm64 under
 # Alpine/OpenRC, cgroupfs; this is amd64 Ubuntu), the memory pool (hosts/zero/system/devpool
 # has its own proof, on zero), Cloudflare and the tunnel (no profile `tunnel` here), the
-# GitHub App (the token handed to infra-dev is this run's own GITHUB_TOKEN, written where the
+# GitHub App (the token handed to infra is this run's own GITHUB_TOKEN, written where the
 # broker would write it; hub/test_github_tokens.py covers the broker against a stand-in),
-# or3-dev (private: its image needs or3's deploy key), and Claude Code acting on the hooks
+# or3 (private: its image needs or3's deploy key), and Claude Code acting on the hooks
 # (it needs a login).
 #
 # claude-sessions: the hub builds exactly as on zero, from the release hub/Dockerfile pins and
@@ -84,10 +84,10 @@ jobs:
           chmod 700 "$s/hub" "$s/infra" "$s/or3" "$s/dd" "$s/ds"
           ssh-keygen -q -t ed25519 -N '' -C smoke-client -f "$s/client"
           # The App is required, so a throwaway key stands in for it: the broker signs with it
-          # and GitHub refuses, which the log says. infra-dev's token is written by hand below.
+          # and GitHub refuses, which the log says. infra's token is written by hand below.
           openssl genrsa -out "$s/hub/github-app.pem" 2048 2>/dev/null
           chmod 600 "$s/hub/github-app.pem"
-          # The client key goes into infra-dev's authorized_keys as well, so the forwarding
+          # The client key goes into infra's authorized_keys as well, so the forwarding
           # rules every container's sshd shares can be tried with a key that is not the hub's.
           for d in hub infra; do cp "$s/client.pub" "$s/$d/authorized_keys"; chmod 600 "$s/$d/authorized_keys"; done
           sed -e "s#^HUB_SECRETS=.*#HUB_SECRETS=$s/hub#" \
@@ -106,7 +106,7 @@ jobs:
       - name: Check compose parses with every profile on
         working-directory: dev
         run: |
-          COMPOSE_PROFILES=tunnel,or3-dev,dd-dev,ds-dev,invective-dev,nibbles-dev,ionic-dev HOST_UID=$(id -u) HOST_GID=$(id -g) \
+          COMPOSE_PROFILES=tunnel,or3,destiny-director,dossier,invective,nibbles,ionic-traces HOST_UID=$(id -u) HOST_GID=$(id -g) \
             docker compose config -q
           docker version --format 'docker {{.Server.Version}}'; docker compose version
 
@@ -142,17 +142,17 @@ jobs:
           make -C dev up S=hub SUDO= $SMOKE_OVERRIDE
           timeout 120 sh -c 'until [ "$(docker inspect -f "{{.State.Health.Status}}" dev-hub)" = healthy ]; do sleep 2; done'
 
-      - name: Hand infra-dev a token where the broker would write it
+      - name: Hand infra a token where the broker would write it
         env:
           TOKEN: ${{ github.token }}
         run: |
           printf %s "$TOKEN" | docker exec -i dev-hub sh -c \
-            'umask 077; d=/home/dev/tokens/infra-dev; cat > "$d/token.tmp" && mv -f "$d/token.tmp" "$d/token"'
+            'umask 077; d=/home/dev/tokens/infra; cat > "$d/token.tmp" && mv -f "$d/token.tmp" "$d/token"'
 
-      - name: Start infra-dev (make up)
+      - name: Start infra (make up)
         run: |
           make -C dev up SUDO= $SMOKE_OVERRIDE
-          timeout 300 sh -c 'until docker exec dev-hub ssh -o BatchMode=yes -o ConnectTimeout=5 infra-dev true 2>/dev/null; do sleep 5; done'
+          timeout 300 sh -c 'until docker exec dev-hub ssh -o BatchMode=yes -o ConnectTimeout=5 infra true 2>/dev/null; do sleep 5; done'
 
       - name: Check the project end to end
         env:
@@ -162,35 +162,35 @@ jobs:
           check() { n="$1"; shift; if "$@"; then echo "PASS  $n"; else echo "FAIL  $n"; fails=$((fails + 1)); fi; }
 
           check "the hub's key sits in authorized_keys.hub, restrict,pty" \
-            docker exec infra-dev grep -q '^restrict,pty ssh-ed25519 ' /home/dev/.ssh/authorized_keys.hub
-          check "the hub runs a command in infra-dev with it" \
-            docker exec dev-hub ssh -o BatchMode=yes infra-dev true
+            docker exec infra grep -q '^restrict,pty ssh-ed25519 ' /home/dev/.ssh/authorized_keys.hub
+          check "the hub runs a command in infra with it" \
+            docker exec dev-hub ssh -o BatchMode=yes infra true
           check "the same claude-sessions runs at both ends" sh -c \
-            '[ "$(docker exec dev-hub claude-sessions --version)" = "$(docker exec dev-hub ssh infra-dev /opt/claude-sessions/bin/claude-sessions --version)" ]'
+            '[ "$(docker exec dev-hub claude-sessions --version)" = "$(docker exec dev-hub ssh infra /opt/claude-sessions/bin/claude-sessions --version)" ]'
           check "the agent answers with a snapshot of /workspace" sh -c \
-            'docker exec dev-hub timeout 20 ssh -T infra-dev /opt/claude-sessions/bin/claude-sessions agent </dev/null | head -1 | grep -q "\"workspace\":\"/workspace\""'
+            'docker exec dev-hub timeout 20 ssh -T infra /opt/claude-sessions/bin/claude-sessions agent </dev/null | head -1 | grep -q "\"workspace\":\"/workspace\""'
           docker exec -i dev-hub sh -c 'umask 077; cat > /tmp/client' < "$SMOKE_SECRETS/client"
           check "a client key reaches the hub's door" sh -c \
             '[ "$(docker exec dev-hub ssh -F /dev/null -i /tmp/client -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null dev@127.0.0.1 echo door-ok)" = door-ok ]'
           check "the hooks drop-in is mounted" \
-            docker exec infra-dev test -s /etc/claude-code/managed-settings.d/claude-sessions.json
-          check "Claude Code is installed" docker exec infra-dev claude --version
+            docker exec infra test -s /etc/claude-code/managed-settings.d/claude-sessions.json
+          check "Claude Code is installed" docker exec infra claude --version
           check "/run/github holds this container's token and nothing else" sh -c \
-            '[ "$(docker exec infra-dev ls -A /run/github)" = token ]'
+            '[ "$(docker exec infra ls -A /run/github)" = token ]'
           check "git asks the hub's helper for github.com" sh -c \
-            '[ "$(docker exec infra-dev git config --global credential.https://github.com.helper)" = hub ]'
+            '[ "$(docker exec infra git config --global credential.https://github.com.helper)" = hub ]'
           check "gh uses the hub's token" sh -c \
-            '[ "$(docker exec infra-dev gh api "repos/$REPO" --jq .full_name)" = "$REPO" ]'
+            '[ "$(docker exec infra gh api "repos/$REPO" --jq .full_name)" = "$REPO" ]'
           check "the workspace is a clone over https" sh -c \
-            '[ "$(docker exec infra-dev git -C /workspace remote get-url origin)" = "https://github.com/gsfernandes81/infra.git" ]'
-          check "the base carries its tools" docker exec infra-dev sh -c '
+            '[ "$(docker exec infra git -C /workspace remote get-url origin)" = "https://github.com/gsfernandes81/infra.git" ]'
+          check "the base carries its tools" docker exec infra sh -c '
             for t in hx rg fd jq yq tree file unzip rsync sqlite3 shellcheck shfmt bat fzf delta \
                      uv ruff ty typescript-language-server bash-language-server \
                      yaml-language-server docker-langserver vscode-json-language-server \
                      taplo fish-lsp gh zmx; do
               command -v "$t" >/dev/null || { echo "missing: $t"; exit 1; }
             done'
-          check "helix has its grammars" docker exec infra-dev test -s /opt/helix/runtime/grammars/python.so
+          check "helix has its grammars" docker exec infra test -s /opt/helix/runtime/grammars/python.so
           check "the token broker's own tests" python3 dev/hub/test_github_tokens.py
 
           # ── the hub's own parts ──
@@ -198,74 +198,74 @@ jobs:
           check "the offload loop has beaten" docker exec dev-hub test -f /home/dev/.hub/offload.beat
           check "the token loop has beaten" docker exec dev-hub test -f /home/dev/.hub/tokens.beat
           check "the container list is derived from HUB_REPO_*" sh -c \
-            '[ "$(docker exec dev-hub sh -c "grep ^CLAUDE_SESSIONS_HOSTS= ~/.ssh/environment")" = "CLAUDE_SESSIONS_HOSTS=dd-dev ds-dev infra-dev invective-dev ionic-dev nibbles-dev or3-dev" ]'
+            '[ "$(docker exec dev-hub sh -c "grep ^CLAUDE_SESSIONS_HOSTS= ~/.ssh/environment")" = "CLAUDE_SESSIONS_HOSTS=destiny-director dossier infra invective ionic-traces nibbles or3" ]'
           # Calibrated by its other half: the stopped containers must FAIL, or the pass did
-          # not try them and "infra-dev did not fail" means nothing.
+          # not try them and "infra did not fail" means nothing.
           docker exec dev-hub claude-sessions offload-all --dry-run > offload.txt 2>&1 || true
           sed 's/^/    | /' offload.txt
-          check "docker exec sees the derived list too (not 'local')" grep -q "^infra-dev: " offload.txt
-          check "an offload pass reaches infra-dev" sh -c '! grep -q "^infra-dev: pass failed" offload.txt'
-          check "and reports the stopped ones as failed" grep -q "^ds-dev: pass failed" offload.txt
+          check "docker exec sees the derived list too (not 'local')" grep -q "^infra: " offload.txt
+          check "an offload pass reaches infra" sh -c '! grep -q "^infra: pass failed" offload.txt'
+          check "and reports the stopped ones as failed" grep -q "^dossier: pass failed" offload.txt
           check "the hub's sshd: no forwarding, the menu door" sh -c '
             t=$(docker exec dev-hub /usr/sbin/sshd -T -f /home/dev/sshd_config) &&
             echo "$t" | grep -qx "allowtcpforwarding no" &&
             echo "$t" | grep -qx "forcecommand /usr/local/bin/hub-door"'
 
           # ── every container's sshd, the one file ──
-          check "infra-dev's sshd: remote forwarding only, the door, two key files" sh -c '
-            t=$(docker exec infra-dev /usr/sbin/sshd -T -f /home/dev/sshd_config) &&
+          check "infra's sshd: remote forwarding only, the door, two key files" sh -c '
+            t=$(docker exec infra /usr/sbin/sshd -T -f /home/dev/sshd_config) &&
             echo "$t" | grep -qx "allowtcpforwarding remote" &&
             echo "$t" | grep -qx "gatewayports no" &&
             echo "$t" | grep -qx "forcecommand /usr/local/bin/dev-door" &&
             echo "$t" | grep -qx "authorizedkeysfile /home/dev/.ssh/authorized_keys /home/dev/.ssh/authorized_keys.hub"'
           check "a client key may -R into a container (or3-tunnel's shape)" sh -c \
-            "[ \"\$(docker exec dev-hub ssh -F /dev/null -i /tmp/client -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -R 127.0.0.1:2299:127.0.0.1:2222 dev@infra-dev 'nc -z 127.0.0.1 2299 && echo r-ok')\" = r-ok ]"
+            "[ \"\$(docker exec dev-hub ssh -F /dev/null -i /tmp/client -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -R 127.0.0.1:2299:127.0.0.1:2222 dev@infra 'nc -z 127.0.0.1 2299 && echo r-ok')\" = r-ok ]"
           check "but not -W/-L (local forwarding refused)" sh -c \
-            "! docker exec dev-hub ssh -F /dev/null -i /tmp/client -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -W 127.0.0.1:2222 dev@infra-dev </dev/null >/dev/null 2>&1"
+            "! docker exec dev-hub ssh -F /dev/null -i /tmp/client -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -W 127.0.0.1:2222 dev@infra </dev/null >/dev/null 2>&1"
           check "and the hub's key may not forward at all (restrict)" sh -c \
-            "! docker exec dev-hub ssh -o BatchMode=yes -o ExitOnForwardFailure=yes -R 127.0.0.1:2298:127.0.0.1:2222 infra-dev true 2>/dev/null"
+            "! docker exec dev-hub ssh -o BatchMode=yes -o ExitOnForwardFailure=yes -R 127.0.0.1:2298:127.0.0.1:2222 infra true 2>/dev/null"
 
           # ── GitHub is the token and nothing else ──
           check "no url rewrite to ssh in git's config" sh -c \
-            '! docker exec infra-dev git config --global --get-regexp "^url\." >/dev/null'
-          check "no private key in ~/.ssh" sh -c '[ -z "$(docker exec infra-dev sh -c "ls ~/.ssh/id_* 2>/dev/null")" ]'
+            '! docker exec infra git config --global --get-regexp "^url\." >/dev/null'
+          check "no private key in ~/.ssh" sh -c '[ -z "$(docker exec infra sh -c "ls ~/.ssh/id_* 2>/dev/null")" ]'
           check "git's credential for github.com is the token" sh -c \
-            'printf "protocol=https\nhost=github.com\n\n" | docker exec -i infra-dev git credential fill | grep -qx username=x-access-token'
+            'printf "protocol=https\nhost=github.com\n\n" | docker exec -i infra git credential fill | grep -qx username=x-access-token'
 
           # ── the editor and its language servers actually run ──
-          check "the language servers start (each --version)" docker exec infra-dev sh -c '
+          check "the language servers start (each --version)" docker exec infra sh -c '
             for t in hx typescript-language-server bash-language-server fish-lsp \
                      taplo ruff ty uv yq; do
               out=$("$t" --version 2>&1) || { echo "does not run: $t"; echo "$out" | head -20; exit 1; }
             done'
-          docker exec infra-dev sh -c 'for l in python bash yaml toml typescript json dockerfile docker-compose fish; do echo "--- $l"; hx --health $l 2>&1 | sed -n "/language servers/,/^[^ ]/p"; done' | sed 's/^/    | /'
-          check "helix finds a language server for each language it is meant to" docker exec infra-dev sh -c '
+          docker exec infra sh -c 'for l in python bash yaml toml typescript json dockerfile docker-compose fish; do echo "--- $l"; hx --health $l 2>&1 | sed -n "/language servers/,/^[^ ]/p"; done' | sed 's/^/    | /'
+          check "helix finds a language server for each language it is meant to" docker exec infra sh -c '
             for l in python bash yaml toml typescript json dockerfile docker-compose fish; do
               hx --health $l 2>&1 | awk "/language servers/{f=1;next} /^[^ ]/{f=0} f && /✓/{ok=1} END{exit !ok}" \
                 || { echo "no server for $l"; exit 1; }
             done'
 
           # ── Claude Code's code intelligence: the plugin is there and enabled, and ty speaks LSP ──
-          check "the local plugin marketplace validates" docker exec infra-dev claude plugin validate /opt/claude-plugins
+          check "the local plugin marketplace validates" docker exec infra claude plugin validate /opt/claude-plugins
           # A session's init event is where Claude Code says what it loaded (`claude plugin list`
           # shows only what a user installed, so it lists nothing here, correctly). A dummy key:
           # the init event comes before the first request, which then fails. A throwaway config
           # dir, so the probe leaves nothing in the container's ~/.claude.
-          docker exec -w /workspace infra-dev sh -c 'CLAUDE_CONFIG_DIR=/tmp/cc-probe ANTHROPIC_API_KEY=sk-ant-smoke-dummy \
+          docker exec -w /workspace infra sh -c 'CLAUDE_CONFIG_DIR=/tmp/cc-probe ANTHROPIC_API_KEY=sk-ant-smoke-dummy \
             timeout 60 claude -p hi --output-format stream-json --verbose 2>/dev/null; rm -rf /tmp/cc-probe' \
             | grep '"subtype":"init"' > init.json || true
           check "a Claude session loads ty-lsp from /opt/claude-plugins" grep -q '"path":"/opt/claude-plugins/ty-lsp","source":"ty-lsp@gsrpi-dev"' init.json
           check "and gives Claude its LSP tool" grep -q '"LSP"' init.json
-          check "ty-lsp prefers the project's venv ty" docker exec infra-dev sh -c '
+          check "ty-lsp prefers the project's venv ty" docker exec infra sh -c '
             mkdir -p /tmp/p/.venv/bin && printf "#!/bin/sh\nexit 0\n" > /tmp/p/.venv/bin/ty && chmod +x /tmp/p/.venv/bin/ty
             CLAUDE_PROJECT_DIR=/tmp/p ty-lsp 2>&1 | grep -qx "ty-lsp: using /tmp/p/.venv/bin/ty"; r=$?; rm -rf /tmp/p; exit $r'
-          check "ty-lsp answers an LSP initialize (the base ty, no venv here)" docker exec infra-dev sh -c '
+          check "ty-lsp answers an LSP initialize (the base ty, no venv here)" docker exec infra sh -c '
             b="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"processId\":null,\"rootUri\":\"file:///workspace\",\"capabilities\":{}}}"
             printf "Content-Length: %d\r\n\r\n%s" "${#b}" "$b" | (cat; sleep 5) | CLAUDE_PROJECT_DIR=/workspace timeout 10 ty-lsp 2>/dev/null | head -c 4000 | grep -q "\"capabilities\""'
 
           # ── the limits compose sets are the ones the kernel got ──
-          check "infra-dev's limits: 2560m RAM, 8704m RAM+swap" sh -c \
-            '[ "$(docker inspect -f "{{.HostConfig.Memory}} {{.HostConfig.MemorySwap}}" infra-dev)" = "2684354560 9126805504" ]'
+          check "infra's limits: 2560m RAM, 8704m RAM+swap" sh -c \
+            '[ "$(docker inspect -f "{{.HostConfig.Memory}} {{.HostConfig.MemorySwap}}" infra)" = "2684354560 9126805504" ]'
 
           echo "$fails failed"
           [ "$fails" = 0 ]
@@ -273,23 +273,23 @@ jobs:
       # The door, as the phone meets it: a terminal on the far end of `ssh dev`. And the rule the
       # metered link depends on, that a menu nobody touches sends nothing. Calibrated by the
       # first half: the menu must have drawn the containers, or "nothing was sent" is empty.
-      # compose.yaml's shared-logins switch reads true: infra-dev reads its
+      # compose.yaml's shared-logins switch reads true: infra reads its
       # login from the shared volume, and the check `make verify` uses to prove Claude Code still
       # honours the undocumented variable tells honoured from ignored. A fake, unexpired login, so
       # nothing reaches a login server; removed after.
-      - name: Check the shared Claude login is the one infra-dev reads
+      - name: Check the shared Claude login is the one infra reads
         run: |
-          dir=$(docker exec infra-dev printenv CLAUDE_SECURESTORAGE_CONFIG_DIR)
+          dir=$(docker exec infra printenv CLAUDE_SECURESTORAGE_CONFIG_DIR)
           [ "$dir" = /home/dev/.claude-logins/true ] || { echo "FAIL  CLAUDE_SECURESTORAGE_CONFIG_DIR is '$dir'"; exit 1; }
           exp=$(( $(date +%s) * 1000 + 3600000 ))
           printf '{"claudeAiOauth":{"accessToken":"at-smoke","refreshToken":"rt-smoke","expiresAt":%s,"scopes":["user:inference"],"subscriptionType":"max"}}' "$exp" \
-            | docker exec -i infra-dev sh -c 'umask 077; cat > "$CLAUDE_SECURESTORAGE_CONFIG_DIR/.credentials.json"'
+            | docker exec -i infra sh -c 'umask 077; cat > "$CLAUDE_SECURESTORAGE_CONFIG_DIR/.credentials.json"'
           make -s -C dev verify SUDO= | grep -E '^(auth|login dir)' | tee login.txt
           grep -q '^auth      : claude logged in — the shared login' login.txt || { echo "FAIL  not logged in on the shared login"; exit 1; }
           echo "PASS  logged in on the shared login"
           grep -q '^login dir : honoured' login.txt || { echo "FAIL  the variable is not honoured"; exit 1; }
           echo "PASS  the variable is honoured"
-          docker exec infra-dev rm -f /home/dev/.claude-logins/true/.credentials.json
+          docker exec infra rm -f /home/dev/.claude-logins/true/.credentials.json
 
       - name: Check the menu under a terminal, and that an idle one sends nothing
         run: |
@@ -306,7 +306,7 @@ jobs:
           sed 's/\x1b\[[0-9;?]*[A-Za-z]//g' "$out" | tr -d '\r' | grep -v '^ *$' | head -30 | sed 's/^/    | /'
           echo "bytes at 15s: $a, at 40s: $b"
           fails=0
-          sed 's/\x1b\[[0-9;?]*[A-Za-z]//g' "$out" | grep -q infra-dev && echo "PASS  the menu lists the containers" || { echo "FAIL  the menu lists the containers"; fails=1; }
+          sed 's/\x1b\[[0-9;?]*[A-Za-z]//g' "$out" | grep -q infra && echo "PASS  the menu lists the containers" || { echo "FAIL  the menu lists the containers"; fails=1; }
           [ "$a" -gt 0 ] && [ "$a" = "$b" ] && echo "PASS  an idle menu sent nothing for 25s" || { echo "FAIL  an idle menu sent $((b - a)) bytes in 25s"; fails=1; }
           [ "$fails" = 0 ]
 
@@ -318,25 +318,25 @@ jobs:
           files="-f compose.yaml"; [ -n "${SMOKE_CLAUDE_SESSIONS_DIR:-}" ] && files="$files -f ci/compose.smoke.yaml"
           fails=0
           check() { n="$1"; shift; if "$@"; then echo "PASS  $n"; else echo "FAIL  $n"; fails=$((fails + 1)); fi; }
-          reach() { timeout 300 sh -c 'until docker exec dev-hub ssh -o BatchMode=yes -o ConnectTimeout=5 infra-dev true 2>/dev/null; do sleep 3; done'; }
+          reach() { timeout 300 sh -c 'until docker exec dev-hub ssh -o BatchMode=yes -o ConnectTimeout=5 infra true 2>/dev/null; do sleep 3; done'; }
           fp() { docker exec "$1" ssh-keygen -lf "$2" | awk '{print $2}'; }
 
-          docker exec infra-dev sh -c 'echo kept > /workspace/.smoke-marker'
-          id1=$(docker inspect -f '{{.Id}}' infra-dev); k1=$(fp infra-dev /home/dev/.ssh-host/ssh_host_ed25519_key.pub)
-          docker compose $files up -d --no-deps --force-recreate infra-dev
+          docker exec infra sh -c 'echo kept > /workspace/.smoke-marker'
+          id1=$(docker inspect -f '{{.Id}}' infra); k1=$(fp infra /home/dev/.ssh-host/ssh_host_ed25519_key.pub)
+          docker compose $files up -d --no-deps --force-recreate infra
           reach
-          check "infra-dev was recreated (a new container id)" [ "$id1" != "$(docker inspect -f '{{.Id}}' infra-dev)" ]
-          check "its workspace survived, not re-cloned" docker exec infra-dev test -s /workspace/.smoke-marker
-          check "its sshd host key survived" [ "$k1" = "$(fp infra-dev /home/dev/.ssh-host/ssh_host_ed25519_key.pub)" ]
+          check "infra was recreated (a new container id)" [ "$id1" != "$(docker inspect -f '{{.Id}}' infra)" ]
+          check "its workspace survived, not re-cloned" docker exec infra test -s /workspace/.smoke-marker
+          check "its sshd host key survived" [ "$k1" = "$(fp infra /home/dev/.ssh-host/ssh_host_ed25519_key.pub)" ]
 
           id2=$(docker inspect -f '{{.Id}}' dev-hub); h1=$(docker exec dev-hub sh -c 'ssh-keygen -lf ~/.hub/id_ed25519.pub' | awk '{print $2}')
           docker compose $files up -d --no-deps --force-recreate hub
           timeout 120 sh -c 'until [ "$(docker inspect -f "{{.State.Health.Status}}" dev-hub)" = healthy ]; do sleep 2; done'
           check "the hub was recreated" [ "$id2" != "$(docker inspect -f '{{.Id}}' dev-hub)" ]
           check "its own key survived" [ "$h1" = "$(docker exec dev-hub sh -c 'ssh-keygen -lf ~/.hub/id_ed25519.pub' | awk '{print $2}')" ]
-          check "it still reaches infra-dev, host key unchanged" docker exec dev-hub ssh -o BatchMode=yes infra-dev true
-          check "infra-dev still sees its token" docker exec infra-dev test -s /run/github/token
-          docker exec infra-dev rm -f /workspace/.smoke-marker
+          check "it still reaches infra, host key unchanged" docker exec dev-hub ssh -o BatchMode=yes infra true
+          check "infra still sees its token" docker exec infra test -s /run/github/token
+          docker exec infra rm -f /workspace/.smoke-marker
           echo "$fails failed"; [ "$fails" = 0 ]
 
       # The deploy play runs these hook files against zero; here they run against the runner,
@@ -374,32 +374,39 @@ jobs:
           echo "PASS  preflight: make check and check-names pass on a good project"
           ansible-playbook -i localhost, "$h" -e hook=probe
           echo "PASS  probe: the hub is healthy and reaches what runs"
-          docker run -d --name ds-dev --label com.docker.compose.project=dossier busybox sleep 600 >/dev/null
-          if make -C dev check-names SUDO= 2>err.txt; then echo "FAIL  check-names let an old project's ds-dev through"; docker rm -f ds-dev; exit 1; fi
-          docker rm -f ds-dev >/dev/null
+          docker run -d --name dossier --label com.docker.compose.project=dossier busybox sleep 600 >/dev/null
+          if make -C dev check-names SUDO= 2>err.txt; then echo "FAIL  check-names let an old project's dossier through"; docker rm -f dossier; exit 1; fi
+          docker rm -f dossier >/dev/null
           grep -q "project 'dossier'" err.txt && echo "PASS  check-names refuses an old project's container, naming it"
+          # A container under a name retired by the 2026-10-27 rename, in this very project, as
+          # zero has until its first deploy after it: refused, because it would share volumes.
+          docker run -d --name ds-dev --label com.docker.compose.project=dev busybox sleep 600 >/dev/null
+          if make -C dev check-names SUDO= 2>err.txt; then echo "FAIL  check-names let the retired ds-dev through"; docker rm -f ds-dev; exit 1; fi
+          docker rm -f ds-dev >/dev/null
+          if grep -q "retired on 2026-10-27: ds-dev" err.txt; then echo "PASS  check-names refuses a container under a retired name"
+          else echo "FAIL  check-names refused, but not for the retired name:"; cat err.txt; exit 1; fi
 
-      # dd-dev is the one child with an env file and a database, and it builds from a public
+      # destiny-director is the one child with an env file and a database, and it builds from a public
       # repo, so it can be brought up here exactly as the cutover's step 6 says.
-      - name: Check dd-dev, its database and its env link (cutover step 6)
+      - name: Check destiny-director, its database and its env link (cutover step 6)
         run: |
-          make -C dev up S=dd-dev SUDO= $SMOKE_OVERRIDE
-          timeout 600 sh -c 'until docker exec dev-hub ssh -o BatchMode=yes -o ConnectTimeout=5 dd-dev true 2>/dev/null; do sleep 5; done'
+          make -C dev up S=destiny-director SUDO= $SMOKE_OVERRIDE
+          timeout 600 sh -c 'until docker exec dev-hub ssh -o BatchMode=yes -o ConnectTimeout=5 destiny-director true 2>/dev/null; do sleep 5; done'
           printf 'SMOKE=1\n' > "$RUNNER_TEMP/dd.env"
-          docker cp "$RUNNER_TEMP/dd.env" dd-dev:/home/dev/.env.d/.env
-          make -C dev restart C=dd-dev SUDO=
-          timeout 300 sh -c 'until docker exec dev-hub ssh -o BatchMode=yes -o ConnectTimeout=5 dd-dev true 2>/dev/null; do sleep 3; done'
+          docker cp "$RUNNER_TEMP/dd.env" destiny-director:/home/dev/.env.d/.env
+          make -C dev restart C=destiny-director SUDO=
+          timeout 300 sh -c 'until docker exec dev-hub ssh -o BatchMode=yes -o ConnectTimeout=5 destiny-director true 2>/dev/null; do sleep 3; done'
           fails=0
           check() { n="$1"; shift; if "$@"; then echo "PASS  $n"; else echo "FAIL  $n"; fails=$((fails + 1)); fi; }
-          check "dd-dev cloned destiny-director" sh -c \
-            '[ "$(docker exec dd-dev git -C /workspace remote get-url origin)" = "https://github.com/gsfernandes81/destiny-director.git" ]'
+          check "destiny-director cloned destiny-director" sh -c \
+            '[ "$(docker exec destiny-director git -C /workspace remote get-url origin)" = "https://github.com/gsfernandes81/destiny-director.git" ]'
           check "/workspace/.env is the link into the env volume" sh -c \
-            '[ "$(docker exec dd-dev readlink /workspace/.env)" = /home/dev/.env.d/.env ]'
-          check "and reads what docker cp put there" sh -c '[ "$(docker exec dd-dev cat /workspace/.env)" = SMOKE=1 ]'
-          check "the link is excluded from git" sh -c '[ -z "$(docker exec dd-dev git -C /workspace status --porcelain -- .env)" ]'
-          check "postgres answers by its old name" docker exec dd-dev nc -z -w 5 postgres 5432
-          check "dd-dev's limits: 2560m RAM, 8704m RAM+swap" sh -c \
-            '[ "$(docker inspect -f "{{.HostConfig.Memory}} {{.HostConfig.MemorySwap}}" dd-dev)" = "2684354560 9126805504" ]'
+            '[ "$(docker exec destiny-director readlink /workspace/.env)" = /home/dev/.env.d/.env ]'
+          check "and reads what docker cp put there" sh -c '[ "$(docker exec destiny-director cat /workspace/.env)" = SMOKE=1 ]'
+          check "the link is excluded from git" sh -c '[ -z "$(docker exec destiny-director git -C /workspace status --porcelain -- .env)" ]'
+          check "postgres answers by its old name" docker exec destiny-director nc -z -w 5 postgres 5432
+          check "destiny-director's limits: 2560m RAM, 8704m RAM+swap" sh -c \
+            '[ "$(docker inspect -f "{{.HostConfig.Memory}} {{.HostConfig.MemorySwap}}" destiny-director)" = "2684354560 9126805504" ]'
           echo "$fails failed"; [ "$fails" = 0 ]
 
       # Not a check: what the owner asked, measured. Each container's own cgroup, after a minute
@@ -412,7 +419,7 @@ jobs:
             echo
             echo "| container | memory.current | anon | file (cache) | docker stats |"
             echo "|---|---|---|---|---|"
-            for c in dev-hub dev-cloudflared infra-dev dd-dev dd-postgres; do
+            for c in dev-hub dev-cloudflared infra destiny-director dd-postgres; do
               docker inspect --type container "$c" >/dev/null 2>&1 || continue
               # cgroup v2 names first (the runner, and zero); v1's for a host that still has it.
               read -r cur anon file <<EOF2
@@ -426,9 +433,9 @@ jobs:
               printf '| %s | %s MiB | %s MiB | %s MiB | %s |\n' "$c" $((cur/1048576)) $((anon/1048576)) $((file/1048576)) "$st"
             done
             echo
-            echo "infra-dev's processes (RSS, KiB):"
+            echo "infra's processes (RSS, KiB):"
             echo '```'
-            docker exec infra-dev ps -eo rss,comm --sort=-rss | head -12
+            docker exec infra ps -eo rss,comm --sort=-rss | head -12
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -438,23 +445,23 @@ jobs:
         working-directory: dev
         run: |
           files="-f compose.yaml"; [ -n "${SMOKE_CLAUDE_SESSIONS_DIR:-}" ] && files="$files -f ci/compose.smoke.yaml"
-          plan() { docker compose $files --dry-run up -d 2>&1 | grep -i recreate | grep -oE '(dev-hub|dev-cloudflared|infra-dev|or3-dev|dd-dev|dd-postgres|ds-dev)' | sort -u | tr '\n' ' '; }
+          plan() { docker compose $files --dry-run up -d 2>&1 | grep -i recreate | grep -oE '(dev-hub|dev-cloudflared|infra|or3|destiny-director|dd-postgres|dossier)' | sort -u | tr '\n' ' '; }
           cp .env .env.orig
           got=$(plan); echo "nothing changed: [$got]"; [ -z "$got" ]
           sed -i 's/^DEV_MEM_LIMIT=.*/DEV_MEM_LIMIT=2048m/' .env
-          got=$(plan); echo "infra-dev's limit changed: [$got]"; [ "$got" = "infra-dev " ]
+          got=$(plan); echo "infra's limit changed: [$got]"; [ "$got" = "infra " ]
           cp .env.orig .env; sed -i 's/^HUB_OFFLOAD=.*/HUB_OFFLOAD=0/' .env
           got=$(plan); echo "the hub's offload switch changed: [$got]"; [ "$got" = "dev-hub " ]
           cp .env.orig .env; rm .env.orig
           echo "PASS  each change recreates only its own container"
 
-      - name: Build ds-dev straight from its GitHub URL
+      - name: Build dossier straight from its GitHub URL
         working-directory: dev
         run: |
-          docker compose build ds-dev
+          docker compose build dossier
 
       - name: "On failure: the containers' logs"
         if: failure()
         run: |
-          for c in dev-hub infra-dev dd-dev; do echo "=== $c"; docker logs --tail 200 "$c" 2>&1 || true; done
+          for c in dev-hub infra destiny-director; do echo "=== $c"; docker logs --tail 200 "$c" 2>&1 || true; done
           docker exec dev-hub sh -c 'tail -50 ~/.hub/github-tokens.log; tail -50 ~/.hub/passes.log' 2>&1 || true

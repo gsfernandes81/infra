@@ -1446,6 +1446,22 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   volumes external from the start, so `make down-volumes` can never take a conversation
   history, at the cost of one `make volumes` before the first `up`. No dev database for
   ionic-dev until one is wanted: its production one is on `one` and stopped by decision.
+- **Every dev container is named for its repo, with nothing appended** (owner, 2026-10-27):
+  `infra`, `or3`, `destiny-director`, `dossier`, `invective`, `nibbles`, `ionic-traces`, where
+  they were `infra-dev`, `or3-dev`, `dd-dev`, `ds-dev` and so on. The service, container,
+  hostname, profile, token directory and `HUB_REPO_<NAME>` all change together, because the hub
+  derives its list from those variables and the menu should read as the list of repos. **What
+  keeps its old name, and why:** the volumes (a volume name is where a login and a history
+  live, and Compose cannot rename one); the host secrets directories (paths on zero, written
+  by plays and or3's seed script); and `or3-dev.gsrpi.uk` with the phone's `or3-dev` alias
+  (Cloudflare's and the clients', a change of their own). Only `cloudflared.yml`'s target
+  follows the container. Images are renamed with their containers. Two guards came with it,
+  because the rename has two silent failures: Compose ignores a `COMPOSE_PROFILES` entry no
+  service has, so zero's `.env` would have started no `or3`; and neither `up` nor the deploy
+  play removes a container whose service left the file, so `infra-dev` would have run on
+  beside `infra` on the same volumes. `make check` refuses the first, `make check-names` the
+  second. Comments in the base image's files still say `infra-dev`: editing them would force a
+  base bump and a rebuild of every image for prose, so they wait for the next real bump.
 
 ## The lesson worth keeping
 

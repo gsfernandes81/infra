@@ -2,9 +2,9 @@
 
 This directory is one Compose project, `name: dev`, holding every dev container on `zero`
 (Pi 5, arm64) and the **hub** that is the way in to all of them: `ssh dev` lands on one
-claude-sessions menu over every container. **`infra-dev`** is this repo's own container —
-Claude Code against **this** repo, with Ansible in the image. `or3-dev`, `dd-dev` (with
-`dd-postgres`), `ds-dev`, `invective-dev`, `nibbles-dev` and `ionic-dev` are the other repos',
+claude-sessions menu over every container. **`infra`** is this repo's own container —
+Claude Code against **this** repo, with Ansible in the image. `or3`, `destiny-director` (with
+`dd-postgres`), `dossier`, `invective`, `nibbles` and `ionic-traces` are the other repos',
 each behind a profile of its own name.
 
 > **Live on zero since the cutover of 2026-10-27.** What is still open from it is
@@ -18,7 +18,7 @@ one metered link on the map (the **or3** repo's `CLAUDE.md` § *Data budget*: me
 the destination, not the size). In a container on `zero` the model traffic goes out over
 zero's home line, and what crosses the radio is a terminal session.
 
-`ansible-core` and the collections are in infra-dev as **development tools** — syntax-check,
+`ansible-core` and the collections are in infra as **development tools** — syntax-check,
 lint, read a playbook against the real `ansible.cfg` — and are not wired to the fleet.
 
 ## What it is not
@@ -30,20 +30,20 @@ lint, read a playbook against the real `ansible.cfg` — and are not wired to th
 - **Not a Remote Control host.** No dev container runs one ([`../docs/decisions.md`](../docs/decisions.md),
   2026-08-25). One way in everywhere, `ssh dev`; adding it back is a decision, not a variable.
 - **Not a holder of the docker socket.** See *The socket line somebody will add*.
-- **Not a tunnel endpoint, except or3-dev.** The phone holds a reverse forward into or3-dev to
+- **Not a tunnel endpoint, except or3's.** The phone holds a reverse forward into or3 to
   reach the vessel LAN. The one `sshd_config` allows `-R` only, the hub's key is `restrict`
-  everywhere, and by default only or3-dev's `authorized_keys` holds a client key.
+  everywhere, and by default only or3's `authorized_keys` holds a client key.
 
 ## Layout
 
 | | |
 |---|---|
-| `Makefile` | **the management interface** — `make up`, `make login`, `make status`, …; `C=<container>` picks the container (infra-dev unless said, `C=hub` the hub), `S=<service>` limits `make up` to one |
-| `compose.yaml` | the project: `hub`, its `cloudflared` sidecar (profile `tunnel`), `infra-dev`, and `or3-dev`, `dd-dev` (+ `dd-postgres`), `ds-dev`, `invective-dev`, `nibbles-dev`, `ionic-dev` each behind a profile of its own name; one network, `dev`; **nothing published on the host**. The base tag is its `x-base-tag` line, each container's repo an anchor at the top |
+| `Makefile` | **the management interface** — `make up`, `make login`, `make status`, …; `C=<container>` picks the container (infra unless said, `C=hub` the hub), `S=<service>` limits `make up` to one |
+| `compose.yaml` | the project: `hub`, its `cloudflared` sidecar (profile `tunnel`), `infra`, and `or3`, `destiny-director` (+ `dd-postgres`), `dossier`, `invective`, `nibbles`, `ionic-traces` each behind a profile of its own name; one network, `dev`; **nothing published on the host**. The base tag is its `x-base-tag` line, each container's repo an anchor at the top |
 | `hub/` | the hub's image: `Dockerfile` (claude-sessions pinned by release and per-arch SHA-256), `entrypoint.sh`, `door` (installed as `hub-door`, its sshd's `ForceCommand`), `health` (`hub-health`, its healthcheck), `github-tokens` (the token broker) and its offline test, `sshd_config`, and `ssh_config` — how it reaches each container |
-| `cloudflared.yml` | the hub tunnel's ingress, and the whole of it: `dev.gsrpi.uk` → the hub, `or3-dev.gsrpi.uk` → or3-dev |
+| `cloudflared.yml` | the hub tunnel's ingress, and the whole of it: `dev.gsrpi.uk` → the hub, `or3-dev.gsrpi.uk` → or3 |
 | `Dockerfile.base` | `gsrpi-dev-base`, which every dev container is `FROM` — Debian trixie slim, Node 22, Claude Code, gh, zmx, screen, sshd, Helix, the tools and language servers, Crush, Jcode |
-| `Dockerfile` | infra-dev: the base + ansible-core, the collections and the docker CLI |
+| `Dockerfile` | infra: the base + ansible-core, the collections and the docker CLI |
 | `entrypoint.sh` | every container's PID 1: ssh material and the hub's key → Claude config → clone or pull the workspace → link the env files → `child-init.sh` → `reconcile` → keep-alive skill → **sshd (fg)** |
 | `dev-door` | sshd's `ForceCommand` in every container: a forwarded command as given, otherwise a login shell in `/workspace` |
 | `in-workspace` | on PATH: run a command in `/workspace`, so no client names the path |
@@ -112,7 +112,7 @@ all collections installed, and `fleet: no route to zero/one/two`.
 **The memory pool is opt-in**: `DEV_CGROUP_PARENT=/devpool` puts every dev container and
 `dd-postgres` under one cgroup — 2048M soft, 2560M hard, 6G of swap — once
 `hosts/zero/system/devpool` is installed and proved ([`../hosts/zero/system/README.md`](../hosts/zero/system/README.md)
-§ *devpool*). Each container's `mem_limit` (infra-dev's 2560m) stays a ceiling inside it, and
+§ *devpool*). Each container's `mem_limit` (infra's 2560m) stays a ceiling inside it, and
 its `memswap_limit` is that plus the pool's 6G, so the pool decides how much dev work swaps.
 
 ## The hub
@@ -150,7 +150,7 @@ round trip rather than a handshake.
 
 **The offloader.** `claude-sessions offload-all` every three minutes at a fixed rate, which
 runs `claude-sessions offload` in every *running* container at once over ssh, each line
-prefixed with its container. A stopped one (dd-dev and ds-dev at rest) is skipped rather than
+prefixed with its container. A stopped one (destiny-director and dossier at rest) is skipped rather than
 failed, and the log says which are skipped once, when that set changes. The measurement happens *inside* each container — it reads `/proc` and the
 socket-diagnostics netlink, which answer only in the container's own namespaces — so only the
 timer is the hub's. Each pass goes timestamped to `~/.hub/passes.log` in the hub (capped near
@@ -210,7 +210,7 @@ How it works:
   that one repo and writes nothing otherwise. A token lasts an hour; the hub renews every 30
   minutes, and a failed pass keeps the old token and retries in 2.
 - **Each container mounts only its own directory** of the `github-tokens` volume, read-only,
-  at `/run/github` (a subpath mount, like the hooks drop-in). A claude in `or3-dev` can read
+  at `/run/github` (a subpath mount, like the hooks drop-in). A claude in `or3` can read
   or3's token and no other container's, and the token itself can reach or3 alone.
 - **In the container nothing needs logging in.** `/usr/local/bin/gh` is a wrapper that hands
   the real gh the token, read fresh on each call; git uses `git-credential-hub` for
@@ -222,7 +222,7 @@ What changes for you:
 - **PRs, issues and comments made from a container appear as the App** (`<app-name>[bot]`),
   not as you; commits are still authored by `GIT_USER_NAME`. That is the price of a token
   scoped to one repo: GitHub mints those only for an App's installation.
-- **A container reaches its own repo only.** `gh` in infra-dev cannot open a PR on
+- **A container reaches its own repo only.** `gh` in infra cannot open a PR on
   claude-sessions any more; that is the point, and a container that needs a second repo is a
   second line in `compose.yaml`, not a wider token.
 - `gh auth status` reports failure on an installation token (it asks for a user the token does
@@ -242,7 +242,7 @@ What changes for you:
    then on zero `chmod 600 ~/.dev-secrets/github-app.pem` and delete the phone's copy.
 4. `HUB_GITHUB_APP_ID=<id>` in `dev/.env` — compose requires it, and `make check` refuses a
    missing `github-app.pem`.
-5. Proof, from `make shell C=infra-dev`: `git -C /workspace push --dry-run origin HEAD`
+5. Proof, from `make shell C=infra`: `git -C /workspace push --dry-run origin HEAD`
    succeeds — a push needs the token's write even on public infra, so this is the token at
    work — and `git ls-remote https://github.com/gsfernandes81/or3` is refused, because or3 is
    private and the token is infra's alone. (Reading a public repo proves nothing: anyone can.)
@@ -289,6 +289,9 @@ it, and every env volume — along with the hub's key (*The targets*). It never 
 clone: nothing reads one, and each child image builds from its repo on GitHub.
 
 ## The cutover from the old layout
+
+*Done 2026-10-27, and written in the names of that day: the containers were `infra-dev`,
+`or3-dev`, `dd-dev` and `ds-dev` until the rename later that day (compose.yaml's header).*
 
 **One cutover moves all four containers at once** (owner, 2026-10-27), and **every one comes
 out working in its own clone, in a volume** — no workspace is a bind mount of a host clone
@@ -459,11 +462,13 @@ containers are proved.
 
 ### A container added later
 
-In `compose.yaml`: a repo anchor at the top, a service built like the others (its
-`DEV_REPO` that anchor, its own `subpath:` of the tokens volume, its login and history
+In `compose.yaml`: a repo anchor at the top, a service built like the others and **named for
+its repo** — service, `container_name`, `hostname`, profile, `subpath:` and the hub's
+`HUB_REPO_<NAME>` all the repo's own name, nothing appended (owner, 2026-10-27) — its
+`DEV_REPO` that anchor, its login and history
 volumes external — its old ones by name if it has any, else new ones `make volumes` makes
-empty), and a `HUB_REPO_<NAME>` line in the hub's environment. `invective-dev`,
-`nibbles-dev` and `ionic-dev` (2026-10-27) are the newest and the shape to copy. **The GitHub
+empty), and a `HUB_REPO_<NAME>` line in the hub's environment. `invective`,
+`nibbles` and `ionic-traces` (2026-10-27) are the newest and the shape to copy. **The GitHub
 App must be installed on its repo first** (github.com → Settings → Applications → Installed
 GitHub Apps → the App → Configure → Repository access, then add the repo): without it the hub mints no token for it, its clone fails,
 and the hub's log says so on every pass. Its profile in
@@ -477,12 +482,12 @@ directory at the hub's next start.
 ## The smoke test
 
 `.github/workflows/dev-smoke.yml` runs on every push that touches `dev/`: it builds the base,
-the hub and infra-dev on GitHub's runner, brings them up with `make` and stand-in keys, and
-checks, each by name — the hub reaching infra-dev with its own key, a client key reaching the
+the hub and infra on GitHub's runner, brings them up with `make` and stand-in keys, and
+checks, each by name — the hub reaching infra with its own key, a client key reaching the
 hub's door, the hooks drop-in, the binary and the GitHub token arriving through their mounts,
-the workspace cloned over https with that token, the tools on `PATH`, and ds-dev building
+the workspace cloned over https with that token, the tools on `PATH`, and dossier building
 straight from its GitHub URL. Its header lists what it cannot check (the Pi, the pool,
-Cloudflare, the App, or3-dev). Until claude-sessions 0.5.0 is released it builds the hub's
+Cloudflare, the App, or3). Until claude-sessions 0.5.0 is released it builds the hub's
 binary from that repo's branch, through `ci/compose.smoke.yaml` and the Makefile's
 `COMPOSE_OVERRIDE`; neither is ever used on zero.
 
@@ -554,11 +559,11 @@ which is all the hub's `claude-sessions agent` calls need — and anything else 
 shell in `/workspace`. **sshd is the foreground process**, so nothing you type ends the
 container: `exit` closes an ssh session, `/exit` a claude, and PID 1 has not moved.
 
-**Through the hub, a command is two hops:** `ssh dev ssh infra-dev 'in-workspace git log'`
-runs `ssh infra-dev …` in the hub with its key, then the rest in the container — two rounds
+**Through the hub, a command is two hops:** `ssh dev ssh infra 'in-workspace git log'`
+runs `ssh infra …` in the hub with its key, then the rest in the container — two rounds
 of quoting, so keep it simple. **scp, sftp, Zed and `ssh -L`/`-R` to a container have no
 route**: the hub's sshd forwards nothing, and its key is `restrict`. That is an open gap; until
-it closes, a file goes over as a stream (`ssh dev ssh infra-dev 'cat /workspace/f' > f`).
+it closes, a file goes over as a stream (`ssh dev ssh infra 'cat /workspace/f' > f`).
 
 **`in-workspace`** cds to `/workspace` and execs what it was handed: a forwarded command is
 `$SHELL -c '…'`, not a login shell, so it lands in `~` — and a claude started there asks to
@@ -567,7 +572,7 @@ trust a directory that is not the repo. Its header has the rest.
 **The break-glass way in is `docker exec` through zero's own ssh**, typed rather than aliased:
 
 ```sh
-ssh -t zero 'cd ~/infra/dev && make shell'        # a shell in infra-dev; C=<c> for another, C=hub the hub
+ssh -t zero 'cd ~/infra/dev && make shell'        # a shell in infra; C=<c> for another, C=hub the hub
 ssh -t zero 'cd ~/infra/dev && make claude'       # the hub's menu, as ssh dev lands on it
 ```
 
@@ -611,7 +616,7 @@ binary skips warm spares under ~1 GB free; the re-measure is open in
 [`../plans/claude-sessions.md`](../plans/claude-sessions.md).
 
 **The login is `make login`, once**, kept in the `*-claude` volume. Never copy the phone's
-`credentials.json` in: tried in or3-dev, claude blanked the copy within a second and refreshed
+`credentials.json` in: tried in or3, claude blanked the copy within a second and refreshed
 the phone's login under it. An OAuth login belongs to the device that made it.
 
 ### The login: shared, or each its own
@@ -692,8 +697,10 @@ a dedicated account, not this line.
 **One tunnel for every dev container, the hub's**, its connector the `dev-cloudflared`
 sidecar in the `tunnel` profile, pinned by digest as the deployment sidecars are, and run as
 the checkout's owner so the gavin-owned 0600 `tunnel.json` serves it. Two hostnames:
-`dev.gsrpi.uk`, the hub's sshd, and `or3-dev.gsrpi.uk`, or3-dev's own sshd, kept for the
-phone's reverse forward to the vessel (`cloudflared.yml`). The base carries no cloudflared.
+`dev.gsrpi.uk`, the hub's sshd, and `or3-dev.gsrpi.uk`, or3's own sshd, kept for the
+phone's reverse forward to the vessel (`cloudflared.yml`). That hostname, and the phone's
+`or3-dev` alias for it, kept their `-dev` when the container lost it: renaming them is a
+Cloudflare and client change of its own. The base carries no cloudflared.
 
 **Provisioning is two plays from the control node**, never ansible on zero. The server side,
 `server-create-dev-container.yml` (*Bring-up*), reads the Cloudflare API token from
@@ -765,7 +772,7 @@ host. zstd needs Docker 23 or newer. The base is Debian trixie, for glibc 2.41 (
 **What goes in the base and what stays in a child:** a thing goes in the base when the
 containers agree about it, and stays in a child when it is that repo's business — or3's `uv`,
 pinned to what or3ecr runs, is or3's; `ANSIBLE_CONFIG` names a path in infra's tree, so it is
-infra-dev's. A change to `Dockerfile.base` is a change to four containers. A child varies the
+infra's. A change to `Dockerfile.base` is a change to four containers. A child varies the
 base through these seams and no others:
 
 - **`DEV_*` in its service's environment** — `DEV_NAME`, `DEV_SECRETS_DIR`, `DEV_REPO`,
@@ -878,9 +885,9 @@ zero, each mounted read-only into the one container that needs it:
 | `.env` line, default | Mounted | Holds |
 |---|---|---|
 | `HUB_SECRETS`, `~/.dev-secrets` | the hub, `/run/hub-secrets` | `authorized_keys` — the clients allowed to `ssh dev`; `github-app.pem` — the GitHub App's key, put there by hand; `tunnel.json` — mounted into the sidecar alone |
-| `INFRA_SECRETS`, `~/.infra-dev-secrets` | infra-dev, `/run/infra-secrets` | nothing, by default. A client key in an `authorized_keys` here would let it straight in; no fleet key is ever put here (*What it is not*) |
-| `OR3_SECRETS`, `~/.or3-dev-secrets` | or3-dev, `/run/or3-secrets` | the or3ecr key, the phone's `authorized_keys`, and or3's deploy key — lent to BuildKit to fetch or3's private repo, and no GitHub credential inside the container. Written by or3's `dev/seed-secrets.sh` |
-| `DD_SECRETS`, `DS_SECRETS` | dd-dev, ds-dev | what was each clone's `.dev-ssh/` |
+| `INFRA_SECRETS`, `~/.infra-dev-secrets` | infra, `/run/infra-secrets` | nothing, by default. A client key in an `authorized_keys` here would let it straight in; no fleet key is ever put here (*What it is not*) |
+| `OR3_SECRETS`, `~/.or3-dev-secrets` | or3, `/run/or3-secrets` | the or3ecr key, the phone's `authorized_keys`, and or3's deploy key — lent to BuildKit to fetch or3's private repo, and no GitHub credential inside the container. Written by or3's `dev/seed-secrets.sh` |
+| `DD_SECRETS`, `DS_SECRETS` | destiny-director, dossier | what was each clone's `.dev-ssh/` |
 
 `server-create-dev-container.yml` writes the first two, from nothing that crosses the radio
 but the control node's own public key. **The hub's private key is in none of them**: it is made
@@ -919,7 +926,7 @@ make fleet        # ssh to each host, then `ansible fleet -m ping` — says ther
 make collections  # the image's collections vs ansible/requirements.yml
 make claude       # the hub's menu, as `ssh dev` lands on it
 make claude-update # update Claude Code now in one container, and say whether it updates itself
-make shell        # a login shell in one container (fish in infra-dev, bash in the hub)
+make shell        # a login shell in one container (fish in infra, bash in the hub)
 make logs         # follow one container's log (= its sshd's)
 make boot-log     # one container's entrypoint lines, from the top, ANSI stripped
 make tunnel-log   # what the hub's cloudflared has been saying
@@ -931,12 +938,13 @@ make down-volumes # also drop the project's own volumes — CONFIRM=yes
 ```
 
 Not in the header, and used by the deploy play's preflight or by hand: `make check` (`.env`,
-secrets and external volumes), `make build`, `make check-names` (no other compose project holds
-a dev container's name), `make volumes` (creates missing external volumes empty — a fresh box
+secrets and external volumes, and every profile in `COMPOSE_PROFILES` one that exists),
+`make build`, `make check-names` (no other compose project holds a dev container's name, and no
+container still has a name retired on 2026-10-27), `make volumes` (creates missing external volumes empty — a fresh box
 only), and `make base` (the base, locally).
 
-`C=<container>` picks the container for the targets that take one — infra-dev unless said,
-`C=hub` for the hub (`dev-hub`), `C=or3-dev` and so on for the others. They work with or
+`C=<container>` picks the container for the targets that take one — infra unless said,
+`C=hub` for the hub (`dev-hub`), `C=or3` and so on for the others. They work with or
 without `sudo` — the Makefile adds one when it is not already root — and the same set is
 available from the repo root as `make dev-up`, `make dev-login` and so on.
 

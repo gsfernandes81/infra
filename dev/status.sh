@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The readouts for one dev container (infra-dev unless CONTAINER says), on the HOST side: what state the container is in, what a
+# The readouts for one dev container (infra unless CONTAINER says), on the HOST side: what state the container is in, what a
 # rebuild landed, and the start-up lines. Called by dev/Makefile —
 #
 #     make status | make verify | make boot-log | make fleet
@@ -12,7 +12,7 @@
 # including against a container that is not there.
 set -u
 
-CONTAINER="${CONTAINER:-infra-dev}"
+CONTAINER="${CONTAINER:-infra}"
 DOCKER=(${SUDO:-} docker)
 
 d() { "${DOCKER[@]}" "$@"; }

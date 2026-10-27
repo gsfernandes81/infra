@@ -108,7 +108,7 @@ limits the owner is having to manage each container separately.
    inventory. Each child repo drops its compose file now that the cutover is done (the handoff). **or3-dev also re-points
    its hostname at the hub's tunnel** (`-e via_hub=true`), so the phone's `or3-tunnel` keeps
    reaching it; or3's `docs/dev-tunnel.md` then names `~/infra/dev` for `make tunnel-log`,
-   `make up` and `make shell C=or3-dev` in place of `~/or3/dev`, which is or3's change to make.
+   `make up` and `make shell C=or3` in place of `~/or3/dev`, which is or3's change to make.
 
 ## Done when
 

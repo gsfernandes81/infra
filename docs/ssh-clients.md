@@ -76,7 +76,7 @@ the hub's sshd — and `dev-sh` is a second name for it.
 | You run | You get |
 |---|---|
 | `ssh dev` | **the session menu over every container** — `Enter` on a container for its sessions (straight in while there is only one), `Enter` to attach or resume, `n` for a new one, `s` for a shell in that container, `Esc` back, `q` to leave |
-| `ssh dev '<cmd>'` | the command, in the hub's `~` — `ssh dev ssh infra-dev '<cmd>'` for a container, two rounds of quoting |
+| `ssh dev '<cmd>'` | the command, in the hub's `~` — `ssh dev ssh infra '<cmd>'` for a container, two rounds of quoting |
 | `ssh -T dev` | a login shell in the hub, with no terminal |
 | scp, sftp, Zed, `ssh -L/-R` | **nothing in a container** — the hub's sshd forwards nothing and its key in each container is `restrict`; a gap this layout opened and has not closed |
 
@@ -128,7 +128,7 @@ does.
 `docker exec` on the container's host, through the host's own ssh:
 
 ```sh
-ssh -t <host> 'cd ~/infra/dev && make shell'          # infra-dev; zero today, the project's host whichever it is
+ssh -t <host> 'cd ~/infra/dev && make shell'          # infra; zero today, the project's host whichever it is
 ssh -t <host> 'cd ~/infra/dev && make shell C=<c>'    # another container; C=hub for the hub
 ssh -t <host> 'cd ~/infra/dev && make claude'         # the hub's menu, as ssh dev lands on it
 ```

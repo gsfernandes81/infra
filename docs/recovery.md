@@ -124,27 +124,27 @@ this fleet.
 Since the 2026-10-27 cutover they are one Compose project, `dev`, in `~/infra/dev`
 ([dev/README.md](../dev/README.md)). The hub (`dev-hub`) and its tunnel (`dev-cloudflared`)
 are `restart: unless-stopped` and come back by themselves: `ssh dev` works after a reboot.
-The dev containers (`infra-dev`, `or3-dev`, and `dd-dev` with `dd-postgres` or `ds-dev` when
-their profiles are on) are `restart: no` and stay down, because each holds live sessions.
-Start each by hand, as stop-then-start, so nothing is recreated:
+The dev containers (`infra`, `or3`, and any other whose profile is on — each is named for
+its repo, `destiny-director` with `dd-postgres`) are `restart: no` and stay down, because
+each holds live sessions. Start each by hand, as stop-then-start, so nothing is recreated:
 
 ```fish
-cd ~/infra/dev; make restart C=infra-dev; make restart C=or3-dev
+cd ~/infra/dev; make restart C=infra; make restart C=or3
 ```
 
 `make restart` never re-reads `compose.yaml`. A container that is missing rather than
 stopped comes back through the deploy play from the control node, not through `up` here.
 
 **Their volumes cannot be recreated.** `<project>_*-claude` holds the Claude Code login
-and the session history (22 MB of it for `or3-dev`), so a container rebuilt without its
+and the session history (22 MB of it for `or3`), so a container rebuilt without its
 volume comes back logged out and empty. Check `sudo docker volume ls` on `zero`, or the
 Volumes section of [fleet-inventory.md](fleet-inventory.md), before removing anything.
 
-**`infra-dev` is not a control node.** It carries Ansible and the inventory but has no
+**The `infra` container is not a control node.** It carries Ansible and the inventory but has no
 route to `zero`, `one` or `two`, by decision
 ([management-plane.md](management-plane.md) § *A control node inside the fleet*), so it
 cannot run a playbook against a host. When the fleet is broken, the phone is the control
-node. `infra-dev` also runs on `zero`, so it cannot help when `zero` is down
+node. It also runs on `zero`, so it cannot help when `zero` is down
 ([dev/README.md](../dev/README.md)).
 
 ## The mount trap

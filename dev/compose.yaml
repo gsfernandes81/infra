@@ -6,9 +6,15 @@
 #
 #   hub          claude-sessions' menu over every container, and the offload timer. `ssh dev`.
 #   cloudflared  the hub's tunnel, a sidecar as Phase 3 settled for deployments.
-#   infra-dev    this repo's container. or3-dev, dd-dev (+ dd-postgres), ds-dev: each repo's,
-#                built from its own Dockerfile, each behind a profile of its own name —
-#                COMPOSE_PROFILES in dev/.env says which `make up` starts.
+#   infra        this repo's container. The rest, each another repo's, built from its own
+#                Dockerfile.dev, each behind a profile of its own name — COMPOSE_PROFILES in
+#                dev/.env says which `make up` starts.
+#
+# EACH CONTAINER IS NAMED FOR ITS REPO, and nothing else (owner, 2026-10-27): the service, the
+# container, the hostname, the profile and the hub's HUB_REPO_<NAME> are all the repo's name,
+# so `ssh dev`'s menu reads as the list of repos. They were `<short>-dev` until then (infra-dev,
+# dd-dev …); the volumes keep those old names, since a volume name is where a login lives, and
+# dev/Makefile refuses to start while a container of an old name still exists.
 #
 # The invariants in ../README.md apply here as everywhere: no `..`; `name:` declared;
 # host-specific values only from the gitignored .env, a `:?` default where absence must stop
@@ -85,8 +91,8 @@ x-dev: &dev
 # NOCOPY ON EVERY DEV CONTAINER'S MOUNT OF A HUB VOLUME (these two and the token mounts below).
 # Docker copies an image's mountpoint INTO an empty volume each time a container using it is
 # created, ownership included, and Compose creates every container before it starts any. So on
-# a whole-project `up` the hub's creation made the still-empty volume dev's, then infra-dev's
-# and or3-dev's made it root's again from their root-owned mountpoints, and the hub could not
+# a whole-project `up` the hub's creation made the still-empty volume dev's, then infra's
+# and or3's made it root's again from their root-owned mountpoints, and the hub could not
 # install into it (zero, 2026-10-27: hub-health "claude-sessions is not installed"). Only the
 # hub's own mount copies, so only its dev-owned mountpoint decides.
 x-opt: &opt
@@ -141,13 +147,13 @@ services:
       HUB_GITHUB_KEY: /run/hub-secrets/github-app.pem
       HUB_GITHUB_PERMISSIONS: ${HUB_GITHUB_PERMISSIONS:-contents=write,pull_requests=write,issues=write,workflows=write,actions=read,checks=read,statuses=read}
       HUB_GITHUB_TOKENS: /home/dev/tokens
-      HUB_REPO_INFRA_DEV: *repo-infra
-      HUB_REPO_OR3_DEV: *repo-or3
-      HUB_REPO_DD_DEV: *repo-dd
-      HUB_REPO_DS_DEV: *repo-ds
-      HUB_REPO_INVECTIVE_DEV: *repo-invective
-      HUB_REPO_NIBBLES_DEV: *repo-nibbles
-      HUB_REPO_IONIC_DEV: *repo-ionic
+      HUB_REPO_INFRA: *repo-infra
+      HUB_REPO_OR3: *repo-or3
+      HUB_REPO_DESTINY_DIRECTOR: *repo-dd
+      HUB_REPO_DOSSIER: *repo-ds
+      HUB_REPO_INVECTIVE: *repo-invective
+      HUB_REPO_NIBBLES: *repo-nibbles
+      HUB_REPO_IONIC_TRACES: *repo-ionic
     volumes:
       - claude-sessions:/opt/claude-sessions
       # The hub's key, its known_hosts, its sshd host key and its pass log.
@@ -181,7 +187,7 @@ services:
 
   # ── the tunnel ────────────────────────────────────────────────────────────────
   # A sidecar, as Phase 3 settled for deployments (decisions.md § "Sidecar, not baked-in"),
-  # pinned identically to theirs. Two hostnames: the hub's, and or3-dev's for the phone's
+  # pinned identically to theirs. Two hostnames: the hub's, and or3's for the phone's
   # reverse forward to the vessel (cloudflared.yml says why).
   cloudflared:
     image: cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39
@@ -218,17 +224,17 @@ services:
     mem_limit: 128m
 
   # ── the dev containers ────────────────────────────────────────────────────────
-  infra-dev:
+  infra:
     <<: *dev
     build:
       context: .
       dockerfile: Dockerfile
       args:
         BASE_TAG: *base-tag
-    image: infra-dev
-    container_name: infra-dev
-    hostname: infra-dev   # Claude Code shows this as the machine title
-    # A cap, not a reservation. 2560m like or3-dev's since 2026-10-27 (owner: 1024m had been
+    image: infra
+    container_name: infra
+    hostname: infra   # Claude Code shows this as the machine title
+    # A cap, not a reservation. 2560m like or3's since 2026-10-27 (owner: 1024m had been
     # restrictive for work); the pool is what keeps all of them together off Immich.
     mem_limit: ${DEV_MEM_LIMIT:-2560m}
     # memswap is RAM + swap. Each container's is its RAM plus the pool's whole 6G, so the pool
@@ -255,7 +261,7 @@ services:
       # 2026-10-25 divergence). Push to share work, as from anywhere else.
       # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
       # no other container's (hub/github-tokens). Empty until the hub's first mint.
-      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: infra-dev, nocopy: true } }
+      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: infra, nocopy: true } }
       - infra-workspace:/workspace
       # The repo's untracked secrets, in a volume of their own, linked into the workspace.
       - infra-env:/home/dev/.env.d
@@ -281,14 +287,15 @@ services:
   # volume, its keys in a secrets directory outside any clone.
   #
   # Each sits behind a profile of its own name, so COMPOSE_PROFILES says which start with
-  # `make up` — dd-dev and ds-dev have been stopped at rest, and dd-dev idles at ~1.4 GB.
-  # `make up S=dd-dev` starts one regardless: naming a service enables its profile.
+  # `make up` — destiny-director and dossier have been stopped at rest, and destiny-director
+  # idles at ~1.4 GB. `make up S=destiny-director` starts one regardless: naming a service
+  # enables its profile.
   #
   # Volume names are the old projects' (or3-dev_, destiny-director_, dossier_), read from
   # docs/fleet-inventory.md of 2026-10-25, so logins and history carry over.
-  or3-dev:
+  or3:
     <<: *dev
-    profiles: [or3-dev]
+    profiles: [or3]
     build:
       context: git@github.com:gsfernandes81/or3.git#main:dev
       # The deploy key that already lives in OR3_SECRETS (or3's dev/seed-secrets.sh makes it),
@@ -297,12 +304,12 @@ services:
         - default=${OR3_SECRETS:?set OR3_SECRETS in dev/.env}/id_ed25519_or3_deploy
       args:
         BASE_TAG: *base-tag
-    image: or3-dev
-    container_name: or3-dev
-    hostname: or3-dev
+    image: or3
+    container_name: or3
+    hostname: or3
     # or3's own RAM figure, from its compose file; its swap is the pool's (below).
     mem_limit: 2560m
-    memswap_limit: 8704m   # RAM + the pool's 6G of swap, as infra-dev's says
+    memswap_limit: 8704m   # RAM + the pool's 6G of swap, as infra's says
     shm_size: 256m
     # No tmpfs on /tmp: it is the container's own disk, as in or3's compose since 16843d5
     # (2026-10-27). It was RAM while Docker lived on the SD card; on the SSD a full `make
@@ -310,7 +317,7 @@ services:
     environment:
       GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
-      DEV_NAME: or3-dev
+      DEV_NAME: or3
       DEV_REPO: *repo-or3
       CLAUDE_SECURESTORAGE_CONFIG_DIR: *claude-login-dir
       DEV_ENV_FILES: ".env"
@@ -321,7 +328,7 @@ services:
       - *claude-login
       # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
       # no other container's (hub/github-tokens). Empty until the hub's first mint.
-      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: or3-dev, nocopy: true } }
+      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: or3, nocopy: true } }
       - or3-workspace:/workspace
       - or3-env:/home/dev/.env.d
       # The or3ecr key, the deploy key and the phone's authorized_keys (or3's
@@ -336,24 +343,24 @@ services:
       - or3-ssh-host:/home/dev/.ssh-host
       - or3-local-share:/home/dev/.local/share
 
-  dd-dev:
+  destiny-director:
     <<: *dev
-    profiles: [dd-dev]
+    profiles: [destiny-director]
     build:
       context: https://github.com/gsfernandes81/destiny-director.git#main
       dockerfile: Dockerfile.dev
       args:
         BASE_TAG: *base-tag
-    image: dd-dev
-    container_name: dd-dev
-    hostname: dd-dev
-    # destiny-director's own figures: dd-dev idles at ~1.4 GB, and the dev bots run in here.
+    image: destiny-director
+    container_name: destiny-director
+    hostname: destiny-director
+    # destiny-director's own figures: it idles at ~1.4 GB, and the dev bots run in here.
     mem_limit: 2560m
-    memswap_limit: 8704m   # RAM + the pool's 6G of swap, as infra-dev's says
+    memswap_limit: 8704m   # RAM + the pool's 6G of swap, as infra's says
     environment:
       GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
-      DEV_NAME: dd-dev
+      DEV_NAME: destiny-director
       DEV_REPO: *repo-dd
       CLAUDE_SECURESTORAGE_CONFIG_DIR: *claude-login-dir
       # DATABASE_URL, RAILWAY_API_TOKEN and the app's variables. dd reads the file itself
@@ -374,7 +381,7 @@ services:
       - *claude-login
       # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
       # no other container's (hub/github-tokens). Empty until the hub's first mint.
-      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: dd-dev, nocopy: true } }
+      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: destiny-director, nocopy: true } }
       - dd-workspace:/workspace
       - dd-env:/home/dev/.env.d
       # What was the clone's .dev-ssh/, moved out of it at the cutover: mode 700, read-only.
@@ -392,7 +399,7 @@ services:
   # host its .env's DATABASE_URL names, so that is its alias here; the container keeps its
   # old name. Dev-only credentials, as in that repo.
   dd-postgres:
-    profiles: [dd-dev]
+    profiles: [destiny-director]
     image: postgres:17-alpine
     container_name: dd-postgres
     restart: "no"
@@ -413,25 +420,25 @@ services:
     volumes:
       - dd-postgres-data:/var/lib/postgresql/data
 
-  ds-dev:
+  dossier:
     <<: *dev
-    profiles: [ds-dev]
+    profiles: [dossier]
     build:
       context: https://github.com/gsfernandes81/dossier.git#main
       dockerfile: Dockerfile.dev
       args:
         BASE_TAG: *base-tag
-    image: ds-dev
-    container_name: ds-dev
-    hostname: ds-dev
+    image: dossier
+    container_name: dossier
+    hostname: dossier
     # dossier's compose set no limit; this is a ceiling for the pool to sit above. Raise it
     # here if uv sync or the TUI's tests are killed.
     mem_limit: 1536m
-    memswap_limit: 7680m   # RAM + the pool's 6G of swap, as infra-dev's says
+    memswap_limit: 7680m   # RAM + the pool's 6G of swap, as infra's says
     environment:
       GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
-      DEV_NAME: ds-dev
+      DEV_NAME: dossier
       DEV_REPO: *repo-ds
       CLAUDE_SECURESTORAGE_CONFIG_DIR: *claude-login-dir
       DEV_ENV_FILES: ""
@@ -442,7 +449,7 @@ services:
       - *claude-login
       # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
       # no other container's (hub/github-tokens). Empty until the hub's first mint.
-      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: ds-dev, nocopy: true } }
+      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: dossier, nocopy: true } }
       - ds-workspace:/workspace
       - ds-env:/home/dev/.env.d
       - ${DS_SECRETS:?set DS_SECRETS in dev/.env}:/run/ds-secrets:ro
@@ -455,30 +462,30 @@ services:
       - ds-local-share:/home/dev/.local/share
 
   # ── three more, added 2026-10-27, each resting stopped ─────────────────────
-  # The same shape as ds-dev, from each repo's own Dockerfile.dev: invective, nibbles and
+  # The same shape as dossier, from each repo's own Dockerfile.dev: invective, nibbles and
   # ionic-traces. No secrets mount: none of them carries an ssh identity, and the base reads
   # only files it finds in DEV_SECRETS_DIR, so an absent one is no identity rather than an
-  # error. No database for ionic-dev yet: ionic-traces' production database is on `one` and
+  # error. No database for ionic-traces yet: ionic-traces' production database is on `one` and
   # stopped by decision, and a dev one is added here when it is wanted. Each needs the
   # GitHub App installed on its repo before its first start, or the hub mints it no token
   # and the clone fails (said in the hub's log and by `make login C=<name>`).
-  invective-dev:
+  invective:
     <<: *dev
-    profiles: [invective-dev]
+    profiles: [invective]
     build:
       context: https://github.com/gsfernandes81/invective.git#main
       dockerfile: Dockerfile.dev
       args:
         BASE_TAG: *base-tag
-    image: invective-dev
-    container_name: invective-dev
-    hostname: invective-dev
+    image: invective
+    container_name: invective
+    hostname: invective
     mem_limit: 1536m
-    memswap_limit: 7680m   # RAM + the pool's 6G of swap, as infra-dev's says
+    memswap_limit: 7680m   # RAM + the pool's 6G of swap, as infra's says
     environment:
       GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
-      DEV_NAME: invective-dev
+      DEV_NAME: invective
       DEV_REPO: *repo-invective
       CLAUDE_SECURESTORAGE_CONFIG_DIR: *claude-login-dir
       DEV_ENV_FILES: ""
@@ -486,7 +493,7 @@ services:
       - *opt
       - *managed
       - *claude-login
-      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: invective-dev, nocopy: true } }
+      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: invective, nocopy: true } }
       - invective-workspace:/workspace
       - invective-env:/home/dev/.env.d
       - invective-uv-cache:/home/dev/.cache/uv
@@ -496,23 +503,23 @@ services:
       - invective-ssh-host:/home/dev/.ssh-host
       - invective-local-share:/home/dev/.local/share
 
-  nibbles-dev:
+  nibbles:
     <<: *dev
-    profiles: [nibbles-dev]
+    profiles: [nibbles]
     build:
       context: https://github.com/gsfernandes81/nibbles.git#main
       dockerfile: Dockerfile.dev
       args:
         BASE_TAG: *base-tag
-    image: nibbles-dev
-    container_name: nibbles-dev
-    hostname: nibbles-dev
+    image: nibbles
+    container_name: nibbles
+    hostname: nibbles
     mem_limit: 1536m
-    memswap_limit: 7680m   # RAM + the pool's 6G of swap, as infra-dev's says
+    memswap_limit: 7680m   # RAM + the pool's 6G of swap, as infra's says
     environment:
       GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
-      DEV_NAME: nibbles-dev
+      DEV_NAME: nibbles
       DEV_REPO: *repo-nibbles
       CLAUDE_SECURESTORAGE_CONFIG_DIR: *claude-login-dir
       DEV_ENV_FILES: ""
@@ -520,7 +527,7 @@ services:
       - *opt
       - *managed
       - *claude-login
-      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: nibbles-dev, nocopy: true } }
+      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: nibbles, nocopy: true } }
       - nibbles-workspace:/workspace
       - nibbles-env:/home/dev/.env.d
       - nibbles-uv-cache:/home/dev/.cache/uv
@@ -530,23 +537,23 @@ services:
       - nibbles-ssh-host:/home/dev/.ssh-host
       - nibbles-local-share:/home/dev/.local/share
 
-  ionic-dev:
+  ionic-traces:
     <<: *dev
-    profiles: [ionic-dev]
+    profiles: [ionic-traces]
     build:
       context: https://github.com/gsfernandes81/ionic-traces.git#main
       dockerfile: Dockerfile.dev
       args:
         BASE_TAG: *base-tag
-    image: ionic-dev
-    container_name: ionic-dev
-    hostname: ionic-dev
+    image: ionic-traces
+    container_name: ionic-traces
+    hostname: ionic-traces
     mem_limit: 1536m
-    memswap_limit: 7680m   # RAM + the pool's 6G of swap, as infra-dev's says
+    memswap_limit: 7680m   # RAM + the pool's 6G of swap, as infra's says
     environment:
       GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
-      DEV_NAME: ionic-dev
+      DEV_NAME: ionic-traces
       DEV_REPO: *repo-ionic
       CLAUDE_SECURESTORAGE_CONFIG_DIR: *claude-login-dir
       DEV_ENV_FILES: ""
@@ -554,7 +561,7 @@ services:
       - *opt
       - *managed
       - *claude-login
-      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: ionic-dev, nocopy: true } }
+      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: ionic-traces, nocopy: true } }
       - ionic-workspace:/workspace
       - ionic-env:/home/dev/.env.d
       - ionic-uv-cache:/home/dev/.cache/uv
@@ -575,7 +582,7 @@ volumes:
   claude-login:
   infra-workspace:
   infra-env:
-  # infra-dev's, made under its old project name `infra-dev` and kept by name, so the
+  # infra's, made under its old project name `infra-dev` and kept by name, so the
   # logins, the host key and the conversation history move with it.
   infra-claude: { external: true, name: infra-dev_infra-claude }
   infra-gh: { external: true, name: infra-dev_infra-gh }
