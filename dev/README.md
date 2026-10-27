@@ -470,11 +470,12 @@ its repo** — service, `container_name`, `hostname`, `subpath:` and the hub's
 `DEV_REPO` that anchor, its login and history
 volumes external — its old ones by name if it has any, else new ones `make volumes` makes
 empty), and a `HUB_REPO_<NAME>` line in the hub's environment. `claude-sessions`,
-`invective`, `nibbles` and `ionic-traces` (2026-10-27) are the newest and the shape to copy. **The GitHub
-App must be installed on its repo first** (github.com → Settings → Applications → Installed
-GitHub Apps → the App → Configure → Repository access, then add the repo): without it the hub
-mints no token for it, so it cannot push or use `gh`, and a private repo's clone fails; the hub's
-log says so on every pass. **No profile**: every container starts by default
+`invective`, `nibbles` and `ionic-traces` (2026-10-27) are the newest and the shape to copy. **The
+GitHub App is installed on every repo of the owner's account** (owner, 2026-10-27), so a new
+repo is covered with nothing to do. If that ever narrows to chosen repos, add each one (github.com
+→ Settings → Applications → Installed GitHub Apps → the App → Configure → Repository access):
+without it the hub mints no token for the container, so it cannot push or use `gh`, and a
+private repo's clone fails; the hub's log says so on every pass. **No profile**: every container starts by default
 (owner, 2026-10-27), so **its start-up starts nothing that keeps running** beyond what the
 base starts. A `child-init.sh` syncs and returns; a bot, a server or a database it needs at
 rest is started by hand in a session, or is a service of its own here, like `dd-postgres`.

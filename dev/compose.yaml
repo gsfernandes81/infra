@@ -469,9 +469,8 @@ services:
   # ionic-traces. No secrets mount: none of them carries an ssh identity, and the base reads
   # only files it finds in DEV_SECRETS_DIR, so an absent one is no identity rather than an
   # error. No database for ionic-traces yet: ionic-traces' production database is on `one` and
-  # stopped by decision, and a dev one is added here when it is wanted. Each needs the
-  # GitHub App installed on its repo before its first start, or the hub mints it no token
-  # and the clone fails (said in the hub's log and by `make login C=<name>`).
+  # stopped by decision, and a dev one is added here when it is wanted. The GitHub App is
+  # installed on every repo of the owner's account, so each gets its token with nothing to add.
   invective:
     <<: *dev
     build:
