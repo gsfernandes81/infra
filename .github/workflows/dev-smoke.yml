@@ -103,11 +103,17 @@ jobs:
               dev/.env.example > dev/.env
           echo "SMOKE_SECRETS=$s" >> "$GITHUB_ENV"
 
-      - name: Check compose parses with every profile on
+      # Every container starts by default and only the tunnel has a profile (owner, 2026-10-27),
+      # so with COMPOSE_PROFILES empty the project is everything but the tunnel. From here on,
+      # each step that brings something up names it: or3's image needs its deploy key.
+      - name: Check compose parses, and that only the tunnel is behind a profile
         working-directory: dev
         run: |
-          COMPOSE_PROFILES=tunnel,or3,destiny-director,dossier,invective,nibbles,ionic-traces,claude-sessions HOST_UID=$(id -u) HOST_GID=$(id -g) \
-            docker compose config -q
+          COMPOSE_PROFILES=tunnel HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose config -q
+          got=$(HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose config --services | sort | tr '\n' ' ')
+          want="claude-sessions dd-postgres destiny-director dossier hub infra invective ionic-traces nibbles or3 "
+          [ "$got" = "$want" ] || { echo "FAIL  started by default: [$got], want [$want]"; exit 1; }
+          echo "PASS  every container starts by default, and the tunnel does not"
           docker version --format 'docker {{.Server.Version}}'; docker compose version
 
       - name: Build the base (make base)
@@ -125,11 +131,13 @@ jobs:
       # before it starts any; the steps below start the hub alone first, which hid this. A dev
       # container's create used to copy its root-owned mountpoint over the hub's still-empty
       # volume, so the hub could not install into it (zero, 2026-10-27; compose.yaml at x-opt).
-      - name: Check a whole-project create leaves the hub's volumes dev's
+      # Here it is the hub and infra, since every dev container mounts the same volumes and the
+      # others' images are not built yet.
+      - name: Check creating a dev container leaves the hub's volumes dev's
         working-directory: dev
         run: |
           files="-f compose.yaml"; [ -n "${SMOKE_CLAUDE_SESSIONS_DIR:-}" ] && files="$files -f ci/compose.smoke.yaml"
-          docker compose $files create
+          docker compose $files create hub infra
           for v in claude-sessions github-tokens hub-state claude-login; do
             owner=$(docker run --rm -v "dev_$v:/v" busybox stat -c %u /v)
             [ "$owner" = "$(id -u)" ] || { echo "FAIL  dev_$v is owned by uid $owner, not the hub's $(id -u)"; exit 1; }
@@ -149,9 +157,9 @@ jobs:
           printf %s "$TOKEN" | docker exec -i dev-hub sh -c \
             'umask 077; d=/home/dev/tokens/infra; cat > "$d/token.tmp" && mv -f "$d/token.tmp" "$d/token"'
 
-      - name: Start infra (make up)
+      - name: Start infra (make up S=infra)
         run: |
-          make -C dev up SUDO= $SMOKE_OVERRIDE
+          make -C dev up S=infra SUDO= $SMOKE_OVERRIDE
           timeout 300 sh -c 'until docker exec dev-hub ssh -o BatchMode=yes -o ConnectTimeout=5 infra true 2>/dev/null; do sleep 5; done'
 
       - name: Check the project end to end
@@ -445,7 +453,7 @@ jobs:
         working-directory: dev
         run: |
           files="-f compose.yaml"; [ -n "${SMOKE_CLAUDE_SESSIONS_DIR:-}" ] && files="$files -f ci/compose.smoke.yaml"
-          plan() { docker compose $files --dry-run up -d 2>&1 | grep -i recreate | grep -oE '(dev-hub|dev-cloudflared|infra|or3|destiny-director|dd-postgres|dossier)' | sort -u | tr '\n' ' '; }
+          plan() { docker compose $files --dry-run up -d hub infra destiny-director 2>&1 | grep -i recreate | grep -oE '(dev-hub|dev-cloudflared|infra|or3|destiny-director|dd-postgres|dossier)' | sort -u | tr '\n' ' '; }
           cp .env .env.orig
           got=$(plan); echo "nothing changed: [$got]"; [ -z "$got" ]
           sed -i 's/^DEV_MEM_LIMIT=.*/DEV_MEM_LIMIT=2048m/' .env

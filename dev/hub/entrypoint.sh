@@ -140,7 +140,7 @@ if [ "${HUB_OFFLOAD:-1}" = "1" ]; then
             stamp=$(date -u "+%Y-%m-%dT%H:%M:%SZ")
             # ONLY THE CONTAINERS THAT ARE UP: a stopped one has no name on the project network,
             # so its pass would fail every 3 minutes ("Could not resolve hostname") for a state
-            # that is the design — dd-dev and ds-dev rest stopped. Said once in the log when the
+            # someone chose — `make stop C=<name>`. Said once in the log when the
             # set changes, not on every pass; the menu shows them as not answering meanwhile.
             up= down=
             for h in $CLAUDE_SESSIONS_HOSTS; do

@@ -5,7 +5,8 @@ This directory is one Compose project, `name: dev`, holding every dev container 
 claude-sessions menu over every container. **`infra`** is this repo's own container —
 Claude Code against **this** repo, with Ansible in the image. `or3`, `destiny-director` (with
 `dd-postgres`), `dossier`, `invective`, `nibbles`, `ionic-traces` and `claude-sessions` are the
-other repos', each behind a profile of its own name. `claude-sessions` is the hub's own
+other repos'. **All of them start by default** on `make up`, the deploy and `docker compose
+up`; only the hub's tunnel has a profile. `claude-sessions` is the hub's own
 software, worked on in a container like any other repo: it adds a pinned Rust toolchain.
 
 > **Live on zero since the cutover of 2026-10-27.** What is still open from it is
@@ -40,7 +41,7 @@ lint, read a playbook against the real `ansible.cfg` — and are not wired to th
 | | |
 |---|---|
 | `Makefile` | **the management interface** — `make up`, `make login`, `make status`, …; `C=<container>` picks the container (infra unless said, `C=hub` the hub), `S=<service>` limits `make up` to one |
-| `compose.yaml` | the project: `hub`, its `cloudflared` sidecar (profile `tunnel`), `infra`, and `or3`, `destiny-director` (+ `dd-postgres`), `dossier`, `invective`, `nibbles`, `ionic-traces`, `claude-sessions` each behind a profile of its own name; one network, `dev`; **nothing published on the host**. The base tag is its `x-base-tag` line, each container's repo an anchor at the top |
+| `compose.yaml` | the project: `hub`, its `cloudflared` sidecar (profile `tunnel`), `infra`, and `or3`, `destiny-director` (+ `dd-postgres`), `dossier`, `invective`, `nibbles`, `ionic-traces`, `claude-sessions`, all started by default; one network, `dev`; **nothing published on the host**. The base tag is its `x-base-tag` line, each container's repo an anchor at the top |
 | `hub/` | the hub's image: `Dockerfile` (claude-sessions pinned by release and per-arch SHA-256), `entrypoint.sh`, `door` (installed as `hub-door`, its sshd's `ForceCommand`), `health` (`hub-health`, its healthcheck), `github-tokens` (the token broker) and its offline test, `sshd_config`, and `ssh_config` — how it reaches each container |
 | `cloudflared.yml` | the hub tunnel's ingress, and the whole of it: `dev.gsrpi.uk` → the hub, `or3-dev.gsrpi.uk` → or3 |
 | `Dockerfile.base` | `gsrpi-dev-base`, which every dev container is `FROM` — Debian trixie slim, Node 22, Claude Code, gh, zmx, screen, sshd, Helix, the tools and language servers, Crush, Jcode |
@@ -54,7 +55,7 @@ lint, read a playbook against the real `ansible.cfg` — and are not wired to th
 | `login.sh` | in the image: the interactive login walkthrough, and the clone if start-up could not make it — `make login` |
 | `status.sh` | on the host: the readouts — `make status`, `verify`, `fleet`, `collections`, `boot-log` |
 | `ci/compose.smoke.yaml` | the smoke test's override; never used on zero |
-| `.env.example` | copy to `.env` on zero; **one `.env` for the whole project, and every line in it is required** — Compose refuses a required variable it cannot fill even for a service whose profile is off |
+| `.env.example` | copy to `.env` on zero; **one `.env` for the whole project, and every line in it is required** — every container starts, and Compose refuses a required variable it cannot fill even for a service whose profile is off |
 
 The host side is `ansible/playbooks/server-create-dev-container.yml`, run from the phone; the
 project is deployed by `server-deploy-compose.yml -e deployment=dev` (`deployments/dev` and
@@ -92,8 +93,8 @@ ansible-playbook playbooks/server-deploy-compose.yml -e deployment=dev -K
 ```
 
 **`make up` on zero is the break glass** — the same build and start with no plan and no
-question; `make dev` is `make up` then `make login`. Each starts what `COMPOSE_PROFILES` names,
-the hub always and first, and refuses while an external volume is missing: at a cutover that
+question; `make dev` is `make up` then `make login`. Each starts every container, the hub
+first, and the tunnel when `COMPOSE_PROFILES` names it, and refuses while an external volume is missing: at a cutover that
 is a mistyped name to fix in `compose.yaml`, never one to create.
 
 On each client — the machine you ssh *from*:
@@ -151,7 +152,7 @@ round trip rather than a handshake.
 
 **The offloader.** `claude-sessions offload-all` every three minutes at a fixed rate, which
 runs `claude-sessions offload` in every *running* container at once over ssh, each line
-prefixed with its container. A stopped one (destiny-director and dossier at rest) is skipped rather than
+prefixed with its container. A stopped one (`make stop C=<name>`) is skipped rather than
 failed, and the log says which are skipped once, when that set changes. The measurement happens *inside* each container — it reads `/proc` and the
 socket-diagnostics netlink, which answer only in the container's own namespaces — so only the
 timer is the hub's. Each pass goes timestamped to `~/.hub/passes.log` in the hub (capped near
@@ -464,16 +465,20 @@ containers are proved.
 ### A container added later
 
 In `compose.yaml`: a repo anchor at the top, a service built like the others and **named for
-its repo** — service, `container_name`, `hostname`, profile, `subpath:` and the hub's
+its repo** — service, `container_name`, `hostname`, `subpath:` and the hub's
 `HUB_REPO_<NAME>` all the repo's own name, nothing appended (owner, 2026-10-27) — its
 `DEV_REPO` that anchor, its login and history
 volumes external — its old ones by name if it has any, else new ones `make volumes` makes
 empty), and a `HUB_REPO_<NAME>` line in the hub's environment. `claude-sessions`,
 `invective`, `nibbles` and `ionic-traces` (2026-10-27) are the newest and the shape to copy. **The GitHub
 App must be installed on its repo first** (github.com → Settings → Applications → Installed
-GitHub Apps → the App → Configure → Repository access, then add the repo): without it the hub mints no token for it, its clone fails,
-and the hub's log says so on every pass. Its profile in
-`COMPOSE_PROFILES` if it should start at rest; then `make up`. The hub's environment changed,
+GitHub Apps → the App → Configure → Repository access, then add the repo): without it the hub
+mints no token for it, so it cannot push or use `gh`, and a private repo's clone fails; the hub's
+log says so on every pass. **No profile**: every container starts by default
+(owner, 2026-10-27), so **its start-up starts nothing that keeps running** beyond what the
+base starts. A `child-init.sh` syncs and returns; a bot, a server or a database it needs at
+rest is started by hand in a session, or is a service of its own here, like `dd-postgres`.
+zero has 4 GB, and destiny-director's container was once recorded at ~1.4 GB. Then `make up`. The hub's environment changed,
 so it is recreated first — its start makes the new token directory, and the container waits
 on it — and every open `ssh dev` view drops for a few seconds; no claude does (owner and
 advisor, 2026-10-27: a list file in place of the recreate would trade that ordering away for a
@@ -919,8 +924,9 @@ is why its key lives in its volume alone and it runs no agent and no claude.
 cd ~/infra/dev
 make              # the header of the Makefile: every target, one line each
 make dev          # up, then login
-make up           # build + (re)create everything the profiles name — drops the sessions of
-                  # every container it recreates; S=<service> for one (and the hub)
+make up           # build + (re)create every container (the tunnel too, if COMPOSE_PROFILES
+                  # names it) — drops the sessions of every container it recreates;
+                  # S=<service> for one (and what it depends on)
 make restart      # stop + start one container; does NOT re-read compose.yaml
 make stop         # stop one container; its sessions end, its volumes stay
 make status       # one screen: container, sshd, sessions, logins, offloader, the tunnel, ansible
@@ -943,7 +949,8 @@ make down-volumes # also drop the project's own volumes — CONFIRM=yes
 ```
 
 Not in the header, and used by the deploy play's preflight or by hand: `make check` (`.env`,
-secrets and external volumes, and every profile in `COMPOSE_PROFILES` one that exists),
+secrets and external volumes, and every name in `COMPOSE_PROFILES` a profile that exists, which
+today is only `tunnel`),
 `make build`, `make check-names` (no other compose project holds a dev container's name, and no
 container still has a name retired on 2026-10-27), `make volumes` (creates missing external volumes empty — a fresh box
 only), and `make base` (the base, locally).

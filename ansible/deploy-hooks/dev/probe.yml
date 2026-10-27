@@ -1,8 +1,8 @@
 ---
 # dev's checks after a redeploy, included by playbooks/_deploy-compose-one.yml once every
 # container is up: the hub is healthy, and it reaches every dev container that is running with
-# its own key — the one path the menu and the offloader depend on. A container whose profile is
-# off is not running and not asked about.
+# its own key — the one path the menu and the offloader depend on. Only running containers are
+# asked: the play has already checked every container reads Up before this runs.
 
 - name: Wait for the hub to report healthy
   ansible.builtin.command:
@@ -37,9 +37,11 @@
     argv: [docker, exec, dev-hub, ssh, -o, BatchMode=yes, -o, ConnectTimeout=10, "{{ item }}", "true"]
   loop: "{{ dev_p_running.stdout_lines | reject('in', ['dev-hub', 'dev-cloudflared', 'dd-postgres']) | list }}"
   register: dev_p_ssh
-  # The entrypoint clones on a first start before sshd comes up, so give it a little while.
+  # The entrypoint clones and runs child-init.sh (a venv sync, slow with an empty uv cache)
+  # before sshd comes up, and since every container starts at once (2026-10-27) their first
+  # starts share the box. About four minutes each; the loop is in turn, so later ones get more.
   until: dev_p_ssh.rc == 0
-  retries: 12
+  retries: 24
   delay: 10
   changed_when: false
   failed_when: false

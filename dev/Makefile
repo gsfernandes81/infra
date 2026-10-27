@@ -1,11 +1,11 @@
 # The dev containers and their hub, from a terminal on zero. **This file is their
 # management interface** — the docker commands live here and nowhere else. One Compose
 # project (compose.yaml, `name: dev`): the hub, its cloudflared sidecar, infra, and each
-# other repo's container behind its profile. Every container is named for its repo.
+# other repo's container. Every container is named for its repo, and all of them start.
 #
 #   make dev         up, then walk infra through whatever is not logged in yet
-#   make up          build and (re)create everything the profiles in .env name; S=<service>
-#                    for one service (and the hub it depends on)
+#   make up          build and (re)create every container, and the tunnel if .env's
+#                    COMPOSE_PROFILES names it; S=<service> for one (and what it depends on)
 #   make restart     stop + start one container, NO re-evaluation of the config
 #   make stop        stop one container (its sessions end; its volumes stay)
 #   make status      one-screen health check of one container
@@ -106,8 +106,9 @@ help:
 # Compose one variable at a time.
 #
 # A profile in COMPOSE_PROFILES that no service has is IGNORED by Compose without a word
-# (checked, Compose 5.6.1): the container it meant simply never starts. The 2026-10-27 rename
-# made every old profile such a name, so each must be one compose.yaml declares. It reads
+# (checked, Compose 5.6.1). Since 2026-10-27 every repo's container starts without a profile
+# and only the tunnel keeps one, so a .env still listing `or3` or `destiny-director` would
+# read as a switch that does nothing. Each name must be one compose.yaml declares. It reads
 # compose.yaml's `profiles: [name]` lines, so keep each in that flow style with nothing after
 # the `]`, as every one is.
 _require-env:
@@ -128,7 +129,7 @@ _require-env:
 	    | sed 's/[[:space:]]*#.*$$//' | tr -d "\"'\r" | tr ',' ' '); do \
 	  printf '%s\n' "$$known" | grep -qx "$$p" || { \
 	    echo "dev/.env: COMPOSE_PROFILES names '$$p', which no service in compose.yaml has, so Compose" >&2; \
-	    echo "  would skip it silently. Each container's profile is its repo's name:" >&2; \
+	    echo "  would skip it silently. Every repo's container starts without a profile now; the profiles are:" >&2; \
 	    echo "  " $$known >&2; exit 1; }; \
 	done
 
@@ -265,7 +266,7 @@ check: _require-env _require-uid _require-secrets _require-volumes
 check-names: _require-own-names _require-no-retired
 	@echo "dev: no other compose project holds a dev container's name, and none has a retired one"
 
-# Builds what the enabled profiles name (or S=), and touches no container.
+# Builds every image (or S='s), and touches no container.
 build: _require-env _require-uid
 	$(COMPOSE) build $(S)
 

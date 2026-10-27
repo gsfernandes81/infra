@@ -102,7 +102,7 @@ limits the owner is having to manage each container separately.
    `dev/hub/Dockerfile`.
 3. **Live, 2026-10-27.** The one compose file in `infra`: the hub, the sidecar, the network,
    and `infra-dev`, with its workspace and `.env` files in volumes.
-4. **Live, 2026-10-27, with step 3** (dd-dev and ds-dev stopped at rest, as before). `or3-dev`, `dd-dev` (with `dd-postgres`)
+4. **Live, 2026-10-27, with step 3** (dd-dev and ds-dev stopped at rest then; since the same day every container starts by default, decisions.md). `or3-dev`, `dd-dev` (with `dd-postgres`)
    and `ds-dev` are in `dev/compose.yaml`, built from their repos' own Dockerfiles on the new
    base, each working in its own clone in a volume, their old volumes named from the fleet
    inventory. Each child repo drops its compose file now that the cutover is done (the handoff). **or3-dev also re-points

@@ -40,7 +40,7 @@ Full orientation is `README.md`; the reasoning is `docs/decisions.md`. Quick map
   stubs), not a control plane.
 - **`dev/`** — every dev container, in one `dev/compose.yaml` (project `dev`): the hub
   (`dev/hub/`, the menu behind `ssh dev`, and the offloader), its `cloudflared` sidecar,
-  `infra`, and the other repos' containers behind profiles, each named for its repo. **Live
+  `infra`, and the other repos' containers, each named for its repo and all started by default. **Live
   on `zero` since 2026-10-27**; what the cutover left open is [`docs/handoff/2026-10-26-dev-hub.md`](docs/handoff/2026-10-26-dev-hub.md). Lifecycle is
   `dev/Makefile` only (it computes `HOST_UID` from the checkout's owner; a second copy of
   that guard is how root-owned files end up in a mount). The top-level `Makefile` forwards

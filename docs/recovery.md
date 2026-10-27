@@ -124,12 +124,13 @@ this fleet.
 Since the 2026-10-27 cutover they are one Compose project, `dev`, in `~/infra/dev`
 ([dev/README.md](../dev/README.md)). The hub (`dev-hub`) and its tunnel (`dev-cloudflared`)
 are `restart: unless-stopped` and come back by themselves: `ssh dev` works after a reboot.
-The dev containers (`infra`, `or3`, and any other whose profile is on — each is named for
-its repo, `destiny-director` with `dd-postgres`) are `restart: no` and stay down, because
-each holds live sessions. Start each by hand, as stop-then-start, so nothing is recreated:
+The dev containers (`infra`, `or3` and the other repos', each named for its repo,
+`destiny-director` with `dd-postgres`) are `restart: no` and stay down, because each holds
+live sessions. Start each by hand, as stop-then-start, so nothing is recreated:
 
 ```fish
-cd ~/infra/dev; make restart C=infra; make restart C=or3
+cd ~/infra/dev; sudo docker start dd-postgres
+for c in infra or3 destiny-director dossier invective nibbles ionic-traces claude-sessions; make restart C=$c; end
 ```
 
 `make restart` never re-reads `compose.yaml`. A container that is missing rather than

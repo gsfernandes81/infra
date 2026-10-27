@@ -7,7 +7,7 @@
 # Three steps, in an order that is the point:
 #   1. dev/Makefile's own guards, under --check too: .env complete, the hub's and infra's
 #      secrets in place, every external volume present (`make check`). Read-only.
-#   2. Outside --check: BUILD every image the enabled profiles name (`make build`) — the hub,
+#   2. Outside --check: BUILD every image (`make build`) — the hub,
 #      infra and each child straight from GitHub, or3 over ssh with its deploy key. A build
 #      touches no container, so a failure here, or3's private fetch being the likeliest, stops
 #      the run with everything as it was. The plan after this then sees the new images, so it

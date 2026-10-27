@@ -1242,7 +1242,7 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   the host account's authorized_keys for a published port that is gone, and blanking it
   (`dev/child-authorized-keys.conf`) leaves the hub's key as the way in and gavin's private
   keys out of both containers. dd-dev and ds-dev stay stopped at rest, as they were, by
-  profile. The old volume names come from the 2026-10-25 fleet inventory — the guesses made
+  profile. ⚠︎SUPERSEDED IN PART 2026-10-27: every container starts by default now (*Every dev container starts by default*, below). The old volume names come from the 2026-10-25 fleet inventory — the guesses made
   the day before were wrong for both (`dd-dev_*` for `destiny-director_*`, `ds-dev_*` for
   `dossier_*`), which is what the artefact-wins rule is for.
 - **No workspace is a bind mount: all four clone into volumes** (owner, 2026-10-27: "Could we
@@ -1375,7 +1375,7 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   from `.env.example` when there is none; `_dev-container-host.yml` used to write it whole,
   which would now wipe the hub's lines. Every container's paths are required from the start:
   Compose refuses a required variable even in a service whose profile is off (measured,
-  Compose 5.6.1); the profile is what keeps a container from starting.
+  Compose 5.6.1); the profile is what keeps a container from starting. ⚠︎SUPERSEDED IN PART 2026-10-27: every container starts by default now (*Every dev container starts by default*, below).
 - **The pool is opt-in until its boot file exists**: `cgroup_parent: ${DEV_CGROUP_PARENT:-}`,
   which Compose drops when empty (measured). `:-` and not `:?`, because absence here is the
   supported state, not a mistake to stop on.
@@ -1387,7 +1387,8 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   not install into it. With `nocopy` on the dev side only the hub's mountpoint decides. This is
   the opposite of the workspace call above for the opposite reason: a workspace has one
   mounter, so `nocopy` there would leave it root's; a hub volume has the hub as well. The smoke
-  test now creates the whole project at once, the way the deploy does, and checks the owner.
+  test now creates a dev container beside the hub before the hub starts, which is the
+  mechanism (the copy happens per create), and checks the owner.
 - **The deploy play refuses a host whose Compose is older than 5.5.0** (zero, 2026-10-27).
   `one` and `zero` run Docker's containerd image store, where a rebuild moves a tag and the
   daemon drops the image record a running container was made from; it does this even for an
@@ -1441,7 +1442,7 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   credential is reachable from every container, as with the token it was weighed against.
 - **invective, nibbles and ionic-traces join as dev containers** (owner, 2026-10-27):
   `invective-dev`, `nibbles-dev` and `ionic-dev`, each from its own repo's `Dockerfile.dev` and
-  resting stopped behind its profile, the shape ds-dev has. No secrets mount, since none
+  resting stopped behind its profile, the shape ds-dev has. ⚠︎SUPERSEDED IN PART 2026-10-27: every container starts by default now (*Every dev container starts by default*, below). No secrets mount, since none
   carries an ssh identity and the base reads only what it finds there; login and history
   volumes external from the start, so `make down-volumes` can never take a conversation
   history, at the cost of one `make volumes` before the first `up`. No dev database for
@@ -1471,7 +1472,23 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   release-and-pin step is the gate that held Stage B on claude-sessions#9, and the two repos'
   licences differ (AGPL-3.0 and none). What a merge would save is the pin handoff, and that
   could be cut without one: a release workflow there opening infra's pin PR was suggested, not
-  decided.
+  decided. ⚠︎SUPERSEDED IN PART 2026-10-27: every container starts by default now (*Every dev container starts by default*, below).
+- **Every dev container starts by default** (owner, 2026-10-27): the repo containers and
+  `dd-postgres` have no profile, so `make up`, the deploy and a plain `docker compose up`
+  start them all; `make stop C=<name>` stops one until the next. Only the tunnel keeps its
+  profile, because a box or a CI runner without its credentials must still come up. Profiles
+  had kept destiny-director and dossier stopped at rest, for memory: zero has 4 GB, and
+  destiny-director's container was recorded idling at ~1.4 GB. The owner's condition was
+  that no container start anything heavy at boot, and none does: every public child's
+  `child-init.sh` (destiny-director, dossier, invective, nibbles, ionic-traces, read
+  2026-10-27; claude-sessions has none) syncs its venv or clones and returns, and
+  destiny-director's bots start only by hand, `make devbot-up`. or3 is private and was
+  not read, but it already ran at rest. That is now the rule for a container added later
+  (dev/README.md § *A container added later*). It is a rule, not a mechanism: nothing in
+  the base stops a `child-init.sh` from starting a daemon, and the pool
+  (plans/dev-pool.md) is what caps them all together. `make check` still refuses a
+  `COMPOSE_PROFILES` name no service has, so an old `.env` naming `or3` is refused rather
+  than read as a switch that does nothing.
 
 ## The lesson worth keeping
 

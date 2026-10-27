@@ -7,11 +7,18 @@
 #   hub          claude-sessions' menu over every container, and the offload timer. `ssh dev`.
 #   cloudflared  the hub's tunnel, a sidecar as Phase 3 settled for deployments.
 #   infra        this repo's container. The rest, each another repo's, built from its own
-#                Dockerfile.dev, each behind a profile of its own name — COMPOSE_PROFILES in
-#                dev/.env says which `make up` starts.
+#                Dockerfile.dev.
+#
+# EVERY CONTAINER STARTS BY DEFAULT (owner, 2026-10-27): `make up`, the deploy and a plain
+# `docker compose up` start them all. Only the tunnel has a profile, because a box or a CI
+# runner without its credentials must still come up. On a 4 GB box that rests on a rule, not
+# a mechanism, until the pool (plans/dev-pool.md) caps them together: a container starts
+# nothing that keeps running beyond what the base starts. Its child-init.sh syncs and returns,
+# and a bot, a server or a test run is started by hand in a session. `make stop C=<name>`
+# stops one until the next `make up` or deploy.
 #
 # EACH CONTAINER IS NAMED FOR ITS REPO, and nothing else (owner, 2026-10-27): the service, the
-# container, the hostname, the profile and the hub's HUB_REPO_<NAME> are all the repo's name,
+# container, the hostname and the hub's HUB_REPO_<NAME> are all the repo's name,
 # so `ssh dev`'s menu reads as the list of repos. They were `<short>-dev` until then (infra-dev,
 # dd-dev …); the volumes keep those old names, since a volume name is where a login lives, and
 # dev/Makefile refuses to start while a container of an old name still exists.
@@ -20,7 +27,7 @@
 # host-specific values only from the gitignored .env, a `:?` default where absence must stop
 # Compose. A REQUIRED VARIABLE STOPS COMPOSE EVEN FOR A SERVICE WHOSE PROFILE IS OFF —
 # checked with Compose 5.6.1 on 2026-10-26 — so every container's paths are in .env from the
-# start; the profile is what keeps one from starting.
+# start, and the tunnel's id is not `:?` (the cloudflared service says why).
 name: dev
 
 # THE BASE IMAGE TAG, stated once (gsrpi-dev-base, built from Dockerfile.base). Every build
@@ -288,16 +295,10 @@ services:
   # public, over https. Each works in its own clone in a volume, its untracked .env in an env
   # volume, its keys in a secrets directory outside any clone.
   #
-  # Each sits behind a profile of its own name, so COMPOSE_PROFILES says which start with
-  # `make up` — destiny-director and dossier have been stopped at rest, and destiny-director
-  # idles at ~1.4 GB. `make up S=destiny-director` starts one regardless: naming a service
-  # enables its profile.
-  #
   # Volume names are the old projects' (or3-dev_, destiny-director_, dossier_), read from
   # docs/fleet-inventory.md of 2026-10-25, so logins and history carry over.
   or3:
     <<: *dev
-    profiles: [or3]
     build:
       context: git@github.com:gsfernandes81/or3.git#main:dev
       # The deploy key that already lives in OR3_SECRETS (or3's dev/seed-secrets.sh makes it),
@@ -347,7 +348,6 @@ services:
 
   destiny-director:
     <<: *dev
-    profiles: [destiny-director]
     build:
       context: https://github.com/gsfernandes81/destiny-director.git#main
       dockerfile: Dockerfile.dev
@@ -356,7 +356,10 @@ services:
     image: destiny-director
     container_name: destiny-director
     hostname: destiny-director
-    # destiny-director's own figures: it idles at ~1.4 GB, and the dev bots run in here.
+    # Sized for the dev bots, which run in here and start only by hand (`make devbot-up` in a
+    # session): its child-init.sh syncs the venv and starts nothing (read 2026-10-27, at
+    # 313751c). It was once recorded idling at ~1.4 GB, which is that cap's reason; at rest
+    # with no bot it should be near the others.
     mem_limit: 2560m
     memswap_limit: 8704m   # RAM + the pool's 6G of swap, as infra's says
     environment:
@@ -401,7 +404,6 @@ services:
   # host its .env's DATABASE_URL names, so that is its alias here; the container keeps its
   # old name. Dev-only credentials, as in that repo.
   dd-postgres:
-    profiles: [destiny-director]
     image: postgres:17-alpine
     container_name: dd-postgres
     restart: "no"
@@ -424,7 +426,6 @@ services:
 
   dossier:
     <<: *dev
-    profiles: [dossier]
     build:
       context: https://github.com/gsfernandes81/dossier.git#main
       dockerfile: Dockerfile.dev
@@ -463,7 +464,7 @@ services:
       - ds-zed-server:/home/dev/.zed_server
       - ds-local-share:/home/dev/.local/share
 
-  # ── three more, added 2026-10-27, each resting stopped ─────────────────────
+  # ── three more, added 2026-10-27 ─────────────────────────────────────────────
   # The same shape as dossier, from each repo's own Dockerfile.dev: invective, nibbles and
   # ionic-traces. No secrets mount: none of them carries an ssh identity, and the base reads
   # only files it finds in DEV_SECRETS_DIR, so an absent one is no identity rather than an
@@ -473,7 +474,6 @@ services:
   # and the clone fails (said in the hub's log and by `make login C=<name>`).
   invective:
     <<: *dev
-    profiles: [invective]
     build:
       context: https://github.com/gsfernandes81/invective.git#main
       dockerfile: Dockerfile.dev
@@ -507,7 +507,6 @@ services:
 
   nibbles:
     <<: *dev
-    profiles: [nibbles]
     build:
       context: https://github.com/gsfernandes81/nibbles.git#main
       dockerfile: Dockerfile.dev
@@ -541,7 +540,6 @@ services:
 
   ionic-traces:
     <<: *dev
-    profiles: [ionic-traces]
     build:
       context: https://github.com/gsfernandes81/ionic-traces.git#main
       dockerfile: Dockerfile.dev
@@ -573,7 +571,7 @@ services:
       - ionic-ssh-host:/home/dev/.ssh-host
       - ionic-local-share:/home/dev/.local/share
 
-  # ── claude-sessions, added 2026-10-27, resting stopped ─────────────────────────
+  # ── claude-sessions, added 2026-10-27 ────────────────────────────────────────
   # The hub's own software, worked on through the hub (owner, 2026-10-27), from that repo's
   # Dockerfile.dev: the base and a pinned Rust toolchain. It runs the released claude-sessions
   # from the hub's volume like every container, and builds its own in /workspace/target, so the
@@ -582,7 +580,6 @@ services:
   # container's own hooks and agent run. It cannot test the hub against real containers: no container has docker.
   claude-sessions:
     <<: *dev
-    profiles: [claude-sessions]
     build:
       context: https://github.com/gsfernandes81/claude-sessions.git#main
       dockerfile: Dockerfile.dev
