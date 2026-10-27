@@ -28,6 +28,13 @@
 # parent. `before docker` so the group exists before anything could be started in it.
 #
 #   rc-service devpool show    what the pool holds now, and how often it has had to kill
+#
+# ON MicroOS THIS FILE GOES, and so does the `/devpool` value. There Docker (or podman) runs
+# with the systemd cgroup driver, which takes a SLICE as a parent, not a path: a
+# `devpool.slice` unit with MemoryMax=2560M and MemorySwapMax=6G replaces this service, and
+# DEV_CGROUP_PARENT in dev/.env becomes `devpool.slice`. Compose's cgroup_parent passes the
+# value through untouched, so nothing else in dev/compose.yaml changes. Measure the kill
+# landing inside the slice again there; the proof in hosts/zero/system/README.md is the shape.
 
 name="dev container memory pool"
 description="cgroup v2 group /devpool and its memory limits, for dev/compose.yaml"
