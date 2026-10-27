@@ -50,6 +50,7 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 | remove a host's unused docker images and stale build cache: keeps every image a container uses (stopped ones too), every image a tracked compose file names, and the repositories in `prune_keep_images`; prints the plan with sizes, asks once, removes by name **without `-f`**. Never volumes or containers | `server-prune-images.yml -e target=zero -K` · `--check` for the plan · `-e build_cache_days=0` for all build cache (default keeps the last 7 days) · **never `-l`** | sudo |
 | move a Pi onto a new tunnel — **a deliberate outage** | `server-cutover-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | delete a Pi's tunnel — **irreversible** | `server-delete-tunnel.yml -e target=<host> -K` | sudo, the API token |
+| retire the dev containers' old tunnels (infra-dev, dd-dev, ds-dev whole; or3-dev's tunnel only) — **irreversible**, a plan and y/N first | `server-retire-dev-tunnels.yml` · `--check` stops at the plan | the API token |
 | update cloudflared on a Pi, deliberately | `server-update-cloudflared.yml -e target=<host> -e version=… -e sha256=… -K` | sudo; refuses while that host autoupdates, which today is all of them |
 
 **Three ways a play picks its host, each on purpose.** A play that changes one host at a time

@@ -1,0 +1,469 @@
+---
+# RETIRE THE DEV CONTAINERS' OLD TUNNELS, from the control node, after the hub (2026-10-27):
+#
+#     cd ansible
+#     ansible-playbook playbooks/server-retire-dev-tunnels.yml --check   # the plan; deletes nothing
+#     ansible-playbook playbooks/server-retire-dev-tunnels.yml           # the plan, y/N, then delete
+#
+# Since the cutover every dev container is reached through the hub's tunnel (`ssh dev`), so the
+# tunnels each container used to run for itself serve nothing, and their Cloudflare objects are
+# doors with nobody behind them. Two kinds of retirement:
+#
+#   FULL, infra-dev, dd-dev, ds-dev   the tunnel, its CNAME <alias>.<zone>, the Access app on that
+#                                     hostname with its policies, the service tokens that app
+#                                     admits (<alias>-<client>), and tunnel.json on zero
+#   TUNNEL ONLY, or3-dev              its hostname, Access app and tokens now serve the HUB's
+#                                     tunnel for the vessel's reverse forward (dev/cloudflared.yml),
+#                                     so only the old tunnel object and its tunnel.json go
+#
+# The client side — each client's ssh block and token file — is client-home-ssh-config.yml's,
+# on its next whole run (_client-retired-dev-ssh.yml).
+#
+# A DELETED TUNNEL CANNOT BE RECREATED WITH ITS UUID, so nothing is deleted until every guard has
+# passed and the plan has been printed and answered y:
+#   - the hub's own tunnel (~/.dev-secrets/tunnel.json on zero) is never a candidate;
+#   - a doomed tunnel with a live connector is refused: something still runs it;
+#   - a DNS record pointing at a doomed tunnel, other than the CNAMEs this play deletes, is
+#     refused — so if or3-dev.<zone> still pointed at its old tunnel (step 7 of the cutover
+#     undone), the play stops rather than strand the vessel's route;
+#   - a service token is deleted only if the doomed app's policy admits it AND it is named for
+#     that alias; anything else the policy admits is printed and left.
+# Then each stage — DNS, Access apps, service tokens, tunnels, credentials files — must succeed
+# whole before the next starts, and every refusal prints Cloudflare's own reason (CLAUDE.md §
+# Verifying changes: a no_log write censors its failure too).
+#
+# Idempotent: a re-run after a partial failure finds less and finishes the rest; a run with
+# nothing left says so. -e retire_full=… and -e retire_tunnel_only=… (JSON lists) narrow it.
+
+- name: Check the inventory is loaded
+  ansible.builtin.import_playbook: _assert-inventory.yml
+  vars:
+    required_group: fleet
+
+- name: Retire the dev containers' old tunnels
+  hosts: zero
+  gather_facts: false
+  become: false
+
+  vars:
+    cf_api: https://api.cloudflare.com/client/v4
+    cf_zone: "{{ dns_zone }}"
+    retire_full: [infra-dev, dd-dev, ds-dev]
+    retire_tunnel_only: [or3-dev]
+    retire_all: "{{ retire_full + retire_tunnel_only }}"
+    hub_secrets: ~/.dev-secrets
+    hdr: { Authorization: "Bearer {{ cf_token }}" }
+
+  tasks:
+    # ── the API token: read, checked and verified, in one shared file ─────────
+    - name: Read and verify the Cloudflare API token
+      ansible.builtin.import_tasks: _cf-api-token.yml
+
+    - name: Read the {{ cf_zone }} zone and its account
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/zones?name={{ cf_zone }}"
+        headers: "{{ hdr }}"
+      register: rt_zone
+      delegate_to: localhost
+      check_mode: false
+      failed_when: false
+      no_log: true
+
+    - name: Check the token can see the {{ cf_zone }} zone
+      ansible.builtin.assert:
+        that:
+          - (rt_zone.status | default(0)) == 200
+          - (rt_zone.json.result | default([], true) | length) > 0
+        fail_msg: >-
+          Could not read the {{ cf_zone }} zone: HTTP {{ rt_zone.status | default('?') }}
+          {{ rt_zone.json.errors | default([]) if rt_zone.json is defined else '' }}. Nothing has been
+          deleted.
+        success_msg: "zone {{ cf_zone }} readable"
+
+    - name: Note the zone and account ids
+      ansible.builtin.set_fact:
+        rt_zone_id: "{{ rt_zone.json.result[0].id }}"
+        rt_account: "{{ rt_zone.json.result[0].account.id }}"
+
+    # ── the hub's tunnel: the one thing that must survive ────────────────────
+    - name: Read the hub's tunnel credentials on zero
+      ansible.builtin.slurp:
+        src: "{{ hub_secrets }}/tunnel.json"
+      register: rt_hub_cred
+      no_log: true
+
+    - name: Note the hub's tunnel id
+      ansible.builtin.set_fact:
+        rt_hub_id: "{{ (rt_hub_cred.content | b64decode | from_json).TunnelID }}"
+
+    # ── what exists ──────────────────────────────────────────────────────────
+    - name: Read the account's tunnels
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ rt_account }}/cfd_tunnel?is_deleted=false&per_page=1000"
+        headers: "{{ hdr }}"
+      register: rt_tunnels_q
+      delegate_to: localhost
+      check_mode: false
+      failed_when: false
+      no_log: true
+
+    - name: Read every record in the {{ cf_zone }} zone
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/zones/{{ rt_zone_id }}/dns_records?per_page=5000"
+        headers: "{{ hdr }}"
+      register: rt_dns_q
+      delegate_to: localhost
+      check_mode: false
+      failed_when: false
+      no_log: true
+
+    - name: Read the account's Access applications
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ rt_account }}/access/apps"
+        headers: "{{ hdr }}"
+      register: rt_apps_q
+      delegate_to: localhost
+      check_mode: false
+      failed_when: false
+      no_log: true
+
+    - name: Read the account's Access service tokens
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ rt_account }}/access/service_tokens?per_page=1000"
+        headers: "{{ hdr }}"
+      register: rt_tokens_q
+      delegate_to: localhost
+      check_mode: false
+      failed_when: false
+      no_log: true
+
+    - name: Check every read was answered
+      ansible.builtin.assert:
+        that:
+          - (rt_tunnels_q.status | default(0)) == 200
+          - (rt_dns_q.status | default(0)) == 200
+          - (rt_apps_q.status | default(0)) == 200
+          - (rt_tokens_q.status | default(0)) == 200
+        fail_msg: >-
+          A read was refused — tunnels HTTP {{ rt_tunnels_q.status | default('?') }}
+          {{ (rt_tunnels_q.json | default({})).errors | default([]) }}; DNS HTTP
+          {{ rt_dns_q.status | default('?') }} {{ (rt_dns_q.json | default({})).errors | default([]) }};
+          Access apps HTTP {{ rt_apps_q.status | default('?') }}
+          {{ (rt_apps_q.json | default({})).errors | default([]) }}; service tokens HTTP
+          {{ rt_tokens_q.status | default('?') }} {{ (rt_tokens_q.json | default({})).errors | default([]) }}.
+          The token needs Cloudflare Tunnel Edit, Access Apps and Policies Edit, Access Service
+          Tokens Edit and Zone DNS Edit (ansible/README.md § The Cloudflare API token). Nothing has
+          been deleted.
+        success_msg: "tunnels, DNS, Access apps and service tokens readable"
+
+    # `| default([], true)`: a refused list comes back as `result: null`, which is defined.
+    - name: Note the doomed tunnels, records and apps
+      ansible.builtin.set_fact:
+        rt_doomed: >-
+          {{ rt_tunnels_q.json.result | default([], true)
+             | selectattr('name', 'in', retire_all) | rejectattr('id', 'eq', rt_hub_id) | list }}
+        rt_hub_named: >-
+          {{ rt_tunnels_q.json.result | default([], true)
+             | selectattr('name', 'in', retire_all) | selectattr('id', 'eq', rt_hub_id)
+             | map(attribute='name') | list }}
+        rt_apps: >-
+          {{ rt_apps_q.json.result | default([], true) | selectattr('domain', 'defined')
+             | selectattr('domain', 'in', retire_full | map('regex_replace', '$', '.' ~ cf_zone) | list)
+             | list }}
+
+    - name: Note the doomed CNAMEs and anything else on them
+      ansible.builtin.set_fact:
+        rt_targets: "{{ rt_doomed | map(attribute='id') | map('regex_replace', '$', '.cfargotunnel.com') | list }}"
+        rt_full_ids: >-
+          {{ rt_doomed | selectattr('name', 'in', retire_full) | map(attribute='id')
+             | map('regex_replace', '$', '.cfargotunnel.com') | list }}
+
+    - name: Sort the records pointing at doomed tunnels
+      ansible.builtin.set_fact:
+        # A full alias's own CNAME, on its own old tunnel: deleted with it.
+        rt_records: >-
+          {{ rt_dns_q.json.result | default([], true) | selectattr('type', 'eq', 'CNAME')
+             | selectattr('content', 'in', rt_full_ids)
+             | selectattr('name', 'in', retire_full | map('regex_replace', '$', '.' ~ cf_zone) | list)
+             | list }}
+        # Anything else on a doomed tunnel — or3-dev's hostname back on its old tunnel included.
+        rt_stragglers: >-
+          {{ rt_dns_q.json.result | default([], true) | selectattr('content', 'defined')
+             | selectattr('content', 'in', rt_targets)
+             | rejectattr('id', 'in', rt_dns_q.json.result | default([], true) | selectattr('type', 'eq', 'CNAME')
+                 | selectattr('content', 'in', rt_full_ids)
+                 | selectattr('name', 'in', retire_full | map('regex_replace', '$', '.' ~ cf_zone) | list)
+                 | map(attribute='id') | list)
+             | map(attribute='name') | list }}
+
+    - name: Read the doomed Access apps' policies
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ rt_account }}/access/apps/{{ item.id }}/policies"
+        headers: "{{ hdr }}"
+      loop: "{{ rt_apps }}"
+      loop_control:
+        label: "{{ item.domain }}"
+      register: rt_pol_q
+      delegate_to: localhost
+      check_mode: false
+      failed_when: false
+      no_log: true
+
+    - name: Check every doomed app's policies were read
+      ansible.builtin.assert:
+        that: rt_pol_q.results | default([]) | rejectattr('status', 'eq', 200) | list | length == 0
+        fail_msg: >-
+          Policies unreadable for
+          {{ rt_pol_q.results | default([]) | rejectattr('status', 'eq', 200) | map(attribute='item.domain') | list }}:
+          {{ rt_pol_q.results | default([]) | rejectattr('status', 'eq', 200)
+             | map(attribute='json') | map('default', {}) | map(attribute='errors') | list }}. Nothing has
+          been deleted.
+        success_msg: "{{ rt_apps | length }} app(s)' policies read"
+
+    # Per app: the token ids its policies admit, then the tokens that are both admitted AND named
+    # <alias>-…, which are the client tokens the client play minted for it.
+    - name: Note the service tokens each doomed app admits
+      ansible.builtin.set_fact:
+        rt_admitted: >-
+          {% set out = [] %}{% for r in rt_pol_q.results | default([]) %}{% set alias = r.item.domain | regex_replace('\.' ~ (cf_zone | regex_escape) ~ '$', '') %}{% for p in (r.json.result | default([], true)) %}{% for i in (p.include | default([])) %}{% if i.service_token is defined %}{% set _ = out.append({'alias': alias, 'id': i.service_token.token_id}) %}{% endif %}{% endfor %}{% endfor %}{% endfor %}{{ out }}
+
+    - name: Sort the admitted tokens into doomed and left
+      ansible.builtin.set_fact:
+        rt_tokens: >-
+          {% set out = [] %}{% for a in rt_admitted %}{% for t in (rt_tokens_q.json.result | default([], true)) %}{% if t.id == a.id and t.name.startswith(a.alias ~ '-') %}{% set _ = out.append(t) %}{% endif %}{% endfor %}{% endfor %}{{ out | unique(attribute='id') }}
+        rt_tokens_left: >-
+          {% set out = [] %}{% for a in rt_admitted %}{% for t in (rt_tokens_q.json.result | default([], true)) %}{% if t.id == a.id and not t.name.startswith(a.alias ~ '-') %}{% set _ = out.append(t.name ~ ' (on ' ~ a.alias ~ ')') %}{% endif %}{% endfor %}{% endfor %}{{ out | unique }}
+
+    # ── guards ───────────────────────────────────────────────────────────────
+    - name: Check the hub's tunnel is not among the doomed
+      ansible.builtin.assert:
+        that: rt_hub_named | length == 0
+        fail_msg: >-
+          The hub's own tunnel ({{ rt_hub_id }}) carries a name in the retire list
+          ({{ rt_hub_named | join(', ') }}). It was left out of the plan, but a name colliding with the
+          hub's is not a state to delete around: look in the dashboard first. Nothing has been deleted.
+        success_msg: "the hub's tunnel {{ rt_hub_id }} is not a candidate"
+
+    - name: Check no doomed tunnel has a live connector
+      ansible.builtin.assert:
+        that: rt_doomed | selectattr('status', 'in', ['healthy', 'degraded']) | list | length == 0
+        fail_msg: >-
+          Still connected, so something still runs it:
+          {{ rt_doomed | selectattr('status', 'in', ['healthy', 'degraded'])
+             | map(attribute='name') | list | join(', ') }}. Find the cloudflared serving it — an old
+          container or a host service — and stop it first. Nothing has been deleted.
+        success_msg: "no doomed tunnel has a connector"
+
+    - name: Check nothing else points at a doomed tunnel
+      ansible.builtin.assert:
+        that: rt_stragglers | length == 0
+        fail_msg: >-
+          These records point at a tunnel about to be deleted, and this play does not delete them:
+          {{ rt_stragglers | join(', ') }}. If or3-dev.{{ cf_zone }} is among them, its hostname is
+          back on its own tunnel: re-point it with server-create-dev-container.yml -e container=or3-dev
+          -e via_hub=true. Nothing has been deleted.
+        success_msg: "nothing else points at a doomed tunnel"
+
+    # ── the plan ─────────────────────────────────────────────────────────────
+    - name: Note whether there is anything to retire
+      ansible.builtin.set_fact:
+        rt_any: >-
+          {{ (rt_doomed + rt_records + rt_apps + rt_tokens) | length > 0 }}
+
+    - name: Print what this run would delete
+      ansible.builtin.debug:
+        msg:
+          - "tunnels: {{ rt_doomed | map(attribute='name') | zip(rt_doomed | map(attribute='id'), rt_doomed | map(attribute='status')) | map('join', ' ') | list | default(['none'], true) }}"
+          - "DNS: {{ rt_records | map(attribute='name') | list | default(['none'], true) }}"
+          - "Access apps (with their policies): {{ rt_apps | map(attribute='domain') | list | default(['none'], true) }}"
+          - "service tokens: {{ rt_tokens | map(attribute='name') | list | default(['none'], true) }}"
+          - "admitted but not named for the app, so LEFT: {{ rt_tokens_left | default(['none'], true) }}"
+          - "kept: the hub's tunnel {{ rt_hub_id }}, and or3-dev.{{ cf_zone }} with its Access app and tokens"
+          - "then on zero: each retired container's tunnel.json whose TunnelID is one deleted here"
+      changed_when: true
+
+    - name: "If nothing is left: say so"
+      ansible.builtin.debug:
+        msg: "Nothing to retire: every old dev tunnel object is already gone."
+      changed_when: true
+      when: not (rt_any | bool)
+
+    # ── ask ──────────────────────────────────────────────────────────────────
+    - name: "If any and not --check: ask before deleting"
+      ansible.builtin.pause:
+        prompt: >-
+          Delete everything listed above? A deleted tunnel cannot be recreated with its UUID.
+          [y/N]
+      register: rt_answer
+      when:
+        - rt_any | bool
+        - not ansible_check_mode
+
+    - name: Note whether to go ahead
+      ansible.builtin.set_fact:
+        rt_go: >-
+          {{ (rt_any | bool) and not ansible_check_mode
+             and ((rt_answer.user_input | default('') | trim | lower) in ['y', 'yes']) }}
+
+    - name: "If not going ahead: say nothing was deleted"
+      ansible.builtin.debug:
+        msg: "{{ '--check: the plan only' if ansible_check_mode else 'Not deleted: the answer was not y.' }}"
+      changed_when: true
+      when: (rt_any | bool) and not (rt_go | bool)
+
+    # ── delete, one stage at a time ──────────────────────────────────────────
+    - name: "If going ahead: delete the retired CNAMEs"
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/zones/{{ rt_zone_id }}/dns_records/{{ item.id }}"
+        method: DELETE
+        headers: "{{ hdr }}"
+        status_code: [200, 204]
+      loop: "{{ rt_records }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: rt_del_dns
+      delegate_to: localhost
+      failed_when: false
+      no_log: true
+      when: rt_go | bool
+
+    - name: "If going ahead: check every CNAME went"
+      ansible.builtin.assert:
+        that: rt_del_dns.results | default([]) | rejectattr('status', 'in', [200, 204]) | list | length == 0
+        fail_msg: >-
+          Refused: {{ rt_del_dns.results | default([]) | rejectattr('status', 'in', [200, 204])
+             | map(attribute='item.name') | list }} —
+          {{ rt_del_dns.results | default([]) | rejectattr('status', 'in', [200, 204])
+             | map(attribute='json') | map('default', {}) | map(attribute='errors') | list }}.
+          Stopped before the Access apps; re-run to finish.
+        success_msg: "{{ rt_records | length }} CNAME(s) deleted"
+      when: rt_go | bool
+
+    - name: "If going ahead: delete the retired Access apps"
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ rt_account }}/access/apps/{{ item.id }}"
+        method: DELETE
+        headers: "{{ hdr }}"
+        status_code: [200, 202, 204]
+      loop: "{{ rt_apps }}"
+      loop_control:
+        label: "{{ item.domain }}"
+      register: rt_del_apps
+      delegate_to: localhost
+      failed_when: false
+      no_log: true
+      when: rt_go | bool
+
+    - name: "If going ahead: check every Access app went"
+      ansible.builtin.assert:
+        that: rt_del_apps.results | default([]) | rejectattr('status', 'in', [200, 202, 204]) | list | length == 0
+        fail_msg: >-
+          Refused: {{ rt_del_apps.results | default([]) | rejectattr('status', 'in', [200, 202, 204])
+             | map(attribute='item.domain') | list }} —
+          {{ rt_del_apps.results | default([]) | rejectattr('status', 'in', [200, 202, 204])
+             | map(attribute='json') | map('default', {}) | map(attribute='errors') | list }}.
+          Stopped before the service tokens; re-run to finish.
+        success_msg: "{{ rt_apps | length }} Access app(s) deleted"
+      when: rt_go | bool
+
+    - name: "If going ahead: delete the retired service tokens"
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ rt_account }}/access/service_tokens/{{ item.id }}"
+        method: DELETE
+        headers: "{{ hdr }}"
+        status_code: [200, 204]
+      loop: "{{ rt_tokens }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: rt_del_tokens
+      delegate_to: localhost
+      failed_when: false
+      no_log: true
+      when: rt_go | bool
+
+    - name: "If going ahead: check every service token went"
+      ansible.builtin.assert:
+        that: rt_del_tokens.results | default([]) | rejectattr('status', 'in', [200, 204]) | list | length == 0
+        fail_msg: >-
+          Refused: {{ rt_del_tokens.results | default([]) | rejectattr('status', 'in', [200, 204])
+             | map(attribute='item.name') | list }} —
+          {{ rt_del_tokens.results | default([]) | rejectattr('status', 'in', [200, 204])
+             | map(attribute='json') | map('default', {}) | map(attribute='errors') | list }}.
+          Stopped before the tunnels; re-run to finish.
+        success_msg: "{{ rt_tokens | length }} service token(s) deleted"
+      when: rt_go | bool
+
+    # Connection records outlive the connector and Cloudflare refuses to delete a tunnel that
+    # still has them (server-delete-tunnel.yml); harmless when there are none.
+    - name: "If going ahead: clear the tunnels' connection records"
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ rt_account }}/cfd_tunnel/{{ item.id }}/connections"
+        method: DELETE
+        headers: "{{ hdr }}"
+        status_code: [200, 202, 204, 400, 404]
+      loop: "{{ rt_doomed }}"
+      loop_control:
+        label: "{{ item.name }}"
+      delegate_to: localhost
+      no_log: true
+      when: rt_go | bool
+
+    - name: "If going ahead: delete the old tunnels"
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ rt_account }}/cfd_tunnel/{{ item.id }}"
+        method: DELETE
+        headers: "{{ hdr }}"
+        status_code: [200, 202, 204]
+      loop: "{{ rt_doomed }}"
+      loop_control:
+        label: "{{ item.name }} {{ item.id }}"
+      register: rt_del_tunnels
+      delegate_to: localhost
+      failed_when: false
+      no_log: true
+      when: rt_go | bool
+
+    - name: "If going ahead: check every old tunnel went"
+      ansible.builtin.assert:
+        that: rt_del_tunnels.results | default([]) | rejectattr('status', 'in', [200, 202, 204]) | list | length == 0
+        fail_msg: >-
+          Refused: {{ rt_del_tunnels.results | default([]) | rejectattr('status', 'in', [200, 202, 204])
+             | map(attribute='item.name') | list }} —
+          {{ rt_del_tunnels.results | default([]) | rejectattr('status', 'in', [200, 202, 204])
+             | map(attribute='json') | map('default', {}) | map(attribute='errors') | list }}.
+          An undeleted tunnel with no DNS and no connector costs nothing; read the reason, re-run.
+        success_msg: "{{ rt_doomed | length }} tunnel(s) deleted"
+      when: rt_go | bool
+
+    # ── on zero: the credentials of what was deleted ─────────────────────────
+    # Only a tunnel.json whose TunnelID is one deleted in this run: a file naming any other tunnel
+    # is left, whatever directory it is in. A credential for a deleted tunnel is worthless, so this
+    # is tidiness, not security — but a file that names nothing is a false lead for the next
+    # reader of ~/.<name>-secrets.
+    - name: "If going ahead: read the retired tunnel.json files"
+      ansible.builtin.slurp:
+        src: "~/.{{ item }}-secrets/tunnel.json"
+      loop: "{{ retire_all }}"
+      register: rt_creds
+      failed_when: false
+      no_log: true
+      when: rt_go | bool
+
+    - name: "If going ahead: delete tunnel.json of deleted tunnels"
+      ansible.builtin.file:
+        path: "~/.{{ item.item }}-secrets/tunnel.json"
+        state: absent
+      loop: >-
+        {{ rt_creds.results | default([]) | selectattr('content', 'defined')
+           | selectattr('content', 'truthy') | list
+           if rt_go | bool else [] }}
+      loop_control:
+        label: "~/.{{ item.item }}-secrets/tunnel.json"
+      when: (item.content | b64decode | from_json).TunnelID in (rt_doomed | map(attribute='id') | list)
+
+    - name: Print what happened
+      ansible.builtin.debug:
+        msg:
+          - "{{ 'retired: ' ~ (rt_doomed | map(attribute='name') | list | join(', ')) if (rt_go | bool) else 'nothing deleted' }}"
+          - "next, on each client: a whole run of client-home-ssh-config.yml removes their ssh blocks and token files"
+      changed_when: true
