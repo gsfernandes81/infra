@@ -1399,6 +1399,17 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   identical rebuilds no longer churn recreates either; provenance is therefore left on. A floor
   rather than `state: latest` in the package play, which stays install-only: the guard names
   the one command, `apk add -u docker-cli-compose`, which restarts nothing.
+- **dev's Compose runs with `BUILDX_BAKE_ENTITLEMENTS_FS=0`** (owner, 2026-10-27). Compose
+  builds through `buildx bake`, which from buildx 0.38 refuses to read a file outside its working
+  directory unless granted; Compose 5.6.1 grants its build contexts but not a build's `ssh:` key,
+  and or3-dev's deploy key is in `OR3_SECRETS`, outside the checkout on purpose, so its build
+  failed "additional privileges requested" on zero after the upgrade. The check exists for a
+  bake file nobody reviewed, and this one is written by Compose from `compose.yaml`. Rejected:
+  moving the key under `dev/` (a secret in the checkout's tree), making the secrets directory a
+  named build context (or3's Dockerfile could then `COPY` the key into a layer), and an
+  `ssh-agent` per build (machinery the podman move would not need). Set in `dev/Makefile`'s
+  `COMPOSE`, which `make build` and `make up` use; the deploy play's own `up` builds nothing,
+  because `make build` ran first.
 
 ## The lesson worth keeping
 

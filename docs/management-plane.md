@@ -527,6 +527,12 @@ ones that answer the question this document started from.
 | 7 | **Rootless podman on `one`** — roadmap §2 | `one` | 3, MicroOS on `one` | **Deferred to MicroOS, 2026-10-25** — the owner's call, so `one` converts once, with memory limits, instead of on OpenRC without them and then again ([`decisions.md`](decisions.md)) |
 | 8 | ~~`two` as the scheduled read-only control node~~ | `two` | ~~6, 7~~ — none since 2026-10-25 | **Dropped 2026-10-25**, the owner's call: no control node inside the fleet. It needed Ansible on a Pi and a key on `two` reaching `zero` and `one`, which this repo refuses, and its one unique benefit, alerting with nobody at the phone, goes to the proposed Cloudflare Worker monitor (see 2h's notes), which needs no key on the fleet. The number is kept. |
 
+**Filed 2026-10-27, no phase number — dev's build key under podman.** `dev/Makefile` runs
+Compose with `BUILDX_BAKE_ENTITLEMENTS_FS=0` so buildx may read or3-dev's deploy key, which is
+outside the checkout ([`decisions.md`](decisions.md), the dev section). It is Docker-only and
+inert under podman, whose build reads the key path itself. What the podman move must check is
+the other half: that `podman-compose` passes a service's `build.ssh` through at all.
+
 **Filed 2026-10-24, no phase number — nothing reports a stale sidecar `cloudflared`.**
 A deployment's connector is pinned in its `compose.yaml` and is outside 2h's staggered
 autoupdate by design, so it ages silently: `server-update-cloudflared.yml` and the hosts'

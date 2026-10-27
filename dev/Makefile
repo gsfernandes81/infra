@@ -61,7 +61,14 @@ COMPOSE_OVERRIDE ?=
 # HOST_UID and HOST_GID are also lines in .env (the dev host play writes them), so the deploy
 # play, which runs compose without this Makefile, builds at the same uid; passing them here
 # as well means a hand-made .env cannot disagree with the checkout.
-COMPOSE = $(SUDO) env HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) \
+#
+# BUILDX_BAKE_ENTITLEMENTS_FS=0 (owner, 2026-10-27): Compose builds through `buildx bake`, which
+# refuses to read a file outside the working directory unless it is granted, and Compose 5.6.1
+# grants its build contexts but not a build's ssh key. or3-dev's deploy key is in OR3_SECRETS,
+# outside the checkout on purpose, so from buildx 0.38 its build failed "additional privileges
+# requested". The check guards against a bake file nobody reviewed; this one is written by
+# Compose from compose.yaml. Not by moving the key into a context: a Dockerfile could copy it.
+COMPOSE = $(SUDO) env HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) BUILDX_BAKE_ENTITLEMENTS_FS=0 \
 	docker compose --project-directory $(CURDIR) -f $(CURDIR)/compose.yaml \
 	$(if $(COMPOSE_OVERRIDE),-f $(COMPOSE_OVERRIDE))
 DOCKER  := $(SUDO) docker
