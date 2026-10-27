@@ -26,6 +26,30 @@
     anchor_head: "{{ deploy_ctl_head }}"
 
 # ── what must be true first ──────────────────────────────────────────────────
+# COMPOSE 5.5.0 OR NEWER, because `one` and `zero` are on the containerd image store, where a
+# rebuild moves the tag and the daemon drops the image record its running container was
+# created from. Compose before 5.5.0 then fails `compose images` for the whole project
+# (docker/compose#14014), and the module runs that after every `up` and every plan, so the
+# deploy stops at the plan with "No such image: sha256:…" (dev on zero, 2026-10-27, on
+# 5.1.4). The CLI only, so no root and no daemon: it is read before anything is built.
+- name: Read the Compose version on {{ dep.host }}
+  ansible.builtin.command:
+    cmd: docker compose version --short
+  register: dep_compose_version
+  changed_when: false
+  check_mode: false
+  delegate_to: "{{ dep.host }}"
+
+- name: Check {{ dep.host }}'s Compose is 5.5.0 or newer
+  ansible.builtin.assert:
+    that: dep_compose_version.stdout | trim | regex_replace('^v', '') is version('5.5.0', '>=')
+    fail_msg: >-
+      {{ dep.host }} has Compose {{ dep_compose_version.stdout | trim }}, which fails the plan once
+      a rebuild has dropped a running container's image (docker/compose#14014, fixed in 5.5.0).
+      Upgrade the plugin alone, which restarts nothing: ssh {{ dep.host }}, then
+      `sudo apk add -u docker-cli-compose`. Nothing was built or touched.
+    success_msg: "Compose {{ dep_compose_version.stdout | trim }}"
+
 # The preflight hook runs before the .env check, because a hook may be what fills .env in:
 # garmin-mcp's writes the lines it generates itself when they are missing, so a first
 # bring-up can be planned. The check after it is then the backstop for the hook as well.

@@ -1379,6 +1379,26 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
 - **The pool is opt-in until its boot file exists**: `cgroup_parent: ${DEV_CGROUP_PARENT:-}`,
   which Compose drops when empty (measured). `:-` and not `:?`, because absence here is the
   supported state, not a mistake to stop on.
+- **The dev containers mount the hub's volumes `nocopy`; the hub's own mount copies** (zero,
+  2026-10-27). Docker copies an image's mountpoint, ownership included, into an empty volume at
+  every container *create*, and Compose creates every container before it starts any, so on a
+  whole-project `up` infra-dev's and or3-dev's root-owned mountpoints were copied over the
+  hub's still-empty `claude-sessions` volume after the hub's dev-owned one, and the hub could
+  not install into it. With `nocopy` on the dev side only the hub's mountpoint decides. This is
+  the opposite of the workspace call above for the opposite reason: a workspace has one
+  mounter, so `nocopy` there would leave it root's; a hub volume has the hub as well. The smoke
+  test now creates the whole project at once, the way the deploy does, and checks the owner.
+- **The deploy play refuses a host whose Compose is older than 5.5.0** (zero, 2026-10-27).
+  `one` and `zero` run Docker's containerd image store, where a rebuild moves a tag and the
+  daemon drops the image record a running container was made from; it does this even for an
+  identical rebuild, because the provenance attestation makes every build a new index digest.
+  Compose before 5.5.0 then fails `compose images` for the whole project (docker/compose#14014),
+  and `docker_compose_v2` runs it after every plan, so the deploy stopped with "No such image"
+  and named an image nothing in the repo refers to. Compose 5.5.0 and later reads the
+  container's own record instead, and labels containers by per-platform manifest digest, so
+  identical rebuilds no longer churn recreates either; provenance is therefore left on. A floor
+  rather than `state: latest` in the package play, which stays install-only: the guard names
+  the one command, `apk add -u docker-cli-compose`, which restarts nothing.
 
 ## The lesson worth keeping
 
