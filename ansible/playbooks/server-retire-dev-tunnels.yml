@@ -27,7 +27,8 @@
 #     refused — so if or3-dev.<zone> still pointed at its old tunnel (step 7 of the cutover
 #     undone), the play stops rather than strand the vessel's route;
 #   - a service token is deleted only if the doomed app's policy admits it AND it is named for
-#     that alias; anything else the policy admits is printed and left.
+#     that alias (<alias>-<client>), or it is named exactly <alias> — the pre-2026-10-04 token,
+#     admitted or orphaned — for a fully retired alias; anything else is printed and left.
 # Then each stage — DNS, Access apps, service tokens, tunnels, credentials files — must succeed
 # whole before the next starts, and every refusal prints Cloudflare's own reason (CLAUDE.md §
 # Verifying changes: a no_log write censors its failure too).
@@ -227,12 +228,15 @@
         rt_admitted: >-
           {% set out = [] %}{% for r in rt_pol_q.results | default([]) %}{% set alias = r.item.domain | regex_replace('\.' ~ (cf_zone | regex_escape) ~ '$', '') %}{% for p in (r.json.result | default([], true)) %}{% for i in (p.include | default([])) %}{% if i.service_token is defined %}{% set _ = out.append({'alias': alias, 'id': i.service_token.token_id}) %}{% endif %}{% endfor %}{% endfor %}{% endfor %}{{ out }}
 
+    # Plus, for a fully retired alias, a token named exactly for it, whether or not an app still
+    # admits it: the one-token-per-container credential from before 2026-10-04, which outlived
+    # its app on the first run (2026-10-27). Never for or3-dev, whose tokens stay.
     - name: Sort the admitted tokens into doomed and left
       ansible.builtin.set_fact:
         rt_tokens: >-
-          {% set out = [] %}{% for a in rt_admitted %}{% for t in (rt_tokens_q.json.result | default([], true)) %}{% if t.id == a.id and t.name.startswith(a.alias ~ '-') %}{% set _ = out.append(t) %}{% endif %}{% endfor %}{% endfor %}{{ out | unique(attribute='id') }}
+          {% set out = [] %}{% for a in rt_admitted %}{% for t in (rt_tokens_q.json.result | default([], true)) %}{% if t.id == a.id and t.name.startswith(a.alias ~ '-') %}{% set _ = out.append(t) %}{% endif %}{% endfor %}{% endfor %}{% for t in (rt_tokens_q.json.result | default([], true)) %}{% if t.name in retire_full %}{% set _ = out.append(t) %}{% endif %}{% endfor %}{{ out | unique(attribute='id') }}
         rt_tokens_left: >-
-          {% set out = [] %}{% for a in rt_admitted %}{% for t in (rt_tokens_q.json.result | default([], true)) %}{% if t.id == a.id and not t.name.startswith(a.alias ~ '-') %}{% set _ = out.append(t.name ~ ' (on ' ~ a.alias ~ ')') %}{% endif %}{% endfor %}{% endfor %}{{ out | unique }}
+          {% set out = [] %}{% for a in rt_admitted %}{% for t in (rt_tokens_q.json.result | default([], true)) %}{% if t.id == a.id and not t.name.startswith(a.alias ~ '-') and t.name not in retire_full %}{% set _ = out.append(t.name ~ ' (on ' ~ a.alias ~ ')') %}{% endif %}{% endfor %}{% endfor %}{{ out | unique }}
 
     # ── guards ───────────────────────────────────────────────────────────────
     - name: Check the hub's tunnel is not among the doomed
