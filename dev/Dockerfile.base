@@ -13,7 +13,7 @@
 # plus whatever that repo needs on top — see dev/Dockerfile here for the shape
 # (ansible), or or3's for the other one (uv, and its own ssh identity).
 #
-# WHAT A CHILD IS EXPECTED TO CHANGE, and how. Five seams, none of which is a fork of a
+# WHAT A CHILD IS EXPECTED TO CHANGE, and how. Four seams, none of which is a fork of a
 # file in here:
 #
 #   environment    DEV_NAME, DEV_SECRETS_DIR, DEV_REPO, DEV_ENV_FILES —
@@ -23,18 +23,8 @@
 #                  path, so a child's identities and hosts are its own business.
 #   known_hosts.extra   COPY one in to pin a host key in ITS repo's tracked content
 #                  (or3-dev pins or3ecr this way). Absent here, and absent is fine.
-#   sshd_config.d/ COPY a .conf in to widen an sshd default — see sshd_config, where
-#                  the Include is first precisely so a child's value wins. A drop-in
-#                  can only OVERRIDE, never remove: the base it falls back to is
-#                  key-only with no forwarding and no passwords, so nothing here can
-#                  widen by being absent.
-#                  What a bad drop-in costs is the drop-in and NOT the container:
-#                  entrypoint.sh runs `sshd -t` first and, if the config is refused,
-#                  starts without the drop-ins and says so. Quieter than a crash — for
-#                  or3-dev it means its reverse tunnel is silently refused until
-#                  somebody reads `make boot-log` — so this is worth more care, not
-#                  less. sshd's own message names the offending file and line, which is
-#                  what that log carries.
+#   (sshd_config.d/ WAS a seam until 2026-10-27; sshd now reads only the base's
+#                  sshd_config, and a drop-in a child still COPYs in is ignored.)
 #   child-init.sh  COPY one in to /home/dev and the entrypoint RUNS it at start, after
 #                  the pull and before sshd. The newest of them, added 2026-08-24: the
 #                  four above all PLACE something, and dd-dev and ds-dev needed something
@@ -111,12 +101,10 @@
 #
 # WHAT CAME WITH IT, because a distro bump is never only the one package you wanted:
 #
-#   OpenSSH 9.2 -> 10.x   the door. sshd_config carries two claims MEASURED on 9.2 —
-#                         that a drop-in's `Match` is confined to that file, and that
-#                         `sshd -T` already reports `compression yes`. Both are marked
-#                         in that file as owing a re-measure on this image; neither is
-#                         assumed to have survived, and the seam they describe is the
-#                         one that decides whether a child can be locked out.
+#   OpenSSH 9.2 -> 10.x   the door. sshd_config carried a claim MEASURED on 9.2, that
+#                         `sshd -T` already reports `compression yes`; it is stated
+#                         there now rather than inherited. (The other, about drop-ins,
+#                         went with the drop-in seam on 2026-10-27.)
 #   fish 3.6 -> 4.x       the login shell. config.fish uses `status is-login` and `cd`
 #                         and nothing else, which is the least of fish's surface.
 #   Python 3.13           unchanged — this is the same image line, so the entrypoint's
@@ -715,11 +703,6 @@ WORKDIR /workspace
 # .ssh/cp is ansible.cfg's ControlPath directory: ssh does NOT create it, and every
 # task fails with "unix_listener: cannot bind" if it is missing.
 #
-# sshd_config.d is not a volume either: it is where a CHILD drops a .conf to widen an
-# sshd default, and it is created here so the `Include` at the top of sshd_config
-# always resolves — a glob that matches nothing is fine, a directory that is not there
-# is a line nobody can see failing.
-#
 # .local/bin is in the list for a different reason than the rest: nothing in this image
 # puts anything there, and it is first on PATH. It is where Claude Code's own installer
 # would land a launcher — so it exists, owned by `dev`, for an update that decides to
@@ -730,7 +713,7 @@ WORKDIR /workspace
 # found the same mistake in the hub on 2026-10-27.
 RUN mkdir -p /home/dev/.claude /home/dev/.config/gh /home/dev/.config/fish \
         /home/dev/.ssh-host /home/dev/.ssh/cp /home/dev/.local/share /home/dev/.local/bin \
-        /home/dev/.screen /home/dev/sshd_config.d /home/dev/.env.d \
+        /home/dev/.screen /home/dev/.env.d \
     && chmod 700 /home/dev/.ssh-host /home/dev/.ssh /home/dev/.ssh/cp \
         /home/dev/.screen /home/dev/.env.d
 

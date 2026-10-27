@@ -282,8 +282,9 @@ services:
       - or3-env:/home/dev/.env.d
       # The or3ecr key, the deploy key and the phone's authorized_keys (or3's
       # dev/seed-secrets.sh writes them). Its sshd is also reached straight from the phone,
-      # through the hub's tunnel, for or3-tunnel's reverse forward (cloudflared.yml), so its
-      # forwarding drop-in stays and so does this authorized_keys.
+      # through the hub's tunnel, for or3-tunnel's reverse forward (cloudflared.yml): the
+      # base's sshd allows remote forwarding for exactly that, and this authorized_keys holds
+      # the phone's key.
       - ${OR3_SECRETS:?set OR3_SECRETS in dev/.env}:/run/or3-secrets:ro
       - or3-claude:/home/dev/.claude
       - or3-gh:/home/dev/.config/gh
@@ -332,12 +333,6 @@ services:
       - dd-env:/home/dev/.env.d
       # What was the clone's .dev-ssh/, moved out of it at the cutover: mode 700, read-only.
       - ${DD_SECRETS:?set DD_SECRETS in dev/.env}:/run/dd-secrets:ro
-      # THE HOST'S ~/.ssh IS NO LONGER MOUNTED. destiny-director's drop-in pointed sshd at
-      # the host account's authorized_keys, for a door that published a port; the hub is the
-      # door now, so this blanks that drop-in and the base's two files apply — the client
-      # keys in its secrets dir, if any, and the hub's. gavin's private keys on zero stop
-      # being visible inside the container as a side effect.
-      - ./child-authorized-keys.conf:/home/dev/sshd_config.d/10-authorized-keys.conf:ro
       - dd-uv-cache:/home/dev/.cache/uv
       - dd-claude:/home/dev/.claude
       - dd-railway:/home/dev/.railway
@@ -403,8 +398,6 @@ services:
       - ds-workspace:/workspace
       - ds-env:/home/dev/.env.d
       - ${DS_SECRETS:?set DS_SECRETS in dev/.env}:/run/ds-secrets:ro
-      # As dd-dev's: the hub is the door, so the host's ~/.ssh is not mounted.
-      - ./child-authorized-keys.conf:/home/dev/sshd_config.d/10-authorized-keys.conf:ro
       - ds-uv-cache:/home/dev/.cache/uv
       - ds-claude:/home/dev/.claude
       - ds-gh:/home/dev/.config/gh

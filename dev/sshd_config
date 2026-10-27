@@ -1,55 +1,15 @@
-# In-container sshd, baked into gsrpi-dev-base and shared by every container built on
-# it. Runs as the unprivileged `dev` user on port 2222 inside the container. infra-dev
-# publishes no port since 2026-10-04 — its tunnel reaches 2222 from inside, and `make
-# shell` on the host is the break-glass; or3-dev's repo still publishes 2224.
+# In-container sshd, baked into gsrpi-dev-base and shared by every container built on it. Runs
+# as the unprivileged `dev` user on port 2222 inside the container. Nothing publishes it: the
+# hub reaches each container on the `dev` network with its own key, and the one sshd anything
+# else reaches is or3-dev's, through the hub's tunnel, for the phone's reverse forward to the
+# vessel LAN (dev/cloudflared.yml).
 #
-# What it is FOR differs between those two, and the difference is the whole point of
-# each. or3-dev's sshd is also a tunnel endpoint — the phone terminates a reverse
-# forward on it to reach the vessel LAN. infra-dev's is a DOOR AND NOTHING ELSE: you
-# ssh in from the phone or a PC and work in a zmx session, and the model traffic
-# that used to cross the phone's metered radio goes out over zero's home connection
-# instead. Nothing tunnels back through infra-dev.
-#
-# THE DEFAULTS HERE ARE THE SMALLER THING, and a child widens them in its own file.
-# sshd takes the FIRST value it obtains for each keyword, so the Include below — at the
-# top, before anything else is set — is what lets a child override rather than merely
-# append. `AllowTcpForwarding yes` in a child's drop-in wins; the same line at the
-# bottom of this file would not have.
-#
-# A glob that matches nothing is not an error, so a container with no drop-in gets
-# exactly this file. The directory is created in the base image so that stays true.
-#
-# A `Match` block inside a drop-in is CONFINED TO THAT FILE and does not leak back into
-# this one — measured on OpenSSH 9.2, not inferred: a drop-in ending in a `Match`
-# leaves `Port` and `HostKey` below valid here, and `sshd -t` accepts the pair. (The
-# same two lines *after* a `Match` in a single file are rejected outright with
-# "Directive 'Port' is not allowed within a Match block", which is the behaviour that
-# makes the leak sound plausible.) So a drop-in cannot break this file by structure;
-# it breaks it by being wrong on its own terms, which `sshd -t` catches in entrypoint.sh
-# before anything is exec'd.
-#
-# ⚠︎ THAT MEASUREMENT IS OLDER THAN THE SSHD IT DESCRIBES. The base moved to Debian
-# trixie on 2026-09-21 for glibc 2.39+, which brought OpenSSH 10.x with it, and 9.2 is
-# no longer in the image. The claim is kept rather than deleted — it was measured, and
-# nothing suggests the behaviour changed — but it is now an inference about a version
-# nobody has run it against, which is exactly the shape this repo keeps getting caught
-# by. Re-measuring is two minutes in the container and does not need the fleet:
-#
-#   printf 'Match User nobody\n  AllowTcpForwarding yes\n' > ~/sshd_config.d/99-probe.conf
-#   sshd -t -f ~/sshd_config && echo "confined, as measured on 9.2"
-#   rm ~/sshd_config.d/99-probe.conf
-#
-# A failure there does not brick anything: entrypoint.sh's preflight already starts
-# without the drop-ins and says so. It would mean the seam needs the `Match` rule
-# documented the other way round.
-# THIS PATH IS WRITTEN TWICE. entrypoint.sh's preflight strips this line by grepping
-# for the literal `^Include /home/dev/sshd_config.d/` before falling back, so moving the
-# directory means editing both. Nothing checks that they agree: if they drift, the grep
-# matches nothing, the "stripped" copy is identical to this file, the fallback fails the
-# same way the original did, and the operator is told the copy could not be written or
-# the base does not parse — neither of which is true. It degrades safely and explains
-# itself wrongly, which is the combination this repo likes least.
-Include /home/dev/sshd_config.d/*.conf
+# ONE FILE FOR EVERY CONTAINER, since 2026-10-27. Until then children widened it with drop-ins
+# in ~/sshd_config.d, through an Include at the top, with a start-up preflight that came up
+# without them if they did not parse; by then the drop-ins existed for one line in one
+# container (or3-dev's forwarding) and for dd-dev's and ds-dev's host-account authorized_keys,
+# which the hub replaced. The Include and the preflight are gone; a child that COPYs a drop-in
+# in is ignored, so a container's sshd is exactly this file.
 
 Port 2222
 ListenAddress 0.0.0.0
@@ -70,12 +30,13 @@ KbdInteractiveAuthentication no
 PermitRootLogin no
 UsePAM no                 # PAM needs root; a non-root sshd must disable it
 
-# NO forwarding, as the base default. or3-dev turns it back on in
-# sshd_config.d/10-forwarding.conf because a reverse forward is its reason to exist;
-# nothing infra-dev does needs one, and this container holds ssh keys that reach all
-# three hosts as an account in `wheel`. Off is the smaller thing to defend, and turning
-# it on should be a deliberate drop-in with a reason written next to it.
-AllowTcpForwarding no
+# REMOTE forwarding only, for or3-dev: the phone holds `ssh -N -R 2236:10.1.0.236:22` into it,
+# and 127.0.0.1:2236 inside is then or3ecr's sshd. `remote` allows -R and nothing else — no
+# -L, no stdio forwarding — and GatewayPorts no keeps what -R binds on the container's own
+# loopback. The hub's key is `restrict` in every container (authorized_keys.hub), which takes
+# forwarding away from it whatever this says, so in practice only or3-dev's phone key can use
+# it. No container holds a key to the fleet (the control-node question).
+AllowTcpForwarding remote
 GatewayPorts no
 
 # Let ssh sessions inherit the env the entrypoint writes to ~/.ssh/environment —
@@ -113,8 +74,7 @@ ClientAliveCountMax 3
 # Zed, ansible, and the hub's `claude-sessions agent`) as sshd would have — in $HOME — and
 # gives anything else a login shell in /workspace. (It gave a terminal the menu until
 # 2026-10-26; the menu is the hub's now, dev/hub/.) `ssh -N` opens no session, so a
-# forward never meets it. A child that must not have it sets `ForceCommand none` in its
-# drop-in, which wins for the reason the Include is at the top.
+# forward — or3's phone tunnel — never meets it.
 #
 # This reverses a rejection in dev/in-workspace's header; the reasons it was rejected,
 # and why each no longer holds, are in docs/decisions.md.

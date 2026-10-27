@@ -361,13 +361,10 @@ print((" ".join(sorted(h)) if h else "PRESENT BUT EMPTY — no hooks in it")
     # it answers "in-workspace: not found" from the login shell.
     printf 'in-workspace: %s\n' "$(d exec "$CONTAINER" sh -c 'command -v in-workspace' 2>/dev/null \
         || echo 'MISSING — this image predates it. Rebuild: make up')"
-    # What sshd ACTUALLY forces, read the way sshd reads it, from the config the RUNNING sshd
-    # was started with — the entrypoint falls back to sshd_config.nodrop when a drop-in is
-    # refused, and a readout of the other file would report a child's `ForceCommand none`
-    # the live daemon never read. The path comes out of its process title (OpenSSH 10 writes
-    # argv there as one string); `-C user=dev` takes any `Match` for this account into the
-    # answer. Since base 2026.10.26 the door is /usr/local/bin/dev-door — a login shell in
-    # /workspace, and a forwarded command as given; the menu is the hub's.
+    # What sshd forces, read the way sshd reads it (`sshd -T`, `-C user=dev` taking any Match
+    # for this account into the answer), from the one config it runs since 2026-10-27. The door
+    # is /usr/local/bin/dev-door — a login shell in /workspace, and a forwarded command as
+    # given; the menu is the hub's.
     #
     # The hub's reach into this container: its key authorised (restrict,pty), and the binary
     # here the one the hub installed — the same bytes as the hub's own, since this container
@@ -375,7 +372,7 @@ print((" ".join(sorted(h)) if h else "PRESENT BUT EMPTY — no hooks in it")
     printf 'hub       : %s\n' "$(hub_line)"
     printf 'hub health: %s\n' "$(d exec dev-hub hub-health 2>&1 || true)"
     printf 'github    : %s\n' "$(github_line)"
-    printf 'door      : %s\n' "$(d exec "$CONTAINER" sh -c 'f=$(tr "\0" " " < /proc/$(cat /home/dev/.ssh-host/sshd.pid)/cmdline | sed -n "s/.* -f \([^ ]*\).*/\1/p"); /usr/sbin/sshd -T -C user=dev,host=localhost,addr=127.0.0.1 -f "${f:-/home/dev/sshd_config}" 2>/dev/null | sed -n "s/^forcecommand //p"' 2>/dev/null \
+    printf 'door      : %s\n' "$(d exec "$CONTAINER" sh -c '/usr/sbin/sshd -T -C user=dev,host=localhost,addr=127.0.0.1 -f /home/dev/sshd_config 2>/dev/null | sed -n "s/^forcecommand //p"' 2>/dev/null \
         | grep . || echo 'could not ask sshd')"
     printf '\n'
     collections

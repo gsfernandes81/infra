@@ -142,48 +142,15 @@ if [ ! -f "$SECRETS/ssh_config.fleet" ]; then
     fi
 fi
 
-# authorized_keys is what lets you in at all. Without it the container comes up and
-# refuses every connection, which looks like a broken sshd rather than a missing file,
-# so say so loudly.
-#
-# THE MIDDLE BRANCH IS NOT A SPECIAL CASE, it is the drop-in seam telling the truth. A
-# child may point sshd at a different file — dd-dev and ds-dev serve the HOST account's
-# authorized_keys, bind-mounted read-only, which is how those two were reached before
-# they were built on this base and is not a thing to re-key. sshd takes the first
-# AuthorizedKeysFile it obtains and the Include is at the top of sshd_config, so a
-# drop-in wins; this file is then simply not what the door reads, and saying "NOTHING can
-# ssh in" about it would be false at the moment it is most likely to be believed.
-#
-# The test is the drop-in's own text rather than an environment variable, for the reason
-# `sshd -t` runs before the exec: the artefact is the authority on what sshd will do, and
-# a flag is a second place for that to be stated wrongly.
-#
-# `*.conf` AND NOT THE WHOLE DIRECTORY. That glob is what the Include globs, so a
-# `10-authorized-keys.conf.bak` or a README in there is not something sshd reads — and a
-# stale `.bak` beside the original is the artefact CLAUDE.md § *Backups of secret-bearing
-# files* has now found on this fleet twice. Testing the directory recursively would let
-# exactly that file silence the one warning that says the door is shut. The glob is
-# unquoted, and the no-match case stays literal and fails the grep, which is the answer
-# wanted anyway.
-if grep -qiE '^[[:space:]]*AuthorizedKeysFile' /home/dev/sshd_config.d/*.conf 2>/dev/null; then
-    authkeys_dropin=1
-else
-    authkeys_dropin=
-fi
-
+# authorized_keys: the keys allowed straight in, copied from the secrets mount — in practice
+# only or3-dev has one, the phone's, for its vessel tunnel. Every container is reached through
+# the hub, whose key is a file of its own (below), so none here is the normal state and not a
+# fault. sshd reads both files (sshd_config), and nothing else names a key file since the
+# drop-in seam went (2026-10-27).
 if [ -f "$SECRETS/authorized_keys" ]; then
     cp -f "$SECRETS/authorized_keys" "$HOME/.ssh/authorized_keys"
     chmod 600 "$HOME/.ssh/authorized_keys"
-    # BOTH present is the quietly wrong case, and the mirror of the one above: the copy
-    # just made lands in a file the door does not read, so a key added to the mount has
-    # no effect and nothing says so. First-match-wins cuts this way too.
-    [ -z "$authkeys_dropin" ] || \
-        say "NOTE: a drop-in sets AuthorizedKeysFile — the copy from $SECRETS is NOT what sshd reads."
-elif [ -n "$authkeys_dropin" ]; then
-    say "authorized_keys comes from a drop-in in sshd_config.d, not from $SECRETS."
 else
-    # Since 2026-10-26 the normal state for a container behind the hub: the hub's key, below,
-    # is in a file of its own, so this is "no client goes straight in", not "nothing can".
     say "no authorized_keys in $SECRETS — no client key goes straight in; the hub's key"
     say "    (below) is the way in, and make shell C=<c> on zero the break glass."
     : > "$HOME/.ssh/authorized_keys"
@@ -198,8 +165,7 @@ fi
 # ITS OWN FILE, NOT A LINE APPENDED TO authorized_keys: server-add-authorized-keys.yml
 # refreshes that file in a running container by copying the secrets dir's over it, which
 # would drop the hub's line until the next start and take the container out of the menu.
-# sshd_config lists both files. A child whose drop-in names its own AuthorizedKeysFile must
-# list this one too, or sshd never reads it — compose.yaml's move-in steps say so.
+# sshd_config lists both files, and it is the only config sshd reads.
 # rm -f first: a write follows a symlink, and nothing else should own this path.
 HUB_PUB=/opt/claude-sessions/hub.pub
 rm -f "$HOME/.ssh/authorized_keys.hub"
@@ -539,58 +505,9 @@ fi
 #
 # Nothing beyond this line runs. A start-up failure is in the log above it, which is
 # what `make boot-log` prints.
-# A DROP-IN THAT DOES NOT PARSE MUST NOT COST THE CONTAINER. sshd is exec'd as PID 1
-# under `restart: "no"`, so a config it refuses means the container exits and stays
-# exited — and no agent session on this fleet has a route to a box to fix it from. The
-# door is the one thing that must come up.
-#
-# So: test first, and on failure come up WITHOUT the child's drop-ins rather than not at
-# all. The stripped config is the base's own file minus the Include line, which is the
-# only thing a child can have broken. Loud, because a container that is up and quietly
-# ignoring its drop-in is how `AllowTcpForwarding yes` goes missing for a fortnight.
-#
-# The subtle failure this catches: a `Match` block in a drop-in. Include is processed
-# inline and first, so everything after it in the main file falls inside that Match
-# context, where Port and HostKey are illegal — and the error names those lines rather
-# than the drop-in that caused them.
-# The error text is captured into a VARIABLE and not a file. `2>/tmp/sshd-t.err` was
-# the first spelling and it has a failure of its own: an unwritable /tmp makes the
-# redirection fail before sshd -t ever runs, so a perfectly good config takes the
-# failure branch and a child loses its drop-ins for no reason. A variable depends on
-# nothing.
-SSHD_CONF=/home/dev/sshd_config
-NODROP=/home/dev/sshd_config.nodrop
-if ! sshd_err="$(/usr/sbin/sshd -t -f "$SSHD_CONF" 2>&1)"; then
-    say "WARNING: sshd refused $SSHD_CONF —"
-    printf '%s\n' "$sshd_err" | sed 's/^/[entrypoint] sshd: /'
-    # Removed before it is written, and the write is CHAINED to the test that promotes
-    # it. Otherwise a stale copy from an earlier boot survives a failed write — and the
-    # second `sshd -t` would validate that file and promote it, which is the one way
-    # this preflight could serve a config nobody in this container wrote.
-    rm -f "$NODROP"
-    if grep -v '^Include /home/dev/sshd_config.d/' "$SSHD_CONF" > "$NODROP" \
-       && /usr/sbin/sshd -t -f "$NODROP" 2>/dev/null; then
-        SSHD_CONF="$NODROP"
-        say "STARTING WITHOUT THE DROP-INS in /home/dev/sshd_config.d — the container is"
-        say "    up and reachable, and whatever they set is NOT in force. Fix the .conf"
-        say "    in the repo's dev/ and rebuild."
-        # "up and reachable" is the one claim above that a stripped drop-in can falsify,
-        # and the line that said authorized_keys comes from a drop-in was printed
-        # hundreds of lines ago, before this preflight had decided anything. Say it
-        # again, here, where it is now true: the base config's AuthorizedKeysFile is
-        # ~/.ssh/authorized_keys, and in that branch nothing ever wrote one.
-        if [ -n "$authkeys_dropin" ] && [ ! -s "$HOME/.ssh/authorized_keys" ]; then
-            say "    AND ONE OF THEM SET AuthorizedKeysFile: sshd now reads"
-            say "    $HOME/.ssh/authorized_keys, which is empty, so NOTHING can ssh in."
-            say "    A docker exec from the host is the only way in until it is fixed."
-        fi
-    else
-        say "could not fall back — either that copy could not be written, or the base"
-        say "    config alone does not parse either. Starting on the original anyway,"
-        say "    so the failure is sshd's own message rather than this script's guess."
-    fi
-fi
-
+# sshd runs this image's own sshd_config and nothing else — no drop-ins since 2026-10-27 — so
+# a config it refuses is a base build bug, which the smoke test (.github/workflows/dev-smoke.yml)
+# meets before any container on zero does. Its own error lands in `make boot-log`.
 say "sshd on :2222 in the foreground — reached through the hub: ssh dev, then $DEV_NAME"
 say "    from zero: make shell C=$DEV_NAME   (a shell here, without the hub)"
-exec /usr/sbin/sshd -D -e -f "$SSHD_CONF"
+exec /usr/sbin/sshd -D -e -f /home/dev/sshd_config
