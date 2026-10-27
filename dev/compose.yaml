@@ -11,7 +11,7 @@
 #                COMPOSE_PROFILES in dev/.env says which `make up` starts.
 #
 # The invariants in ../README.md apply here as everywhere: no `..`; `name:` declared;
-# host-specific values only from the gitignored .env, `${VAR:?}` where absence must stop
+# host-specific values only from the gitignored .env, a `:?` default where absence must stop
 # Compose. A REQUIRED VARIABLE STOPS COMPOSE EVEN FOR A SERVICE WHOSE PROFILE IS OFF —
 # checked with Compose 5.6.1 on 2026-10-26 — so every container's paths are in .env from the
 # start; the profile is what keeps one from starting.
