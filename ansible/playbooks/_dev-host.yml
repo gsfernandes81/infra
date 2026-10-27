@@ -134,5 +134,5 @@
           - ""
           - "{{ 'The App key is missing: make the App and put its .pem at ' ~ hub_secrets ~ '/github-app.pem, 0600, and HUB_GITHUB_APP_ID in dev/.env (dev/README.md § GitHub tokens).' if not app_key.stat.exists else 'The App key is in place; HUB_GITHUB_APP_ID in dev/.env must be its id.' }}"
           - "Then: ansible-playbook playbooks/server-deploy-compose.yml -e deployment=dev -K"
-          - "and on each client: ansible-playbook playbooks/client-home-ssh-config.yml -e container=dev"
+          - "and on each client, once the hub is up: ansible-playbook playbooks/client-home-ssh-config.yml (a whole run: it also removes the retired doors)"
       changed_when: true
