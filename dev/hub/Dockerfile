@@ -93,7 +93,12 @@ USER ${USERNAME}
 WORKDIR /home/dev
 
 # The volumes' mountpoints, made as dev so an empty volume inherits dev's ownership.
-RUN mkdir -p /home/dev/.hub /home/dev/.ssh/cm && chmod 700 /home/dev/.hub /home/dev/.ssh /home/dev/.ssh/cm
+# Every volume's mountpoint, as `dev`: a new named volume takes the owner of the directory it
+# mounts over, and one the image lacks is root's. ~/tokens was missing until the smoke test's
+# first run (2026-10-27): the broker could not make a container's directory, and the hub never
+# reported healthy.
+RUN mkdir -p /home/dev/.hub /home/dev/.ssh/cm /home/dev/tokens \
+    && chmod 700 /home/dev/.hub /home/dev/.ssh /home/dev/.ssh/cm
 
 COPY --chown=${USER_UID}:${USER_GID} sshd_config /home/dev/sshd_config
 COPY --chown=${USER_UID}:${USER_GID} ssh_config /home/dev/.ssh/config

@@ -722,11 +722,15 @@ WORKDIR /workspace
 # puts anything there, and it is first on PATH. It is where Claude Code's own installer
 # would land a launcher — so it exists, owned by `dev`, for an update that decides to
 # use it rather than the npm prefix.
+# EVERY VOLUME'S MOUNTPOINT IS MADE HERE, as `dev`: Docker gives a new named volume the
+# owner and mode of the directory it mounts over, and a mountpoint the image lacks is made
+# root's — `dev` then cannot write its own env volume (~/.env.d), which is how the smoke test
+# found the same mistake in the hub on 2026-10-27.
 RUN mkdir -p /home/dev/.claude /home/dev/.config/gh /home/dev/.config/fish \
         /home/dev/.ssh-host /home/dev/.ssh/cp /home/dev/.local/share /home/dev/.local/bin \
-        /home/dev/.screen /home/dev/sshd_config.d \
+        /home/dev/.screen /home/dev/sshd_config.d /home/dev/.env.d \
     && chmod 700 /home/dev/.ssh-host /home/dev/.ssh /home/dev/.ssh/cp \
-        /home/dev/.screen
+        /home/dev/.screen /home/dev/.env.d
 
 # ── Jcode: a third agent harness, alongside Crush (owner, 2026-10-16) ─────────────────
 # 1jehuang/jcode, a Rust CLI agent, reached the same plain way: `ssh -t <c> in-workspace`,
