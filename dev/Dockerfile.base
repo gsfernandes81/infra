@@ -310,6 +310,11 @@ ENV HELIX_RUNTIME=/opt/helix/runtime \
 # Single-binary tools and language servers with no trixie package, hash-pinned per arch:
 # marksman (Markdown), taplo (TOML) and yq (YAML at the command line, mikefarah's — the one
 # whose syntax every compose and ansible snippet online uses, not trixie's jq wrapper).
+# marksman is a .NET single-file binary, and .NET aborts at start-up without libicu, which the
+# base lacks ("Couldn't find a valid ICU package" — the smoke test, 2026-10-27; helix's
+# --health only checks the file is on PATH, so it passed). Invariant mode, not libicu: Markdown
+# needs no locale rules, and nothing else in the image is .NET for the setting to reach.
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 ARG MARKSMAN_VERSION=2026-02-08
 ARG MARKSMAN_SHA256_arm64=db8e124527f7f8048e3e6c91821b9c52ef173d92c01e47d221bf1337afd962fb
 ARG MARKSMAN_SHA256_amd64=be5098e8213219269c47fc0d916a66fa31ce0602ec967475c722260aabf26087
@@ -335,7 +340,7 @@ RUN set -eux; \
     curl -fsSLo /usr/local/bin/yq "$gh_rel/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_$y"; \
     echo "$ys  /usr/local/bin/yq" | sha256sum -c -; \
     chmod 0755 /usr/local/bin/marksman /usr/local/bin/taplo /usr/local/bin/yq; \
-    taplo --version; yq --version
+    taplo --version; yq --version; marksman --version
 
 # Python's: uv, and ruff and ty as uv tools — Helix's own default Python servers are `ty` and
 # `ruff`, and they are what or3, dd and ds lint with. Version-pinned from PyPI and the vendor's
