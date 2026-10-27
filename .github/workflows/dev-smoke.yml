@@ -94,6 +94,8 @@ jobs:
               -e 's#^COMPOSE_PROFILES=.*#COMPOSE_PROFILES=#' \
               -e 's#^HUB_HOSTS=.*#HUB_HOSTS=infra-dev#' \
               -e 's#^HUB_TUNNEL_ID=.*#HUB_TUNNEL_ID=none#' \
+              -e "s#^HOST_UID=.*#HOST_UID=$(id -u)#" \
+              -e "s#^HOST_GID=.*#HOST_GID=$(id -g)#" \
               dev/.env.example > dev/.env
           echo "SMOKE_SECRETS=$s" >> "$GITHUB_ENV"
 
@@ -174,11 +176,26 @@ jobs:
           echo "$fails failed"
           [ "$fails" = 0 ]
 
+      # What the deploy play's plan relies on: Compose recreates only what a change touches.
+      # Calibrated first — with nothing changed the plan must be empty, or the reading is wrong.
+      - name: Check a change to one container recreates only that one
+        working-directory: dev
+        run: |
+          files="-f compose.yaml"; [ -n "${SMOKE_CLAUDE_SESSIONS_DIR:-}" ] && files="$files -f ci/compose.smoke.yaml"
+          plan() { docker compose $files --dry-run up -d 2>&1 | grep -i recreate | grep -oE '(dev-hub|dev-cloudflared|infra-dev|or3-dev|dd-dev|dd-postgres|ds-dev)' | sort -u | tr '\n' ' '; }
+          cp .env .env.orig
+          got=$(plan); echo "nothing changed: [$got]"; [ -z "$got" ]
+          sed -i 's/^DEV_MEM_LIMIT=.*/DEV_MEM_LIMIT=2048m/' .env
+          got=$(plan); echo "infra-dev's limit changed: [$got]"; [ "$got" = "infra-dev " ]
+          cp .env.orig .env; sed -i 's/^HUB_OFFLOAD=.*/HUB_OFFLOAD=0/' .env
+          got=$(plan); echo "the hub's offload switch changed: [$got]"; [ "$got" = "dev-hub " ]
+          cp .env.orig .env; rm .env.orig
+          echo "PASS  each change recreates only its own container"
+
       - name: Build ds-dev straight from its GitHub URL
         working-directory: dev
         run: |
-          HOST_UID=$(id -u) HOST_GID=$(id -g) BASE_TAG=$(sed -n 's/^BASE_TAG := //p' Makefile) \
-            docker compose build ds-dev
+          docker compose build ds-dev
 
       - name: "On failure: the containers' logs"
         if: failure()

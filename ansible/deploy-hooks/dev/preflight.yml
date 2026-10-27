@@ -1,0 +1,48 @@
+---
+# dev's work before the .env check and the plan, included by playbooks/_deploy-compose-one.yml
+# (the contract is in server-deploy-compose.yml's header). The dev project is `deployments/dev`,
+# a link to the repo's dev/, so this play plans, asks about and checks it like any other
+# deployment (owner, 2026-10-27).
+#
+# Three steps, in an order that is the point:
+#   1. dev/Makefile's own guards, under --check too: .env complete, the hub's and infra-dev's
+#      secrets in place, every external volume present (`make check`). Read-only.
+#   2. Outside --check: BUILD every image the enabled profiles name (`make build`) — the hub,
+#      infra-dev and each child straight from GitHub, or3 over ssh with its deploy key. A build
+#      touches no container, so a failure here, or3's private fetch being the likeliest, stops
+#      the run with everything as it was. The plan after this then sees the new images, so it
+#      names every container a rebuild would recreate.
+#   3. Only then, the refusal while a container of a dev name belongs to another compose
+#      project (`make check-names`). At the cutover the first run therefore builds, proves the
+#      build, and stops here; you stop the old projects and run again, and that run asks.
+#
+# Under --check step 2 is skipped, so the plan is against the images already on the host:
+# a change that only a rebuild would bring in does not show until a real run.
+
+- name: Check dev's .env, secrets and volumes (make check)
+  ansible.builtin.command:
+    argv: [make, --no-print-directory, -C, "{{ dep_dir }}", check]
+  register: dev_check
+  changed_when: false
+  check_mode: false
+  become: true
+  delegate_to: "{{ dep.host }}"
+
+- name: "Not --check: build dev's images (make build)"
+  ansible.builtin.command:
+    argv: [make, --no-print-directory, -C, "{{ dep_dir }}", build]
+  register: dev_build
+  # A build that reuses every cached layer leaves each image as it was; the plan after this is
+  # what says whether anything changes.
+  changed_when: false
+  become: true
+  delegate_to: "{{ dep.host }}"
+  when: not ansible_check_mode
+
+- name: Check no old project holds a dev name (make check-names)
+  ansible.builtin.command:
+    argv: [make, --no-print-directory, -C, "{{ dep_dir }}", check-names]
+  changed_when: false
+  check_mode: false
+  become: true
+  delegate_to: "{{ dep.host }}"

@@ -409,22 +409,33 @@ reconnects by itself.
 4. **On zero: check the paths the new `.env` names** — `ls -d ~/.or3-dev-secrets
    ~/.dd-dev-secrets ~/.ds-dev-secrets ~/.or3-dev-secrets/id_ed25519_or3_deploy` — and fix
    any line that is wrong. The last is what builds or3's image.
-5. **On zero, from `~` and not from inside any dev container: stop the four old projects,
-   keeping their volumes, then start this one.**
+5. **From the control node: the deploy play, twice, with the old projects stopped between.**
+
+   ```fish
+   cd ~/infra/ansible
+   ansible-playbook playbooks/server-deploy-compose.yml -e deployment=dev -K
+   ```
+
+   The first run checks `.env`, the secrets and the external volumes, then **builds every
+   image** — the hub, infra-dev and or3-dev, or3 fetched over ssh with its deploy key — while
+   the old containers still run, so a failed build costs nothing. Then it **stops**, naming the
+   old projects that still hold the dev names. On zero, from `~` and not from inside any dev
+   container:
 
    ```fish
    cd ~
    for p in infra-dev or3-dev destiny-director dossier
        sudo docker compose -p $p down
    end
-   cd ~/infra/dev; and make dev
    ```
 
-   No `-v`: the volumes are what moves. From `~`, because in `dev/` `docker compose` would
-   read the new `compose.yaml`. A project with nothing left in it is a no-op. `make up`
-   refuses, naming the command, if any old container is still there. It starts the hub, its
-   tunnel, `infra-dev` and `or3-dev` (`COMPOSE_PROFILES`), each cloning its repo on first
-   start; `dd-dev` and `ds-dev` stay stopped, as they were.
+   No `-v`: the volumes are what moves. From `~`, because in `dev/` `docker compose` would read
+   the new `compose.yaml`. A project with nothing left in it is a no-op. Then the same play
+   again: the build is cached, the plan lists every container it would create, it asks
+   `[y/N]`, and on `y` it starts the hub, its tunnel, infra-dev and or3-dev
+   (`COMPOSE_PROFILES`), waits for them, compares container ids, and probes that the hub
+   reaches each one. dd-dev and ds-dev stay stopped, as they were. `make login C=<c>` on zero
+   afterwards walks any login a container still lacks.
 6. **dd's `.env`, into its env volume** — the first time dd-dev is wanted:
 
    ```fish

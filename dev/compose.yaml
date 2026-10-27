@@ -17,6 +17,11 @@
 # start; the profile is what keeps one from starting.
 name: dev
 
+# THE BASE IMAGE TAG, stated once (gsrpi-dev-base, built from Dockerfile.base). Every build
+# below takes it as BASE_TAG; dev/Makefile and .github/workflows/dev-base.yml read this line,
+# so keep its shape: `x-base-tag: &base-tag <tag>`. Bumping it is what publishes a new base.
+x-base-tag: &base-tag 2026.10.26
+
 # EACH CONTAINER'S REPO, stated once. Its service clones it (DEV_REPO), and the hub mints that
 # container's GitHub token for it and nothing else (HUB_REPO_*, below) — one anchor each, so the
 # two cannot name different repos.
@@ -73,8 +78,8 @@ services:
     build:
       context: hub
       args:
-        USER_UID: ${HOST_UID:?run make, which passes the checkout owner's uid}
-        USER_GID: ${HOST_GID:?run make, which passes the checkout owner's gid}
+        USER_UID: ${HOST_UID:?set HOST_UID in dev/.env — the checkout owner's uid; the dev host play writes it}
+        USER_GID: ${HOST_GID:?set HOST_GID in dev/.env — the checkout owner's gid; the dev host play writes it}
     image: dev-hub
     container_name: dev-hub
     # `dev` is what the menu's home is headed with, and what `ssh dev` names.
@@ -142,7 +147,7 @@ services:
     # As the checkout's owner, not the image's 65532: the credentials are written by the
     # dev-container edge play, which leaves them owned by gavin at 0600, and a file the
     # connector cannot read kills it on start. cloudflared needs no home and no shell.
-    user: "${HOST_UID:?run make}:${HOST_GID:?run make}"
+    user: "${HOST_UID:?set HOST_UID in dev/.env}:${HOST_GID:?set HOST_GID in dev/.env}"
     profiles: [tunnel]
     # THE PROFILE IS THE SWITCH, not the id: `tunnel` in COMPOSE_PROFILES once
     # server-create-dev-container.yml -e container=dev has made the tunnel. `:-`, not `:?`,
@@ -174,9 +179,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      # The tag is the Makefile's BASE_TAG, the single source; this is its fallback.
       args:
-        BASE_TAG: ${BASE_TAG:-2026.10.26}
+        BASE_TAG: *base-tag
     image: infra-dev
     container_name: infra-dev
     hostname: infra-dev   # Claude Code shows this as the machine title
@@ -250,7 +254,7 @@ services:
       ssh:
         - default=${OR3_SECRETS:?set OR3_SECRETS in dev/.env}/id_ed25519_or3_deploy
       args:
-        BASE_TAG: ${BASE_TAG:-2026.10.26}
+        BASE_TAG: *base-tag
     image: or3-dev
     container_name: or3-dev
     hostname: or3-dev
@@ -293,7 +297,7 @@ services:
       context: https://github.com/gsfernandes81/destiny-director.git#main
       dockerfile: Dockerfile.dev
       args:
-        BASE_TAG: ${BASE_TAG:-2026.10.26}
+        BASE_TAG: *base-tag
     image: dd-dev
     container_name: dd-dev
     hostname: dd-dev
@@ -374,7 +378,7 @@ services:
       context: https://github.com/gsfernandes81/dossier.git#main
       dockerfile: Dockerfile.dev
       args:
-        BASE_TAG: ${BASE_TAG:-2026.10.26}
+        BASE_TAG: *base-tag
     image: ds-dev
     container_name: ds-dev
     hostname: ds-dev

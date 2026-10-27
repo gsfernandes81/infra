@@ -1,0 +1,57 @@
+---
+# dev's checks after a redeploy, included by playbooks/_deploy-compose-one.yml once every
+# container is up: the hub is healthy, and it reaches every dev container that is running with
+# its own key — the one path the menu and the offloader depend on. A container whose profile is
+# off is not running and not asked about.
+
+- name: Wait for the hub to report healthy
+  ansible.builtin.command:
+    argv: [docker, inspect, -f, "{{ '{{' }}.State.Health.Status{{ '}}' }}", dev-hub]
+  register: dev_p_hub
+  until: dev_p_hub.stdout | default('') == 'healthy'
+  retries: 30
+  delay: 5
+  changed_when: false
+  failed_when: false
+  become: true
+  delegate_to: "{{ dep.host }}"
+
+- name: Check the hub is healthy
+  ansible.builtin.assert:
+    that: dev_p_hub.stdout | default('') == 'healthy'
+    fail_msg: >-
+      dev-hub reads {{ dev_p_hub.stdout | default('nothing') }}. `make status C=hub` in
+      {{ dep_dir }} on {{ dep.host }} says which of its parts is not done.
+    success_msg: "dev-hub is healthy"
+
+- name: Read the running dev containers
+  ansible.builtin.command:
+    argv: [docker, ps, --filter, label=com.docker.compose.project=dev, --format, "{{ '{{' }}.Names{{ '}}' }}"]
+  register: dev_p_running
+  changed_when: false
+  become: true
+  delegate_to: "{{ dep.host }}"
+
+- name: Probe the hub's ssh into each running dev container
+  ansible.builtin.command:
+    argv: [docker, exec, dev-hub, ssh, -o, BatchMode=yes, -o, ConnectTimeout=10, "{{ item }}", "true"]
+  loop: "{{ dev_p_running.stdout_lines | reject('in', ['dev-hub', 'dev-cloudflared', 'dd-postgres']) | list }}"
+  register: dev_p_ssh
+  # The entrypoint clones on a first start before sshd comes up, so give it a little while.
+  until: dev_p_ssh.rc == 0
+  retries: 12
+  delay: 10
+  changed_when: false
+  failed_when: false
+  become: true
+  delegate_to: "{{ dep.host }}"
+
+- name: Check the hub reaches each of them
+  ansible.builtin.assert:
+    that: dev_p_ssh.results | rejectattr('rc', 'eq', 0) | list | length == 0
+    fail_msg: >-
+      The hub cannot reach {{ dev_p_ssh.results | rejectattr('rc', 'eq', 0) | map(attribute='item') | join(', ') }}
+      with its key. `make boot-log C=<name>` in {{ dep_dir }} on {{ dep.host }}: the line about
+      the hub's key says whether it was authorised.
+    success_msg: >-
+      the hub reaches {{ dev_p_ssh.results | map(attribute='item') | join(', ') or 'no running container' }}

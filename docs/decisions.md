@@ -1282,6 +1282,17 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   its own. **dd-postgres is in the pool too** — it is dev work's memory. **infra-dev's own
   limit rises from 1024m to 2560m**, or3-dev's figure (owner: "quite restrictive for work");
   the pool, not each container, is what keeps the total off Immich.
+- **The dev project is a deployment of server-deploy-compose.yml** (owner, 2026-10-27, on the
+  design review: `make up` could recreate every container, and every claude in them, with no
+  preview). `deployments/dev` is a link to `dev/` and `hosts/zero/dev` places it, so it gets
+  that play's dry-run plan, its y/N, its before/after container-id comparison and its hooks: a
+  preflight that builds every image before anything is touched — the cutover's riskiest step,
+  or3's private build, fails with the old layout still running — and then refuses while old
+  projects hold the names; a probe that the hub reaches each container. This reverses "the
+  lifecycle is dev/Makefile's" for the guarded path; `make up` stays as the unguarded break
+  glass. For compose to run without make, the base tag moved into compose.yaml
+  (`x-base-tag`) and the checkout owner's uid/gid into `.env`. The smoke test checks that
+  changing one container's settings recreates only that container, the hub included.
 - **A smoke test brings the project up in CI** (owner, 2026-10-27), because most of what
   could break at the cutover — mounts, keys, the door, the token path — was untested anywhere
   but on zero. GitHub's runner, not zero: infra is public, so its minutes are free, and a

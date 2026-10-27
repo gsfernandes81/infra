@@ -6,7 +6,7 @@ name: dev-base
 # which is the single source everywhere else too.
 #
 # IT RUNS ITSELF NOW, since 2026-09-21. A push to main that touches dev/ starts this,
-# and what happens next is decided by one question: **is the BASE_TAG in dev/Makefile
+# and what happens next is decided by one question: **is the base tag in dev/compose.yaml (its `x-base-tag` line)
 # already published?** A pinned tag is a contract that the same tag is the same bytes,
 # so the answer decides between three outcomes and there is no fourth:
 #
@@ -131,11 +131,11 @@ jobs:
 
       # The Makefile is the tag's single source everywhere else, so it is here too —
       # a tag typed into a dispatch box can typo; this one is reviewed in a diff.
-      - name: Read BASE_TAG from dev/Makefile
+      - name: Read the base tag from dev/compose.yaml
         id: tag
         run: |
-          tag=$(sed -n 's/^BASE_TAG := //p' dev/Makefile)
-          [ -n "$tag" ] || { echo "no BASE_TAG in dev/Makefile" >&2; exit 1; }
+          tag=$(sed -n 's/^x-base-tag: &base-tag //p' dev/compose.yaml)
+          [ -n "$tag" ] || { echo "no x-base-tag line in dev/compose.yaml" >&2; exit 1; }
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Log in to ghcr
@@ -262,7 +262,7 @@ jobs:
               echo "the same tag is the same bytes — dd-dev, ds-dev and or3-dev pin it."
               echo "So this push leaves \`main\` describing an image that does not exist."
               echo
-              echo "Bump \`BASE_TAG\` in \`dev/Makefile\` and push that; this builds and"
+              echo "Bump \`x-base-tag\` in \`dev/compose.yaml\` and push that; this builds and"
               echo "publishes the new tag on its own. Move each child's \`ARG BASE_TAG\`"
               echo "when that repo is ready."
               echo
@@ -270,7 +270,7 @@ jobs:
               echo "tag left alone, nothing needs doing here — the image is still correct."
               echo "Re-running this will fail the same way; that is the check working."
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::$IMAGE:$TAG is published and the base changed — bump BASE_TAG in dev/Makefile"
+            echo "::error::$IMAGE:$TAG is published and the base changed — bump x-base-tag in dev/compose.yaml"
             exit 1
           fi
 

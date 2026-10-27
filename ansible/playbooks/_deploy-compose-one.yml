@@ -19,7 +19,10 @@
   ansible.builtin.import_tasks: _sync-host-checkout.yml
   vars:
     sync_host: "{{ dep.host }}"
-    sync_paths: ["deployments/{{ dep.name }}/"]
+    # The deployment directory's REAL path: `dev` is a link to the repo's dev/, where the dev
+    # containers' project lives, and a pathspec through a link checks only the link itself.
+    sync_paths: >-
+      {{ [((control_checkout ~ '/deployments/' ~ dep.name) | realpath | relpath(control_checkout)) ~ '/'] }}
     anchor_head: "{{ deploy_ctl_head }}"
 
 # ── what must be true first ──────────────────────────────────────────────────

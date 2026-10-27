@@ -13,7 +13,7 @@
 #     dev/compose.yaml runs the sidecar as gavin so it can read that);
 #   - authorized_keys in it, with this control node's key: the clients allowed to `ssh dev`.
 #     Another client's key is server-add-authorized-keys.yml's job;
-#   - HUB_SECRETS and HUB_TUNNEL_ID in dev/.env, by line, starting one from .env.example if
+#   - HOST_UID and HOST_GID (the checkout's owner), HUB_SECRETS and HUB_TUNNEL_ID in dev/.env, by line, starting one from .env.example if
 #     there is none. The tunnel id beside the credentials it came from, in the same run, so
 #     the two cannot name different tunnels.
 #
@@ -69,6 +69,28 @@
         remote_src: true
         mode: "0600"
         force: false
+
+    - name: Read who owns the checkout's dev/ directory
+      ansible.builtin.stat:
+        path: "{{ infra_src }}/dev"
+      register: dev_dir_owner
+      check_mode: false
+
+    # The uid every image's `dev` user is built at, so files shared with the host read as
+    # gavin's. The Makefile reads the same owner with stat; these two lines are what the deploy
+    # play's compose runs with, since it does not go through make.
+    - name: Write HOST_UID and HOST_GID in dev/.env
+      ansible.builtin.lineinfile:
+        path: "{{ infra_src }}/dev/.env"
+        regexp: "^{{ item.key }}="
+        line: "{{ item.key }}={{ item.value }}"
+        mode: "0600"
+      loop:
+        - { key: HOST_UID, value: "{{ dev_dir_owner.stat.uid }}" }
+        - { key: HOST_GID, value: "{{ dev_dir_owner.stat.gid }}" }
+      loop_control:
+        label: "{{ item.key }}"
+      when: not ansible_check_mode
 
     - name: Write HUB_SECRETS in dev/.env
       ansible.builtin.lineinfile:

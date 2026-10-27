@@ -58,21 +58,22 @@ HOST_GID := $(shell stat -c '%g' $(CURDIR))
 # (.github/workflows/dev-smoke.yml puts an unreleased claude-sessions into the hub's build).
 # Empty on zero, always.
 COMPOSE_OVERRIDE ?=
-# `=`, NOT `:=`: BASE_TAG is set further down, and an immediate expansion here passed it EMPTY
-# — every `make up` built at compose.yaml's fallback, which only matched by being kept in step
-# by hand (found 2026-10-27; true on main since the tag moved here).
-COMPOSE = $(SUDO) env HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) BASE_TAG=$(BASE_TAG) \
+# HOST_UID and HOST_GID are also lines in .env (the dev host play writes them), so the deploy
+# play, which runs compose without this Makefile, builds at the same uid; passing them here
+# as well means a hand-made .env cannot disagree with the checkout.
+COMPOSE = $(SUDO) env HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) \
 	docker compose --project-directory $(CURDIR) -f $(CURDIR)/compose.yaml \
 	$(if $(COMPOSE_OVERRIDE),-f $(COMPOSE_OVERRIDE))
 DOCKER  := $(SUDO) docker
 
-# The base image tag (2d). Bump it HERE when Dockerfile.base changes, then move the
-# ARG BASE_TAG default in each repo's child Dockerfile as that repo is ready — children
-# pin a tag, never latest, so a base rebuild cannot change a container behind its
-# repo's back. THIS is the single source: COMPOSE passes it through the environment,
-# compose.yaml forwards it as a build arg, the defaults in compose.yaml and
-# dev/Dockerfile are fallbacks that only matter outside `make`, and
-# .github/workflows/dev-base.yml reads this line to decide what to publish.
+# The base image tag (2d). Its ONE source is the `x-base-tag` line at the top of
+# compose.yaml (since 2026-10-27, when the deploy play started running compose without
+# make): every build there takes it as BASE_TAG, this reads it for `make base`, and
+# .github/workflows/dev-base.yml reads the same line to decide what to publish. Bump it there
+# when Dockerfile.base changes. dev/Dockerfile's ARG default is a fallback for a build outside
+# compose only. (Before, it was set here and passed through the environment, and an
+# immediate `:=` expansion above it passed it EMPTY — every build fell back to compose's
+# default, which matched only by being kept in step by hand.)
 #
 # THE BUMP IS WHAT PUBLISHES. Since 2026-09-21 a push to main that touches dev/ runs
 # that workflow: a new tag gets built and pushed on its own, and a base change WITHOUT a
@@ -80,11 +81,12 @@ DOCKER  := $(SUDO) docker
 # is bump, push, wait (about five minutes — see dev/README.md, where that number is
 # measured rather than guessed), then `make up`. Or `make base` below, which builds the
 # same image locally and waits for nobody.
-BASE_TAG := 2026.10.26
+BASE_TAG := $(shell sed -n 's/^x-base-tag: &base-tag //p' $(CURDIR)/compose.yaml)
 
 .PHONY: help dev base up restart stop down down-volumes status verify collections logs \
 	boot-log tunnel-log idle offload-log sessions login claude claude-update shell fleet \
-	_require-env _require-secrets _require-uid _require-own-names _require-volumes volumes
+	_require-env _require-secrets _require-uid _require-own-names _require-volumes volumes \
+	check check-names build
 
 help:
 	@awk '/^#/ { sub(/^# ?/, ""); print; next } { exit }' $(MAKEFILE_LIST)
@@ -197,6 +199,20 @@ base: _require-uid
 # No `base` dependency: the FROM pulls from ghcr when the tag is absent locally, so
 # the cross-repo build order 2d started with is gone — that was the point of the
 # registry. `make base` above exists for the days the registry does not.
+# The deploy play's preflight (ansible/deploy-hooks/dev/preflight.yml) runs these three, in
+# this order, so a failure in any build — or3's private fetch is the likeliest — stops the
+# run while whatever was there before is still running, and the old projects are refused only
+# AFTER the build has been proved. `make up` is the same thing without the plan or the y/N.
+check: _require-env _require-uid _require-secrets _require-volumes
+	@echo "dev: .env, secrets and external volumes are in place"
+
+check-names: _require-own-names
+	@echo "dev: no other compose project holds a dev container's name"
+
+# Builds what the enabled profiles name (or S=), and touches no container.
+build: _require-env _require-uid
+	$(COMPOSE) build $(S)
+
 up: _require-env _require-uid _require-secrets _require-own-names _require-volumes
 	$(COMPOSE) up -d --build $(S)
 	@printf '\n'
