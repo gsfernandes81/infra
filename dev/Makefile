@@ -133,7 +133,7 @@ volumes:
 # its login volumes are this project's external ones.
 _require-own-names:
 	@for c in infra-dev or3-dev dd-dev dd-postgres ds-dev dev-hub dev-cloudflared; do \
-	  p=$$($(DOCKER) inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' $$c 2>/dev/null) || continue; \
+	  p=$$($(DOCKER) inspect --type container -f '{{ index .Config.Labels "com.docker.compose.project" }}' $$c 2>/dev/null) || continue; \
 	  [ "$$p" = dev ] && continue; \
 	  echo "container $$c belongs to compose project '$${p:-none}', not dev. Stop it there first:" >&2; \
 	  echo "  cd ~ && sudo docker compose -p $$p down   # from ~, not here: this dir's compose.yaml is the new one. NOT -v" >&2; \

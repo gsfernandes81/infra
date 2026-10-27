@@ -395,7 +395,7 @@ jobs:
             echo "| container | memory.current | anon | file (cache) | docker stats |"
             echo "|---|---|---|---|---|"
             for c in dev-hub dev-cloudflared infra-dev dd-dev dd-postgres; do
-              docker inspect "$c" >/dev/null 2>&1 || continue
+              docker inspect --type container "$c" >/dev/null 2>&1 || continue
               # cgroup v2 names first (the runner, and zero); v1's for a host that still has it.
               read -r cur anon file <<EOF2
           $(docker exec "$c" sh -c 'd=/sys/fs/cgroup; if [ -f $d/memory.current ]; then
