@@ -1270,6 +1270,15 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   **Off by default**, with every container's own gh login and deploy key as before: the App is
   the owner's to make (dev/README.md). Built in Python's standard library plus `openssl`, in
   infra's hub image and not in claude-sessions, whose zero-dependency build has no TLS.
+- **The hub's App is the only GitHub credential in any dev container** (owner, 2026-10-27,
+  on the design review: three paths — deploy key with an https-to-ssh rewrite, a gh login,
+  the token — where one does the job). Deploy keys, their generation in the host play, the
+  `gh repo deploy-key add` step, the rewrite and the gh/ssh clone branches are gone, about 300
+  lines; every origin is https. The cost, accepted: the App is made before the cutover, and a
+  hub down for over an hour stops pushes until it is back. or3's deploy key stays, for
+  BuildKit's fetch of its private repo only. infra-dev's host play had nothing left but a
+  directory, so it is one play with the hub's (`_dev-host.yml`), and the dev-container play
+  takes only `dev` and `or3-dev` (via the hub) — no other container has a tunnel to make.
 - **The pool reclaims from 2048M (memory.high) before its 2560M kill line** (owner,
   2026-10-27, on the design review's point that cgroup memory limits do not limit IO): the
   soft limit makes idle sessions give memory back early and gradually, into zram first, so the

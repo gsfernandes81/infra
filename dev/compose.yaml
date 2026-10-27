@@ -96,11 +96,11 @@ services:
       CLAUDE_SESSIONS_HOSTS: ${HUB_HOSTS:-}
       CLAUDE_SESSIONS_REMOTE: /opt/claude-sessions/bin/claude-sessions
       HUB_OFFLOAD: ${HUB_OFFLOAD:-1}
-      # THE TOKEN BROKER (hub/github-tokens). Empty app id is OFF — a setting, not a mistake,
-      # so `:-` — and every container keeps its own gh login and deploy key. The App's key is
-      # github-app.pem in HUB_SECRETS. What each token may do is the list below, never more
-      # than the App was granted; which repo, the anchors at the top of this file.
-      HUB_GITHUB_APP_ID: ${HUB_GITHUB_APP_ID:-}
+      # THE TOKEN BROKER (hub/github-tokens), the containers' ONLY GitHub credential since
+      # 2026-10-27 — required. The App's key is github-app.pem in HUB_SECRETS. What each token
+      # may do is the list below, never more than the App was granted; which repo, the anchors
+      # at the top of this file.
+      HUB_GITHUB_APP_ID: ${HUB_GITHUB_APP_ID:?set HUB_GITHUB_APP_ID in dev/.env — the hub's GitHub App (dev/README.md)}
       HUB_GITHUB_KEY: /run/hub-secrets/github-app.pem
       HUB_GITHUB_PERMISSIONS: ${HUB_GITHUB_PERMISSIONS:-contents=write,pull_requests=write,issues=write,workflows=write,actions=read,checks=read,statuses=read}
       HUB_GITHUB_TOKENS: /home/dev/tokens

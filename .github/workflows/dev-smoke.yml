@@ -87,6 +87,10 @@ jobs:
           mkdir -p "$s/hub" "$s/infra"
           chmod 700 "$s/hub" "$s/infra"
           ssh-keygen -q -t ed25519 -N '' -C smoke-client -f "$s/client"
+          # The App is required, so a throwaway key stands in for it: the broker signs with it
+          # and GitHub refuses, which the log says. infra-dev's token is written by hand below.
+          openssl genrsa -out "$s/hub/github-app.pem" 2048 2>/dev/null
+          chmod 600 "$s/hub/github-app.pem"
           cp "$s/client.pub" "$s/hub/authorized_keys"
           chmod 600 "$s/hub/authorized_keys"
           sed -e "s#^HUB_SECRETS=.*#HUB_SECRETS=$s/hub#" \
@@ -94,6 +98,7 @@ jobs:
               -e 's#^COMPOSE_PROFILES=.*#COMPOSE_PROFILES=#' \
               -e 's#^HUB_HOSTS=.*#HUB_HOSTS=infra-dev#' \
               -e 's#^HUB_TUNNEL_ID=.*#HUB_TUNNEL_ID=none#' \
+              -e 's#^HUB_GITHUB_APP_ID=.*#HUB_GITHUB_APP_ID=1#' \
               -e "s#^HOST_UID=.*#HOST_UID=$(id -u)#" \
               -e "s#^HOST_GID=.*#HOST_GID=$(id -g)#" \
               dev/.env.example > dev/.env

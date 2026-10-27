@@ -37,7 +37,8 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 | rotate one dev container's service token on this client, or add it once its tunnel exists | `client-home-ssh-config.yml -e container=or3-dev -e replace_token=true` | the same |
 | let a new phone or laptop into the dev containers | `server-add-authorized-keys.yml -e client_pubkey_file=~/laptop.pub` | a route to `zero` |
 | gate one Pi's ssh hostname behind Access, admitting each client's fleet token, proved from here and undone if the proof fails. **One host per run, `one` first, `zero` last** | `server-create-fleet-ssh-access.yml -e host=one` · `-e remove=true` to undo · no `-K` | the API token, and this client set up by the play above |
-| create a dev container: its tunnel, DNS, Access, and (for `infra-dev`) its host side | `server-create-dev-container.yml` · `-e container=or3-dev` for another | the [API token](#the-cloudflare-api-token) |
+| create the dev project's tunnel, DNS, Access and host side (the hub, `ssh dev`), or put or3-dev's hostname on that tunnel | `server-create-dev-container.yml` · `-e container=or3-dev -e via_hub=true` | the [API token](#the-cloudflare-api-token) |
+| bring the dev containers up, or change them: build, plan, y/N, compare ids, probe | `server-deploy-compose.yml -e deployment=dev -K` | sudo |
 | see what runs where, read-only, into `docs/fleet-inventory.md` — a full run that changed it commits it and asks before pushing | `server-generate-fleet-inventory.yml -K` · `-e push=true` / `push=false` / `commit=false` | sudo, and this checkout exactly at `origin/main` |
 | install the packages each Pi should have | `server-install-packages.yml -K` · `-l <host>` | sudo |
 | install the tracked `/etc` files, without restarting anything | `server-install-system-files.yml -K` · `-l <host>` · `-e only=<file>` | sudo |
@@ -89,7 +90,7 @@ The halves, for reading rather than running:
 | `_dev-container-tunnel.yml` | the **edge** side — tunnel, DNS, Access application and policy |
 | `_cf-tunnel.yml` | tasks, shared by the two plays that give something its own tunnel: zone and account, the tunnel with its dead-tunnel assert, the CNAME. **No Access** — each caller adds its own or none |
 | `_cf-access-app.yml` | tasks: one Access application and its one policy, read back after writing — imported once per application by `server-create-deployment-tunnel.yml` |
-| `_dev-container-host.yml` | the **host** side of `infra-dev` on zero — secrets dir, deploy key, authorized_keys, `dev/.env` |
+| `_dev-host.yml` | the **host** side of the dev project on zero — the hub's and infra-dev's secrets dirs, the hub's authorized_keys, `dev/.env`'s lines |
 | `_assert-inventory.yml` | imported above every play that targets `control` or `fleet`, so a run with no inventory fails instead of exiting 0 |
 | `_cf-api-token.yml` | tasks, imported by every play that talks to Cloudflare: reads the API token file, refuses it on the command line, prints the minting steps when it is missing, verifies it |
 
@@ -97,9 +98,10 @@ The halves, for reading rather than running:
 Until 2026-10-04 they were three separately-run plays (the client half is still separate,
 because it runs on each client), defended on the grounds that each needed a different
 credential. Neither server half needs sudo, so the only credential the combined play asks
-for is the API token — from a file now, see below — and the owner wanted one command. The
-host half runs for `infra-dev` only, because it writes `dev/.env` in this checkout; the
-other containers' host side lives in their own repos, and the play says so.
+for is the API token — from a file now, see below — and the owner wanted one command. It
+takes two names only, since 2026-10-27: `dev`, the hub, which has the one tunnel and the host
+half, and `or3-dev` with `via_hub=true`, whose hostname the hub's tunnel serves for the phone's
+vessel link. Every other dev container is reached through the hub and needs nothing here.
 
 **`client-home-ssh-config.yml` is also the registry** of which dev containers exist and
 which repo each lives in. No ports: since 2026-10-04 nothing is published on the host, and
@@ -225,28 +227,16 @@ plays import `playbooks/_assert-inventory.yml` above their own play; it matches
 `localhost` (which Ansible provides even with no inventory) and fails, loudly, naming the
 working directory as the usual cause.
 
-**None of them starts anything, and there is no flag that makes them.** `dev/Makefile` is
-the container's lifecycle interface and stays the only one — this repo's own split from
-`../CLAUDE.md`: *check-system-drift reports and never writes; install-system-file writes
-and never restarts.*
-
-The principle is not the whole reason. `community.docker.docker_compose_v2` is installed
-and an `up` task here would work, but **the Makefile does not merely run `docker compose
-up`**: it passes `HOST_UID`/`HOST_GID` as build args read from the *owner of the checkout*
-with `stat -c %u`, not from `id -u`, because under sudo `id -u` is 0 and a dev user built
-at uid 0 writes root-owned files into the bind-mounted repo. It refuses to build at 0 at
-all. A second copy of that guard is a guard that can be subtly wrong, and the way it would
-be wrong is by corrupting ownership in a working tree.
-
-So there is one interface, and the control node reaches it in one line instead of being
-told to go somewhere else:
+**None of them starts anything; the deploy play does.** Since 2026-10-27 the dev project is a
+deployment of `server-deploy-compose.yml` (`deployments/dev` links to `dev/`), so it is brought
+up and changed the way every deployment is: a preflight that runs `dev/Makefile`'s own guards
+(the uid guard among them — the play does not copy it, it calls it) and builds every image,
+then a dry-run plan, a `[y/N]`, `up`, a container-id comparison and a probe. `make up` on zero
+stays as the unguarded break glass:
 
 ```sh
-ssh -t zero 'cd ~/infra/dev && make up'      # or dev, restart, status, verify, logs
+ssh -t zero 'cd ~/infra/dev && make up'      # or restart, status, verify, logs
 ```
-
-`-t` because `make` sudos and sudo wants a tty. `server-create-dev-container.yml` prints exactly this
-line, filled in, when it finishes.
 
 **The host half of `server-create-dev-container.yml` replaced `dev/seed-secrets.sh`, which is deleted.** Three of that
 script's five steps were fleet access, which went with the control-node question being

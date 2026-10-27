@@ -28,30 +28,31 @@ ask()  { # ask "question" -> 0 on yes; empty answer means yes
   [ -z "$reply" ] || [ "$reply" = y ] || [ "$reply" = Y ]
 }
 
-# ── 1/4  git over ssh ────────────────────────────────────────────────────────
-# Nothing to log into: the deploy key arrives through the read-only secrets mount and
-# the entrypoint copies it into ~/.ssh on every start. So this step only ever reports,
-# and when it reports a failure the fix is on zero, not in here.
-bold "1/4  git over ssh (the infra deploy key)"
-if ssh -o BatchMode=yes -T git@github.com 2>&1 | grep -q 'successfully authenticated'; then
-  ok "github.com accepts the deploy key — commits from here can be pushed."
-elif [ ! -f "$HOME/.ssh/id_ed25519_infra_deploy" ]; then
-  warn "No deploy key in this container."
-  info "It comes from \$INFRA_SECRETS/id_ed25519_infra_deploy on zero, which"
-  info "ansible/playbooks/server-create-dev-container.yml generates there. Add it and restart:"
-  info "    cd ~/infra/dev && make restart"
+# ── 1/3  GitHub: the hub's token ─────────────────────────────────────────────
+# Nothing to log into, since 2026-10-27: the hub mints this container an hourly token for its
+# own repo and nothing else, git and gh both use it, and there is no deploy key or gh login
+# beside it. So this step only reports — and NOT through `gh auth status`, which fails for an
+# installation token (it has no user) while every repo command works.
+bold "1/3  GitHub (the hub's token)"
+if [ -s /run/github/token ]; then
+  if git ls-remote "https://github.com/${DEV_REPO:-gsfernandes81/infra}.git" HEAD >/dev/null 2>&1; then
+    ok "the hub's token for ${DEV_REPO:-this repo} works — git and gh need nothing else."
+  else
+    warn "a token is here but GitHub refuses it for ${DEV_REPO:-this repo}."
+    info "Is the App installed on that repo? ~/.hub/github-tokens.log in the hub says what"
+    info "GitHub answered: on zero, cd ~/infra/dev && make logs C=hub"
+  fi
 else
-  warn "The deploy key is present but github.com does not accept it."
-  info "Add its public half to the repo as a deploy key. The playbook printed"
-  info "the command; it is also:"
-  info "    gh repo deploy-key add <pubkey-file> --repo gsfernandes81/infra --allow-write"
+  warn "no token from the hub yet."
+  info "The hub writes one at its start and every 30 min; make status C=hub on zero says why"
+  info "it has not (HUB_GITHUB_APP_ID, github-app.pem, or GitHub's own answer)."
 fi
 
-# ── 2/4  the fleet ───────────────────────────────────────────────────────────
+# ── 2/3  the fleet ───────────────────────────────────────────────────────────
 # Not a login either — but it is the thing this container exists for, so it is a step
 # rather than a footnote. Asked of each host in turn, because "ansible works" and
 # "all three answer" are different claims and the second is the useful one.
-bold "2/4  the fleet (zero, one, two)"
+bold "2/3  the fleet (zero, one, two)"
 if [ ! -f "$HOME/.ssh/id_ed25519_fleet" ]; then
   ok "not configured — the default. This container develops the repo; it does not"
   info "operate the fleet, and running playbooks against the three hosts stays on the"
@@ -72,31 +73,11 @@ else
   info "Then, for the real check: cd /workspace/ansible && ansible fleet -m ping"
 fi
 
-# ── 3/4  GitHub CLI ──────────────────────────────────────────────────────────
-# The deploy key above covers git. gh covers everything git does not — PRs, issues,
-# releases, `gh api` — and it is a login rather than a mounted key, which is why it is
-# a step here at all.
-bold "3/4  GitHub CLI (gh)"
-# THE HUB'S TOKEN FIRST, and not through `gh auth status`: an installation token has no user
-# behind it, so that command fails for it while every gh command a repo needs works.
-if [ -s /run/github/token ]; then
-  ok "the hub's token for ${DEV_REPO:-this repo}, renewed every 30 min — no login needed here"
-elif gh auth status >/dev/null 2>&1; then
-  ok "$(gh auth status 2>&1 | grep -m1 'Logged in' | sed 's/^[[:space:]]*//')"
-else
-  warn "Not logged in."
-  info "This container also holds an ssh key that reaches all three hosts, so give gh"
-  info "the narrowest token that does what you need — 'repo' alone is usually it, and"
-  info "a token pasted in is easier to scope than the browser flow's default set."
-  info "There is no browser in here: the web flow prints a code to paste elsewhere."
-  ask "Run 'gh auth login' now?" && gh auth login
-fi
-
-# ── 4/4  Claude Code ─────────────────────────────────────────────────────────
+# ── 3/3  Claude Code ─────────────────────────────────────────────────────────
 # The one that CANNOT be skipped by copying a file. or3-dev established that: the
 # phone's credentials.json was copied in and the container blanked it one second
 # later. An OAuth login belongs to the device that performed it.
-bold "4/4  Claude Code"
+bold "3/3  Claude Code"
 if claude auth status 2>/dev/null | grep -q '"loggedIn": *true'; then
   ok "logged in — \`claude\` will start without a login flow."
 else
@@ -108,9 +89,8 @@ else
 fi
 
 # ── the workspace ────────────────────────────────────────────────────────────
-# Since 2026-10-26 /workspace is this container's own volume, cloned at first start from
-# DEV_REPO. A start before the deploy key was registered, or before gh was logged in, leaves
-# it empty; with gh now logged in (above), this is where it gets filled.
+# /workspace is this container's own volume, cloned at first start from DEV_REPO with the
+# hub's token. A start before the token arrived leaves it empty; this is where it gets filled.
 bold "the workspace (/workspace)"
 if [ -d /workspace/.git ]; then
   ok "$(git -C /workspace remote get-url origin 2>/dev/null) at $(git -C /workspace log --oneline -1 2>/dev/null)"
@@ -119,7 +99,8 @@ elif [ -z "${DEV_REPO:-}" ]; then
 elif [ -n "$(ls -A /workspace 2>/dev/null)" ]; then
   warn "/workspace holds files but no checkout; not cloning ${DEV_REPO} over them."
 else
-  ask "Clone ${DEV_REPO} into /workspace now?" && gh repo clone "$DEV_REPO" /workspace
+  ask "Clone ${DEV_REPO} into /workspace now?" \
+    && git clone "https://github.com/${DEV_REPO}.git" /workspace
 fi
 
 bold "Done."

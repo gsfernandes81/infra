@@ -1,0 +1,138 @@
+---
+# NOT A PLAYBOOK YOU RUN — the underscore says so. server-create-dev-container.yml imports it
+# for `-e container=dev` (the default), after the edge half has made the hub's tunnel, DNS
+# record and Access application. This is the dev project's HOST side on `zero`: what has to
+# exist before the deploy play (server-deploy-compose.yml -e deployment=dev) can bring it up.
+# One play for the hub and infra-dev since 2026-10-27, when infra-dev's deploy key went (the
+# hub's GitHub App is every container's GitHub credential) and left it nothing but a directory.
+#
+#     cd ansible
+#     ansible-playbook playbooks/server-create-dev-container.yml --check --diff
+#     ansible-playbook playbooks/server-create-dev-container.yml
+#
+# What it makes, and nothing else:
+#   - ~/.dev-secrets at 0700, the hub's (the edge half wrote tunnel.json into it, gavin-owned,
+#     0600 — dev/compose.yaml runs the sidecar as gavin so it can read that), with
+#     authorized_keys holding this control node's key: the clients allowed to `ssh dev`.
+#     Another client's key is server-add-authorized-keys.yml's job. github-app.pem, the App's
+#     key, goes in here too, by hand — it is made in a browser (dev/README.md);
+#   - ~/.infra-dev-secrets at 0700, infra-dev's DEV_SECRETS_DIR — empty by default: its only
+#     candidate content is a fleet key, which the control-node question keeps out
+#     (docs/management-plane.md § "A control node inside the fleet");
+#   - in dev/.env, by line, starting one from .env.example if there is none: HOST_UID and
+#     HOST_GID (the checkout's owner), HUB_SECRETS, INFRA_SECRETS, and HUB_TUNNEL_ID — the
+#     id beside the credentials it came from, in the same run, so the two cannot name
+#     different tunnels.
+#
+# THE HUB'S OWN KEY IS NOT HERE, and must never be: the hub makes it at first start in its
+# own volume, and it is never on the host, the control node or any other container.
+#
+# IT SETS UP AND DOES NOT START. Starting is the deploy play's, which plans, asks y/N and
+# checks what it recreated (decisions.md, the dev-project-as-a-deployment row).
+
+- name: Create the dev project's secrets and dev/.env lines
+  hosts: "{{ dev_host | default('zero') }}"
+  gather_facts: true
+  become: false
+
+  vars:
+    # Absolute, from the host's own $HOME: a `~` in dev/.env breaks under sudo.
+    infra_src: "{{ src_dir | default(ansible_facts['env']['HOME'] ~ '/infra') }}"
+    hub_secrets: "{{ ansible_facts['env']['HOME'] ~ '/.dev-secrets' }}"
+    infra_secrets: "{{ ansible_facts['env']['HOME'] ~ '/.infra-dev-secrets' }}"
+    # The control node's own key by default; -e '{"client_pubkey": "ssh-ed25519 AAAA… you@x"}'
+    # for another, as JSON (k=v splits on the space). `if … is defined`, not default(): Jinja
+    # evaluates default()'s argument eagerly, so the lookup would fail without the file.
+    dev_client_pubkey: >-
+      {{ client_pubkey if client_pubkey is defined
+         else lookup('file', lookup('env', 'HOME') ~ '/.ssh/id_ed25519.pub') }}
+
+  tasks:
+    - name: Create the hub's and infra-dev's secrets directories, 0700
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0700"
+      loop: ["{{ hub_secrets }}", "{{ infra_secrets }}"]
+
+    - name: Install the client ssh key in the hub's authorized_keys
+      # ansible.posix.authorized_key: append, never rewrite — this file is the only door.
+      ansible.posix.authorized_key:
+        user: "{{ ansible_facts['user_id'] }}"
+        key: "{{ dev_client_pubkey }}"
+        path: "{{ hub_secrets }}/authorized_keys"
+        manage_dir: false
+        state: present
+
+    - name: Write the hub's authorized_keys mode as 0600
+      ansible.builtin.file:
+        path: "{{ hub_secrets }}/authorized_keys"
+        mode: "0600"
+        state: file
+      when: not ansible_check_mode
+
+    - name: "If no dev/.env: copy it from dev/.env.example"
+      # force: false — an existing .env serves every container in the project and is never
+      # replaced; the lines below are the only ones this play owns.
+      ansible.builtin.copy:
+        src: "{{ infra_src }}/dev/.env.example"
+        dest: "{{ infra_src }}/dev/.env"
+        remote_src: true
+        mode: "0600"
+        force: false
+
+    - name: Read who owns the checkout's dev/ directory
+      ansible.builtin.stat:
+        path: "{{ infra_src }}/dev"
+      register: dev_dir_owner
+      check_mode: false
+
+    # HOST_UID/HOST_GID: the uid every image's `dev` user is built at, so what it shares with
+    # the host reads as gavin's. The Makefile reads the same owner with stat, and its
+    # `_require-uid` refuses when these lines disagree with it.
+    - name: Write the dev project's lines in dev/.env
+      ansible.builtin.lineinfile:
+        path: "{{ infra_src }}/dev/.env"
+        regexp: "^{{ item.key }}="
+        line: "{{ item.key }}={{ item.value }}"
+        mode: "0600"
+      loop:
+        - { key: HOST_UID, value: "{{ dev_dir_owner.stat.uid }}" }
+        - { key: HOST_GID, value: "{{ dev_dir_owner.stat.gid }}" }
+        - { key: HUB_SECRETS, value: "{{ hub_secrets }}" }
+        - { key: INFRA_SECRETS, value: "{{ infra_secrets }}" }
+      loop_control:
+        label: "{{ item.key }}"
+      when: not ansible_check_mode
+
+    # The edge half's own fact, from this same run. Under --check a tunnel that does not
+    # exist yet has no id, and the line is not written — never a placeholder, which would
+    # read as configured.
+    - name: "If the tunnel exists: write HUB_TUNNEL_ID in dev/.env"
+      ansible.builtin.lineinfile:
+        path: "{{ infra_src }}/dev/.env"
+        regexp: '^HUB_TUNNEL_ID='
+        line: "HUB_TUNNEL_ID={{ cf_tunnel_id }}"
+        mode: "0600"
+      when:
+        - not ansible_check_mode
+        - cf_tunnel_id is defined
+        - cf_tunnel_id | length > 0
+
+    - name: Read whether the GitHub App key is in place
+      ansible.builtin.stat:
+        path: "{{ hub_secrets }}/github-app.pem"
+      register: app_key
+      check_mode: false
+
+    - name: Print the dev project's host side and the steps left
+      ansible.builtin.debug:
+        msg:
+          - "hub       {{ hub_secrets }} (0700): authorized_keys, tunnel.json, github-app.pem {{ 'present' if app_key.stat.exists else 'NOT YET' }}"
+          - "infra-dev {{ infra_secrets }} (0700)"
+          - "env       {{ infra_src }}/dev/.env: HOST_UID, HOST_GID, HUB_SECRETS, INFRA_SECRETS, HUB_TUNNEL_ID {{ cf_tunnel_id | default('(not yet — --check)', true) }}"
+          - ""
+          - "{{ 'The App key is missing: make the App and put its .pem at ' ~ hub_secrets ~ '/github-app.pem, 0600, and HUB_GITHUB_APP_ID in dev/.env (dev/README.md § GitHub tokens).' if not app_key.stat.exists else 'The App key is in place; HUB_GITHUB_APP_ID in dev/.env must be its id.' }}"
+          - "Then: ansible-playbook playbooks/server-deploy-compose.yml -e deployment=dev -K"
+          - "and on each client: ansible-playbook playbooks/client-home-ssh-config.yml -e container=dev"
+      changed_when: true

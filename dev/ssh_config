@@ -16,17 +16,9 @@
 # so this file is, in practice, the whole of the container's ~/.ssh/config. The prepend
 # is kept because it costs nothing and is the shape the answer would take.
 
-# ── GitHub ──────────────────────────────────────────────────────────────────
-# A deploy key on gsfernandes81/infra, generated on zero and never transmitted.
-# Read-write, so a commit made in here can be pushed. It reaches this one repo and
-# nothing else on GitHub — which is the point of it being a deploy key rather than
-# an account credential. `gh` is the account credential, and it is a separate,
-# optional login kept in a volume; see the README.
-Host github.com
-  HostName github.com
-  User git
-  IdentityFile ~/.ssh/id_ed25519_infra_deploy
-  IdentitiesOnly yes
+# ── GitHub: none ────────────────────────────────────────────────────────────
+# No github.com block since 2026-10-27: GitHub is reached over https with the hub's token
+# for this repo alone (dev/README.md § "GitHub tokens, one repo each"), never over ssh.
 
 # ── defaults — MUST stay last ───────────────────────────────────────────────
 # IdentitiesOnly stops ssh offering every key it owns to every server it meets. The

@@ -21,8 +21,8 @@ access token limited to that ONE repository and to HUB_GITHUB_PERMISSIONS, and w
                           pass, which the hub's healthcheck reads
 
 Environment (dev/compose.yaml sets each):
-    HUB_GITHUB_APP_ID       the App's id. Empty means OFF: `dirs` still runs, nothing is minted,
-                            and each container keeps its own gh login and deploy key.
+    HUB_GITHUB_APP_ID       the App's id; compose requires it. Empty (only outside compose,
+                            in tests) means nothing is minted.
     HUB_GITHUB_KEY          the App's private key, PEM        (/run/hub-secrets/github-app.pem)
     HUB_GITHUB_PERMISSIONS  name=level,... asked for on every token
     HUB_GITHUB_TOKENS       where the tokens go                (/home/dev/tokens)
@@ -160,11 +160,13 @@ def mint_all(env, now=None):
     app_id = env.get("HUB_GITHUB_APP_ID", "").strip()
     key = env.get("HUB_GITHUB_KEY", "/run/hub-secrets/github-app.pem")
     if not app_id:
-        say("off: HUB_GITHUB_APP_ID is empty — containers use their own gh login and deploy key")
+        say("off: HUB_GITHUB_APP_ID is empty — no container gets a GitHub token")
         return []
     if not os.path.isfile(key):
-        say(f"off: no App key at {key} — containers use their own gh login and deploy key")
-        return []
+        # The App is every container's only GitHub credential, so a missing key is a failure
+        # of every token, said in the log each pass, not a quiet "off".
+        say(f"FAILED: no App key at {key} — no container gets a token until it is there")
+        return sorted(table)
     api = env.get("HUB_GITHUB_API", "https://api.github.com")
     perms = permissions(env.get("HUB_GITHUB_PERMISSIONS", "contents=write"))
     jwt = app_jwt(app_id, key, int(now if now is not None else time.time()))

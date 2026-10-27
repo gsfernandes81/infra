@@ -1,85 +1,61 @@
 ---
-# CREATE A DEV CONTAINER'S TUNNEL AND HOST SIDE, in one run, from the control node.
+# CREATE THE DEV PROJECT'S TUNNEL AND HOST SIDE, in one run, from the control node.
 #
 #     cd ansible
-#     ansible-playbook playbooks/server-create-dev-container.yml --check          # prove
-#     ansible-playbook playbooks/server-create-dev-container.yml                  # infra-dev
-#     ansible-playbook playbooks/server-create-dev-container.yml -e container=dev      # the hub (`ssh dev`)
-#     ansible-playbook playbooks/server-create-dev-container.yml -e container=or3-dev  # another container
+#     ansible-playbook playbooks/server-create-dev-container.yml --check   # prove
+#     ansible-playbook playbooks/server-create-dev-container.yml           # the hub (`ssh dev`)
 #     ansible-playbook playbooks/server-create-dev-container.yml -e container=or3-dev -e via_hub=true
-#                     # or3-dev at move-in: its hostname re-pointed at the hub's tunnel, so the
-#                     # phone's or3-tunnel reaches it unchanged (dev/cloudflared.yml)
+#                     # or3-dev's hostname onto the hub's tunnel, at the cutover, so the phone's
+#                     # or3-tunnel reaches it unchanged (dev/cloudflared.yml)
 #
-# Then, in that order:
-#
-#     ssh -t zero 'cd ~/infra/dev && make up'          # start it (-t: make sudos)
-#     ansible-playbook playbooks/client-home-ssh-config.yml -e container=<alias>   # on EACH client
+# Then the deploy play starts it (server-deploy-compose.yml -e deployment=dev -K), and on EACH
+# client `client-home-ssh-config.yml -e container=dev` writes the `ssh dev` block.
 #
 # No -K: nothing here needs root. It needs the Cloudflare API token, read from
 # ~/.config/cloudflare/api-token on this machine; if that is missing it prints how to mint
 # one and stops — ansible/README.md § "The Cloudflare API token".
 #
+# TWO NAMES AND NO MORE, since 2026-10-27. `dev`, the hub, is the only dev container with a
+# tunnel of its own; `or3-dev` keeps a HOSTNAME, served by the hub's tunnel, for the phone's
+# reverse forward to the vessel. Every other dev container is reached through the hub and has
+# neither — so any other name is refused here, rather than minting a tunnel nothing serves.
+#
 # TWO HALVES, imported in the order that lets one run do it all:
-#
 #   1. _dev-container-tunnel.yml  the EDGE: tunnel, CNAME, and an Access application with
-#                                 NO policy — each client adds its own service token to
-#                                 it when client-home-ssh-config.yml runs there. Nothing is
-#                                 printed. Idempotent — re-run after a partial failure.
-#   2. the HOST half, by container:
-#        dev        _dev-hub-host.yml       the hub: its secrets dir, authorized_keys, and
-#                                           HUB_SECRETS + HUB_TUNNEL_ID in dev/.env
-#        infra-dev  _dev-container-host.yml secrets dir, deploy key, authorized_keys, and
-#                                           INFRA_SECRETS in dev/.env
-#        others     nothing yet — made by hand at move-in (dev/README.md), and since
-#                   2026-10-26 they need no tunnel: the hub's is the way in. Their old
-#                   per-container tunnels go once each has moved in.
+#                                 NO policy — each client adds its own service token to it
+#                                 when client-home-ssh-config.yml runs there. With
+#                                 via_hub=true it mints nothing and points the name at the
+#                                 hub's tunnel. Idempotent — re-run after a partial failure.
+#   2. _dev-host.yml              the HOST, for `dev` only: secrets directories,
+#                                 authorized_keys, and the dev project's dev/.env lines.
 #
-# WHY ONE PLAY NOW, when the README spent a paragraph defending three. Until 2026-10-04
-# the sequence was host half → make up → edge half → host half again with -e
-# tunnel_hostname, and the defence was credentials: sudo, an API token and an Access
-# service token, one per half. It was already half untrue — neither half here needs sudo —
-# and the owner asked for the task to be one command. The service token is still a
-# different half (client-home-ssh-config.yml, run on each client), and the API token is
-# still never on a command line. The decision is a row in docs/decisions.md.
-#
-# The edge half runs first so the host half can write what it learned into dev/.env in the
-# same run: the hub's tunnel id (HUB_TUNNEL_ID) beside the credentials it came from. Since
-# 2026-10-26 no dev container has a tunnel of its own, so there is no hostname to hand over;
-# the hub's is `dev.<dns_zone>`, derived on both sides (CLAUDE.md § Repo invariants).
-#
-# NO TASKS OF ITS OWN beyond one message: this file is composition. Everything it runs
-# belongs to the two halves.
+# The edge half runs first so the host half can write the tunnel id into dev/.env in the same
+# run, beside the credentials it came from.
 
 - name: Check the inventory is loaded
   ansible.builtin.import_playbook: _assert-inventory.yml
   vars:
     required_group: fleet
 
-- name: Create the container's tunnel, DNS and Access app
-  ansible.builtin.import_playbook: _dev-container-tunnel.yml
-
-- name: "If not infra-dev: print where the host side lives"
+- name: Check the dev container is dev or or3-dev
   hosts: localhost
   gather_facts: false
   tasks:
-    - name: "If not infra-dev: print the {{ container | default('infra-dev') }} next steps"
-      ansible.builtin.debug:
-        msg: >-
-          The host half (secrets dir, deploy key, authorized_keys, dev/.env) runs for
-          infra-dev and the hub only. {{ container | default('infra-dev') }} is reached
-          through the hub since 2026-10-26: its secrets dir and its paths in dev/.env are
-          made by hand at move-in (dev/README.md).
-          {{ 'Its hostname now names the hub tunnel: the ingress rule is dev/cloudflared.yml.'
-             if (via_hub | default(false) | bool) else '' }}
-      changed_when: true
-      when: (container | default('infra-dev')) not in ['infra-dev', 'dev']
+    - name: Check -e container names dev or or3-dev via the hub
+      ansible.builtin.assert:
+        that:
+          - (container | default('dev')) in ['dev', 'or3-dev']
+          - (container | default('dev')) == 'dev' or (via_hub | default(false) | bool)
+        fail_msg: >-
+          {{ container | default('dev') }}: only `dev` (the hub) has a tunnel, and `or3-dev`
+          a hostname on it (-e container=or3-dev -e via_hub=true). Every other dev container
+          is reached through the hub and needs nothing here — add it to dev/compose.yaml.
+        success_msg: "{{ container | default('dev') }}"
 
-- name: "dev only: create the hub's host side on zero"
-  ansible.builtin.import_playbook: _dev-hub-host.yml
-  when: (container | default('infra-dev')) == 'dev'
+- name: Create the container's tunnel, DNS and Access app
+  ansible.builtin.import_playbook: _dev-container-tunnel.yml
 
-- name: "infra-dev only: create the host side on zero"
-  ansible.builtin.import_playbook: _dev-container-host.yml
-  # `when` on an import applies to every task it brings in. The play still gathers facts
-  # on zero, which is cheap and harmless.
-  when: (container | default('infra-dev')) == 'infra-dev'
+- name: "dev only: create the dev project's host side on zero"
+  ansible.builtin.import_playbook: _dev-host.yml
+  # `when` on an import applies to every task it brings in.
+  when: (container | default('dev')) == 'dev'

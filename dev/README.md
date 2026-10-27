@@ -228,9 +228,11 @@ mockups 12 to 15, and binding as the rest of that file is:
 
 ## GitHub tokens, one repo each
 
-**The hub can hold the one GitHub credential, and hand each container a token for its own repo
-and nothing else** (owner, 2026-10-27). Off until `HUB_GITHUB_APP_ID` is set; until then every
-container keeps its own `gh` login and deploy key, exactly as before.
+**The hub holds the one GitHub credential, and hands each container a token for its own repo
+and nothing else** (owner, 2026-10-27). It is the ONLY way a container reaches GitHub: no
+deploy key, no `gh` login, no https-to-ssh rewrite, so the App is made before the cutover
+(step 0 there). or3's deploy key stays for one job only: lending BuildKit or3's private repo
+when its image is built on zero.
 
 How it works:
 
@@ -262,7 +264,7 @@ What changes for you:
   not have) while every repo command works; `make login` and the entrypoint check the token
   file instead, and `make status` prints `github: the hub's token for <repo>, until <time>`.
 
-**Turning it on, once** — the browser half is yours, everything else is in the repo:
+**Making the App, once, before the cutover** — the browser half is yours, everything else is in the repo:
 
 1. On GitHub, *Settings → Developer settings → GitHub Apps → New GitHub App*: any name and
    homepage; *Webhook* unticked; *Repository permissions* Contents, Pull requests, Issues and
@@ -272,8 +274,8 @@ What changes for you:
    account, *Only select repositories*: infra, or3, destiny-director, dossier.
 3. The key to zero, never into a repo: from the phone, `scp <the.pem> zero:.dev-secrets/github-app.pem`,
    then on zero `chmod 600 ~/.dev-secrets/github-app.pem` and delete the phone's copy.
-4. `HUB_GITHUB_APP_ID=<id>` in `dev/.env`, then `make up` (the hub is recreated) and
-   `make restart C=<c>` for each running container, so its git picks the helper up.
+4. `HUB_GITHUB_APP_ID=<id>` in `dev/.env` — compose requires it, and `make check` refuses a
+   missing `github-app.pem`.
 5. Proof, from `make shell C=infra-dev`: `git -C /workspace push --dry-run origin HEAD`
    succeeds — a push needs the token's write even on public infra, so this is the token at
    work — and `git ls-remote https://github.com/gsfernandes81/or3` is refused, because or3 is
@@ -361,9 +363,11 @@ reconnects by itself.
 
 **The steps.** Blocks are for fish, pasted inside the shell named.
 
-0. **Release and pin.** Merge claude-sessions to `main`; wait for `v0.5.0`; put its two
-   checksums (`SHA256SUMS`) into `hub/Dockerfile`; merge infra to `main`. Base `2026.10.26`
-   publishes from that push (about five minutes), or `make base` builds it locally.
+0. **Release and pin; make the App.** Merge claude-sessions to `main`; wait for `v0.5.0`; put
+   its two checksums (`SHA256SUMS`) into `hub/Dockerfile`; merge infra to `main`. Base
+   `2026.10.26` publishes from that push (about five minutes), or `make base` builds it
+   locally. Make the GitHub App (*GitHub tokens, one repo each*, steps 1–3): it is every
+   container's only way to GitHub from here on.
 1. **On zero (`ssh zero`): what would not carry over, for all four clones.** Read-only.
 
    ```fish
@@ -397,12 +401,12 @@ reconnects by itself.
 
    The old `.env` is backed up outside the directory at 600, never beside itself. A volume name
    that differs from `compose.yaml`'s is fixed there before `make up`.
-3. **From the control node: the hub, then infra-dev's host side.** Each starts the new
-   `dev/.env` from `.env.example` if there is none and writes its own lines.
+3. **From the control node: the dev project's tunnel and host side.** It starts the new
+   `dev/.env` from `.env.example` and writes its own lines (uid, secrets dirs, tunnel id).
+   Then put `HUB_GITHUB_APP_ID` in that `.env` by hand.
 
    ```fish
    cd ~/infra/ansible
-   ansible-playbook playbooks/server-create-dev-container.yml -e container=dev
    ansible-playbook playbooks/server-create-dev-container.yml
    ```
 

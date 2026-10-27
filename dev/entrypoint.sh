@@ -68,9 +68,10 @@ mkdir -p "$HOME/.ssh/cp"
 chmod 700 "$HOME/.ssh" "$HOME/.ssh/cp"
 
 # EVERY private key in the mount, rather than a list of names. The names are precisely
-# what differs per container — infra-dev has id_ed25519_infra_deploy and
-# id_ed25519_fleet, or3-dev has id_ed25519_or3_deploy and id_ed25519_or3ecr_m — and a
-# list baked here is a list the base has to know about its children.
+# what differs per container — infra-dev's would be id_ed25519_fleet if fleet access is ever
+# given, or3-dev has id_ed25519_or3ecr_m for the vessel — and a list baked here is a list the
+# base has to know about its children. None of them is a GitHub credential since 2026-10-27:
+# that is the hub's token.
 #
 # `.pub` halves are skipped: ssh does not need them, and a 600 on a public key reads as
 # a secret to whoever finds it later.
@@ -326,37 +327,26 @@ git config --global --add safe.directory /workspace 2>/dev/null || true
 git config --global user.name  "${GIT_USER_NAME:-Gavin Fernandes}"
 git config --global user.email "${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}"
 
-# A clone's `origin` is https when gh made it, and the only git credential in here may be the
-# deploy key copied out of the secrets mount above — an ssh credential. Rewrite the TRANSPORT
-# rather than the remote, in --global (/home/dev/.gitconfig, in no volume), so a gh clone's
-# pushes and the --ff-only pull below go over ssh with that key. A no-op for git@ URLs.
-#
-# Without this, the pull below has never once run on an https origin: it fails on "could not
-# read Username", and the message in its failure branch names neither cause.
-#
-# WITH A HUB TOKEN, THE OTHER WAY ROUND. When the hub's broker is on, /run/github/token holds
-# an hourly token for this container's repo only (dev/README.md § "GitHub tokens, one repo
-# each"): git keeps https and asks git-credential-hub, which reads that file on each call, and
-# gh is handed it by its wrapper. No rewrite then — it would send pushes back to the deploy
-# key. An ssh origin (git@) keeps using the key either way.
+# GITHUB IS THE HUB'S TOKEN, AND ONLY THAT (owner, 2026-10-27). /run/github/token holds an
+# hourly token for this container's repo alone (dev/README.md § "GitHub tokens, one repo
+# each"): git asks git-credential-hub for https://github.com, which reads that file on each
+# call, and gh is handed it by its wrapper. No deploy key, no gh login, no rewrite of https to
+# ssh — so every origin is https, and a token GitHub restricted to one repo is the only
+# GitHub credential in the container. Set unconditionally: with no token yet the helper
+# answers nothing, and git fails the way it would without it.
+git config --global credential.https://github.com.helper hub
 if [ -s /run/github/token ]; then
-    git config --global credential.https://github.com.helper hub
-    say "github: the hub's token for ${DEV_REPO:-this repo} — git over https, gh, renewed every 30 min"
+    say "github: the hub's token for ${DEV_REPO:-this repo} — git over https and gh, renewed every 30 min"
 else
-    git config --global url."git@github.com:".insteadOf "https://github.com/"
+    say "WARNING: no GitHub token from the hub yet — clone, pull and push wait for it (make status C=hub)"
 fi
 
 # ── the workspace: cloned once, pulled after ────────────────────────────────
-# SINCE 2026-10-26 /workspace IS THIS CONTAINER'S OWN, a named volume, not the host's clone
-# (dev/compose.yaml says why). An empty one is filled from DEV_REPO: with `gh repo clone` when
-# gh is logged in — the owner's choice — and otherwise over ssh with the deploy key from the
-# secrets mount, so a container's first start does not wait for `make login`. Bounded, like
-# everything ahead of sshd, and never fatal: a container with an empty workspace is one you
-# can ssh into and fix. A volume that already holds something that is not a checkout is left
-# alone and said so — it is somebody's work.
-#
-# With the insteadOf above, gh's https clone goes over ssh with the deploy key too, so the
-# two ways in differ only in what they need: gh a login, git nothing beyond the key.
+# /workspace IS THIS CONTAINER'S OWN, a named volume, never the host's clone (dev/compose.yaml
+# says why). An empty one is cloned from DEV_REPO over https with the hub's token. Bounded, like
+# everything ahead of sshd, and never fatal: a container with an empty workspace is one you can
+# ssh into and fix (`make login C=<c>` clones once the token is there). A volume that already
+# holds something that is not a checkout is left alone and said so — it is somebody's work.
 #
 # Then the pull: --ff-only, and never fatal, as it always was. ${PIPESTATUS[0]}, and not the
 # pipeline's own status — `if git … | sed …` tests SED, which is CLAUDE.md § Shell traps'
@@ -365,22 +355,12 @@ fi
 if [ ! -e /workspace/.git ] && [ -n "${DEV_REPO:-}" ]; then
     if [ -n "$(ls -A /workspace 2>/dev/null)" ]; then
         say "WARNING: /workspace holds files but no checkout — not cloning $DEV_REPO over them"
-    elif [ -s /run/github/token ]; then
+    else
         say "cloning $DEV_REPO into /workspace over https with the hub's token"
         timeout 300 git clone --quiet "https://github.com/$DEV_REPO.git" /workspace 2>&1 \
             | sed 's/^/[entrypoint] git: /'
         [ "${PIPESTATUS[0]}" = 0 ] || \
-            say "WARNING: the clone failed — the workspace is empty; make login clones it"
-    elif gh auth status >/dev/null 2>&1; then
-        say "cloning $DEV_REPO into /workspace with gh"
-        timeout 300 gh repo clone "$DEV_REPO" /workspace 2>&1 | sed 's/^/[entrypoint] gh: /'
-        [ "${PIPESTATUS[0]}" = 0 ] || say "WARNING: gh repo clone failed — make login clones it once gh works"
-    else
-        say "cloning $DEV_REPO into /workspace over ssh (gh is not logged in yet)"
-        timeout 300 git clone --quiet "git@github.com:$DEV_REPO.git" /workspace 2>&1 \
-            | sed 's/^/[entrypoint] git: /'
-        [ "${PIPESTATUS[0]}" = 0 ] || \
-            say "WARNING: the clone failed — the workspace is empty; make login clones it with gh"
+            say "WARNING: the clone failed — the workspace is empty; make login C=<c> clones it"
     fi
 elif [ -d /workspace/.git ]; then
     git -C /workspace pull --ff-only 2>&1 | sed 's/^/[entrypoint] git: /'

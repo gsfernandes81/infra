@@ -82,7 +82,7 @@
     # side of the same hostname from that one value, and the two must not be able to
     # disagree about the zone.
     cf_zone: "{{ zone | default(dns_zone) }}"
-    cf_name: "{{ container | default('infra-dev') }}"
+    cf_name: "{{ container | default('dev') }}"
     cf_hostname: "{{ hostname | default(cf_name ~ '.' ~ cf_zone) }}"
     # Ansible templates a task's arguments BEFORE deciding to skip it, and `uri` declares
     # no check-mode support — so under --check every write is skipped, but its URL and

@@ -76,8 +76,6 @@ status() {
     # tokens exists and reports logged out, so the file's presence proves nothing.
     printf 'auth      : %s\n' "$(d exec "$CONTAINER" claude auth status 2>/dev/null | grep -q '"loggedIn": *true' \
         && echo 'claude logged in' || echo 'claude NOT logged in — run: make login')"
-    printf 'gh        : %s\n' "$(d exec "$CONTAINER" gh auth status 2>/dev/null | grep -m1 'Logged in' | sed 's/^[[:space:]]*//' \
-        | grep . || echo 'NOT logged in — run: make login (git push works without it)')"
 
     # The two files that decide whether this container can reach the fleet at all.
     # Named separately because they fail differently: no ssh_config.fleet is "unknown
@@ -130,7 +128,7 @@ hub_line() {
 # The hub's token for this container, by what the broker wrote beside it (never the token).
 github_line() {
     d exec "$CONTAINER" sh -c '
-        if [ ! -s /run/github/token ]; then echo "no hub token — the broker is off; gh and the deploy key are this container'"'"'s own"
+        if [ ! -s /run/github/token ]; then echo "NO hub token — nothing here reaches GitHub; ~/.hub/github-tokens.log in the hub says why"
         else sed -n "s/.*\"repo\": \"\([^\"]*\)\".*\"expires_at\": \"\([^\"]*\)\".*/the hub'"'"'s token for \1, until \2/p" /run/github/meta.json; fi' 2>/dev/null \
         || echo 'could not ask the container'
 }

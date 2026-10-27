@@ -145,6 +145,14 @@ _require-uid:
 	  echo "refusing to build the container's dev user at uid 0: this checkout is" >&2; \
 	  echo "owned by root, so every file written from the container would be too." >&2; \
 	  echo "chown the clone to your own account first." >&2; exit 1; }
+	@[ ! -f $(CURDIR)/.env ] || { \
+	  for k in HOST_UID:$(HOST_UID) HOST_GID:$(HOST_GID); do \
+	    v=$$(grep -E "^$${k%%:*}=" $(CURDIR)/.env | cut -d= -f2-); \
+	    [ "$$v" = "$${k#*:}" ] || { \
+	      echo "dev/.env says $${k%%:*}=$$v, but this checkout is owned by $${k#*:}: the deploy" >&2; \
+	      echo "  play's compose reads that line and would build at the wrong uid. Fix it, or" >&2; \
+	      echo "  re-run server-create-dev-container.yml, which writes it from the checkout." >&2; exit 1; }; \
+	  done; }
 
 # Warns rather than refuses: a missing file costs the thing that uses it, and the
 # container is still worth having up without it. The mode check is not cosmetic — ssh
@@ -154,19 +162,14 @@ _require-secrets:
 	[ -n "$$hub" ] || { echo "HUB_SECRETS is not set in .env" >&2; exit 1; }; \
 	[ -s "$$hub/authorized_keys" ] || { \
 	  echo "WARNING — no $$hub/authorized_keys: the hub will start and NOTHING can ssh in." >&2; \
-	  echo "          ansible/playbooks/server-create-dev-container.yml -e container=dev writes it." >&2; }
+	  echo "          ansible/playbooks/server-create-dev-container.yml -e container=dev writes it." >&2; }; \
+	[ -s "$$hub/github-app.pem" ] || { \
+	  echo "no $$hub/github-app.pem: the hub's GitHub App key, every container's only way to" >&2; \
+	  echo "  GitHub. Make the App and put its key there (dev/README.md § GitHub tokens)." >&2; exit 1; }
 	@dir=$$(grep -E '^INFRA_SECRETS=' $(CURDIR)/.env | cut -d= -f2-); \
 	[ -n "$$dir" ] || { echo "INFRA_SECRETS is not set in .env" >&2; exit 1; }; \
 	[ -d "$$dir" ] || { echo "INFRA_SECRETS=$$dir does not exist. From a control node:" >&2; \
-	  echo "  cd ../ansible && ansible-playbook playbooks/server-create-dev-container.yml" >&2; exit 1; }; \
-	missing=; \
-	for f in authorized_keys id_ed25519_infra_deploy; do \
-	  [ -s "$$dir/$$f" ] || missing="$$missing $$f"; \
-	done; \
-	[ -z "$$missing" ] || { \
-	  echo "WARNING — missing or empty in $$dir:$$missing" >&2; \
-	  echo "          The container will start; whatever needs those will not work." >&2; \
-	  echo "          ansible/playbooks/server-create-dev-container.yml writes both." >&2; }; \
+	  echo "  cd ../ansible && ansible-playbook playbooks/server-create-dev-container.yml -e container=dev" >&2; exit 1; }; \
 	[ -s "$$dir/id_ed25519_fleet" ] || \
 	  echo "note: no fleet access configured (the default) — the container has no route" >&2; \
 	[ ! -s "$$dir/id_ed25519_fleet" ] || \
