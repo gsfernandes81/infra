@@ -300,13 +300,48 @@ fi
 # ssh into and fix (`make login C=<c>` clones once the token is there). A volume that already
 # holds something that is not a checkout is left alone and said so — it is somebody's work.
 #
+# EXCEPT THE IMAGE'S OWN COPIES OF THE REPO'S FILES. A child that bakes its dependencies COPYs
+# pyproject.toml and uv.lock into /workspace at build time (dd-dev does), and Docker copies an
+# image's files into a NEW named volume the first time it is mounted, so a fresh workspace is
+# not empty (found by the smoke test, 2026-10-27; the bind mount this replaced hid them).
+# `nocopy` on the mount would leave it empty but root's, which dev cannot write. So: clone
+# without a checkout beside them, and adopt the clone only when EVERY file already there is
+# one the repo tracks; any that differ from the repo's are kept in ~/.workspace-pre-clone
+# first. One untracked file and nothing is touched, as before.
+#
 # Then the pull: --ff-only, and never fatal, as it always was. ${PIPESTATUS[0]}, and not the
 # pipeline's own status — `if git … | sed …` tests SED, which is CLAUDE.md § Shell traps'
 # entry for this very block; and not `set -o pipefail`, which would make a pull that SUCCEEDED
 # print "unchanged" when sed died.
 if [ ! -e /workspace/.git ] && [ -n "${DEV_REPO:-}" ]; then
     if [ -n "$(ls -A /workspace 2>/dev/null)" ]; then
-        say "WARNING: /workspace holds files but no checkout — not cloning $DEV_REPO over them"
+        tmp=/workspace/.dev-clone
+        rm -rf "$tmp"
+        say "/workspace holds files but no checkout — cloning $DEV_REPO beside them to see whose they are"
+        if timeout 300 git clone --quiet --no-checkout "https://github.com/$DEV_REPO.git" "$tmp" 2>&1 \
+                | sed 's/^/[entrypoint] git: /'; [ "${PIPESTATUS[0]}" = 0 ]; then
+            untracked=$(cd /workspace && find . -path ./.dev-clone -prune -o -type f -print | sed 's|^\./||' \
+                | grep -vxF -f <(git -C "$tmp" ls-tree -r --name-only HEAD) || true)
+            if [ -n "$untracked" ]; then
+                rm -rf "$tmp"
+                say "WARNING: /workspace holds files $DEV_REPO does not track — not cloning over them:"
+                printf '%s\n' "$untracked" | head -5 | sed 's/^/[entrypoint]     /'
+            else
+                mv "$tmp/.git" /workspace/.git && rm -rf "$tmp"
+                git -C /workspace reset --quiet
+                changed=$(git -C /workspace diff --name-only)
+                for f in $changed; do
+                    mkdir -p "$HOME/.workspace-pre-clone/$(dirname "$f")"
+                    cp -p "/workspace/$f" "$HOME/.workspace-pre-clone/$f"
+                done
+                git -C /workspace checkout --quiet -f HEAD -- . \
+                    && say "cloned $DEV_REPO into /workspace; the image's copies of its files were the repo's own" \
+                    && { [ -z "$changed" ] || say "  ($(echo $changed | wc -w) differed from the repo's, kept in ~/.workspace-pre-clone)"; }
+            fi
+        else
+            rm -rf "$tmp"
+            say "WARNING: the clone failed — /workspace is as it was; make login C=<c> clones it"
+        fi
     else
         say "cloning $DEV_REPO into /workspace over https with the hub's token"
         timeout 300 git clone --quiet "https://github.com/$DEV_REPO.git" /workspace 2>&1 \

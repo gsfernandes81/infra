@@ -239,9 +239,15 @@ jobs:
 
           # ── Claude Code's code intelligence: the plugin is there and enabled, and ty speaks LSP ──
           check "the local plugin marketplace validates" docker exec infra-dev claude plugin validate /opt/claude-plugins
-          docker exec infra-dev claude plugin list > plugins.txt 2>&1 || true
-          sed 's/^/    | /' plugins.txt
-          check "ty-lsp is listed by Claude Code" grep -q "ty-lsp@gsrpi-dev" plugins.txt
+          # A session's init event is where Claude Code says what it loaded (`claude plugin list`
+          # shows only what a user installed, so it lists nothing here, correctly). A dummy key:
+          # the init event comes before the first request, which then fails. A throwaway config
+          # dir, so the probe leaves nothing in the container's ~/.claude.
+          docker exec -w /workspace infra-dev sh -c 'CLAUDE_CONFIG_DIR=/tmp/cc-probe ANTHROPIC_API_KEY=sk-ant-smoke-dummy \
+            timeout 60 claude -p hi --output-format stream-json --verbose 2>/dev/null; rm -rf /tmp/cc-probe' \
+            | grep '"subtype":"init"' > init.json || true
+          check "a Claude session loads ty-lsp from /opt/claude-plugins" grep -q '"path":"/opt/claude-plugins/ty-lsp","source":"ty-lsp@gsrpi-dev"' init.json
+          check "and gives Claude its LSP tool" grep -q '"LSP"' init.json
           check "ty-lsp prefers the project's venv ty" docker exec infra-dev sh -c '
             mkdir -p /tmp/p/.venv/bin && printf "#!/bin/sh\nexit 0\n" > /tmp/p/.venv/bin/ty && chmod +x /tmp/p/.venv/bin/ty
             CLAUDE_PROJECT_DIR=/tmp/p ty-lsp 2>&1 | grep -qx "ty-lsp: using /tmp/p/.venv/bin/ty"; r=$?; rm -rf /tmp/p; exit $r'
@@ -382,9 +388,14 @@ jobs:
             echo "|---|---|---|---|---|"
             for c in dev-hub dev-cloudflared infra-dev dd-dev dd-postgres; do
               docker inspect "$c" >/dev/null 2>&1 || continue
-              cur=$(docker exec "$c" cat /sys/fs/cgroup/memory.current 2>/dev/null || echo 0)
-              anon=$(docker exec "$c" awk '$1=="anon"{print $2}' /sys/fs/cgroup/memory.stat 2>/dev/null || echo 0)
-              file=$(docker exec "$c" awk '$1=="file"{print $2}' /sys/fs/cgroup/memory.stat 2>/dev/null || echo 0)
+              # cgroup v2 names first (the runner, and zero); v1's for a host that still has it.
+              read -r cur anon file <<EOF2
+          $(docker exec "$c" sh -c 'd=/sys/fs/cgroup; if [ -f $d/memory.current ]; then
+              echo "$(cat $d/memory.current) $(awk "\$1==\"anon\"{print \$2}" $d/memory.stat) $(awk "\$1==\"file\"{print \$2}" $d/memory.stat)"
+            else d=$d/memory
+              echo "$(cat $d/memory.usage_in_bytes) $(awk "\$1==\"total_rss\"{print \$2}" $d/memory.stat) $(awk "\$1==\"total_cache\"{print \$2}" $d/memory.stat)"
+            fi' 2>/dev/null || echo 0 0 0)
+          EOF2
               st=$(docker stats --no-stream --format '{{.MemUsage}}' "$c")
               printf '| %s | %s MiB | %s MiB | %s MiB | %s |\n' "$c" $((cur/1048576)) $((anon/1048576)) $((file/1048576)) "$st"
             done

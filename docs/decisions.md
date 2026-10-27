@@ -1347,6 +1347,14 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   No plugin for the other languages: they have no official one, and no repo here is mostly
   them. The server is the repo's own ty where it has one (owner: "allow the use of local / venv
   ty"), through `dev/ty-lsp`, so diagnostics match the version and imports the repo checks with.
+- **A fresh workspace volume that holds only the image's copies of the repo's files is cloned
+  into** (2026-10-27, found by running the smoke test's dd-dev step locally). dd's and ds's
+  images COPY `pyproject.toml` and `uv.lock` into `/workspace` to bake their dependencies, and
+  Docker copies those into a new named volume on its first mount, so the entrypoint's "holds
+  files but no checkout" refusal fired on every first start and dd-dev and ds-dev would have
+  come up with no clone. Not `nocopy` on the mount: that leaves the volume root's, which dev
+  cannot write. The entrypoint clones beside the files and adopts the clone only when every file
+  there is one the repo tracks, keeping any that differ in `~/.workspace-pre-clone`.
 - **A repo's untracked secrets live in a second volume, `~/.env.d`, symlinked into the
   workspace** (`DEV_ENV_FILES`). Not hard links: two volumes are two mounts and `link(2)`
   refuses across mounts. A regular file found where a link should be — an editor that saves by
