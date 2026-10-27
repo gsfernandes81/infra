@@ -876,6 +876,7 @@ make up           # build + (re)create everything the profiles name — drops th
 make restart      # stop + start one container; does NOT re-read compose.yaml
 make stop         # stop one container; its sessions end, its volumes stay
 make status       # one screen: container, sshd, sessions, logins, offloader, the tunnel, ansible
+                  # C=hub: its health, the containers it serves, its two loops, its tunnel
 make verify       # status + the tools + the hub + the GitHub token + the collections + the fleet
 make login        # the walkthrough: the token, the fleet, claude's login, the workspace clone
 make fleet        # ssh to each host, then `ansible fleet -m ping` — says there is no fleet access

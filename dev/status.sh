@@ -17,8 +17,35 @@ DOCKER=(${SUDO:-} docker)
 
 d() { "${DOCKER[@]}" "$@"; }
 
+# The offload loop's age, as a snippet run INSIDE the hub (sh, no bash), shared by both views.
+# hub-health holds the hub unhealthy past the same 10 minutes.
+OFFLOAD_AGE='f=$HOME/.hub/offload.beat; [ -f "$f" ] || { echo "no pass yet at the hub — make boot-log C=hub"; exit 0; }; a=$(( $(date +%s) - $(stat -c %Y "$f") )); if [ "$a" -le 600 ]; then echo "the hub'"'"'s, last pass $((a / 60))m ago (make offload-log)"; else echo "NO PASS in $((a / 60))m at the hub — its loop has stopped; make boot-log C=hub"; fi'
+
+# ── the hub's own view (make status C=hub) ─────────────────────────────────
+# The hub runs no claude, has no workspace and no ansible, so the dev-container lines would
+# each read as a fault. These are what the hub is for: its health verdict, which containers
+# it serves, its two loops, and its tunnel.
+hub_status() {
+    printf 'container : %s\n' "$(d inspect -f '{{.Name}} {{.State.Status}} id={{slice .Id 0 12}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' dev-hub 2>/dev/null || echo 'absent')"
+    printf 'health    : %s\n' "$(d exec dev-hub hub-health 2>/dev/null || true)"
+    printf 'serves    : %s\n' "$(d exec dev-hub github-tokens hosts 2>/dev/null || echo 'could not ask the hub')"
+    printf 'offloader : %s\n' "$(d exec dev-hub sh -c '[ "${HUB_OFFLOAD:-1}" = 1 ] || { echo "off (HUB_OFFLOAD=$HUB_OFFLOAD)"; exit 0; }; '"$OFFLOAD_AGE" 2>/dev/null || echo 'could not ask the hub')"
+    # A pass writes to its log only when a container offloaded or failed, so the newest lines
+    # there are the last EVENTFUL pass, which may be long before the last pass. Stamped.
+    printf 'passes    : %s\n' 'newest lines of ~/.hub/passes.log (a quiet pass writes none)'
+    d exec dev-hub sh -c 'tail -n 3 "$HOME/.hub/passes.log" 2>/dev/null' 2>/dev/null | sed 's/^/            /'
+    # Each container's newest line from the broker, then the log's last line if it is hub-wide
+    # (no key, GitHub down). The log holds repo and expiry, never a token.
+    printf 'tokens    : %s\n' 'newest per container in ~/.hub/github-tokens.log'
+    d exec dev-hub sh -c 'l=$HOME/.hub/github-tokens.log; [ -f "$l" ] || { echo "no token pass yet"; exit 0; }; for h in $(github-tokens hosts); do grep " $h: " "$l" | tail -n 1; done; tail -n 1 "$l" | grep -v -E " [a-z0-9-]+: " || true' 2>/dev/null \
+        | sed 's/^/            /'
+    printf 'sessions  : %s\n' "$(d exec dev-hub claude-sessions --version 2>/dev/null || echo 'no claude-sessions in the hub')"
+    printf 'tunnel    : %s\n' "$(tunnel_line)"
+}
+
 # ── status ──────────────────────────────────────────────────────────────────
 status() {
+    [ "$CONTAINER" = dev-hub ] && { hub_status; return; }
     # One read of every process's cmdline, used by the lines below. Straight out of
     # /proc rather than `pgrep`, because procps was not in the image's package list when
     # this was written (it is now, Dockerfile.base): if pgrep is absent, `pgrep … || echo
@@ -65,11 +92,14 @@ status() {
         | grep -vE 'claude-sessions|/proc/' | grep -q . \
         && echo 'a claude is running in this container' || echo 'no claude running')"
 
-    # The offloader is the HUB's since 2026-10-26: its loop, by the age of the log it writes
-    # every pass, and whether this container is one it reaches. Read by file age, not by
-    # matching argv — `pgrep -f` on the loop's own words is the self-match trap CLAUDE.md
-    # records.
-    printf 'offloader : %s\n' "$(d exec dev-hub sh -c 'f=$HOME/.hub/passes.log; [ "${HUB_OFFLOAD:-1}" = 1 ] || { echo "off at the hub (HUB_OFFLOAD=$HUB_OFFLOAD)"; exit 0; }; case " $CLAUDE_SESSIONS_HOSTS " in *" $1 "*) ;; *) echo "the hub does not reach $1 — no HUB_REPO_* line for it in compose.yaml"; exit 0 ;; esac; [ -f "$f" ] || { echo "no pass yet at the hub — make boot-log C=hub"; exit 0; }; a=$(( $(date +%s) - $(stat -c %Y "$f") )); if [ "$a" -le 600 ]; then echo "the hub'"'"'s, last pass $((a / 60))m ago (make offload-log)"; else echo "NO PASS in $((a / 60))m at the hub — its loop has stopped; make boot-log C=hub"; fi' _ "$CONTAINER" 2>/dev/null \
+    # The offloader is the HUB's since 2026-10-26: whether this container is one it reaches, and
+    # the age of its beat file, which the loop touches after EVERY pass. Not passes.log's age: a
+    # pass writes there only when a container offloaded or failed, so a quiet hub would read as
+    # stopped. Not $CLAUDE_SESSIONS_HOSTS either: the hub's entrypoint exports that to its own
+    # children, and a `docker exec` never sees it; `github-tokens hosts` derives the same list
+    # from the HUB_REPO_* names, as the hub's claude-sessions wrapper does. Read by file age, not
+    # by matching argv — `pgrep -f` on the loop's own words is the self-match trap CLAUDE.md records.
+    printf 'offloader : %s\n' "$(d exec dev-hub sh -c '[ "${HUB_OFFLOAD:-1}" = 1 ] || { echo "off at the hub (HUB_OFFLOAD=$HUB_OFFLOAD)"; exit 0; }; case " $(github-tokens hosts 2>/dev/null) " in *" $1 "*) ;; *) echo "the hub does not reach $1 — no HUB_REPO_* line for it in compose.yaml"; exit 0 ;; esac; '"$OFFLOAD_AGE" _ "$CONTAINER" 2>/dev/null \
         || echo 'could not ask the hub — is it up? (make status C=hub)')"
 
     # `claude auth status`, not "is there a credentials file" — a file holding empty
