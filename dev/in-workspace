@@ -15,8 +15,8 @@
 # a session started in /home/dev asks you to trust a directory that is not the repo.
 #
 # WHY IT WRAPS ONLY THE DIRECTORY. A first version of this was `dev-claude`, which also
-# baked in abduco and the session name. That was one concern too many. WHERE THE WORK IS
-# belongs to the container — it is the container's bind mount and nothing outside knows
+# baked in the session holder and its name. That was one concern too many. WHERE THE WORK IS
+# belongs to the container — it is the container's own volume and nothing outside knows
 # the path. WHETHER TO HOLD THE SESSION ACROSS A DROPPED LINK belongs to the client: the
 # phone wants a held session (zmx) because ssh dies at the lock screen, and a laptop running
 # `ssh … 'git log'`, a cron, or a one-shot `claude -p` all want no such thing. Wrapping

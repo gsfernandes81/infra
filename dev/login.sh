@@ -9,9 +9,8 @@
 # Everything it fills lives in a persisted volume or in the read-only secrets mount,
 # so this is normally done once per machine and not again after a rebuild:
 #
-#   git over ssh -> /run/infra-secrets  (mounted; nothing to do in here)
-#   the fleet    -> /run/infra-secrets  (mounted; nothing to do in here)
-#   GitHub CLI   -> infra-gh     volume ($GH_CONFIG_DIR)
+#   GitHub       -> /run/github, the hub's token  (nothing to do in here; checked)
+#   the fleet    -> /run/infra-secrets  (absent by decision; reported)
 #   Claude Code  -> infra-claude volume ($CLAUDE_CONFIG_DIR)
 #
 # It is a script in the image rather than a Makefile recipe because every step of it
@@ -56,10 +55,8 @@ bold "2/3  the fleet (zero, one, two)"
 if [ ! -f "$HOME/.ssh/id_ed25519_fleet" ]; then
   ok "not configured — the default. This container develops the repo; it does not"
   info "operate the fleet, and running playbooks against the three hosts stays on the"
-  info "phone. That is a deferred decision rather than a missing step: putting a control"
-  info "node inside a container on a box it controls is a real question, and it is"
-  info "written up in docs/management-plane.md § \"A control node inside the fleet\"."
-  info "It is not built: see that section for what would have to be decided first."
+  info "phone. The owner decided so on 2026-10-25: docs/management-plane.md"
+  info "§ \"A control node inside the fleet\" has the reasoning."
 elif [ ! -s "$HOME/.ssh/known_hosts" ]; then
   warn "A fleet key is present but known_hosts is empty — it was added by hand."
 else

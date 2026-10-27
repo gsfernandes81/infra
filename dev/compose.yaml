@@ -191,8 +191,8 @@ services:
     environment:
       GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
-      # The repo cloned into the workspace volume at first start — by gh when it is logged
-      # in, else over ssh with the deploy key (entrypoint.sh).
+      # The repo cloned into the workspace volume at first start, over https with the hub's
+      # token (entrypoint.sh).
       DEV_REPO: *repo-infra
       # Files the repo expects beside its tracked ones, kept in the env volume and linked into
       # the workspace (entrypoint.sh). None for infra: its .env files live on the hosts.
@@ -205,13 +205,13 @@ services:
       # commit in here never leaves zero's checkout diverged again (CLAUDE.md § Git, the
       # 2026-10-25 divergence). Push to share work, as from anywhere else.
       # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
-      # no other container's (hub/github-tokens). Empty when the broker is off.
+      # no other container's (hub/github-tokens). Empty until the hub's first mint.
       - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: infra-dev } }
       - infra-workspace:/workspace
       # The repo's untracked secrets, in a volume of their own, linked into the workspace.
       - infra-env:/home/dev/.env.d
-      # Mode-700 directory outside the repo: the deploy key, the fleet key if any, the
-      # owner's authorized_keys, the host-specific ssh fragments. Read-only.
+      # Mode-700 directory outside the repo: an optional authorized_keys, and the fleet key
+      # files, absent by decision (docs/management-plane.md). Read-only.
       - ${INFRA_SECRETS:?set INFRA_SECRETS in dev/.env to the absolute path of the secrets dir}:/run/infra-secrets:ro
       # The logins, history and state, kept from the infra-dev project they were made in, so
       # moving into this one costs no login and loses no conversation.
@@ -267,7 +267,7 @@ services:
       - *opt
       - *managed
       # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
-      # no other container's (hub/github-tokens). Empty when the broker is off.
+      # no other container's (hub/github-tokens). Empty until the hub's first mint.
       - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: or3-dev } }
       - or3-workspace:/workspace
       - or3-env:/home/dev/.env.d
@@ -317,7 +317,7 @@ services:
       - *opt
       - *managed
       # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
-      # no other container's (hub/github-tokens). Empty when the broker is off.
+      # no other container's (hub/github-tokens). Empty until the hub's first mint.
       - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: dd-dev } }
       - dd-workspace:/workspace
       - dd-env:/home/dev/.env.d
@@ -382,7 +382,7 @@ services:
       - *opt
       - *managed
       # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
-      # no other container's (hub/github-tokens). Empty when the broker is off.
+      # no other container's (hub/github-tokens). Empty until the hub's first mint.
       - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: ds-dev } }
       - ds-workspace:/workspace
       - ds-env:/home/dev/.env.d

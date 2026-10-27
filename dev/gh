@@ -5,7 +5,7 @@
 # The token is read on EVERY call, not once into the environment, because the hub renews it
 # every 30 minutes and a token in a long-lived shell's environment would expire in an hour.
 # An explicit GH_TOKEN or GITHUB_TOKEN wins, so a person can still override it per command.
-# With no token file — the broker off — this is exactly the real gh and its own login.
+# With no token file yet — before the hub's first mint — this is the real gh, unauthenticated.
 if [ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] && [ -s /run/github/token ]; then
     GH_TOKEN=$(cat /run/github/token)
     export GH_TOKEN

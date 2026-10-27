@@ -83,7 +83,7 @@ status() {
     # connection. Neither is written by anything in the repo today.
     # Absent is the DEFAULT here, not a fault. Fleet access is opt-in
     # (INFRA_DEV_FLEET=1) because it makes this a control node running on a box it
-    # controls, which is a deferred question rather than a settled one. So the line says
+    # controls, which the owner decided against on 2026-10-25. So the line says
     # "not configured", and only says something is wrong when the set is half-present —
     # a key with no host keys fails on verification in a way that reads as a refused
     # connection, which is the state worth naming.
@@ -158,10 +158,8 @@ fleet() {
     if ! d exec "$CONTAINER" sh -c '[ -s /run/infra-secrets/id_ed25519_fleet ]' 2>/dev/null; then
         printf 'No fleet access configured, which is the default.\n\n'
         printf 'This container develops the repo; it does not operate the fleet. Running\n'
-        printf 'playbooks against zero, one and two stays on the phone. To change that:\n\n'
-        printf '    (not built — see the doc for what would have to be decided first)\n\n'
-        printf 'Read docs/management-plane.md § "A control node inside the fleet" first —\n'
-        printf 'it is a deferred decision, not an oversight.\n'
+        printf 'playbooks against zero, one and two stays on the phone, by the owner'"'"'s\n'
+        printf 'decision of 2026-10-25: docs/management-plane.md § "A control node inside the fleet".\n'
         return
     fi
     printf '── ssh, one host at a time ──\n'
@@ -187,8 +185,8 @@ verify() {
     status
     printf '\n'
     # A rebuild is where a tool silently fails to arrive: gh is unpacked from a tarball
-    # and cloudflared is a hash-checked download, so a build that succeeded can still
-    # have landed either in the wrong path. These lines ask the container instead of
+    # and the language servers are hash-checked downloads, so a build that succeeded can
+    # still have landed one in the wrong path. These lines ask the container instead of
     # trusting the build.
     #
     # `tool` EXISTS BECAUSE THE FALLBACK IT REPLACES COULD NOT FIRE. Every one of these
@@ -319,7 +317,6 @@ print("managed settings say off" if v is True else
     # No `bgtasks` line since claude-sessions v0.4.7: no offload rule reads Claude Code any
     # more, so no field in its binary is load-bearing for the offloader (the timer tools'
     # names, claude-sessions#13, were never added for the same reason).
-    tool cloudflared 'the hash-pinned download did not land' cloudflared --version
     tool sessions 'no claude-sessions — the hub'"'"'s volume is not mounted at /opt/claude-sessions' claude-sessions --version
     # Unpinned (the latest at the base's build), so this is the only readout of which one a
     # container has once CI's log has expired. MISSING is also what a base built with

@@ -102,14 +102,15 @@ fi
 # each keyword, so a wildcard placed above a Host block silently wins over it.
 #
 # The fleet blocks are not in the image because they carry addresses — this repo's own
-# invariant puts those in a gitignored file. Nothing in the repo writes them today:
-# fleet access is the deferred control-node question, so in practice this file is absent
-# and the container has no route to zero, one or two. That is the default and the
-# warning below says so rather than treating it as a fault.
+# invariant puts those in a gitignored file. Nothing in the repo writes them, and nothing
+# will: the owner decided on 2026-10-25 that no container is a control node
+# (docs/management-plane.md § "A control node inside the fleet"), so this file is absent and
+# the container has no route to zero, one or two. Absence is the settled state, so it is
+# not warned about; `make status` reports it.
 #
 # `rm -f` FIRST, AND THAT LINE IS LOAD-BEARING. A redirection follows a symlink and
 # truncates its TARGET, so if anything in this container has made ~/.ssh/config a symlink
-# — a child's child-init.sh pointing it at a file in the bind mount, or a person doing the
+# — a child's child-init.sh pointing it at a file in a mount, or a person doing the
 # same by hand — this write lands in that file instead. ~/.ssh is not a volume, but a
 # `docker stop`/`start` reuses the container's filesystem, so the second boot is where it
 # fires: the host's own gitignored ssh config is overwritten with the lines below, and the
@@ -125,20 +126,6 @@ rm -f "$HOME/.ssh/config"
 } > "$HOME/.ssh/config"
 chmod 600 "$HOME/.ssh/config"
 
-#
-# SPLIT BY WHOSE CONTAINER THIS IS. The fleet sentence is infra-dev's: it names three
-# hosts that mean nothing in or3-dev, dd-dev or ds-dev, and a warning that names the
-# wrong thing is worse than none — it sends whoever reads it to look at a mount that was
-# never meant to hold that file. A child that named its own DEV_SECRETS_DIR is by
-# definition not infra-dev, so it gets the plain statement of what did not happen.
-if [ ! -f "$SECRETS/ssh_config.fleet" ]; then
-    if [ -z "${DEV_SECRETS_DIR:-}" ]; then
-        say "WARNING: no ssh_config.fleet in $SECRETS — zero, one and two are unreachable."
-        say "         That is the DEFAULT — see docs/management-plane.md. Everything else works."
-    else
-        say "no ssh_config.fleet in $SECRETS — nothing is prepended to ~/.ssh/config."
-    fi
-fi
 
 # authorized_keys: the keys allowed straight in, copied from the secrets mount — in practice
 # only or3-dev has one, the phone's, for its vessel tunnel. Every container is reached through
@@ -197,9 +184,10 @@ EOF
 } > "$HOME/.ssh/known_hosts"
 chmod 600 "$HOME/.ssh/known_hosts"
 
-if [ ! -f "$SECRETS/known_hosts.fleet" ]; then
-    say "WARNING: no known_hosts.fleet in $SECRETS — every ansible task will fail on"
-    say "         host key verification, which reads as a connection error. See README."
+# A fleet key without the fleet's host keys is the one half-state worth a word: ansible would
+# fail on host key verification, which reads as a refused connection.
+if [ -f "$SECRETS/id_ed25519_fleet" ] && [ ! -f "$SECRETS/known_hosts.fleet" ]; then
+    say "WARNING: id_ed25519_fleet but no known_hosts.fleet in $SECRETS — ansible will fail on host keys"
 fi
 
 # ── Claude login ────────────────────────────────────────────────────────────

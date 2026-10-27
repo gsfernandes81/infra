@@ -67,8 +67,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # `--version` IS FATAL and compared exactly: a static musl binary has no excuse, and it is
 # also what proves a binary the smoke test put in place is the version this file pins.
 ARG CLAUDE_SESSIONS_VERSION=0.5.0
-COPY --from=fetch /out/claude-sessions /usr/local/bin/claude-sessions
-RUN test "$(claude-sessions --version)" = "claude-sessions ${CLAUDE_SESSIONS_VERSION}"
+# The binary sits off PATH; what PATH finds is hub/claude-sessions, which hands it the container
+# list (that file says why). `install` copies the running binary, so the containers get this one.
+COPY --from=fetch /out/claude-sessions /usr/local/libexec/claude-sessions
+COPY claude-sessions /usr/local/bin/claude-sessions
+RUN chmod 0755 /usr/local/bin/claude-sessions \
+    && test "$(/usr/local/libexec/claude-sessions --version)" = "claude-sessions ${CLAUDE_SESSIONS_VERSION}"
 
 # The door — sshd's ForceCommand: the menu at a terminal, a shell otherwise or if it fails.
 # Root-owned, on PATH, above the USER line for the reason Dockerfile.base gives for its own.

@@ -1,0 +1,14 @@
+#!/bin/sh
+# claude-sessions in the hub, with the container list every caller needs. The list is derived
+# from the hub's HUB_REPO_* lines (`github-tokens hosts`), so it is stated once, in compose.yaml
+# — but a derived value lives only in the process that derived it, and the entrypoint's export
+# reached its own loops and, through ~/.ssh/environment, ssh logins. `docker exec dev-hub
+# claude-sessions …` — `make claude`, `make idle`, anything by hand — got neither, and the binary
+# fell back to "local", a menu and an offload pass over the hub itself, where nothing runs. Found
+# by the smoke test, 2026-10-27. Deriving it here makes every way in see the same list; a value
+# already set (the entrypoint's, a test's) wins.
+if [ -z "${CLAUDE_SESSIONS_HOSTS:-}" ]; then
+    CLAUDE_SESSIONS_HOSTS=$(github-tokens hosts 2>/dev/null)
+    export CLAUDE_SESSIONS_HOSTS
+fi
+exec /usr/local/libexec/claude-sessions "$@"

@@ -255,8 +255,8 @@ from there: the four `server-` tunnel plays, and `client-home-ssh-config.yml`, w
 it to mint this client's Access service tokens. If the file is missing the play prints the
 steps below (they live once, in `group_vars/all.yml`) and stops; nothing is ever prompted
 for, because a prompt is a paste. It is never accepted on the command line
-(`-e cf_api_token=` is refused), never in this repo gitignored or not (the checkout is
-bind-mounted into `infra-dev`, whose point is having no route out), and never in
+(`-e cf_api_token=` is refused), never in this repo gitignored or not (the repo is
+cloned into `infra-dev`, whose point is having no route out), and never in
 `$INFRA_SECRETS` (mounted into the container).
 
 **One per machine, not one copied around.** Any token with the six permissions below

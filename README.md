@@ -131,8 +131,9 @@ and each holds live sessions and uncommitted worktrees. See
 **⚠︎ Built 2026-10-26, not yet on the box:** all four move into one `dev/compose.yaml`
 behind a hub — `ssh dev` opens a menu of every container's sessions, and nothing publishes
 a port. The table below is what `zero` runs until the owner brings it up
-([`docs/handoff/2026-10-26-dev-hub.md`](docs/handoff/2026-10-26-dev-hub.md)); `infra-dev`
-is the first to move, the others follow one at a time.
+([`docs/handoff/2026-10-26-dev-hub.md`](docs/handoff/2026-10-26-dev-hub.md)), and all four
+move at once, in one cutover ([`dev/README.md`](dev/README.md) § *The cutover from the old
+layout*).
 
 | Container | Repo | SSH | Defined in |
 |---|---|---|---|
@@ -148,10 +149,9 @@ nothing in `deployments/` or `hosts/` refers to it, and its lifecycle is `dev/Ma
 
 It also carries `ansible-core` and the collections — but **it is not a control node, by
 decision**: no fleet key, no `ssh_config.fleet`, so it has no route to `zero`, `one` or
-`two` and cannot run a playbook against any of them. The case for making it one is real
-and is filed as OPEN in [`docs/management-plane.md`](docs/management-plane.md) §
-*A control node inside the fleet* — an inventory run from Termux crosses metered mobile
-data to reach boxes on zero's own LAN — but it has not been taken.
+`two` and cannot run a playbook against any of them. The owner decided on 2026-10-25 that
+it stays that way: [`docs/management-plane.md`](docs/management-plane.md) §
+*A control node inside the fleet* has the case that was made for it and why it was declined.
 [`dev/README.md`](dev/README.md).
 
 **Only `or3-dev` was up at the last audit**, and only its port was listening. The others

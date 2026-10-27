@@ -10,7 +10,7 @@
 #   make stop        stop one container (its sessions end; its volumes stay)
 #   make status      one-screen health check of one container
 #   make verify      status + the tools + the collections + the fleet, after a rebuild
-#   make login       log a container into GitHub and claude.ai, and clone its workspace
+#   make login       check a container's GitHub token, log it into claude.ai, clone its workspace
 #   make fleet       prove zero, one and two answer — by ssh, then by ansible
 #   make collections check the image's collections against ansible/requirements.yml
 #   make claude      the hub's menu, as `ssh dev` lands on it
@@ -44,7 +44,7 @@ SUDO := $(if $(filter 0,$(shell id -u)),,sudo)
 
 # The uid/gid the container's `dev` user is built at, read from the OWNER of this
 # checkout — not from `id -u`. Under sudo `id -u` is 0, and a dev user built at 0
-# writes root-owned files into the bind-mounted clone (and collides with the base
+# writes root-owned files the checkout's owner cannot touch (and collides with the base
 # image's own root account at build time). The clone's owner is the right answer
 # however this was invoked.
 HOST_UID := $(shell stat -c '%u' $(CURDIR))
