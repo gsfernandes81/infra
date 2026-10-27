@@ -4,14 +4,11 @@ This directory is one Compose project, `name: dev`, holding every dev container 
 (Pi 5, arm64) and the **hub** that is the way in to all of them: `ssh dev` lands on one
 claude-sessions menu over every container. **`infra-dev`** is this repo's own container —
 Claude Code against **this** repo, with Ansible in the image. `or3-dev`, `dd-dev` (with
-`dd-postgres`) and `ds-dev` are the other repos', each behind a profile of its own name.
+`dd-postgres`), `ds-dev`, `invective-dev`, `nibbles-dev` and `ionic-dev` are the other repos',
+each behind a profile of its own name.
 
-> **⚠︎ Built 2026-10-26, not yet on the fleet.** Until the owner brings it up, zero still
-> runs the old layout — each container in a project of its own, its `/workspace` a bind mount
-> of zero's clone, with its own tunnel, offload loop and menu. claude-sessions `v0.5.0` is
-> released and pinned in `hub/Dockerfile`, and this is on `main` (2026-10-27); what is left is
-> the move itself, which is the owner's — *The cutover from the old layout* below has the
-> order, starting with the GitHub App.
+> **Live on zero since the cutover of 2026-10-27.** What is still open from it is
+> [`../docs/handoff/2026-10-26-dev-hub.md`](../docs/handoff/2026-10-26-dev-hub.md).
 
 ## Why this exists
 
@@ -42,7 +39,7 @@ lint, read a playbook against the real `ansible.cfg` — and are not wired to th
 | | |
 |---|---|
 | `Makefile` | **the management interface** — `make up`, `make login`, `make status`, …; `C=<container>` picks the container (infra-dev unless said, `C=hub` the hub), `S=<service>` limits `make up` to one |
-| `compose.yaml` | the project: `hub`, its `cloudflared` sidecar (profile `tunnel`), `infra-dev`, and `or3-dev`, `dd-dev` (+ `dd-postgres`), `ds-dev` each behind a profile of its own name; one network, `dev`; **nothing published on the host**. The base tag is its `x-base-tag` line, each container's repo an anchor at the top |
+| `compose.yaml` | the project: `hub`, its `cloudflared` sidecar (profile `tunnel`), `infra-dev`, and `or3-dev`, `dd-dev` (+ `dd-postgres`), `ds-dev`, `invective-dev`, `nibbles-dev`, `ionic-dev` each behind a profile of its own name; one network, `dev`; **nothing published on the host**. The base tag is its `x-base-tag` line, each container's repo an anchor at the top |
 | `hub/` | the hub's image: `Dockerfile` (claude-sessions pinned by release and per-arch SHA-256), `entrypoint.sh`, `door` (installed as `hub-door`, its sshd's `ForceCommand`), `health` (`hub-health`, its healthcheck), `github-tokens` (the token broker) and its offline test, `sshd_config`, and `ssh_config` — how it reaches each container |
 | `cloudflared.yml` | the hub tunnel's ingress, and the whole of it: `dev.gsrpi.uk` → the hub, `or3-dev.gsrpi.uk` → or3-dev |
 | `Dockerfile.base` | `gsrpi-dev-base`, which every dev container is `FROM` — Debian trixie slim, Node 22, Claude Code, gh, zmx, screen, sshd, Helix, the tools and language servers, Crush, Jcode |
@@ -239,7 +236,8 @@ What changes for you:
    Workflows **read and write**, Actions, Checks and Commit statuses **read**; *Only on this
    account*. Create it and note its **App ID**.
 2. On the App's page, *Generate a private key* — a `.pem` downloads — then *Install App* on your
-   account, *Only select repositories*: infra, or3, destiny-director, dossier.
+   account, *Only select repositories*: infra, or3, destiny-director, dossier, invective, nibbles,
+   ionic-traces.
 3. The key to zero, never into a repo: from the phone, `scp <the.pem> zero:.dev-secrets/github-app.pem`,
    then on zero `chmod 600 ~/.dev-secrets/github-app.pem` and delete the phone's copy.
 4. `HUB_GITHUB_APP_ID=<id>` in `dev/.env` — compose requires it, and `make check` refuses a
@@ -461,9 +459,14 @@ containers are proved.
 
 ### A container added later
 
-In `compose.yaml`: a repo anchor at the top, a service built like the three above (its
-`DEV_REPO` that anchor, its own `subpath:` of the tokens volume, its old volumes named
-external if it has any), and a `HUB_REPO_<NAME>` line in the hub's environment. Its profile in
+In `compose.yaml`: a repo anchor at the top, a service built like the others (its
+`DEV_REPO` that anchor, its own `subpath:` of the tokens volume, its login and history
+volumes external — its old ones by name if it has any, else new ones `make volumes` makes
+empty), and a `HUB_REPO_<NAME>` line in the hub's environment. `invective-dev`,
+`nibbles-dev` and `ionic-dev` (2026-10-27) are the newest and the shape to copy. **The GitHub
+App must be installed on its repo first** (github.com → Settings → Applications → Installed
+GitHub Apps → the App → Configure → Repository access, then add the repo): without it the hub mints no token for it, its clone fails,
+and the hub's log says so on every pass. Its profile in
 `COMPOSE_PROFILES` if it should start at rest; then `make up`. The hub's environment changed,
 so it is recreated first — its start makes the new token directory, and the container waits
 on it — and every open `ssh dev` view drops for a few seconds; no claude does (owner and

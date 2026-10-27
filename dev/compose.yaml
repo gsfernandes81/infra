@@ -48,6 +48,9 @@ x-repo-infra: &repo-infra gsfernandes81/infra
 x-repo-or3: &repo-or3 gsfernandes81/or3
 x-repo-dd: &repo-dd gsfernandes81/destiny-director
 x-repo-ds: &repo-ds gsfernandes81/dossier
+x-repo-invective: &repo-invective gsfernandes81/invective
+x-repo-nibbles: &repo-nibbles gsfernandes81/nibbles
+x-repo-ionic: &repo-ionic gsfernandes81/ionic-traces
 
 # What every dev container shares. A child sets its own build, name, repo, secrets and
 # volumes beside these.
@@ -142,6 +145,9 @@ services:
       HUB_REPO_OR3_DEV: *repo-or3
       HUB_REPO_DD_DEV: *repo-dd
       HUB_REPO_DS_DEV: *repo-ds
+      HUB_REPO_INVECTIVE_DEV: *repo-invective
+      HUB_REPO_NIBBLES_DEV: *repo-nibbles
+      HUB_REPO_IONIC_DEV: *repo-ionic
     volumes:
       - claude-sessions:/opt/claude-sessions
       # The hub's key, its known_hosts, its sshd host key and its pass log.
@@ -448,6 +454,116 @@ services:
       - ds-zed-server:/home/dev/.zed_server
       - ds-local-share:/home/dev/.local/share
 
+  # ── three more, added 2026-10-27, each resting stopped ─────────────────────
+  # The same shape as ds-dev, from each repo's own Dockerfile.dev: invective, nibbles and
+  # ionic-traces. No secrets mount: none of them carries an ssh identity, and the base reads
+  # only files it finds in DEV_SECRETS_DIR, so an absent one is no identity rather than an
+  # error. No database for ionic-dev yet: ionic-traces' production database is on `one` and
+  # stopped by decision, and a dev one is added here when it is wanted. Each needs the
+  # GitHub App installed on its repo before its first start, or the hub mints it no token
+  # and the clone fails (said in the hub's log and by `make login C=<name>`).
+  invective-dev:
+    <<: *dev
+    profiles: [invective-dev]
+    build:
+      context: https://github.com/gsfernandes81/invective.git#main
+      dockerfile: Dockerfile.dev
+      args:
+        BASE_TAG: *base-tag
+    image: invective-dev
+    container_name: invective-dev
+    hostname: invective-dev
+    mem_limit: 1536m
+    memswap_limit: 7680m   # RAM + the pool's 6G of swap, as infra-dev's says
+    environment:
+      GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
+      GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
+      DEV_NAME: invective-dev
+      DEV_REPO: *repo-invective
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: *claude-login-dir
+      DEV_ENV_FILES: ""
+    volumes:
+      - *opt
+      - *managed
+      - *claude-login
+      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: invective-dev, nocopy: true } }
+      - invective-workspace:/workspace
+      - invective-env:/home/dev/.env.d
+      - invective-uv-cache:/home/dev/.cache/uv
+      - invective-claude:/home/dev/.claude
+      - invective-claude:/home/dev/.claude-logins/false
+      - invective-gh:/home/dev/.config/gh
+      - invective-ssh-host:/home/dev/.ssh-host
+      - invective-local-share:/home/dev/.local/share
+
+  nibbles-dev:
+    <<: *dev
+    profiles: [nibbles-dev]
+    build:
+      context: https://github.com/gsfernandes81/nibbles.git#main
+      dockerfile: Dockerfile.dev
+      args:
+        BASE_TAG: *base-tag
+    image: nibbles-dev
+    container_name: nibbles-dev
+    hostname: nibbles-dev
+    mem_limit: 1536m
+    memswap_limit: 7680m   # RAM + the pool's 6G of swap, as infra-dev's says
+    environment:
+      GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
+      GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
+      DEV_NAME: nibbles-dev
+      DEV_REPO: *repo-nibbles
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: *claude-login-dir
+      DEV_ENV_FILES: ""
+    volumes:
+      - *opt
+      - *managed
+      - *claude-login
+      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: nibbles-dev, nocopy: true } }
+      - nibbles-workspace:/workspace
+      - nibbles-env:/home/dev/.env.d
+      - nibbles-uv-cache:/home/dev/.cache/uv
+      - nibbles-claude:/home/dev/.claude
+      - nibbles-claude:/home/dev/.claude-logins/false
+      - nibbles-gh:/home/dev/.config/gh
+      - nibbles-ssh-host:/home/dev/.ssh-host
+      - nibbles-local-share:/home/dev/.local/share
+
+  ionic-dev:
+    <<: *dev
+    profiles: [ionic-dev]
+    build:
+      context: https://github.com/gsfernandes81/ionic-traces.git#main
+      dockerfile: Dockerfile.dev
+      args:
+        BASE_TAG: *base-tag
+    image: ionic-dev
+    container_name: ionic-dev
+    hostname: ionic-dev
+    mem_limit: 1536m
+    memswap_limit: 7680m   # RAM + the pool's 6G of swap, as infra-dev's says
+    environment:
+      GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
+      GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
+      DEV_NAME: ionic-dev
+      DEV_REPO: *repo-ionic
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: *claude-login-dir
+      DEV_ENV_FILES: ""
+    volumes:
+      - *opt
+      - *managed
+      - *claude-login
+      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: ionic-dev, nocopy: true } }
+      - ionic-workspace:/workspace
+      - ionic-env:/home/dev/.env.d
+      - ionic-uv-cache:/home/dev/.cache/uv
+      - ionic-claude:/home/dev/.claude
+      - ionic-claude:/home/dev/.claude-logins/false
+      - ionic-gh:/home/dev/.config/gh
+      - ionic-ssh-host:/home/dev/.ssh-host
+      - ionic-local-share:/home/dev/.local/share
+
 networks:
   # The hub reaches each container's sshd by name here. Nothing is published on zero.
   dev:
@@ -491,3 +607,26 @@ volumes:
   ds-ssh-host: { external: true, name: dossier_ds-ssh-host }
   ds-zed-server: { external: true, name: dossier_ds-zed-server }
   ds-local-share: { external: true, name: dossier_ds-local-share }
+  invective-workspace:
+  invective-env:
+  nibbles-workspace:
+  nibbles-env:
+  ionic-workspace:
+  ionic-env:
+  # Their logins and history, external like the others' so `make down-volumes` cannot take a
+  # conversation history; `make volumes` makes them once, empty.
+  invective-uv-cache: { external: true, name: invective-dev_invective-uv-cache }
+  invective-claude: { external: true, name: invective-dev_invective-claude }
+  invective-gh: { external: true, name: invective-dev_invective-gh }
+  invective-ssh-host: { external: true, name: invective-dev_invective-ssh-host }
+  invective-local-share: { external: true, name: invective-dev_invective-local-share }
+  nibbles-uv-cache: { external: true, name: nibbles-dev_nibbles-uv-cache }
+  nibbles-claude: { external: true, name: nibbles-dev_nibbles-claude }
+  nibbles-gh: { external: true, name: nibbles-dev_nibbles-gh }
+  nibbles-ssh-host: { external: true, name: nibbles-dev_nibbles-ssh-host }
+  nibbles-local-share: { external: true, name: nibbles-dev_nibbles-local-share }
+  ionic-uv-cache: { external: true, name: ionic-dev_ionic-uv-cache }
+  ionic-claude: { external: true, name: ionic-dev_ionic-claude }
+  ionic-gh: { external: true, name: ionic-dev_ionic-gh }
+  ionic-ssh-host: { external: true, name: ionic-dev_ionic-ssh-host }
+  ionic-local-share: { external: true, name: ionic-dev_ionic-local-share }

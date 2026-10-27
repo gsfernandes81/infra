@@ -106,7 +106,7 @@ jobs:
       - name: Check compose parses with every profile on
         working-directory: dev
         run: |
-          COMPOSE_PROFILES=tunnel,or3-dev,dd-dev,ds-dev HOST_UID=$(id -u) HOST_GID=$(id -g) \
+          COMPOSE_PROFILES=tunnel,or3-dev,dd-dev,ds-dev,invective-dev,nibbles-dev,ionic-dev HOST_UID=$(id -u) HOST_GID=$(id -g) \
             docker compose config -q
           docker version --format 'docker {{.Server.Version}}'; docker compose version
 

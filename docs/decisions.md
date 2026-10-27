@@ -1439,6 +1439,13 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   empty directory, so the day an update drops the variable it reads NOT HONOURED (calibrated by
   passing a name Claude does not read). A logout in one container is a logout in all, and one
   credential is reachable from every container, as with the token it was weighed against.
+- **invective, nibbles and ionic-traces join as dev containers** (owner, 2026-10-27):
+  `invective-dev`, `nibbles-dev` and `ionic-dev`, each from its own repo's `Dockerfile.dev` and
+  resting stopped behind its profile, the shape ds-dev has. No secrets mount, since none
+  carries an ssh identity and the base reads only what it finds there; login and history
+  volumes external from the start, so `make down-volumes` can never take a conversation
+  history, at the cost of one `make volumes` before the first `up`. No dev database for
+  ionic-dev until one is wanted: its production one is on `one` and stopped by decision.
 
 ## The lesson worth keeping
 
