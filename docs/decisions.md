@@ -1462,6 +1462,16 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   beside `infra` on the same volumes. `make check` refuses the first, `make check-names` the
   second. Comments in the base image's files still say `infra-dev`: editing them would force a
   base bump and a rebuild of every image for prose, so they wait for the next real bump.
+- **claude-sessions gets a dev container of its own, and stays its own repo** (owner,
+  2026-10-27): `claude-sessions`, from that repo's `Dockerfile.dev` (claude-sessions#16, the
+  base and a pinned Rust 1.99.1), resting stopped like the others. It replaces the checkout and
+  toolchain kept in `infra`'s `~/.local/share` since 2026-10-01, which go once it has run the
+  tests. Merging the repo into infra was weighed, since infra is its only consumer, and
+  declined: infra is config and no source, its `main` is what the fleet runs while the
+  release-and-pin step is the gate that held Stage B on claude-sessions#9, and the two repos'
+  licences differ (AGPL-3.0 and none). What a merge would save is the pin handoff, and that
+  could be cut without one: a release workflow there opening infra's pin PR was suggested, not
+  decided.
 
 ## The lesson worth keeping
 

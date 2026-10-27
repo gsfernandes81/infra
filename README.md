@@ -127,7 +127,7 @@ which case each is, and its Listening section is the answer that covers all of t
 One Compose project, [`dev/compose.yaml`](dev/compose.yaml), live since 2026-10-27: a hub
 that `ssh dev` lands on — a menu of every container's sessions — and one container per repo,
 **each named for its repo**: `infra` (this one), `or3`, `destiny-director` (+ `dd-postgres`),
-`dossier`, `invective`, `nibbles`, `ionic-traces`. Nothing publishes a port; the hub's
+`dossier`, `invective`, `nibbles`, `ionic-traces`, `claude-sessions`. Nothing publishes a port; the hub's
 tunnel is the way in, and `or3-dev.gsrpi.uk` reaches `or3`'s own sshd for the phone's vessel
 tunnel. Each is `restart: no` and holds live sessions; lifecycle is `dev/Makefile`.
 [`dev/README.md`](dev/README.md) is the whole of it.

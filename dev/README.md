@@ -4,8 +4,9 @@ This directory is one Compose project, `name: dev`, holding every dev container 
 (Pi 5, arm64) and the **hub** that is the way in to all of them: `ssh dev` lands on one
 claude-sessions menu over every container. **`infra`** is this repo's own container —
 Claude Code against **this** repo, with Ansible in the image. `or3`, `destiny-director` (with
-`dd-postgres`), `dossier`, `invective`, `nibbles` and `ionic-traces` are the other repos',
-each behind a profile of its own name.
+`dd-postgres`), `dossier`, `invective`, `nibbles`, `ionic-traces` and `claude-sessions` are the
+other repos', each behind a profile of its own name. `claude-sessions` is the hub's own
+software, worked on in a container like any other repo: it adds a pinned Rust toolchain.
 
 > **Live on zero since the cutover of 2026-10-27.** What is still open from it is
 > [`../docs/handoff/2026-10-26-dev-hub.md`](../docs/handoff/2026-10-26-dev-hub.md).
@@ -39,7 +40,7 @@ lint, read a playbook against the real `ansible.cfg` — and are not wired to th
 | | |
 |---|---|
 | `Makefile` | **the management interface** — `make up`, `make login`, `make status`, …; `C=<container>` picks the container (infra unless said, `C=hub` the hub), `S=<service>` limits `make up` to one |
-| `compose.yaml` | the project: `hub`, its `cloudflared` sidecar (profile `tunnel`), `infra`, and `or3`, `destiny-director` (+ `dd-postgres`), `dossier`, `invective`, `nibbles`, `ionic-traces` each behind a profile of its own name; one network, `dev`; **nothing published on the host**. The base tag is its `x-base-tag` line, each container's repo an anchor at the top |
+| `compose.yaml` | the project: `hub`, its `cloudflared` sidecar (profile `tunnel`), `infra`, and `or3`, `destiny-director` (+ `dd-postgres`), `dossier`, `invective`, `nibbles`, `ionic-traces`, `claude-sessions` each behind a profile of its own name; one network, `dev`; **nothing published on the host**. The base tag is its `x-base-tag` line, each container's repo an anchor at the top |
 | `hub/` | the hub's image: `Dockerfile` (claude-sessions pinned by release and per-arch SHA-256), `entrypoint.sh`, `door` (installed as `hub-door`, its sshd's `ForceCommand`), `health` (`hub-health`, its healthcheck), `github-tokens` (the token broker) and its offline test, `sshd_config`, and `ssh_config` — how it reaches each container |
 | `cloudflared.yml` | the hub tunnel's ingress, and the whole of it: `dev.gsrpi.uk` → the hub, `or3-dev.gsrpi.uk` → or3 |
 | `Dockerfile.base` | `gsrpi-dev-base`, which every dev container is `FROM` — Debian trixie slim, Node 22, Claude Code, gh, zmx, screen, sshd, Helix, the tools and language servers, Crush, Jcode |
@@ -467,8 +468,8 @@ its repo** — service, `container_name`, `hostname`, profile, `subpath:` and th
 `HUB_REPO_<NAME>` all the repo's own name, nothing appended (owner, 2026-10-27) — its
 `DEV_REPO` that anchor, its login and history
 volumes external — its old ones by name if it has any, else new ones `make volumes` makes
-empty), and a `HUB_REPO_<NAME>` line in the hub's environment. `invective`,
-`nibbles` and `ionic-traces` (2026-10-27) are the newest and the shape to copy. **The GitHub
+empty), and a `HUB_REPO_<NAME>` line in the hub's environment. `claude-sessions`,
+`invective`, `nibbles` and `ionic-traces` (2026-10-27) are the newest and the shape to copy. **The GitHub
 App must be installed on its repo first** (github.com → Settings → Applications → Installed
 GitHub Apps → the App → Configure → Repository access, then add the repo): without it the hub mints no token for it, its clone fails,
 and the hub's log says so on every pass. Its profile in

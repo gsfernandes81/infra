@@ -106,7 +106,7 @@ jobs:
       - name: Check compose parses with every profile on
         working-directory: dev
         run: |
-          COMPOSE_PROFILES=tunnel,or3,destiny-director,dossier,invective,nibbles,ionic-traces HOST_UID=$(id -u) HOST_GID=$(id -g) \
+          COMPOSE_PROFILES=tunnel,or3,destiny-director,dossier,invective,nibbles,ionic-traces,claude-sessions HOST_UID=$(id -u) HOST_GID=$(id -g) \
             docker compose config -q
           docker version --format 'docker {{.Server.Version}}'; docker compose version
 
@@ -198,7 +198,7 @@ jobs:
           check "the offload loop has beaten" docker exec dev-hub test -f /home/dev/.hub/offload.beat
           check "the token loop has beaten" docker exec dev-hub test -f /home/dev/.hub/tokens.beat
           check "the container list is derived from HUB_REPO_*" sh -c \
-            '[ "$(docker exec dev-hub sh -c "grep ^CLAUDE_SESSIONS_HOSTS= ~/.ssh/environment")" = "CLAUDE_SESSIONS_HOSTS=destiny-director dossier infra invective ionic-traces nibbles or3" ]'
+            '[ "$(docker exec dev-hub sh -c "grep ^CLAUDE_SESSIONS_HOSTS= ~/.ssh/environment")" = "CLAUDE_SESSIONS_HOSTS=claude-sessions destiny-director dossier infra invective ionic-traces nibbles or3" ]'
           # Calibrated by its other half: the stopped containers must FAIL, or the pass did
           # not try them and "infra did not fail" means nothing.
           docker exec dev-hub claude-sessions offload-all --dry-run > offload.txt 2>&1 || true
@@ -459,6 +459,20 @@ jobs:
         working-directory: dev
         run: |
           docker compose build dossier
+
+      # claude-sessions' Dockerfile.dev picks its rustup-init by architecture; this is the amd64
+      # half, and the only build of it before zero's. The toolchain must answer as dev, from
+      # the PATH the image sets, at the version it pins.
+      - name: Build claude-sessions straight from its GitHub URL, and run its toolchain
+        working-directory: dev
+        run: |
+          docker compose build claude-sessions
+          v=$(docker run --rm --entrypoint rustc claude-sessions --version)
+          echo "$v"
+          case "$v" in "rustc 1.99.1 "*) echo "PASS  claude-sessions has its pinned rustc" ;;
+            *) echo "FAIL  claude-sessions' rustc is '$v'"; exit 1 ;; esac
+          docker run --rm --entrypoint sh claude-sessions -c \
+            'cargo clippy --version && rustfmt --version && rust-analyzer --version && rustup target list --installed'
 
       - name: "On failure: the containers' logs"
         if: failure()

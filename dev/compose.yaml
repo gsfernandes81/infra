@@ -57,6 +57,7 @@ x-repo-ds: &repo-ds gsfernandes81/dossier
 x-repo-invective: &repo-invective gsfernandes81/invective
 x-repo-nibbles: &repo-nibbles gsfernandes81/nibbles
 x-repo-ionic: &repo-ionic gsfernandes81/ionic-traces
+x-repo-claude-sessions: &repo-claude-sessions gsfernandes81/claude-sessions
 
 # What every dev container shares. A child sets its own build, name, repo, secrets and
 # volumes beside these.
@@ -154,6 +155,7 @@ services:
       HUB_REPO_INVECTIVE: *repo-invective
       HUB_REPO_NIBBLES: *repo-nibbles
       HUB_REPO_IONIC_TRACES: *repo-ionic
+      HUB_REPO_CLAUDE_SESSIONS: *repo-claude-sessions
     volumes:
       - claude-sessions:/opt/claude-sessions
       # The hub's key, its known_hosts, its sshd host key and its pass log.
@@ -571,6 +573,45 @@ services:
       - ionic-ssh-host:/home/dev/.ssh-host
       - ionic-local-share:/home/dev/.local/share
 
+  # ── claude-sessions, added 2026-10-27, resting stopped ─────────────────────────
+  # The hub's own software, worked on through the hub (owner, 2026-10-27), from that repo's
+  # Dockerfile.dev: the base and a pinned Rust toolchain. It runs the released claude-sessions
+  # from the hub's volume like every container, and builds its own in /workspace/target, so the
+  # two never meet. It cannot test the hub against real containers: no container has docker.
+  claude-sessions:
+    <<: *dev
+    profiles: [claude-sessions]
+    build:
+      context: https://github.com/gsfernandes81/claude-sessions.git#main
+      dockerfile: Dockerfile.dev
+      args:
+        BASE_TAG: *base-tag
+    image: claude-sessions
+    container_name: claude-sessions
+    hostname: claude-sessions
+    # rustc and rust-analyzer are the heavy ones; the crate has no dependencies.
+    mem_limit: 1536m
+    memswap_limit: 7680m   # RAM + the pool's 6G of swap, as infra's says
+    environment:
+      GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
+      GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
+      DEV_NAME: claude-sessions
+      DEV_REPO: *repo-claude-sessions
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: *claude-login-dir
+      DEV_ENV_FILES: ""
+    volumes:
+      - *opt
+      - *managed
+      - *claude-login
+      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: claude-sessions, nocopy: true } }
+      - claude-sessions-workspace:/workspace
+      - claude-sessions-env:/home/dev/.env.d
+      - claude-sessions-claude:/home/dev/.claude
+      - claude-sessions-claude:/home/dev/.claude-logins/false
+      - claude-sessions-gh:/home/dev/.config/gh
+      - claude-sessions-ssh-host:/home/dev/.ssh-host
+      - claude-sessions-local-share:/home/dev/.local/share
+
 networks:
   # The hub reaches each container's sshd by name here. Nothing is published on zero.
   dev:
@@ -637,3 +678,11 @@ volumes:
   ionic-gh: { external: true, name: ionic-dev_ionic-gh }
   ionic-ssh-host: { external: true, name: ionic-dev_ionic-ssh-host }
   ionic-local-share: { external: true, name: ionic-dev_ionic-local-share }
+  claude-sessions-workspace:
+  claude-sessions-env:
+  # Its login and history, external from the start like the three above; `make volumes` makes
+  # them once, empty. The project prefix is its own name, there being no old one to keep.
+  claude-sessions-claude: { external: true, name: claude-sessions_claude-sessions-claude }
+  claude-sessions-gh: { external: true, name: claude-sessions_claude-sessions-gh }
+  claude-sessions-ssh-host: { external: true, name: claude-sessions_claude-sessions-ssh-host }
+  claude-sessions-local-share: { external: true, name: claude-sessions_claude-sessions-local-share }
