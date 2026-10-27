@@ -198,7 +198,7 @@ jobs:
           check "the offload loop has beaten" docker exec dev-hub test -f /home/dev/.hub/offload.beat
           check "the token loop has beaten" docker exec dev-hub test -f /home/dev/.hub/tokens.beat
           check "the container list is derived from HUB_REPO_*" sh -c \
-            '[ "$(docker exec dev-hub sh -c "grep ^CLAUDE_SESSIONS_HOSTS= ~/.ssh/environment")" = "CLAUDE_SESSIONS_HOSTS=dd-dev ds-dev infra-dev or3-dev" ]'
+            '[ "$(docker exec dev-hub sh -c "grep ^CLAUDE_SESSIONS_HOSTS= ~/.ssh/environment")" = "CLAUDE_SESSIONS_HOSTS=dd-dev ds-dev infra-dev invective-dev ionic-dev nibbles-dev or3-dev" ]'
           # Calibrated by its other half: the stopped containers must FAIL, or the pass did
           # not try them and "infra-dev did not fail" means nothing.
           docker exec dev-hub claude-sessions offload-all --dry-run > offload.txt 2>&1 || true
