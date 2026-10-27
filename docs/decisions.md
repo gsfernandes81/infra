@@ -1274,7 +1274,9 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   those 6G**, so the pool, not a container, says how much dev work may swap. Before this the
   containers' own `memswap_limit`s allowed 256–512 MB each, which would have left the pool's
   swap unreachable. The cost until the pool is installed: a container may swap up to 6G on
-  its own. **dd-postgres is in the pool too** — it is dev work's memory. Each child builds
+  its own. **dd-postgres is in the pool too** — it is dev work's memory. **infra-dev's own
+  limit rises from 1024m to 2560m**, or3-dev's figure (owner: "quite restrictive for work");
+  the pool, not each container, is what keeps the total off Immich. Each child builds
   from its repo on GitHub (`main`), so no clone on zero is read by anything.
 - **A repo's untracked secrets live in a second volume, `~/.env.d`, symlinked into the
   workspace** (`DEV_ENV_FILES`). Not hard links: two volumes are two mounts and `link(2)`

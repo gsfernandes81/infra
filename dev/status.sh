@@ -30,8 +30,9 @@ status() {
 
     # Container ID, not StartedAt: StartedAt necessarily changes across a legitimate
     # stop/start, so it cannot tell a cycle from a recreate. The ID can. oom is here
-    # because mem_limit is lower than or3-dev's and an OOM kill is the expected way
-    # for that to be wrong.
+    # because a container's mem_limit, or the pool above it, is the expected way for a
+    # limit to be wrong — and Docker's flag can be wrong too: `rc-service devpool show`
+    # counts the pool's kills from the kernel.
     printf 'container : %s\n' "$(d inspect -f '{{.Name}} {{.State.Status}} id={{slice .Id 0 12}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' "$CONTAINER" 2>/dev/null || echo 'absent')"
     printf 'published : %s\n' "$(d port "$CONTAINER" 2222/tcp 2>/dev/null || echo 'none')"
 
