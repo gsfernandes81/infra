@@ -264,5 +264,5 @@
           - "{{ 'the hub: its host half writes HUB_TUNNEL_ID into dev/.env next; then `make up`.'
                 if cf_name == 'dev' else
                 cf_name ~ ': since 2026-10-26 a dev container has no tunnel of its own; the hub tunnel'
-                ~ ' (-e container=dev) is the way in. This one serves its old setup until it moves in.' }}"
+                ~ ' (-e container=dev) is the way in. This one serves its old setup until the cutover.' }}"
       changed_when: true

@@ -88,9 +88,8 @@ limits the owner is having to manage each container separately.
 
 - **The pool's size and swap limit.** `zero` has 4 GB. Immich's machine learning peaks lower
   after v3.3.5, and ~2.3 GB was available on 2026-10-25 before that.
-- **`or3-dev`'s shared working tree.** Its `/workspace` is `zero`'s own clone, by or3's design
-  (management-plane.md, *The `or3-dev` caveat*); moving its definition into `infra` can keep
-  that bind mount, but it is or3's trade to confirm.
+- ~~**`or3-dev`'s shared working tree.**~~ Decided 2026-10-27, the owner: every workspace,
+  or3's included, is a clone in a volume (decisions.md).
 
 ## Order, and where each step stands
 
@@ -105,11 +104,10 @@ limits the owner is having to manage each container separately.
 3. **Built, not brought up.** The one compose file in `infra`: the hub, the sidecar, the
    network, and `infra-dev` first, with its workspace and `.env` files in volumes. Bring-up is
    the owner's, in the handoff's order.
-4. **Defined, not moved.** `or3-dev`, `dd-dev` and `ds-dev` are in `dev/compose.yaml` behind
-   profiles, with their sources and secrets as required paths in `dev/.env`. Each still has to
-   be moved in from its own repo: the base tag bumped to `2026.10.26`, its published port and
-   its compose file dropped there, and its old login volumes' names checked against the
-   `external:` names guessed here before its profile is turned on. **or3-dev also re-points
+4. **Ported, moves at the same cutover as step 3.** `or3-dev`, `dd-dev` (with `dd-postgres`)
+   and `ds-dev` are in `dev/compose.yaml`, built from their repos' own Dockerfiles on the new
+   base, each working in its own clone in a volume, their old volumes named from the fleet
+   inventory. No child repo changes first; each drops its compose file afterwards. **or3-dev also re-points
    its hostname at the hub's tunnel** (`-e via_hub=true`), so the phone's `or3-tunnel` keeps
    reaching it; or3's `docs/dev-tunnel.md` then names `~/infra/dev` for `make tunnel-log`,
    `make up` and `make shell C=or3-dev` in place of `~/or3/dev`, which is or3's change to make.

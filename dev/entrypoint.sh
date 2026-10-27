@@ -181,7 +181,10 @@ if [ -f "$SECRETS/authorized_keys" ]; then
 elif [ -n "$authkeys_dropin" ]; then
     say "authorized_keys comes from a drop-in in sshd_config.d, not from $SECRETS."
 else
-    say "WARNING: no authorized_keys in $SECRETS — NOTHING can ssh in. Use: make shell"
+    # Since 2026-10-26 the normal state for a container behind the hub: the hub's key, below,
+    # is in a file of its own, so this is "no client goes straight in", not "nothing can".
+    say "no authorized_keys in $SECRETS — no client key goes straight in; the hub's key"
+    say "    (below) is the way in, and make shell C=<c> on zero the break glass."
     : > "$HOME/.ssh/authorized_keys"
     chmod 600 "$HOME/.ssh/authorized_keys"
 fi
@@ -323,23 +326,13 @@ git config --global --add safe.directory /workspace 2>/dev/null || true
 git config --global user.name  "${GIT_USER_NAME:-Gavin Fernandes}"
 git config --global user.email "${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}"
 
-# A clone's `origin` may be https (gh's default, or zero's own clone bind-mounted as or3's
-# is), and the only git credential in here is the
-# deploy key copied out of the secrets mount above — an ssh credential. Rewrite the
-# TRANSPORT rather than the remote: --global is /home/dev/.gitconfig, which is neither
-# the bind mount nor one of the four named volumes, so the host's .git/config is left
-# exactly as it is and gavin's own git on zero keeps working the way it does today.
+# A clone's `origin` is https when gh made it, and the only git credential in here may be the
+# deploy key copied out of the secrets mount above — an ssh credential. Rewrite the TRANSPORT
+# rather than the remote, in --global (/home/dev/.gitconfig, in no volume), so a gh clone's
+# pushes and the --ff-only pull below go over ssh with that key. A no-op for git@ URLs.
 #
-# THE TWO SIBLING REPOS DIVERGE HERE and this follows destiny-director, not or3.
-# or3 needs no rewrite because its clone is made over ssh to begin with
-# (or3/dev/seed-secrets.sh) — a fix that lives on the host and cannot be shipped in an
-# image. destiny-director/docker-entrypoint.dev.sh does this, for the same reason it
-# applies here: the host stays on https and nothing outside the container has to change.
-# It is also a no-op if that clone is ever re-made over ssh — insteadOf rewrites https
-# URLs and leaves git@ ones alone — so the two approaches do not fight.
-#
-# Without this, the --ff-only pull below has never once run: it fails on "could not read
-# Username", and the message in its failure branch names neither cause.
+# Without this, the pull below has never once run on an https origin: it fails on "could not
+# read Username", and the message in its failure branch names neither cause.
 git config --global url."git@github.com:".insteadOf "https://github.com/"
 
 # ── the workspace: cloned once, pulled after ────────────────────────────────

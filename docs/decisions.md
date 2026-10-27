@@ -1224,7 +1224,33 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   does not wait on `make login`; `make login` clones when neither worked. It ends the shared
   working tree with the host: zero's `~gavin/infra` is only what the box runs, and the
   2026-10-25 divergence (a container commit left behind in the host checkout) cannot recur.
-  **or3-dev keeps its bind mount**, which is or3's design and its call (plans/dev-pool.md).
+  ~~**or3-dev keeps its bind mount**, which is or3's design and its call (plans/dev-pool.md).~~
+  ⚠︎SUPERSEDED 2026-10-27 by *No workspace is a bind mount*, below.
+- **One cutover for all four, not one container at a time** (owner, 2026-10-27: "Could we
+  simplify to one big bang cutover?"). What made the staged order necessary was each child
+  repo changing first; none has to. Every child Dockerfile already takes `BASE_TAG` as a
+  build arg, so `dev/compose.yaml` builds each on the new base from its own clone, and each
+  repo drops its compose file afterwards. ~~**dd-dev and ds-dev keep their bind-mounted
+  clones too**, as their repos had them: their `.dev-ssh/` keys and dd's `.env` live there,
+  and moving to a volume mid-cutover would be a migration nobody asked for.~~ ⚠︎SUPERSEDED the
+  same day by the next bullet. **dd-dev brings its
+  `dd-postgres` sidecar**, aliased `postgres` on the network because that is the host its
+  `DATABASE_URL` names. **The two stop mounting zero's `~gavin/.ssh`**: their drop-in served
+  the host account's authorized_keys for a published port that is gone, and blanking it
+  (`dev/child-authorized-keys.conf`) leaves the hub's key as the way in and gavin's private
+  keys out of both containers. dd-dev and ds-dev stay stopped at rest, as they were, by
+  profile. The old volume names come from the 2026-10-25 fleet inventory — the guesses made
+  the day before were wrong for both (`dd-dev_*` for `destiny-director_*`, `ds-dev_*` for
+  `dossier_*`), which is what the artefact-wins rule is for.
+- **No workspace is a bind mount: all four clone into volumes** (owner, 2026-10-27: "Could we
+  remove support for bind mounted clones and switch entirely to clones in volumes?"). This
+  ends or3's shared working tree, the trade management-plane.md said should be made
+  knowingly in or3 — the owner made it. Each host clone on zero stays, as the build context
+  only. What a clone held that git does not — dd's `.env`, dd's and ds's `.dev-ssh/` — moves
+  into an env volume and a secrets directory at the cutover; uncommitted work, stashes,
+  worktrees and ignored directories are listed first and stay behind on the host, untouched.
+  dd's compose-level `env_file` is dropped rather than pointed at a host file: dd reads its
+  `.env` itself, and a host path would be secrets outside their volume again.
 - **A repo's untracked secrets live in a second volume, `~/.env.d`, symlinked into the
   workspace** (`DEV_ENV_FILES`). Not hard links: two volumes are two mounts and `link(2)`
   refuses across mounts. A regular file found where a link should be — an editor that saves by

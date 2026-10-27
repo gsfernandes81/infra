@@ -16,7 +16,7 @@ below and `../docs/management-plane.md` § *A control node inside the fleet*.
 > placeholders (`FILL-FROM-THE-v0.5.0-RELEASE`) and the hub's build fails at `sha256sum -c`,
 > on purpose, until they are filled from the release; and base `2026.10.26` is published by
 > CI only when this reaches `main` (`make base` builds it locally meanwhile). Then the move
-> itself, which is the owner's — *Moving a container in* below has the order.
+> itself, which is the owner's — *The cutover from the old layout* below has the order.
 
 ## Why this exists
 
@@ -254,93 +254,164 @@ across mounts. Rules the entrypoint keeps:
   warning.
 
 **`make down-volumes` drops both kinds** — every cloned workspace, with any unpushed work in
-it, and every env volume — along with the hub's key. **or3-dev keeps its bind mount**: its
-`/workspace` is zero's own clone of or3 by or3's design, and changing that is or3's call
-([`../plans/dev-pool.md`](../plans/dev-pool.md)).
+it, and every env volume — along with the hub's key. That is every container's: since 2026-10-27 no workspace is a
+bind mount (owner), so the host clones on zero are only build contexts, and `down-volumes`
+never touches them.
 
-## Moving a container in
+## The cutover from the old layout
 
-### infra-dev itself — the first move
+**One cutover moves all four containers at once** (owner, 2026-10-27), and **every one comes
+out working in its own clone, in a volume** — no workspace is a bind mount of a host clone
+any more. Until it runs, zero runs the old layout: `infra-dev` and `or3-dev` each in their
+own compose project with zero's clone as `/workspace`, `dd-dev` and `ds-dev` defined in their
+repos and stopped.
 
-The old `infra-dev` project and this one cannot both run: they name the same container.
-**Every live session in infra-dev ends at the move.** The conversations do not — the
-`~/.claude` volume moves across — and each is resumable from Archived afterwards.
+Every running claude in `infra-dev` and `or3-dev` ends at step 5; the conversations do not —
+each `~/.claude` volume is reused by name — and each is resumable from Archived afterwards.
+The phone's vessel tunnel is down from step 5 to step 7, a few minutes, and `or3-tunnel`
+reconnects by itself.
 
-1. **Release claude-sessions 0.5.0, and fill the two hashes** in `hub/Dockerfile` from the
-   release's `SHA256SUMS` asset (also in its notes), in a commit here.
-2. **Push everything first.** `/workspace` stops being zero's checkout and becomes a fresh
-   clone, so a commit that exists only in `~gavin/infra` on zero is not in the new container.
-   Nothing is deleted — the host checkout stays where it is — but account for every local
-   commit before moving on: `git log --left-right --cherry-mark HEAD...origin/main` in
-   `~gavin/infra`, and each `<` needs a `=` twin upstream (`../CLAUDE.md` § *Git*).
-3. **The two playbook runs** from *Bring-up, from nothing* above, from the control node.
-   They start nothing. On an existing `dev/.env` the plain run only sets `INFRA_SECRETS`,
-   and the old file's other lines are the old layout's, so on zero move it aside first
-   (`mv ~/infra/dev/.env ~/infra/dev/.env.old`) and let the runs start the new one from
-   `.env.example`.
-4. **Stop the old project, keeping its volumes, then start this one.** `ssh -t zero`, then
-   inside it:
+**What carries over, and what has to be carried:**
 
-   ```sh
-   cd ~ && sudo docker compose -p infra-dev down     # from ~, so it reads no compose file
-   cd ~/infra/dev && make dev
+- **Logins, history and sshd host keys** — every old volume is named **external** in
+  `compose.yaml` (`infra-dev_*`, `or3-dev_*`, `destiny-director_*`, `dossier_*`, as
+  [`../docs/fleet-inventory.md`](../docs/fleet-inventory.md) listed them on 2026-10-25). dd's
+  database volume too.
+- **Pushed work** — each workspace is a fresh clone of its repo. **Anything not pushed is not
+  in it**: uncommitted changes, local branches, stashes, worktrees, and ignored files such as
+  or3's `var/`, `waterproof/live/` and `.rehearsal/`. Step 1 lists each; the host clones stay
+  on zero untouched, so nothing is deleted, but nothing there is visible to a container.
+- **Untracked secrets** — dd's `.env` (DATABASE_URL, the Railway token) goes into dd-dev's env
+  volume, linked into its workspace, in step 6. dd's and ds's `.dev-ssh/` keys move out of
+  their clones into `~/.dd-dev-secrets` and `~/.ds-dev-secrets` in step 2. or3's keys are
+  already in `~/.or3-dev-secrets`.
+- **The host clones become build contexts only.** Each child builds from its repo's own
+  Dockerfile on base `2026.10.26`, passed as the `BASE_TAG` build arg each already takes, so
+  no child repo changes first.
+- `dd-dev` and `ds-dev` stop mounting zero's `~gavin/.ssh` (`child-authorized-keys.conf`).
+- `or3-dev.gsrpi.uk` stays, re-pointed at the hub's tunnel in step 7, so the phone's
+  `or3-tunnel` reverse forward lands inside `or3-dev` as before (`cloudflared.yml`).
+
+**The steps.** Blocks are for fish, pasted inside the shell named.
+
+0. **Release and pin.** Merge claude-sessions to `main`; wait for `v0.5.0`; put its two
+   checksums (`SHA256SUMS`) into `hub/Dockerfile`; merge infra to `main`. Base `2026.10.26`
+   publishes from that push (about five minutes), or `make base` builds it locally.
+1. **On zero (`ssh zero`): what would not carry over, for all four clones.** Read-only.
+
+   ```fish
+   for r in ~/infra ~/or3 ~/destiny-director ~/dossier
+       echo "== $r"
+       git -C $r fetch -q
+       git -C $r status --short
+       git -C $r log --branches --not --remotes --oneline
+       git -C $r stash list
+       git -C $r worktree list | tail -n +2
+       git -C $r status --short --ignored | grep '^!!'
+   end
    ```
 
-   `down` without `-v` removes the container and its network and leaves every volume. Not
-   from `dev/`, where it would read the new `compose.yaml`, and not `make down`, which now
-   means project `dev`. The new file names the old volumes as **external** —
-   `infra-dev_infra-claude`, `_infra-gh`, `_infra-ssh-host`, `_infra-local-share`,
-   `_infra-jcode` — so the logins, the conversation history and the sshd host key move
-   with it.
-5. **On each client**, `client-home-ssh-config.yml -e container=dev`, then `ssh dev`. The
-   old `infra-dev` block stays in `~/.ssh/config` for now, and once the move is done it
-   names a tunnel with no connector behind it — infra-dev's base no longer carries
-   cloudflared — so `ssh infra-dev` fails at Cloudflare. That is expected.
+   Empty under a heading means that clone has nothing to lose. Push what should survive, and
+   note any ignored directory worth copying in by hand after step 5 (`docker cp` into the
+   container's `/workspace`). `.env`, `.dev-ssh/` and `.venv/` in that list are expected:
+   the first two are carried below, the last is rebuilt.
+2. **On zero: pull, set the old `.env` aside, move the keys out of the clones.**
 
-### Another repo's container
+   ```fish
+   cd ~/infra; and git pull --ff-only
+   install -m 600 dev/.env ~/dev.env.old; and rm dev/.env
+   for r in dd:destiny-director ds:dossier
+       set n (string split : $r)
+       install -d -m 700 ~/.$n[1]-dev-secrets
+       cp -a ~/$n[2]/.dev-ssh/. ~/.$n[1]-dev-secrets/
+   end
+   sudo docker volume ls --format '{{.Name}}' | grep -E '^(infra-dev|or3-dev|destiny-director|dossier)_'
+   ```
 
-`or3-dev`, `dd-dev` and `ds-dev` are already in `compose.yaml`, each behind its profile.
-Moving one in is, **in its own repo first**:
+   The old `.env` is backed up outside the directory at 600, never beside itself. A volume name
+   that differs from `compose.yaml`'s is fixed there before `make up`.
+3. **From the control node: the hub, then infra-dev's host side.** Each starts the new
+   `dev/.env` from `.env.example` if there is none and writes its own lines.
 
-- bump its `BASE_TAG` to `2026.10.26` or later;
-- drop its own `compose.yaml` — this one is its compose file now;
-- if an `sshd_config.d` drop-in sets `AuthorizedKeysFile` (dd-dev's and ds-dev's
-  `10-authorized-keys.conf` do), add `.ssh/authorized_keys.hub` to it, which is where the
-  entrypoint puts the hub's key.
+   ```fish
+   cd ~/infra/ansible
+   ansible-playbook playbooks/server-create-dev-container.yml -e container=dev
+   ansible-playbook playbooks/server-create-dev-container.yml
+   ```
 
-**Then here:**
+4. **On zero: check the paths the new `.env` names** — `ls -d ~/or3 ~/destiny-director
+   ~/dossier ~/.or3-dev-secrets ~/.dd-dev-secrets ~/.ds-dev-secrets` — and fix any line that
+   is wrong.
+5. **On zero, from `~` and not from inside any dev container: stop the four old projects,
+   keeping their volumes, then start this one.**
 
-1. Its secrets directory exists at the path its `*_SECRETS` line in `.env` names. No
-   playbook makes one for these three yet, so by hand — mode 700, the contents its old
-   setup had.
-2. `docker volume ls`, and check the external names in `compose.yaml` against what is there.
-   They are guesses that follow the old project's pattern, and `up` refuses loudly if one is
-   wrong.
-3. Stop its old project the way infra-dev's was: `sudo docker compose -p <old-project> down`,
-   no `-v`.
-4. Add its profile to `COMPOSE_PROFILES` and its name to `HUB_HOSTS`, then `make up`. The
-   hub's environment changed, so the hub is recreated too: every `ssh dev` session drops,
-   and no claude does.
-5. Its `.env`, if it has one: write it at `~/.env.d/.env` inside the container (`make shell
-   C=<c>`), and restart it to link it. For or3, whose workspace is still the host clone, the
-   existing `.env` there is a regular file, so the entrypoint reports it and leaves it —
-   moving it into the env volume is or3's call.
+   ```fish
+   cd ~
+   for p in infra-dev or3-dev destiny-director dossier
+       sudo docker compose -p $p down
+   end
+   cd ~/infra/dev; and make dev
+   ```
 
-Its old tunnel and the client block that points at it are retired in a change of their own —
-**except or3-dev's block, which stays.** The phone's `or3-tunnel` holds `ssh -N -R
-2236:10.1.0.236:22 or3-dev-sh`, a reverse forward to the vessel LAN that has to land inside
-or3-dev, so `or3-dev.gsrpi.uk` keeps pointing at or3-dev's own sshd, now through the hub's
-tunnel (`cloudflared.yml`). At its move-in, after `make up`, from the control node:
+   No `-v`: the volumes are what moves. From `~`, because in `dev/` `docker compose` would
+   read the new `compose.yaml`. A project with nothing left in it is a no-op. `make up`
+   refuses, naming the command, if any old container is still there. It starts the hub, its
+   tunnel, `infra-dev` and `or3-dev` (`COMPOSE_PROFILES`), each cloning its repo on first
+   start; `dd-dev` and `ds-dev` stay stopped, as they were.
+6. **dd's `.env`, into its env volume** — the first time dd-dev is wanted:
 
-```fish
-ansible-playbook playbooks/server-create-dev-container.yml -e container=or3-dev -e via_hub=true
-```
+   ```fish
+   make up S=dd-dev
+   sudo docker cp ~/destiny-director/.env dd-dev:/home/dev/.env.d/.env
+   make restart C=dd-dev
+   ```
 
-That re-points the hostname's CNAME at the hub's tunnel and keeps its Access application and
-every client's token, so the phone's alias, its token and or3's tool are untouched. Between
-the old project's `down` and that run the phone's tunnel is down, and `or3-tunnel` retries on
-its own (at most five minutes apart). Then `ssh or3-dev ssh or3ecr hostname` from the phone
-answers `OR3-ECR1-GR` again. Only or3-dev's *old tunnel* is retired after that.
+   The restart links it into `/workspace/.env`. `docker cp` keeps the file's owner, which is
+   the checkout's — the container's `dev` uid.
+7. **From the control node: the vessel tunnel's hostname onto the hub's tunnel.**
+
+   ```fish
+   ansible-playbook playbooks/server-create-dev-container.yml -e container=or3-dev -e via_hub=true
+   ```
+
+   It re-points `or3-dev.gsrpi.uk` and keeps its Access application and every client's
+   token. It refuses, rather than mint a tunnel, if the hub's does not exist.
+8. **On each client:** `client-home-ssh-config.yml -e container=dev`, then `ssh dev`.
+
+**Proof, each against the thing it claims:**
+
+- `ssh dev` opens on four containers; `infra-dev` and `or3-dev` say what is open in them,
+  `dd-dev` and `ds-dev` "not answering" while stopped.
+- A new claude in `infra-dev` shows busy, then idle, in the menu — the hooks are read from
+  the hub's volume (the one thing no box has shown yet).
+- `make shell C=or3-dev`, then `git -C /workspace remote -v` and `git -C /workspace status`:
+  a clean clone of or3, not zero's.
+- From the phone, `ssh or3-dev ssh or3ecr hostname` answers `OR3-ECR1-GR`.
+- After step 6, `make shell C=dd-dev`, then `pg_isready -h postgres` and `readlink
+  /workspace/.env`: the database by its old name, and the env file by its link.
+- `make verify` on zero, and `make status` for the hub, its tunnel and the offload passes.
+
+**Rolling back** is the old layout, one commit back, with every old volume intact and every
+host clone as it was: `make down` here, check out the commit before the hub in `~/infra`,
+`install -m 600 ~/dev.env.old dev/.env`, and `make up` there; or3 and infra-dev come back as
+they were. `or3-dev.gsrpi.uk` then needs re-pointing at or3-dev's old tunnel:
+`server-create-dev-container.yml -e container=or3-dev`, without `via_hub`. Work committed in
+a new container's volume clone in the meantime is in that volume, not the host clone: push it
+first.
+
+**Afterwards, each its own change:** retire infra-dev's and or3-dev's old tunnels (the
+CNAMEs no longer use them) and infra-dev's client block, with a `state: absent` for it —
+or3-dev's block stays; in each child repo, drop its compose file and its authorized-keys
+drop-in, bump its `BASE_TAG` default, and fix its docs (or3's `docs/dev-tunnel.md` names
+`~/or3/dev` for `make tunnel-log`, `up` and `shell`, now `~/infra/dev` with `C=or3-dev`; dd's
+and ds's say their keys are in `.dev-ssh/`); then delete `child-authorized-keys.conf`. The
+`.dev-ssh/` copies left in the host clones can go once the containers are proved.
+
+### A container added later
+
+A row in `compose.yaml` built like the three above, its old volumes named external if it has
+any, its profile in `COMPOSE_PROFILES` and its name in `HUB_HOSTS`, then `make up`. The hub's
+environment changes, so the hub is recreated: every `ssh dev` session drops, and no claude does.
 
 ## How this container is used
 
@@ -756,7 +827,7 @@ way back to a session after a disconnect is the rest.
 connector is a sidecar: `dev-cloudflared`, in the `tunnel` profile, the image pinned by
 digest exactly as the deployment sidecars pin theirs. Two hostnames: `dev.gsrpi.uk`, the hub's sshd on the
 project network, and `or3-dev.gsrpi.uk`, or3-dev's own sshd, kept for the phone's reverse
-forward to the vessel (*Moving a container in*; `cloudflared.yml`). No other dev container has
+forward to the vessel (*The cutover from the old layout*; `cloudflared.yml`). No other dev container has
 a hostname any more, and the base no longer carries cloudflared at all.
 
 ### The order
@@ -1249,6 +1320,9 @@ gitignored `.dev-ssh/` inside their own bind mount, their own `ssh_config`, and 
 `10-authorized-keys.conf`, naming the host account's `authorized_keys` (how both were
 reached before the base existed, and not a thing to re-key), and `20-forwarding.conf`,
 which puts `AllowTcpForwarding` back to the default their old config left in place.
+**Since the 2026-10-27 cutover** their keys are in `~/.dd-dev-secrets` and
+`~/.ds-dev-secrets` rather than the clone, and `child-authorized-keys.conf` blanks the first
+drop-in (*The cutover from the old layout*).
 Neither repo needs this one checked out: the `FROM` pulls.
 
 **Their identities arrive through `ssh_config.fleet`, and that is not a coincidence of
@@ -1587,8 +1661,8 @@ so on. `make dev` at either level is the bring-up above.
 
 The uid the container's `dev` user is built at comes from the **owner of the
 checkout**, read with `stat`, not from `id -u`: under `sudo` that is 0, and a dev user
-at uid 0 writes root-owned files into whatever it shares with the host — or3-dev's
-bind-mounted clone today. The same uid is what the hub's sidecar runs as, to read the
+at uid 0 writes root-owned files into whatever it shares with the host — the secrets
+directories, and the clone every workspace was until 2026-10-27. The same uid is what the hub's sidecar runs as, to read the
 gavin-owned `tunnel.json`. It refuses to build at 0 rather than doing it.
 
 `restart` is `stop`/`start` deliberately — `up -d` re-evaluates the config and may

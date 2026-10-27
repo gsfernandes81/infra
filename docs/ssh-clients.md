@@ -28,7 +28,7 @@ Two blocks land in `~/.ssh/config`, each edited in place on re-runs:
 | Marker | Written by | Holds |
 |---|---|---|
 | `# BEGIN infra-fleet` | `client-home-ssh-config.yml` (its fleet half) → `templates/ssh-fleet-block.j2` | the three Pis, three ways each; their ProxyCommand is `~/.config/fleet/access-ssh` |
-| `# BEGIN <alias>` | `client-home-ssh-config.yml` (its dev half, once per alias) → `templates/ssh-dev-block.j2` | `dev`, the hub — and each container's old block until it moves in |
+| `# BEGIN <alias>` | `client-home-ssh-config.yml` (its dev half, once per alias) → `templates/ssh-dev-block.j2` | `dev`, the hub; `or3-dev`, for the phone's vessel tunnel; and the others' old blocks until they are retired after the cutover |
 
 Do not hand-edit between the markers. Change the template and re-run — a hand edit
 survives until the next run and then vanishes, which is the worst of both.
@@ -90,7 +90,7 @@ drops to a login shell in the hub, from which `ssh <container>` still works.
 as given — the hub's calls are forwarded commands — and gives anything else a login shell in
 `/workspace`.
 
-### The old per-container blocks, kept until each container moves in
+### The old per-container blocks, kept until the cutover
 
 `client-home-ssh-config.yml` still writes a block for `infra-dev`, `or3-dev`, `dd-dev` and
 `ds-dev` beside `dev`: **each reached that container over its own tunnel, and works only
@@ -101,7 +101,7 @@ like the container being down. Each block, and its import in the play, goes in t
 commit that retires that container's old tunnel — **except `or3-dev`'s, which stays**: its
 hostname moves onto the hub's tunnel at move-in and keeps reaching or3-dev's own sshd, because
 the phone's `or3-tunnel` reverse forward to the vessel has to land there
-([`dev/README.md`](../dev/README.md) § *Moving a container in*). Until then this is how those aliases
+([`dev/README.md`](../dev/README.md) § *The cutover from the old layout*). Until then this is how those aliases
 behave against a container that has *not* moved:
 
 | You run | You get |
@@ -289,7 +289,7 @@ cable. This exists for the ship: the laptop has no internet, the phone does.
 
 ## The service token, and where it is allowed to live
 
-The hub — and, until each moves in, every old per-container tunnel — sits behind a
+The hub and `or3-dev` — and, until the cutover, every old per-container tunnel — sit behind a
 Cloudflare Access application admitting service tokens, one per client. The client holds it at `~/.config/<alias>/token`, mode 600, and the
 `ProxyCommand` sources it:
 
@@ -434,7 +434,7 @@ each container's own connector — they are a second door to each, with a differ
 story.
 
 No client alias points at them. `dd-dev` and `ds-dev` are not running, and since 2026-10-26
-neither gets a connector of its own: each moves into `dev/compose.yaml` behind the hub, and is
+neither gets a connector of its own: both move into `dev/compose.yaml` behind the hub at the cutover, and are
 reached by `ssh dev` like every other container. An alias for the old door would name a
 hostname with nothing behind it, which fails exactly like a container being down.
 

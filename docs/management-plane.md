@@ -410,6 +410,8 @@ bind mount of *zero's* clone, so a `git pull` in the container and one on the ho
 same pull on one working tree — "there is nothing that can drift", per its README. A
 movable container gives that up and owns its own clone. That is a real trade and it should
 be made knowingly, in or3, not implied by a placement decision made here.
+**Made, 2026-10-27, by the owner:** every dev container's workspace, or3's included, is its
+own clone in a volume ([`decisions.md`](decisions.md), *No workspace is a bind mount*).
 
 **Ports stopped being a registry problem on 2026-10-04**, when addressing became tunnel
 hostname only: `infra-dev` publishes nothing on zero, the break-glass path is `ssh -t zero
