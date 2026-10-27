@@ -315,7 +315,17 @@ jobs:
         run: |
           pipx install --quiet ansible-core
           ansible-galaxy collection install --upgrade -r ansible/requirements.yml >/dev/null
-          (cd ansible && for p in playbooks/*.yml; do ansible-playbook --syntax-check "$p" >/dev/null || { echo "FAIL  syntax: $p"; exit 1; }; done)
+          # Playbooks only: an underscore file is either an imported play or a task list that
+          # plays include, and --syntax-check refuses the second kind as "not a valid Play".
+          # The -e values are placeholders for the three plays that name a host or a play from
+          # one; syntax-check renders those names and dies on an undefined variable.
+          plays=$(cd ansible && python3 -c 'import sys, yaml
+          for f in sys.argv[1:]:
+              d = yaml.safe_load(open(f)) or []
+              if all(isinstance(e, dict) and ("hosts" in e or any(k.endswith("import_playbook") for k in e)) for e in d):
+                  print(f)' playbooks/*.yml)
+          echo "$plays" | wc -l | xargs echo "playbooks:"
+          (cd ansible && for p in $plays; do ansible-playbook --syntax-check -e deployment=dev -e target=zero "$p" >/dev/null || { echo "FAIL  syntax: $p"; exit 1; }; done)
           echo "PASS  every playbook parses"
           h="$RUNNER_TEMP/hooks.yml"
           cat > "$h" <<'YAML'
