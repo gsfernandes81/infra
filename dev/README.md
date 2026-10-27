@@ -107,8 +107,8 @@ ssh dev
 On zero, `make login` (`C=<c>` for another container) reports the hub's token, runs `claude
 auth login` if needed, and clones the workspace if start-up could not; re-running it is safe.
 Then `make verify` should read `sshd: running in the foreground`, `auth: claude logged in`,
-`tunnel: the hub's, serving dev`, `hub: key authorised; claude-sessions 0.5.0 here,
-claude-sessions 0.5.0 at the hub`, `github: the hub's token for gsfernandes81/infra, until …`,
+`tunnel: the hub's, serving dev`, `hub: key authorised; claude-sessions 0.6.0 here,
+claude-sessions 0.6.0 at the hub`, `github: the hub's token for gsfernandes81/infra, until …`,
 all collections installed, and `fleet: no route to zero/one/two`.
 
 **The memory pool is opt-in**: `DEV_CGROUP_PARENT=/devpool` puts every dev container and
@@ -181,10 +181,13 @@ The owner's shape (2026-10-26), drawn in claude-sessions'
 [`docs/mockups.md`](https://github.com/gsfernandes81/claude-sessions/blob/main/docs/mockups.md),
 mockups 12 to 15, and binding as the rest of that file is:
 
-- **The home is the containers**, one row each, in the hub's list order, with what is in it in
-  words — `3 loaded · 1 offloaded`, `nothing open`, `not answering`. A container with a
-  session waiting for you is marked with an amber `!`; one with something unread is bold.
-  Marked, never moved. `Enter` opens one; `n` and `s` act in the container under the cursor.
+- **The home is a tree of the containers** (since claude-sessions 0.6.0), one row each, in
+  the hub's list order, with what is in it in words — `3 loaded · 1 offloaded`, `nothing
+  open`, `not answering` — and under each, on `├─` and `└─`, its loaded sessions. A container
+  with a session waiting for you is marked with an amber `!`; one with something unread is
+  bold. Marked, never moved. `Enter` on a session opens it and `c` offloads it; `Enter` on a
+  container opens that container's screen; `n` and `s` act in the container of the cursor's
+  row.
 - **Inside a container: Loaded, Offloaded, and Archived**, which holds everything closed,
   starts folded, and opens with `Enter` or a click on its heading — the heading says `Enter
   shows` or `Enter hides`. A session waiting for you is an amber `!` on its row rather than a
@@ -331,8 +334,8 @@ reconnects by itself.
 
 **The steps.** Blocks are for fish, pasted inside the shell named.
 
-0. **Release and pin; make the App.** Merge claude-sessions to `main`; wait for `v0.5.0`; put
-   its two checksums (`SHA256SUMS`) into `hub/Dockerfile`; merge infra to `main`. Base
+0. **Release and pin; make the App.** Merge claude-sessions to `main`; wait for its release
+   (`v0.5.0` at the cutover); put its two checksums (`SHA256SUMS`) into `hub/Dockerfile`; merge infra to `main`. Base
    `2026.10.26` publishes from that push (about five minutes), or `make base` builds it
    locally. Make the GitHub App (*GitHub tokens, one repo each*, steps 1–3): it is every
    container's only way to GitHub from here on.
@@ -494,9 +497,9 @@ checks, each by name — the hub reaching infra with its own key, a client key r
 hub's door, the hooks drop-in, the binary and the GitHub token arriving through their mounts,
 the workspace cloned over https with that token, the tools on `PATH`, and dossier building
 straight from its GitHub URL. Its header lists what it cannot check (the Pi, the pool,
-Cloudflare, the App, or3). Until claude-sessions 0.5.0 is released it builds the hub's
-binary from that repo's branch, through `ci/compose.smoke.yaml` and the Makefile's
-`COMPOSE_OVERRIDE`; neither is ever used on zero.
+Cloudflare, the App, or3). Dispatched with a claude-sessions ref, it builds the hub's binary
+from that ref instead of the pinned release, through `ci/compose.smoke.yaml` and the
+Makefile's `COMPOSE_OVERRIDE`; neither is ever used on zero.
 
 ## What every container carries for work
 
@@ -803,15 +806,19 @@ copies in is ignored.
 
 [`gsfernandes81/claude-sessions`](https://github.com/gsfernandes81/claude-sessions) is the
 session registry: one JSON file per slot under `~/.local/share/claude-sessions/` (on a volume),
-kept current by Claude Code's own hooks. The hub pins **v0.5.0** (not yet released) and
-installs it for every container (*The hub*); its design and screens are that repo's
+kept current by Claude Code's own hooks. The hub pins **v0.6.0** and installs it for every
+container (*The hub*). A bump reaches every container when the hub is recreated, with no
+container restarted: hooks and offload passes run the binary from the volume each time, and
+each container's agent is started by the hub's menu over ssh and ends with that connection, so
+the old hub's agents go with it; its design and screens are that repo's
 `docs/design.md` and `docs/mockups.md`.
 
 **The menu is the hub's** (*The menu, two levels deep*), but each container's rows come from
 that container: the hub runs `claude-sessions agent` there over ssh, and `agent exec` for the
 one child an action needs at your terminal, so every lock and launch is decided inside the
-container. `Enter` attaches or resumes, `n` starts a slot in `/workspace`, `c` closes, `s` is
-a shell, `?` the keys, `q` quits, `Esc` goes back. A resume runs `claude --resume <id>` in a
+container. `Enter` attaches or resumes, `n` starts a slot in `/workspace`, `c` moves a
+session one step down without asking (a loaded one is offloaded, an offloaded one archived;
+since 0.6.0), `s` is a shell, `?` the keys, `q` quits, `Esc` goes back. A resume runs `claude --resume <id>` in a
 new slot from the directory Claude Code filed the conversation under, refused (`which is
 gone`) when that directory no longer exists. **The archive is the menu's only**: Claude
 Code's files are never touched, so `claude --resume` still finds everything; without the
