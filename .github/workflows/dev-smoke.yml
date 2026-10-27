@@ -242,9 +242,12 @@ jobs:
           docker exec infra-dev claude plugin list > plugins.txt 2>&1 || true
           sed 's/^/    | /' plugins.txt
           check "ty-lsp is listed by Claude Code" grep -q "ty-lsp@gsrpi-dev" plugins.txt
-          check "ty server answers an LSP initialize" docker exec infra-dev sh -c '
+          check "ty-lsp prefers the project's venv ty" docker exec infra-dev sh -c '
+            mkdir -p /tmp/p/.venv/bin && printf "#!/bin/sh\nexit 0\n" > /tmp/p/.venv/bin/ty && chmod +x /tmp/p/.venv/bin/ty
+            CLAUDE_PROJECT_DIR=/tmp/p ty-lsp 2>&1 | grep -qx "ty-lsp: using /tmp/p/.venv/bin/ty"; r=$?; rm -rf /tmp/p; exit $r'
+          check "ty-lsp answers an LSP initialize (the base ty, no venv here)" docker exec infra-dev sh -c '
             b="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"processId\":null,\"rootUri\":\"file:///workspace\",\"capabilities\":{}}}"
-            printf "Content-Length: %d\r\n\r\n%s" "${#b}" "$b" | (cat; sleep 5) | timeout 10 ty server 2>/dev/null | head -c 4000 | grep -q "\"capabilities\""'
+            printf "Content-Length: %d\r\n\r\n%s" "${#b}" "$b" | (cat; sleep 5) | CLAUDE_PROJECT_DIR=/workspace timeout 10 ty-lsp 2>/dev/null | head -c 4000 | grep -q "\"capabilities\""'
 
           # ── the limits compose sets are the ones the kernel got ──
           check "infra-dev's limits: 2560m RAM, 8704m RAM+swap" sh -c \

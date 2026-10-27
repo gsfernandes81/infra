@@ -502,7 +502,9 @@ The base, so every child has it by its `FROM` line (owner, 2026-10-27):
   plugin marketplace in `claude-plugins/`, baked at `/opt/claude-plugins` and enabled in
   `claude-managed-settings.json`, so Claude gets ty's diagnostics after each edit and an `LSP`
   tool for definitions and references. `ty server` starts the first time Claude edits a `.py`
-  file in a session, one per session. No pyright (heavier, and not what the repos check
+  file in a session, one per session, and it is **the repo's own ty** where there is one — an
+  activated venv, a `.venv` in or above the project, dd's and ds's `/home/dev/venv` — and the
+  base's only otherwise (`ty-lsp`). No pyright (heavier, and not what the repos check
   with); ruff stays a command Claude runs, because Claude Code gives each extension one
   server. Other languages have no plugin enabled; their servers are for Helix.
 - **Command-line tools**: ripgrep, fd, jq, yq (mikefarah's), tree, file, zip/unzip, xz,

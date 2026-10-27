@@ -1345,7 +1345,8 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   ruff as the server, because Claude Code gives each extension one server, and ty's diagnostics
   and navigation are what an agent cannot get by running a command; ruff stays that command.
   No plugin for the other languages: they have no official one, and no repo here is mostly
-  them.
+  them. The server is the repo's own ty where it has one (owner: "allow the use of local / venv
+  ty"), through `dev/ty-lsp`, so diagnostics match the version and imports the repo checks with.
 - **A repo's untracked secrets live in a second volume, `~/.env.d`, symlinked into the
   workspace** (`DEV_ENV_FILES`). Not hard links: two volumes are two mounts and `link(2)`
   refuses across mounts. A regular file found where a link should be — an editor that saves by

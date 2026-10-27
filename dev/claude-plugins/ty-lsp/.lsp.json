@@ -1,7 +1,6 @@
 {
   "ty": {
-    "command": "ty",
-    "args": ["server"],
+    "command": "ty-lsp",
     "extensionToLanguage": {
       ".py": "python",
       ".pyi": "python"

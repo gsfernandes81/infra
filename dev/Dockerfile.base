@@ -605,10 +605,13 @@ COPY claude-managed-settings.json /etc/claude-code/managed-settings.json
 # extension is all Claude Code allows, so ruff stays the linter Claude runs, not a second .py
 # server. The server starts the first time Claude edits a Python file, not with the session.
 COPY claude-plugins /opt/claude-plugins
+# What the plugin runs: `ty server` from the repo's own venv when it has a ty, else the base's
+# (the file says in which order it looks).
+COPY ty-lsp /usr/local/bin/ty-lsp
 # Parsed here because it is hand-edited and Claude Code ignores a malformed settings file
 # WHOLE and says nothing — the agent view would be back on and the channel back on latest.
 RUN chmod 0644 /etc/claude-code/managed-settings.json \
-    && chmod -R a+rX /opt/claude-plugins \
+    && chmod -R a+rX /opt/claude-plugins && chmod 0755 /usr/local/bin/ty-lsp \
     && for f in /etc/claude-code/managed-settings.json /opt/claude-plugins/.claude-plugin/marketplace.json \
                 /opt/claude-plugins/ty-lsp/.claude-plugin/plugin.json /opt/claude-plugins/ty-lsp/.lsp.json; do \
          python3 -c 'import json, sys; json.load(open(sys.argv[1]))' "$f" || exit 1; done

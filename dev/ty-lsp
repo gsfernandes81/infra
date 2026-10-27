@@ -1,0 +1,26 @@
+#!/bin/sh
+# Claude Code's Python language server (claude-plugins/ty-lsp/.lsp.json runs this): `ty server`,
+# from THE REPO'S OWN ty when it has one, so Claude's diagnostics come from the version and the
+# environment the repo checks with — its pinned ty, and the venv that resolves its imports — not
+# from the base's. The base's ty (uv tool, dev/Dockerfile.base) is the fallback.
+#
+# Looked for in this order, first executable wins:
+#   1. $VIRTUAL_ENV/bin/ty                    an activated venv
+#   2. .venv/bin/ty in the project or above   uv's layout (or3); the project is Claude Code's
+#                                             CLAUDE_PROJECT_DIR, else the directory it ran in
+#   3. /home/dev/venv/bin/ty                  where dd-dev and ds-dev bake theirs
+#   4. ty on PATH                             a child that puts its venv first, else the base
+# Says which on stderr, which Claude Code keeps as the server's log; stdout is the protocol and
+# must carry nothing else.
+pick() { [ -n "$1" ] && [ -x "$1" ] && { echo "ty-lsp: using $1" >&2; exec "$1" server; }; }
+[ -n "${VIRTUAL_ENV:-}" ] && pick "$VIRTUAL_ENV/bin/ty"
+d=${CLAUDE_PROJECT_DIR:-$PWD}
+while [ -n "$d" ]; do
+    pick "$d/.venv/bin/ty"
+    [ "$d" = / ] && break
+    d=$(dirname "$d")
+done
+pick /home/dev/venv/bin/ty
+pick "$(command -v ty)"
+echo "ty-lsp: no ty found (no venv ty, and none on PATH)" >&2
+exit 127
