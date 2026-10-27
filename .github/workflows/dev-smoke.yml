@@ -121,6 +121,22 @@ jobs:
           grep -q 'missing external volumes' err.txt && echo "PASS  refused, naming the volumes"
           make -C dev volumes SUDO=
 
+      # The deploy play brings the whole project up at once, and Compose creates every container
+      # before it starts any; the steps below start the hub alone first, which hid this. A dev
+      # container's create used to copy its root-owned mountpoint over the hub's still-empty
+      # volume, so the hub could not install into it (zero, 2026-10-27; compose.yaml at x-opt).
+      - name: Check a whole-project create leaves the hub's volumes dev's
+        working-directory: dev
+        run: |
+          files="-f compose.yaml"; [ -n "${SMOKE_CLAUDE_SESSIONS_DIR:-}" ] && files="$files -f ci/compose.smoke.yaml"
+          docker compose $files create
+          for v in claude-sessions github-tokens hub-state; do
+            owner=$(docker run --rm -v "dev_$v:/v" busybox stat -c %u /v)
+            [ "$owner" = "$(id -u)" ] || { echo "FAIL  dev_$v is owned by uid $owner, not the hub's $(id -u)"; exit 1; }
+            echo "PASS  dev_$v is the hub's after creating every container"
+          done
+          docker compose $files down
+
       - name: Start the hub (make up S=hub)
         run: |
           make -C dev up S=hub SUDO= $SMOKE_OVERRIDE

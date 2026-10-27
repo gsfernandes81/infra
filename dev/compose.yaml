@@ -59,11 +59,21 @@ x-dev: &dev
 # hooks drop-in as Claude Code's managed-settings.d, a subpath mount rather than a symlink so
 # Claude Code reads a plain directory of plain files. Read-only, so no claude in a container
 # can rewrite the hooks every claude runs.
+#
+# NOCOPY ON EVERY DEV CONTAINER'S MOUNT OF A HUB VOLUME (these two and the token mounts below).
+# Docker copies an image's mountpoint INTO an empty volume each time a container using it is
+# created, ownership included, and Compose creates every container before it starts any. So on
+# a whole-project `up` the hub's creation made the still-empty volume dev's, then infra-dev's
+# and or3-dev's made it root's again from their root-owned mountpoints, and the hub could not
+# install into it (zero, 2026-10-27: hub-health "claude-sessions is not installed"). Only the
+# hub's own mount copies, so only its dev-owned mountpoint decides.
 x-opt: &opt
   type: volume
   source: claude-sessions
   target: /opt/claude-sessions
   read_only: true
+  volume:
+    nocopy: true
 x-managed: &managed
   type: volume
   source: claude-sessions
@@ -71,6 +81,7 @@ x-managed: &managed
   read_only: true
   volume:
     subpath: managed-settings.d
+    nocopy: true
 
 services:
   # ── the hub ───────────────────────────────────────────────────────────────────
@@ -206,7 +217,7 @@ services:
       # 2026-10-25 divergence). Push to share work, as from anywhere else.
       # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
       # no other container's (hub/github-tokens). Empty until the hub's first mint.
-      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: infra-dev } }
+      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: infra-dev, nocopy: true } }
       - infra-workspace:/workspace
       # The repo's untracked secrets, in a volume of their own, linked into the workspace.
       - infra-env:/home/dev/.env.d
@@ -269,7 +280,7 @@ services:
       - *managed
       # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
       # no other container's (hub/github-tokens). Empty until the hub's first mint.
-      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: or3-dev } }
+      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: or3-dev, nocopy: true } }
       - or3-workspace:/workspace
       - or3-env:/home/dev/.env.d
       # The or3ecr key, the deploy key and the phone's authorized_keys (or3's
@@ -319,7 +330,7 @@ services:
       - *managed
       # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
       # no other container's (hub/github-tokens). Empty until the hub's first mint.
-      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: dd-dev } }
+      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: dd-dev, nocopy: true } }
       - dd-workspace:/workspace
       - dd-env:/home/dev/.env.d
       # What was the clone's .dev-ssh/, moved out of it at the cutover: mode 700, read-only.
@@ -384,7 +395,7 @@ services:
       - *managed
       # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
       # no other container's (hub/github-tokens). Empty until the hub's first mint.
-      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: ds-dev } }
+      - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: ds-dev, nocopy: true } }
       - ds-workspace:/workspace
       - ds-env:/home/dev/.env.d
       - ${DS_SECRETS:?set DS_SECRETS in dev/.env}:/run/ds-secrets:ro
