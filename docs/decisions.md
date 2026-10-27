@@ -1269,6 +1269,11 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   **Off by default**, with every container's own gh login and deploy key as before: the App is
   the owner's to make (dev/README.md). Built in Python's standard library plus `openssl`, in
   infra's hub image and not in claude-sessions, whose zero-dependency build has no TLS.
+- **The pool reclaims from 2048M (memory.high) before its 2560M kill line** (owner,
+  2026-10-27, on the design review's point that cgroup memory limits do not limit IO): the
+  soft limit makes idle sessions give memory back early and gradually, into zram first, so the
+  6G of swap is reached only by a runaway rather than by the pool filling and swapping at once
+  beside Immich's SSD.
 - **The pool is 2560M of RAM and 6G of swap** (owner, 2026-10-27: "allow 6G of swap so both
   zram and normal swap can be utilized"), and **each container's swap cap is its RAM plus
   those 6G**, so the pool, not a container, says how much dev work may swap. Before this the

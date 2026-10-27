@@ -22,6 +22,13 @@
 # own ceiling is also 2560M, so one container may still use the whole pool while the others
 # are idle. A container's own memswap_limit still caps its swap below the pool's.
 #
+# AND A SOFT LIMIT UNDER THE HARD ONE, memory.high at 2048M (owner, 2026-10-27). Above it the
+# kernel throttles the pool's processes and reclaims their pages — idle claudes' first, into
+# zram — instead of killing anything; 2560M stays the kill line. Without it the pool would fill
+# to 2560M before any reclaim, competing with Immich for what is left, and swap hard all at
+# once. memory.high does not bound swap or disk traffic by itself: it makes the pool give
+# memory back early and gradually, so only a runaway ever reaches far into the 6G.
+#
 # Not boot-critical, and it starts nothing: it makes an empty group and writes its limits.
 # A failed start costs only this — the dev containers are restart: no, `make up` would then
 # fail to place them, and leaving DEV_CGROUP_PARENT empty puts them back under Docker's own
@@ -41,6 +48,7 @@ description="cgroup v2 group /devpool and its memory limits, for dev/compose.yam
 extra_started_commands="show"
 
 POOL=/sys/fs/cgroup/devpool
+POOL_MEMORY_HIGH=2048M
 POOL_MEMORY_MAX=2560M
 POOL_SWAP_MAX=6G
 POOL_PIDS_MAX=4096
@@ -52,7 +60,7 @@ depend() {
 }
 
 start() {
-	ebegin "Starting the dev container memory pool (${POOL_MEMORY_MAX}, swap ${POOL_SWAP_MAX})"
+	ebegin "Starting the dev container memory pool (${POOL_MEMORY_HIGH} soft, ${POOL_MEMORY_MAX} hard, swap ${POOL_SWAP_MAX})"
 	if [ "$(stat -fc %T /sys/fs/cgroup 2>/dev/null)" != cgroup2fs ]; then
 		eend 1 "/sys/fs/cgroup is not cgroup v2 — rc_cgroup_mode=\"unified\" in /etc/rc.conf"
 		return 1
@@ -73,6 +81,7 @@ start() {
 		echo "+$c" > "$POOL/cgroup.subtree_control" 2>/dev/null || true
 	done
 	echo "$POOL_MEMORY_MAX" > "$POOL/memory.max" &&
+		echo "$POOL_MEMORY_HIGH" > "$POOL/memory.high" &&
 		echo "$POOL_SWAP_MAX" > "$POOL/memory.swap.max" &&
 		echo "$POOL_PIDS_MAX" > "$POOL/pids.max"
 	eend $? "could not write the pool's limits"
@@ -86,9 +95,12 @@ stop() {
 }
 
 show() {
-	printf 'memory  %s used of %s\n' "$(cat "$POOL/memory.current")" "$(cat "$POOL/memory.max")"
+	printf 'memory  %s used; soft %s, hard %s\n' "$(cat "$POOL/memory.current")" \
+		"$(cat "$POOL/memory.high")" "$(cat "$POOL/memory.max")"
 	printf 'swap    %s used of %s\n' "$(cat "$POOL/memory.swap.current")" "$(cat "$POOL/memory.swap.max")"
 	printf 'killed  %s times inside the pool (memory.events oom_kill)\n' \
 		"$(sed -n 's/^oom_kill //p' "$POOL/memory.events")"
+	printf 'held    %s times at the soft limit (memory.events high)\n' \
+		"$(sed -n 's/^high //p' "$POOL/memory.events")"
 	printf 'groups  %s\n' "$(find "$POOL" -mindepth 1 -maxdepth 1 -type d | wc -l)"
 }
