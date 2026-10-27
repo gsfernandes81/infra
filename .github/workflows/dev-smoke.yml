@@ -273,7 +273,7 @@ jobs:
       # The door, as the phone meets it: a terminal on the far end of `ssh dev`. And the rule the
       # metered link depends on, that a menu nobody touches sends nothing. Calibrated by the
       # first half: the menu must have drawn the containers, or "nothing was sent" is empty.
-      # CLAUDE_UNDOCUMENTED_SHARED_LOGINS=true (the .env.example default): infra-dev reads its
+      # compose.yaml's shared-logins switch reads true: infra-dev reads its
       # login from the shared volume, and the check `make verify` uses to prove Claude Code still
       # honours the undocumented variable tells honoured from ignored. A fake, unexpired login, so
       # nothing reaches a login server; removed after.

@@ -612,15 +612,18 @@ the phone's login under it. An OAuth login belongs to the device that made it.
 
 ### The login: shared, or each its own
 
-**One switch in `.env`, `CLAUDE_UNDOCUMENTED_SHARED_LOGINS`** (owner, 2026-10-27):
+**One switch, `CLAUDE_UNDOCUMENTED_SHARED_LOGINS`, whose value is the default written into
+`compose.yaml`** (`${CLAUDE_UNDOCUMENTED_SHARED_LOGINS:-true}`, owner, 2026-10-27). Tracked rather
+than in `.env`, because it is how the fleet behaves, not a host value, and `make check` refuses a
+`.env` that sets it, so the value in git is the one that runs:
 
 - `true`, the default: every dev container is on **one** full Claude login, Remote Control
   included. Log in once, in any container (`make login C=<c>`), and every one follows; a logout
   in one is a logout in all.
 - `false`: each container has its own login, in its own `*-claude` volume, as before.
 
-Flipping it is that line and the deploy play, which recreates the dev containers, so their
-sessions end; then `make login C=<c>` wherever `make status` reads logged out. Nothing is
+Flipping it is a commit changing `:-true` to `:-false` (or back), then the deploy play, which recreates the dev
+containers, so their sessions end; then `make login C=<c>` wherever `make status` reads logged out. Nothing is
 deleted either way: the shared login stays in the `claude-login` volume and each container's
 own stays in its `*-claude` volume, so flipping back finds whichever was there, if it has not
 gone stale meanwhile.
@@ -632,7 +635,7 @@ processes on one machine do. Read from Claude Code 2.1.311 and proved against a 
 server; the reasoning and the tests are in [`../docs/decisions.md`](../docs/decisions.md).
 Because Claude Code updates itself, **`make verify`'s `login dir` line proves it each time**: it
 asks for the login once as configured and once pointed at an empty directory, and reads
-`NOT HONOURED` the day an update stops reading the variable. The fix that day is `false`.
+`NOT HONOURED` the day an update stops reading the variable. The fix that day is flipping it to `false`.
 
 The `auth` line in `make status` says which login a container is on. Where each lives:
 `~/.claude-logins/true` is the shared volume, `~/.claude-logins/false` the container's own
@@ -879,7 +882,7 @@ zero, each mounted read-only into the one container that needs it:
 but the control node's own public key. **The hub's private key is in none of them**: it is made
 in, and never leaves, the `hub-state` volume. A repo's `.env` files are in its env volume. The
 Claude login (`*-claude`, or the shared `claude-login` volume while
-`CLAUDE_UNDOCUMENTED_SHARED_LOGINS=true`), Crush's key (`~/.local/share/crush`) and jcode's login (`~/.jcode`)
+`compose.yaml`'s shared-logins switch reads true), Crush's key (`~/.local/share/crush`) and jcode's login (`~/.jcode`)
 are on the containers' external volumes, which `make down-volumes` leaves alone.
 
 **What a container can reach:**

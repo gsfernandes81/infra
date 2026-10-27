@@ -1411,7 +1411,13 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   `COMPOSE`, which `make build` and `make up` use; the deploy play's own `up` builds nothing,
   because `make build` ran first.
 - **The dev containers share one Claude login, on an undocumented setting, behind one switch**
-  (owner, 2026-10-27): `CLAUDE_UNDOCUMENTED_SHARED_LOGINS` in `dev/.env`, `true` or `false`.
+  (owner, 2026-10-27): `CLAUDE_UNDOCUMENTED_SHARED_LOGINS`, `true` or `false`, its value the
+  default written into `dev/compose.yaml` (`:-true`). In `compose.yaml` and not `.env` (owner, the
+  same day): it is how the fleet behaves, not a host value or a secret, so it belongs where git
+  records when it flipped and the deploy play applies it; a `.env` line is invisible to the repo
+  and to a rebuilt host. Compose has no variables of its own, so the value is a default, and
+  `make check` refuses a `.env` that sets it (the Makefile's `sudo env` already drops the shell's),
+  so a default can never be overridden unseen.
   Wanted: one login for every container *with* Remote Control. A `setup-token` token is the only
   documented shareable login and makes model requests only, so no Remote Control and no
   claude.ai connectors; copying a full login is what failed on or3-dev (the copies refresh on
@@ -1428,7 +1434,7 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   proved here: a real Remote Control session, and a long-running session picking up a refresh
   made elsewhere (the code watches the file's mtime for it). **Reversible by design**: both
   directories are mounted always, `false` being each container's own `*-claude` volume mounted a
-  second time, so the switch is one value and a redeploy, and nothing is deleted either way.
+  second time, so the switch is one value, a commit and a redeploy, and nothing is deleted either way.
   `make verify`'s `login dir` line asks for the login once as configured and once pointed at an
   empty directory, so the day an update drops the variable it reads NOT HONOURED (calibrated by
   passing a name Claude does not read). A logout in one container is a logout in all, and one

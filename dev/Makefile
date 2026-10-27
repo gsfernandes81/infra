@@ -111,9 +111,12 @@ _require-env:
 	  grep -q "^$$k" $(CURDIR)/.env || printf ' %s' "$${k%=}"; done); \
 	[ -z "$$missing" ] || { \
 	  echo "dev/.env lacks:$$missing — copy each line from .env.example and set it." >&2; exit 1; }
-	@v=$$(sed -n 's/^CLAUDE_UNDOCUMENTED_SHARED_LOGINS=//p' $(CURDIR)/.env | tail -n 1); \
-	case "$$v" in true|false) ;; *) \
-	  echo "dev/.env: CLAUDE_UNDOCUMENTED_SHARED_LOGINS is '$$v' — it must be true or false" >&2; exit 1 ;; esac
+	@grep -qE '^x-claude-login-dir: &claude-login-dir /home/dev/\.claude-logins/\$$\{CLAUDE_UNDOCUMENTED_SHARED_LOGINS:-(true|false)\}$$' $(CURDIR)/compose.yaml || { \
+	  echo "compose.yaml: the x-claude-login-dir line must end in" >&2; \
+	  echo '  $${CLAUDE_UNDOCUMENTED_SHARED_LOGINS:-true}   (or :-false)' >&2; exit 1; }
+	@! grep -qE '^[[:space:]]*(export[[:space:]]+)?CLAUDE_UNDOCUMENTED_SHARED_LOGINS=' $(CURDIR)/.env || { \
+	  echo "dev/.env sets CLAUDE_UNDOCUMENTED_SHARED_LOGINS; it lives in compose.yaml, so a .env line" >&2; \
+	  echo "  would override it unseen. Delete that line, and change compose.yaml to flip it." >&2; exit 1; }
 
 # THE EXTERNAL VOLUMES — each container's logins, history and host keys, kept by name from its
 # old project — must already exist: Compose refuses an external volume it cannot find, and

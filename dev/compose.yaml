@@ -22,6 +22,25 @@ name: dev
 # so keep its shape: `x-base-tag: &base-tag <tag>`. Bumping it is what publishes a new base.
 x-base-tag: &base-tag 2026.10.26
 
+# THE CLAUDE LOGIN, ONE SWITCH: CLAUDE_UNDOCUMENTED_SHARED_LOGINS, SET BELOW, true OR false (owner,
+# 2026-10-27). Its value is the default written into the line, `:-true` or `:-false`, and only that:
+# dev/Makefile refuses a .env that sets the variable, and runs Compose through `sudo env`, which
+# drops the caller's environment, so what git holds is what runs.
+#   true    SHARED — every dev container on one full login (Remote Control included), in the
+#           claude-login volume; log in once, in any of them, and all follow
+#   false   EACH ITS OWN — each container's login in its own *-claude volume, as before
+# Tracked here, not in .env: it is a choice about how the fleet behaves, not a host value, so git
+# says when it flipped and the deploy play applies it. Flipping it is a commit and a redeploy,
+# which recreates the dev containers; then `make login C=<c>` wherever `make status` reads logged
+# out. dev/Makefile checks the line's shape, so keep it: `${CLAUDE_UNDOCUMENTED_SHARED_LOGINS:-true}`
+# or `:-false}` at its end.
+# It rests on CLAUDE_SECURESTORAGE_CONFIG_DIR, UNDOCUMENTED: Claude Code reads its login file and
+# takes its refresh lock there, so containers sharing it refresh once between them, as processes
+# on one machine do (read from 2.1.311's code and proved against a stand-in login server,
+# decisions.md). ~/.claude-logins/true is the shared volume; ~/.claude-logins/false is the
+# container's own config volume mounted a second time, so false reads ~/.claude's own login file.
+x-claude-login-dir: &claude-login-dir /home/dev/.claude-logins/${CLAUDE_UNDOCUMENTED_SHARED_LOGINS:-true}
+
 # EACH CONTAINER'S REPO, stated once. Its service clones it (DEV_REPO), and the hub mints that
 # container's GitHub token for it and nothing else (HUB_REPO_*, below) — one anchor each, so the
 # two cannot name different repos.
@@ -83,19 +102,6 @@ x-managed: &managed
     subpath: managed-settings.d
     nocopy: true
 
-# THE CLAUDE LOGIN, ONE SWITCH (owner, 2026-10-27): CLAUDE_UNDOCUMENTED_SHARED_LOGINS in .env.
-#   true    SHARED — every dev container on one login, in the claude-login volume; log in once,
-#           in any of them, and all follow
-#   false   EACH ITS OWN — each container's login in its own config volume, as before
-# Claude Code reads its login file and takes its refresh lock in CLAUDE_SECURESTORAGE_CONFIG_DIR
-# — UNDOCUMENTED, read from 2.1.311's code and proved with four containers against a stand-in
-# login server (decisions.md) — so containers sharing that directory refresh once between them,
-# as processes on one machine do. Config, history and device keys stay each container's own.
-# The switch picks the directory: ~/.claude-logins/true is the shared volume, ~/.claude-logins/
-# false is the container's own config volume mounted a second time, so `false` reads the very
-# file ~/.claude/.credentials.json is. Both are mounted always: flipping is the one value and a
-# redeploy (dev/Makefile refuses anything but true or false).
-x-claude-login-dir: &claude-login-dir /home/dev/.claude-logins/${CLAUDE_UNDOCUMENTED_SHARED_LOGINS:?set CLAUDE_UNDOCUMENTED_SHARED_LOGINS in dev/.env — true or false}
 x-claude-login: &claude-login
   type: volume
   source: claude-login
