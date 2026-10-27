@@ -76,9 +76,9 @@ anything invasive ([Immich's database](#immichs-database)).
 **`two`:** nothing to bring back. Its one deployment, `destiny-director`, is stopped since
 2026-10-25 with its files kept ([README](../README.md)).
 
-**Two things the greps do not show, by design.** The dev containers' ports (2222, 2223,
-`127.0.0.1:2224`) are absent after a reboot, because nothing starts those containers; a
-grep for them would only ever fail. And 8384 and 22000 are Syncthing on host networking,
+**Two things the greps do not show, by design.** The dev containers publish no port on
+`zero` at all since the hub (their sshd is reached on the project's own network, and the hub
+through its tunnel), so there is nothing of theirs to grep for. And 8384 and 22000 are Syncthing on host networking,
 on both boxes: they appear in `netstat` but not in `docker ps`'s ports. `one`'s Syncthing
 is part of the `torrents` deployment and syncs a different share from `zero`'s.
 
@@ -121,15 +121,19 @@ this fleet.
 
 ## The dev containers on `zero`
 
-They are `restart: no` and stay down after a reboot, because they hold live sessions and
-uncommitted worktrees. Each is started by hand, with `make dev` in its own repo:
+Since the 2026-10-27 cutover they are one Compose project, `dev`, in `~/infra/dev`
+([dev/README.md](../dev/README.md)). The hub (`dev-hub`) and its tunnel (`dev-cloudflared`)
+are `restart: unless-stopped` and come back by themselves: `ssh dev` works after a reboot.
+The dev containers (`infra-dev`, `or3-dev`, and `dd-dev` with `dd-postgres` or `ds-dev` when
+their profiles are on) are `restart: no` and stay down, because each holds live sessions.
+Start each by hand, as stop-then-start, so nothing is recreated:
 
-| container | start it from |
-|---|---|
-| `dd-dev` (its database `dd-mysql` comes up with it) | `~/destiny-director` |
-| `ds-dev` | `~/dossier` |
-| `or3-dev` | `~/or3` |
-| `infra-dev` | `~/infra` |
+```fish
+cd ~/infra/dev; make restart C=infra-dev; make restart C=or3-dev
+```
+
+`make restart` never re-reads `compose.yaml`. A container that is missing rather than
+stopped comes back through the deploy play from the control node, not through `up` here.
 
 **Their volumes cannot be recreated.** `<project>_*-claude` holds the Claude Code login
 and the session history (22 MB of it for `or3-dev`), so a container rebuilt without its
