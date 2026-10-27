@@ -86,16 +86,17 @@ limits the owner is having to manage each container separately.
 
 ## Open, the owner's
 
-- **The pool's size and swap limit.** `zero` has 4 GB. Immich's machine learning peaks lower
+- ~~**The pool's size and swap limit.**~~ Decided 2026-10-27: 2560M and 6G. `zero` has 4 GB. Immich's machine learning peaks lower
   after v3.3.5, and ~2.3 GB was available on 2026-10-25 before that.
 - ~~**`or3-dev`'s shared working tree.**~~ Decided 2026-10-27, the owner: every workspace,
   or3's included, is a clone in a volume (decisions.md).
 
 ## Order, and where each step stands
 
-1. **Not started.** The pool file on `zero`, proved by attempting to over-allocate inside the
-   pool and requiring the kill to land there (CLAUDE.md: calibrate the check first). Until it
-   exists, `DEV_CGROUP_PARENT` stays empty in `dev/.env` and Compose sets no parent.
+1. **Written, not installed (2026-10-27).** `hosts/zero/system/devpool`, an OpenRC service
+   making `/sys/fs/cgroup/devpool` at 2560M of RAM and 6G of swap (the owner's, 2026-10-27:
+   swap enough to reach through zram into the SSD swap). Its install and calibrated proof are `hosts/zero/system/README.md` §
+   *devpool*. Until it is proved, `DEV_CGROUP_PARENT` stays empty and Compose sets no parent.
 2. **Built, unreleased.** The hub rewrite, in the claude-sessions repo: `agent`, `install`,
    `offload-all` and the containers-first menu, as 0.5.0. It is released by merging that
    repo's branch to `main` (a version bump there is a publish), and then

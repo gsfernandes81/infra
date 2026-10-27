@@ -180,7 +180,10 @@ services:
     hostname: infra-dev   # Claude Code shows this as the machine title
     # A cap, not a reservation; dev/README.md has why it is lower than or3-dev's.
     mem_limit: ${DEV_MEM_LIMIT:-1024m}
-    memswap_limit: ${DEV_MEMSWAP_LIMIT:-1536m}
+    # memswap is RAM + swap. Each container's is its RAM plus the pool's whole 6G, so the pool
+    # (hosts/zero/system/devpool), not each container, decides how much swap dev work may use —
+    # zram first, then the SSD swap behind it (owner, 2026-10-27).
+    memswap_limit: ${DEV_MEMSWAP_LIMIT:-7168m}
     environment:
       GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
@@ -248,9 +251,9 @@ services:
     image: or3-dev
     container_name: or3-dev
     hostname: or3-dev
-    # or3's own figures, from its compose file.
+    # or3's own RAM figure, from its compose file; its swap is the pool's (below).
     mem_limit: 2560m
-    memswap_limit: 3072m
+    memswap_limit: 8704m   # RAM + the pool's 6G of swap, as infra-dev's says
     shm_size: 256m
     tmpfs:
       - /tmp:exec,mode=1777,size=512m
@@ -293,7 +296,7 @@ services:
     hostname: dd-dev
     # destiny-director's own figures: dd-dev idles at ~1.4 GB, and the dev bots run in here.
     mem_limit: 2560m
-    memswap_limit: 2816m
+    memswap_limit: 8704m   # RAM + the pool's 6G of swap, as infra-dev's says
     environment:
       GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
@@ -344,6 +347,8 @@ services:
     image: postgres:17-alpine
     container_name: dd-postgres
     restart: "no"
+    # In the pool with the dev containers: it is dev work's memory, not the host's.
+    cgroup_parent: ${DEV_CGROUP_PARENT:-}
     networks:
       dev:
         aliases: [postgres]
@@ -373,7 +378,7 @@ services:
     # dossier's compose set no limit; this is a ceiling for the pool to sit above. Raise it
     # here if uv sync or the TUI's tests are killed.
     mem_limit: 1536m
-    memswap_limit: 2048m
+    memswap_limit: 7680m   # RAM + the pool's 6G of swap, as infra-dev's says
     environment:
       GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}

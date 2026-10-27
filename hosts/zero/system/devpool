@@ -1,0 +1,87 @@
+#!/sbin/openrc-run
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /etc/init.d
+# infra-name: devpool
+# infra-mode: 0755
+# One memory limit for every dev container: the cgroup v2 group /sys/fs/cgroup/devpool, which
+# dev/compose.yaml names as each dev container's cgroup_parent once DEV_CGROUP_PARENT=/devpool
+# is set in dev/.env (plans/dev-pool.md, step 1).
+#
+# WHY A POOL. zero runs Immich and Syncthing in 3.9 GB, and the dev containers beside them
+# are many and mostly idle: what costs memory is live claude sessions, ~250 MB each, wherever
+# they are. Each container's own mem_limit stays as a ceiling inside the pool; the pool is the
+# one number that says how much of zero the dev work may take in total. When it is full, the
+# kernel kills a process INSIDE it — the pool's largest, which may be a busy session in
+# another repo than the one that grew — and nothing outside it, Immich above all, is touched.
+#
+# THE TWO NUMBERS ARE THE OWNER'S (2026-10-27): 2560M of RAM, which leaves about 1.4 GB for
+# Immich, Syncthing, Docker and the host — what 2026-10-25's measurement left free with nothing
+# in the pool; and 6G of swap, so idle sessions can spill through all of zram (zram-swap, 2G,
+# priority 100) and on into the SSD swap partition behind it rather than being killed. or3-dev's
+# own ceiling is also 2560M, so one container may still use the whole pool while the others
+# are idle. A container's own memswap_limit still caps its swap below the pool's.
+#
+# Not boot-critical, and it starts nothing: it makes an empty group and writes its limits.
+# A failed start costs only this — the dev containers are restart: no, `make up` would then
+# fail to place them, and leaving DEV_CGROUP_PARENT empty puts them back under Docker's own
+# parent. `before docker` so the group exists before anything could be started in it.
+#
+#   rc-service devpool show    what the pool holds now, and how often it has had to kill
+
+name="dev container memory pool"
+description="cgroup v2 group /devpool and its memory limits, for dev/compose.yaml"
+extra_started_commands="show"
+
+POOL=/sys/fs/cgroup/devpool
+POOL_MEMORY_MAX=2560M
+POOL_SWAP_MAX=6G
+POOL_PIDS_MAX=4096
+
+depend() {
+	need sysfs
+	after cgroups localmount
+	before docker
+}
+
+start() {
+	ebegin "Starting the dev container memory pool (${POOL_MEMORY_MAX}, swap ${POOL_SWAP_MAX})"
+	if [ "$(stat -fc %T /sys/fs/cgroup 2>/dev/null)" != cgroup2fs ]; then
+		eend 1 "/sys/fs/cgroup is not cgroup v2 — rc_cgroup_mode=\"unified\" in /etc/rc.conf"
+		return 1
+	fi
+	for c in memory pids; do
+		if ! grep -qw "$c" /sys/fs/cgroup/cgroup.controllers; then
+			eend 1 "the kernel offers no $c controller at the root"
+			return 1
+		fi
+	done
+	# The root must hand memory and pids down to its children, the pool among them; usually it
+	# already does, because Docker needs the same.
+	echo "+memory +pids" > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null || true
+	mkdir -p "$POOL" || { eend 1 "could not create $POOL"; return 1; }
+	# Hand EVERY controller the pool has on to the containers inside it. runc enables what it
+	# needs in a parent anyway; doing it here means the pool is complete before runc sees it.
+	for c in $(cat "$POOL/cgroup.controllers"); do
+		echo "+$c" > "$POOL/cgroup.subtree_control" 2>/dev/null || true
+	done
+	echo "$POOL_MEMORY_MAX" > "$POOL/memory.max" &&
+		echo "$POOL_SWAP_MAX" > "$POOL/memory.swap.max" &&
+		echo "$POOL_PIDS_MAX" > "$POOL/pids.max"
+	eend $? "could not write the pool's limits"
+}
+
+stop() {
+	# The group is left in place: removing it would fail while a container is in it, and an
+	# empty group costs nothing. Its limits stay as written until the next start.
+	ebegin "Leaving the dev container memory pool in place"
+	eend 0
+}
+
+show() {
+	printf 'memory  %s used of %s\n' "$(cat "$POOL/memory.current")" "$(cat "$POOL/memory.max")"
+	printf 'swap    %s used of %s\n' "$(cat "$POOL/memory.swap.current")" "$(cat "$POOL/memory.swap.max")"
+	printf 'killed  %s times inside the pool (memory.events oom_kill)\n' \
+		"$(sed -n 's/^oom_kill //p' "$POOL/memory.events")"
+	printf 'groups  %s\n' "$(find "$POOL" -mindepth 1 -maxdepth 1 -type d | wc -l)"
+}

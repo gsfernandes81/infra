@@ -145,7 +145,7 @@ dev`, and `make status C=hub` is the hub's own.
 | | What it adds | Why it is off |
 |---|---|---|
 | *(not built)* | ssh to zero, one and two | makes this a control node on a box it controls — deferred |
-| `DEV_CGROUP_PARENT=/devpool` | one memory pool over every dev container | the pool's boot file is not installed yet — [`../plans/dev-pool.md`](../plans/dev-pool.md), step 1 |
+| `DEV_CGROUP_PARENT=/devpool` | one memory pool over every dev container | `hosts/zero/system/devpool` is written but not installed — its install and proof are [`../hosts/zero/system/README.md`](../hosts/zero/system/README.md) § *devpool* |
 
 The tunnel is a profile, not a requirement: with `tunnel` out of `COMPOSE_PROFILES` the hub
 and the containers come up anyway, and `make claude` on zero is the menu `ssh dev` would have
@@ -269,9 +269,11 @@ What changes for you:
    then on zero `chmod 600 ~/.dev-secrets/github-app.pem` and delete the phone's copy.
 4. `HUB_GITHUB_APP_ID=<id>` in `dev/.env`, then `make up` (the hub is recreated) and
    `make restart C=<c>` for each running container, so its git picks the helper up.
-5. Proof, from `make shell C=infra-dev`: `git ls-remote https://github.com/gsfernandes81/infra`
-   answers, and `git ls-remote https://github.com/gsfernandes81/or3` is refused — or3 is
-   private, and the token is infra's alone. (A public repo is no test: anything can read one.) `~/.hub/github-tokens.log` in the hub has each pass, never a token.
+5. Proof, from `make shell C=infra-dev`: `git -C /workspace push --dry-run origin HEAD`
+   succeeds — a push needs the token's write even on public infra, so this is the token at
+   work — and `git ls-remote https://github.com/gsfernandes81/or3` is refused, because or3 is
+   private and the token is infra's alone. (Reading a public repo proves nothing: anyone can.)
+   `~/.hub/github-tokens.log` in the hub has each pass, never a token.
 
 Asking for a permission the App was not granted fails every token with GitHub's reason in the
 log (HTTP 422); narrow `HUB_GITHUB_PERMISSIONS` in `.env` or widen the App. The checks are

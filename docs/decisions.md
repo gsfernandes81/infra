@@ -1269,6 +1269,13 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   **Off by default**, with every container's own gh login and deploy key as before: the App is
   the owner's to make (dev/README.md). Built in Python's standard library plus `openssl`, in
   infra's hub image and not in claude-sessions, whose zero-dependency build has no TLS.
+- **The pool is 2560M of RAM and 6G of swap** (owner, 2026-10-27: "allow 6G of swap so both
+  zram and normal swap can be utilized"), and **each container's swap cap is its RAM plus
+  those 6G**, so the pool, not a container, says how much dev work may swap. Before this the
+  containers' own `memswap_limit`s allowed 256–512 MB each, which would have left the pool's
+  swap unreachable. The cost until the pool is installed: a container may swap up to 6G on
+  its own. **dd-postgres is in the pool too** — it is dev work's memory. Each child builds
+  from its repo on GitHub (`main`), so no clone on zero is read by anything.
 - **A repo's untracked secrets live in a second volume, `~/.env.d`, symlinked into the
   workspace** (`DEV_ENV_FILES`). Not hard links: two volumes are two mounts and `link(2)`
   refuses across mounts. A regular file found where a link should be — an editor that saves by

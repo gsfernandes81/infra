@@ -39,6 +39,7 @@ exemption, which is a real cost on a 512 MB armv6 box running diskless.
 | `bcache-register` | `/etc/init.d/bcache-register` | The array is btrfs RAID1 across **two** bcache devices; both must assemble before it can mount rw. This registers them and waits, bounded to 30s, then **always exits 0** — a failure here must never stop the boot. |
 | `cloudflared` | `/etc/init.d/cloudflared` | The tunnel — the remote way in. Only trackable since Aug 2026: it previously carried the tunnel token inline, so committing it would have committed a secret. **Since 2026-08-23 it carries no secret at all** — `command_args` is `--autoupdate-freq 240h0m0s --config /etc/cloudflared/config.yml tunnel run`, and the tunnel credentials file is 0600. It is hand-written, not packaged: `docs/host-setup.md` installs the binary from GitHub, so Alpine ships no init script for it. It logged nowhere until 2026-08-23: `stdout_log`/`stderr_log` are not variables `supervise-daemon` reads, and it now uses `output_logger`/`error_logger` — see phase 2f. |
 | `zram-swap` | `/etc/init.d/zram-swap` | Compressed swap in RAM ahead of the SSD swap partition, 2 GiB zstd at priority 100. **Installed 2026-10-26**: `/proc/swaps` lists `/dev/zram0` at 2 GiB, priority 100, `[zstd]`; in the default runlevel, owner-reported; [`docs/decisions.md`](../../../docs/decisions.md) § *Zram swap on `zero`* says why. Not boot-critical: a failed start leaves the SSD swap as it was. |
+| `devpool` | `/etc/init.d/devpool` | The dev containers' one memory limit: cgroup v2 group `/sys/fs/cgroup/devpool`, 2560M RAM and 6G swap (the owner's, 2026-10-27, so zram and the SSD swap can both be used), named by `dev/compose.yaml` as each dev container's `cgroup_parent` once `DEV_CGROUP_PARENT=/devpool`. **Written 2026-10-27, not installed**: install and proof below. Not boot-critical. |
 | `cloudflared-config.yml` | `/etc/cloudflared/config.yml` | The tunnel's ingress, moved off Cloudflare on 2026-08-23. Eight hostnames, and **the order is behaviour** — cloudflared matches first-rule-wins. This file is now the authoritative record of what zero serves; the dashboard's copy is ignored. See [`../../../docs/cloudflare.md`](../../../docs/cloudflare.md). |
 
 **The mountpoints are `chattr +i`.** That is the actual protection against a failed
@@ -47,6 +48,43 @@ mount silently destroying the Immich library, and it is not visible in any file 
 than trusting the flag. Read
 [`../../../docs/recovery.md`](../../../docs/recovery.md) before touching a bare
 mountpoint, or you will get `Permission denied` as root and not know why.
+
+## `devpool`: install, then prove the kill lands inside it
+
+Owner-run, from `ssh zero`, fish. The proof runs **with no dev container in the pool**, on a
+limit lowered for the test, so it never pushes zero anywhere near full; the last step puts
+the real limits back.
+
+```fish
+cd ~/infra
+sudo docker info --format '{{.CgroupDriver}} cgroup v{{.CgroupVersion}}'   # expect: cgroupfs cgroup v2
+bin/install-system-file devpool --new                                       # dry run: the new file
+sudo bin/install-system-file devpool --new --commit
+sudo rc-update add devpool default
+sudo rc-service devpool start; and sudo rc-service devpool show
+
+# the test: 256M, no swap, and the kill counter before
+echo 256M | sudo tee /sys/fs/cgroup/devpool/memory.max
+echo 0 | sudo tee /sys/fs/cgroup/devpool/memory.swap.max
+set before (sudo sed -n 's/^oom_kill //p' /sys/fs/cgroup/devpool/memory.events)
+set img python:3.13-slim-trixie@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c
+
+# calibrate first: 128 MB inside the pool must SURVIVE
+sudo docker run --rm --cgroup-parent=/devpool $img python3 -c "b=b'x'*(128<<20); print('kept 128M')"
+# then 512 MB must be KILLED, and counted by the POOL
+sudo docker run --rm --cgroup-parent=/devpool $img python3 -c "b=b'x'*(512<<20); print('NOT KILLED')"; echo "exit $status"
+echo "kills: $before -> "(sudo sed -n 's/^oom_kill //p' /sys/fs/cgroup/devpool/memory.events)
+sudo dmesg | grep -i 'killed process' | tail -1
+
+sudo rc-service devpool restart; and sudo rc-service devpool show            # the real limits back
+```
+
+Passing reads: `kept 128M`; then no `NOT KILLED`, `exit 137`, the kill count one higher,
+and a kernel line for the python process. **Read the counter and the kernel, not Docker's
+`OOMKilled`**, which the 2026-10-25 test showed reporting true for a container that was not
+killed. If the first run is killed too, the test is wrong (the pool is not where Docker put
+the container, or the limit did not take), not the pool: stop there. Once it passes, set
+`DEV_CGROUP_PARENT=/devpool` in `dev/.env`, and `make up` places every dev container in it.
 
 ## When `crypttab` lands here
 
