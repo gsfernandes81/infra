@@ -254,8 +254,9 @@ services:
     mem_limit: 2560m
     memswap_limit: 8704m   # RAM + the pool's 6G of swap, as infra-dev's says
     shm_size: 256m
-    tmpfs:
-      - /tmp:exec,mode=1777,size=512m
+    # No tmpfs on /tmp: it is the container's own disk, as in or3's compose since 16843d5
+    # (2026-10-27). It was RAM while Docker lived on the SD card; on the SSD a full `make
+    # test` filled most of the 512 MB, crashed browsers and spent the container's memory cap.
     environment:
       GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
