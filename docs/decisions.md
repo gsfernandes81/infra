@@ -1245,8 +1245,10 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
 - **No workspace is a bind mount: all four clone into volumes** (owner, 2026-10-27: "Could we
   remove support for bind mounted clones and switch entirely to clones in volumes?"). This
   ends or3's shared working tree, the trade management-plane.md said should be made
-  knowingly in or3 — the owner made it. Each host clone on zero stays, as the build context
-  only. What a clone held that git does not — dd's `.env`, dd's and ds's `.dev-ssh/` — moves
+  knowingly in or3 — the owner made it. ~~Each host clone on zero stays, as the build
+  context only.~~ ⚠︎SUPERSEDED the same day: each child builds from its repo on GitHub
+  (`main`) — or3 over ssh with its existing deploy key, dd and ds over https — so no clone on
+  zero is read by anything, and none can build a stale Dockerfile because nobody pulled it. What a clone held that git does not — dd's `.env`, dd's and ds's `.dev-ssh/` — moves
   into an env volume and a secrets directory at the cutover; uncommitted work, stashes,
   worktrees and ignored directories are listed first and stay behind on the host, untouched.
   dd's compose-level `env_file` is dropped rather than pointed at a host file: dd reads its

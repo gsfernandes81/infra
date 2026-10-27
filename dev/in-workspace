@@ -34,10 +34,10 @@
 set -u
 
 if ! cd /workspace 2>/dev/null; then
-    # Warn and carry on rather than refuse. If the bind mount is missing you want the
+    # Warn and carry on rather than refuse. If the workspace volume is missing you want the
     # command anyway — most likely you are running one to find out why.
-    echo "in-workspace: /workspace is not there — the bind mount is missing." >&2
-    echo "in-workspace: running in $(pwd) instead. Check INFRA_SRC in dev/.env." >&2
+    echo "in-workspace: /workspace is not there — the workspace volume is not mounted." >&2
+    echo "in-workspace: running in $(pwd) instead. Check the container's volumes in dev/compose.yaml." >&2
 fi
 
 # No arguments is a login shell, so `in-workspace` alone is useful rather than a no-op.

@@ -313,8 +313,8 @@ across mounts. Rules the entrypoint keeps:
 
 **`make down-volumes` drops both kinds** — every cloned workspace, with any unpushed work in
 it, and every env volume — along with the hub's key. That is every container's: since 2026-10-27 no workspace is a
-bind mount (owner), so the host clones on zero are only build contexts, and `down-volumes`
-never touches them.
+bind mount (owner), and no image builds from a clone on zero either (each child builds from
+GitHub), so `down-volumes` never touches a host clone.
 
 ## The cutover from the old layout
 
@@ -343,9 +343,11 @@ reconnects by itself.
   volume, linked into its workspace, in step 6. dd's and ds's `.dev-ssh/` keys move out of
   their clones into `~/.dd-dev-secrets` and `~/.ds-dev-secrets` in step 2. or3's keys are
   already in `~/.or3-dev-secrets`.
-- **The host clones become build contexts only.** Each child builds from its repo's own
-  Dockerfile on base `2026.10.26`, passed as the `BASE_TAG` build arg each already takes, so
-  no child repo changes first.
+- **Nothing reads the host clones any more.** Each child builds straight from its repo on
+  GitHub (`main`), with its own Dockerfile, on base `2026.10.26` passed as the `BASE_TAG`
+  build arg each already takes — so no child repo changes first. or3, being private, is
+  fetched over ssh with its deploy key from `~/.or3-dev-secrets`. Once step 1's listing is
+  clean, the clones of or3, destiny-director and dossier on zero can be deleted.
 - `dd-dev` and `ds-dev` stop mounting zero's `~gavin/.ssh` (`child-authorized-keys.conf`).
 - `or3-dev.gsrpi.uk` stays, re-pointed at the hub's tunnel in step 7, so the phone's
   `or3-tunnel` reverse forward lands inside `or3-dev` as before (`cloudflared.yml`).
@@ -397,9 +399,9 @@ reconnects by itself.
    ansible-playbook playbooks/server-create-dev-container.yml
    ```
 
-4. **On zero: check the paths the new `.env` names** — `ls -d ~/or3 ~/destiny-director
-   ~/dossier ~/.or3-dev-secrets ~/.dd-dev-secrets ~/.ds-dev-secrets` — and fix any line that
-   is wrong.
+4. **On zero: check the paths the new `.env` names** — `ls -d ~/.or3-dev-secrets
+   ~/.dd-dev-secrets ~/.ds-dev-secrets ~/.or3-dev-secrets/id_ed25519_or3_deploy` — and fix
+   any line that is wrong. The last is what builds or3's image.
 5. **On zero, from `~` and not from inside any dev container: stop the four old projects,
    keeping their volumes, then start this one.**
 
@@ -450,7 +452,7 @@ reconnects by itself.
 - `make verify` on zero, and `make status` for the hub, its tunnel and the offload passes.
 
 **Rolling back** is the old layout, one commit back, with every old volume intact and every
-host clone as it was: `make down` here, check out the commit before the hub in `~/infra`,
+host clone as it was (so delete no clone until the new layout has been proved): `make down` here, check out the commit before the hub in `~/infra`,
 `install -m 600 ~/dev.env.old dev/.env`, and `make up` there; or3 and infra-dev come back as
 they were. `or3-dev.gsrpi.uk` then needs re-pointing at or3-dev's old tunnel:
 `server-create-dev-container.yml -e container=or3-dev`, without `via_hub`. Work committed in
@@ -463,13 +465,36 @@ or3-dev's block stays; in each child repo, drop its compose file and its authori
 drop-in, bump its `BASE_TAG` default, and fix its docs (or3's `docs/dev-tunnel.md` names
 `~/or3/dev` for `make tunnel-log`, `up` and `shell`, now `~/infra/dev` with `C=or3-dev`; dd's
 and ds's say their keys are in `.dev-ssh/`); then delete `child-authorized-keys.conf`. The
-`.dev-ssh/` copies left in the host clones can go once the containers are proved.
+host clones of or3, destiny-director and dossier, `.dev-ssh/` included, can go once the
+containers are proved.
 
 ### A container added later
 
 A row in `compose.yaml` built like the three above, its old volumes named external if it has
 any, its profile in `COMPOSE_PROFILES` and its name in `HUB_HOSTS`, then `make up`. The hub's
 environment changes, so the hub is recreated: every `ssh dev` session drops, and no claude does.
+
+## What every container carries for work
+
+The base, so every child has it by its `FROM` line (owner, 2026-10-27):
+
+- **Helix** (`hx`, 25.07.1, with its compiled grammars), and `EDITOR`/`VISUAL` set to it.
+- **Language servers**, the ones Helix uses by default and Claude Code's code-intelligence
+  plugins look for: `ty` and `ruff` (Python, Helix's defaults), `pyright-langserver`,
+  `typescript-language-server` with TypeScript 5.9, `bash-language-server`,
+  `yaml-language-server` and the compose one, `vscode-{json,html,css}-language-server`,
+  `docker-langserver`, `fish-lsp`, `marksman` (Markdown), `taplo` (TOML). A project's venv
+  comes first on `PATH` where its Dockerfile puts it there, so the repo's own pinned ruff and
+  ty win inside it. Claude Code's LSP plugins are not enabled here; the binaries they need are.
+- **Command-line tools**: ripgrep, fd, jq, yq (mikefarah's), tree, file, zip/unzip, xz,
+  rsync, sqlite3, shellcheck, shfmt, bat, fzf, delta, htop, lsof, strace, dig, nc, wget,
+  patch, bc, uv.
+
+Not here, and why: `ansible-language-server` wants Node 24 and the base runs Node 22;
+rust-analyzer, because no container works on a Rust repo; compilers, which each child adds
+for its own builds (dd and ds add `build-essential`). Every binary that runs as what it
+downloads is hash-pinned per arch in `Dockerfile.base`; the npm and PyPI ones are
+version-pinned, as Claude Code is.
 
 ## How this container is used
 

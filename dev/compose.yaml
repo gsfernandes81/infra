@@ -221,11 +221,12 @@ services:
 
   # ── the other repos' containers, ported from each repo's own compose file ───────
   # All three move in at the one cutover (dev/README.md § "The cutover from the old layout").
-  # Each builds from its repo's clone on zero with ITS OWN Dockerfile, on this base — BASE_TAG
-  # is a build arg every child Dockerfile already takes, so no child repo changes first. THE
-  # HOST CLONE IS ONLY THE BUILD CONTEXT: like infra-dev, each works in its own clone in a
-  # volume, its untracked .env in an env volume, its keys in a secrets directory outside any
-  # clone (owner, 2026-10-27: no bind-mounted workspaces).
+  # EACH BUILDS STRAIGHT FROM ITS REPO ON GITHUB, `main`, with its own Dockerfile and on this
+  # base — BASE_TAG is a build arg every child Dockerfile already takes, so no child repo
+  # changes first, and no clone on zero is read by anything (owner, 2026-10-27). or3 is
+  # private, so its context is fetched over ssh with or3's own deploy key; dd and ds are
+  # public, over https. Each works in its own clone in a volume, its untracked .env in an env
+  # volume, its keys in a secrets directory outside any clone.
   #
   # Each sits behind a profile of its own name, so COMPOSE_PROFILES says which start with
   # `make up` — dd-dev and ds-dev have been stopped at rest, and dd-dev idles at ~1.4 GB.
@@ -237,7 +238,11 @@ services:
     <<: *dev
     profiles: [or3-dev]
     build:
-      context: ${OR3_SRC:?set OR3_SRC in dev/.env to the absolute path of the or3 checkout on this host}/dev
+      context: git@github.com:gsfernandes81/or3.git#main:dev
+      # The deploy key that already lives in OR3_SECRETS (or3's dev/seed-secrets.sh makes it),
+      # lent to BuildKit for the fetch only; it is not in any layer.
+      ssh:
+        - default=${OR3_SECRETS:?set OR3_SECRETS in dev/.env}/id_ed25519_or3_deploy
       args:
         BASE_TAG: ${BASE_TAG:-2026.10.26}
     image: or3-dev
@@ -279,7 +284,7 @@ services:
     <<: *dev
     profiles: [dd-dev]
     build:
-      context: ${DD_SRC:?set DD_SRC in dev/.env to the absolute path of the destiny-director checkout on this host}
+      context: https://github.com/gsfernandes81/destiny-director.git#main
       dockerfile: Dockerfile.dev
       args:
         BASE_TAG: ${BASE_TAG:-2026.10.26}
@@ -358,7 +363,7 @@ services:
     <<: *dev
     profiles: [ds-dev]
     build:
-      context: ${DS_SRC:?set DS_SRC in dev/.env to the absolute path of the dossier checkout on this host}
+      context: https://github.com/gsfernandes81/dossier.git#main
       dockerfile: Dockerfile.dev
       args:
         BASE_TAG: ${BASE_TAG:-2026.10.26}
