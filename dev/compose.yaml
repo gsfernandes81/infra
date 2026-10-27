@@ -577,7 +577,9 @@ services:
   # The hub's own software, worked on through the hub (owner, 2026-10-27), from that repo's
   # Dockerfile.dev: the base and a pinned Rust toolchain. It runs the released claude-sessions
   # from the hub's volume like every container, and builds its own in /workspace/target, so the
-  # two never meet. It cannot test the hub against real containers: no container has docker.
+  # two never meet — as long as it is `cargo build`, never `cargo install`: ~/.cargo/bin is
+  # ahead of /opt/claude-sessions/bin on PATH, so an installed dev build would become what this
+  # container's own hooks and agent run. It cannot test the hub against real containers: no container has docker.
   claude-sessions:
     <<: *dev
     profiles: [claude-sessions]

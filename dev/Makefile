@@ -369,7 +369,7 @@ login:
 claude:
 	$(DOCKER) exec -it dev-hub claude-sessions
 
-# The container's own login shell — fish in infra-dev, bash in the hub — from passwd, as
+# The container's own login shell — fish in infra, bash in the hub — from passwd, as
 # sshd would pick it.
 shell:
 	$(DOCKER) exec -it $(CONTAINER) sh -c 'exec "$$(getent passwd "$$(id -u)" | cut -d: -f7)" -l'
