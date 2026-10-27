@@ -15,7 +15,7 @@
 # that silence into a failure — it is imported for exactly this reason and the reasoning
 # is in that file.
 #
-# ONE IMPORT PER CONTAINER, and the defaults are infra-dev's. The wrapper names each one
+# ONE IMPORT PER CONTAINER, and the defaults are the hub's (`dev`). The wrapper names each one
 # with `alias:` on the import; `-e container=<alias>` on the wrapper is how you reach a single
 # container from the command line (an `-e alias=` would override every import at once).
 #
@@ -112,7 +112,7 @@
   gather_facts: false
 
   vars:
-    dev_alias: "{{ alias | default('infra-dev') }}"
+    dev_alias: "{{ alias | default('dev') }}"
     # DERIVED, and it is the same expression _dev-container-tunnel.yml uses to CREATE the
     # hostname — so a client block cannot name something the edge was never provisioned
     # under. The old default was the literal `infra-dev.gsrpi.uk`, which meant every

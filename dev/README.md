@@ -198,14 +198,12 @@ every container at once over ssh, each line prefixed with its container. The mea
 still happens *inside* each container — it reads `/proc` and the socket-diagnostics
 netlink, which answer only in the container's own namespaces — so only the timer moved.
 Each pass goes timestamped to `~/.hub/passes.log` in the hub (capped near 16 MB, trimmed to
-the newest 8 MB). `HUB_OFFLOAD=0` in `.env` stops the timer for everyone;
-`DEV_IDLE_OFFLOAD=0` stops it stopping anything in infra-dev, which compose passes on as
-`CLAUDE_SESSIONS_OFFLOAD=0` — that container's pass says so and looks at nothing.
+the newest 8 MB). `HUB_OFFLOAD=0` in `.env` stops it, and is the only switch: no container has
+one of its own (2026-10-27).
 
 **Which containers** is every container `compose.yaml` names a repo for — its
 `HUB_REPO_<NAME>` line in the hub's environment, the same list the token broker mints for —
-sorted by name. `HUB_HOSTS` in `.env` overrides it, space-separated, only to set an order or a
-subset. With one name, there is no home screen: the menu is that container's, exactly as it
+sorted by name, and stated nowhere else. With one name, there is no home screen: the menu is that container's, exactly as it
 was inside it.
 
 ### The menu, two levels deep
@@ -458,7 +456,10 @@ reconnects by itself.
 
    It re-points `or3-dev.gsrpi.uk` and keeps its Access application and every client's
    token. It refuses, rather than mint a tunnel, if the hub's does not exist.
-8. **On each client:** `client-home-ssh-config.yml -e container=dev`, then `ssh dev`.
+8. **On each client:** `git pull` in the client's checkout, then the whole
+   `client-home-ssh-config.yml` — it writes `dev`'s block and token, keeps `or3-dev`'s, and
+   removes the blocks and token files of `infra-dev`, `dd-dev` and `ds-dev`, whose tunnels
+   are retired. Then `ssh dev`.
 
 **Proof, each against the thing it claims:**
 
@@ -482,11 +483,12 @@ a new container's volume clone in the meantime is in that volume, not the host c
 first.
 
 **Afterwards, each its own change:** retire infra-dev's and or3-dev's old tunnels (the
-CNAMEs no longer use them) and infra-dev's client block, with a `state: absent` for it —
-or3-dev's block stays; in each child repo, drop its compose file and its authorized-keys
-drop-in, bump its `BASE_TAG` default, and fix its docs (or3's `docs/dev-tunnel.md` names
-`~/or3/dev` for `make tunnel-log`, `up` and `shell`, now `~/infra/dev` with `C=or3-dev`; dd's
-and ds's say their keys are in `.dev-ssh/`); then delete `child-authorized-keys.conf`. The
+CNAMEs no longer use them), and the Access applications and service tokens of infra-dev,
+dd-dev and ds-dev, where they exist — or3-dev's stays, its hostname now on the hub's; in each
+child repo, drop its compose file and its authorized-keys drop-in, bump its `BASE_TAG`
+default, and fix its docs (or3's `docs/dev-tunnel.md` names `~/or3/dev` for `make tunnel-log`,
+`up` and `shell`, now `~/infra/dev` with `C=or3-dev`; dd's and ds's say their keys are in
+`.dev-ssh/`). The
 host clones of or3, destiny-director and dossier, `.dev-ssh/` included, can go once the
 containers are proved.
 
@@ -1582,7 +1584,7 @@ menu exited non-zero, a forwarded command run as given in `~`. Its menu half is 
 | Piece | Where | What it does |
 |---|---|---|
 | the hooks | `/etc/claude-code/managed-settings.d/claude-sessions.json` — the hub volume's `managed-settings.d`, mounted read-only | `SessionStart`, `UserPromptSubmit`, `Stop`, `Notification` and `SessionEnd` — five since v0.4.7, which feed the **menu only** (titles, who is busy); no offload rule reads them, so `PostToolUse`, `SubagentStart` and `SubagentStop` went. Each calls `claude-sessions hook`, which always exits 0 and prints nothing. Every event but `SessionStart` (30 s timeout) and `SessionEnd` (1 s) runs **async** (v0.4.6) — Claude Code neither waits for it nor kills it, so no hook of ours can hold a prompt — because a millisecond hook stalled past its 5 s timeout on a loaded box (or3's); late events are applied in the order Claude Code forked them. Exit 0 and silence still matter for the two synchronous hooks: a `SessionStart` failure is shown to you, and its output would reach claude as context |
-| the keep-alive skill | `~/.claude/skills/keepalive/SKILL.md`, copied by the entrypoint at every start from the hub's `/opt/claude-sessions/skills/keepalive/` — only while `CLAUDE_SESSIONS_OFFLOAD=1`, and removed otherwise | when to run `claude-sessions keepalive`, and for how short. On the config volume, so the image cannot carry it; a failed copy says so in the boot log and removes any old one, which would name a command that might not exist |
+| the keep-alive skill | `~/.claude/skills/keepalive/SKILL.md`, copied by the entrypoint at every start from the hub's `/opt/claude-sessions/skills/keepalive/` | when to run `claude-sessions keepalive`, and for how short. On the config volume, so the image cannot carry it; a failed copy says so in the boot log and removes any old one, which would name a command that might not exist |
 | the status line | the same file's `statusLine` (v0.4.5) | `claude-sessions statusline` every minute: the container's RAM and load, yellow then red as they rise, and its name. Managed settings, so it outranks a user `statusLine` — Claude Code's `/statusline` command writes one that never shows here; `make verify`'s `hooks` line names it |
 | `reconcile` | the entrypoint, before sshd | marks slots whose process died with the last container; since v0.4.0 it sweeps no sockets — `zmx list` clears a dead daemon's own, and zmx's socket directory, `/tmp/zmx-<uid>`, empties with a recreate (a `make restart` keeps /tmp; a stale socket there is cleared by the next `zmx list`) |
 | `offload` | run in here by the hub's `offload-all`, every 3 minutes (the entrypoint's own loop until 2026-10-26) | stops a detached slot measured quiet for 10 minutes (v0.4.7, *The rules* below) and runs the orphan sweep — live from base `2026.10.06` (a dry run before it, as Stage A). Each pass's verdicts, and any failed pass with its exit code, go timestamped to the hub's `~/.hub/passes.log`, every container's lines prefixed with its name (capped near 16 MB, trimmed to the newest 8 MB; the per-container `~/.local/share/claude-sessions-passes.log` before it stays on the volume); stops and sweep lines also go to this container's `offload.log`. Each pass prints, per slot, its measured line — bytes (TCP included), CPU, its line and how long it has been quiet — which since v0.4.7 is the offloader's own reason, and only on stdout: this log is the record to read when a slot was stopped that should not have been. `make idle` is `offload-all --dry-run` in the hub: verdicts for every container, nothing stopped — though since v0.4.5 it writes the activity state as a live pass does, so a hand pass just before the loop's leaves the loop a window too short to count, and the next one counts it |
@@ -1672,9 +1674,8 @@ the same figure, so a burst of file I/O no longer reads as a session's worth of 
 menu: `claude-sessions doctor` prints each slot's session id, then `claude --resume <id>`
 in its directory.
 
-`DEV_IDLE_OFFLOAD=0` in `dev/.env` and a `make up` turn off offloading in infra-dev
-(compose passes it on as `CLAUDE_SESSIONS_OFFLOAD=0`, and that container's pass then looks at
-nothing); `HUB_OFFLOAD=0` turns off the hub's timer for every container. Overrides, neither normally worth setting: `CLAUDE_SESSIONS_DIR` (the
+`HUB_OFFLOAD=0` in `dev/.env` turns off the hub's timer, for every container; there is no
+per-container switch. Overrides, neither normally worth setting: `CLAUDE_SESSIONS_DIR` (the
 registry) and zmx's own `ZMX_DIR` (its sockets, and its logs — `$ZMX_DIR/logs` instead of
 `~/.local/state/zmx/logs`) — each must be
 the same for every login and the hub's offload pass, so set one in compose or not at all. Never

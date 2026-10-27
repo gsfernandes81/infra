@@ -12,7 +12,7 @@ access token limited to that ONE repository and to HUB_GITHUB_PERMISSIONS, and w
                           and remove the directory, token and all, of any container no
                           longer named — so a removed container's last token goes with it
     github-tokens hosts   print the containers' names, sorted, one line: the hub's list
-                          when HUB_HOSTS does not set one
+                          (the containers the menu and the offloader reach)
     github-tokens once    mint every token now; exit 1 if any failed
     github-tokens loop [LOG] [--skip-first]
                           `once`, then again every 30 minutes (2 after a failure), forever;

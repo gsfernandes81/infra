@@ -28,12 +28,10 @@ set -u
 #   DEV_REPO             owner/name cloned into an empty /workspace     (unset = no clone)
 #   DEV_ENV_FILES        workspace paths kept in ~/.env.d and linked in (".env" style; none)
 #   DEV_CHILD_INIT_TIMEOUT  seconds child-init.sh gets before it is killed        (600)
-#   CLAUDE_SESSIONS_OFFLOAD 0: the hub's offload passes stop nothing here, and the keep-alive
-#                        skill is not installed                         (1)
 #
 # DEV_TUNNEL_HOSTNAME AND DEV_IDLE_OFFLOAD WENT on 2026-10-26 with the tunnel and the offload
-# loop they switched (the hub has both now); DEV_IDLE_OFFLOAD lives on in dev/.env as what
-# compose turns into CLAUDE_SESSIONS_OFFLOAD.
+# loop they switched, and CLAUDE_SESSIONS_OFFLOAD, the per-container switch that replaced the
+# second, on 2026-10-27: the hub's HUB_OFFLOAD is the one switch.
 #
 # DEV_REMOTE_CONTROL IS GONE, 2026-08-25. Every container on this fleet is now reached the
 # same way — ssh in, work in a held session — and none of them ships a remote-control
@@ -468,18 +466,13 @@ fi
 # follows a symlink, so a failed `skill` would leave an empty file, and a re-pointed path
 # would be written through; the temp path is cleared first for the same reason, and `mv -T`
 # refuses to move INTO a directory (or a link to one) where the file should be.
-# ONLY WHILE OFFLOADING IS ON HERE, and removed otherwise: with CLAUDE_SESSIONS_OFFLOAD=0
-# nothing honours a keep-alive, and a hub volume with no skill (a rollback past v0.4.7) has no
-# `keepalive` either — a stale file would tell every claude to run a command that does
-# nothing or does not exist. A failure is said and does not stop the door; the cost is a
+# Removed when the hub's volume has none (a rollback past v0.4.7 has no `keepalive` either): a
+# stale file would tell every claude to run a command that does not exist. A failure is said and does not stop the door; the cost is a
 # claude that does not know to ask, so a quiet wait in a detached slot can be offloaded.
 skill_dir="$CFG/skills/keepalive"
 skill_src=/opt/claude-sessions/skills/keepalive/SKILL.md
 rm -f "$skill_dir/.SKILL.md.tmp"
-if [ "${CLAUDE_SESSIONS_OFFLOAD:-1}" != "1" ]; then
-    rm -f "$skill_dir/SKILL.md"
-    say "claude-sessions keep-alive skill not installed — offloading is off here, so nothing needs one"
-elif mkdir -p "$skill_dir" \
+if mkdir -p "$skill_dir" \
     && [ -s "$skill_src" ] \
     && cp "$skill_src" "$skill_dir/.SKILL.md.tmp" \
     && mv -fT "$skill_dir/.SKILL.md.tmp" "$skill_dir/SKILL.md"; then

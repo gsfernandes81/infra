@@ -30,19 +30,19 @@
 # rewrite of it is unrecoverable from anywhere. Re-running with a key already present
 # reports ok and changes nothing.
 #
-# WHY ONLY TWO CONTAINERS BY DEFAULT. `infra-dev` and `or3-dev` read the
-# `authorized_keys` in their own secrets mount. `dd-dev` and `ds-dev` do not — their
-# sshd_config drop-in names its own AuthorizedKeysFile and serves the HOST account's keys
-# (docs/decisions.md, "A start-up warning that names the wrong thing"), so a key added
-# here would be a file nothing reads. Authorise those two by adding the key to gavin's
-# own ~/.ssh/authorized_keys on zero instead. Override with -e containers='["a","b"]' if
-# that ever changes.
+# THE TWO DOORS, AND ONLY THEM. Since the 2026-10-27 cutover a client reaches the dev
+# containers through two sshds: the hub's (`ssh dev`, the menu over all of them) and or3-dev's
+# (the phone's or3-tunnel reverse forward). Each reads the authorized_keys in its own secrets
+# directory on zero — the hub's ~/.dev-secrets, or3-dev's ~/.or3-dev-secrets. Every other
+# container is reached from the hub, with the hub's own key (dev/README.md § The hub), so a
+# client key added to one would admit nobody: nothing routes a client to it. Override with
+# -e containers='["a","b"]' if a door is added.
 #
 # THE SECRETS DIRECTORY IS A CONVENTION, AND THIS PLAY PROVES IT RATHER THAN ASSUMING IT.
-# infra-dev's is ~/.infra-dev-secrets; the pattern is ~/.<alias>-secrets. or3-dev's real
-# path is set in or3's compose file, which is not in this repo — so the play stats the
-# directory and REFUSES if it is not there rather than creating a stray one somewhere
-# nothing is mounted from. Point it somewhere else per run with:
+# The pattern is ~/.<alias>-secrets; the real paths are HUB_SECRETS and OR3_SECRETS in
+# dev/.env on zero — so the play stats the directory and REFUSES if it is not there rather
+# than creating a stray one somewhere nothing is mounted from. Point it somewhere else per
+# run with:
 #
 #     -e secrets_dirs='{"or3-dev": "/home/gavin/somewhere-else"}'
 #
@@ -80,7 +80,7 @@
     pubkey: >-
       {{ (lookup('file', pubkey_file) if client_pubkey_file is defined
           else client_pubkey | default('')) | trim }}
-    dev_clients: "{{ containers | default(['infra-dev', 'or3-dev']) }}"
+    dev_clients: "{{ containers | default(['dev', 'or3-dev']) }}"
     dev_secrets_overrides: "{{ secrets_dirs | default({}) }}"
     host_home: "{{ ansible_facts['env']['HOME'] }}"
 
@@ -176,7 +176,7 @@
         fail_msg: >-
           {{ resolved_dirs[item.item] }} is not a directory on {{ inventory_hostname }},
           so it is not {{ item.item }}'s secrets mount. Find the host side of that
-          container's bind mount — it is in that container's own compose file — and pass
+          container's bind mount — HUB_SECRETS or OR3_SECRETS in dev/.env — and pass
           it: -e secrets_dirs='{"{{ item.item }}": "/the/real/path"}'
       loop: "{{ sd.results }}"
       loop_control:
@@ -202,13 +202,14 @@
       loop: "{{ dev_clients }}"
 
     # ── and the copy sshd actually reads ─────────────────────────────────────
-    # THE HOST FILE IS NOT THE ONE SSHD READS. dev/entrypoint.sh copies
-    # $DEV_SECRETS_DIR/authorized_keys to ~/.ssh/authorized_keys at start-up, and
-    # sshd_config names that copy — so a key added above reaches a running container only
+    # THE HOST FILE IS NOT THE ONE SSHD READS. dev/hub/entrypoint.sh and dev/entrypoint.sh
+    # copy the secrets mount's authorized_keys to ~/.ssh/authorized_keys at start-up, and
+    # each sshd_config names that copy — so a key added above reaches a running container only
     # once the copy is refreshed.
     #
     # DO NOT RESTART TO ACHIEVE THAT. sshd is exec'd as PID 1, so restarting it is
-    # restarting the container, and every detached session goes with it. sshd reads
+    # restarting the container: every detached session goes with it in or3-dev, and every
+    # open `ssh dev` view with the hub. sshd reads
     # AuthorizedKeysFile on each authentication attempt, not at start-up, so refreshing
     # the copy is enough and costs nothing.
     #

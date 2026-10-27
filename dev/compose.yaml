@@ -89,11 +89,8 @@ services:
     restart: unless-stopped
     networks: [dev]
     environment:
-      # The containers the menu and the offloader reach, by name on the `dev` network. EMPTY
-      # MEANS DERIVED: the hub's entrypoint takes the HUB_REPO_* names below, so the list of
-      # containers is stated once, there. HUB_HOSTS in .env only sets an order (or a subset),
-      # and `:-` because its absence is the normal setting, not a mistake.
-      CLAUDE_SESSIONS_HOSTS: ${HUB_HOSTS:-}
+      # (No container list here: the hub derives the containers the menu and the offloader
+      # reach from the HUB_REPO_* names below, so the list is stated once.)
       CLAUDE_SESSIONS_REMOTE: /opt/claude-sessions/bin/claude-sessions
       HUB_OFFLOAD: ${HUB_OFFLOAD:-1}
       # THE TOKEN BROKER (hub/github-tokens), the containers' ONLY GitHub credential since
@@ -200,7 +197,6 @@ services:
       # Files the repo expects beside its tracked ones, kept in the env volume and linked into
       # the workspace (entrypoint.sh). None for infra: its .env files live on the hosts.
       DEV_ENV_FILES: ""
-      CLAUDE_SESSIONS_OFFLOAD: ${DEV_IDLE_OFFLOAD:-1}
     volumes:
       - *opt
       - *managed
@@ -224,10 +220,6 @@ services:
       - infra-ssh-host:/home/dev/.ssh-host
       - infra-local-share:/home/dev/.local/share
       - infra-jcode:/home/dev/.jcode
-    # The container no longer needs to reach zero for ansible's sake (no fleet key, by
-    # decision); kept so the inventory's `zero` still resolves if fleet access is ever given.
-    extra_hosts:
-      - "${DEV_HOST_ALIAS:-zero}:host-gateway"
 
   # ── the other repos' containers, ported from each repo's own compose file ───────
   # All three move in at the one cutover (dev/README.md § "The cutover from the old layout").
@@ -271,7 +263,6 @@ services:
       DEV_REPO: *repo-or3
       DEV_ENV_FILES: ".env"
       DEV_SECRETS_DIR: /run/or3-secrets
-      CLAUDE_SESSIONS_OFFLOAD: ${DEV_IDLE_OFFLOAD:-1}
     volumes:
       - *opt
       - *managed
@@ -315,7 +306,6 @@ services:
       # serves it; its old compose-level env_file is not carried over.
       DEV_ENV_FILES: ".env"
       DEV_SECRETS_DIR: /run/dd-secrets
-      CLAUDE_SESSIONS_OFFLOAD: ${DEV_IDLE_OFFLOAD:-1}
     # YAML merge is shallow: listing depends_on here replaces the anchor's, so the hub is
     # named again beside the database.
     depends_on:
@@ -388,7 +378,6 @@ services:
       DEV_REPO: *repo-ds
       DEV_ENV_FILES: ""
       DEV_SECRETS_DIR: /run/ds-secrets
-      CLAUDE_SESSIONS_OFFLOAD: ${DEV_IDLE_OFFLOAD:-1}
     volumes:
       - *opt
       - *managed

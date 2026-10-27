@@ -11,7 +11,7 @@
 #     ansible-playbook playbooks/client-home-ssh-config.yml -e container=or3-dev -e replace_token=true
 #
 # `container`, NOT `alias`. Each import below pins `alias:` for its container; an `-e alias=`
-# would outrank all four (extra vars win) and configure the same container four times.
+# would outrank both (extra vars win) and configure the same container twice.
 # `container` is read by the `when:` on each import and nowhere else. With it the fleet half is
 # skipped too, so the run touches exactly one block and one token.
 #
@@ -25,21 +25,21 @@
 #
 # ── THE REGISTRY ────────────────────────────────────────────────────────────────
 #
-# SINCE 2026-10-26 THE WAY IN IS `dev`, the hub: one tunnel, one hostname
+# SINCE THE 2026-10-27 CUTOVER THE WAY IN IS `dev`, the hub: one tunnel, one hostname
 # (`dev.<dns_zone>`), its connector a sidecar in dev/compose.yaml, and the hub's menu lists
-# every dev container's sessions (dev/README.md). The four blocks below it are the old way, a
-# tunnel per container, kept for each container until it has moved into the one compose file
-# and dropped its own tunnel — then its import goes from here, in the same commit. EXCEPT
-# or3-dev's, which stays: its hostname moves onto the hub's tunnel (dev/cloudflared.yml) and
-# still reaches or3-dev's own sshd, where the phone's or3-tunnel reverse forward lands.
+# every dev container's sessions (dev/README.md). The one other door is or3-dev's: its
+# hostname rides the hub's tunnel (dev/cloudflared.yml) and still reaches or3-dev's own sshd,
+# where the phone's or3-tunnel reverse forward lands.
 #
 #   container   image lives in
 #   ─────────   ──────────────────
 #   dev         this repo, dev/hub/ — the hub
-#   infra-dev   this repo, dev/
 #   or3-dev     or3
-#   dd-dev      destiny-director
-#   ds-dev      dossier
+#
+# RETIRED, their blocks removed by _client-retired-dev-ssh.yml on a whole run: infra-dev,
+# dd-dev, ds-dev. Each had a tunnel of its own until the cutover; each is a row in the hub's
+# menu now. Run this from main only after the cutover's step 7 — before it, the old doors are
+# still the way in, and this would remove them.
 #
 # NO PORT COLUMN since 2026-10-04: nothing is published on the host any more. The way in
 # is the tunnel; break glass is `ssh -t <host> 'cd ~/infra/dev && make shell'` (docker
@@ -60,9 +60,9 @@
 #     ansible-playbook playbooks/client-home-ssh-config.yml --tags ssh       # blocks only, no API token needed
 #     ansible-playbook playbooks/client-home-ssh-config.yml --tags access    # tokens only
 #
-# The order below is deliberate: the hub first, then the old per-container doors.
+# The order below is deliberate: the hub first, then or3-dev's door, then the retired ones' removal.
 #
-# ── ADDING A FIFTH ──────────────────────────────────────────────────────────────
+# ── ADDING A DOOR ───────────────────────────────────────────────────────────────
 #
 # A row above and an import below — but only after the edge and the host halves exist,
 # because a client block is the third of three:
@@ -70,10 +70,10 @@
 #     ansible-playbook playbooks/server-create-dev-container.yml -e container=<alias> -e secrets_dir=<its mount>
 #     ansible-playbook playbooks/client-home-ssh-config.yml
 #
-# The first line is the edge half for any alias and, for `dev` and infra-dev, the host
-# half as well. Since 2026-10-26 a new dev container needs no alias at all — the hub's menu
-# lists it once dev/compose.yaml names its repo (HUB_REPO_*) — so a fifth row here is for a
-# second door, not for another container.
+# The first line is the edge half for any alias and, for `dev`, the host half as well. A new
+# dev container needs no alias at all — the hub's menu lists it once dev/compose.yaml names
+# its repo (HUB_REPO_*) — so a row here is for a door, not for another container. An alias
+# taken out of `retired_aliases` in _client-retired-dev-ssh.yml first, if it was ever there.
 #
 # NO NEW COLLECTIONS, and no tasks of its own: this file is composition and a table.
 # Everything it runs belongs to the two plays it imports.
@@ -87,8 +87,8 @@
   tasks:
     - name: Check -e container, if given, names a known dev container
       ansible.builtin.assert:
-        that: container is not defined or container in ['dev', 'infra-dev', 'or3-dev', 'dd-dev', 'ds-dev']
-        fail_msg: "-e container={{ container | default('') }} names no dev container; the registry in this file's header has the five"
+        that: container is not defined or container in ['dev', 'or3-dev']
+        fail_msg: "-e container={{ container | default('') }} names no dev container; the registry in this file's header has the two"
         success_msg: "{{ 'one container: ' ~ container if container is defined else 'every container' }}"
 
 # ── the servers: the fleet, the mesh, and the LAN and cross-box rescue paths ────
@@ -121,26 +121,14 @@
     alias: dev
   when: container is not defined or container == 'dev'
 
-- name: Write ssh block and token for infra-dev
-  ansible.builtin.import_playbook: _client-dev-ssh.yml
-  vars:
-    alias: infra-dev
-  when: container is not defined or container == 'infra-dev'
-
 - name: Write ssh block and token for or3-dev
   ansible.builtin.import_playbook: _client-dev-ssh.yml
   vars:
     alias: or3-dev
   when: container is not defined or container == 'or3-dev'
 
-- name: Write ssh block and token for dd-dev
-  ansible.builtin.import_playbook: _client-dev-ssh.yml
-  vars:
-    alias: dd-dev
-  when: container is not defined or container == 'dd-dev'
-
-- name: Write ssh block and token for ds-dev
-  ansible.builtin.import_playbook: _client-dev-ssh.yml
-  vars:
-    alias: ds-dev
-  when: container is not defined or container == 'ds-dev'
+# Last, and on a whole run only: what the old per-container doors left on this client.
+- name: Remove the retired dev containers' ssh blocks
+  ansible.builtin.import_playbook: _client-retired-dev-ssh.yml
+  tags: [ssh]
+  when: container is not defined

@@ -1,0 +1,118 @@
+---
+# NOT A PLAYBOOK YOU RUN — the underscore says so. client-home-ssh-config.yml imports it;
+# run that. This is the other direction of _client-dev-ssh.yml: it REMOVES, from the machine
+# you ssh from, what that play wrote for a dev container that no longer has a door of its own.
+#
+# Since the 2026-10-27 cutover every dev container is reached through the hub (`ssh dev`), so
+# infra-dev's, dd-dev's and ds-dev's own blocks name tunnels that are being retired. Left in
+# place they are not harmless: `ssh infra-dev` would hang on a hostname with no connector
+# behind it, which reads as the tunnel being down rather than gone. or3-dev keeps its block —
+# its hostname rides the hub's tunnel (dev/cloudflared.yml) for the vessel's reverse forward.
+#
+# CLAUDE.md § Repo invariants: a block a play stops writing needs a `state: absent` for its
+# marker, or every client keeps it for good. The list below only grows; an alias in it is never
+# written again under that name without first being taken out of here.
+#
+# What goes, per alias, and nothing else:
+#   - the block in ~/.ssh/config, under every marker the dev play has ever used;
+#   - this client's token file for it (a credential for a door that is shut stays nowhere);
+#   - on WSL, the same two on the Windows side, and the cf-access-<alias>.cmd wrapper.
+# The Access application and the service tokens on Cloudflare are the edge's, retired with the
+# old tunnels (dev/README.md § The cutover); this play reaches no API.
+#
+# It runs only on a whole run, never with -e container=: a one-container run touches exactly
+# one block, and that is what the gate in client-home-ssh-config.yml promises.
+
+- name: Check the inventory is loaded
+  ansible.builtin.import_playbook: _assert-inventory.yml
+  vars:
+    required_group: control
+
+- name: Remove the retired dev containers' ssh blocks
+  hosts: control
+  gather_facts: false
+  vars:
+    retired_aliases: [infra-dev, dd-dev, ds-dev]
+    # The marker names the play you re-run, and that play has had three names; the dev play's
+    # own absent task has the history.
+    dev_markers:
+      - ansible/playbooks/dev-client.yml
+      - ansible/playbooks/configure-client-dev.yml
+      - ansible/playbooks/client-home-ssh-config.yml
+    # lookup('env','HOME'), never ~: on Termux the passwd entry says /data (_client-dev-ssh.yml).
+    home: "{{ lookup('env', 'HOME') }}"
+    ssh_config: "{{ home }}/.ssh/config"
+    # Same knob and default as _client-dev-ssh.yml: `-e windows_home=""` skips Windows.
+    windows_home_wsl: "{{ windows_home | default('/mnt/c/Users/gavin') }}"
+    win_ssh_config: "{{ windows_home_wsl }}/.ssh/config"
+
+  tasks:
+    - name: Probe for the laptop's Windows home through WSL
+      ansible.builtin.stat:
+        path: "{{ windows_home_wsl }}"
+      register: retired_win_home
+      check_mode: false
+      when: windows_home_wsl | length > 0
+
+    - name: Note whether the laptop's Windows side is cleaned
+      ansible.builtin.set_fact:
+        retired_on_windows: >-
+          {{ (windows_home_wsl | length > 0)
+             and (retired_win_home.stat.isdir | default(false)) }}
+
+    # CRLF first, as the dev play does: in a CRLF file blockinfile cannot match its markers,
+    # so an absent would silently find nothing. A config with no file at all is skipped.
+    - name: Probe the ssh configs for CRLF line endings
+      ansible.builtin.command:
+        argv: [grep, -qs, "\r$", "{{ item }}"]
+      loop: "{{ [ssh_config] + ([win_ssh_config] if retired_on_windows | bool else []) }}"
+      register: retired_crlf
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: "If CRLF: convert the ssh config to LF"
+      ansible.builtin.command:
+        argv: [sed, -i, --follow-symlinks, 's/\r$//', "{{ item.item }}"]
+      loop: "{{ retired_crlf.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.rc == 0
+
+    - name: Delete the retired blocks from ~/.ssh/config
+      # `create: true` creates nothing with state=absent; without it a client with no config
+      # fails rc=257 on a removal (the dev play's absent task says the same).
+      ansible.builtin.blockinfile:
+        path: "{{ ssh_config }}"
+        create: true
+        state: absent
+        marker: "# {mark} {{ item.0 }} ({{ item.1 }})"
+      loop: "{{ retired_aliases | product(dev_markers) | list }}"
+      loop_control:
+        label: "{{ item.0 }} ({{ item.1 | basename }})"
+
+    - name: Delete the retired containers' token files
+      ansible.builtin.file:
+        path: "{{ home }}/.config/{{ item }}/token"
+        state: absent
+      loop: "{{ retired_aliases }}"
+
+    - name: "WSL only: delete the retired Windows blocks"
+      ansible.builtin.blockinfile:
+        path: "{{ win_ssh_config }}"
+        create: true
+        state: absent
+        marker: "# {mark} {{ item.0 }} ({{ item.1 }})"
+      loop: "{{ retired_aliases | product(dev_markers) | list }}"
+      loop_control:
+        label: "{{ item.0 }} ({{ item.1 | basename }})"
+      when: retired_on_windows | bool
+
+    - name: "WSL only: delete retired Windows tokens and wrappers"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: >-
+        {{ (retired_aliases | map('regex_replace', '^(.*)$', windows_home_wsl ~ '/.config/\1/token') | list)
+           + (retired_aliases | map('regex_replace', '^(.*)$', windows_home_wsl ~ '/.ssh/cf-access-\1.cmd') | list) }}
+      when: retired_on_windows | bool

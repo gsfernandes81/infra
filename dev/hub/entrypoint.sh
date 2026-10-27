@@ -11,8 +11,8 @@
 # a container never starts against an empty volume.
 #
 # What it reads from the environment (dev/compose.yaml sets each):
-#   CLAUDE_SESSIONS_HOSTS   the containers, by name on the `dev` network — HUB_HOSTS when
-#                           .env sets it (an order); otherwise derived below from HUB_REPO_*
+#   HUB_REPO_<NAME>         each container's repo; the names ARE the containers the menu and
+#                           the offloader reach, exported below as CLAUDE_SESSIONS_HOSTS
 #   CLAUDE_SESSIONS_REMOTE  the binary's path inside them (/opt/claude-sessions/bin/…)
 #   HUB_OFFLOAD             0 stops the offload timer starting                     (1)
 #   HUB_GITHUB_*, HUB_REPO_*  the token broker's; github-tokens' own header lists them
@@ -91,14 +91,11 @@ else
 fi
 
 # ── which containers ───────────────────────────────────────────────────────────
-# ONE LIST: the containers the hub mints tokens for are the containers it manages, so without
-# an explicit HUB_HOSTS (which only sets an order) the list IS the HUB_REPO_* names compose
-# gives this container. Before the environment file below and the offload loop, which both
-# carry it.
-if [ -z "${CLAUDE_SESSIONS_HOSTS:-}" ]; then
-    CLAUDE_SESSIONS_HOSTS="$(github-tokens hosts)"
-    export CLAUDE_SESSIONS_HOSTS
-fi
+# ONE LIST: the containers the hub mints tokens for are the containers it manages — the
+# HUB_REPO_* names compose gives this container, sorted. Before the environment file below and
+# the offload loop, which both carry it.
+CLAUDE_SESSIONS_HOSTS="$(github-tokens hosts)"
+export CLAUDE_SESSIONS_HOSTS
 
 # ── sshd: host key, and who may log in ─────────────────────────────────────────
 [ -f "$STATE/ssh_host_ed25519_key" ] || \
@@ -130,8 +127,8 @@ chmod 600 "$HOME/.ssh/environment"
 # LOAD-BEARING (the CPU budget is per window), so the loop sleeps to a fixed rate. Each pass is
 # kept, timestamped, in ~/.hub/passes.log, trimmed past 16 MB to its newest 8 MB from the first
 # whole line, through a temp file and a rename — the per-container loop's rules, moved here.
-# A container whose owner wants nothing stopped sets DEV_IDLE_OFFLOAD=0 in dev/.env, which its
-# compose service turns into CLAUDE_SESSIONS_OFFLOAD=0: its pass says so and stops nothing.
+# ONE SWITCH: HUB_OFFLOAD=0 stops the timer for every container. A slot that must stay loaded
+# holds itself with `claude-sessions keepalive`, which every claude learns from the skill.
 if [ "${HUB_OFFLOAD:-1}" = "1" ]; then
     # offload.beat is touched now and after every pass: hub-health reads its age, so a loop
     # that dies or wedges turns the hub unhealthy rather than going quiet.

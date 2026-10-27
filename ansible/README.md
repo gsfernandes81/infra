@@ -86,7 +86,8 @@ The halves, for reading rather than running:
 | | |
 |---|---|
 | `_client-fleet-ssh.yml` | the fleet's aliases in this client's `~/.ssh/config`, Windows included |
-| `_client-dev-ssh.yml` | one dev container's service token and `~/.ssh/config` block, imported once per container |
+| `_client-dev-ssh.yml` | one dev container's service token and `~/.ssh/config` block, imported once per door (`dev`, `or3-dev`) |
+| `_client-retired-dev-ssh.yml` | the other direction: removes the blocks and token files of `infra-dev`, `dd-dev` and `ds-dev`, whose own doors the cutover retired. Whole runs only |
 | `_dev-container-tunnel.yml` | the **edge** side — tunnel, DNS, Access application and policy |
 | `_cf-tunnel.yml` | tasks, shared by the two plays that give something its own tunnel: zone and account, the tunnel with its dead-tunnel assert, the CNAME. **No Access** — each caller adds its own or none |
 | `_cf-access-app.yml` | tasks: one Access application and its one policy, read back after writing — imported once per application by `server-create-deployment-tunnel.yml` |
@@ -103,8 +104,10 @@ takes two names only, since 2026-10-27: `dev`, the hub, which has the one tunnel
 half, and `or3-dev` with `via_hub=true`, whose hostname the hub's tunnel serves for the phone's
 vessel link. Every other dev container is reached through the hub and needs nothing here.
 
-**`client-home-ssh-config.yml` is also the registry** of which dev containers exist and
-which repo each lives in. No ports: since 2026-10-04 nothing is published on the host, and
+**`client-home-ssh-config.yml` is also the registry** of the two doors a client holds —
+`dev`, the hub, and `or3-dev` — and of the aliases retired at the cutover, whose blocks a
+whole run removes. Run it from `main` only after the cutover: before it, those old doors are
+still the way in. No ports: since 2026-10-04 nothing is published on the host, and
 break-glass is `ssh -t zero 'cd ~/infra/dev && make shell'`.
 
 ### One command, for whichever client you are on
@@ -144,7 +147,7 @@ Termux and `uname -n` elsewhere. It matters only at minting.
 ### A new client needs two halves, and only one of them is `client-home-ssh-config.yml`
 
 The ssh block and the service token are things a client *holds*. The key that admits it
-is a fact about the **container**, and lives on `zero`:
+is a fact about the **door** — the hub's and or3-dev's authorized_keys — and lives on `zero`:
 
 ```sh
 ansible-playbook playbooks/server-add-authorized-keys.yml \

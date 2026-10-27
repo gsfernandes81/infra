@@ -1312,6 +1312,17 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   Makefile passing `BASE_TAG` to Compose empty since the tag moved there (`:=` before the
   variable was set), which only worked because compose.yaml's fallback was kept in step. Each child builds
   from its repo on GitHub (`main`), so no clone on zero is read by anything.
+- **One offload switch, one container list, one way in per door** (design review, 2026-10-27;
+  owner: do it before the cutover). `HUB_OFFLOAD` in the hub is the only offload switch: the
+  per-container `DEV_IDLE_OFFLOAD`/`CLAUDE_SESSIONS_OFFLOAD` pair said the same thing a second
+  time in each container, and a container that disagreed with the hub was offloaded anyway by
+  the hub's pass. The hub's container list is derived from its `HUB_REPO_*` lines
+  (`github-tokens hosts`), not written again as `HUB_HOSTS`, so a container cannot be in the
+  token list and missing from the menu. infra-dev's `extra_hosts` entry for `zero` went too:
+  it was kept for a fleet key no container holds, by decision. And the clients keep two doors, `dev` and `or3-dev`: infra-dev's, dd-dev's and
+  ds-dev's blocks are removed by `_client-retired-dev-ssh.yml` (a `state: absent` per marker
+  ever used, per the rename rule), and `server-add-authorized-keys.yml` writes the hub's and
+  or3-dev's authorized_keys — the only two sshds a client reaches — instead of infra-dev's.
 - **A repo's untracked secrets live in a second volume, `~/.env.d`, symlinked into the
   workspace** (`DEV_ENV_FILES`). Not hard links: two volumes are two mounts and `link(2)`
   refuses across mounts. A regular file found where a link should be — an editor that saves by
@@ -1326,7 +1337,8 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
 - **The base drops claude-sessions and cloudflared**, keeping the two mountpoints, and the
   per-container offload loop, tunnel and menu door go with them; `DEV_TUNNEL_HOSTNAME` and
   `DEV_IDLE_OFFLOAD` leave the containers (the latter survives in `dev/.env` as what compose
-  turns into `CLAUDE_SESSIONS_OFFLOAD=0`). Base `2026.10.26`.
+  turns into `CLAUDE_SESSIONS_OFFLOAD=0`). Base `2026.10.26`. ⚠︎SUPERSEDED IN PART 2026-10-27:
+  `DEV_IDLE_OFFLOAD` is gone too — see *One offload switch* below.
 - **`dev/.env` now serves the whole project, so the plays write it by line**, starting one
   from `.env.example` when there is none; `_dev-container-host.yml` used to write it whole,
   which would now wipe the hub's lines. Every container's paths are required from the start:
