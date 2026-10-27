@@ -1207,6 +1207,15 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   unchanged, and it is behind a `tunnel` profile so the rest comes up before the tunnel
   exists. The dev containers lose their own tunnels and their per-container hostnames; the
   break-glass path is the one that never needed a tunnel, `make shell C=<c>` on zero.
+- **Except or3-dev's hostname, which moves onto the hub's tunnel instead of going** (owner,
+  2026-10-27: "the only concern I have is or3-tunnel"). The phone's `or3-tunnel` holds `ssh -N
+  -R 2236:10.1.0.236:22 or3-dev-sh`, the only route to the vessel LAN, and the forward has to
+  land inside or3-dev (or3's `docs/dev-tunnel.md`). A second ingress rule, and the CNAME
+  re-pointed by `-e via_hub=true` at move-in, keep the phone's alias, its Access token and
+  or3's tool exactly as they are. **Not a jump through the hub**: `ssh -J dev or3-dev` would
+  need the hub's sshd to forward, on the one machine holding a key to every container, and
+  would change or3's tool and the phone's config. The bytes over the metered link are the
+  same either way.
 - **The alias is `dev`** (owner), through the existing dev-container edge and client plays
   with `-e container=dev`, so the tunnel, the Access application and each client's service
   token are made the way every container's always were.

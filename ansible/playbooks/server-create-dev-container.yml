@@ -6,6 +6,9 @@
 #     ansible-playbook playbooks/server-create-dev-container.yml                  # infra-dev
 #     ansible-playbook playbooks/server-create-dev-container.yml -e container=dev      # the hub (`ssh dev`)
 #     ansible-playbook playbooks/server-create-dev-container.yml -e container=or3-dev  # another container
+#     ansible-playbook playbooks/server-create-dev-container.yml -e container=or3-dev -e via_hub=true
+#                     # or3-dev at move-in: its hostname re-pointed at the hub's tunnel, so the
+#                     # phone's or3-tunnel reaches it unchanged (dev/cloudflared.yml)
 #
 # Then, in that order:
 #
@@ -64,8 +67,10 @@
         msg: >-
           The host half (secrets dir, deploy key, authorized_keys, dev/.env) runs for
           infra-dev and the hub only. {{ container | default('infra-dev') }} is reached
-          through the hub since 2026-10-26 and needs no tunnel of its own: its secrets dir
-          and its paths in dev/.env are made by hand at move-in (dev/README.md).
+          through the hub since 2026-10-26: its secrets dir and its paths in dev/.env are
+          made by hand at move-in (dev/README.md).
+          {{ 'Its hostname now names the hub tunnel: the ingress rule is dev/cloudflared.yml.'
+             if (via_hub | default(false) | bool) else '' }}
       changed_when: true
       when: (container | default('infra-dev')) not in ['infra-dev', 'dev']
 

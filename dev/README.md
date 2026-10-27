@@ -326,7 +326,21 @@ Moving one in is, **in its own repo first**:
    existing `.env` there is a regular file, so the entrypoint reports it and leaves it —
    moving it into the env volume is or3's call.
 
-Its old tunnel and the client block that points at it are retired in a change of their own.
+Its old tunnel and the client block that points at it are retired in a change of their own —
+**except or3-dev's block, which stays.** The phone's `or3-tunnel` holds `ssh -N -R
+2236:10.1.0.236:22 or3-dev-sh`, a reverse forward to the vessel LAN that has to land inside
+or3-dev, so `or3-dev.gsrpi.uk` keeps pointing at or3-dev's own sshd, now through the hub's
+tunnel (`cloudflared.yml`). At its move-in, after `make up`, from the control node:
+
+```fish
+ansible-playbook playbooks/server-create-dev-container.yml -e container=or3-dev -e via_hub=true
+```
+
+That re-points the hostname's CNAME at the hub's tunnel and keeps its Access application and
+every client's token, so the phone's alias, its token and or3's tool are untouched. Between
+the old project's `down` and that run the phone's tunnel is down, and `or3-tunnel` retries on
+its own (at most five minutes apart). Then `ssh or3-dev ssh or3ecr hostname` from the phone
+answers `OR3-ECR1-GR` again. Only or3-dev's *old tunnel* is retired after that.
 
 ## How this container is used
 
@@ -740,10 +754,10 @@ way back to a session after a disconnect is the rest.
 
 **Since 2026-10-26 there is one tunnel for every dev container, the hub's**, and its
 connector is a sidecar: `dev-cloudflared`, in the `tunnel` profile, the image pinned by
-digest exactly as the deployment sidecars pin theirs. One hostname, `dev.gsrpi.uk`, whose
-one ingress rule is the hub's sshd on the project network (`cloudflared.yml`). The
-dev containers have no tunnel and no hostname of their own any more, and the base no longer
-carries cloudflared at all.
+digest exactly as the deployment sidecars pin theirs. Two hostnames: `dev.gsrpi.uk`, the hub's sshd on the
+project network, and `or3-dev.gsrpi.uk`, or3-dev's own sshd, kept for the phone's reverse
+forward to the vessel (*Moving a container in*; `cloudflared.yml`). No other dev container has
+a hostname any more, and the base no longer carries cloudflared at all.
 
 ### The order
 

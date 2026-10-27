@@ -3,9 +3,14 @@
 # dashboard copy to disagree with it. The tunnel id is an argument from dev/.env, written
 # beside the credentials, so a `tunnel:` key here could only ever disagree with it.
 #
-# ONE HOSTNAME: dev.<dns_zone>, the hub's sshd. The dev containers have no hostname of their
-# own any more; `ssh dev` is the way in to every one of them, and the break-glass path is the
-# one that never depended on a tunnel: `ssh -t zero 'cd ~/infra/dev && make shell C=<c>'`.
+# TWO HOSTNAMES. dev.<dns_zone> is the hub's sshd, the way in to every dev container.
+# or3-dev.<dns_zone> is or3-dev's own sshd, kept because the phone's `or3-tunnel` holds a
+# reverse forward to the vessel LAN that must terminate INSIDE or3-dev (or3's
+# docs/dev-tunnel.md): the phone's alias, its Access token and or3's tool stay exactly as
+# they were, and only the hostname's CNAME moves from or3-dev's old tunnel to this one, at
+# move-in (`server-create-dev-container.yml -e container=or3-dev -e via_hub=true`). Until
+# then the rule is unused — the CNAME still names the old tunnel — and harmless. No other
+# container gets one: the break-glass path is `make shell C=<c>` on zero.
 #
 # A service name, not 127.0.0.1: on the project network the name is the stable address,
 # and the hub is the only service the tunnel may reach.
@@ -19,4 +24,6 @@ metrics: 127.0.0.1:20241
 ingress:
   - hostname: dev.gsrpi.uk
     service: ssh://hub:2222
+  - hostname: or3-dev.gsrpi.uk
+    service: ssh://or3-dev:2222
   - service: http_status:404

@@ -104,7 +104,17 @@
     # server-add-authorized-keys.yml also relies on: a literal infra-dev path here made
     # `-e container=or3-dev` read infra-dev's credentials, find its tunnel alive, and CNAME
     # or3-dev at it. -e secrets_dir= for a container whose mount is somewhere else.
-    infra_secrets: "{{ secrets_dir | default('~/.' ~ cf_name ~ '-secrets') }}"
+    #
+    # -e via_hub=true: SERVE THIS HOSTNAME FROM THE HUB'S TUNNEL instead of one of its own.
+    # The credentials read are the hub's (~/.dev-secrets), so the tunnel is found alive and
+    # the CNAME is re-pointed at it; the Access application, matched by hostname, is kept
+    # with every client's token. For or3-dev, whose phone tunnel must reach its own sshd
+    # (dev/cloudflared.yml). It never mints: the check below refuses if the hub's tunnel
+    # does not exist yet, rather than creating a tunnel named for this container there.
+    hub_route: "{{ via_hub | default(false) | bool }}"
+    infra_secrets: >-
+      {{ secrets_dir | default('~/.dev-secrets' if hub_route
+         else '~/.' ~ cf_name ~ '-secrets') }}
     # Irrelevant to a service token, which does not expire with a session. Set explicitly
     # so the value is chosen rather than inherited from a Cloudflare default nobody read.
     cf_session_duration: 24h
@@ -141,6 +151,23 @@
           own token. Nothing here to rotate or name.
         success_msg: "no retired flags"
 
+    - name: "via_hub: probe the hub's tunnel credentials"
+      ansible.builtin.stat:
+        path: "{{ infra_secrets }}/tunnel.json"
+      register: hub_creds
+      when: hub_route
+      check_mode: false
+
+    - name: "via_hub: check the hub's tunnel already exists"
+      ansible.builtin.assert:
+        that: hub_creds.stat.exists | default(false)
+        fail_msg: >-
+          No {{ infra_secrets }}/tunnel.json on {{ inventory_hostname }}: the hub's tunnel
+          is not made yet, and via_hub must never mint one in its place. Run
+          server-create-dev-container.yml -e container=dev first.
+        success_msg: "{{ cf_name }} will be served by the hub's tunnel"
+      when: hub_route
+
     # ── 0–2  the zone and its account, the tunnel, the DNS record ───────────
     # Shared since 2026-10-24 with server-create-deployment-tunnel.yml, which gives a compose
     # deployment's sidecar connector the same tunnel by the same code. Moved to
@@ -151,7 +178,9 @@
       ansible.builtin.import_tasks: _cf-tunnel.yml
       vars:
         cf_creds_path: "{{ infra_secrets }}/tunnel.json"
-        cf_dns_comment: "{{ cf_name }} container tunnel — ansible/playbooks/_dev-container-tunnel.yml"
+        cf_dns_comment: >-
+          {{ cf_name }} {{ 'via the dev hub tunnel' if hub_route else 'container tunnel' }}
+          — ansible/playbooks/_dev-container-tunnel.yml
         cf_dead_tunnel_hint: >-
           The container reads it and fails closed until you do; `make shell` on the host
           still works.

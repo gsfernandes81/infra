@@ -106,7 +106,8 @@ services:
 
   # ── the tunnel ────────────────────────────────────────────────────────────────
   # A sidecar, as Phase 3 settled for deployments (decisions.md § "Sidecar, not baked-in"),
-  # pinned identically to theirs. One hostname, the hub's (cloudflared.yml).
+  # pinned identically to theirs. Two hostnames: the hub's, and or3-dev's for the phone's
+  # reverse forward to the vessel (cloudflared.yml says why).
   cloudflared:
     image: cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39
     container_name: dev-cloudflared
@@ -218,6 +219,8 @@ services:
       # or3's /workspace is zero's own clone, BY or3's DESIGN (management-plane.md, "The
       # or3-dev caveat"), so it stays a bind mount until or3 decides otherwise — the open
       # item in plans/dev-pool.md. Every other container clones into a volume.
+      # Its sshd is also reached straight from the phone, through the hub's tunnel, for
+      # or3-tunnel's reverse forward (cloudflared.yml): its forwarding drop-in stays.
       - ${OR3_SRC:?set OR3_SRC}:/workspace
       - or3-env:/home/dev/.env.d
       - ${OR3_SECRETS:?set OR3_SECRETS in dev/.env}:/run/or3-secrets:ro

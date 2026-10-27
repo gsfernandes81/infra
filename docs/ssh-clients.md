@@ -98,7 +98,10 @@ while the container still runs its old, pre-hub setup.** A container that has mo
 `dev/compose.yaml` runs no connector — the base no longer carries cloudflared — so its old
 alias names a hostname with nothing behind it and fails at Cloudflare, which looks exactly
 like the container being down. Each block, and its import in the play, goes in the same
-commit that retires that container's old tunnel. Until then this is how those aliases
+commit that retires that container's old tunnel — **except `or3-dev`'s, which stays**: its
+hostname moves onto the hub's tunnel at move-in and keeps reaching or3-dev's own sshd, because
+the phone's `or3-tunnel` reverse forward to the vessel has to land there
+([`dev/README.md`](../dev/README.md) § *Moving a container in*). Until then this is how those aliases
 behave against a container that has *not* moved:
 
 | You run | You get |

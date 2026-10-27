@@ -80,7 +80,8 @@ limits the owner is having to manage each container separately.
 
 5. **One `cloudflared` sidecar, one tunnel.** It serves the hub's hostname, `dev.<dns_zone>`.
    This replaces `infra-dev`'s connector started from its own entrypoint, and matches Phase 5's
-   sidecar leaning. **As built, no per-container hostname**: the break-glass path is
+   sidecar leaning. **As built, no per-container hostname but or3-dev's**, which moves onto
+   this tunnel for the phone's reverse forward to the vessel; otherwise the break-glass path is
    `make shell C=<c>` on `zero`, which never depended on a tunnel.
 
 ## Open, the owner's
@@ -108,7 +109,10 @@ limits the owner is having to manage each container separately.
    profiles, with their sources and secrets as required paths in `dev/.env`. Each still has to
    be moved in from its own repo: the base tag bumped to `2026.10.26`, its published port and
    its compose file dropped there, and its old login volumes' names checked against the
-   `external:` names guessed here before its profile is turned on.
+   `external:` names guessed here before its profile is turned on. **or3-dev also re-points
+   its hostname at the hub's tunnel** (`-e via_hub=true`), so the phone's `or3-tunnel` keeps
+   reaching it; or3's `docs/dev-tunnel.md` then names `~/infra/dev` for `make tunnel-log`,
+   `make up` and `make shell C=or3-dev` in place of `~/or3/dev`, which is or3's change to make.
 
 ## Done when
 

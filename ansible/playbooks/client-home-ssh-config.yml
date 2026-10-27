@@ -29,7 +29,9 @@
 # (`dev.<dns_zone>`), its connector a sidecar in dev/compose.yaml, and the hub's menu lists
 # every dev container's sessions (dev/README.md). The four blocks below it are the old way, a
 # tunnel per container, kept for each container until it has moved into the one compose file
-# and dropped its own tunnel — then its import goes from here, in the same commit.
+# and dropped its own tunnel — then its import goes from here, in the same commit. EXCEPT
+# or3-dev's, which stays: its hostname moves onto the hub's tunnel (dev/cloudflared.yml) and
+# still reaches or3-dev's own sshd, where the phone's or3-tunnel reverse forward lands.
 #
 #   container   image lives in
 #   ─────────   ──────────────────
