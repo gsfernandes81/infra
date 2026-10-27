@@ -12,7 +12,7 @@ in git history before 2026-10-25.
 
 **What comes next is [`dev-pool.md`](dev-pool.md)**: decided 2026-10-25, the menu and the
 offloader move out of the dev containers into a hub that manages them all over ssh. **Built
-2026-10-26 on a branch, not on the fleet** (claude-sessions 0.5.0, unreleased). The items below
+2026-10-26, released as claude-sessions v0.5.0 on 2026-10-27, not on the fleet** until the cutover. The items below
 are about today's per-container layout and stay open until the hub is brought up; item 2 then
 reads "base `2026.10.26`", the first base without claude-sessions baked in.
 

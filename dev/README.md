@@ -8,13 +8,10 @@ Claude Code against **this** repo, with Ansible in the image. `or3-dev`, `dd-dev
 
 > **⚠︎ Built 2026-10-26, not yet on the fleet.** Until the owner brings it up, zero still
 > runs the old layout — each container in a project of its own, its `/workspace` a bind mount
-> of zero's clone, with its own tunnel, offload loop and menu. Two things stand between this
-> file and the box: **claude-sessions 0.5.0 is not released**, so the two hashes in
-> `hub/Dockerfile` are placeholders (`FILL-FROM-THE-v0.5.0-RELEASE`) and the hub's build fails
-> at `sha256sum -c`, on purpose, until they are filled from the release; and base
-> `2026.10.26` is published by CI only when this reaches `main` (`make base` builds it locally
-> meanwhile). Then the move itself, which is the owner's — *The cutover from the old layout*
-> below has the order.
+> of zero's clone, with its own tunnel, offload loop and menu. claude-sessions `v0.5.0` is
+> released and pinned in `hub/Dockerfile`, and this is on `main` (2026-10-27); what is left is
+> the move itself, which is the owner's — *The cutover from the old layout* below has the
+> order, starting with the GitHub App.
 
 ## Why this exists
 

@@ -28,15 +28,12 @@
 # that is how an UNRELEASED claude-sessions is tested against this image before it is
 # published. Nothing else ever overrides it: zero builds this stage as written.
 #
-# ⚠︎ v0.5.0 IS NOT RELEASED YET. It is on claude-sessions' branch of the same name as this
-# one, and merging that to its main is what publishes it (its CI tags and releases on the
-# version bump). The two hashes below are placeholders until then, so this build FAILS at
-# `sha256sum -c` — loudly, which is the point: fill them from the release's SHA256SUMS asset
-# (also in its notes), then build.
+# A BUMP is the version and both hashes together, from the new release's SHA256SUMS asset
+# (also in its notes). A wrong hash fails this build at `sha256sum -c`, loudly, by design.
 FROM python:3.13-slim-trixie@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c AS fetch
 ARG CLAUDE_SESSIONS_VERSION=0.5.0
-ARG CLAUDE_SESSIONS_SHA256_arm64=FILL-FROM-THE-v0.5.0-RELEASE
-ARG CLAUDE_SESSIONS_SHA256_amd64=FILL-FROM-THE-v0.5.0-RELEASE
+ARG CLAUDE_SESSIONS_SHA256_arm64=f59f70389302036d1cbadef60d7e44f8eb452656aad1ff23a346f0a626e7740b
+ARG CLAUDE_SESSIONS_SHA256_amd64=e13a332a833abeb6005360467313dc804c6ced4d8e9fc224501b8e0ba4e59574
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 RUN set -eux; \

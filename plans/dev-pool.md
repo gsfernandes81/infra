@@ -97,11 +97,9 @@ limits the owner is having to manage each container separately.
    making `/sys/fs/cgroup/devpool` at 2560M of RAM and 6G of swap (the owner's, 2026-10-27:
    swap enough to reach through zram into the SSD swap). Its install and calibrated proof are `hosts/zero/system/README.md` §
    *devpool*. Until it is proved, `DEV_CGROUP_PARENT` stays empty and Compose sets no parent.
-2. **Built, unreleased.** The hub rewrite, in the claude-sessions repo: `agent`, `install`,
-   `offload-all` and the containers-first menu, as 0.5.0. It is released by merging that
-   repo's branch to `main` (a version bump there is a publish), and then
-   `dev/hub/Dockerfile`'s two `CLAUDE_SESSIONS_SHA256_*` placeholders take the release's
-   checksums.
+2. **Released, 2026-10-27.** The hub rewrite, in the claude-sessions repo: `agent`, `install`,
+   `offload-all` and the containers-first menu, as `v0.5.0`, pinned and checksummed in
+   `dev/hub/Dockerfile`.
 3. **Built, not brought up.** The one compose file in `infra`: the hub, the sidecar, the
    network, and `infra-dev` first, with its workspace and `.env` files in volumes. Bring-up is
    the owner's, in the handoff's order.

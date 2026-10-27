@@ -20,11 +20,10 @@ name: dev-smoke
 # or3-dev (private: its image needs or3's deploy key), and Claude Code acting on the hooks
 # (it needs a login).
 #
-# UNRELEASED claude-sessions: while hub/Dockerfile's two hashes are placeholders the release
-# does not exist, so the hub is built with a binary compiled here from claude-sessions at
-# CLAUDE_SESSIONS_UNRELEASED_REF, swapped in for the image's `fetch` stage through
-# dev/ci/compose.smoke.yaml. Once the pin is filled, the hub builds exactly as on zero, from
-# the checksummed release. A dispatch can name any claude-sessions ref.
+# claude-sessions: the hub builds exactly as on zero, from the release hub/Dockerfile pins and
+# checksums. To test an UNRELEASED claude-sessions against this image before a bump, dispatch
+# with its ref: the binary is compiled here and swapped in for the image's `fetch` stage
+# through dev/ci/compose.smoke.yaml.
 #
 # Runs as the runner's own user, not under sudo (`make SUDO=`): the runner user is in the
 # docker group, and sudo would drop the environment the override file reads.
@@ -47,10 +46,6 @@ concurrency:
   group: dev-smoke-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # Delete this line, and the step that uses it, once hub/Dockerfile's hashes are filled.
-  CLAUDE_SESSIONS_UNRELEASED_REF: ccr-87300a0c-3kalf9
-
 jobs:
   smoke:
     runs-on: ubuntu-24.04
@@ -64,9 +59,6 @@ jobs:
           ASKED: ${{ inputs.claude_sessions_ref }}
         run: |
           ref="$ASKED"
-          if [ -z "$ref" ] && grep -q 'FILL-FROM-THE' dev/hub/Dockerfile; then
-            ref="$CLAUDE_SESSIONS_UNRELEASED_REF"
-          fi
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
           echo "claude-sessions: ${ref:-the release hub/Dockerfile pins}"
 
