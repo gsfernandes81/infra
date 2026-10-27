@@ -700,7 +700,10 @@ the checkout's owner so the gavin-owned 0600 `tunnel.json` serves it. Two hostna
 `dev.gsrpi.uk`, the hub's sshd, and `or3-dev.gsrpi.uk`, or3's own sshd, kept for the
 phone's reverse forward to the vessel (`cloudflared.yml`). That hostname, and the phone's
 `or3-dev` alias for it, kept their `-dev` when the container lost it: renaming them is a
-Cloudflare and client change of its own. The base carries no cloudflared.
+Cloudflare and client change of its own. **A change to `cloudflared.yml` reaches the tunnel
+only on `make restart C=dev-cloudflared`**: cloudflared reads it at start, the mount is of a
+single file that `git pull` replaces, and a deploy recreates the sidecar only when its own
+service changes. Restart it from `ssh zero`, not from inside `ssh dev`, which it drops. The base carries no cloudflared.
 
 **Provisioning is two plays from the control node**, never ansible on zero. The server side,
 `server-create-dev-container.yml` (*Bring-up*), reads the Cloudflare API token from

@@ -107,7 +107,9 @@ help:
 #
 # A profile in COMPOSE_PROFILES that no service has is IGNORED by Compose without a word
 # (checked, Compose 5.6.1): the container it meant simply never starts. The 2026-10-27 rename
-# made every old profile such a name, so each must be one compose.yaml declares.
+# made every old profile such a name, so each must be one compose.yaml declares. It reads
+# compose.yaml's `profiles: [name]` lines, so keep each in that flow style with nothing after
+# the `]`, as every one is.
 _require-env:
 	@[ -f $(CURDIR)/.env ] || { \
 	  echo "no $(CURDIR)/.env — copy .env.example to .env and edit it." >&2; exit 1; }
@@ -122,7 +124,8 @@ _require-env:
 	  echo "dev/.env sets CLAUDE_UNDOCUMENTED_SHARED_LOGINS; it lives in compose.yaml, so a .env line" >&2; \
 	  echo "  would override it unseen. Delete that line, and change compose.yaml to flip it." >&2; exit 1; }
 	@known=$$(sed -n 's/^[[:space:]]*profiles: \[\(.*\)\]$$/\1/p' $(CURDIR)/compose.yaml | tr -s ', ' '\n\n' | sort -u); \
-	for p in $$(sed -n 's/^COMPOSE_PROFILES=//p' $(CURDIR)/.env | tr -d "\"'" | tr ',' ' '); do \
+	for p in $$(sed -n -E 's/^[[:space:]]*(export[[:space:]]+)?COMPOSE_PROFILES=//p' $(CURDIR)/.env \
+	    | sed 's/[[:space:]]*#.*$$//' | tr -d "\"'\r" | tr ',' ' '); do \
 	  printf '%s\n' "$$known" | grep -qx "$$p" || { \
 	    echo "dev/.env: COMPOSE_PROFILES names '$$p', which no service in compose.yaml has, so Compose" >&2; \
 	    echo "  would skip it silently. Each container's profile is its repo's name:" >&2; \
@@ -157,8 +160,15 @@ volumes:
 # volumes are this project's external ones. The names are compose.yaml's own container_name
 # lines, so a container added there is checked without being listed twice.
 OWN_NAMES = $(shell sed -n 's/^[[:space:]]*container_name: //p' $(CURDIR)/compose.yaml)
+#
+# Both name guards list the containers once, and refuse if that fails: a `sudo docker` that
+# cannot reach the daemon (a wrong password, dockerd down) would otherwise read as "no such
+# container", and the guard would pass for the wrong reason.
 _require-own-names:
-	@for c in $(OWN_NAMES); do \
+	@names=$$($(DOCKER) ps -a --format '{{.Names}}') || { \
+	  echo "cannot list containers (docker ps -a failed), so cannot check the names." >&2; exit 1; }; \
+	for c in $(OWN_NAMES); do \
+	  printf '%s\n' "$$names" | grep -qx "$$c" || continue; \
 	  p=$$($(DOCKER) inspect --type container -f '{{ index .Config.Labels "com.docker.compose.project" }}' $$c 2>/dev/null) || continue; \
 	  [ "$$p" = dev ] && continue; \
 	  echo "container $$c belongs to compose project '$${p:-none}', not dev. Stop it there first:" >&2; \
@@ -173,8 +183,10 @@ _require-own-names:
 # sessions; its volumes stay, being external and named.
 RETIRED_NAMES = infra-dev or3-dev dd-dev ds-dev invective-dev nibbles-dev ionic-dev
 _require-no-retired:
-	@found=; for c in $(RETIRED_NAMES); do \
-	  $(DOCKER) inspect --type container $$c >/dev/null 2>&1 && found="$$found $$c"; done; \
+	@names=$$($(DOCKER) ps -a --format '{{.Names}}') || { \
+	  echo "cannot list containers (docker ps -a failed), so cannot check the names." >&2; exit 1; }; \
+	found=; for c in $(RETIRED_NAMES); do \
+	  printf '%s\n' "$$names" | grep -qx "$$c" && found="$$found $$c"; done; \
 	[ -z "$$found" ] || { \
 	  echo "containers under names retired on 2026-10-27:$$found" >&2; \
 	  echo "  each is now its repo's name (compose.yaml's header), and an old one left running" >&2; \
