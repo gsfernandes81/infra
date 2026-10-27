@@ -202,10 +202,11 @@ the newest 8 MB). `HUB_OFFLOAD=0` in `.env` stops the timer for everyone;
 `DEV_IDLE_OFFLOAD=0` stops it stopping anything in infra-dev, which compose passes on as
 `CLAUDE_SESSIONS_OFFLOAD=0` — that container's pass says so and looks at nothing.
 
-**Which containers** is `HUB_HOSTS` in `.env` — names on the `dev` network,
-space-separated, in the order the menu shows them, and only containers on base `2026.10.26`
-or later, which mount the hub's volume. With one name there, as today, there is no home
-screen: the menu is that container's, exactly as it was inside it.
+**Which containers** is every container `compose.yaml` names a repo for — its
+`HUB_REPO_<NAME>` line in the hub's environment, the same list the token broker mints for —
+sorted by name. `HUB_HOSTS` in `.env` overrides it, space-separated, only to set an order or a
+subset. With one name, there is no home screen: the menu is that container's, exactly as it
+was inside it.
 
 ### The menu, two levels deep
 
@@ -213,7 +214,7 @@ The owner's shape (2026-10-26), drawn in claude-sessions'
 [`docs/mockups.md`](https://github.com/gsfernandes81/claude-sessions/blob/main/docs/mockups.md),
 mockups 12 to 15, and binding as the rest of that file is:
 
-- **The home is the containers**, one row each, in `HUB_HOSTS` order, with what is in it in
+- **The home is the containers**, one row each, in the hub's list order, with what is in it in
   words — `3 loaded · 1 offloaded`, `nothing open`, `not answering`. A container with a
   session waiting for you is marked with an amber `!`; one with something unread is bold.
   Marked, never moved. `Enter` opens one; `n` and `s` act in the container under the cursor.
@@ -476,9 +477,15 @@ containers are proved.
 
 ### A container added later
 
-A row in `compose.yaml` built like the three above, its old volumes named external if it has
-any, its profile in `COMPOSE_PROFILES` and its name in `HUB_HOSTS`, then `make up`. The hub's
-environment changes, so the hub is recreated: every `ssh dev` session drops, and no claude does.
+In `compose.yaml`: a repo anchor at the top, a service built like the three above (its
+`DEV_REPO` that anchor, its own `subpath:` of the tokens volume, its old volumes named
+external if it has any), and a `HUB_REPO_<NAME>` line in the hub's environment. Its profile in
+`COMPOSE_PROFILES` if it should start at rest; then `make up`. The hub's environment changed,
+so it is recreated first — its start makes the new token directory, and the container waits
+on it — and every open `ssh dev` view drops for a few seconds; no claude does (owner and
+advisor, 2026-10-27: a list file in place of the recreate would trade that ordering away for a
+second place each repo is named). A container removed from `compose.yaml` loses its token
+directory at the hub's next start.
 
 ## The smoke test
 

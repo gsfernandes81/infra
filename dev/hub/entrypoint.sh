@@ -11,7 +11,8 @@
 # a container never starts against an empty volume.
 #
 # What it reads from the environment (dev/compose.yaml sets each):
-#   CLAUDE_SESSIONS_HOSTS   the containers, by name on the `dev` network
+#   CLAUDE_SESSIONS_HOSTS   the containers, by name on the `dev` network — HUB_HOSTS when
+#                           .env sets it (an order); otherwise derived below from HUB_REPO_*
 #   CLAUDE_SESSIONS_REMOTE  the binary's path inside them (/opt/claude-sessions/bin/…)
 #   HUB_OFFLOAD             0 stops the offload timer starting                     (1)
 #   HUB_GITHUB_*, HUB_REPO_*  the token broker's; github-tokens' own header lists them
@@ -75,6 +76,16 @@ else
     say "WARNING: could not make the token directories — containers whose mount needs one will not start"
 fi
 : > "$TOKENS/.ready"
+
+# ── which containers ───────────────────────────────────────────────────────────
+# ONE LIST: the containers the hub mints tokens for are the containers it manages, so without
+# an explicit HUB_HOSTS (which only sets an order) the list IS the HUB_REPO_* names compose
+# gives this container. Before the environment file below and the offload loop, which both
+# carry it.
+if [ -z "${CLAUDE_SESSIONS_HOSTS:-}" ]; then
+    CLAUDE_SESSIONS_HOSTS="$(github-tokens hosts)"
+    export CLAUDE_SESSIONS_HOSTS
+fi
 
 # ── sshd: host key, and who may log in ─────────────────────────────────────────
 [ -f "$STATE/ssh_host_ed25519_key" ] || \

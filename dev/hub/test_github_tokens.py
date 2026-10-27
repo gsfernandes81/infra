@@ -140,6 +140,23 @@ class Broker(unittest.TestCase):
         self.assertEqual(os.listdir(os.path.join(tokens, "x-dev")), [])
         self.assertIn("off:", out.stdout)
 
+    def test_hosts_are_the_containers_sorted(self):
+        out, _ = self.run_broker({"OR3_DEV": "owner/or3", "INFRA_DEV": "owner/infra"}, verb="hosts")
+        self.assertEqual(out.stdout.strip(), "infra-dev or3-dev")
+
+    def test_dirs_removes_a_container_no_longer_named(self):
+        tokens = tempfile.mkdtemp(dir=self.tmp.name)
+        for name in ("gone-dev", "kept-dev"):
+            os.makedirs(os.path.join(tokens, name))
+            open(os.path.join(tokens, name, "token"), "w").write("ghs_SECRET_old")
+        open(os.path.join(tokens, ".ready"), "w").close()
+        env = {"PATH": os.environ["PATH"], "HUB_GITHUB_TOKENS": tokens, "HUB_REPO_KEPT_DEV": "owner/kept"}
+        out = subprocess.run([sys.executable, BROKER, "dirs"], env=env, capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(sorted(os.listdir(tokens)), [".ready", "kept-dev"])
+        self.assertTrue(os.path.exists(os.path.join(tokens, "kept-dev", "token")))
+        self.assertNotIn("SECRET", out.stdout + out.stderr)
+
     def test_a_malformed_repo_stops_it(self):
         out, _ = self.run_broker({"Y": "a b/c"}, verb="dirs")
         self.assertNotEqual(out.returncode, 0)

@@ -8,7 +8,11 @@ access token limited to that ONE repository and to HUB_GITHUB_PERMISSIONS, and w
 /run/github, so a claude in or3-dev can read or3's token and no other. A token lasts an hour;
 `loop` renews every 30 minutes, so one is always at least half an hour from expiring.
 
-    github-tokens dirs    make <tokens>/<name>/ for every container (their mounts need them)
+    github-tokens dirs    make <tokens>/<name>/ for every container (their mounts need them),
+                          and remove the directory, token and all, of any container no
+                          longer named — so a removed container's last token goes with it
+    github-tokens hosts   print the containers' names, sorted, one line: the hub's list
+                          when HUB_HOSTS does not set one
     github-tokens once    mint every token now; exit 1 if any failed
     github-tokens loop    `once`, then again every 30 minutes (2 after a failure), forever
 
@@ -131,6 +135,17 @@ def make_dirs(tokens, names):
     os.makedirs(tokens, mode=0o755, exist_ok=True)
     for name in names:
         os.makedirs(os.path.join(tokens, name), mode=0o700, exist_ok=True)
+    # A directory for a container compose no longer names holds a token nothing should keep.
+    # Only plain directories whose name could be a container's: dotfiles (.ready) are the
+    # hub's own, and nothing else is ever written here.
+    for entry in os.listdir(tokens):
+        path = os.path.join(tokens, entry)
+        if entry in names or entry.startswith(".") or not os.path.isdir(path) or os.path.islink(path):
+            continue
+        for f in os.listdir(path):
+            os.unlink(os.path.join(path, f))
+        os.rmdir(path)
+        say(f"{entry}: no longer in compose.yaml — its token directory is removed")
 
 
 def mint_all(env, now=None):
@@ -185,6 +200,9 @@ def trim(log):
 
 def main(argv, env):
     verb = argv[1] if len(argv) > 1 else "once"
+    if verb == "hosts":
+        print(" ".join(sorted(repos(env))))
+        return 0
     if verb == "dirs":
         make_dirs(env.get("HUB_GITHUB_TOKENS", "/home/dev/tokens"), repos(env))
         return 0

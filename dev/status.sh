@@ -69,7 +69,7 @@ status() {
     # every pass, and whether this container is one it reaches. Read by file age, not by
     # matching argv — `pgrep -f` on the loop's own words is the self-match trap CLAUDE.md
     # records.
-    printf 'offloader : %s\n' "$(d exec dev-hub sh -c 'f=$HOME/.hub/passes.log; [ "${HUB_OFFLOAD:-1}" = 1 ] || { echo "off at the hub (HUB_OFFLOAD=$HUB_OFFLOAD)"; exit 0; }; case " $CLAUDE_SESSIONS_HOSTS " in *" $1 "*) ;; *) echo "the hub does not reach $1 — not in HUB_HOSTS"; exit 0 ;; esac; [ -f "$f" ] || { echo "no pass yet at the hub — make boot-log C=hub"; exit 0; }; a=$(( $(date +%s) - $(stat -c %Y "$f") )); if [ "$a" -le 600 ]; then echo "the hub'"'"'s, last pass $((a / 60))m ago (make offload-log)"; else echo "NO PASS in $((a / 60))m at the hub — its loop has stopped; make boot-log C=hub"; fi' _ "$CONTAINER" 2>/dev/null \
+    printf 'offloader : %s\n' "$(d exec dev-hub sh -c 'f=$HOME/.hub/passes.log; [ "${HUB_OFFLOAD:-1}" = 1 ] || { echo "off at the hub (HUB_OFFLOAD=$HUB_OFFLOAD)"; exit 0; }; case " $CLAUDE_SESSIONS_HOSTS " in *" $1 "*) ;; *) echo "the hub does not reach $1 — not in its list (HUB_HOSTS, or HUB_REPO_* in compose.yaml)"; exit 0 ;; esac; [ -f "$f" ] || { echo "no pass yet at the hub — make boot-log C=hub"; exit 0; }; a=$(( $(date +%s) - $(stat -c %Y "$f") )); if [ "$a" -le 600 ]; then echo "the hub'"'"'s, last pass $((a / 60))m ago (make offload-log)"; else echo "NO PASS in $((a / 60))m at the hub — its loop has stopped; make boot-log C=hub"; fi' _ "$CONTAINER" 2>/dev/null \
         || echo 'could not ask the hub — is it up? (make status C=hub)')"
 
     # `claude auth status`, not "is there a credentials file" — a file holding empty

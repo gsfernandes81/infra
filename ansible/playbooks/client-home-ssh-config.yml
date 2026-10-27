@@ -72,7 +72,7 @@
 #
 # The first line is the edge half for any alias and, for `dev` and infra-dev, the host
 # half as well. Since 2026-10-26 a new dev container needs no alias at all — the hub's menu
-# lists it once it is in dev/compose.yaml and HUB_HOSTS — so a fifth row here is for a
+# lists it once dev/compose.yaml names its repo (HUB_REPO_*) — so a fifth row here is for a
 # second door, not for another container.
 #
 # NO NEW COLLECTIONS, and no tasks of its own: this file is composition and a table.

@@ -84,9 +84,11 @@ services:
     restart: unless-stopped
     networks: [dev]
     environment:
-      # The containers the menu and the offloader reach, by name on the `dev` network — only
-      # those on a base new enough to have /opt/claude-sessions mounted (base 2026.10.26).
-      CLAUDE_SESSIONS_HOSTS: ${HUB_HOSTS:?set HUB_HOSTS in dev/.env — the containers the hub manages, e.g. infra-dev}
+      # The containers the menu and the offloader reach, by name on the `dev` network. EMPTY
+      # MEANS DERIVED: the hub's entrypoint takes the HUB_REPO_* names below, so the list of
+      # containers is stated once, there. HUB_HOSTS in .env only sets an order (or a subset),
+      # and `:-` because its absence is the normal setting, not a mistake.
+      CLAUDE_SESSIONS_HOSTS: ${HUB_HOSTS:-}
       CLAUDE_SESSIONS_REMOTE: /opt/claude-sessions/bin/claude-sessions
       HUB_OFFLOAD: ${HUB_OFFLOAD:-1}
       # THE TOKEN BROKER (hub/github-tokens). Empty app id is OFF — a setting, not a mistake,
