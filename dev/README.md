@@ -152,8 +152,9 @@ at `~/.ssh/cm/%C`, which is what makes the menu's second connection for an attac
 round trip rather than a handshake.
 
 **The offloader.** `claude-sessions offload-all` every three minutes at a fixed rate, which
-runs `claude-sessions offload` in every container at once over ssh, each line prefixed with
-its container. The measurement happens *inside* each container — it reads `/proc` and the
+runs `claude-sessions offload` in every *running* container at once over ssh, each line
+prefixed with its container. A stopped one (dd-dev and ds-dev at rest) is skipped rather than
+failed, and the log says which are skipped once, when that set changes. The measurement happens *inside* each container — it reads `/proc` and the
 socket-diagnostics netlink, which answer only in the container's own namespaces — so only the
 timer is the hub's. Each pass goes timestamped to `~/.hub/passes.log` in the hub (capped near
 16 MB, trimmed to the newest 8 MB). `HUB_OFFLOAD=0` in `.env` stops it, and is the only

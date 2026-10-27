@@ -134,11 +134,29 @@ if [ "${HUB_OFFLOAD:-1}" = "1" ]; then
     # that dies or wedges turns the hub unhealthy rather than going quiet.
     touch "$STATE/offload.beat"
     setsid bash -c '
+        skipped=
         while :; do
             start=$(date +%s)
             stamp=$(date -u "+%Y-%m-%dT%H:%M:%SZ")
-            out=$(timeout 150 claude-sessions offload-all 2>&1)
-            rc=$?
+            # ONLY THE CONTAINERS THAT ARE UP: a stopped one has no name on the project network,
+            # so its pass would fail every 3 minutes ("Could not resolve hostname") for a state
+            # that is the design — dd-dev and ds-dev rest stopped. Said once in the log when the
+            # set changes, not on every pass; the menu shows them as not answering meanwhile.
+            up= down=
+            for h in $CLAUDE_SESSIONS_HOSTS; do
+                if getent hosts "$h" >/dev/null 2>&1; then up="$up $h"; else down="$down $h"; fi
+            done
+            if [ "$down" != "$skipped" ]; then
+                printf "%s not running, so not offloaded:%s\n" "$stamp" "${down:- none}" >> "$1"
+                skipped=$down
+            fi
+            # An empty list would make the claude-sessions wrapper derive every container again.
+            if [ -n "$up" ]; then
+                out=$(CLAUDE_SESSIONS_HOSTS="${up# }" timeout 150 claude-sessions offload-all 2>&1)
+                rc=$?
+            else
+                out= rc=0
+            fi
             [ -n "$out" ] && printf "%s\n" "$out" | sed "s/^/$stamp /" >> "$1"
             if [ "$rc" -ne 0 ]; then
                 printf "%s offload pass failed: exit %s%s\n" "$stamp" "$rc" \
