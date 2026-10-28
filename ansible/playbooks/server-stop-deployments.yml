@@ -142,20 +142,41 @@
       become: true
       delegate_to: "{{ item.host }}"
 
+    - name: Read the one-shots of each deployment
+      # A one-shot (files/compose-oneshots.py says which) is exited when it has done its job, so a
+      # start leaves it alone: `compose start` would run it again and it would exit 0 again,
+      # which the check below would then report as a failure (the deploy play met this on
+      # dev-policy, 2026-10-28). A stop never meets one: it is not running.
+      ansible.builtin.script:
+        cmd: files/compose-oneshots.py
+        chdir: "{{ hostvars[item.host].infra_checkout }}/deployments/{{ item.name }}"
+        executable: /usr/bin/python3
+      loop: "{{ sd_run }}"
+      loop_control:
+        label: "{{ item.host }}/{{ item.name }}"
+      register: sd_oneshots
+      changed_when: false
+      check_mode: false
+      become: true
+      delegate_to: "{{ item.host }}"
+      when: sd_start
+
     - name: Note each container and its state
       ansible.builtin.set_fact:
         sd_rows: >-
           {% set out = [] %}{% for r in sd_before.results %}{% for l in r.stdout_lines %}{% set f = l.split(' ', 4) %}{% set _ = out.append({'host': r.item.host, 'dep': r.item.name, 'service': f[0], 'name': f[1], 'id': f[2], 'state': f[3], 'status': f[4] | default('')}) %}{% endfor %}{% endfor %}{{ out }}
         sd_empty: >-
           {{ sd_before.results | rejectattr('stdout_lines') | map(attribute='item') | list }}
+        # host/deployment/container of every one-shot, matching sd_rows' fields.
+        sd_oneshot: >-
+          {% set out = [] %}{% for r in sd_oneshots.results | default([]) %}{% for n in r.stdout_lines | default([]) %}{% set _ = out.append(r.item.host ~ '/' ~ r.item.name ~ '/' ~ n) %}{% endfor %}{% endfor %}{{ out }}
 
     - name: Note the containers this run would change
       ansible.builtin.set_fact:
-        sd_todo: "{{ sd_rows | selectattr('state', 'in', sd_from_states) | list }}"
+        sd_todo: >-
+          {% set out = [] %}{% for r in sd_rows if r.state in sd_from_states and (r.host ~ '/' ~ r.dep ~ '/' ~ r.name) not in sd_oneshot %}{% set _ = out.append(r) %}{% endfor %}{{ out }}
         sd_todo_deps: >-
-          {{ sd_rows | selectattr('state', 'in', sd_from_states)
-             | map(attribute='host') | zip(sd_rows | selectattr('state', 'in', sd_from_states) | map(attribute='dep'))
-             | map('join', '/') | unique | list }}
+          {% set out = [] %}{% for r in sd_rows if r.state in sd_from_states and (r.host ~ '/' ~ r.dep ~ '/' ~ r.name) not in sd_oneshot %}{% set _ = out.append(r.host ~ '/' ~ r.dep) %}{% endfor %}{{ out | unique | list }}
 
     - name: "If starting: check every deployment has containers"
       # `compose start` cannot create a container. One that is missing was never brought up,
@@ -192,7 +213,7 @@
     - name: Print what would {{ sd_verb }}
       ansible.builtin.debug:
         msg: >-
-          {% set out = ['Would ' ~ sd_verb ~ ':'] %}{% for t in sd_todo %}{% set _ = out.append('  ' ~ t.host ~ '/' ~ t.dep ~ ' ' ~ t.name ~ ' (' ~ t.id ~ '), ' ~ t.state) %}{% endfor %}{% if sd_todo | length == 0 %}{% set _ = out.append('  nothing: every container is already ' ~ sd_to_state) %}{% endif %}{% if sd_others | default([]) | length > 0 %}{% set _ = out.append('Left running:') %}{% for o in sd_others %}{% set _ = out.append('  ' ~ o) %}{% endfor %}{% endif %}{% for e in sd_empty %}{% set _ = out.append('No containers: ' ~ e.host ~ '/' ~ e.name) %}{% endfor %}{{ out }}
+          {% set out = ['Would ' ~ sd_verb ~ ':'] %}{% for t in sd_todo %}{% set _ = out.append('  ' ~ t.host ~ '/' ~ t.dep ~ ' ' ~ t.name ~ ' (' ~ t.id ~ '), ' ~ t.state) %}{% endfor %}{% if sd_todo | length == 0 %}{% set _ = out.append('  nothing: every container is already ' ~ sd_to_state) %}{% endif %}{% if sd_others | default([]) | length > 0 %}{% set _ = out.append('Left running:') %}{% for o in sd_others %}{% set _ = out.append('  ' ~ o) %}{% endfor %}{% endif %}{% for e in sd_empty %}{% set _ = out.append('No containers: ' ~ e.host ~ '/' ~ e.name) %}{% endfor %}{% if sd_start and sd_oneshot | length > 0 %}{% set _ = out.append('Left exited, one-shots: ' ~ (sd_oneshot | join(', '))) %}{% endif %}{{ out }}
       changed_when: true
 
     - name: "If any and not --check: ask to {{ sd_verb }} them"

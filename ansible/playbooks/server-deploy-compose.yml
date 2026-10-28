@@ -31,7 +31,10 @@
 #      image only if its tag is absent, each service's pull_policy honoured.
 #      Then the container ids are compared with the ids from before, so what was recreated
 #      is read, not assumed (CLAUDE.md § Verifying changes), and the play waits for
-#      healthchecks and fails naming any container that is not up.
+#      healthchecks and fails naming any container that is not up. A ONE-SHOT, a service
+#      another waits on with `condition: service_completed_successfully` (dev's `policy`),
+#      is up when it reads `Exited (0)`, and its restart on every `up` is not a change the
+#      plan asks about; anything else that exits is a failure.
 #
 # `deployment=all` runs that for every deployment this play may touch, ONE AT A TIME, `one`
 # before `zero`, each

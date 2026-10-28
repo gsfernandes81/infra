@@ -206,6 +206,11 @@ idle nudge are issue #17). Infra pinned it the same day.
    `2026.10.28.1` with the policy volume, the hub rebuilt on claude-sessions 0.8.1 (bumped the
    same afternoon), `dev-policy` exited 0, `make verify` read 0.8.1 twice, the hub healthy, and
    the recreated `infra` container loads the managed policy with the three skills in the volume.
+   **Both runs of the play ended `FAILED` after a successful `up`**, on `dev-policy Exited (0)`:
+   the all-up check did not know a one-shot, so the dev probe (the hub reaching each container
+   with its own key) has not run since the rollout; `make verify` and a round trip stood in. Fixed
+   the same day in the deploy and stop/start plays (`decisions.md`, *The deploy play knows a
+   one-shot*); the next dev deploy is the first that runs the probe with it.
    **Left from this item: the negative-control run** — one `claude -p` in a container with the
    policy file chowned to 1001 for the test, expecting the banner if the gate is on there; it was
    off in the sandbox. The two steps as they were planned, for the record:

@@ -71,6 +71,34 @@
       {{ lookup('file', control_checkout ~ '/deployments/' ~ dep.name ~ '/compose.yaml')
          | regex_findall('[$][{]([A-Za-z0-9_]+):[?]') | unique | list }}
 
+- name: Read the one-shot containers of {{ dep.name }}
+  # A service another service waits on with `condition: service_completed_successfully` is
+  # meant to run once and exit 0 (dev's `policy`, which installs the managed CLAUDE.md as root),
+  # so after `up` it reads `Exited (0)`, and every `up` starts it again by design. The plan and
+  # the all-up check below allow exactly that for exactly these, and nothing else: a dev
+  # container also has `restart: "no"`, and one of those exiting is the failure the check is
+  # for. So the key is the declaration that says a service is waited on to complete, not the
+  # restart policy. files/compose-oneshots.py says why it asks the daemon and not the file.
+  # Under --check too: it reads, and the plan needs it.
+  ansible.builtin.script:
+    cmd: files/compose-oneshots.py
+    chdir: "{{ dep_dir }}"
+    executable: /usr/bin/python3
+  register: dep_oneshot_out
+  changed_when: false
+  check_mode: false
+  become: true
+  delegate_to: "{{ dep.host }}"
+
+- name: Note the one-shots of {{ dep.name }}
+  # The pattern matches a status line of a one-shot that has exited 0, and nothing at all when
+  # there is none: `(?!)` fails every match.
+  ansible.builtin.set_fact:
+    dep_oneshot: "{{ dep_oneshot_out.stdout_lines | default([]) }}"
+    dep_oneshot_done_re: >-
+      {{ '^(' ~ (dep_oneshot_out.stdout_lines | default([]) | map('regex_escape') | join('|')) ~ ') Exited [(]0[)]'
+         if dep_oneshot_out.stdout_lines | default([]) | length > 0 else '(?!)' }}
+
 - name: Read the variable names in .env for {{ dep.name }}
   # Names only: sed prints the part before the `=`, so a value never reaches a register or a
   # log. No .env at all is rc 2, and reads as no names.
@@ -226,13 +254,20 @@
       # module's to change, and the whole entry is the fallback so a plan is never blanks.
       # With an image Compose cannot plan past, the plan is that image, and `up` recreates
       # every container using it; others change only if their own config did.
+      # A one-shot (dep_oneshot) "Starting" is every `up` running it again, not a change, so
+      # it is left out too; its "Creating", and anything else about it, stays. What changed is
+      # then read from the lines that are left, not from the module's own flag, which counts
+      # that start (dev, 2026-10-28: a second run planned only `dev-policy: Starting` and asked).
       ansible.builtin.set_fact:
-        dep_plan_changed: "{{ (dep_unplannable | length > 0) or (dep_plan.changed | default(false)) }}"
         dep_plan_lines: >-
           {% if dep_unplannable | length > 0 %}{{ ['the host lacks ' ~ (dep_unplannable | join(', '))
               ~ (', which up pulls or builds' if ansible_check_mode else ', which up builds')
               ~ ', and recreates the containers using it. Compose cannot plan past a missing image,'
-              ~ ' so any other container changes only if its own config did'] }}{% else %}{% set out = [] %}{% for a in dep_plan.actions | default([]) %}{% if a.id is not defined or a.id is not match('^[0-9a-f]{12}_') %}{% set _ = out.append((a.what | default('?')) ~ ' ' ~ (a.id | default(a.msg | default(a | string))) ~ ': ' ~ (a.status | default(''))) %}{% endif %}{% endfor %}{{ out }}{% endif %}
+              ~ ' so any other container changes only if its own config did'] }}{% else %}{% set out = [] %}{% for a in dep_plan.actions | default([]) %}{% if (a.id is not defined or a.id is not match('^[0-9a-f]{12}_')) and not ((a.id | default('')) in dep_oneshot and (a.status | default('')) == 'Starting') %}{% set _ = out.append((a.what | default('?')) ~ ' ' ~ (a.id | default(a.msg | default(a | string))) ~ ': ' ~ (a.status | default(''))) %}{% endif %}{% endfor %}{{ out }}{% endif %}
+
+    - name: Note whether the plan changes {{ dep.name }}
+      ansible.builtin.set_fact:
+        dep_plan_changed: "{{ (dep_unplannable | length > 0) or (dep_plan_lines | length > 0) }}"
 
     - name: Print what up would do to {{ dep.name }}
       ansible.builtin.debug:
@@ -272,6 +307,20 @@
       when:
         - dep_go | bool
         - dep_prepare.stat.exists | default(false)
+
+    - name: "If going ahead and one-shots: read when each last finished"
+      # The proof a one-shot RAN in this `up`, and not that it exited 0 some other day: its
+      # FinishedAt moves. One inspect per name, so an absent one (a first bring-up) reads as
+      # empty for that name alone, and any time differs from it.
+      ansible.builtin.command:
+        argv: ['docker', 'inspect', '-f', '{% raw %}{{.State.FinishedAt}}{% endraw %}', '{{ item }}']
+      loop: "{{ dep_oneshot }}"
+      register: dep_oneshot_fin_before
+      changed_when: false
+      failed_when: false
+      become: true
+      delegate_to: "{{ dep.host }}"
+      when: dep_go | bool and dep_oneshot | length > 0
 
     - name: "If going ahead: read container ids of {{ dep.name }}"
       ansible.builtin.command:
@@ -319,15 +368,36 @@
       delegate_to: "{{ dep.host }}"
       when: dep_go | bool
 
+    - name: "If going ahead and one-shots: read when each finished now"
+      ansible.builtin.command:
+        argv: ['docker', 'inspect', '-f', '{% raw %}{{.State.FinishedAt}}{% endraw %}', '{{ item }}']
+      loop: "{{ dep_oneshot }}"
+      register: dep_oneshot_fin_after
+      changed_when: false
+      failed_when: false
+      become: true
+      delegate_to: "{{ dep.host }}"
+      when: dep_go | bool and dep_oneshot | length > 0
+
+    - name: "If going ahead: note what is not up in {{ dep.name }}"
+      # Each line is `<container> <status>`. Up is up; a one-shot (dep_oneshot) that reads
+      # `Exited (0)` AND finished at a different time than before `up` has done its one job
+      # (dev-policy, 2026-10-28: a finished deploy reported as failed on it, twice). Any other
+      # exit, a one-shot's non-zero one, and a one-shot `up` did not run are not up.
+      ansible.builtin.set_fact:
+        dep_not_up: >-
+          {% set out = dep_status.stdout_lines | default([]) | reject('search', ' Up ') | reject('match', dep_oneshot_done_re) | list %}{% for i in range(dep_oneshot | length) %}{% if (dep_oneshot_fin_before.results[i].stdout | default('')) == (dep_oneshot_fin_after.results[i].stdout | default('')) %}{% set _ = out.append(dep_oneshot[i] ~ ' did not run in this up') %}{% endif %}{% endfor %}{{ out }}
+      when: dep_go | bool
+
     - name: "If going ahead: check {{ dep.name }} is all up"
       ansible.builtin.assert:
-        that: dep_status.stdout_lines | reject('search', ' Up ') | list | length == 0
+        that: dep_not_up | length == 0
         fail_msg: >-
           Not up after the redeploy on {{ dep.host }}:
-          {{ dep_status.stdout_lines | default([]) | reject('search', ' Up ') | join('; ') }}.
+          {{ dep_not_up | join('; ') }}.
           The rest of this run is stopped. `sudo docker compose logs` in {{ dep_dir }} says why;
           the deployment is as the failed `up` left it.
-        success_msg: "{{ dep.name }}: all containers up"
+        success_msg: "{{ dep.name }}: all containers up{{ ', ' ~ (dep_oneshot | join(', ')) ~ ' ran and exited 0' if dep_oneshot | length > 0 else '' }}"
       when: dep_go | bool
 
     - name: Stat the probe hook for {{ dep.name }}

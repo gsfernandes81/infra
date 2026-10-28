@@ -1575,6 +1575,19 @@ build list and the split with claude-sessions.
   no change to the wire, the registry, the drop-in or compose; it reaches every container when
   the hub is rebuilt and recreated. On zero the same afternoon, by the deploy play's full run,
   which also carried the policy volume and base `2026.10.28.1` to every container.
+- **The deploy play knows a one-shot by the dependency that waits on it (2026-10-28).** Both
+  of that rollout's runs ended `FAILED` on `dev-policy Exited (0)` after a successful `up`,
+  and the second had planned only `dev-policy: Starting` and asked. So `files/compose-oneshots.py`,
+  run on the host, prints every service some other service `depends_on` with
+  `condition: service_completed_successfully`, from `docker compose config` (merge keys resolved,
+  the project name as Compose uses it; names only leave it). In `_deploy-compose-one.yml` those
+  may read `Exited (0)` in the all-up check, but only with a `FinishedAt` that moved across the
+  `up`, so a one-shot `up` left untouched is still "did not run"; and their `Starting` alone is not
+  a change. In `server-stop-deployments.yml` a start leaves them exited, since `compose start`
+  would run one again and the check would fail on its exit. Keyed on that declaration and not on
+  `restart: "no"`, which every dev container carries too, and one of those exiting is exactly
+  what the check is for. The dev probe never ran on either rollout run; the next dev deploy is
+  the first with this in it.
 - **The policy text is `dev/hub/managed-CLAUDE.md`, installed by a one-shot `policy` service,
   and the skills are `dev/hub/skills/`** (2026-10-28, base `2026.10.28.1`). In `hub/` because
   that is the hub image's build context, and the hub is what carries both to the fleet: the
