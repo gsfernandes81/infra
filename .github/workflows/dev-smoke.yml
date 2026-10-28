@@ -190,6 +190,23 @@ jobs:
             '[ "$(docker inspect -f "{{.State.Status}} {{.State.ExitCode}}" dev-policy)" = "exited 0" ]'
           check "the mail skills reached infra's config dir" sh -c \
             'for s in mail-send mail-read mail-reply; do docker exec infra test -s /home/dev/.claude/skills/$s/SKILL.md || exit 1; done'
+          # AGENT MAIL, END TO END, over the real ssh path: a message from infra to itself and one to
+          # a receiver that does not exist. The hub's loop ticks every 15 s (HUB_MAIL_TICK); 90 s is
+          # six ticks. The bounce is the negative control — a loop that only ever delivered would
+          # pass the first check and prove nothing about refusing.
+          docker exec infra sh -c 'mkdir -p /workspace/.mail/out/infra /workspace/.mail/out/nosuch \
+            && echo "smoke round trip" > /workspace/.mail/out/infra/.t && mv /workspace/.mail/out/infra/.t /workspace/.mail/out/infra/smoke.md \
+            && echo "to nobody" > /workspace/.mail/out/nosuch/.t && mv /workspace/.mail/out/nosuch/.t /workspace/.mail/out/nosuch/smoke.md'
+          timeout 90 sh -c 'until docker exec infra sh -c "ls /workspace/.mail/in/infra/*.md /workspace/.mail/in/hub/*.md" >/dev/null 2>&1; do sleep 3; done' || true
+          check "the hub carried a message from infra to itself, with its own header" sh -c \
+            'docker exec infra sh -c "cat /workspace/.mail/in/infra/*.md" | grep -q "^From: infra$" && docker exec infra sh -c "cat /workspace/.mail/in/infra/*.md" | grep -q "^smoke round trip$"'
+          check "and bounced one to an unknown receiver, from hub" sh -c \
+            'docker exec infra sh -c "cat /workspace/.mail/in/hub/*.md" | grep -q "unknown receiver nosuch"'
+          check "and the outbox is empty afterwards" sh -c \
+            '[ -z "$(docker exec infra find /workspace/.mail/out -type f)" ]'
+          check "the mail hook announces both, then nothing" sh -c \
+            '[ "$(docker exec infra claude-sessions mail-hook </dev/null | grep -c "^new message from ")" = 2 ] && [ -z "$(docker exec infra claude-sessions mail-hook </dev/null)" ]'
+          docker exec dev-hub sh -c 'tail -n 8 ~/.hub/mail.log' | sed 's/^/  mail.log: /'
           check "Claude Code is installed" docker exec infra claude --version
           check "/run/github holds this container's token and nothing else" sh -c \
             '[ "$(docker exec infra ls -A /run/github)" = token ]'

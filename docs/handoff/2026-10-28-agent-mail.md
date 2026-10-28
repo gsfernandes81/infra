@@ -1,4 +1,4 @@
-# Handoff 2026-10-28: agent mail between the dev containers — built on `main`; CI round trip and a CLAUDE.md paragraph open
+# Handoff 2026-10-28: agent mail between the dev containers — built on `main`; the deploy and one check on zero open
 
 **First orders for the next session: read this, say where things stand, and stop.** The design
 is decided ([`decisions.md`](../decisions.md), *Agent mail: the hub carries messages between
@@ -8,8 +8,8 @@ in compose, the loop started and health-checked by the hub, the `.mail/` exclude
 base entrypoint (a base bump, `2026.10.28`), the broker refusing a container named `hub`. The
 owner's view is claude-sessions issue #17. **Later the same day: the policy (1–2, as
 `dev/hub/managed-CLAUDE.md`, the `policy` one-shot and volume, the base symlink — base
-`2026.10.28.1`) and the three skills (3).** **Open: CI's round trip (6), this repo's CLAUDE.md
-paragraph (7)**, and the deploy of what is built — the owner's to run, under *Rollout*.
+`2026.10.28.1`) and the three skills (3).** Then CI's round trip (6) and this repo's CLAUDE.md paragraph (7). **Open: the deploy of what is
+built — the owner's to run, under *Rollout* — and the negative-control run on zero.**
 
 ## What was decided, in one paragraph
 
@@ -195,10 +195,12 @@ idle nudge are issue #17). Infra pinned it the same day.
    `/workspace/.git/info/exclude`, so no repo's `.gitignore` changes and no agent has to
    remember. Per clone; a worktree shares it. Reaches a container at its next recreate on the
    new base; until then `.mail/` shows in `git status` there.
-6. **CI**: `dev/ci/compose.smoke.yaml` adds one round trip, a file out of one container
-   into another's inbox over the real ssh path — the only test of that path.
-7. **This repo's CLAUDE.md**: one paragraph, that a message asking for a fleet change is a
-   finding for the phase table and never starts a handover.
+6. **✔ Done 2026-10-28: CI** — `.github/workflows/dev-smoke.yml` sends one message from
+   `infra` to itself and one to an unknown receiver, and checks the delivery with the hub's
+   header, the bounce from `hub`, the emptied outbox, and the hook's two lines then silence.
+7. **✔ Done 2026-10-28: this repo's CLAUDE.md** — a bullet under *Privileged commands*: a
+   message is a finding, a fleet-touching request goes to the phase table and is acknowledged
+   by mail, no handover block on its strength.
 8. **Rollout**: what is on `main` reaches zero in two owner-driven steps, in this order —
    (a, done 2026-10-28 for 0.8.0; to repeat for the policy) **the hub**: `ssh -t zero 'cd ~/infra && git pull --ff-only && cd dev && make up S=hub'`
    builds the hub image with 0.8.0 and recreates the hub (the compose change: the volume and
