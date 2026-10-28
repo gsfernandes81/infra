@@ -107,8 +107,8 @@ ssh dev
 On zero, `make login` (`C=<c>` for another container) reports the hub's token, runs `claude
 auth login` if needed, and clones the workspace if start-up could not; re-running it is safe.
 Then `make verify` should read `sshd: running in the foreground`, `auth: claude logged in`,
-`tunnel: the hub's, serving dev`, `hub: key authorised; claude-sessions 0.8.0 here,
-claude-sessions 0.8.0 at the hub`, `github: the hub's token for gsfernandes81/infra, until …`,
+`tunnel: the hub's, serving dev`, `hub: key authorised; claude-sessions 0.8.1 here,
+claude-sessions 0.8.1 at the hub`, `github: the hub's token for gsfernandes81/infra, until …`,
 all collections installed, and `fleet: no route to zero/one/two`.
 
 **The memory pool is opt-in**: `DEV_CGROUP_PARENT=/devpool` puts every dev container and
@@ -865,7 +865,7 @@ copies in is ignored.
 
 [`gsfernandes81/claude-sessions`](https://github.com/gsfernandes81/claude-sessions) is the
 session registry: one JSON file per slot under `~/.local/share/claude-sessions/` (on a volume),
-kept current by Claude Code's own hooks. The hub pins **v0.8.0** and installs it for every
+kept current by Claude Code's own hooks. The hub pins **v0.8.1** and installs it for every
 container (*The hub*). A bump reaches every container when the hub is recreated, with no
 container restarted: hooks and offload passes run the binary from the volume each time, and
 each container's agent is started by the hub's menu over ssh and ends with that connection, so
