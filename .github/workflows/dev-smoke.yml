@@ -490,7 +490,8 @@ jobs:
           got=$(plan); echo "nothing changed: [$got]"; [ -z "$got" ]
           # INFRA_SECRETS is the one variable only infra reads (every dev container's memory
           # limit is the same literal since 2026-10-28), so a second stand-in directory is the
-          # change; it must exist, so the plan is about the change and not a missing path.
+          # change. Compose would create a missing bind source anyway; the mkdir only keeps the
+          # stand-in beside the others.
           alt="$(dirname "$(sed -n 's/^INFRA_SECRETS=//p' .env)")/infra-alt"; mkdir -p "$alt"
           sed -i "s#^INFRA_SECRETS=.*#INFRA_SECRETS=$alt#" .env
           got=$(plan); echo "infra's secrets path changed: [$got]"; [ "$got" = "infra " ]

@@ -1302,10 +1302,10 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   pool's 6G still bounds them together. Before this the
   containers' own `memswap_limit`s allowed 256–512 MB each, which would have left the pool's
   swap unreachable. The cost until the pool is installed: a container may swap up to 6G on
-  its own. **dd-postgres is in the pool too** — it is dev work's memory. ~~**infra-dev's own
-  limit rises from 1024m to 2560m**~~ ⚠︎SUPERSEDED 2026-10-28 by 2048m for every dev
-  container (above), or3-dev's figure (owner: "quite restrictive for work");
-  the pool, not each container, is what keeps the total off Immich.
+  its own (4G since 2026-10-28). **dd-postgres is in the pool too** — it is dev work's memory. ~~**infra-dev's own
+  limit rises from 1024m to 2560m**, or3-dev's figure (owner: "quite restrictive for work")~~
+  ⚠︎SUPERSEDED 2026-10-28 by 2048m for every dev container (above). The pool, not each
+  container, is what keeps the total off Immich.
 - **The dev project is a deployment of server-deploy-compose.yml** (owner, 2026-10-27, on the
   design review: `make up` could recreate every container, and every claude in them, with no
   preview). `deployments/dev` is a link to `dev/` and `hosts/zero/dev` places it, so it gets
