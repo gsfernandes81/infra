@@ -1527,12 +1527,15 @@ build list and the split with claude-sessions.
   volume as the record, and pushes into the receiver's `/workspace/.mail/in/<from>/`. **No
   container gains a credential**, which the earlier push design (a per-container key into
   the hub) would have ended. The sender's outbox copy is deleted; the volume is the one record.
-- **The policy is a managed `CLAUDE.md`, which no repo can exclude.** Claude Code 2.1.311 has a
-  fourth memory type, *Managed*, read as `CLAUDE.md` from the managed-settings directory the
-  base already owns (`/etc/claude-code`); `claudeMdExcludes` cannot drop it and `managed-only`
-  mode keeps it. The base bakes a symlink into the hub's `claude-sessions` volume so the text
-  is infra's and travels with the hub, not with a base bump. Whether the symlink is followed
-  is to be proved on zero; the fallback is the `claudeMd` key in a managed-settings drop-in.
+- **The policy is a managed `CLAUDE.md`, which no repo can exclude, baked root-owned in the
+  base.** Claude Code 2.1.311 has a fourth memory type, *Managed*, read as `CLAUDE.md` from
+  the managed-settings directory the base already owns (`/etc/claude-code`, hard-coded);
+  `claudeMdExcludes` cannot drop it and `managed-only` mode keeps it. A symlink into the hub's
+  volume was wanted, so edits would skip the base bump, and the loader does follow one — but
+  it marks a file the session's own uid could have written as *unverified* and injects it
+  under a banner saying it may not be policy, and everything in that volume is the sessions'
+  own uid. Read from the binary in the `infra` container on 2026-10-28, not run. So the
+  policy text takes the base bump; the mail skills, which change often, ship by the volume.
 - **Every message gets a reply, an acknowledgement sufficing; requests for work are always
   permitted and judged on their merits**, under the receiver's own repo process, vigilant
   against an attack from another repo but never refusing as a blanket policy (owner). A
