@@ -266,12 +266,25 @@ check: _require-env _require-uid _require-secrets _require-volumes
 check-names: _require-own-names _require-no-retired
 	@echo "dev: no other compose project holds a dev container's name, and none has a retired one"
 
-# Builds every image (or S='s), and touches no container.
+# Builds every image (or S='s), and touches no container. ONE AT A TIME, in compose.yaml's order:
+# Compose alone hands buildx every image at once, and on a 4 GB box running Immich nine
+# concurrent builds after a base bump are too many (owner, 2026-10-28). The deploy play's
+# preflight runs this, and `up` runs it first, so every build goes this way. The first failure
+# stops the rest. The list is every service with a `build:` line, read from compose.yaml; a
+# count of those lines guards it, so a service name the pattern misses is refused, not skipped.
+BUILT_SERVICES = $(shell awk '/^[^ #]/{top=$$1} top=="services:" && /^  [^ #]/{svc=""} top=="services:" && /^  [A-Za-z0-9_.-]+:[ \t]*(#.*)?$$/{svc=$$1; sub(/:.*/,"",svc)} top=="services:" && /^    build:/{print (svc == "" ? "?" : svc)}' $(CURDIR)/compose.yaml)
+BUILD_LINES = $(shell awk '/^[^ #]/{top=$$1} top=="services:" && /^    build:/{n++} END{print n+0}' $(CURDIR)/compose.yaml)
 build: _require-env _require-uid
-	$(COMPOSE) build $(S)
+	@if [ -n "$(S)" ]; then $(COMPOSE) build $(S); else \
+	  [ "$(words $(filter-out ?,$(BUILT_SERVICES)))" = "$(BUILD_LINES)" ] || { \
+	    echo "compose.yaml has $(BUILD_LINES) build: lines but make read the services as: $(BUILT_SERVICES)" >&2; exit 1; }; \
+	  for s in $(BUILT_SERVICES); do echo "dev: building $$s"; $(COMPOSE) build $$s || exit 1; done; \
+	fi
 
-up: _require-env _require-uid _require-secrets _require-own-names _require-no-retired _require-volumes
-	$(COMPOSE) up -d --build $(S)
+# `build` first and no --build here, so `up` builds one image at a time as well; without
+# --build Compose still builds an image that is absent, and `build` has made every one present.
+up: _require-env _require-uid _require-secrets _require-own-names _require-no-retired _require-volumes build
+	$(COMPOSE) up -d $(S)
 	@printf '\n'
 	@$(MAKE) --no-print-directory status
 

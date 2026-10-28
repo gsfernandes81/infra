@@ -97,6 +97,11 @@ limits the owner is having to manage each container separately.
    making `/sys/fs/cgroup/devpool` at 2560M of RAM and 6G of swap (the owner's, 2026-10-27:
    swap enough to reach through zram into the SSD swap). Its install and calibrated proof are `hosts/zero/system/README.md` §
    *devpool*. Until it is proved, `DEV_CGROUP_PARENT` stays empty and Compose sets no parent.
+   **With it, the pool's read-only mount goes into every dev container as well as the hub**,
+   with `CLAUDE_SESSIONS_POOL` set to it in both: from claude-sessions 0.7.0 each session's
+   load line shows the pool's RAM where that is set, and its own container's figure where not
+   (that repo's `docs/design.md` § *The status line*). The hub's mount is the commented one in
+   `dev/compose.yaml`; the containers' belongs in the `x-dev` anchor.
 2. **Released, 2026-10-27.** The hub rewrite, in the claude-sessions repo: `agent`, `install`,
    `offload-all` and the containers-first menu, as `v0.5.0`, pinned and checksummed in
    `dev/hub/Dockerfile`.

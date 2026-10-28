@@ -3,8 +3,9 @@
 # infra-dev — a THIN CHILD of gsrpi-dev-base since 2d (2026-08-24). Everything shared
 # lives in Dockerfile.base; this file is only what makes this image not or3-dev.
 #
-# PINNED TAG, never latest: a base rebuild must not change this container until this
-# line moves. The base normally comes from ghcr — public, built by
+# PINNED TAG, never latest: compose.yaml's x-base-tag, passed as BASE_TAG, is the tag every
+# dev container is built on, and this default is only the fallback for a build by hand. The
+# base normally comes from ghcr — public, built by
 # .github/workflows/dev-base.yml from dev/Dockerfile.base in this repo, on every push to
 # main that changes it — so no host needs a build order any more. The corollary of it
 # being automatic: after a BASE_TAG bump the tag is real only once that run finishes —

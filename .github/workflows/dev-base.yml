@@ -266,12 +266,12 @@ jobs:
               echo "## The base changed and BASE_TAG did not"
               echo
               echo "\`$IMAGE:$TAG\` is already published, and a pinned tag is a contract that"
-              echo "the same tag is the same bytes — dd-dev, ds-dev and or3-dev pin it."
+              echo "the same tag is the same bytes — every dev container is built on it."
               echo "So this push leaves \`main\` describing an image that does not exist."
               echo
               echo "Bump \`x-base-tag\` in \`dev/compose.yaml\` and push that; this builds and"
-              echo "publishes the new tag on its own. Move each child's \`ARG BASE_TAG\`"
-              echo "when that repo is ready."
+              echo "publishes the new tag on its own; then the recreate play moves every"
+              echo "container onto it (dev/README.md). No child repo changes."
               echo
               echo "If the change genuinely cannot alter the built image and you want the"
               echo "tag left alone, nothing needs doing here — the image is still correct."

@@ -1489,6 +1489,19 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   (plans/dev-pool.md) is what caps them all together. `make check` still refuses a
   `COMPOSE_PROFILES` name no service has, so an old `.env` naming `or3` is refused rather
   than read as a switch that does nothing.
+- **Every dev container is always on the newest base, and moving it is infra's alone**
+  (owner, 2026-10-28): a base change is a bump of `x-base-tag` in `dev/compose.yaml` and the
+  recreate play (`server-deploy-compose.yml -e deployment=dev -e recreate=true -K`), nothing
+  further. That already held by construction: every service passes `x-base-tag` as
+  `BASE_TAG` (checked 2026-10-28: all eight, and the six public children's `FROM` reads
+  `${BASE_TAG}`; or3's is private and was not read), and 2026.10.26 was the newest tag on
+  ghcr. What changed is the rule, not the mechanism: a child's `ARG BASE_TAG` default is a
+  fallback for a build by hand and never needs moving, so the handoff's and the base
+  workflow's "move each child's tag when that repo is ready" are gone. `Dockerfile.base`'s own
+  header still says it; editing it would force a base bump for prose, so it waits for the next
+  real one. With it, `make build`, which the play's preflight runs (async, as the pull is) and
+  `make up` runs first, builds one image at a time: Compose alone builds them all at once, which after a base bump is nine concurrent
+  builds on a 4 GB box running Immich.
 
 ## The lesson worth keeping
 

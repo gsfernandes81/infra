@@ -458,8 +458,7 @@ first.
 **Afterwards, each its own change:** retire infra-dev's and or3-dev's old tunnels (the
 CNAMEs no longer use them), and the Access applications and service tokens of infra-dev,
 dd-dev and ds-dev, where they exist — or3-dev's stays, its hostname now on the hub's; in each
-child repo, drop its compose file and its authorized-keys drop-in, bump its `BASE_TAG`
-default, and fix its docs (or3's `docs/dev-tunnel.md` names `~/or3/dev` for `make tunnel-log`,
+child repo, drop its compose file and its authorized-keys drop-in, and fix its docs (or3's `docs/dev-tunnel.md` names `~/or3/dev` for `make tunnel-log`,
 `up` and `shell`, now `~/infra/dev` with `C=or3-dev`; dd's and ds's say their keys are in
 `.dev-ssh/`). The
 host clones of or3, destiny-director and dossier, `.dev-ssh/` included, can go once the
@@ -763,9 +762,20 @@ four containers used to carry each — and differs only in its own Dockerfile an
 **The tag is `compose.yaml`'s `x-base-tag` line**, stated once: every service passes it as
 `BASE_TAG`, the Makefile and the workflow read the same line, and each child Dockerfile's
 `ARG` default is only a fallback for a build outside compose. So **a bump moves every
-container at its next build**. Bumping is: edit that line, push to `main`, and the workflow
+container at its next build, and no other repo changes** (owner, 2026-10-28: every container
+is always on the newest base). Bumping is: edit that line, push to `main`, and the workflow
 publishes the tag on its own — about five minutes (the first three runs took 4m16s, 4m42s and
-4m07s end to end, arm64 under QEMU included) — then deploy. `make base` builds the identical
+4m07s end to end, arm64 under QEMU included) — then, from the phone, the recreate play:
+
+```fish
+# phone: rebuild every dev image from its repo's main and recreate every container (asks y/N)
+cd ~/infra; git pull --ff-only; cd ansible; ansible-playbook playbooks/server-deploy-compose.yml -e deployment=dev -e recreate=true -K
+```
+
+Its preflight builds the images one at a time (`make build`), each child from its repo's
+`main`, then it plans, asks, recreates every container, and probes the hub's reach into each.
+Every session in every container ends; volumes, logins and history stay. The same command
+is the refresh when only the children's `main`s moved. `make base` builds the identical
 image locally under the ghcr name (Crush aside: it takes that day's release), and docker
 prefers a local image over a pull: the fallback for no network, or not waiting.
 
