@@ -114,8 +114,9 @@ all collections installed, and `fleet: no route to zero/one/two`.
 **The memory pool is opt-in**: `DEV_CGROUP_PARENT=/devpool` puts every dev container and
 `dd-postgres` under one cgroup — 2048M soft, 2560M hard, 6G of swap — once
 `hosts/zero/system/devpool` is installed and proved ([`../hosts/zero/system/README.md`](../hosts/zero/system/README.md)
-§ *devpool*). Each container's `mem_limit` (infra's 2560m) stays a ceiling inside it, and
-its `memswap_limit` is that plus the pool's 6G, so the pool decides how much dev work swaps.
+§ *devpool*). Every dev container has the same ceiling inside it, set once in the shared
+block of `compose.yaml`: 2048m of RAM and about 4G of swap (`memswap_limit: 6144m`). One
+container cannot fill the pool's 6G of swap alone; two together can.
 
 ## The hub
 

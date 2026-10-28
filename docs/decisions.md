@@ -1287,13 +1287,24 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   soft limit makes idle sessions give memory back early and gradually, into zram first, so the
   6G of swap is reached only by a runaway rather than by the pool filling and swapping at once
   beside Immich's SSD.
+- **Every dev container is 2048m of RAM and about 4G of swap, the same for all** (owner,
+  2026-10-28: "for the sake of standardisation and can be challenged in the future").
+  `memswap_limit: 6144m`, set once in the shared `x-dev` block of `dev/compose.yaml`, and no
+  child sets its own. infra's `DEV_MEM_LIMIT` and `DEV_MEMSWAP_LIMIT` are gone with it, so a
+  value left in zero's `dev/.env` cannot quietly override the standard. This lowers infra,
+  or3 and destiny-director from 2560m and raises the other five from 1536m. The pool keeps
+  its own numbers. One container now reaches the pool's 2048M soft line but not its 2560M kill
+  line, and cannot fill the 6G of swap alone. A container that needs more is argued here.
 - **The pool is 2560M of RAM and 6G of swap** (owner, 2026-10-27: "allow 6G of swap so both
-  zram and normal swap can be utilized"), and **each container's swap cap is its RAM plus
-  those 6G**, so the pool, not a container, says how much dev work may swap. Before this the
+  zram and normal swap can be utilized"), and ~~**each container's swap cap is its RAM plus
+  those 6G**, so the pool, not a container, says how much dev work may swap~~ ⚠︎SUPERSEDED
+  2026-10-28 for the per-container part: each container's swap is 4G (the row above); the
+  pool's 6G still bounds them together. Before this the
   containers' own `memswap_limit`s allowed 256–512 MB each, which would have left the pool's
   swap unreachable. The cost until the pool is installed: a container may swap up to 6G on
-  its own. **dd-postgres is in the pool too** — it is dev work's memory. **infra-dev's own
-  limit rises from 1024m to 2560m**, or3-dev's figure (owner: "quite restrictive for work");
+  its own. **dd-postgres is in the pool too** — it is dev work's memory. ~~**infra-dev's own
+  limit rises from 1024m to 2560m**~~ ⚠︎SUPERSEDED 2026-10-28 by 2048m for every dev
+  container (above), or3-dev's figure (owner: "quite restrictive for work");
   the pool, not each container, is what keeps the total off Immich.
 - **The dev project is a deployment of server-deploy-compose.yml** (owner, 2026-10-27, on the
   design review: `make up` could recreate every container, and every claude in them, with no

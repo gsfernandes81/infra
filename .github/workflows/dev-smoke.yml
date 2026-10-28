@@ -297,8 +297,8 @@ jobs:
             printf "Content-Length: %d\r\n\r\n%s" "${#b}" "$b" | (cat; sleep 5) | CLAUDE_PROJECT_DIR=/workspace timeout 10 ty-lsp 2>/dev/null | head -c 4000 | grep -q "\"capabilities\""'
 
           # ── the limits compose sets are the ones the kernel got ──
-          check "infra's limits: 2560m RAM, 8704m RAM+swap" sh -c \
-            '[ "$(docker inspect -f "{{.HostConfig.Memory}} {{.HostConfig.MemorySwap}}" infra)" = "2684354560 9126805504" ]'
+          check "infra's limits: 2048m RAM, 6144m RAM+swap" sh -c \
+            '[ "$(docker inspect -f "{{.HostConfig.Memory}} {{.HostConfig.MemorySwap}}" infra)" = "2147483648 6442450944" ]'
 
           echo "$fails failed"
           [ "$fails" = 0 ]
@@ -445,8 +445,8 @@ jobs:
           check "and reads what docker cp put there" sh -c '[ "$(docker exec destiny-director cat /workspace/.env)" = SMOKE=1 ]'
           check "the link is excluded from git" sh -c '[ -z "$(docker exec destiny-director git -C /workspace status --porcelain -- .env)" ]'
           check "postgres answers by its old name" docker exec destiny-director nc -z -w 5 postgres 5432
-          check "destiny-director's limits: 2560m RAM, 8704m RAM+swap" sh -c \
-            '[ "$(docker inspect -f "{{.HostConfig.Memory}} {{.HostConfig.MemorySwap}}" destiny-director)" = "2684354560 9126805504" ]'
+          check "destiny-director's limits: 2048m RAM, 6144m RAM+swap" sh -c \
+            '[ "$(docker inspect -f "{{.HostConfig.Memory}} {{.HostConfig.MemorySwap}}" destiny-director)" = "2147483648 6442450944" ]'
           echo "$fails failed"; [ "$fails" = 0 ]
 
       # Not a check: what the owner asked, measured. Each container's own cgroup, after a minute
@@ -488,8 +488,12 @@ jobs:
           plan() { docker compose $files --dry-run up -d hub infra destiny-director 2>&1 | grep -i recreate | grep -oE '(dev-hub|dev-cloudflared|infra|or3|destiny-director|dd-postgres|dossier)' | sort -u | tr '\n' ' '; }
           cp .env .env.orig
           got=$(plan); echo "nothing changed: [$got]"; [ -z "$got" ]
-          sed -i 's/^DEV_MEM_LIMIT=.*/DEV_MEM_LIMIT=2048m/' .env
-          got=$(plan); echo "infra's limit changed: [$got]"; [ "$got" = "infra " ]
+          # INFRA_SECRETS is the one variable only infra reads (every dev container's memory
+          # limit is the same literal since 2026-10-28), so a second stand-in directory is the
+          # change; it must exist, so the plan is about the change and not a missing path.
+          alt="$(dirname "$(sed -n 's/^INFRA_SECRETS=//p' .env)")/infra-alt"; mkdir -p "$alt"
+          sed -i "s#^INFRA_SECRETS=.*#INFRA_SECRETS=$alt#" .env
+          got=$(plan); echo "infra's secrets path changed: [$got]"; [ "$got" = "infra " ]
           cp .env.orig .env; sed -i 's/^HUB_OFFLOAD=.*/HUB_OFFLOAD=0/' .env
           got=$(plan); echo "the hub's offload switch changed: [$got]"; [ "$got" = "dev-hub " ]
           cp .env.orig .env; rm .env.orig

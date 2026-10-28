@@ -79,6 +79,13 @@ x-dev: &dev
   # The hub installs the binary every container's hooks, agent and offload pass run before
   # any container starts, and the drop-in below is a subpath of its volume that must exist
   # to be mounted at all.
+  # ONE SIZE FOR EVERY DEV CONTAINER (owner, 2026-10-28, for standardisation, open to
+  # challenge): 2 GB of RAM and about 4 GB of swap each. memswap is RAM + swap, so 6144m.
+  # A ceiling, not a reservation; the pool below still says how much all of them take
+  # together. Here once, so no child sets its own: a container that needs more is a case to
+  # argue in docs/decisions.md, not an override.
+  mem_limit: 2048m
+  memswap_limit: 6144m
   depends_on:
     hub:
       condition: service_healthy
@@ -298,13 +305,6 @@ services:
     image: infra
     container_name: infra
     hostname: infra   # Claude Code shows this as the machine title
-    # A cap, not a reservation. 2560m like or3's since 2026-10-27 (owner: 1024m had been
-    # restrictive for work); the pool is what keeps all of them together off Immich.
-    mem_limit: ${DEV_MEM_LIMIT:-2560m}
-    # memswap is RAM + swap. Each container's is its RAM plus the pool's whole 6G, so the pool
-    # (hosts/zero/system/devpool), not each container, decides how much swap dev work may use —
-    # zram first, then the SSD swap behind it (owner, 2026-10-27).
-    memswap_limit: ${DEV_MEMSWAP_LIMIT:-8704m}
     environment:
       GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
@@ -366,9 +366,6 @@ services:
     image: or3
     container_name: or3
     hostname: or3
-    # or3's own RAM figure, from its compose file; its swap is the pool's (below).
-    mem_limit: 2560m
-    memswap_limit: 8704m   # RAM + the pool's 6G of swap, as infra's says
     shm_size: 256m
     # No tmpfs on /tmp: it is the container's own disk, as in or3's compose since 16843d5
     # (2026-10-27). It was RAM while Docker lived on the SD card; on the SSD a full `make
@@ -413,12 +410,9 @@ services:
     image: destiny-director
     container_name: destiny-director
     hostname: destiny-director
-    # Sized for the dev bots, which run in here and start only by hand (`make devbot-up` in a
-    # session): its child-init.sh syncs the venv and starts nothing (read 2026-10-27, at
-    # 313751c). It was once recorded idling at ~1.4 GB, which is that cap's reason; at rest
-    # with no bot it should be near the others.
-    mem_limit: 2560m
-    memswap_limit: 8704m   # RAM + the pool's 6G of swap, as infra's says
+    # The dev bots run in here and start only by hand (`make devbot-up` in a session): its
+    # child-init.sh syncs the venv and starts nothing (read 2026-10-27, at 313751c). It was once
+    # recorded idling at ~1.4 GB, inside the shared 2 GB; watch it there when a bot is up.
     environment:
       GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
@@ -494,10 +488,6 @@ services:
     image: dossier
     container_name: dossier
     hostname: dossier
-    # dossier's compose set no limit; this is a ceiling for the pool to sit above. Raise it
-    # here if uv sync or the TUI's tests are killed.
-    mem_limit: 1536m
-    memswap_limit: 7680m   # RAM + the pool's 6G of swap, as infra's says
     environment:
       GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
@@ -542,8 +532,6 @@ services:
     image: invective
     container_name: invective
     hostname: invective
-    mem_limit: 1536m
-    memswap_limit: 7680m   # RAM + the pool's 6G of swap, as infra's says
     environment:
       GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
@@ -576,8 +564,6 @@ services:
     image: nibbles
     container_name: nibbles
     hostname: nibbles
-    mem_limit: 1536m
-    memswap_limit: 7680m   # RAM + the pool's 6G of swap, as infra's says
     environment:
       GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
@@ -610,8 +596,6 @@ services:
     image: ionic-traces
     container_name: ionic-traces
     hostname: ionic-traces
-    mem_limit: 1536m
-    memswap_limit: 7680m   # RAM + the pool's 6G of swap, as infra's says
     environment:
       GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}
@@ -662,9 +646,6 @@ services:
     image: claude-sessions
     container_name: claude-sessions
     hostname: claude-sessions
-    # rustc and rust-analyzer are the heavy ones; the crate has no dependencies.
-    mem_limit: 1536m
-    memswap_limit: 7680m   # RAM + the pool's 6G of swap, as infra's says
     environment:
       GIT_USER_NAME: ${GIT_USER_NAME:-Gavin Fernandes}
       GIT_USER_EMAIL: ${GIT_USER_EMAIL:-gavinfernandes2012@pm.me}

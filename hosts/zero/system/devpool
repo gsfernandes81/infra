@@ -18,9 +18,9 @@
 # THE TWO NUMBERS ARE THE OWNER'S (2026-10-27): 2560M of RAM, which leaves about 1.4 GB for
 # Immich, Syncthing, Docker and the host — what 2026-10-25's measurement left free with nothing
 # in the pool; and 6G of swap, so idle sessions can spill through all of zram (zram-swap, 2G,
-# priority 100) and on into the SSD swap partition behind it rather than being killed. or3-dev's
-# own ceiling is also 2560M, so one container may still use the whole pool while the others
-# are idle. A container's own memswap_limit still caps its swap below the pool's.
+# priority 100) and on into the SSD swap partition behind it rather than being killed. Each dev
+# container's own ceiling is 2048M of RAM and 4G of swap (dev/compose.yaml, 2026-10-28), so
+# one container alone reaches the pool's soft line but not its kill line or its whole swap.
 #
 # AND A SOFT LIMIT UNDER THE HARD ONE, memory.high at 2048M (owner, 2026-10-27). Above it the
 # kernel throttles the pool's processes and reclaims their pages — idle claudes' first, into

@@ -1041,8 +1041,8 @@ goes and where Postgres starts timing out — and the kernel's victim choice is 
 It protects survival, not service. `two` already uses it correctly, pinning `cloudflared`
 to −1000 to keep the only way in alive; that is the job it is good at.
 
-**The better answer is the work already in flight.** `or3-dev` carries
-`mem_limit: 1536m` precisely so a build cannot reap Immich. Move the dev containers to a
+**The better answer is the work already in flight.** Every dev container carries
+`mem_limit: 2048m`, inside the dev pool, precisely so a build cannot reap Immich. Move the dev containers to a
 host that is not serving Immich — Phase 5 — and the constraint disappears without any
 cgroup configuration at all. Mobility solves this more cleanly than delegation would.
 
