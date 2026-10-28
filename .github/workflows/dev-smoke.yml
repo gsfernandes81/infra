@@ -111,7 +111,7 @@ jobs:
         run: |
           COMPOSE_PROFILES=tunnel HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose config -q
           got=$(HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose config --services | sort | tr '\n' ' ')
-          want="claude-sessions dd-postgres destiny-director dossier hub infra invective ionic-traces nibbles or3 "
+          want="claude-sessions dd-postgres destiny-director dossier hub infra invective ionic-traces nibbles or3 policy "
           [ "$got" = "$want" ] || { echo "FAIL  started by default: [$got], want [$want]"; exit 1; }
           echo "PASS  every container starts by default, and the tunnel does not"
           docker version --format 'docker {{.Server.Version}}'; docker compose version
