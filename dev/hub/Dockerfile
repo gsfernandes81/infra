@@ -31,9 +31,9 @@
 # A BUMP is the version and both hashes together, from the new release's SHA256SUMS asset
 # (also in its notes). A wrong hash fails this build at `sha256sum -c`, loudly, by design.
 FROM python:3.13-slim-trixie@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c AS fetch
-ARG CLAUDE_SESSIONS_VERSION=0.6.0
-ARG CLAUDE_SESSIONS_SHA256_arm64=77ff33837a447e61f15ce24179c481825c0175f0bf2e0be626910ec549d4530e
-ARG CLAUDE_SESSIONS_SHA256_amd64=b8717fb69b7b813852025fd44c592b33f416b3e3c30bee01e918f4400b723474
+ARG CLAUDE_SESSIONS_VERSION=0.7.0
+ARG CLAUDE_SESSIONS_SHA256_arm64=feac17055ab87caa5bb7ee0e8fde6e15fcbf0f8ece80802a5b606f466dfe5b25
+ARG CLAUDE_SESSIONS_SHA256_amd64=b8ca08fa80f7aabdd8da6293aab07a4cd2d9b1479836a49b027a1b4696506cb2
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 RUN set -eux; \
@@ -63,7 +63,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # `--version` IS FATAL and compared exactly: a static musl binary has no excuse, and it is
 # also what proves a binary the smoke test put in place is the version this file pins.
-ARG CLAUDE_SESSIONS_VERSION=0.6.0
+ARG CLAUDE_SESSIONS_VERSION=0.7.0
 # The binary sits off PATH; what PATH finds is hub/claude-sessions, which hands it the container
 # list (that file says why). `install` copies the running binary, so the containers get this one.
 COPY --from=fetch /out/claude-sessions /usr/local/libexec/claude-sessions

@@ -1502,6 +1502,17 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   real one. With it, `make build`, which the play's preflight runs (async, as the pull is) and
   `make up` runs first, builds one image at a time: Compose alone builds them all at once, which after a base bump is nine concurrent
   builds on a 4 GB box running Immich.
+- **The claude-sessions container reuses its repo's CI layer cache, not its CI image**
+  (owner, 2026-10-28, who asked that repo's agent to build the image in CI so zero stops
+  compiling cargo-mutants). Its `dev-image` workflow pushes `claude-sessions-dev:sha-<commit>`
+  built on that repo's own `BASE_TAG` default, and suggests pinning it as the service's
+  `image:`. Not taken: a pinned prebuilt image stays on the base it was built against, so a
+  base bump would need that repo to move first, against the row above. Instead the service
+  keeps its `build:` from GitHub with `x-base-tag` and lists the workflow's per-architecture
+  registry caches in `cache_from`. Where the two bases match, every layer is a pull; where
+  they do not, nothing after `FROM` matches and zero compiles, slower and still correct.
+  The package is public, as the base's is: ghcr linked it to the public repo at its first
+  push (checked 2026-10-28, anonymous pulls of both cache tags).
 
 ## The lesson worth keeping
 

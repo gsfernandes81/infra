@@ -163,6 +163,9 @@ services:
       HUB_REPO_NIBBLES: *repo-nibbles
       HUB_REPO_IONIC_TRACES: *repo-ionic
       HUB_REPO_CLAUDE_SESSIONS: *repo-claude-sessions
+      # Where claude-sessions reads the pool's memory (the home's header, the door's load line).
+      # Uncomment with the pool's mount below, once the pool exists; neither works alone.
+      # CLAUDE_SESSIONS_POOL: /run/devpool
     volumes:
       - claude-sessions:/opt/claude-sessions
       # The hub's key, its known_hosts, its sshd host key and its pass log.
@@ -176,7 +179,8 @@ services:
       # Mode-700 directory on zero holding the hub's authorized_keys (the clients' keys)
       # and its tunnel credentials. Read-only.
       - ${HUB_SECRETS:?set HUB_SECRETS in dev/.env — server-create-dev-container.yml -e container=dev writes it}:/run/hub-secrets:ro
-      # THE POOL'S MEMORY, for the home's header, once the pool exists — uncomment then.
+      # THE POOL'S MEMORY, for the home's header, once the pool exists — uncomment then, with
+      # CLAUDE_SESSIONS_POOL above.
       # Long form with create_host_path false, so a path that is not there fails the start
       # rather than having Docker mkdir a cgroup under /sys/fs/cgroup.
       # - type: bind
@@ -584,6 +588,17 @@ services:
       dockerfile: Dockerfile.dev
       args:
         BASE_TAG: *base-tag
+      # ITS CI'S LAYERS, REUSED, NOT ITS IMAGE (owner, 2026-10-28). That repo's dev-image
+      # workflow builds this Dockerfile natively per architecture and keeps a registry cache,
+      # so where its base matches ours every layer, cargo-mutants' compile included, is a
+      # pull. Still built here and on x-base-tag, because a pinned prebuilt image would stay
+      # on whatever base it was built against and a base bump would need that repo to move
+      # first. When the bases differ, nothing after FROM matches and zero compiles, slower and
+      # still correct. A cache that cannot be read (GitHub down) is an ERROR line on the
+      # import step and an uncached build, never a failed one.
+      cache_from:
+        - type=registry,ref=ghcr.io/gsfernandes81/claude-sessions-dev:buildcache-arm64
+        - type=registry,ref=ghcr.io/gsfernandes81/claude-sessions-dev:buildcache-amd64
     image: claude-sessions
     container_name: claude-sessions
     hostname: claude-sessions
