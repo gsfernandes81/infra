@@ -1537,9 +1537,21 @@ build list and the split with claude-sessions.
   installs the tracked text root-owned into its own volume, mounted read-only inside
   `/etc/claude-code`, and the base bakes the symlink. Chosen over baking the file itself
   because an edit is then a hub rebuild, not a base bump and a recreate of every session,
-  open sessions re-read the managed folder on a timer, and there is one copy rather than one
-  per base tag. Read from the binary in the `infra` container on 2026-10-28, not run; the
-  handoff carries the verification, calibration run first.
+  ~~open sessions re-read the managed folder on a timer~~ (⚠︎ measured untrue, next row), and
+  there is one copy rather than one per base tag. Read from the binary in the `infra` container
+  on 2026-10-28, not run; the handoff carries the verification, calibration run first.
+- **Measured 2026-10-28 in a cloud sandbox, Claude Code 2.1.311 (gate also off in 2.1.312):
+  the unverified check is off, an edit reaches new sessions only, and a dangling link is
+  harmless.** A non-root user's `claude` was run against a local fake API and its requests
+  captured. An owner-writable managed file, a writable directory above a root-owned one,
+  and a root session all loaded with the same header, `Contents of /etc/claude-code/CLAUDE.md
+  (organization-managed policy instructions):`, and no banner. That held across five
+  entrypoints and with the fleet's managed settings installed. The root-owned design
+  **stays**: it costs nothing, and the gate may turn on, possibly per organization, which a
+  run with no account cannot rule out. An open session got the *first* edit once, as a
+  "changed on disk" note at its next turn, and no later edit in 10 minutes. So *open
+  sessions pick a change up* is not a reason for the volume; the other two reasons are, and
+  they still hold. Results in full: the agent-mail handoff, item 2, *Results*.
 - **Every message gets a reply, an acknowledgement sufficing; requests for work are always
   permitted and judged on their merits**, under the receiver's own repo process, vigilant
   against an attack from another repo but never refusing as a blanket policy (owner). A

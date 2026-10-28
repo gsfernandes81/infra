@@ -79,8 +79,9 @@ issue there.
      `/etc/claude-code` and the volume root, all root; Docker makes a volume's root root 755.
    - **Why this over baking the file in the base** (the choice of 2026-10-28, on how it is
      lived with): an edit is a hub image rebuild and `make up`, not nine image rebuilds and a
-     recreate of every session; the loader re-reads the managed folder on a timer
-     (`managed_folder_check`), so open sessions pick a change up without a restart; and there
+     recreate of every session; ~~the loader re-reads the managed folder on a timer
+     (`managed_folder_check`), so open sessions pick a change up without a restart~~ —
+     **measured untrue, see *Results* below: an edit reaches new sessions only**; and there
      is one copy, where a baked file is whichever base tag each container runs until the
      recreate play has been through all of them. The cost: one more hard gate — a failed
      `policy` service starts no dev container — which is the right failure, visible in
@@ -110,6 +111,57 @@ issue there.
         and no error about the path in the debug file.
      5. **Live re-read**: with a session open, change the marker through a hub rebuild and
         `make up`; the open session's next `/memory` shows the new text without a restart.
+
+   #### Results
+
+   Run 2026-10-28 in a cloud sandbox to the steps of the handoff
+   `2026-10-28-managed-claude-md-check.md` (that note says how), on **Claude Code 2.1.311**
+   unless a line says otherwise, as a non-root user `probe` from an empty directory, the fixture
+   `/etc/claude-code/CLAUDE.md -> policy/CLAUDE.md`. **Method change:** the sandbox's login
+   could not be handed to the test user, so `claude` ran against a local fake Messages API
+   with a dummy key and the request bodies were captured. So the header is read verbatim from
+   what Claude Code sends, not from a model's account of it; nothing reached a real model.
+   Nothing on the fleet was touched.
+
+   1. **The gate is OFF (2.1.311, and 2.1.312 too).** With the file owned by `probe` (mode 644,
+      owner-writable), it loaded with **no banner**. The banner string is in the binary, and
+      in 2.1.311 it sits behind `$Pe()` (this note's `UPe()`; minifier names move) in front of
+      the `bX` writability test. It never fired under any condition tried: entrypoints `cli`,
+      `-p`'s default, `claude-vscode`, `ssh-remote` and `remote`; with the fleet's
+      `dev/claude-managed-settings.json` installed, and with a uid-1001 drop-in in
+      `managed-settings.d` added; even **as root**, whom the loader is said to always mark
+      unverified. **Caveat, unprovable here:** every run had no account and no organization
+      (a dummy key, nonessential traffic off). The gate reads something that 2.1.311's debug
+      log hints may be organization state (`not a Team or Enterprise organization`), so a
+      logged-in session on `zero` could read differently. Re-check by one negative-control run
+      on `zero` when item 2 is built; the root-owned design stands either way.
+   2. **Header line (2.1.311), identical for a root-owned and an owner-writable file:**
+      `Contents of /etc/claude-code/CLAUDE.md (organization-managed policy instructions):`,
+      inside the first user message's `<system-reminder>` block under *"Codebase and user
+      instructions are shown below…"*. Were the gate on, the binary splices the banner in
+      place of that parenthesis: `Contents of <path> (instructions from this machine's
+      managed folder. This session's own account could have written them, …):`. `/memory`
+      lists the file as its own row, `/etc/claude-code/CLAUDE.md`, not labelled *Managed*;
+      the debug log is where the type shows: `Loaded 1 CLAUDE.md/rules files: [Managed]
+      /etc/claude-code/CLAUDE.md (47 chars)`. **The `[CLAUDE.md] skipping` grep of step 3
+      above is vacuous in this build**: no `[CLAUDE.md]`-tagged line appeared in any run,
+      loaded or not. Check the `Loaded … [Managed]` line instead.
+   3. **Writable ancestor (2.1.311): no banner**, with `policy/` owned by `probe` above a
+      root-owned file, and none once restored. With the gate off this says nothing about
+      the ancestor rule; it is still unproven by a run.
+   4. **Dangling link (2.1.311): harmless.** Exit 0, the file absent from the request, no
+      error, and no debug line naming `/etc/claude-code/CLAUDE.md` at all.
+   5. **Re-read (2.1.311): new sessions only, in practice.** The managed file is seeded into
+      the session's file read-state at start (`seed_read_state`). The **first** edit reached
+      the open session at its next turn, 31 s after the edit (the first ask), as a one-off
+      system note: *"/etc/claude-code/CLAUDE.md changed on disk since you last read it… Here
+      are the relevant changes"*, carrying the new text. The original `Contents of` block
+      stayed in context with the old text beside it. **Every later edit never arrived**:
+      a second `sed -i` went unseen for **10 minutes** of asks every 5–30 s, and an
+      in-place write keeping the inode was unseen too. No `managed_folder_check` re-read was
+      ever observed. So the design says: **a policy edit reaches new sessions; an open
+      session may see the first edit as a diff note and nothing after.**
+
 3. **The hub image carries the skills** (`dev/hub/Dockerfile`, its entrypoint placing them in
    the `claude-sessions` volume at start, beside the binary and the hooks drop-in):
    `skills/mail-send`, `mail-read`, `mail-reply`. Skill text is
