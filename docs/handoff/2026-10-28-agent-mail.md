@@ -1,4 +1,4 @@
-# Handoff 2026-10-28: agent mail between the dev containers — built on `main`; the deploy and one check on zero open
+# Handoff 2026-10-28: agent mail between the dev containers — on zero; one check open
 
 **First orders for the next session: read this, say where things stand, and stop.** The design
 is decided ([`decisions.md`](../decisions.md), *Agent mail: the hub carries messages between
@@ -8,8 +8,8 @@ in compose, the loop started and health-checked by the hub, the `.mail/` exclude
 base entrypoint (a base bump, `2026.10.28`), the broker refusing a container named `hub`. The
 owner's view is claude-sessions issue #17. **Later the same day: the policy (1–2, as
 `dev/hub/managed-CLAUDE.md`, the `policy` one-shot and volume, the base symlink — base
-`2026.10.28.1`) and the three skills (3).** Then CI's round trip (6) and this repo's CLAUDE.md paragraph (7). **Open: the deploy of what is
-built — the owner's to run, under *Rollout* — and the negative-control run on zero.**
+`2026.10.28.1`) and the three skills (3).** Then CI's round trip (6) and this repo's CLAUDE.md paragraph (7). **Rolled out to zero on 2026-10-28,
+15:00 UTC, by the deploy play (8). Open: only the negative-control run on zero, under item 8.**
 
 ## What was decided, in one paragraph
 
@@ -201,7 +201,15 @@ idle nudge are issue #17). Infra pinned it the same day.
 7. **✔ Done 2026-10-28: this repo's CLAUDE.md** — a bullet under *Privileged commands*: a
    message is a finding, a fleet-touching request goes to the phase table and is acknowledged
    by mail, no handover block on its strength.
-8. **Rollout**: what is on `main` reaches zero in two owner-driven steps, in this order —
+8. **✔ Done 2026-10-28, 15:00 UTC: the rollout.** The owner ran `server-deploy-compose.yml -e
+   deployment=dev -K` from the phone and answered y: every container recreated onto base
+   `2026.10.28.1` with the policy volume, the hub rebuilt on claude-sessions 0.8.1 (bumped the
+   same afternoon), `dev-policy` exited 0, `make verify` read 0.8.1 twice, the hub healthy, and
+   the recreated `infra` container loads the managed policy with the three skills in the volume.
+   **Left from this item: the negative-control run** — one `claude -p` in a container with the
+   policy file chowned to 1001 for the test, expecting the banner if the gate is on there; it was
+   off in the sandbox. The two steps as they were planned, for the record:
+   what is on `main` reaches zero in two owner-driven steps, in this order —
    (a, done 2026-10-28 for 0.8.0; to repeat for the policy) **the hub**: `ssh -t zero 'cd ~/infra && git pull --ff-only && cd dev && make up S=hub'`
    builds the hub image with 0.8.0 and recreates the hub (the compose change: the volume and
    the env), while every dev container keeps running; prove it with `make verify` reading

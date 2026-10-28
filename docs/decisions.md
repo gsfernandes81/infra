@@ -1573,7 +1573,8 @@ build list and the split with claude-sessions.
   that repo's agent announcing it, verified against the release's `SHA256SUMS`: a slot renamed
   with `/rename` now shows its new name at the hub within one agent poll. Agent-side only, so
   no change to the wire, the registry, the drop-in or compose; it reaches every container when
-  the hub is rebuilt and recreated, which is the owner's `make up S=hub` on zero.
+  the hub is rebuilt and recreated. On zero the same afternoon, by the deploy play's full run,
+  which also carried the policy volume and base `2026.10.28.1` to every container.
 - **The policy text is `dev/hub/managed-CLAUDE.md`, installed by a one-shot `policy` service,
   and the skills are `dev/hub/skills/`** (2026-10-28, base `2026.10.28.1`). In `hub/` because
   that is the hub image's build context, and the hub is what carries both to the fleet: the
