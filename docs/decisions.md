@@ -1564,6 +1564,11 @@ build list and the split with claude-sessions.
   the owner's view of traffic are claude-sessions', the last deferred to an open issue there.
 - **No HTTP API on the hub.** It would be a second door on the dev network with its own auth,
   or trust in a bridge address, weaker than the ssh identity the hub already holds.
+- **The hub side is claude-sessions 0.8.0, pinned 2026-10-28**, the day it was released: its
+  `mail-loop` runs in the hub, supervised and health-checked like the token loop, the `mail`
+  volume is the hub's alone, and the limits are the release's defaults as `HUB_MAIL_*` lines in
+  compose, so a change is one visible line. The `.mail/` exclude is the base entrypoint's and so
+  a base bump (`2026.10.28`). Not on zero until the owner runs the hub rebuild and the recreate.
 
 ## The lesson worth keeping
 

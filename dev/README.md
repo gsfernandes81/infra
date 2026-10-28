@@ -107,8 +107,8 @@ ssh dev
 On zero, `make login` (`C=<c>` for another container) reports the hub's token, runs `claude
 auth login` if needed, and clones the workspace if start-up could not; re-running it is safe.
 Then `make verify` should read `sshd: running in the foreground`, `auth: claude logged in`,
-`tunnel: the hub's, serving dev`, `hub: key authorised; claude-sessions 0.7.0 here,
-claude-sessions 0.7.0 at the hub`, `github: the hub's token for gsfernandes81/infra, until …`,
+`tunnel: the hub's, serving dev`, `hub: key authorised; claude-sessions 0.8.0 here,
+claude-sessions 0.8.0 at the hub`, `github: the hub's token for gsfernandes81/infra, until …`,
 all collections installed, and `fleet: no route to zero/one/two`.
 
 **The memory pool is opt-in**: `DEV_CGROUP_PARENT=/devpool` puts every dev container and
@@ -163,8 +163,8 @@ switch. The rules are *claude-sessions*, below.
 
 **Its health** is `hub-health`, the compose healthcheck and `make verify`'s `hub health`
 line: the binary, `hub.pub`, the hooks drop-in and every container's token directory in place,
-an offload pass in the last 10 minutes (when `HUB_OFFLOAD` is on) and a token pass in the
-last 40. Every dev container `depends_on` it being healthy, because a subpath that does not
+an offload pass in the last 10 minutes (when `HUB_OFFLOAD` is on), a token pass in the
+last 40, and a mail tick in the last 5 (*Agent mail*, below). Every dev container `depends_on` it being healthy, because a subpath that does not
 exist cannot be mounted at all; so a dead loop also stops new containers starting until it is
 looked at. Unhealthy restarts nothing.
 
@@ -258,6 +258,40 @@ log (HTTP 422); narrow `HUB_GITHUB_PERMISSIONS` in `.env` or widen the App. The 
 `python3 hub/test_github_tokens.py`, offline, against a stand-in GitHub that verifies each
 JWT's signature.
 
+## Agent mail: messages between the containers, carried by the hub
+
+**Since claude-sessions 0.8.0 (2026-10-28) an agent in one container can write to an agent in
+another**, and the hub carries it. The decision and what was rejected are
+[`../docs/decisions.md`](../docs/decisions.md) § *Agent mail*; the loop's own design is
+claude-sessions' `docs/design.md` § *Agent mail*. What a container sees:
+
+- **To send**: write a file into `/workspace/.mail/out/<to>/` — `<to>` a container's name,
+  any file name, plain text, under 16 KiB. On the hub's next tick (every 15 s) the file is
+  gone: the hub has stored it and will deliver it. There is no command to run and nothing
+  to connect to.
+- **To receive**: the hub writes `/workspace/.mail/in/<from>/<stamp>.md`, headed by the hub's
+  own `From:`, `To:` and `Date:` lines and then the body as sent. The hooks drop-in announces
+  each new one at the session's next `SessionStart` or prompt — one line,
+  `new message from <from>, <date>, at <path>` — and the agent reads the file as it reads any
+  file. `/workspace/.mail/.cursor` is the hook's own, written by the receiver.
+- **A refusal comes back as a message from `hub`**, in `/workspace/.mail/in/hub/`: a `<to>`
+  that is not a container (or is `hub`, the reserved name — the broker refuses a container
+  called that), a message over the size cap or not UTF-8, or a receiver whose queue already
+  holds 200 undelivered. A stopped receiver is not a refusal: its queue waits in the hub.
+- **`.mail/` is never committed**: the base entrypoint puts it in the clone's
+  `.git/info/exclude` on every start, so no repo's `.gitignore` changes.
+
+On the hub: `claude-sessions mail-loop`, started by `hub/entrypoint.sh` and supervised like
+the token loop; the `mail` volume at `/home/dev/mail`, `<to>/<from>/<stamp>.md` pending and
+`<to>/<from>/delivered/` once the receiver has it, pruned past 90 days; the limits are the
+`HUB_MAIL_*` lines in `compose.yaml`, the release's defaults; `~/.hub/mail.log` has one line
+per event, never a body. `hub-health` fails without a tick in 5 minutes.
+
+**What is not built yet** (`../docs/handoff/2026-10-28-agent-mail.md`): the managed policy
+that tells every agent how to treat a message, and the `mail-send`, `mail-read` and
+`mail-reply` skills. Until the policy ships, a message is just a file an agent may or may not
+notice the hook announcing.
+
 ## The workspace and the env volume
 
 **`/workspace` is each container's own named volume, cloned into** (`infra-workspace`,
@@ -324,7 +358,7 @@ reconnects by itself.
   their clones into `~/.dd-dev-secrets` and `~/.ds-dev-secrets` in step 2. or3's keys are
   already in `~/.or3-dev-secrets`.
 - **Nothing reads the host clones any more.** Each child builds straight from its repo on
-  GitHub (`main`), with its own Dockerfile, on base `2026.10.26` passed as the `BASE_TAG`
+  GitHub (`main`), with its own Dockerfile, on base `2026.10.28` passed as the `BASE_TAG`
   build arg each already takes — so no child repo changes first. or3, being private, is
   fetched over ssh with its deploy key from `~/.or3-dev-secrets`. Once step 1's listing is
   clean, the clones of or3, destiny-director and dossier on zero can be deleted.
@@ -816,7 +850,7 @@ copies in is ignored.
 
 [`gsfernandes81/claude-sessions`](https://github.com/gsfernandes81/claude-sessions) is the
 session registry: one JSON file per slot under `~/.local/share/claude-sessions/` (on a volume),
-kept current by Claude Code's own hooks. The hub pins **v0.7.0** and installs it for every
+kept current by Claude Code's own hooks. The hub pins **v0.8.0** and installs it for every
 container (*The hub*). A bump reaches every container when the hub is recreated, with no
 container restarted: hooks and offload passes run the binary from the volume each time, and
 each container's agent is started by the hub's menu over ssh and ends with that connection, so
@@ -991,7 +1025,8 @@ the container, ending every session in it. So a change to `compose.yaml` lands o
 or a deploy — the rule [`../CLAUDE.md`](../CLAUDE.md) states for the deployments.
 
 `make down-volumes CONFIRM=yes` drops **the project's own volumes**: every cloned workspace,
-with any unpushed work; every env volume; `claude-sessions` and `github-tokens`; and
+with any unpushed work; every env volume; `claude-sessions`, `github-tokens` and `mail` (every
+message between containers, the one copy); and
 `hub-state`, with the hub's key and **its sshd host key** — so every client is then asked to
 accept a changed host key for `dev`, the moment a real one would be waved through. Expect it.
 The logins, history and each container's own host key are external volumes, which stay.

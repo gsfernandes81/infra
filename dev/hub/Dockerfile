@@ -31,9 +31,9 @@
 # A BUMP is the version and both hashes together, from the new release's SHA256SUMS asset
 # (also in its notes). A wrong hash fails this build at `sha256sum -c`, loudly, by design.
 FROM python:3.13-slim-trixie@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c AS fetch
-ARG CLAUDE_SESSIONS_VERSION=0.7.0
-ARG CLAUDE_SESSIONS_SHA256_arm64=feac17055ab87caa5bb7ee0e8fde6e15fcbf0f8ece80802a5b606f466dfe5b25
-ARG CLAUDE_SESSIONS_SHA256_amd64=b8ca08fa80f7aabdd8da6293aab07a4cd2d9b1479836a49b027a1b4696506cb2
+ARG CLAUDE_SESSIONS_VERSION=0.8.0
+ARG CLAUDE_SESSIONS_SHA256_arm64=9fb504ab20fdac20ec3fbcc3b1ca8bc2efa9e9ac14c7cd9caa3e27c4116bf83e
+ARG CLAUDE_SESSIONS_SHA256_amd64=2d6900ca51764fdf92d7485c62df8eadbabbdb1820741dc90f276556b2c04fee
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 RUN set -eux; \
@@ -63,7 +63,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # `--version` IS FATAL and compared exactly: a static musl binary has no excuse, and it is
 # also what proves a binary the smoke test put in place is the version this file pins.
-ARG CLAUDE_SESSIONS_VERSION=0.7.0
+ARG CLAUDE_SESSIONS_VERSION=0.8.0
 # The binary sits off PATH; what PATH finds is hub/claude-sessions, which hands it the container
 # list (that file says why). `install` copies the running binary, so the containers get this one.
 COPY --from=fetch /out/claude-sessions /usr/local/libexec/claude-sessions
@@ -99,8 +99,8 @@ WORKDIR /home/dev
 # Every volume's mountpoint, as `dev`: a new named volume takes the owner of the directory it
 # mounts over, and one the image lacks is root's. ~/tokens was missing until the smoke test's
 # first run (2026-10-27): the broker could not make a container's directory, and the hub never
-# reported healthy.
-RUN mkdir -p /home/dev/.hub /home/dev/.ssh/cm /home/dev/tokens /home/dev/.claude-login \
+# reported healthy. ~/mail is the agent-mail volume (entrypoint.sh § agent mail), same rule.
+RUN mkdir -p /home/dev/.hub /home/dev/.ssh/cm /home/dev/tokens /home/dev/.claude-login /home/dev/mail \
     && chmod 700 /home/dev/.hub /home/dev/.ssh /home/dev/.ssh/cm /home/dev/.claude-login
 
 COPY --chown=${USER_UID}:${USER_GID} sshd_config /home/dev/sshd_config

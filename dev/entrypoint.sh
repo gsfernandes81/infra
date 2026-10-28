@@ -393,6 +393,21 @@ for f in ${DEV_ENV_FILES:-}; do
     fi
 done
 
+# ── agent mail: /workspace/.mail is never committed ────────────────────────────
+# The hub writes each container's inbox under /workspace/.mail/in/ and reads its outbox from
+# /workspace/.mail/out/ (decisions.md § Agent mail; the hub's entrypoint § agent mail). It is in
+# the workspace volume so it survives a recreate, and it must never reach a commit — so the
+# clone's own .git/info/exclude carries `.mail/`, ensured on every start the way the env links
+# are above: no repo's .gitignore changes and no agent has to remember. -x -F, so `.mail/x` or a
+# commented line does not count as present. A missing file is created by the redirection.
+if [ -d /workspace/.git ]; then
+    ex=/workspace/.git/info/exclude
+    if ! grep -qxF '.mail/' "$ex" 2>/dev/null; then
+        mkdir -p "$(dirname "$ex")" && printf '.mail/\n' >> "$ex" \
+            && say ".mail/ added to .git/info/exclude — the hub's mail never reaches a commit"
+    fi
+fi
+
 # ── the child's own start-up, if it ships one ───────────────────────────────
 # THE FIFTH SEAM, added 2026-08-24 for dd-dev and ds-dev. Both bake their dependencies
 # into /home/dev/venv at build time and both must add the editable project once

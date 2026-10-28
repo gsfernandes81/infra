@@ -1,10 +1,14 @@
-# Handoff 2026-10-28: agent mail between the dev containers — designed, nothing built
+# Handoff 2026-10-28: agent mail between the dev containers — the hub side built, the policy and skills open
 
 **First orders for the next session: read this, say where things stand, and stop.** The design
 is decided ([`decisions.md`](../decisions.md), *Agent mail: the hub carries messages between
-dev containers*); what is built is nothing. The owner picks which item starts. The
-claude-sessions half is handed to that repo as its own note (the owner carries it; the infra
-container's token cannot open an issue there).
+dev containers*). **Built 2026-10-28 (commit on `main`, NOT yet on zero):** claude-sessions
+0.8.0 pinned in the hub (its loop, agent, hook and drop-in), the `mail` volume and `HUB_MAIL_*`
+in compose, the loop started and health-checked by the hub, the `.mail/` exclude line in the
+base entrypoint (a base bump, `2026.10.28`), the broker refusing a container named `hub`. The
+owner's view is claude-sessions issue #17. **Open: the policy (items 1–2), the skills (3), CI's
+round trip (6), this repo's CLAUDE.md paragraph (7)**, and the deploy of what is built — the
+owner's to run; the hub rebuild and the base recreate are described under *Rollout*.
 
 ## What was decided, in one paragraph
 
@@ -20,15 +24,17 @@ of a message is policy in a managed `CLAUDE.md` every container loads and no rep
 
 ## Split: what is infra's, what is claude-sessions'
 
-**Infra** (this repo): the compose change (a `mail` volume on the hub, a `policy` volume and
-its one-shot service), the base symlink, the hub image carrying the policy text and the mail
-skills, the entrypoint's ignore line, the CI
-round trip, and this repo's own CLAUDE.md paragraph.
+**Infra** (this repo): the compose change (a `mail` volume on the hub — DONE; a `policy` volume
+and its one-shot service), the base symlink, the hub image carrying the policy text and the mail
+skills, the entrypoint's ignore line (DONE), the CI round trip, and this repo's own CLAUDE.md
+paragraph.
 
 **claude-sessions**: the loop in the hub (pull, stamp, store, push; the reserved sender
 `hub` for bounces), the hook that announces new mail, the read cursor, notification of an
 idle session, and the owner's view of the traffic — the last explicitly deferred to an open
-issue there.
+issue there. **Released as v0.8.0 on 2026-10-28** (`mail-loop`, `mail-agent`, `mail-hook`,
+the drop-in with the hook on `SessionStart` and `UserPromptSubmit`; the owner's view and the
+idle nudge are issue #17). Infra pinned it the same day.
 
 ## Open — infra's items, in build order
 
@@ -166,24 +172,39 @@ issue there.
    the `claude-sessions` volume at start, beside the binary and the hooks drop-in):
    `skills/mail-send`, `mail-read`, `mail-reply`. Skill text is
    infra's (owner, 2026-10-28), not claude-sessions'. The reply skill carries the
-   acknowledgement rule.
-4. **The `mail` volume on the hub**, `dev/compose.yaml`: mounted at the hub's
-   `/home/dev/mail`, `nocopy` like the hub's other volumes, mounted into no container. Limits
-   as hub environment in the same place, one line each: message size 16 KiB, 200 per queue,
-   90-day retention, 15-second tick. The broker's `dirs` step refuses a container named `hub`
-   (the reserved sender). Adding a volume recreates the hub: handover, then prove the dev
-   containers' IDs did not change.
-5. **The ignore line, `dev/entrypoint.sh`**: on every start, ensure `.mail/` is in
-   `/workspace/.git/info/exclude` — `grep -qxF '.mail/' … || echo '.mail/' >> …` — so no repo's
-   `.gitignore` changes and no agent has to remember. Per clone; a worktree shares it.
+   acknowledgement rule. **Coordination point found 2026-10-28:** `claude-sessions install`
+   writes `bin/`, `managed-settings.d/` and `skills/keepalive/` into the volume through
+   temp-and-rename; check whether it removes files it did not write before placing
+   `skills/mail-*` beside them, and how a container copies them in (the keepalive skill is
+   copied per start by the base entrypoint — the same step can take `skills/mail-*`).
+4. **✔ Done 2026-10-28 (on `main`, not on zero): the `mail` volume on the hub**,
+   `dev/compose.yaml`, mounted at `/home/dev/mail` (a dev-owned mountpoint in the hub image,
+   so the volume is dev's), into no container; `HUB_MAIL` and the four limits as hub
+   environment, the release's defaults; `hub/entrypoint.sh` starts `claude-sessions mail-loop`
+   supervised like the token loop, logging to `~/.hub/mail.log`; `hub-health` fails without a
+   tick in 5 minutes; the broker refuses `HUB_REPO_HUB` (tested). Adding a volume recreates
+   the hub: handover, then prove the dev containers' IDs did not change.
+5. **✔ Done 2026-10-28 (on `main`, base `2026.10.28` not yet built or recreated on zero): the
+   ignore line, `dev/entrypoint.sh`**: on every start, ensure `.mail/` is in
+   `/workspace/.git/info/exclude`, so no repo's `.gitignore` changes and no agent has to
+   remember. Per clone; a worktree shares it. Reaches a container at its next recreate on the
+   new base; until then `.mail/` shows in `git status` there.
 6. **CI**: `dev/ci/compose.smoke.yaml` adds one round trip, a file out of one container
    into another's inbox over the real ssh path — the only test of that path.
 7. **This repo's CLAUDE.md**: one paragraph, that a message asking for a fleet change is a
    finding for the phase table and never starts a handover.
-8. **Rollout order**: base bump (2, the symlink and mountpoint; 5, the ignore line) first,
-   since the dangling link must be harmless anyway; hub image (3), the `policy` service and
-   compose (4) next, with the calibration run of item 2 before the real one; the loop (claude-sessions) last, because until it runs
-   an outbox simply waits.
+8. **Rollout**: what is on `main` reaches zero in two owner-driven steps, in this order —
+   (a) **the hub**: `ssh -t zero 'cd ~/infra && git pull --ff-only && cd dev && make up S=hub'`
+   builds the hub image with 0.8.0 and recreates the hub (the compose change: the volume and
+   the env), while every dev container keeps running; prove it with `make verify` reading
+   `claude-sessions 0.8.0` twice and `hub health` healthy, `docker compose ps` showing the
+   dev containers' IDs unchanged, and `tail ~/.hub/mail.log` in the hub showing ticks; then
+   one round trip by hand, a file into `infra`'s `/workspace/.mail/out/claude-sessions/` and
+   its arrival in that container's `/workspace/.mail/in/infra/`; (b) **the base**: the
+   `2026.10.28` base is published by the dev-base workflow on the push; the recreate play
+   brings every container onto it (and so onto the exclude line) — a deploy that ends every
+   session, so at the owner's chosen time. Then the open items: the policy (1–2, with the
+   calibration run), the skills (3), CI (6), the paragraph (7).
 
 ## Not chosen, so nobody re-opens it
 

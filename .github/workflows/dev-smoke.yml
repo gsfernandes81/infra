@@ -138,7 +138,7 @@ jobs:
         run: |
           files="-f compose.yaml"; [ -n "${SMOKE_CLAUDE_SESSIONS_DIR:-}" ] && files="$files -f ci/compose.smoke.yaml"
           docker compose $files create hub infra
-          for v in claude-sessions github-tokens hub-state claude-login; do
+          for v in claude-sessions github-tokens hub-state mail claude-login; do
             owner=$(docker run --rm -v "dev_$v:/v" busybox stat -c %u /v)
             [ "$owner" = "$(id -u)" ] || { echo "FAIL  dev_$v is owned by uid $owner, not the hub's $(id -u)"; exit 1; }
             echo "PASS  dev_$v is the hub's after creating every container"
@@ -493,4 +493,4 @@ jobs:
         if: failure()
         run: |
           for c in dev-hub infra destiny-director; do echo "=== $c"; docker logs --tail 200 "$c" 2>&1 || true; done
-          docker exec dev-hub sh -c 'tail -50 ~/.hub/github-tokens.log; tail -50 ~/.hub/passes.log' 2>&1 || true
+          docker exec dev-hub sh -c 'tail -50 ~/.hub/github-tokens.log; tail -50 ~/.hub/passes.log; tail -50 ~/.hub/mail.log' 2>&1 || true

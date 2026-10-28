@@ -66,6 +66,10 @@ def repos(env):
         name = key[len("HUB_REPO_"):].lower().replace("_", "-")
         if not REPO.fullmatch(value):
             raise SystemExit(f"github-tokens: {key}={value!r} is not owner/repo")
+        if name == "hub":
+            # The mail loop's reserved sender: its refusals arrive "from hub", so no container
+            # may be one (decisions.md § Agent mail).
+            raise SystemExit(f"github-tokens: {key}: `hub` is the mail loop's reserved name, not a container")
         out[name] = value
     return out
 
