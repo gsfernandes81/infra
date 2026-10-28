@@ -1568,7 +1568,17 @@ build list and the split with claude-sessions.
   `mail-loop` runs in the hub, supervised and health-checked like the token loop, the `mail`
   volume is the hub's alone, and the limits are the release's defaults as `HUB_MAIL_*` lines in
   compose, so a change is one visible line. The `.mail/` exclude is the base entrypoint's and so
-  a base bump (`2026.10.28`). Not on zero until the owner runs the hub rebuild and the recreate.
+  a base bump (`2026.10.28`). The hub went to zero the same day and a round trip was proved.
+- **The policy text is `dev/hub/managed-CLAUDE.md`, installed by a one-shot `policy` service,
+  and the skills are `dev/hub/skills/`** (2026-10-28, base `2026.10.28.1`). In `hub/` because
+  that is the hub image's build context, and the hub is what carries both to the fleet: the
+  service runs that image as root for one `install` into the `policy` volume and exits, the
+  only root process in the project; the skills go into the shared volume beside keepalive and
+  the base entrypoint copies a fixed list of four into each container's config dir, removing
+  one the hub stops shipping. The base bakes the symlink and the empty mountpoint, nothing
+  else, so the text changes with a hub rebuild. The sandbox test (handoff item 2, *Results*)
+  found the unverified gate off in 2.1.311 and a dangling link harmless; the root-owned chain
+  is kept because it costs nothing and the gate reads organization state the sandbox had none of.
 
 ## The lesson worth keeping
 

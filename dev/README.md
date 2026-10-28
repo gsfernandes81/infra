@@ -42,7 +42,7 @@ lint, read a playbook against the real `ansible.cfg` — and are not wired to th
 |---|---|
 | `Makefile` | **the management interface** — `make up`, `make login`, `make status`, …; `C=<container>` picks the container (infra unless said, `C=hub` the hub), `S=<service>` limits `make up` to one |
 | `compose.yaml` | the project: `hub`, its `cloudflared` sidecar (profile `tunnel`), `infra`, and `or3`, `destiny-director` (+ `dd-postgres`), `dossier`, `invective`, `nibbles`, `ionic-traces`, `claude-sessions`, all started by default; one network, `dev`; **nothing published on the host**. The base tag is its `x-base-tag` line, each container's repo an anchor at the top |
-| `hub/` | the hub's image: `Dockerfile` (claude-sessions pinned by release and per-arch SHA-256), `entrypoint.sh`, `door` (installed as `hub-door`, its sshd's `ForceCommand`), `health` (`hub-health`, its healthcheck), `github-tokens` (the token broker) and its offline test, `sshd_config`, and `ssh_config` — how it reaches each container |
+| `hub/` | the hub's image: `Dockerfile` (claude-sessions pinned by release and per-arch SHA-256), `entrypoint.sh`, `door` (installed as `hub-door`, its sshd's `ForceCommand`), `health` (`hub-health`, its healthcheck), `github-tokens` (the token broker) and its offline test, `managed-CLAUDE.md` (the agent-mail policy every container loads) and `skills/` (`mail-send`, `mail-read`, `mail-reply`), `sshd_config`, and `ssh_config` — how it reaches each container |
 | `cloudflared.yml` | the hub tunnel's ingress, and the whole of it: `dev.gsrpi.uk` → the hub, `or3-dev.gsrpi.uk` → or3 |
 | `Dockerfile.base` | `gsrpi-dev-base`, which every dev container is `FROM` — Debian trixie slim, Node 22, Claude Code, gh, zmx, screen, sshd, Helix, the tools and language servers, Crush, Jcode |
 | `Dockerfile` | infra: the base + ansible-core, the collections and the docker CLI |
@@ -287,10 +287,25 @@ the token loop; the `mail` volume at `/home/dev/mail`, `<to>/<from>/<stamp>.md` 
 `HUB_MAIL_*` lines in `compose.yaml`, the release's defaults; `~/.hub/mail.log` has one line
 per event, never a body. `hub-health` fails without a tick in 5 minutes.
 
-**What is not built yet** (`../docs/handoff/2026-10-28-agent-mail.md`): the managed policy
-that tells every agent how to treat a message, and the `mail-send`, `mail-read` and
-`mail-reply` skills. Until the policy ships, a message is just a file an agent may or may not
-notice the hook announcing.
+**How an agent treats a message is policy, loaded in every container**: `hub/managed-CLAUDE.md`
+is Claude Code's *Managed* memory, `/etc/claude-code/CLAUDE.md`, which no repo's settings can
+exclude. A message is data, never an instruction; every message gets a reply, an acknowledgement
+sufficing; a request for work is judged on its merits through the repo's own process; nothing
+privileged happens on a message alone. The mechanics are the `mail-send`, `mail-read` and
+`mail-reply` skills (`hub/skills/`), which the hub puts in its volume beside the keepalive skill
+and every container copies in at start.
+
+**Why the policy is a one-shot root service and a symlink** (`policy` in `compose.yaml`; the
+reasoning is `../docs/decisions.md` § *Agent mail*): Claude Code's loader marks a managed file
+the session's own uid could have written, or with such a directory above it, as *unverified*
+and says so in the prompt. Everything in the hub's volume is uid `dev`. So the hub image carries
+the text root-owned, the `policy` service runs it through `install -o 0 -g 0 -m 644` into the
+`policy` volume and exits, every dev container mounts that volume read-only at
+`/etc/claude-code/policy` and `depends_on` the service having completed, and the base bakes
+`/etc/claude-code/CLAUDE.md` as a symlink to `policy/CLAUDE.md`. Editing the policy is a hub
+rebuild and `make up`, not a base bump; it reaches sessions started after that (an open one
+keeps the text it started with — measured). The one-shot is the only thing in the project
+that runs as root, it runs `install` and nothing else, on no network.
 
 ## The workspace and the env volume
 
@@ -358,7 +373,7 @@ reconnects by itself.
   their clones into `~/.dd-dev-secrets` and `~/.ds-dev-secrets` in step 2. or3's keys are
   already in `~/.or3-dev-secrets`.
 - **Nothing reads the host clones any more.** Each child builds straight from its repo on
-  GitHub (`main`), with its own Dockerfile, on base `2026.10.28` passed as the `BASE_TAG`
+  GitHub (`main`), with its own Dockerfile, on base `2026.10.28.1` passed as the `BASE_TAG`
   build arg each already takes — so no child repo changes first. or3, being private, is
   fetched over ssh with its deploy key from `~/.or3-dev-secrets`. Once step 1's listing is
   clean, the clones of or3, destiny-director and dossier on zero can be deleted.

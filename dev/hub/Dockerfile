@@ -79,6 +79,13 @@ COPY door /usr/local/bin/hub-door
 COPY github-tokens /usr/local/bin/github-tokens
 # The healthcheck, and `make status`'s word on the hub (health says why).
 COPY health /usr/local/bin/hub-health
+# AGENT MAIL'S TEXT, infra's (decisions.md § Agent mail): the managed policy every container
+# loads, installed root-owned into the `policy` volume by the one-shot `policy` service in
+# dev/compose.yaml (this image, as root, `install` and exit); and the three skills, which
+# entrypoint.sh puts in the shared volume beside claude-sessions' keepalive skill, for every
+# container's start to copy in. Root-owned here so the one-shot's source is too.
+COPY managed-CLAUDE.md /usr/local/share/dev-hub/CLAUDE.md
+COPY skills /usr/local/share/dev-hub/skills
 RUN chmod 0755 /usr/local/bin/hub-door /usr/local/bin/github-tokens /usr/local/bin/hub-health
 
 # The dev user, at the uid that owns the checkout — the same uid as every dev container's

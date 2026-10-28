@@ -507,18 +507,25 @@ fi
 # Removed when the hub's volume has none (a rollback past v0.4.7 has no `keepalive` either): a
 # stale file would tell every claude to run a command that does not exist. A failure is said and does not stop the door; the cost is a
 # claude that does not know to ask, so a quiet wait in a detached slot can be offloaded.
-skill_dir="$CFG/skills/keepalive"
-skill_src=/opt/claude-sessions/skills/keepalive/SKILL.md
-rm -f "$skill_dir/.SKILL.md.tmp"
-if mkdir -p "$skill_dir" \
-    && [ -s "$skill_src" ] \
-    && cp "$skill_src" "$skill_dir/.SKILL.md.tmp" \
-    && mv -fT "$skill_dir/.SKILL.md.tmp" "$skill_dir/SKILL.md"; then
-    say "claude-sessions keep-alive skill: $skill_dir/SKILL.md (from the hub's $skill_src)"
-else
-    rm -f "$skill_dir/.SKILL.md.tmp" "$skill_dir/SKILL.md"
-    say "claude-sessions keep-alive skill NOT installed (and any old copy removed) — claude will not know to ask for time before a quiet wait"
-fi
+# SINCE 2026-10-28 THE SAME FOR THE MAIL SKILLS: mail-send, mail-read and mail-reply are
+# infra's (dev/hub/skills/), put in the volume by the hub's entrypoint beside keepalive, and
+# copied in here the same way. The list is fixed so a skill the hub no longer ships is removed,
+# and nothing else under $CFG/skills — a person's own skills — is touched.
+for skill in keepalive mail-send mail-read mail-reply; do
+    skill_dir="$CFG/skills/$skill"
+    skill_src="/opt/claude-sessions/skills/$skill/SKILL.md"
+    rm -f "$skill_dir/.SKILL.md.tmp"
+    if mkdir -p "$skill_dir" \
+        && [ -s "$skill_src" ] \
+        && cp "$skill_src" "$skill_dir/.SKILL.md.tmp" \
+        && mv -fT "$skill_dir/.SKILL.md.tmp" "$skill_dir/SKILL.md"; then
+        say "skill $skill: $skill_dir/SKILL.md (from the hub's $skill_src)"
+    else
+        rm -f "$skill_dir/.SKILL.md.tmp" "$skill_dir/SKILL.md"
+        rmdir "$skill_dir" 2>/dev/null
+        say "skill $skill NOT installed (and any old copy removed) — the hub's volume has none"
+    fi
+done
 
 # ── the offloader and the tunnel: the hub's, since base 2026.10.26 ────────────
 # This entrypoint started both until then: a fixed-rate loop running `claude-sessions offload`

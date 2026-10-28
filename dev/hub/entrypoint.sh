@@ -48,6 +48,21 @@ else
     say "WARNING: claude-sessions install failed — the containers keep whatever $SHARED held:"
     printf '%s\n' "$out" | sed 's/^/[hub]     /'
 fi
+# The mail skills (infra's, dev/hub/skills/) go beside claude-sessions' keepalive skill, the
+# same way: temp name and rename, so a container copying mid-write sees whole files. `install`
+# above leaves files it did not write alone (checked against 0.8.0, 2026-10-28).
+for d in /usr/local/share/dev-hub/skills/*/; do
+    s=$(basename "$d")
+    rm -f "$SHARED/skills/$s/.SKILL.md.tmp"
+    if mkdir -p "$SHARED/skills/$s" && cp "$d/SKILL.md" "$SHARED/skills/$s/.SKILL.md.tmp" \
+        && chmod 644 "$SHARED/skills/$s/.SKILL.md.tmp" \
+        && mv -fT "$SHARED/skills/$s/.SKILL.md.tmp" "$SHARED/skills/$s/SKILL.md"; then
+        say "skill $s published: $SHARED/skills/$s/SKILL.md"
+    else
+        rm -f "$SHARED/skills/$s/.SKILL.md.tmp"
+        say "WARNING: could not publish skill $s — containers keep whatever $SHARED/skills/$s held"
+    fi
+done
 rm -f "$SHARED/.hub.pub.tmp"
 if cp "$STATE/id_ed25519.pub" "$SHARED/.hub.pub.tmp" && chmod 644 "$SHARED/.hub.pub.tmp" \
     && mv -fT "$SHARED/.hub.pub.tmp" "$SHARED/hub.pub"; then

@@ -182,6 +182,14 @@ jobs:
             '[ "$(docker exec dev-hub ssh -F /dev/null -i /tmp/client -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null dev@127.0.0.1 echo door-ok)" = door-ok ]'
           check "the hooks drop-in is mounted" \
             docker exec infra test -s /etc/claude-code/managed-settings.d/claude-sessions.json
+          check "the managed policy is in place, root-owned, 644" sh -c \
+            '[ "$(docker exec infra stat -c %u:%g:%a /etc/claude-code/policy/CLAUDE.md)" = 0:0:644 ]'
+          check "and /etc/claude-code/CLAUDE.md is the base's link to it" sh -c \
+            '[ "$(docker exec infra readlink /etc/claude-code/CLAUDE.md)" = policy/CLAUDE.md ] && docker exec infra grep -q "agent mail" /etc/claude-code/CLAUDE.md'
+          check "the policy one-shot exited 0 and is not running" sh -c \
+            '[ "$(docker inspect -f "{{.State.Status}} {{.State.ExitCode}}" dev-policy)" = "exited 0" ]'
+          check "the mail skills reached infra's config dir" sh -c \
+            'for s in mail-send mail-read mail-reply; do docker exec infra test -s /home/dev/.claude/skills/$s/SKILL.md || exit 1; done'
           check "Claude Code is installed" docker exec infra claude --version
           check "/run/github holds this container's token and nothing else" sh -c \
             '[ "$(docker exec infra ls -A /run/github)" = token ]'
