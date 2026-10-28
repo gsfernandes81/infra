@@ -1527,15 +1527,19 @@ build list and the split with claude-sessions.
   volume as the record, and pushes into the receiver's `/workspace/.mail/in/<from>/`. **No
   container gains a credential**, which the earlier push design (a per-container key into
   the hub) would have ended. The sender's outbox copy is deleted; the volume is the one record.
-- **The policy is a managed `CLAUDE.md`, which no repo can exclude, baked root-owned in the
-  base.** Claude Code 2.1.311 has a fourth memory type, *Managed*, read as `CLAUDE.md` from
-  the managed-settings directory the base already owns (`/etc/claude-code`, hard-coded);
-  `claudeMdExcludes` cannot drop it and `managed-only` mode keeps it. A symlink into the hub's
-  volume was wanted, so edits would skip the base bump, and the loader does follow one — but
-  it marks a file the session's own uid could have written as *unverified* and injects it
-  under a banner saying it may not be policy, and everything in that volume is the sessions'
-  own uid. Read from the binary in the `infra` container on 2026-10-28, not run. So the
-  policy text takes the base bump; the mail skills, which change often, ship by the volume.
+- **The policy is a managed `CLAUDE.md`, which no repo can exclude, root-owned in a volume
+  a one-shot service writes.** Claude Code 2.1.311 has a fourth memory type, *Managed*, read as
+  `CLAUDE.md` from the managed-settings directory the base already owns (`/etc/claude-code`,
+  hard-coded); `claudeMdExcludes` cannot drop it and `managed-only` mode keeps it. It follows
+  a symlink there — but a file the session's own uid could have written, or with one such
+  directory above it, loads *unverified*, under a banner that it may not be policy, and the
+  hub's volume is uid 1001 throughout. So a `policy` service runs as root once per `up` and
+  installs the tracked text root-owned into its own volume, mounted read-only inside
+  `/etc/claude-code`, and the base bakes the symlink. Chosen over baking the file itself
+  because an edit is then a hub rebuild, not a base bump and a recreate of every session,
+  open sessions re-read the managed folder on a timer, and there is one copy rather than one
+  per base tag. Read from the binary in the `infra` container on 2026-10-28, not run; the
+  handoff carries the verification, calibration run first.
 - **Every message gets a reply, an acknowledgement sufficing; requests for work are always
   permitted and judged on their merits**, under the receiver's own repo process, vigilant
   against an attack from another repo but never refusing as a blanket policy (owner). A
