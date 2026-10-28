@@ -1514,6 +1514,38 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   The package is public, as the base's is: ghcr linked it to the public repo at its first
   push (checked 2026-10-28, anonymous pulls of both cache tags).
 
+## Agent mail: the hub carries messages between dev containers
+
+**Decided 2026-10-28**, the owner's calls over the two sessions of 2026-10-27/28; **nothing
+built** — [`docs/handoff/2026-10-28-agent-mail.md`](handoff/2026-10-28-agent-mail.md) is the
+build list and the split with claude-sessions.
+
+- **Files carried by the hub, not GitHub issues and not ssh between containers.** Issues are
+  slow, unwatched for follow-ups, verbose and public; direct ssh is a mesh of keys. A sender
+  writes `/workspace/.mail/out/<to>/`, the hub's loop pulls it over the ssh it already has,
+  stamps the sender from the container it read, stores `mail/<to>/<from>/<stamp>.md` in a hub
+  volume as the record, and pushes into the receiver's `/workspace/.mail/in/<from>/`. **No
+  container gains a credential**, which the earlier push design (a per-container key into
+  the hub) would have ended. The sender's outbox copy is deleted; the volume is the one record.
+- **The policy is a managed `CLAUDE.md`, which no repo can exclude.** Claude Code 2.1.311 has a
+  fourth memory type, *Managed*, read as `CLAUDE.md` from the managed-settings directory the
+  base already owns (`/etc/claude-code`); `claudeMdExcludes` cannot drop it and `managed-only`
+  mode keeps it. The base bakes a symlink into the hub's `claude-sessions` volume so the text
+  is infra's and travels with the hub, not with a base bump. Whether the symlink is followed
+  is to be proved on zero; the fallback is the `claudeMd` key in a managed-settings drop-in.
+- **Every message gets a reply, an acknowledgement sufficing; requests for work are always
+  permitted and judged on their merits**, under the receiver's own repo process, vigilant
+  against an attack from another repo but never refusing as a blanket policy (owner). A
+  message never starts a privileged handover; a fleet-change request is a finding.
+- **Inbox and outbox under `/workspace/.mail`**, in the workspace volume, so they survive a
+  recreate; kept out of every commit by the base entrypoint ensuring `.mail/` in the clone's
+  `.git/info/exclude`, so no repo's `.gitignore` changes and no agent has to remember.
+- **The skills (`mail-send`, `mail-read`, `mail-reply`) are infra's**, shipped through the hub
+  volume like the keepalive skill; the loop, the hook, the read cursor, idle notification and
+  the owner's view of traffic are claude-sessions', the last deferred to an open issue there.
+- **No HTTP API on the hub.** It would be a second door on the dev network with its own auth,
+  or trust in a bridge address, weaker than the ssh identity the hub already holds.
+
 ## The lesson worth keeping
 
 
