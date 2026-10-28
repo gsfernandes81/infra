@@ -299,7 +299,11 @@ jobs:
           echo "PASS  the variable is honoured"
           docker exec infra rm -f /home/dev/.claude-logins/true/.credentials.json
 
-      - name: Check the menu under a terminal, and that an idle one sends nothing
+      # Since claude-sessions 0.7.0 an idle menu rewrites its load line when the figures change
+      # (owner, 2026-10-27, that repo's design § The status line), and nothing else. So the bytes
+      # sent while idle, escapes stripped, must be load lines and nothing more; none at all also
+      # passes, when the load held still.
+      - name: Check the menu under a terminal, and that an idle one sends only its load line
         run: |
           cmd="stty cols 80 rows 24; exec docker exec -it dev-hub ssh -tt -F /dev/null -i /tmp/client -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null dev@127.0.0.1"
           in="$RUNNER_TEMP/menu.in"; out="$RUNNER_TEMP/menu.out"
@@ -315,7 +319,10 @@ jobs:
           echo "bytes at 15s: $a, at 40s: $b"
           fails=0
           sed 's/\x1b\[[0-9;?]*[A-Za-z]//g' "$out" | grep -q infra && echo "PASS  the menu lists the containers" || { echo "FAIL  the menu lists the containers"; fails=1; }
-          [ "$a" -gt 0 ] && [ "$a" = "$b" ] && echo "PASS  an idle menu sent nothing for 25s" || { echo "FAIL  an idle menu sent $((b - a)) bytes in 25s"; fails=1; }
+          idle=$(head -c "$b" "$out" | tail -c +"$((a + 1))" | sed 's/\x1b\[[0-9;?]*[A-Za-z]//g; s/\x1b[78]//g' | tr -d '\r\n')
+          rest=$(printf '%s' "$idle" | sed -E 's/RAM: [^,]*, Load: [^,]*, dev//g' | tr -d ' ')
+          if [ "$a" -gt 0 ] && [ -z "$rest" ]; then echo "PASS  an idle menu sent only its load line for 25s ($((b - a)) bytes)"
+          else echo "FAIL  an idle menu sent more than its load line in 25s: [$rest]"; fails=1; fi
           [ "$fails" = 0 ]
 
       # What a rebuild or an `up` that recreates must keep: the workspace, the host key the
