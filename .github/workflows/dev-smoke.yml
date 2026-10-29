@@ -139,7 +139,7 @@ jobs:
           files="-f compose.yaml"; [ -n "${SMOKE_CLAUDE_SESSIONS_DIR:-}" ] && files="$files -f ci/compose.smoke.yaml"
           docker compose $files create hub infra
           for v in claude-sessions github-tokens hub-state mail claude-login; do
-            owner=$(docker run --rm -v "dev_$v:/v" busybox stat -c %u /v)
+            owner=$(docker run --rm -v "dev_$v:/v" dev-hub stat -c %u /v)
             [ "$owner" = "$(id -u)" ] || { echo "FAIL  dev_$v is owned by uid $owner, not the hub's $(id -u)"; exit 1; }
             echo "PASS  dev_$v is the hub's after creating every container"
           done
@@ -410,13 +410,13 @@ jobs:
           echo "PASS  preflight: make check and check-names pass on a good project"
           ansible-playbook -i localhost, "$h" -e hook=probe
           echo "PASS  probe: the hub is healthy and reaches what runs"
-          docker run -d --name dossier --label com.docker.compose.project=dossier busybox sleep 600 >/dev/null
+          docker run -d --name dossier --label com.docker.compose.project=dossier dev-hub sleep 600 >/dev/null
           if make -C dev check-names SUDO= 2>err.txt; then echo "FAIL  check-names let an old project's dossier through"; docker rm -f dossier; exit 1; fi
           docker rm -f dossier >/dev/null
           grep -q "project 'dossier'" err.txt && echo "PASS  check-names refuses an old project's container, naming it"
           # A container under a name retired by the 2026-10-27 rename, in this very project, as
           # zero has until its first deploy after it: refused, because it would share volumes.
-          docker run -d --name ds-dev --label com.docker.compose.project=dev busybox sleep 600 >/dev/null
+          docker run -d --name ds-dev --label com.docker.compose.project=dev dev-hub sleep 600 >/dev/null
           if make -C dev check-names SUDO= 2>err.txt; then echo "FAIL  check-names let the retired ds-dev through"; docker rm -f ds-dev; exit 1; fi
           docker rm -f ds-dev >/dev/null
           if grep -q "retired on 2026-10-27: ds-dev" err.txt; then echo "PASS  check-names refuses a container under a retired name"
