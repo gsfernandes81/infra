@@ -188,28 +188,24 @@ jobs:
             '[ "$(docker exec infra readlink /etc/claude-code/CLAUDE.md)" = policy/CLAUDE.md ] && docker exec infra grep -q "agent mail" /etc/claude-code/CLAUDE.md'
           check "the policy one-shot exited 0 and is not running" sh -c \
             '[ "$(docker inspect -f "{{.State.Status}} {{.State.ExitCode}}" dev-policy)" = "exited 0" ]'
-          check "the mail skills reached infra's config dir" sh -c \
-            'for s in mail-send mail-read mail-reply; do docker exec infra test -s /home/dev/.claude/skills/$s/SKILL.md || exit 1; done'
-          # AGENT MAIL, END TO END, over the real ssh path: a message from infra to itself and one to
-          # a receiver that does not exist. The hub's loop ticks every 15 s (HUB_MAIL_TICK); 90 s is
-          # six ticks. The bounce is the negative control — a loop that only ever delivered would
-          # pass the first check and prove nothing about refusing.
-          docker exec infra sh -c 'mkdir -p /workspace/.mail/out/infra /workspace/.mail/out/nosuch \
-            && echo "smoke round trip" > /workspace/.mail/out/infra/.t && mv /workspace/.mail/out/infra/.t /workspace/.mail/out/infra/smoke.md \
-            && echo "to nobody" > /workspace/.mail/out/nosuch/.t && mv /workspace/.mail/out/nosuch/.t /workspace/.mail/out/nosuch/smoke.md'
-          timeout 90 sh -c 'until docker exec infra sh -c "ls /workspace/.mail/in/infra/*.md /workspace/.mail/in/hub/*.md" >/dev/null 2>&1; do sleep 3; done' || true
-          check "the hub carried a message from infra to itself, with its own header" sh -c \
-            'docker exec infra sh -c "cat /workspace/.mail/in/infra/*.md" | grep -q "^From: infra$" && docker exec infra sh -c "cat /workspace/.mail/in/infra/*.md" | grep -q "^smoke round trip$"'
-          check "and bounced one to an unknown receiver, from hub" sh -c \
-            'docker exec infra sh -c "cat /workspace/.mail/in/hub/*.md" | grep -q "unknown receiver nosuch"'
-          check "and the outbox is empty afterwards" sh -c \
-            '[ -z "$(docker exec infra find /workspace/.mail/out -type f)" ]'
-          check "the mail hook announces both, then nothing" sh -c \
-            '[ "$(docker exec infra claude-sessions mail-hook </dev/null | grep -c "^new message from ")" = 2 ] && [ -z "$(docker exec infra claude-sessions mail-hook </dev/null)" ]'
+          check "the four skills are symlinks into the hub's volume, and resolve" sh -c \
+            'for s in keepalive mail-send mail-read mail-reply; do [ "$(docker exec infra readlink /home/dev/.claude/skills/$s)" = /opt/claude-sessions/skills/$s ] && docker exec infra test -s /home/dev/.claude/skills/$s/SKILL.md || exit 1; done'
+          # AGENT MAIL v2: the server in the hub answers, each container holds its mail-token, and the
+          # tools and hook reach it. No session is live on a runner (nothing is logged in), so a send
+          # cannot be delivered here; the negative control is a send to an address nobody holds,
+          # which the server must refuse rather than accept and lose.
+          check "the mail server answers GET /who (401 without a token)" sh -c \
+            '[ "$(docker exec dev-hub python3 -c "import http.client as h; c=h.HTTPConnection(\"127.0.0.1\",8025,timeout=3); c.request(\"GET\",\"/who\"); print(c.getresponse().status)")" = 401 ]'
+          check "/run/github holds this container'"'"'s token and its mail-token, 0644" sh -c \
+            '[ "$(docker exec infra ls -A /run/github | sort | tr "\n" " ")" = "mail-token token " ] && [ "$(docker exec infra stat -c %a /run/github/mail-token)" = 644 ]'
+          check "mail who reaches the server from infra with its token" sh -c \
+            'docker exec -e CLAUDE_SESSIONS_SLOT=claude-1 infra claude-sessions mail who >who.txt 2>&1; cat who.txt | sed "s/^/  who: /"; grep -qiE "infra|no live|no session" who.txt'
+          check "a send to an address nobody holds is refused, not accepted" sh -c \
+            '! echo body | docker exec -i -e CLAUDE_SESSIONS_SLOT=claude-1 infra claude-sessions mail send --to nosuch/claude-1 --subject smoke >send.txt 2>&1; cat send.txt | sed "s/^/  send: /"'
+          check "the mail hook says nothing and returns within 2 s when there is no mail" sh -c \
+            '[ -z "$(timeout 2 docker exec infra claude-sessions mail-hook </dev/null)" ]'
           docker exec dev-hub sh -c 'tail -n 8 ~/.hub/mail.log' | sed 's/^/  mail.log: /'
           check "Claude Code is installed" docker exec infra claude --version
-          check "/run/github holds this container's token and nothing else" sh -c \
-            '[ "$(docker exec infra ls -A /run/github)" = token ]'
           check "git asks the hub's helper for github.com" sh -c \
             '[ "$(docker exec infra git config --global credential.https://github.com.helper)" = hub ]'
           check "gh uses the hub's token" sh -c \

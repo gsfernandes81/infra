@@ -393,21 +393,6 @@ for f in ${DEV_ENV_FILES:-}; do
     fi
 done
 
-# ── agent mail: /workspace/.mail is never committed ────────────────────────────
-# The hub writes each container's inbox under /workspace/.mail/in/ and reads its outbox from
-# /workspace/.mail/out/ (decisions.md § Agent mail; the hub's entrypoint § agent mail). It is in
-# the workspace volume so it survives a recreate, and it must never reach a commit — so the
-# clone's own .git/info/exclude carries `.mail/`, ensured on every start the way the env links
-# are above: no repo's .gitignore changes and no agent has to remember. -x -F, so `.mail/x` or a
-# commented line does not count as present. A missing file is created by the redirection.
-if [ -d /workspace/.git ]; then
-    ex=/workspace/.git/info/exclude
-    if ! grep -qxF '.mail/' "$ex" 2>/dev/null; then
-        mkdir -p "$(dirname "$ex")" && printf '.mail/\n' >> "$ex" \
-            && say ".mail/ added to .git/info/exclude — the hub's mail never reaches a commit"
-    fi
-fi
-
 # ── the child's own start-up, if it ships one ───────────────────────────────
 # THE FIFTH SEAM, added 2026-08-24 for dd-dev and ds-dev. Both bake their dependencies
 # into /home/dev/venv at build time and both must add the editable project once
@@ -507,23 +492,24 @@ fi
 # Removed when the hub's volume has none (a rollback past v0.4.7 has no `keepalive` either): a
 # stale file would tell every claude to run a command that does not exist. A failure is said and does not stop the door; the cost is a
 # claude that does not know to ask, so a quiet wait in a detached slot can be offloaded.
-# SINCE 2026-10-28 THE SAME FOR THE MAIL SKILLS: mail-send, mail-read and mail-reply are
-# infra's (dev/hub/skills/), put in the volume by the hub's entrypoint beside keepalive, and
-# copied in here the same way. The list is fixed so a skill the hub no longer ships is removed,
-# and nothing else under $CFG/skills — a person's own skills — is touched.
+# SINCE BASE 2026.10.29 EVERY SKILL THE HUB SHIPS IS A SYMLINK, not a copy: keepalive and the
+# three mail skills (claude-sessions' since 0.9.0) live in the volume, and a link means an edit
+# there is live at the skill's next invocation with no container restart. The list is fixed so a
+# skill the hub stops shipping is removed, and nothing else under $CFG/skills — a person's own
+# skills — is touched. A real directory where the link should be is the copy an earlier base
+# made, and goes first; `rm -rf` on a symlink removes the link, never what it points at.
 for skill in keepalive mail-send mail-read mail-reply; do
-    skill_dir="$CFG/skills/$skill"
-    skill_src="/opt/claude-sessions/skills/$skill/SKILL.md"
-    rm -f "$skill_dir/.SKILL.md.tmp"
-    if mkdir -p "$skill_dir" \
-        && [ -s "$skill_src" ] \
-        && cp "$skill_src" "$skill_dir/.SKILL.md.tmp" \
-        && mv -fT "$skill_dir/.SKILL.md.tmp" "$skill_dir/SKILL.md"; then
-        say "skill $skill: $skill_dir/SKILL.md (from the hub's $skill_src)"
+    link="$CFG/skills/$skill"
+    src="/opt/claude-sessions/skills/$skill"
+    if [ -s "$src/SKILL.md" ]; then
+        if [ -e "$link" ] && [ ! -L "$link" ]; then rm -rf "$link"; fi
+        if [ "$(readlink "$link" 2>/dev/null)" != "$src" ]; then
+            mkdir -p "$CFG/skills" && rm -f "$link" && ln -s "$src" "$link"
+        fi
+        say "skill $skill: $link -> $src"
     else
-        rm -f "$skill_dir/.SKILL.md.tmp" "$skill_dir/SKILL.md"
-        rmdir "$skill_dir" 2>/dev/null
-        say "skill $skill NOT installed (and any old copy removed) — the hub's volume has none"
+        rm -rf "$link"
+        say "skill $skill NOT in the hub's volume — removed here"
     fi
 done
 

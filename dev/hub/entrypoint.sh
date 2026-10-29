@@ -3,7 +3,7 @@
 #
 #   hub key -> install into the shared volume -> GitHub tokens (first pass, then bg)
 #   -> the container list -> sshd host key and authorized_keys -> environment for logins
-#   -> mail loop (bg) -> [offloader (bg)] -> sshd (fg)
+#   -> mail server (bg) -> [offloader (bg)] -> sshd (fg)
 #
 # Everything ahead of sshd is bounded and non-fatal, as in the dev containers' entrypoint:
 # the door is the one thing that must come up. The compose healthcheck reads what the
@@ -16,8 +16,8 @@
 #   CLAUDE_SESSIONS_REMOTE  the binary's path inside them (/opt/claude-sessions/bin/…)
 #   HUB_OFFLOAD             0 stops the offload timer starting                     (1)
 #   HUB_GITHUB_*, HUB_REPO_*  the token broker's; github-tokens' own header lists them
-#   HUB_MAIL, HUB_MAIL_*    the mail loop's (the volume, the limits, the tick); read by
-#                           `claude-sessions mail-loop` itself, this file only names the dir
+#   HUB_MAIL, HUB_MAIL_*    the mail server's (where it listens, the store, the tokens, the
+#                           limits); read by `claude-sessions mail-server` itself
 set -u
 
 say() { printf '[hub] %s\n' "$*"; }
@@ -48,21 +48,6 @@ else
     say "WARNING: claude-sessions install failed — the containers keep whatever $SHARED held:"
     printf '%s\n' "$out" | sed 's/^/[hub]     /'
 fi
-# The mail skills (infra's, dev/hub/skills/) go beside claude-sessions' keepalive skill, the
-# same way: temp name and rename, so a container copying mid-write sees whole files. `install`
-# above leaves files it did not write alone (checked against 0.8.0, 2026-10-28).
-for d in /usr/local/share/dev-hub/skills/*/; do
-    s=$(basename "$d")
-    rm -f "$SHARED/skills/$s/.SKILL.md.tmp"
-    if mkdir -p "$SHARED/skills/$s" && cp "$d/SKILL.md" "$SHARED/skills/$s/.SKILL.md.tmp" \
-        && chmod 644 "$SHARED/skills/$s/.SKILL.md.tmp" \
-        && mv -fT "$SHARED/skills/$s/.SKILL.md.tmp" "$SHARED/skills/$s/SKILL.md"; then
-        say "skill $s published: $SHARED/skills/$s/SKILL.md"
-    else
-        rm -f "$SHARED/skills/$s/.SKILL.md.tmp"
-        say "WARNING: could not publish skill $s — containers keep whatever $SHARED/skills/$s held"
-    fi
-done
 rm -f "$SHARED/.hub.pub.tmp"
 if cp "$STATE/id_ed25519.pub" "$SHARED/.hub.pub.tmp" && chmod 644 "$SHARED/.hub.pub.tmp" \
     && mv -fT "$SHARED/.hub.pub.tmp" "$SHARED/hub.pub"; then
@@ -138,34 +123,33 @@ rm -f "$HOME/.ssh/environment"
 } > "$HOME/.ssh/environment"
 chmod 600 "$HOME/.ssh/environment"
 
-# ── agent mail: the loop that carries messages between the containers ──────────
-# `claude-sessions mail-loop` (0.8.0; claude-sessions' docs/design.md § Agent mail, infra's
-# decisions.md § Agent mail) pulls every container's /workspace/.mail/out/ into the `mail`
-# volume at $HUB_MAIL, stamps the sender from the container it read, and pushes each queue
-# into its receiver's /workspace/.mail/in/ — over the same ssh as everything else, so no
-# container gains a credential. The limits and the tick are HUB_MAIL_* in the environment,
-# which the loop reads itself; compose sets them. SUPERVISED like the token loop: an exit is
-# said in the log and the loop starts again a minute later. One line per event in
-# ~/.hub/mail.log, never a body; the loop touches $HUB_MAIL/.beat after every tick, and
-# hub-health reads its age. AFTER the container list above, which the loop takes from
-# CLAUDE_SESSIONS_HOSTS; a stopped container is skipped by the loop, said once, not an error.
+# ── agent mail: the server every session sends and reads through ───────────────
+# `claude-sessions mail-server` (0.9.0; claude-sessions' docs/design.md § Agent mail, infra's
+# decisions.md § Agent mail v2) serves plain HTTP on HUB_MAIL_LISTEN, on the `dev` network only,
+# with the `mail` volume at $HUB_MAIL as its store. Every request carries a container's
+# mail-token, which the server writes at start into $HUB_MAIL_TOKENS/<container>/ — the GitHub
+# tokens' directory, so each container's read-only subpath mount at /run/github carries both;
+# `github-tokens dirs` above has made every directory already. It holds one agent per container
+# over the hub's ssh to know which sessions are live, and types a fixed nudge into an idle
+# detached one when its mail arrives. The limits are HUB_MAIL_* in the environment, which the
+# server reads itself; compose sets them. SUPERVISED like the token loop: an exit is said in the
+# log and the server starts again a minute later. One line per event in ~/.hub/mail.log, never
+# a body. hub-health asks it for /who without a token and takes any HTTP answer as alive.
+# AFTER the container list above, which the server takes from CLAUDE_SESSIONS_HOSTS.
 HUB_MAIL="${HUB_MAIL:-$HOME/mail}"
 export HUB_MAIL
 if [ -d "$HUB_MAIL" ]; then
-    # Touched now as offload.beat is: a hub that has only just started is not held unhealthy
-    # for the 15 s before the first tick.
-    touch "$HUB_MAIL/.beat"
     setsid bash -c '
         while :; do
-            claude-sessions mail-loop
+            claude-sessions mail-server
             rc=$?
-            printf "%s the mail loop exited (%s) — starting it again in 60 s\n" \
+            printf "%s the mail server exited (%s) — starting it again in 60 s\n" \
                 "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$rc" >> "$1"
             sleep 60
         done' _ "$STATE/mail.log" </dev/null >> "$STATE/mail.log" 2>&1 &
-    say "mail loop every ${HUB_MAIL_TICK:-15}s over: ${CLAUDE_SESSIONS_HOSTS:-(none)} — the volume at $HUB_MAIL, every event in ~/.hub/mail.log"
+    say "mail server on ${HUB_MAIL_LISTEN:-0.0.0.0:8025} for: ${CLAUDE_SESSIONS_HOSTS:-(none)} — the store at $HUB_MAIL, every event in ~/.hub/mail.log"
 else
-    say "WARNING: $HUB_MAIL is not a directory — no mail loop; the hub stays unhealthy"
+    say "WARNING: $HUB_MAIL is not a directory — no mail server; the hub stays unhealthy"
 fi
 
 # ── the offloader, for every container ──────────────────────────────────────────

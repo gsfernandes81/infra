@@ -33,7 +33,7 @@ name: dev
 # THE BASE IMAGE TAG, stated once (gsrpi-dev-base, built from Dockerfile.base). Every build
 # below takes it as BASE_TAG; dev/Makefile and .github/workflows/dev-base.yml read this line,
 # so keep its shape: `x-base-tag: &base-tag <tag>`. Bumping it is what publishes a new base.
-x-base-tag: &base-tag 2026.10.28.1
+x-base-tag: &base-tag 2026.10.29
 
 # THE CLAUDE LOGIN, ONE SWITCH: CLAUDE_UNDOCUMENTED_SHARED_LOGINS, SET BELOW, true OR false (owner,
 # 2026-10-27). Its value is the default written into the line, `:-true` or `:-false`, and only that:
@@ -187,14 +187,20 @@ services:
       HUB_REPO_NIBBLES: *repo-nibbles
       HUB_REPO_IONIC_TRACES: *repo-ionic
       HUB_REPO_CLAUDE_SESSIONS: *repo-claude-sessions
-      # AGENT MAIL (decisions.md § Agent mail; hub/entrypoint.sh § agent mail): the volume the
-      # loop keeps every message in, and its limits — the release's defaults, one line each, so
-      # a change is visible here. `:-`, because absence IS the default, not a missing setting.
+      # AGENT MAIL (decisions.md § Agent mail v2; hub/entrypoint.sh § agent mail): the server's
+      # port, the volume it keeps every message in, where it writes each container's mail-token
+      # (THE SAME directory as the GitHub tokens, so each container's read-only subpath mount at
+      # /run/github carries both — set the two together), and its limits — the release's
+      # defaults, one line each, so a change is visible here. `:-`, because absence IS the
+      # default, not a missing setting. Nothing is published on the host: the port is reachable
+      # on the `dev` network only, and every request needs a container's token.
+      HUB_MAIL_LISTEN: 0.0.0.0:${HUB_MAIL_PORT:-8025}
       HUB_MAIL: /home/dev/mail
+      HUB_MAIL_TOKENS: /home/dev/tokens
       HUB_MAIL_MAX_BYTES: ${HUB_MAIL_MAX_BYTES:-16384}
       HUB_MAIL_MAX_QUEUE: ${HUB_MAIL_MAX_QUEUE:-200}
       HUB_MAIL_RETAIN_DAYS: ${HUB_MAIL_RETAIN_DAYS:-90}
-      HUB_MAIL_TICK: ${HUB_MAIL_TICK:-15}
+      HUB_MAIL_RATE: ${HUB_MAIL_RATE:-60}
       # Where claude-sessions reads the pool's memory (the home's header, the door's load line).
       # Uncomment with the pool's mount below, once the pool exists; neither works alone.
       # CLAUDE_SESSIONS_POOL: /run/devpool
@@ -204,9 +210,8 @@ services:
       - hub-state:/home/dev/.hub
       # Every container's token, one directory each; each container mounts only its own.
       - github-tokens:/home/dev/tokens
-      # Every message between containers, <to>/<from>/<stamp>.md, pending or delivered/; the
-      # one record (the sender's copy is deleted once this one is fsynced). Mounted into no
-      # container: the hub pushes over ssh into each receiver's /workspace/.mail/in/.
+      # Every message between sessions, the mail server's store and the one record. Mounted into
+      # no container: sessions read and send over HTTP with their container's token.
       - mail:/home/dev/mail
       # The shared Claude login (x-claude-login above). Mounted here only so the volume is made
       # from the hub's dev-owned mountpoint: the dev images lack the directory, and a volume made

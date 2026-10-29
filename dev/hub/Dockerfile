@@ -31,9 +31,9 @@
 # A BUMP is the version and both hashes together, from the new release's SHA256SUMS asset
 # (also in its notes). A wrong hash fails this build at `sha256sum -c`, loudly, by design.
 FROM python:3.13-slim-trixie@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c AS fetch
-ARG CLAUDE_SESSIONS_VERSION=0.8.1
-ARG CLAUDE_SESSIONS_SHA256_arm64=7b1e5c9ec64354b75f61a55a41b58400a141ea1afa87a9814b5e485ff922028c
-ARG CLAUDE_SESSIONS_SHA256_amd64=0a4631af2c3e43aa47ddf54ce3ffb9fd87e6c8a165bf4211aaf76fd0e0d88e10
+ARG CLAUDE_SESSIONS_VERSION=0.9.0
+ARG CLAUDE_SESSIONS_SHA256_arm64=b0d96c3af7ac6f6c2e1dcea89548bd29e5aace3204dc141eb62ef0fd2dbe650a
+ARG CLAUDE_SESSIONS_SHA256_amd64=c27cfa378b41bab18540273b5dde959e69a3ae7144d3adc2082a9175f3c2e446
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 RUN set -eux; \
@@ -63,7 +63,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # `--version` IS FATAL and compared exactly: a static musl binary has no excuse, and it is
 # also what proves a binary the smoke test put in place is the version this file pins.
-ARG CLAUDE_SESSIONS_VERSION=0.8.1
+ARG CLAUDE_SESSIONS_VERSION=0.9.0
 # The binary sits off PATH; what PATH finds is hub/claude-sessions, which hands it the container
 # list (that file says why). `install` copies the running binary, so the containers get this one.
 COPY --from=fetch /out/claude-sessions /usr/local/libexec/claude-sessions
@@ -79,13 +79,12 @@ COPY door /usr/local/bin/hub-door
 COPY github-tokens /usr/local/bin/github-tokens
 # The healthcheck, and `make status`'s word on the hub (health says why).
 COPY health /usr/local/bin/hub-health
-# AGENT MAIL'S TEXT, infra's (decisions.md § Agent mail): the managed policy every container
+# AGENT MAIL'S POLICY, infra's (decisions.md § Agent mail): the managed text every container
 # loads, installed root-owned into the `policy` volume by the one-shot `policy` service in
-# dev/compose.yaml (this image, as root, `install` and exit); and the three skills, which
-# entrypoint.sh puts in the shared volume beside claude-sessions' keepalive skill, for every
-# container's start to copy in. Root-owned here so the one-shot's source is too.
+# dev/compose.yaml (this image, as root, `install` and exit). Root-owned here so the one-shot's
+# source is too. The mail SKILLS are claude-sessions' since 0.9.0: `install` writes them into
+# the shared volume beside keepalive, and the base symlinks them in.
 COPY managed-CLAUDE.md /usr/local/share/dev-hub/CLAUDE.md
-COPY skills /usr/local/share/dev-hub/skills
 RUN chmod 0755 /usr/local/bin/hub-door /usr/local/bin/github-tokens /usr/local/bin/hub-health
 
 # The dev user, at the uid that owns the checkout — the same uid as every dev container's

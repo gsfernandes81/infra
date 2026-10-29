@@ -1656,6 +1656,15 @@ the why. Supersedes the two struck bullets in *Agent mail* above; the rest of th
 - **Owner mail is deferred** (the owner has a remote-use detail to add); when it comes it is
   high priority and outside the agent-mail policy, so the server leaves room for a From only
   it can produce.
+- **The mail-token sits beside the GitHub token, in the same per-container directory and
+  mount** (settled by mail with claude-sessions' agent, 2026-10-29): `HUB_MAIL_TOKENS` is set
+  to `HUB_GITHUB_TOKENS`'s value, so one read-only subpath mount at `/run/github` carries both
+  and the two cannot drift; `github-tokens dirs` makes and removes the directory, the server
+  mints into it. 0644, because the mount is the separation, not the mode. The mount's name
+  stops fitting and is renamed at a later base bump, not this one.
+- **hub-health probes the server, not a beat**: `GET /who` on `127.0.0.1` without a token,
+  any HTTP answer meaning alive (401 the expected one), in python because the hub image is
+  python's and carries no curl.
 
 ## The lesson worth keeping
 
