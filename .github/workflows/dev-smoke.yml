@@ -196,7 +196,7 @@ jobs:
           # which the server must refuse rather than accept and lose.
           check "the mail server answers GET /who (401 without a token)" sh -c \
             '[ "$(docker exec dev-hub python3 -c "import http.client as h; c=h.HTTPConnection(\"127.0.0.1\",8025,timeout=3); c.request(\"GET\",\"/who\"); print(c.getresponse().status)")" = 401 ]'
-          check "/run/github holds this container'"'"'s token and its mail-token, 0644" sh -c \
+          check "/run/github holds the GitHub token and the mail-token, 0644, and nothing else" sh -c \
             '[ "$(docker exec infra ls -A /run/github | sort | tr "\n" " ")" = "mail-token token " ] && [ "$(docker exec infra stat -c %a /run/github/mail-token)" = 644 ]'
           check "mail who reaches the server from infra with its token" sh -c \
             'docker exec -e CLAUDE_SESSIONS_SLOT=claude-1 infra claude-sessions mail who >who.txt 2>&1; cat who.txt | sed "s/^/  who: /"; grep -qiE "infra|no live|no session" who.txt'
