@@ -247,8 +247,9 @@ idle nudge are issue #17). Infra pinned it the same day.
 after the owner's go in claude-sessions' own session, and infra pinned it the same hour, with
 items 2, 3, 5 (all but the mount rename), 6, 7 and 8 in the same commit; 4 is the server's own
 (it mints the token); 9 is after the deploy. **Open: the deploy** — the hub rebuild and
-`make up S=policy` (the policy text changed), then the base recreate onto `2026.10.29` (the
-skill symlinks; the `.mail` exclude line goes) — and the two first-run watches: the nudge
+`make up S=policy` (the policy text changed), then the base recreate onto `2026.10.29.1` (the
+skill symlinks; the `.mail` exclude line goes; `.1` adds auto mode as the default and supersedes
+`2026.10.29` before it was rolled out) — and the two first-run watches: the nudge
 typed into an idle detached session, and `mail who` from a real slot. Read the release notes first: they are to name the env names, the port, the token file name,
 the hook events, the nudge prefix and the header set. Then, in order:
 

@@ -598,6 +598,12 @@ RUN chmod 0755 /usr/local/bin/in-workspace
 # baked survives: ~/.claude is a volume, and a default written into it would be hidden from
 # every container after the one that created it. The cost, chosen: a container cannot be
 # switched back to `latest` from inside it — that is an edit here and a base bump.
+#
+# AUTO MODE IS EVERY SESSION'S STARTING PERMISSION MODE (owner, 2026-10-29), as
+# `permissions.defaultMode` in the same file, for the same reason: ~/.claude is a volume. It is
+# a default, not a lock. Managed settings beat every settings file, so no repo's .claude/ can
+# set another default, but Shift+Tab still changes mode inside a session and
+# `claude --permission-mode default` starts one that asks (both checked on 2.1.311).
 COPY claude-managed-settings.json /etc/claude-code/managed-settings.json
 # THE MANAGED POLICY — how an agent treats mail from another container (decisions.md § Agent
 # mail). Claude Code loads /etc/claude-code/CLAUDE.md as its *Managed* memory, which no repo's
@@ -621,7 +627,8 @@ COPY claude-plugins /opt/claude-plugins
 # (the file says in which order it looks).
 COPY ty-lsp /usr/local/bin/ty-lsp
 # Parsed here because it is hand-edited and Claude Code ignores a malformed settings file
-# WHOLE and says nothing — the agent view would be back on and the channel back on latest.
+# WHOLE and says nothing — the agent view would be back on, the channel back on latest and
+# sessions back to asking for every tool call.
 RUN chmod 0644 /etc/claude-code/managed-settings.json \
     && chmod -R a+rX /opt/claude-plugins && chmod 0755 /usr/local/bin/ty-lsp \
     && for f in /etc/claude-code/managed-settings.json /opt/claude-plugins/.claude-plugin/marketplace.json \

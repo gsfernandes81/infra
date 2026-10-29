@@ -51,7 +51,7 @@ lint, read a playbook against the real `ansible.cfg` — and are not wired to th
 | `in-workspace` | on PATH: run a command in `/workspace`, so no client names the path |
 | `gh`, `git-credential-hub` | the `gh` wrapper and git's credential helper, both reading the hub's token |
 | `sshd_config` / `ssh_config` | the one in-container daemon config, and the baked half of how a container reaches out |
-| `config.fish`, `screenrc`, `claude-managed-settings.json` | fish's config (a login shell lands in `/workspace`), screen's, and Claude Code's managed settings (agent view off, stable channel) |
+| `config.fish`, `screenrc`, `claude-managed-settings.json` | fish's config (a login shell lands in `/workspace`), screen's, and Claude Code's managed settings (agent view off, stable channel, auto mode as every session's starting permission mode) |
 | `login.sh` | in the image: the interactive login walkthrough, and the clone if start-up could not make it — `make login` |
 | `status.sh` | on the host: the readouts — `make status`, `verify`, `fleet`, `collections`, `boot-log` |
 | `ci/compose.smoke.yaml` | the smoke test's override; never used on zero |
@@ -383,7 +383,7 @@ reconnects by itself.
   their clones into `~/.dd-dev-secrets` and `~/.ds-dev-secrets` in step 2. or3's keys are
   already in `~/.or3-dev-secrets`.
 - **Nothing reads the host clones any more.** Each child builds straight from its repo on
-  GitHub (`main`), with its own Dockerfile, on base `2026.10.29` passed as the `BASE_TAG`
+  GitHub (`main`), with its own Dockerfile, on base `2026.10.29.1` passed as the `BASE_TAG`
   build arg each already takes — so no child repo changes first. or3, being private, is
   fetched over ssh with its deploy key from `~/.or3-dev-secrets`. Once step 1's listing is
   clean, the clones of or3, destiny-director and dossier on zero can be deleted.
@@ -682,6 +682,12 @@ back on means stopping the offloader first. `make verify`'s `agentview` line rep
 switches. The figures are a floor: taken with a dummy API key rather than a login, and the
 binary skips warm spares under ~1 GB free; the re-measure is open in
 [`../plans/claude-sessions.md`](../plans/claude-sessions.md).
+
+**Every session starts in auto mode**, from `permissions.defaultMode` in the same managed
+settings (since base `2026.10.29.1`). It is a starting point, not a lock: Shift+Tab changes
+mode inside a session, and `claude --permission-mode default` starts one that asks for each
+tool call. Because managed settings outrank every settings file, a repo's `.claude/` cannot
+choose a different default. `make verify`'s `permmode` line reads the setting.
 
 **The login is `make login`, once**, kept in the `*-claude` volume. Never copy the phone's
 `credentials.json` in: tried in or3, claude blanked the copy within a second and refreshed

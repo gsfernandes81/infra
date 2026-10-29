@@ -365,6 +365,22 @@ print("managed settings say off" if v is True else
     printf 'agentview : %s; env=%s\n' \
         "${agentview_file:-could not ask the container — see the container line above}" \
         "${agentview_env:-UNSET in this container — the image should set it to 1}"
+    # The starting permission mode every session gets from the same file (base 2026.10.29.1).
+    # Parsed for the reasons above. A default only: Shift+Tab and --permission-mode still win.
+    printf 'permmode  : %s\n' "$(d exec "$CONTAINER" python3 -c '
+import json, sys
+p = "/etc/claude-code/managed-settings.json"
+try:
+    v = (json.load(open(p)).get("permissions") or {}).get("defaultMode")
+except FileNotFoundError:
+    sys.exit("NO " + p)
+except ValueError as e:
+    sys.exit("NOT VALID JSON, so Claude Code ignores the whole file — %s" % e)
+except OSError as e:
+    sys.exit("UNREADABLE — %s" % e)
+print("sessions start in %s mode" % v if v else
+      "NOT SET — sessions start in default mode and ask (a base before 2026.10.29.1)")
+' 2>&1 || true)"
     # The three names claude-sessions (v0.3.8+) sets on every slot's claude so it scrolls in
     # the terminal's own buffer. They come from inside Claude Code's binary, and Claude Code
     # updates itself in a running container — so a rename would leave the variables set,
