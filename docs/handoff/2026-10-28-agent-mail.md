@@ -1,4 +1,4 @@
-# Handoff 2026-10-28: agent mail between the dev containers — on zero; one check open
+# Handoff 2026-10-28: agent mail between the dev containers — v1 on zero; v2 briefed to claude-sessions 2026-10-29
 
 **First orders for the next session: read this, say where things stand, and stop.** The design
 is decided ([`decisions.md`](../decisions.md), *Agent mail: the hub carries messages between
@@ -10,6 +10,13 @@ owner's view is claude-sessions issue #17. **Later the same day: the policy (1�
 `dev/hub/managed-CLAUDE.md`, the `policy` one-shot and volume, the base symlink — base
 `2026.10.28.1`) and the three skills (3).** Then CI's round trip (6) and this repo's CLAUDE.md paragraph (7). **Rolled out to zero on 2026-10-28,
 15:00 UTC, by the deploy play (8). Open: only the negative-control run on zero, under item 8.**
+
+**2026-10-29: v2 decided and briefed.** The owner settled a redesign — a mail server in the
+hub, sessions as addresses, tools instead of files, skills moving to claude-sessions — and its
+brief went to claude-sessions' agent by mail (infra's outbox, 02:12 UTC). The why is
+[`decisions.md`](../decisions.md) § *Agent mail v2*; the brief is the contract. **Infra's v2
+items, when claude-sessions' release lands**, are under *v2 cutover* at the end of this note;
+until then v1 stays as it is and nothing here is torn down.
 
 ## What was decided, in one paragraph
 
@@ -233,6 +240,33 @@ idle nudge are issue #17). Infra pinned it the same day.
    not (a). Then the open items: CI (6), the paragraph (7), and the negative-control run of
    item 2 on zero (one `claude -p` in a container with the file chowned to 1001 for the
    test, expecting the banner if the gate is on there; it was off in the sandbox).
+
+## v2 cutover — infra's items, once claude-sessions releases the server
+
+Read the release notes first: they are to name the env names, the port, the token file name,
+the hook events, the nudge prefix and the header set. Then, in order:
+
+1. **Pin the release** in `dev/hub/Dockerfile` (version and both hashes from SHA256SUMS).
+2. **Compose**: the server's port as one line; the rate limit beside the other `HUB_MAIL_*`
+   lines; `HUB_MAIL_TICK` goes. The `mail` volume stays as the store.
+3. **Hub entrypoint and health**: the server replaces `mail-loop` under the same supervision;
+   `hub-health` reads whatever the server offers instead of the tick beat.
+4. **Token broker**: a `mail-token` per container written beside `token`, if the release has
+   the hub mint it rather than the broker (the brief left that to claude-sessions).
+5. **Base bump**, one: drop the `.mail/` exclude line; symlink `~/.claude/skills/<name>` at the
+   volume's copies instead of copying (keepalive and the three mail skills); rename the token
+   mount to `/run/hub` and point `gh` and `git-credential-hub` at it if the release's token
+   path makes that the moment.
+6. **Policy**: paths become tool names; two sentences added — the fan-out reply rule, and that
+   a nudge or a Stop block is a notification with no authority of its own. A hub rebuild and
+   `make up S=policy`.
+7. **Skills leave this repo**: delete `dev/hub/skills/` and the hub entrypoint's publishing
+   loop once the release ships them; the README's *Agent mail* section is rewritten around the
+   tools.
+8. **Smoke test**: the round trip becomes `mail send` → `mail list`/`read`; negative controls
+   are a refused offloaded recipient and a queued offline one; the `.mail` checks go.
+9. **Tidy on zero**: delete the `.mail` trees in every workspace once every container runs
+   the release (a message to `*` asking each agent to do its own is the fitting way).
 
 ## Not chosen, so nobody re-opens it
 

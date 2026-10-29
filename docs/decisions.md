@@ -1570,11 +1570,15 @@ build list and the split with claude-sessions.
 - **Inbox and outbox under `/workspace/.mail`**, in the workspace volume, so they survive a
   recreate; kept out of every commit by the base entrypoint ensuring `.mail/` in the clone's
   `.git/info/exclude`, so no repo's `.gitignore` changes and no agent has to remember.
-- **The skills (`mail-send`, `mail-read`, `mail-reply`) are infra's**, shipped through the hub
+- ~~**The skills (`mail-send`, `mail-read`, `mail-reply`) are infra's**~~ ⚠︎SUPERSEDED 2026-10-29:
+  they move to claude-sessions with v2, because they say when to run tools that repo owns and
+  must move with its flags; infra keeps the policy. Shipped through the hub
   volume like the keepalive skill; the loop, the hook, the read cursor, idle notification and
   the owner's view of traffic are claude-sessions', the last deferred to an open issue there.
-- **No HTTP API on the hub.** It would be a second door on the dev network with its own auth,
-  or trust in a bridge address, weaker than the ssh identity the hub already holds.
+- ~~**No HTTP API on the hub.** It would be a second door on the dev network with its own auth,
+  or trust in a bridge address, weaker than the ssh identity the hub already holds.~~ ⚠︎SUPERSEDED
+  2026-10-29 by *Agent mail v2*, below: the per-container token the hub already delivers is the
+  auth, and the sprawl of the files design outweighed the listener.
 - **The hub side is claude-sessions 0.8.0, pinned 2026-10-28**, the day it was released: its
   `mail-loop` runs in the hub, supervised and health-checked like the token loop, the `mail`
   volume is the hub's alone, and the limits are the release's defaults as `HUB_MAIL_*` lines in
@@ -1609,6 +1613,49 @@ build list and the split with claude-sessions.
   else, so the text changes with a hub rebuild. The sandbox test (handoff item 2, *Results*)
   found the unverified gate off in 2.1.311 and a dangling link harmless; the root-owned chain
   is kept because it costs nothing and the gate reads organization state the sandbox had none of.
+
+## Agent mail v2: a mail server in the hub, sessions as addresses, tools instead of files
+
+**Decided 2026-10-29** by the owner over two sessions with infra's agent; **briefed to
+claude-sessions by mail the same day, nothing built**. The brief is the contract; this row is
+the why. Supersedes the two struck bullets in *Agent mail* above; the rest of that section
+(files carried by the hub, the managed policy, root-owned via the one-shot) stands.
+
+- **Why v1 goes.** The files design worked but had grown one small piece in each of a dozen
+  places — an exclude line in the base, a `.mail` tree in every workspace, a cursor per reader,
+  a directory file, hooks that knew all of them — and it had no per-session identity, so
+  several sessions in one container shared an inbox and the duplicate-action problem wanted a
+  claims scheme. The owner refused that as complexity retrofitted onto a simple system. One
+  centralised piece instead: a mail server in the hub.
+- **Auth is the token the hub already delivers.** The earlier "second door" objection assumed a
+  new credential class; the per-container GitHub token mount is already a hub-minted secret in
+  every container, and a `mail-token` beside it (same directory, `/run/github`, until a base
+  bump renames the mount) grants only the mail API. The slot is self-declared from
+  `CLAUDE_SESSIONS_SLOT` and validated by the hub against the registry it already reads; one
+  repo's slots are one trust domain. Every request authenticated from day one, because the
+  owner intends Cloudflare Access in front later for owner mail, as a second layer.
+- **A session's address is its slot**, `repo/claude-2`, which already survives offload and dies
+  on close; `repo/*` is every live session of a repo, `*` every live session on the hub, a bare
+  `repo` is `repo/*`. **Offloaded is refused** at send time; **offline queues with a warning**
+  to the sender. From is generated and validated, never typed. Headers are RFC-822 shape. A
+  reply is wanted for one address and not for fan-out unless asked. 60 messages per half hour
+  per slot.
+- **Tools, not hoops**: `mail who/send/list/read/reply/wait/status` as subcommands of the
+  binary every container already runs from the hub's volume, so a hub rebuild updates them
+  fleet-wide with no container restart. `mail wait` holds a keepalive and is how an agent gets
+  an answer in the same turn.
+- **Notification**: hooks on start, prompt and Stop (block once per unread message), a
+  fixed-prefix nudge typed into an idle DETACHED slot and tagged by the hook as the hub's, no
+  status-line count (owner), no PostToolUse. Claude Code's own daemon messaging would be
+  better and is off on this fleet by the agent-view setting, a memory decision; the nudge is
+  one function so it can be swapped.
+- **Hooks fail fast** — under a second, silently — because they run on every prompt on the
+  fleet and the hub being down must never stall them.
+- **Skills move to claude-sessions**; infra's base symlinks `~/.claude/skills/<name>` at the
+  volume's copy instead of copying, so wording lands without restarts. Infra keeps the policy.
+- **Owner mail is deferred** (the owner has a remote-use detail to add); when it comes it is
+  high priority and outside the agent-mail policy, so the server leaves room for a From only
+  it can produce.
 
 ## The lesson worth keeping
 
