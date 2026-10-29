@@ -4,7 +4,7 @@ services:
     # Pinned by digest to the build running on 2026-10-25, which no version tag points at
     # any more (`latest` has moved on twice), so `latest` here is a label and the digest is
     # the image. Moving to a version tag is a deliberate bump of the VPN container.
-    image: qmcgaw/gluetun:latest@sha256:a70a461a9c86966193f543009cfedf57e51d2f4880f0d834d7b3c0091c9250d1
+    image: qmcgaw/gluetun:latest@sha256:4af0c804003481e100180e1f8d4d5e9c48163fedc0f88d061881b615aef9d183
     restart: always
     cap_add:
       - NET_ADMIN
