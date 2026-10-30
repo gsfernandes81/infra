@@ -998,31 +998,30 @@ A second agent harness beside Claude Code in every container, the owner's call (
 
 The gate is `@gotgenes/pi-permission-system`, and its judge is `pi-permission-classifier`,
 which asks the session's own model. Since base `2026.10.30.1` it works like Claude Code's auto
-mode, by the owner's call: the container is the boundary, so the gate lets the agent work and
-asks the owner as little as it can.
+mode, by the owner's call: the container is the boundary, and no call waits on a prompt.
 
 - **Allowed outright:** reading any file; writing or editing any file under `/workspace`;
   `claude-sessions mail` and `claude-sessions keepalive`, which the policy and the keepalive
   skill run each turn.
-- **The judge decides:** every other shell command, every write outside `/workspace`, and
-  every other tool (subagents, web access). It answers allow or deny. When it cannot tell, it
-  denies with "could not be confirmed safe", and the agent takes another route. It does not
-  ask the owner.
+- **Judged:** every other shell command, every write outside `/workspace`, and every other
+  tool (subagents, web access). The judge answers allow or deny, never "ask the owner". When
+  it cannot tell, it denies with "could not be confirmed safe". When it cannot answer at all
+  (a timeout, a model error, no key), it denies at once with a reason that names the failure
+  and ends "Retry later or take another route". The agent reads the reason and carries on.
 - **Always denied, before the judge sees it:** `git push` with `--force`,
   `--force-with-lease`, `-f` or a `+` refspec, and `git push --mirror`. Under the gate,
   `cc-safety-net` blocks `rm -rf` on dangerous targets, `git reset --hard`, force pushes,
   `curl | sh` and reads of SSH keys and `.env` files, however the command is wrapped.
-- **When the judge fails** (a timeout, a model error, no key), the call goes to the owner as a
-  prompt in the slot, never to an allow: neither package can be set to allow on a failure. A
-  prompt nobody answers in five minutes is a deny, and the agent is told nobody answered.
+- **The judge does not read infra's `CLAUDE.md`:** it is over the judge's 16 KiB cap for
+  guidance files, so the judge decides on its own built-in rubric.
 - **To see what it decided**, read the gate's review log, one JSON line per event:
   `~/.local/share/pi/extensions/pi-permission-system/logs/pi-permission-system-permission-review.jsonl`.
   A judge's answer is a `classifier.decision` line with its `verdict`; a rule's deny is a
   `permission_request.blocked` line naming the rule.
 - **To change it**, edit `dev/pi-permission-system.json` or `dev/pi-permission-classifier.json`
-  and rebuild the base. The entrypoint copies both over the volume's at every start, so an
-  edit on the volume, or a `/permission-model` choice inside pi, lasts until the container
-  next starts.
+  and rebuild the base. The seed wins: the entrypoint copies both over the volume's at every
+  start, so an edit on the volume, or a `/permission-model` choice inside pi, lasts until the
+  container next starts.
 
 ## Secrets
 

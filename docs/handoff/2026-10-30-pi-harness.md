@@ -11,7 +11,9 @@ Built on 2026-10-30 and green in the smoke test, on GitHub's amd64 runner only. 
 and links the policy, the four skills and the claude-sessions extension. The hub pins
 claude-sessions 0.10.0, which starts a pi slot with `p`, and copies `openrouter-key` from
 `$HUB_SECRETS` into every container. The managed policy tells a pi session how to read its
-mail. The reasons are the pi row in [`decisions.md`](../decisions.md); how pi is used is
+mail. From base `2026.10.30.1` pi's gate allows reads and edits in `/workspace`, has the judge
+answer everything else allow or deny with no prompt, denies force pushes by rule, and the
+footer's welcome card is off. The reasons are the pi row in [`decisions.md`](../decisions.md); how pi is used is
 [`dev/README.md`](../../dev/README.md) § *pi*. The plan, `plans/pi-harness.md`, is deleted:
 both repos built their side.
 
@@ -30,7 +32,7 @@ The owner's, in this order, each on zero:
    read -s -P 'OpenRouter key: ' k; and printf '%s\n' $k > ~/.dev-secrets/openrouter-key; set -e k
    ```
 
-2. **The deploy**, once this is on `main` and `dev-base.yml` has published `2026.10.30`: the
+2. **The deploy**, once this is on `main` and `dev-base.yml` has published `2026.10.30.1`: the
    recreate play from the phone, as [`dev/README.md`](../../dev/README.md) § *Four copies of
    this, now one base* gives it (`make up` on zero is the break glass). It rebuilds the hub
    with claude-sessions 0.10.0 and the new policy, and recreates every container on the new
