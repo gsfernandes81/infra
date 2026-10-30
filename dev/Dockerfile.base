@@ -5,7 +5,7 @@
 # This is dev/README.md § *Four copies of this* built: the ~700 lines that dd-dev,
 # ds-dev, or3-dev and infra-dev agreed on, in one place. Debian trixie slim (glibc 2.41
 # since 2026-09-21; bookworm and its 2.36 before that), Node + Claude Code (with the agent
-# view off by baked managed settings), gh, zmx (what a slot lives in), pi (on trial), Helix
+# view off by baked managed settings), gh, zmx (what a slot lives in), pi, Helix
 # and the language servers it and Claude Code use, the everyday CLI tools (ripgrep, fd, jq,
 # yq …), uv with ruff and ty, sshd, fish, the dev user, the entrypoint and every dotfile, and
 # the two mountpoints claude-sessions arrives through from the hub. A repo's own dev/Dockerfile becomes a FROM line
@@ -369,12 +369,12 @@ RUN npm install -g \
 # pinned there by digest. An inert 37 MB binary on a deprecation clock was all that was
 # left of it here, so it went too.
 
-# ── pi: a second agent harness, on trial, on its way to a slot (owner, 2026-10-30) ─────
-# earendil-works/pi (pi.dev), reached the plain way for now: `ssh -t <c> in-workspace`,
-# then `pi`. Its model is qwen/qwen3.8-flash over OpenRouter, with the key read from the file
-# the hub mounts at /run/github/openrouter-key and never from the environment (pi-models.json).
-# The claude-sessions menu learns pi from a release of its own; until then pi has no slot and a
-# dropped link ends it. plans/pi-harness.md is the design.
+# ── pi: a second agent harness, run as a slot by claude-sessions (owner, 2026-10-30) ──
+# earendil-works/pi (pi.dev). The menu starts it with `p` (claude-sessions 0.10.0), and the
+# entrypoint links the extension that binds the slot. Its model is qwen/qwen3.8-flash over
+# OpenRouter, with the key read from the file the hub mounts at /run/github/openrouter-key and
+# never from the environment (pi-models.json). dev/README.md § pi is how it is used, and its
+# row in docs/decisions.md is why it is built this way.
 #
 # VERSION-PINNED FROM npm INTO /opt/npm-global, beside the language servers, and bumped by a
 # rebuild. PI_SKIP_VERSION_CHECK stops it asking pi.dev for a newer one at every start.

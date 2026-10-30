@@ -187,8 +187,8 @@ mockups 12 to 15, and binding as the rest of that file is:
   open`, `not answering` — and under each, on `├─` and `└─`, its loaded sessions. A container
   with a session waiting for you is marked with an amber `!`; one with something unread is
   bold. Marked, never moved. `Enter` on a session opens it and `c` offloads it; `Enter` on a
-  container opens that container's screen; `n` and `s` act in the container of the cursor's
-  row.
+  container opens that container's screen; `n`, `p` and `s` act in the container of the
+  cursor's row.
 - **Inside a container: Loaded, Offloaded, and Archived**, which holds everything closed,
   starts folded, and opens with `Enter` or a click on its heading — the heading says `Enter
   shows` or `Enter hides`. A session waiting for you is an amber `!` on its row rather than a
@@ -594,35 +594,6 @@ for its own builds (dd and ds add `build-essential`). Every binary that runs as 
 downloads is hash-pinned per arch in `Dockerfile.base`; the npm and PyPI ones are
 version-pinned, as Claude Code is.
 
-## Pi, on trial
-
-A second agent harness in the base, the owner's call (its row in
-[`../docs/decisions.md`](../docs/decisions.md), its layer in `Dockerfile.base`). `ssh dev`,
-`s` on a container, then `pi`. Its provider is set in the image. The two harnesses on trial
-before it were dropped on 2026-10-30, when pi was chosen; their rows in `decisions.md` keep the
-record.
-
-- **Pi** is pinned at `1.4.0` and on its way to a slot of its own
-  ([`../plans/pi-harness.md`](../plans/pi-harness.md)); the menu is claude-sessions' work. Its
-  model is `qwen/qwen3.8-flash` over OpenRouter, with the key read from
-  `/run/github/openrouter-key`, which the hub copies at its start, beside each container's
-  mail-token, from `openrouter-key` in `$HUB_SECRETS` (put there by hand). Without that file pi
-  has no key. Pi reads the key once per process, so a key added while a pi runs takes effect at
-  that pi's next start. Its state is in `~/.local/share/pi`, on the volume, and the
-  entrypoint re-seeds it at every start: the image's package list always, its other settings
-  and configs only where the volume has none. Its
-  packages are baked into the image, each pinned: `@gotgenes/pi-permission-system` and
-  `pi-permission-classifier`, `cc-safety-net`, `pi-subagents`, `pi-web-access`, `pi-lens`,
-  `@nredd/pi-dev-tools`, `pi-powerline-footer` and `pi-themes`. The gate asks before every edit
-  and every shell command, the session's model answers what it can, and it denies any path
-  outside `/workspace`. Pi ignores a repo's `.pi/` directory, which could otherwise replace the
-  gate. Install telemetry is off and pi does not check for updates. `make verify`'s `pi` line
-  is its version, `pi-ext` says whether the claude-sessions extension is linked (without it the
-  menu and the offloader never see a pi slot), and `pi-tui` whether pi still takes the
-  `--tui-mode` flag every pi slot is started with.
-- **No slot yet**: pi runs in no zmx session, so a dropped connection ends it, and the menu
-  and offloader know nothing about it.
-
 ## How a container is used
 
 **You `ssh dev` and pick a session from the menu** — from Termux on the phone, or from a
@@ -906,8 +877,8 @@ host's load, and the pool's RAM once the pool is mounted into the containers
 **The menu is the hub's** (*The menu, two levels deep*), but each container's rows come from
 that container: the hub runs `claude-sessions agent` there over ssh, and `agent exec` for the
 one child an action needs at your terminal, so every lock and launch is decided inside the
-container. `Enter` attaches or resumes, `n` starts a slot in `/workspace`, `c` moves a
-session one step down without asking (a loaded one is offloaded, an offloaded one archived;
+container. `Enter` attaches or resumes, `n` starts a slot in `/workspace` and `p` a pi slot
+(*pi*), `c` moves a session one step down without asking (a loaded one is offloaded, an offloaded one archived;
 since 0.6.0), `s` is a shell, `?` the keys, `q` quits, `Esc` goes back. A resume runs `claude --resume <id>` in a
 new slot from the directory Claude Code filed the conversation under, refused (`which is
 gone`) when that directory no longer exists. **The archive is the menu's only**: Claude
@@ -984,6 +955,43 @@ Overrides, neither normally worth setting: `CLAUDE_SESSIONS_DIR` (the registry) 
 `ZMX_DIR` — each must be the same for every login and the hub's pass, so set one in compose or
 not at all. **Never set `ZMX_SESSION_PREFIX`**: slot names would disagree. A source checkout of
 claude-sessions goes at `~/.local/share/src/claude-sessions`, never at the registry's path.
+
+## pi
+
+A second agent harness beside Claude Code in every container, the owner's call (its row in
+[`../docs/decisions.md`](../docs/decisions.md), its layer in `Dockerfile.base`). Its model is
+`qwen/qwen3.8-flash` over OpenRouter. The two harnesses on trial before it were dropped on
+2026-10-30, when pi was chosen; their rows in `decisions.md` keep the record.
+
+- **A pi slot comes from the menu** (*claude-sessions*, from 0.10.0). `p` starts one in
+  `/workspace`, in the container of the cursor's row, as `n` starts a claude. Its row carries
+  a dim `pi: ` before the title; the slot is `pi-<n>` and its mail address `<repo>/pi-<n>`. It
+  is offloaded by the same rule as a claude slot, `Enter` brings it back, and a closed one is
+  listed under Archived with claude's. A `pi` typed in the `s` shell runs in no slot: a
+  dropped connection ends it, and the menu and the offloader never see it.
+- **The extension binds the slot.** claude-sessions learns a pi slot's process and events
+  from `extensions/claude-sessions.js`, which the entrypoint links into pi's agent dir from
+  the hub's volume at every start. A pi slot without that link still starts, lists and
+  resumes, but is never bound, so it is never offloaded. `make verify`'s `pi-ext:` line says
+  whether it is linked, `pi-tui:` whether pi still takes the `--tui-mode` flag every pi slot
+  is started with, and `pi` is its version.
+- **The key** is `openrouter-key` in `$HUB_SECRETS`, put there by hand. The hub copies it into
+  each container's `/run/github`, beside the mail-token, once each time the hub starts, and pi
+  reads `/run/github/openrouter-key` once per process. So a key added to `$HUB_SECRETS`
+  reaches the containers when the hub next starts (`make restart C=hub`; `make up` restarts
+  the hub only when its image or config changed), and a running pi reads it at its next
+  start. Without the file pi has no key, and says so at the first prompt.
+- **Mail**: pi has no hook, so nothing names new mail at its next prompt. The managed policy
+  has a pi session run `claude-sessions mail list` at the start of a turn.
+- **Pinned** at `1.4.0`, and pi does not check for updates; a bump is a rebuild. Its state is
+  in `~/.local/share/pi`, on the volume, and the entrypoint re-seeds it at every start: the
+  image's package list always, its other settings and configs only where the volume has
+  none. Its packages are baked into the image, each pinned: `@gotgenes/pi-permission-system`
+  and `pi-permission-classifier`, `cc-safety-net`, `pi-subagents`, `pi-web-access`,
+  `pi-lens`, `@nredd/pi-dev-tools`, `pi-powerline-footer` and `pi-themes`. The gate asks
+  before every edit and every shell command, the session's model answers what it can, and it
+  denies any path outside `/workspace`. Pi ignores a repo's `.pi/` directory, which could
+  otherwise replace the gate. Install telemetry is off.
 
 ## Secrets
 
