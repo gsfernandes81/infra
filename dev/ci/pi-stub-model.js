@@ -11,7 +11,9 @@
 // with one bash call, $PI_SMOKE_COMMAND; anything else (the tool result coming back, or the
 // permission judge asking with its own single tool) is answered "done". So the judge gets no
 // verdict from it, which the judge counts as uncertain. $PI_SMOKE_TOOL and $PI_SMOKE_ARGS (a
-// JSON object) make the one call to another tool instead, `write` for the edit check.
+// JSON object) make the one call to another tool instead, `write` for the edit check. With
+// $PI_SMOKE_JUDGE=fail, the judge's request (the one offering `report_verdict`) gets an HTTP 500
+// instead, which the judge counts as a failure rather than an answer.
 import http from "node:http";
 
 export default async function (pi) {
@@ -31,6 +33,11 @@ export default async function (pi) {
         messages = j.messages || [];
         tools = (j.tools || []).map((t) => t.function && t.function.name);
       } catch {}
+      if (process.env.PI_SMOKE_JUDGE === "fail" && tools.includes("report_verdict")) {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "smoke: the judge's model is down" } }));
+        return;
+      }
       const done = messages.some((m) => m.role === "tool") || !tools.includes(tool);
       const delta = done
         ? { role: "assistant", content: "done" }

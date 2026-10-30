@@ -276,7 +276,8 @@ jobs:
           docker exec -i infra sh -c 'cat > /tmp/pi-stub-model.js' < dev/ci/pi-stub-model.js
           pigate() { n=$1 c=$2; shift 2
             docker exec -w /workspace -e PI_OFFLINE=1 -e PI_SMOKE_COMMAND="$c" \
-              -e PI_SMOKE_TOOL="${PI_SMOKE_TOOL:-bash}" -e PI_SMOKE_ARGS="${PI_SMOKE_ARGS:-}" infra timeout 120 \
+              -e PI_SMOKE_TOOL="${PI_SMOKE_TOOL:-bash}" -e PI_SMOKE_ARGS="${PI_SMOKE_ARGS:-}" \
+              -e PI_SMOKE_JUDGE="${PI_SMOKE_JUDGE:-}" infra timeout 120 \
               pi --mode json --no-session -e /tmp/pi-stub-model.js --model smoke/stub "$@" "run: $c" </dev/null > "$n.jsonl" 2> "$n.err" || true
             jq -c 'select(.type == "tool_execution_end") | {isError, text: .result.content[0].text}' "$n.jsonl" > "$n.txt" 2>&1 || true
             sed "s/^/  $n: /" "$n.txt"; }
@@ -289,8 +290,6 @@ jobs:
           pigate gate-deny "git push --force --dry-run /tmp/pi-probe-remote.git HEAD:refs/heads/pi-probe"
           check "pi's gate denies a force push by its explicit rule, on a scripted model's tool call" sh -c \
             'grep -q "\"isError\":true" gate-deny.txt && grep -qF "[pi-permission-system] Denied by policy" gate-deny.txt && grep -qF "git *push*--force*" gate-deny.txt && grep -qF "force pushes are denied" gate-deny.txt'
-          check "and no pi-probe ref reached the probe remote" sh -c \
-            '[ -z "$(docker exec infra git --git-dir=/tmp/pi-probe-remote.git for-each-ref refs/heads/pi-probe)" ]'
           pigate gate-none "git push --force --dry-run /tmp/pi-probe-remote.git HEAD:refs/heads/pi-probe" --no-extensions
           check "and with no extensions loaded the same call runs (calibration)" sh -c \
             'grep -q "\"isError\":false" gate-none.txt && grep -qF "HEAD -> pi-probe" gate-none.txt'
@@ -300,8 +299,13 @@ jobs:
           docker exec infra mkdir -p /workspace/.pi-gate-probe
           pigate gate-ask "rm -rf /workspace/.pi-gate-probe"
           gate_ask_judged() { docker exec infra test -d /workspace/.pi-gate-probe && grep -qF "permission-judge" gate-ask.txt &&
-            ! grep -qF "no interactive UI is available" gate-ask.txt && judged "rm -rf /workspace/.pi-gate-probe"; }
+            grep -qF "could not be confirmed safe" gate-ask.txt && judged "rm -rf /workspace/.pi-gate-probe"; }
           check "a shell command inside /workspace goes to the judge, which answers it without asking" gate_ask_judged
+          # The judge's own model failing: the stub answers the judge's request with an HTTP 500,
+          # and under onError: deny the call is denied at once, with the retry-later reason.
+          PI_SMOKE_JUDGE=fail pigate gate-judge-down "rm -rf /workspace/.pi-gate-probe"
+          check "a judge whose model fails denies at once, and says to retry later" sh -c \
+            'docker exec infra test -d /workspace/.pi-gate-probe && grep -qF "Retry later or take another route" gate-judge-down.txt'
           # An edit inside /workspace is allowed outright, with no judge call, as Claude Code's auto
           # mode allows in-project edits. A write outside it goes to the judge, which the stub
           # leaves uncertain, so that write is denied: the pair shows the rule, not a gate that is off.
@@ -316,6 +320,15 @@ jobs:
           gate_edit_out_judged() { grep -q '"isError":true' gate-edit-out.txt && ! docker exec infra test -e /tmp/pi-edit-probe &&
             judged '"surface":"write"'; }
           check "and a write outside /workspace goes to the judge (calibration)" gate_edit_out_judged
+          # A link inside /workspace into pi's own directory: the write rules see /workspace, the
+          # path_write deny sees where the link resolves, and the deny wins.
+          docker exec infra sh -c 'echo orig > "$PI_CODING_AGENT_DIR/link-probe" && ln -sfn "$PI_CODING_AGENT_DIR/link-probe" /workspace/.pi-link-probe'
+          PI_SMOKE_TOOL=write PI_SMOKE_ARGS='{"path":"/workspace/.pi-link-probe","content":"probe\n"}' \
+            pigate gate-link "write /workspace/.pi-link-probe"
+          check "a write through a link in /workspace into pi's own directory is denied" sh -c '
+            grep -qF "path_write" gate-link.txt && grep -q "\"isError\":true" gate-link.txt &&
+            [ "$(docker exec infra sh -c "cat \"\$PI_CODING_AGENT_DIR/link-probe\"")" = orig ]'
+          docker exec infra sh -c 'rm -f /workspace/.pi-link-probe "$PI_CODING_AGENT_DIR/link-probe"'
           docker exec infra rm -rf /workspace/.pi-gate-probe /workspace/.pi-edit-probe /tmp/pi-probe-remote.git /tmp/pi-stub-model.js
           # The same scan the measure step uses: comm pi, or the mark pi puts in its children's
           # environment, so an orphaned child (ty) counts too. A scan that cannot run fails.

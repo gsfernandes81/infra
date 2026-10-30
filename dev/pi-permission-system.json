@@ -6,13 +6,14 @@
   "permission": {
     "*": "ask",
     "path": "allow",
+    "path_write": { "*": "allow", "/home/dev/.local/share/pi/*": "deny" },
     "external_directory": "allow",
     "read": "allow",
     "grep": "allow",
     "find": "allow",
     "ls": "allow",
-    "write": { "*": "ask", "/workspace/*": "allow" },
-    "edit": { "*": "ask", "/workspace/*": "allow" },
+    "write": { "*": "ask", "/workspace/*": "allow", "/workspace/*.git/*": "ask" },
+    "edit": { "*": "ask", "/workspace/*": "allow", "/workspace/*.git/*": "ask" },
     "bash": {
       "*": "ask",
       "claude-sessions mail *": "allow",

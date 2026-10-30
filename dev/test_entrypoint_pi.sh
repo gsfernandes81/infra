@@ -39,7 +39,7 @@ mkdir -p "$SEED/extensions/pi-permission-system" "$SEED/extensions/pi-permission
 cat > "$SEED/settings.json" <<'JSON'
 {"defaultProvider": "openrouter", "defaultModel": "qwen/qwen3.8-flash",
  "enableInstallTelemetry": false, "theme": "dark",
- "powerline": {"preset": "ascii", "welcome": false},
+ "powerline": {"preset": "ascii", "welcome": false}, "defaultProjectTrust": "never",
  "packages": [{"source": "npm:pi-permission-classifier@1.0.0"},
               {"source": "npm:@gotgenes/pi-permission-system@2.0.0"},
               {"source": "npm:cc-safety-net@0.3.0"}]}
@@ -73,6 +73,14 @@ pi_seed_settings "$SEED/settings.json" "$d/settings.json" > "$T/out" 2>&1
 check "a volume's own powerline is replaced with the seed's" json_true 'r["powerline"] == s["powerline"]' "$SEED/settings.json" "$d/settings.json"
 check "and the volume's theme beside it is kept" json_true 'r["theme"] == "solarized"' "$SEED/settings.json" "$d/settings.json"
 check "and the replacement is said" grep -q '^\[entrypoint\] pi settings.json: updated from the image: .*powerline restored' "$T/out"
+
+# Project trust is infra's too: a trusted repo's .pi/ could carry a gate config that loosens
+# this one, so a volume that says "always" is put back to the seed's "never".
+d="$T/s2c"; mkdir -p "$d"
+echo '{"theme":"solarized","defaultProjectTrust":"always"}' > "$d/settings.json"
+pi_seed_settings "$SEED/settings.json" "$d/settings.json" > "$T/out" 2>&1
+check "a volume's defaultProjectTrust is replaced with the seed's" json_true 'r["defaultProjectTrust"] == "never"' "$SEED/settings.json" "$d/settings.json"
+check "and the theme beside it is kept" json_true 'r["theme"] == "solarized"' "$SEED/settings.json" "$d/settings.json"
 
 d="$T/s3"; mkdir -p "$d"
 echo '{"theme": "solarized",' > "$d/settings.json"
@@ -108,6 +116,13 @@ check "an edited gate config is replaced with the seed's" cmp -s "$SEED/extensio
 check "an edited classifier config is replaced with the seed's" cmp -s "$SEED/extensions/pi-permission-classifier/config.json" "$PI/extensions/pi-permission-classifier/config.json"
 check "the replaced gate config is mode 600" test "$(stat -c %a "$PI/extensions/pi-permission-system/config.json")" = 600
 check "and the replacement is said" grep -q '^\[entrypoint\] pi extensions/pi-permission-system/config.json: restored from the image$' "$T/out"
+# A directory planted at the temp path would make cp write INTO it and the rename fail.
+echo '{"bash": "allow"}' > "$PI/extensions/pi-permission-system/config.json"
+mkdir -p "$PI/extensions/pi-permission-system/config.json.tmp/x"
+pi_seed "$SEED" "$PI" > "$T/out" 2>&1
+check "a directory at the temp path does not block the gate config's restore" \
+    cmp -s "$SEED/extensions/pi-permission-system/config.json" "$PI/extensions/pi-permission-system/config.json"
+check "and nothing is left at the temp path" test ! -e "$PI/extensions/pi-permission-system/config.json.tmp"
 pi_seed "$SEED" "$PI" > "$T/out" 2>&1
 check "a gate config that matches the seed is left alone, and said to be current" \
     grep -q '^\[entrypoint\] pi extensions/pi-permission-system/config.json: current$' "$T/out"

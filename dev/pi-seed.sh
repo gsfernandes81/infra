@@ -16,13 +16,17 @@
 # removes the link, never what it points at.
 
 # pi_seed_settings <seed.json> <target.json>
-# Two seed keys win every time. `packages` is the list of what the image installed, and a
+# Three seed keys win every time. `packages` is the list of what the image installed, and a
 # package the volume's list names but the image lacks, or the reverse, is a pi that will not
 # start the way the image meant (the gate is one of them). `powerline` is the footer's, where
 # infra turns the welcome card off: the card is a prompt at every start, and a fresh slot reads
-# as waiting on the owner while it is up. Every other seed key is written only where the volume
-# has none, so the owner's theme or model survives a restart. A target that is not a JSON
-# object is replaced with the seed and said, as one line. Written to a temp file opened
+# as waiting on the owner while it is up. `defaultProjectTrust` is `never` because a trusted
+# repo's .pi/ could carry a gate config that loosens infra's, so a volume that says otherwise is
+# put back. (A decision saved with /trust, in trust.json, still beats the default; the gate
+# denies writes under the agent dir wherever it can resolve the path, and judges the rest.) Every
+# other seed key is written only where the volume has none, so the owner's theme or model
+# survives a restart. A target that is not a JSON object is replaced with the seed and said,
+# as one line. Written to a temp file opened
 # exclusively and renamed over the target, at 0600, so neither a crash nor a link at either
 # path is written through.
 pi_seed_settings() {
@@ -45,7 +49,11 @@ except FileNotFoundError:
 except (ValueError, OSError):
     cfg, note = {}, "was not valid JSON — replaced with the image's seed"
 
-SEED_WINS = {"packages": "package list restored", "powerline": "powerline restored"}
+SEED_WINS = {
+    "packages": "package list restored",
+    "powerline": "powerline restored",
+    "defaultProjectTrust": "defaultProjectTrust restored",
+}
 changed = []
 for key, value in seed.items():
     if key in SEED_WINS:
@@ -81,9 +89,10 @@ PY
 
 # pi_copy <seed file> <target file>
 # Through a temp file and a rename, the temp path cleared first, as the .claude.json block in
-# entrypoint.sh does and for its reason: a redirection follows a link.
+# entrypoint.sh does and for its reason: a redirection follows a link. `rm -rf`, because a
+# directory at the temp path would have cp write into it and the rename fail.
 pi_copy() {
-    mkdir -p "$(dirname "$2")" && rm -f "$2.tmp" && cp "$1" "$2.tmp" \
+    mkdir -p "$(dirname "$2")" && rm -rf "$2.tmp" && cp "$1" "$2.tmp" \
         && chmod 600 "$2.tmp" && mv -fT "$2.tmp" "$2"
 }
 
