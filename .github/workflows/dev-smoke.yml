@@ -579,7 +579,10 @@ jobs:
           docker exec -d -w /workspace -e PI_OFFLINE=1 -e CLAUDE_SESSIONS_SLOT=pi-2 infra sh -c \
             'echo $$ > /tmp/pi-rpc.pid; rm -f /tmp/pi-rpc.in; mkfifo /tmp/pi-rpc.in; exec 3<>/tmp/pi-rpc.in; exec pi --mode rpc --no-session <&3 3<&- >/tmp/pi-rpc.log 2>&1'
           pidof_slot() { docker exec infra python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("pid") or "")' "$reg/$1.json" 2>/dev/null || true; }
-          tui=""; for i in $(seq 20); do tui=$(pidof_slot pi-1); [ -n "$tui" ] && break; sleep 1; done
+          # pi loads its nine packages before session_start fires the hook, and on a runner that
+          # took over 20 s with two starting at once (run 41004350726), so the wait is generous.
+          tui=""; for i in $(seq 120); do
+            tui=$(pidof_slot pi-1); [ -n "$tui" ] && ix "test -s $reg/pi-2.json" 2>/dev/null && break; sleep 1; done
           echo "pi-1's pid after ${i}s: ${tui:-none}"
           rpc=$(ix 'cat /tmp/pi-rpc.pid' 2>/dev/null || true)
           ix "cat $reg/pi-1.json" 2>&1 | sed 's/^/  pi-1.json: /' || true
@@ -597,7 +600,7 @@ jobs:
           hz=$(ix 'getconf CLK_TCK')
           ticks() { if [ -n "$1" ]; then ix "awk '{print \$14 + \$15}' /proc/$1/stat" 2>/dev/null || echo 0; else echo 0; fi; }
           rss() { if [ -n "$1" ]; then ix "awk '/^VmRSS:/ {print \$2}' /proc/$1/status" 2>/dev/null || echo 0; else echo 0; fi; }
-          sleep 10
+          sleep 15
           t1=$(ticks "$tui"); q1=$(ticks "$rpc")
           sleep "$win"
           t2=$(ticks "$tui"); q2=$(ticks "$rpc")
@@ -611,14 +614,16 @@ jobs:
             docker exec infra ps -eo pid=,ppid= | awk -v root="$1" '{par[$1] = $2} END {for (p in par) {q = p; while ((q in par) && q != root && q > 1) q = par[q]; if (q == root && p != root) printf "%s ", p}}'; }
           marked() { ix 'for p in /proc/[0-9]*; do tr "\0" "\n" < $p/environ 2>/dev/null | grep -q "^PI_CODING_AGENT=true$" && printf "%s " "${p#/proc/}"; done; true'; }
           dt=$(desc "$tui"); dr=$(desc "$rpc"); m1=$(marked)
-          echo "children of the slot pi: [${dt}], of the rpc pi: [${dr}], marked PI_CODING_AGENT=true: [${m1}]"
+          named() { for p in "$@"; do printf '%s(%s) ' "$p" "$(comm "$p")"; done; }
+          echo "children of the slot pi: [$(named $dt)], of the rpc pi: [$(named $dr)], marked PI_CODING_AGENT=true: [$(named $m1)]"
           ix "kill -TERM $tui $rpc" 2>/dev/null || true
           sleep 3
           left=""
           for p in $tui $rpc $dt $dr; do if ix "kill -0 $p" 2>/dev/null; then left="$left $p"; fi; done
           m2=$(marked)
           zl=$(docker exec infra zmx list --short 2>/dev/null | grep -x pi-1 || true)
-          surv=$(echo "$left $m2 ${zl:+zmx:pi-1}" | xargs)
+          gone=$(echo $left $m2 | tr ' ' '\n' | sort -un | xargs)
+          surv=$(echo "$(named $gone) ${zl:+zmx:pi-1}" | xargs)
           tline="pi-measure: shape=slot comm=$ct cpu_ms=$tcpu rss_kb=$trss window_s=$win children=$(echo $dt | wc -w) survivors=${surv:-none}"
           rline="pi-measure: shape=rpc comm=$cr cpu_ms=$rcpu rss_kb=$rrss window_s=$win children=$(echo $dr | wc -w) survivors=${surv:-none}"
           echo "  $tline"; echo "  $rline"
@@ -628,7 +633,7 @@ jobs:
           check "hook.log gained nothing from the pi hooks ($hook0 bytes before, $hook1 after)" [ "$hook1" = "$hook0" ]
           ix 'tail -n 3 /tmp/pi-1.stderr /tmp/pi-rpc.log' 2>/dev/null | sed 's/^/  pi output: /' || true
           # Whatever is left goes now, so no later step meets it.
-          [ -z "$left" ] || ix "kill -KILL $left" 2>/dev/null || true
+          [ -z "$gone" ] || ix "kill -KILL $gone" 2>/dev/null || true
           [ -z "$zl" ] || docker exec infra zmx kill pi-1 >/dev/null 2>&1 || true
           ix "rm -f /tmp/pi-rpc.in /tmp/pi-rpc.pid /tmp/pi-rpc.log /tmp/pi-1.stderr $reg/pi-1.json $reg/pi-1.lock $reg/pi-2.json $reg/pi-2.lock"
           {
