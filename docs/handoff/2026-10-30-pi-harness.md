@@ -44,11 +44,14 @@ The owner's, in this order, each on zero:
 
 Findings, not started:
 
-5. **A package opens a dialog when pi starts, and it stays open.** A fresh pi slot reads
-   `needs_you`, the amber `!`, before any prompt. Which package is not known yet; the gate and
-   pi-lens are the first suspects. The smoke step prints the slot's stderr whole and the tail
-   of pi's `pi-debug.log`, so a run's log is where to name the package. Infra owes
-   claude-sessions a mail naming it.
+5. **The startup dialog is `pi-powerline-footer`'s welcome card.** Named on 2026-10-30 from
+   the first slot on zero: the footer draws a "Press any key to continue" card with an 18 s
+   countdown at every start (its `welcome.ts`), and that is the prompt that sets `needs_you`,
+   the amber `!`, on a fresh slot; on a terminal it dismisses itself, in the smoke run's rpc
+   pi it stayed open. Turning the card off is a line in the footer's seed config
+   (`dev/pi-powerline-footer.json` or its settings key; the package's README names it), which
+   is a base rebuild and a tag bump, so it rides the next bump (item 7's pin, or sooner if the
+   owner wants it). claude-sessions has the name (mail, 2026-10-30 11:07Z).
 6. **Idle CPU on arm64 is unproven.** The offloader counts an idle slot as quiet only under
    3000 ms of CPU per three-minute window. On amd64, pi alone used about 1.2 s over 180 s
    idle, its `ty` child not counted. If an idle pi slot on zero goes over, it is never
@@ -66,5 +69,13 @@ Findings, not started:
    Nothing to fix in infra: both are pinned inside the packages, so they move when pi and the
    judge release, and the next pi bump should check both.
 
-This note is deleted when all nine are closed. Its reasoning is already in the pi row, so
+10. **`mail-read` and `mail-reply` do not load in pi.** Their `SKILL.md` frontmatter has an
+    unquoted `description:` containing `: `, which Claude Code tolerates and pi's strict YAML
+    parser rejects ("Nested mappings are not allowed in compact mappings"); pi drops both
+    skills and prints the error at start, so a pi session has `keepalive` and `mail-send` and
+    reads mail from the policy's sentence alone. The files are claude-sessions' (shipped by
+    its `install`); its agent was asked on 2026-10-30 to quote the two descriptions for
+    0.10.1. Nothing to change in infra; the pin bump of item 7 brings the fix.
+
+This note is deleted when all ten are closed. Its reasoning is already in the pi row, so
 nothing needs moving first.
