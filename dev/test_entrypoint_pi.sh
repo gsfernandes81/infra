@@ -39,6 +39,7 @@ mkdir -p "$SEED/extensions/pi-permission-system" "$SEED/extensions/pi-permission
 cat > "$SEED/settings.json" <<'JSON'
 {"defaultProvider": "openrouter", "defaultModel": "qwen/qwen3.8-flash",
  "enableInstallTelemetry": false, "theme": "dark",
+ "powerline": {"preset": "ascii", "welcome": false},
  "packages": [{"source": "npm:pi-permission-classifier@1.0.0"},
               {"source": "npm:@gotgenes/pi-permission-system@2.0.0"},
               {"source": "npm:cc-safety-net@0.3.0"}]}
@@ -61,8 +62,17 @@ pi_seed_settings "$SEED/settings.json" "$d/settings.json" > "$T/out" 2>&1
 check "the volume's theme is kept" json_true 'r["theme"] == "solarized"' "$SEED/settings.json" "$d/settings.json"
 check "the volume's defaultModel is kept" json_true 'r["defaultModel"] == "other"' "$SEED/settings.json" "$d/settings.json"
 check "the package list is restored from the seed" json_true 'r["packages"] == s["packages"]' "$SEED/settings.json" "$d/settings.json"
+check "an absent powerline is added from the seed" json_true 'r["powerline"] == s["powerline"]' "$SEED/settings.json" "$d/settings.json"
 check "a seed key the volume lacks is added" json_true 'r["enableInstallTelemetry"] is False' "$SEED/settings.json" "$d/settings.json"
 check "nothing beyond the seed's keys is written" json_true 'set(r) == set(s)' "$SEED/settings.json" "$d/settings.json"
+
+# The footer's settings are infra's (the welcome card is off there), so the seed's win.
+d="$T/s2b"; mkdir -p "$d"
+echo '{"theme":"solarized","powerline":{"preset":"default","welcome":true}}' > "$d/settings.json"
+pi_seed_settings "$SEED/settings.json" "$d/settings.json" > "$T/out" 2>&1
+check "a volume's own powerline is replaced with the seed's" json_true 'r["powerline"] == s["powerline"]' "$SEED/settings.json" "$d/settings.json"
+check "and the volume's theme beside it is kept" json_true 'r["theme"] == "solarized"' "$SEED/settings.json" "$d/settings.json"
+check "and the replacement is said" grep -q '^\[entrypoint\] pi settings.json: updated from the image: .*powerline restored' "$T/out"
 
 d="$T/s3"; mkdir -p "$d"
 echo '{"theme": "solarized",' > "$d/settings.json"
@@ -85,12 +95,22 @@ check "the gate's config is copied" cmp -s "$SEED/extensions/pi-permission-syste
 check "the classifier's config is copied" cmp -s "$SEED/extensions/pi-permission-classifier/config.json" "$PI/extensions/pi-permission-classifier/config.json"
 check "the package tree is a link to the seed's" test "$(readlink "$PI/npm")" = "$SEED/npm"
 
-PI="$T/pi2"; mkdir -p "$PI/npm/node_modules/stale" "$PI/extensions/pi-permission-system"
+# The gate's two configs are infra's policy, not the owner's settings: an edit on the volume
+# (by the agent, or by /permission-model) is undone at the next start.
+PI="$T/pi2"; mkdir -p "$PI/npm/node_modules/stale" "$PI/extensions/pi-permission-system" \
+    "$PI/extensions/pi-permission-classifier"
 echo '{"mine": true}' > "$PI/models.json"
 echo '{"bash": "allow"}' > "$PI/extensions/pi-permission-system/config.json"
+echo '{"verdicts": "allow-deny-defer"}' > "$PI/extensions/pi-permission-classifier/config.json"
 pi_seed "$SEED" "$PI" > "$T/out" 2>&1
 check "a present models.json is untouched" test "$(cat "$PI/models.json")" = '{"mine": true}'
-check "a present gate config is untouched" test "$(cat "$PI/extensions/pi-permission-system/config.json")" = '{"bash": "allow"}'
+check "an edited gate config is replaced with the seed's" cmp -s "$SEED/extensions/pi-permission-system/config.json" "$PI/extensions/pi-permission-system/config.json"
+check "an edited classifier config is replaced with the seed's" cmp -s "$SEED/extensions/pi-permission-classifier/config.json" "$PI/extensions/pi-permission-classifier/config.json"
+check "the replaced gate config is mode 600" test "$(stat -c %a "$PI/extensions/pi-permission-system/config.json")" = 600
+check "and the replacement is said" grep -q '^\[entrypoint\] pi extensions/pi-permission-system/config.json: restored from the image$' "$T/out"
+pi_seed "$SEED" "$PI" > "$T/out" 2>&1
+check "a gate config that matches the seed is left alone, and said to be current" \
+    grep -q '^\[entrypoint\] pi extensions/pi-permission-system/config.json: current$' "$T/out"
 check "a real npm directory from an earlier start becomes the link" test "$(readlink "$PI/npm")" = "$SEED/npm"
 check "and the seed's tree is intact" test -d "$SEED/npm/node_modules/cc-safety-net"
 

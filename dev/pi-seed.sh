@@ -16,13 +16,15 @@
 # removes the link, never what it points at.
 
 # pi_seed_settings <seed.json> <target.json>
-# The seed's `packages` win every time: it is the list of what the image installed, and a
+# Two seed keys win every time. `packages` is the list of what the image installed, and a
 # package the volume's list names but the image lacks, or the reverse, is a pi that will not
-# start the way the image meant (the gate is one of them). Every other seed key is written only
-# where the volume has none, so the owner's theme or model survives a restart. A target that
-# is not a JSON object is replaced with the seed and said, as one line. Written to a temp file
-# opened exclusively and renamed over the target, at 0600, so neither a crash nor a link at
-# either path is written through.
+# start the way the image meant (the gate is one of them). `powerline` is the footer's, where
+# infra turns the welcome card off: the card is a prompt at every start, and a fresh slot reads
+# as waiting on the owner while it is up. Every other seed key is written only where the volume
+# has none, so the owner's theme or model survives a restart. A target that is not a JSON
+# object is replaced with the seed and said, as one line. Written to a temp file opened
+# exclusively and renamed over the target, at 0600, so neither a crash nor a link at either
+# path is written through.
 pi_seed_settings() {
     local msg
     if msg="$(python3 -I - "$1" "$2" <<'PY'
@@ -43,11 +45,16 @@ except FileNotFoundError:
 except (ValueError, OSError):
     cfg, note = {}, "was not valid JSON — replaced with the image's seed"
 
+SEED_WINS = {"packages": "package list restored", "powerline": "powerline restored"}
 changed = []
 for key, value in seed.items():
-    if key == "packages" and cfg.get(key) != value:
-        cfg[key] = value
-        changed.append("package list restored")
+    if key in SEED_WINS:
+        if cfg.get(key) != value:
+            if key in cfg:
+                changed.append(SEED_WINS[key])
+            else:
+                changed.append(key)
+            cfg[key] = value
     elif key not in cfg:
         cfg[key] = value
         changed.append(key)
@@ -72,17 +79,35 @@ PY
     fi
 }
 
-# pi_copy_absent <seed file> <target file> <name for the log>
+# pi_copy <seed file> <target file>
 # Through a temp file and a rename, the temp path cleared first, as the .claude.json block in
 # entrypoint.sh does and for its reason: a redirection follows a link.
+pi_copy() {
+    mkdir -p "$(dirname "$2")" && rm -f "$2.tmp" && cp "$1" "$2.tmp" \
+        && chmod 600 "$2.tmp" && mv -fT "$2.tmp" "$2"
+}
+
+# pi_copy_absent <seed file> <target file> <name for the log>
 pi_copy_absent() {
     if [ -e "$2" ]; then
         say "pi $3: the volume's own, kept"
-    elif mkdir -p "$(dirname "$2")" && rm -f "$2.tmp" "$2" && cp "$1" "$2.tmp" \
-        && chmod 600 "$2.tmp" && mv -fT "$2.tmp" "$2"; then
+    elif rm -f "$2" && pi_copy "$1" "$2"; then
         say "pi $3: copied from the image"
     else
         say "pi $3: could not copy it from $1"
+    fi
+}
+
+# pi_copy_seed <seed file> <target file> <name for the log>
+# The seed's copy wins: whatever the volume holds at <target> is replaced when it differs,
+# a directory or a link included, so an edit made during a session lasts until the next start.
+pi_copy_seed() {
+    if [ -f "$2" ] && [ ! -L "$2" ] && cmp -s "$1" "$2"; then
+        say "pi $3: current"
+    elif rm -rf "$2" && pi_copy "$1" "$2"; then
+        say "pi $3: restored from the image"
+    else
+        say "pi $3: could not restore it from $1 — the gate runs on what the volume holds"
     fi
 }
 
@@ -94,17 +119,24 @@ pi_link() {
 }
 
 # pi_seed <seed dir> <agent dir>
-# The settings merge, then models.json and every extension config (the gate's and the
-# classifier's today) copied where absent: pi and its gate read them, and the owner may edit
-# them on the volume. A deleted one comes back at the next start, which is the way to reset it.
-# Then the package tree, linked where LAYOUT says pi looks for it.
+# The settings merge, then models.json copied where absent, since the owner may edit it on the
+# volume and a deleted one comes back at the next start. The gate's config and the classifier's
+# are infra's policy, not the owner's settings, so the seed's copy replaces the volume's at every
+# start: an agent, or /permission-model, may write either during a session, and a policy that
+# drifted on one volume would be a policy nobody reviewed. To change them, change the seed files
+# in dev/ and rebuild. Any other extension file is copied where absent. Then the package tree,
+# linked where LAYOUT says pi looks for it.
 pi_seed() {
     local seed="$1" dir="$2" rel pkgs
     mkdir -p "$dir" || { say "pi: could not create $dir — its agent dir is not seeded"; return 1; }
     pi_seed_settings "$seed/settings.json" "$dir/settings.json"
     pi_copy_absent "$seed/models.json" "$dir/models.json" models.json
     while IFS= read -r rel; do
-        pi_copy_absent "$seed/$rel" "$dir/$rel" "$rel"
+        case "$rel" in
+            extensions/pi-permission-system/config.json | extensions/pi-permission-classifier/config.json)
+                pi_copy_seed "$seed/$rel" "$dir/$rel" "$rel" ;;
+            *) pi_copy_absent "$seed/$rel" "$dir/$rel" "$rel" ;;
+        esac
     done < <(cd "$seed" && find extensions -type f | sort)
     # LAYOUT is the build's word on where `pi install` put the packages (pi 1.4.0: <agent
     # dir>/npm). A single plain name or nothing, because this name goes to `rm -rf` in pi_link.

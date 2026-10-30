@@ -267,32 +267,56 @@ jobs:
           check "and the key is back" sh -c '[ "$(docker exec infra cat /run/github/openrouter-key)" = sk-or-smoke ]'
           # THE GATE, ON A REAL TOOL CALL. It decides on the model's tool call, which comes only
           # after a model answers, so with no key and no network a scripted model stands in:
-          # ci/pi-stub-model.js, loaded with -e, answers with one bash call and is otherwise inert.
-          # The agent dir, the packages and the gate's config are the container's own. Calibrated
-          # by the second run: the same call with no extensions loaded runs and deletes the probe,
-          # so a probe that survives the first was saved by the gate, not by a call never made.
+          # ci/pi-stub-model.js, loaded with -e, answers with one tool call and is otherwise inert.
+          # The agent dir, the packages and the gate's config are the container's own.
+          # The deterministic deny is a force push: a dry run against a bare repo made here, so
+          # the call is harmless whether or not it runs. Calibrated by the second run: with no
+          # extensions loaded the same call runs, so a deny in the first is the gate's rule and
+          # not a call that could not have run anyway.
           docker exec -i infra sh -c 'cat > /tmp/pi-stub-model.js' < dev/ci/pi-stub-model.js
           pigate() { n=$1 c=$2; shift 2
-            docker exec -w /workspace -e PI_OFFLINE=1 -e PI_SMOKE_COMMAND="$c" infra timeout 120 \
+            docker exec -w /workspace -e PI_OFFLINE=1 -e PI_SMOKE_COMMAND="$c" \
+              -e PI_SMOKE_TOOL="${PI_SMOKE_TOOL:-bash}" -e PI_SMOKE_ARGS="${PI_SMOKE_ARGS:-}" infra timeout 120 \
               pi --mode json --no-session -e /tmp/pi-stub-model.js --model smoke/stub "$@" "run: $c" </dev/null > "$n.jsonl" 2> "$n.err" || true
             jq -c 'select(.type == "tool_execution_end") | {isError, text: .result.content[0].text}' "$n.jsonl" > "$n.txt" 2>&1 || true
             sed "s/^/  $n: /" "$n.txt"; }
-          docker exec infra mkdir -p /tmp/pi-gate-probe
-          pigate gate-deny "rm -rf /tmp/pi-gate-probe"
-          check "pi's gate denies rm -rf outside /workspace, on a scripted model's tool call" sh -c \
-            'docker exec infra test -d /tmp/pi-gate-probe && grep -q "\"isError\":true" gate-deny.txt && grep -qF "[pi-permission-system] Denied by policy" gate-deny.txt && grep -q external_directory gate-deny.txt'
-          pigate gate-none "rm -rf /tmp/pi-gate-probe" --no-extensions
-          check "and with no extensions loaded the same call runs and deletes it (calibration)" sh -c \
-            '! docker exec infra test -e /tmp/pi-gate-probe && grep -q "\"isError\":false" gate-none.txt'
-          # Inside /workspace a shell command is an ask: the judge is consulted (its decision is in
-          # the gate's review log), and with no UI to ask the answer is no.
+          # judged <text>: the gate's review log holds a judge's decision whose entry carries <text>.
+          # A bash decision carries the command; a write decision carries only "surface":"write",
+          # so the write checks run in order and the first expects none.
+          judged() { docker exec infra sh -c 'cat "$PI_CODING_AGENT_DIR"/extensions/pi-permission-system/logs/*.jsonl' \
+            | grep -F classifier.decision | grep -qF "$1"; }
+          docker exec infra sh -c 'rm -rf /tmp/pi-probe-remote.git && git init -q --bare /tmp/pi-probe-remote.git'
+          pigate gate-deny "git push --force --dry-run /tmp/pi-probe-remote.git HEAD:refs/heads/pi-probe"
+          check "pi's gate denies a force push by its explicit rule, on a scripted model's tool call" sh -c \
+            'grep -q "\"isError\":true" gate-deny.txt && grep -qF "[pi-permission-system] Denied by policy" gate-deny.txt && grep -qF "git *push*--force*" gate-deny.txt && grep -qF "force pushes are denied" gate-deny.txt'
+          check "and no pi-probe ref reached the probe remote" sh -c \
+            '[ -z "$(docker exec infra git --git-dir=/tmp/pi-probe-remote.git for-each-ref refs/heads/pi-probe)" ]'
+          pigate gate-none "git push --force --dry-run /tmp/pi-probe-remote.git HEAD:refs/heads/pi-probe" --no-extensions
+          check "and with no extensions loaded the same call runs (calibration)" sh -c \
+            'grep -q "\"isError\":false" gate-none.txt && grep -qF "HEAD -> pi-probe" gate-none.txt'
+          # Inside /workspace a shell command goes to the judge (its decision is in the gate's review
+          # log). The stub gives it no verdict, which the judge counts as uncertain, and under
+          # `verdicts: allow-deny` an uncertain answer is a deny, never a question for the owner.
           docker exec infra mkdir -p /workspace/.pi-gate-probe
           pigate gate-ask "rm -rf /workspace/.pi-gate-probe"
-          check "a shell command inside /workspace goes to the judge, and with no UI is denied" sh -c '
-            docker exec infra test -d /workspace/.pi-gate-probe && grep -qF "no interactive UI is available" gate-ask.txt &&
-            docker exec infra sh -c "cat \"\$PI_CODING_AGENT_DIR\"/extensions/pi-permission-system/logs/*.jsonl" \
-              | grep -F classifier.decision | grep -qF "rm -rf /workspace/.pi-gate-probe"'
-          docker exec infra rm -rf /workspace/.pi-gate-probe /tmp/pi-gate-probe /tmp/pi-stub-model.js
+          gate_ask_judged() { docker exec infra test -d /workspace/.pi-gate-probe && grep -qF "permission-judge" gate-ask.txt &&
+            ! grep -qF "no interactive UI is available" gate-ask.txt && judged "rm -rf /workspace/.pi-gate-probe"; }
+          check "a shell command inside /workspace goes to the judge, which answers it without asking" gate_ask_judged
+          # An edit inside /workspace is allowed outright, with no judge call, as Claude Code's auto
+          # mode allows in-project edits. A write outside it goes to the judge, which the stub
+          # leaves uncertain, so that write is denied: the pair shows the rule, not a gate that is off.
+          docker exec infra rm -f /workspace/.pi-edit-probe /tmp/pi-edit-probe
+          PI_SMOKE_TOOL=write PI_SMOKE_ARGS='{"path":"/workspace/.pi-edit-probe","content":"probe\n"}' \
+            pigate gate-edit "write /workspace/.pi-edit-probe"
+          gate_edit_allowed() { grep -q '"isError":false' gate-edit.txt && docker exec infra test -f /workspace/.pi-edit-probe &&
+            ! judged '"surface":"write"'; }
+          check "a write inside /workspace is allowed with no judge call" gate_edit_allowed
+          PI_SMOKE_TOOL=write PI_SMOKE_ARGS='{"path":"/tmp/pi-edit-probe","content":"probe\n"}' \
+            pigate gate-edit-out "write /tmp/pi-edit-probe"
+          gate_edit_out_judged() { grep -q '"isError":true' gate-edit-out.txt && ! docker exec infra test -e /tmp/pi-edit-probe &&
+            judged '"surface":"write"'; }
+          check "and a write outside /workspace goes to the judge (calibration)" gate_edit_out_judged
+          docker exec infra rm -rf /workspace/.pi-gate-probe /workspace/.pi-edit-probe /tmp/pi-probe-remote.git /tmp/pi-stub-model.js
           # The same scan the measure step uses: comm pi, or the mark pi puts in its children's
           # environment, so an orphaned child (ty) counts too. A scan that cannot run fails.
           pi_left_none() { local out

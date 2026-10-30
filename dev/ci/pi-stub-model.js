@@ -10,11 +10,16 @@
 // Its script: a request that offers a `bash` tool and holds no tool result yet is answered
 // with one bash call, $PI_SMOKE_COMMAND; anything else (the tool result coming back, or the
 // permission judge asking with its own single tool) is answered "done". So the judge gets no
-// verdict from it and defers, which is what a judge that cannot answer does.
+// verdict from it, which the judge counts as uncertain. $PI_SMOKE_TOOL and $PI_SMOKE_ARGS (a
+// JSON object) make the one call to another tool instead, `write` for the edit check.
 import http from "node:http";
 
 export default async function (pi) {
-  const command = process.env.PI_SMOKE_COMMAND || "true";
+  const tool = process.env.PI_SMOKE_TOOL || "bash";
+  const args =
+    tool === "bash"
+      ? JSON.stringify({ command: process.env.PI_SMOKE_COMMAND || "true" })
+      : process.env.PI_SMOKE_ARGS || "{}";
   const server = http.createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
@@ -26,7 +31,7 @@ export default async function (pi) {
         messages = j.messages || [];
         tools = (j.tools || []).map((t) => t.function && t.function.name);
       } catch {}
-      const done = messages.some((m) => m.role === "tool") || !tools.includes("bash");
+      const done = messages.some((m) => m.role === "tool") || !tools.includes(tool);
       const delta = done
         ? { role: "assistant", content: "done" }
         : {
@@ -36,7 +41,7 @@ export default async function (pi) {
                 index: 0,
                 id: "call_smoke",
                 type: "function",
-                function: { name: "bash", arguments: JSON.stringify({ command }) },
+                function: { name: tool, arguments: args },
               },
             ],
           };

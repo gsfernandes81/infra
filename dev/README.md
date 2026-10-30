@@ -985,14 +985,44 @@ A second agent harness beside Claude Code in every container, the owner's call (
   has a pi session run `claude-sessions mail list` at the start of a turn.
 - **Pinned** at `1.4.0`, and pi does not check for updates; a bump is a rebuild. Its state is
   in `~/.local/share/pi`, on the volume, and the entrypoint re-seeds it at every start: the
-  image's package list always, its other settings and configs only where the volume has
-  none. Its packages are baked into the image, each pinned: `@gotgenes/pi-permission-system`
-  and `pi-permission-classifier`, `cc-safety-net`, `pi-subagents`, `pi-web-access`,
-  `pi-lens`, `@nredd/pi-dev-tools`, `pi-powerline-footer` and `pi-themes`. The gate asks
-  before every edit and every shell command but `claude-sessions mail` and `keepalive`, which
-  the policy and the keepalive skill run each turn; the session's model answers what it can,
-  and the gate denies any path outside `/workspace`. Pi ignores a repo's `.pi/` directory, which could
-  otherwise replace the gate. Install telemetry is off.
+  image's package list, its footer settings (`powerline`) and the gate's two configs always,
+  its other settings and `models.json` only where the volume has none. Its packages are baked
+  into the image, each pinned: `@gotgenes/pi-permission-system` and
+  `pi-permission-classifier`, `cc-safety-net`, `pi-subagents`, `pi-web-access`, `pi-lens`,
+  `@nredd/pi-dev-tools`, `pi-powerline-footer` and `pi-themes`. Pi ignores a repo's `.pi/`
+  directory, which could otherwise replace the gate. Install telemetry is off.
+- **The footer's welcome card is off** from base `2026.10.30.1`. It waited for a key at every
+  start, so a fresh slot showed in the menu as waiting on the owner.
+
+### How the gate decides
+
+The gate is `@gotgenes/pi-permission-system`, and its judge is `pi-permission-classifier`,
+which asks the session's own model. Since base `2026.10.30.1` it works like Claude Code's auto
+mode, by the owner's call: the container is the boundary, so the gate lets the agent work and
+asks the owner as little as it can.
+
+- **Allowed outright:** reading any file; writing or editing any file under `/workspace`;
+  `claude-sessions mail` and `claude-sessions keepalive`, which the policy and the keepalive
+  skill run each turn.
+- **The judge decides:** every other shell command, every write outside `/workspace`, and
+  every other tool (subagents, web access). It answers allow or deny. When it cannot tell, it
+  denies with "could not be confirmed safe", and the agent takes another route. It does not
+  ask the owner.
+- **Always denied, before the judge sees it:** `git push` with `--force`,
+  `--force-with-lease`, `-f` or a `+` refspec, and `git push --mirror`. Under the gate,
+  `cc-safety-net` blocks `rm -rf` on dangerous targets, `git reset --hard`, force pushes,
+  `curl | sh` and reads of SSH keys and `.env` files, however the command is wrapped.
+- **When the judge fails** (a timeout, a model error, no key), the call goes to the owner as a
+  prompt in the slot, never to an allow: neither package can be set to allow on a failure. A
+  prompt nobody answers in five minutes is a deny, and the agent is told nobody answered.
+- **To see what it decided**, read the gate's review log, one JSON line per event:
+  `~/.local/share/pi/extensions/pi-permission-system/logs/pi-permission-system-permission-review.jsonl`.
+  A judge's answer is a `classifier.decision` line with its `verdict`; a rule's deny is a
+  `permission_request.blocked` line naming the rule.
+- **To change it**, edit `dev/pi-permission-system.json` or `dev/pi-permission-classifier.json`
+  and rebuild the base. The entrypoint copies both over the volume's at every start, so an
+  edit on the volume, or a `/permission-model` choice inside pi, lasts until the container
+  next starts.
 
 ## Secrets
 

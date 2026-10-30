@@ -44,14 +44,12 @@ The owner's, in this order, each on zero:
 
 Findings, not started:
 
-5. **The startup dialog is `pi-powerline-footer`'s welcome card.** Named on 2026-10-30 from
-   the first slot on zero: the footer draws a "Press any key to continue" card with an 18 s
-   countdown at every start (its `welcome.ts`), and that is the prompt that sets `needs_you`,
-   the amber `!`, on a fresh slot; on a terminal it dismisses itself, in the smoke run's rpc
-   pi it stayed open. Turning the card off is a line in the footer's seed config
-   (`dev/pi-powerline-footer.json` or its settings key; the package's README names it), which
-   is a base rebuild and a tag bump, so it rides the next bump (item 7's pin, or sooner if the
-   owner wants it). claude-sessions has the name (mail, 2026-10-30 11:07Z).
+5. **The startup dialog was `pi-powerline-footer`'s welcome card, and it is off from base
+   `2026.10.30.1`** (`"welcome": false` under `powerline` in `dev/pi-settings.json`, a key the
+   entrypoint now re-seeds at every start). It drew a "Press any key to continue" card with a
+   countdown at every start, and that prompt set `needs_you`, the amber `!`, on a fresh slot.
+   Open until that base is on zero: then a fresh `p` slot should show no `!` before its first
+   prompt. claude-sessions has the name (mail, 2026-10-30 11:07Z).
 6. **Idle CPU on arm64 is unproven.** The offloader counts an idle slot as quiet only under
    3000 ms of CPU per three-minute window. On amd64, pi alone used about 1.2 s over 180 s
    idle, its `ty` child not counted. If an idle pi slot on zero goes over, it is never
