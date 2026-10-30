@@ -603,7 +603,8 @@ first start; pi's is set in the image.
   model is `qwen/qwen3.8-flash` over OpenRouter, with the key read from
   `/run/github/openrouter-key`, which the hub copies at its start, beside each container's
   mail-token, from `openrouter-key` in `$HUB_SECRETS` (put there by hand). Without that file pi
-  has no key. Its state is in `~/.local/share/pi`, on the volume, and the
+  has no key. Pi reads the key once per process, so a key added while a pi runs takes effect at
+  that pi's next start. Its state is in `~/.local/share/pi`, on the volume, and the
   entrypoint re-seeds it at every start: the image's package list always, its other settings
   and configs only where the volume has none. Its
   packages are baked into the image, each pinned: `@gotgenes/pi-permission-system` and
