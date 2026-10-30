@@ -469,7 +469,10 @@ RUN set -eux; \
 # configs. The package list is put back at every start and the rest only when absent; the
 # entrypoint says which. tuiMode is regular because pi's default, fullscreen, takes the
 # alternate screen and turns on mouse tracking, the pair that broke scrolling over ssh from the
-# phone for Claude Code (claude-sessions issue #8).
+# phone for Claude Code (claude-sessions issue #8). defaultProjectTrust is never, so pi skips a
+# repo's .pi/ without asking: a trusted .pi/ could carry a gate config that replaces this one
+# and packages that pi would install unpinned at start. The repos ship none, and the base's own
+# packages and skills come from the agent dir, which project trust does not govern.
 #
 # THE PACKAGES, each pinned here; npm resolves their own dependencies once, in this layer:
 #   pi-permission-classifier and @gotgenes/pi-permission-system, the judge and the gate. The

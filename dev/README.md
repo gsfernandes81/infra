@@ -606,7 +606,8 @@ first start; pi's is set in the image.
   `pi-permission-classifier`, `cc-safety-net`, `pi-subagents`, `pi-web-access`, `pi-lens`,
   `@nredd/pi-dev-tools`, `pi-powerline-footer` and `pi-themes`. The gate asks before every edit
   and every shell command, the session's model answers what it can, and it denies any path
-  outside `/workspace`. Install telemetry is off and pi does not check for updates.
+  outside `/workspace`. Pi ignores a repo's `.pi/` directory, which could otherwise replace the
+  gate. Install telemetry is off and pi does not check for updates.
 - **No slot**: Crush and jcode run in no zmx session, and pi does not yet, so a dropped
   connection ends any of them, and the menu and offloader know nothing about them.
   `crush --continue` picks up the last session.

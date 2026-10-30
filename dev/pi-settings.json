@@ -3,7 +3,7 @@
   "defaultProvider": "openrouter",
   "defaultModel": "qwen/qwen3.8-flash",
   "enableInstallTelemetry": false,
-  "defaultProjectTrust": "always",
+  "defaultProjectTrust": "never",
   "theme": "dark",
   "tuiMode": "regular",
   "workingVibe": "off",
