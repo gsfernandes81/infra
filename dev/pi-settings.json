@@ -1,0 +1,14 @@
+{
+  "$schema": "https://pi.dev/schemas/settings.schema.json",
+  "defaultProvider": "openrouter",
+  "defaultModel": "qwen/qwen3.8-flash",
+  "enableInstallTelemetry": false,
+  "defaultProjectTrust": "never",
+  "theme": "dark",
+  "tuiMode": "regular",
+  "workingVibe": "off",
+  "powerline": {
+    "preset": "ascii",
+    "autoFollowUp": false
+  }
+}

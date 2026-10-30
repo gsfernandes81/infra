@@ -1,0 +1,21 @@
+{
+  "$schema": "https://raw.githubusercontent.com/gotgenes/pi-packages/main/packages/pi-permission-system/schemas/permissions.schema.json",
+  "promptTimeoutMs": 300000,
+  "authorizerChain": ["permission-judge"],
+  "piInfrastructureReadPaths": ["/opt/claude-sessions/skills"],
+  "permission": {
+    "*": "ask",
+    "read": "allow",
+    "grep": "allow",
+    "find": "allow",
+    "ls": "allow",
+    "bash": {
+      "*": "ask",
+      "claude-sessions mail *": "allow",
+      "claude-sessions keepalive *": "allow"
+    },
+    "write": { "*": "deny", "/workspace/*": "ask" },
+    "edit": { "*": "deny", "/workspace/*": "ask" },
+    "external_directory": "deny"
+  }
+}

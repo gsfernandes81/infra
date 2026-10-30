@@ -3,7 +3,7 @@
 #
 #   hub key -> install into the shared volume -> GitHub tokens (first pass, then bg)
 #   -> the container list -> sshd host key and authorized_keys -> environment for logins
-#   -> mail server (bg) -> [offloader (bg)] -> sshd (fg)
+#   -> mail server (bg) -> the OpenRouter key -> [offloader (bg)] -> sshd (fg)
 #
 # Everything ahead of sshd is bounded and non-fatal, as in the dev containers' entrypoint:
 # the door is the one thing that must come up. The compose healthcheck reads what the
@@ -150,6 +150,37 @@ if [ -d "$HUB_MAIL" ]; then
     say "mail server on ${HUB_MAIL_LISTEN:-0.0.0.0:8025} for: ${CLAUDE_SESSIONS_HOSTS:-(none)} — the store at $HUB_MAIL, every event in ~/.hub/mail.log"
 else
     say "WARNING: $HUB_MAIL is not a directory — no mail server; the hub stays unhealthy"
+fi
+
+# ── the OpenRouter key: one file, beside each container's mail-token ───────────────
+# Every container's pi reads its key from /run/github/openrouter-key (dev/pi-models.json), once
+# per process. It is the owner's one key, put in $SECRETS by hand, and OPTIONAL: absent there,
+# any copy a container still holds is removed and pi in it has no key; nothing else fails. A
+# file in each container's tokens directory, never the environment: no secret reaches a
+# container that way. Copied once per start, never watched: the key changes when the owner
+# changes it, and `make restart C=hub` then copies it (`make up` recreates the hub only when
+# its image or config changed). Through a temp file and a rename, as the public
+# key above, so a pi starting mid-copy reads the old key or the new one. Never printed.
+# AFTER the container list, and after `github-tokens dirs` made each directory.
+if [ -s "$SECRETS/openrouter-key" ]; then
+    copied='' failed=''
+    for h in $CLAUDE_SESSIONS_HOSTS; do
+        tmp="$TOKENS/$h/.openrouter-key.tmp"
+        rm -f "$tmp"
+        if cp "$SECRETS/openrouter-key" "$tmp" && chmod 644 "$tmp" \
+            && mv -fT "$tmp" "$TOKENS/$h/openrouter-key"; then
+            copied="$copied $h"
+        else
+            rm -f "$tmp"
+            failed="$failed $h"
+        fi
+    done
+    say "openrouter-key copied for:${copied:- (none)}${failed:+ — WARNING: could not copy it for:$failed}"
+else
+    for h in $CLAUDE_SESSIONS_HOSTS; do
+        rm -f "$TOKENS/$h/openrouter-key" "$TOKENS/$h/.openrouter-key.tmp"
+    done
+    say "no openrouter-key in $SECRETS, or it is empty — no container has one, so pi has no key"
 fi
 
 # ── the offloader, for every container ──────────────────────────────────────────

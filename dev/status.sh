@@ -397,11 +397,19 @@ print("sessions start in %s mode" % v if v else
     # more, so no field in its binary is load-bearing for the offloader (the timer tools'
     # names, claude-sessions#13, were never added for the same reason).
     tool sessions 'no claude-sessions — the hub'"'"'s volume is not mounted at /opt/claude-sessions' claude-sessions --version
-    # Unpinned (the latest at the base's build), so this is the only readout of which one a
-    # container has once CI's log has expired. MISSING is also what a base built with
-    # CRUSH_VERSION=none looks like.
-    tool crush 'no crush — a base before 2026.10.11, or one built with CRUSH_VERSION=none' crush --version
-    tool jcode 'no jcode — a base before 2026.10.16' jcode --version
+    # Pi (base 2026.10.30), and the two things a pi slot leans on that nothing else reads
+    # back. `pi-ext` is the claude-sessions extension the entrypoint links from the hub's
+    # volume (v0.10.0 ships it): without it pi fires no hook, so the menu never binds a pi slot
+    # and the offloader never stops one. `-s` follows the link, so a dangling one reads NOT
+    # linked too. `pi-tui` is the twin of `scrollvars`: the launcher starts every pi slot with
+    # `--tui-mode regular` to keep it off the alternate screen, so a pi that dropped the flag
+    # would fail to start in a slot at all. Read from `pi --help`, which loads the packages and
+    # takes a few seconds; checked 2026-10-30 on 1.4.0, where the flag is listed once.
+    tool pi 'no pi — a base before 2026.10.30' pi --version
+    printf 'pi-ext    : %s\n' "$(d exec "$CONTAINER" sh -c 'f="${PI_CODING_AGENT_DIR:-$HOME/.local/share/pi}/extensions/claude-sessions.js"; if [ -s "$f" ]; then echo linked; else echo "NOT linked — a claude-sessions before 0.10.0, pi slots are not offloaded"; fi' 2>/dev/null \
+        || echo 'could not ask the container')"
+    printf 'pi-tui    : %s\n' "$(d exec "$CONTAINER" sh -c 'command -v pi >/dev/null 2>&1 || { echo "no pi"; exit 0; }; if PI_OFFLINE=1 pi --help 2>/dev/null | grep -q -- --tui-mode; then echo "--tui-mode present"; else echo "MISSING — tell claude-sessions"; fi' 2>/dev/null \
+        || echo 'could not ask the container')"
     # The hooks that feed claude-sessions, read the way Claude Code reads them: parsed, and
     # as `dev`, because a file that is malformed or unreadable to the session's account is
     # ignored whole and silently — sessions start with no hooks. Whether they actually FIRE

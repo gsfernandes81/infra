@@ -44,9 +44,9 @@ lint, read a playbook against the real `ansible.cfg` — and are not wired to th
 | `compose.yaml` | the project: `hub`, its `cloudflared` sidecar (profile `tunnel`), `infra`, and `or3`, `destiny-director` (+ `dd-postgres`), `dossier`, `invective`, `nibbles`, `ionic-traces`, `claude-sessions`, all started by default; one network, `dev`; **nothing published on the host**. The base tag is its `x-base-tag` line, each container's repo an anchor at the top |
 | `hub/` | the hub's image: `Dockerfile` (claude-sessions pinned by release and per-arch SHA-256), `entrypoint.sh`, `door` (installed as `hub-door`, its sshd's `ForceCommand`), `health` (`hub-health`, its healthcheck), `github-tokens` (the token broker) and its offline test, `managed-CLAUDE.md` (the agent-mail policy every container loads), `sshd_config`, and `ssh_config` — how it reaches each container |
 | `cloudflared.yml` | the hub tunnel's ingress, and the whole of it: `dev.gsrpi.uk` → the hub, `or3-dev.gsrpi.uk` → or3 |
-| `Dockerfile.base` | `gsrpi-dev-base`, which every dev container is `FROM` — Debian trixie slim, Node 22, Claude Code, gh, zmx, screen, sshd, Helix, the tools and language servers, Crush, Jcode |
+| `Dockerfile.base` | `gsrpi-dev-base`, which every dev container is `FROM` — Debian trixie slim, Node 22, Claude Code, gh, zmx, screen, sshd, Helix, the tools and language servers, pi |
 | `Dockerfile` | infra: the base + ansible-core, the collections and the docker CLI |
-| `entrypoint.sh` | every container's PID 1: ssh material and the hub's key → Claude config → clone or pull the workspace → link the env files → `child-init.sh` → `reconcile` → keep-alive skill → **sshd (fg)** |
+| `entrypoint.sh` | every container's PID 1: ssh material and the hub's key → Claude config → pi's agent dir (`pi-seed.sh`, sourced; its offline test is `test_entrypoint_pi.sh`) → clone or pull the workspace → link the env files → `child-init.sh` → `reconcile` → keep-alive skill → **sshd (fg)** |
 | `dev-door` | sshd's `ForceCommand` in every container: a forwarded command as given, otherwise a login shell in `/workspace` |
 | `in-workspace` | on PATH: run a command in `/workspace`, so no client names the path |
 | `gh`, `git-credential-hub` | the `gh` wrapper and git's credential helper, both reading the hub's token |
@@ -107,8 +107,8 @@ ssh dev
 On zero, `make login` (`C=<c>` for another container) reports the hub's token, runs `claude
 auth login` if needed, and clones the workspace if start-up could not; re-running it is safe.
 Then `make verify` should read `sshd: running in the foreground`, `auth: claude logged in`,
-`tunnel: the hub's, serving dev`, `hub: key authorised; claude-sessions 0.9.0 here,
-claude-sessions 0.9.0 at the hub`, `github: the hub's token for gsfernandes81/infra, until …`,
+`tunnel: the hub's, serving dev`, `hub: key authorised; claude-sessions 0.10.0 here,
+claude-sessions 0.10.0 at the hub`, `github: the hub's token for gsfernandes81/infra, until …`,
 all collections installed, and `fleet: no route to zero/one/two`.
 
 **The memory pool is opt-in**: `DEV_CGROUP_PARENT=/devpool` puts every dev container and
@@ -187,8 +187,8 @@ mockups 12 to 15, and binding as the rest of that file is:
   open`, `not answering` — and under each, on `├─` and `└─`, its loaded sessions. A container
   with a session waiting for you is marked with an amber `!`; one with something unread is
   bold. Marked, never moved. `Enter` on a session opens it and `c` offloads it; `Enter` on a
-  container opens that container's screen; `n` and `s` act in the container of the cursor's
-  row.
+  container opens that container's screen; `n`, `p` and `s` act in the container of the
+  cursor's row.
 - **Inside a container: Loaded, Offloaded, and Archived**, which holds everything closed,
   starts folded, and opens with `Enter` or a click on its heading — the heading says `Enter
   shows` or `Enter hides`. A session waiting for you is an amber `!` on its row rather than a
@@ -383,7 +383,7 @@ reconnects by itself.
   their clones into `~/.dd-dev-secrets` and `~/.ds-dev-secrets` in step 2. or3's keys are
   already in `~/.or3-dev-secrets`.
 - **Nothing reads the host clones any more.** Each child builds straight from its repo on
-  GitHub (`main`), with its own Dockerfile, on base `2026.10.29.1` passed as the `BASE_TAG`
+  GitHub (`main`), with its own Dockerfile, on base `2026.10.30` passed as the `BASE_TAG`
   build arg each already takes — so no child repo changes first. or3, being private, is
   fetched over ssh with its deploy key from `~/.or3-dev-secrets`. Once step 1's listing is
   clean, the clones of or3, destiny-director and dossier on zero can be deleted.
@@ -553,8 +553,11 @@ directory at the hub's next start.
 the hub and infra on GitHub's runner, brings them up with `make` and stand-in keys, and
 checks, each by name — the hub reaching infra with its own key, a client key reaching the
 hub's door, the hooks drop-in, the binary and the GitHub token arriving through their mounts,
-the workspace cloned over https with that token, the tools on `PATH`, and dossier building
-straight from its GitHub URL. Its header lists what it cannot check (the Pi, the pool,
+the workspace cloned over https with that token, the tools on `PATH`, pi's packages, links and
+gate (the gate meets a real tool call from a scripted model, `ci/pi-stub-model.js`, since the
+runner has no key), a pi slot binding as the menu starts one, and dossier building straight
+from its GitHub URL. The job summary carries two idle pis' CPU and memory over the offloader's
+window, the figures claude-sessions asked for. Its header lists what it cannot check (the Pi, the pool,
 Cloudflare, the App, or3). Dispatched with a claude-sessions ref, it builds the hub's binary
 from that ref instead of the pinned release, through `ci/compose.smoke.yaml` and the
 Makefile's `COMPOSE_OVERRIDE`; neither is ever used on zero.
@@ -590,25 +593,6 @@ rust-analyzer, because no container works on a Rust repo; compilers, which each 
 for its own builds (dd and ds add `build-essential`). Every binary that runs as what it
 downloads is hash-pinned per arch in `Dockerfile.base`; the npm and PyPI ones are
 version-pinned, as Claude Code is.
-
-## Crush and Jcode, on trial
-
-Two more agent harnesses in the base, the owner's calls (their rows in
-[`../docs/decisions.md`](../docs/decisions.md), their layers in `Dockerfile.base`). `ssh dev`,
-`s` on a container, then `crush` or `jcode`; the first start asks for a provider.
-
-- **No slot**: neither runs in a zmx session, so a dropped connection ends it, and the menu and
-  offloader know nothing about either. `crush --continue` picks up the last session.
-- **State**: Crush's key and settings in `~/.local/share/crush` (a volume; `~/.config/crush` is
-  not), jcode's everything, login included, under `~/.jcode`; per-project `.crush/` and
-  `.jcode/`, which the repo ignores. **Decline any offer to initialise a project** — it writes
-  an `AGENTS.md`, a second `CLAUDE.md`.
-- **Versions**: Crush is the latest release when the base was built (`crush-latest`; `make base
-  CRUSH_VERSION=none` without it when GitHub or `repo.charm.sh` is down). Jcode is hash-pinned
-  and bumped by hand, then updates itself into `~/.jcode/builds`, which is why it is installed
-  as `dev` with a launcher in `~/.local/bin`. `make verify` names both.
-- **Telemetry** is left at each default: Crush's metrics are on (`CRUSH_DISABLE_METRICS=1` —
-  the owner's call, not yet made); jcode's installer, which phones home, is not used.
 
 ## How a container is used
 
@@ -841,8 +825,7 @@ Its preflight builds the images one at a time (`make build`), each child from it
 `main`, then it plans, asks, recreates every container, and probes the hub's reach into each.
 Every session in every container ends; volumes, logins and history stay. The same command
 is the refresh when only the children's `main`s moved. `make base` builds the identical
-image locally under the ghcr name (Crush aside: it takes that day's release), and docker
-prefers a local image over a pull: the fallback for no network, or not waiting.
+image locally under the ghcr name, and docker prefers a local image over a pull: the fallback for no network, or not waiting.
 
 **A published tag is never overwritten** (the workflow refuses without `force`), and **a push
 that changes a file the image is built from without bumping the tag fails the run** — the
@@ -851,8 +834,8 @@ count, since one cannot reach the image; shell scripts compare byte for byte.
 
 **A bump pulls only the layers that changed**: the workflow keeps a registry build cache (the
 `buildcache` tag) and pushes zstd layers, and `Dockerfile.base` pins its python base by
-digest so the cache cannot move under it; a bump near the bottom of the file ships a few MiB,
-plus ~25 MB when Crush has released. A pull of the whole image on a bump that did not move
+digest so the cache cannot move under it; a bump near the bottom of the file ships a few MiB.
+A pull of the whole image on a bump that did not move
 that digest means the cache missed (shared layers print `Already exists`). **Moving the python
 digest is the refresh** — Debian's security updates arrive only then, for one full pull per
 host. zstd needs Docker 23 or newer. The base is Debian trixie, for glibc 2.41 (`make verify`'s
@@ -881,7 +864,7 @@ copies in is ignored.
 
 [`gsfernandes81/claude-sessions`](https://github.com/gsfernandes81/claude-sessions) is the
 session registry: one JSON file per slot under `~/.local/share/claude-sessions/` (on a volume),
-kept current by Claude Code's own hooks. The hub pins **v0.9.0** and installs it for every
+kept current by Claude Code's own hooks. The hub pins **v0.10.0** and installs it for every
 container (*The hub*). A bump reaches every container when the hub is recreated, with no
 container restarted: hooks and offload passes run the binary from the volume each time, and
 each container's agent is started by the hub's menu over ssh and ends with that connection, so
@@ -894,8 +877,8 @@ host's load, and the pool's RAM once the pool is mounted into the containers
 **The menu is the hub's** (*The menu, two levels deep*), but each container's rows come from
 that container: the hub runs `claude-sessions agent` there over ssh, and `agent exec` for the
 one child an action needs at your terminal, so every lock and launch is decided inside the
-container. `Enter` attaches or resumes, `n` starts a slot in `/workspace`, `c` moves a
-session one step down without asking (a loaded one is offloaded, an offloaded one archived;
+container. `Enter` attaches or resumes, `n` starts a slot in `/workspace` and `p` a pi slot
+(*pi*), `c` moves a session one step down without asking (a loaded one is offloaded, an offloaded one archived;
 since 0.6.0), `s` is a shell, `?` the keys, `q` quits, `Esc` goes back. A resume runs `claude --resume <id>` in a
 new slot from the directory Claude Code filed the conversation under, refused (`which is
 gone`) when that directory no longer exists. **The archive is the menu's only**: Claude
@@ -973,6 +956,44 @@ Overrides, neither normally worth setting: `CLAUDE_SESSIONS_DIR` (the registry) 
 not at all. **Never set `ZMX_SESSION_PREFIX`**: slot names would disagree. A source checkout of
 claude-sessions goes at `~/.local/share/src/claude-sessions`, never at the registry's path.
 
+## pi
+
+A second agent harness beside Claude Code in every container, the owner's call (its row in
+[`../docs/decisions.md`](../docs/decisions.md), its layer in `Dockerfile.base`). Its model is
+`qwen/qwen3.8-flash` over OpenRouter. The two harnesses on trial before it were dropped on
+2026-10-30, when pi was chosen; their rows in `decisions.md` keep the record.
+
+- **A pi slot comes from the menu** (*claude-sessions*, from 0.10.0). `p` starts one in
+  `/workspace`, in the container of the cursor's row, as `n` starts a claude. Its row carries
+  a dim `pi: ` before the title; the slot is `pi-<n>` and its mail address `<repo>/pi-<n>`. It
+  is offloaded by the same rule as a claude slot, `Enter` brings it back, and a closed one is
+  listed under Archived with claude's. A `pi` typed in the `s` shell runs in no slot: a
+  dropped connection ends it, and the menu and the offloader never see it.
+- **The extension binds the slot.** claude-sessions learns a pi slot's process and events
+  from `extensions/claude-sessions.js`, which the entrypoint links into pi's agent dir from
+  the hub's volume at every start. A pi slot without that link still starts, lists and
+  resumes, but is never bound, so it is never offloaded. `make verify`'s `pi-ext:` line says
+  whether it is linked, `pi-tui:` whether pi still takes the `--tui-mode` flag every pi slot
+  is started with, and `pi` is its version.
+- **The key** is `openrouter-key` in `$HUB_SECRETS`, put there by hand. The hub copies it into
+  each container's `/run/github`, beside the mail-token, once each time the hub starts, and pi
+  reads `/run/github/openrouter-key` once per process. So a key added to `$HUB_SECRETS`
+  reaches the containers when the hub next starts (`make restart C=hub`; `make up` restarts
+  the hub only when its image or config changed), and a running pi reads it at its next
+  start. Without the file pi has no key, and says so at the first prompt.
+- **Mail**: pi has no hook, so nothing names new mail at its next prompt. The managed policy
+  has a pi session run `claude-sessions mail list` at the start of a turn.
+- **Pinned** at `1.4.0`, and pi does not check for updates; a bump is a rebuild. Its state is
+  in `~/.local/share/pi`, on the volume, and the entrypoint re-seeds it at every start: the
+  image's package list always, its other settings and configs only where the volume has
+  none. Its packages are baked into the image, each pinned: `@gotgenes/pi-permission-system`
+  and `pi-permission-classifier`, `cc-safety-net`, `pi-subagents`, `pi-web-access`,
+  `pi-lens`, `@nredd/pi-dev-tools`, `pi-powerline-footer` and `pi-themes`. The gate asks
+  before every edit and every shell command but `claude-sessions mail` and `keepalive`, which
+  the policy and the keepalive skill run each turn; the session's model answers what it can,
+  and the gate denies any path outside `/workspace`. Pi ignores a repo's `.pi/` directory, which could
+  otherwise replace the gate. Install telemetry is off.
+
 ## Secrets
 
 None are in git. `.env` and `.env.*` are gitignored; the rest live in mode-700 directories on
@@ -980,7 +1001,7 @@ zero, each mounted read-only into the one container that needs it:
 
 | `.env` line, default | Mounted | Holds |
 |---|---|---|
-| `HUB_SECRETS`, `~/.dev-secrets` | the hub, `/run/hub-secrets` | `authorized_keys` — the clients allowed to `ssh dev`; `github-app.pem` — the GitHub App's key, put there by hand; `tunnel.json` — mounted into the sidecar alone |
+| `HUB_SECRETS`, `~/.dev-secrets` | the hub, `/run/hub-secrets` | `authorized_keys` — the clients allowed to `ssh dev`; `github-app.pem` — the GitHub App's key, put there by hand; `openrouter-key` — optional, the OpenRouter key pi uses, put there by hand and copied into every container's `/run/github`; `tunnel.json` — mounted into the sidecar alone |
 | `INFRA_SECRETS`, `~/.infra-dev-secrets` | infra, `/run/infra-secrets` | nothing, by default. A client key in an `authorized_keys` here would let it straight in; no fleet key is ever put here (*What it is not*) |
 | `OR3_SECRETS`, `~/.or3-dev-secrets` | or3, `/run/or3-secrets` | the or3ecr key, the phone's `authorized_keys`, and or3's deploy key — lent to BuildKit to fetch or3's private repo, and no GitHub credential inside the container. Written by or3's `dev/seed-secrets.sh` |
 | `DD_SECRETS`, `DS_SECRETS` | destiny-director, dossier | what was each clone's `.dev-ssh/` |
@@ -989,8 +1010,7 @@ zero, each mounted read-only into the one container that needs it:
 but the control node's own public key. **The hub's private key is in none of them**: it is made
 in, and never leaves, the `hub-state` volume. A repo's `.env` files are in its env volume. The
 Claude login (`*-claude`, or the shared `claude-login` volume while
-`compose.yaml`'s shared-logins switch reads true), Crush's key (`~/.local/share/crush`) and jcode's login (`~/.jcode`)
-are on the containers' external volumes, which `make down-volumes` leaves alone.
+`compose.yaml`'s shared-logins switch reads true) is on the containers' external volumes, which `make down-volumes` leaves alone.
 
 **What a container can reach:**
 

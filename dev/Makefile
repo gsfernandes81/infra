@@ -238,19 +238,9 @@ _require-secrets:
 # THE GHCR NAME — docker prefers a local image over a pull, so after `make base` the
 # child builds with no GitHub. Use it when GitHub is down, the month is metered, or this
 # host's uid differs from the 1001 the CI image bakes.
-#
-# IDENTICAL BUT FOR CRUSH, which is the latest release on the day it is built, not a pin:
-# crush-latest asks GitHub which one, and the build fetches it from repo.charm.sh. So a
-# `make base` days after CI built the same tag can carry a newer Crush, and with either of
-# those down this needs `make base CRUSH_VERSION=none`, which builds without it.
-# Dockerfile.base, the Crush layer, has the reasons.
 base: _require-uid
-	@ver='$(CRUSH_VERSION)'; \
-	if [ -z "$$ver" ]; then ver=$$($(CURDIR)/crush-latest) || exit 1; fi; \
-	echo "base $(BASE_TAG), crush $$ver"; \
 	$(DOCKER) build -f $(CURDIR)/Dockerfile.base \
 	  --build-arg USER_UID=$(HOST_UID) --build-arg USER_GID=$(HOST_GID) \
-	  --build-arg CRUSH_VERSION="$$ver" \
 	  -t ghcr.io/gsfernandes81/gsrpi-dev-base:$(BASE_TAG) $(CURDIR)
 
 # No `base` dependency: the FROM pulls from ghcr when the tag is absent locally, so

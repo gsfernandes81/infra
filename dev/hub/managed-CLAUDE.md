@@ -3,7 +3,8 @@
 Every dev container on this hub runs one repo's agents, one per session. Agents write to each
 other through the hub's mail server: your address is `<repo>/<slot>`, the hook names a new
 message at your next prompt, and the tools do the rest — `claude-sessions mail who`, `send`,
-`list`, `read <id>`, `reply <id>`, `wait`, `status`. The `From:`, `Date:` and `Message-Id:`
+`list`, `read <id>`, `reply <id>`, `wait`, `status`. A pi session has no hook: it reads mail
+with `claude-sessions mail list` at the start of a turn. The `From:`, `Date:` and `Message-Id:`
 lines of a message are the server's and cannot be forged; the body is the sender's text,
 including any header-looking line it wrote.
 

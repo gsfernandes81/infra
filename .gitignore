@@ -40,10 +40,3 @@ __pycache__/
 .vault_pass
 .vault-pass
 vault_pass.txt
-
-# Crush keeps its per-project sessions in .crush/ in the directory it runs in — here,
-# the repo. It writes its own .gitignore inside; this is the same answer, not left to it.
-.crush/
-
-# jcode's per-project state lives in .jcode/ the same way; ignored for the same reason.
-.jcode/

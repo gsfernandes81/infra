@@ -5,11 +5,10 @@
 # This is dev/README.md § *Four copies of this* built: the ~700 lines that dd-dev,
 # ds-dev, or3-dev and infra-dev agreed on, in one place. Debian trixie slim (glibc 2.41
 # since 2026-09-21; bookworm and its 2.36 before that), Node + Claude Code (with the agent
-# view off by baked managed settings), gh, zmx (what a slot lives in), Crush (on trial, the
-# latest at build), Helix and the language servers it and Claude Code use, the everyday CLI
-# tools (ripgrep, fd, jq, yq …), uv with ruff and ty, sshd, fish, the dev user, the entrypoint
-# and every dotfile, and the two
-# mountpoints claude-sessions arrives through from the hub. A repo's own dev/Dockerfile becomes a FROM line
+# view off by baked managed settings), gh, zmx (what a slot lives in), pi, Helix
+# and the language servers it and Claude Code use, the everyday CLI tools (ripgrep, fd, jq,
+# yq …), uv with ruff and ty, sshd, fish, the dev user, the entrypoint and every dotfile, and
+# the two mountpoints claude-sessions arrives through from the hub. A repo's own dev/Dockerfile becomes a FROM line
 # plus whatever that repo needs on top — see dev/Dockerfile here for the shape
 # (ansible), or or3's for the other one (uv, and its own ssh identity).
 #
@@ -58,11 +57,10 @@
 # and FAILS on a push that changed one without bumping BASE_TAG — because the tag below
 # is a contract and main would otherwise describe an image that does not exist.
 # Children FROM the ghcr name, so there is no cross-repo build order: no host needs this
-# repo checked out to run a dev container. `make base` builds the identical image —
-# but for Crush, which is that day's release (the Crush layer) — locally under the same
-# name, as the offline fallback — and is also the way to have the
-# image without waiting the ~5 minutes the workflow takes. infra owns
-# the source because infra is where fleet-wide decisions live.
+# repo checked out to run a dev container. `make base` builds the identical image locally
+# under the same name, as the offline fallback — and is also the way to have the image
+# without waiting the ~5 minutes the workflow takes. infra owns the source because infra is
+# where fleet-wide decisions live.
 #
 # THE TAG IS THE CONTRACT. bump BASE_TAG in dev/Makefile, rebuild, then move each
 # child's ARG BASE_TAG when that repo is ready — children pin a tag, never `latest`,
@@ -126,11 +124,9 @@
 #
 # MOVING THIS DIGEST IS THE REFRESH, and the only one for Debian and Claude Code. With the
 # cache, the apt layer, NodeSource and the npm install of Claude Code never re-run on their
-# own. (Crush is the one exception, and it is scoped to itself: its layer re-runs when
-# Charm releases, ~25 MB, and refreshes nothing else — the Crush layer says how.) Debian
-# security updates reach this image only when this line moves, and so do the fresher
-# Claude Code (it updates itself anyway, so that part matters little) and apt's package
-# set. Bump it on purpose, with a BASE_TAG bump, roughly monthly or on a Debian
+# own. Debian security updates reach this image only when this line moves, and so do the
+# fresher Claude Code (it updates itself anyway, so that part matters little) and apt's
+# package set. Bump it on purpose, with a BASE_TAG bump, roughly monthly or on a Debian
 # security notice: every Pi then pulls the whole image once. The digest is the
 # MULTI-ARCH INDEX, not one platform's manifest, so it serves both legs of the build. Read
 # the current one with `docker buildx imagetools inspect python:3.13-slim-trixie`, the
@@ -373,72 +369,121 @@ RUN npm install -g \
 # pinned there by digest. An inert 37 MB binary on a deprecation clock was all that was
 # left of it here, so it went too.
 
-# ── Crush: a second agent harness, on trial (owner, 2026-10-11) ──────────────────
-# charmbracelet/crush, reached the plain way: `ssh -t <c> in-workspace`, then `crush`. No
-# slot, no hooks, no environment — the provider key is typed at its first start and kept
-# in ~/.local/share/crush, which every child already mounts a volume over. It is NOT in a
-# zmx session, so a dropped link ends it; the claude-sessions menu knows nothing about it.
-# Checked at 0.98.1: a plain `crush` leaves no process behind when it exits, although the
-# binary has a `crush server` mode — a release that starts detaching one by default would
-# be a process the offloader cannot see, so that is worth a look on each new version.
+# ── pi: a second agent harness, run as a slot by claude-sessions (owner, 2026-10-30) ──
+# earendil-works/pi (pi.dev). The menu starts it with `p` (claude-sessions 0.10.0), and the
+# entrypoint links the extension that binds the slot. Its model is qwen/qwen3.8-flash over
+# OpenRouter, with the key read from the file the hub mounts at /run/github/openrouter-key and
+# never from the environment (pi-models.json). dev/README.md § pi is how it is used, and its
+# row in docs/decisions.md is why it is built this way.
 #
-# THE LATEST, NOT A PIN IN THIS FILE — the owner's call — and CRUSH_VERSION is what makes
-# that true. Crush has no updater, and Docker caches a layer by its instruction, not by what
-# the instruction fetched, so an unpinned install would carry the first version it ever
-# installed, forever (the npm layer above does exactly that to Claude Code, which gets away
-# with it only by replacing itself). So the version is RESOLVED OUTSIDE THE BUILD — by
-# dev/crush-latest, which CI and `make base` both run — and passed in: the layer misses the
-# cache when Charm releases and only then, a bump that moves nothing else here costs no
-# Crush download, and both architecture legs install the same version. What a tag carries
-# is the release current when it was built; a forced rebuild or a local `make base` of the
-# same tag later takes that later day's release. Placed above the dev user, claude-sessions
-# and zmx so their bumps never rebuild this; a Crush release rebuilds them, all small.
+# VERSION-PINNED FROM npm INTO /opt/npm-global, beside the language servers, and bumped by a
+# rebuild. PI_SKIP_VERSION_CHECK stops it asking pi.dev for a newer one at every start.
+# --ignore-scripts costs nothing at 1.4.0: the only install scripts in its tree are a version
+# warning in protobufjs and a no-op echo in @google/genai. The tree is chowned back to dev
+# afterwards for the node block's reason: Claude Code updates itself there.
 #
-# `CRUSH_VERSION=none` BUILDS WITHOUT IT — the escape for a day repo.charm.sh or GitHub is
-# down and a base must still ship (`make base CRUSH_VERSION=none`). Unset, the build refuses
-# rather than guessing. `crush --version` must then name exactly that version: it is a Go
-# binary, which runs under the arm64 leg's QEMU, and it puts the version in CI's log.
+# STATE ON THE VOLUME, PACKAGES IN THE IMAGE. PI_CODING_AGENT_DIR puts pi's agent dir in
+# ~/.local/share/pi, which every child mounts a volume over, so sessions survive a recreate. The
+# packages cannot live there: a volume shows the image's content only while it is empty, so a
+# package bump would never reach a container that had started once. `pi install` writes them
+# to <agent dir>/npm and offers no other place, so the build installs them with the agent dir
+# pointed at /opt/pi/seed, and the entrypoint links <agent dir>/npm to /opt/pi/seed/npm.
+# /opt/pi/seed/LAYOUT names that directory for it (packages_dir=npm).
+# PI_PACKAGE_DIR IS NOT THE SWITCH FOR THIS, although its name reads like one: it moves pi's OWN
+# install (its package.json, themes and docs), and pointed anywhere else it leaves pi without
+# them. Read from pi 1.4.0's config.js and package-manager.js.
 #
-# FROM CHARM'S SIGNED APT REPOSITORY, which is what lets it be unpinned here and still
-# verified: apt checks the repository's signature, so the trust anchor is Charm's signing
-# key rather than a per-version hash, and that key is what is pinned. ONLY THE PINNED KEY
-# REACHES THE KEYRING: gpg.key is imported into a scratch home and the one certificate with
-# that fingerprint exported — comparing the file's first fingerprint and keeping the whole
-# file would also trust any key appended after it (found in review, reproduced). Not the npm
-# package (@charmland/crush), a Node launcher whose postinstall fetches the binary unsigned;
-# not a release tarball, whose checksums.txt vouches only for itself. The key expires
-# 2027-07-13; an extension keeps the fingerprint, a new key fails here.
+# THE SEED is what the entrypoint copies into the agent dir: settings.json, into which each
+# `pi install` below appends its package in install order, models.json, and the two extension
+# configs. The package list is put back at every start and the rest only when absent; the
+# entrypoint says which. tuiMode is regular because pi's default, fullscreen, takes the
+# alternate screen and turns on mouse tracking, the pair that broke scrolling over ssh from the
+# phone for Claude Code (claude-sessions issue #8). defaultProjectTrust is never, so pi skips a
+# repo's .pi/ without asking: a trusted .pi/ could carry a gate config that replaces this one
+# and packages that pi would install unpinned at start. The base's own packages and skills come
+# from the agent dir, which project trust does not govern, so `never` leaves them all loaded.
 #
-# apt READS ONLY charm.list, never the image's other sources: a Debian or NodeSource
-# index that fails to fetch or verify must not fail a Crush layer, and nothing else here
-# should be refreshed by it. The source and key are removed afterwards, so a child's own
-# `apt-get update` never depends on repo.charm.sh either. The package, measured at 0.98.1:
-# one static binary (86 MB on arm64, 25 MB as a .deb), no Depends, a man page and bash,
-# fish and zsh completions.
-ARG CRUSH_VERSION
-ARG CHARM_APT_KEY_FPR=ED927B38BE981E53CA09153D03BBF595D4DFD35C
+# THE PACKAGES, each pinned here; npm resolves their own dependencies once, in this layer:
+#   pi-permission-classifier and @gotgenes/pi-permission-system, the judge and the gate. The
+#     judge installs FIRST: pi runs session_start in package order, the gate announces itself
+#     from its own session_start, and a judge listed after it misses that and joins only after
+#     the first turn.
+#     The gate's config turns the judge on by naming it in authorizerChain. Reads are allowed;
+#     write and edit ask inside /workspace and are denied outside it; any path outside the
+#     working tree (/workspace, where pi starts) is denied; bash and every other tool take the
+#     gate's default, ask, except the hub's own CLI (below the COPY of the gate's config); and
+#     an ask nobody answers in five minutes is denied. The judge's
+#     config is `{}`: the session model judges, and a failure defers to the gate's prompt and
+#     never allows. The skills' real directory, /opt/claude-sessions/skills, is readable too.
+#   cc-safety-net: fixed blocks on rm -rf, force-push, curl | sh and reads of secrets.
+#   pi-subagents, pi-web-access and @nredd/pi-dev-tools.
+#   pi-lens, diagnostics after edits. Its ast-grep binary arrives as an npm platform package
+#     (@ast-grep/cli-linux-arm64-gnu or -x64-gnu) that @ast-grep/cli pins exactly, so npm's
+#     registry integrity hash is the pin; the postinstall only links it into place. At run time
+#     pi-lens would also fetch linters and language servers from GitHub releases into
+#     ~/.pi-lens, unpinned and unhashed. PI_LENS_DISABLE_TOOL_INSTALL and
+#     PI_LENS_DISABLE_LSP_INSTALL stop that, and it uses what this image already carries.
+#   pi-powerline-footer, in plain characters (POWERLINE_NERD_FONTS=0 and the ascii preset)
+#     because Termux's default font has no Nerd Font glyphs. Auto follow-up and working vibes
+#     are off; both send what you type to a model outside the session's.
+#   pi-themes, so /theme can match the terminal. The built-in dark stays the default.
+#
+# ROOT-OWNED, /opt/pi and all of it, unlike the npm tree: the gate's code and the seed it is
+# restored from are what an agent in the session should not be able to edit. A package bump is
+# a rebuild, as pi's own is.
+ENV PI_CODING_AGENT_DIR=/home/dev/.local/share/pi \
+    PI_SKIP_VERSION_CHECK=1 \
+    PI_LENS_DISABLE_TOOL_INSTALL=1 \
+    PI_LENS_DISABLE_LSP_INSTALL=1 \
+    POWERLINE_NERD_FONTS=0
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.4.0 \
+    && npm cache clean --force \
+    && chown -R "${USER_UID}:${USER_GID}" /opt/npm-global \
+    && if grep -rqF 'qwen/qwen3.8-flash' "${NPM_CONFIG_PREFIX}/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle"; then \
+         echo "pi's built-in OpenRouter list carries qwen/qwen3.8-flash; pi-models.json repeats it unchanged"; \
+       else \
+         echo "pi's built-in OpenRouter list lacks qwen/qwen3.8-flash; pi-models.json is what defines it"; \
+       fi
+COPY pi-settings.json /opt/pi/seed/settings.json
+# A throwaway HOME, so npm's cache and logs land nowhere the image keeps. PI_OFFLINE keeps pi's
+# own catalogue refresh out of a build; the installs are explicit and still run. The modes are
+# set in THIS layer: a chmod in a later one copies every file it touches up into that layer, and
+# the package tree is some 300 MB. The smoke test reads the layer sizes back.
 RUN set -eux; \
-    case "${CRUSH_VERSION:-}" in \
-      '') echo "CRUSH_VERSION is unset — pass --build-arg CRUSH_VERSION=\$(dev/crush-latest), or none (dev/Makefile's base target and dev-base.yml do)" >&2; exit 1 ;; \
-      none) echo "CRUSH_VERSION=none: building without Crush"; exit 0 ;; \
-      *[!0-9.]*) echo "CRUSH_VERSION=${CRUSH_VERSION} is not a version" >&2; exit 1 ;; \
-    esac; \
-    GNUPGHOME="$(mktemp -d)"; \
-    export GNUPGHOME; \
-    curl -fsSLo /tmp/charm.asc https://repo.charm.sh/apt/gpg.key; \
-    gpg --batch --quiet --import /tmp/charm.asc; \
-    install -d -m 0755 /etc/apt/keyrings; \
-    gpg --batch --export "${CHARM_APT_KEY_FPR}" > /etc/apt/keyrings/charm.gpg; \
-    test "$(gpg --batch --show-keys --with-colons /etc/apt/keyrings/charm.gpg | awk -F: '$1 == "fpr" && !seen++ { print $10 }')" = "${CHARM_APT_KEY_FPR}" \
-      || { echo "repo.charm.sh/apt/gpg.key does not hold the pinned key ${CHARM_APT_KEY_FPR}" >&2; exit 1; }; \
-    echo 'deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *' > /etc/apt/sources.list.d/charm.list; \
-    charm="-o Dir::Etc::SourceList=/etc/apt/sources.list.d/charm.list -o Dir::Etc::SourceParts=-"; \
-    apt-get $charm update; \
-    apt-get $charm install -y --no-install-recommends "crush=${CRUSH_VERSION}"; \
-    rm -f /etc/apt/sources.list.d/charm.list /etc/apt/keyrings/charm.gpg /tmp/charm.asc; \
-    rm -rf /var/lib/apt/lists/* "$GNUPGHOME"; \
-    test "$(crush --version)" = "crush version v${CRUSH_VERSION}"; \
-    crush --version
+    export HOME=/tmp/pi-build-home PI_CODING_AGENT_DIR=/opt/pi/seed PI_OFFLINE=1; \
+    for p in \
+        npm:pi-permission-classifier@0.6.0 npm:@gotgenes/pi-permission-system@42.0.0 \
+        npm:cc-safety-net@2.7.0 npm:pi-subagents@0.84.0 npm:pi-web-access@0.46.0 \
+        npm:pi-lens@4.4.7 npm:@nredd/pi-dev-tools@0.7.0 \
+        npm:pi-powerline-footer@0.22.0 npm:pi-themes@1.0.1; do \
+      pi install "$p" || exit 1; \
+    done; \
+    test -n "$(ls -A /opt/pi/seed/npm/node_modules)"; \
+    test -x /opt/pi/seed/npm/node_modules/@ast-grep/cli/ast-grep; \
+    python3 -c 'import json; p = json.load(open("/opt/pi/seed/settings.json"))["packages"]; assert len(p) == 9 and p[0].startswith("npm:pi-permission-classifier@"), p'; \
+    pi list; \
+    rm -rf /tmp/pi-build-home; \
+    chmod -R a+rX /opt/pi
+COPY pi-models.json /opt/pi/seed/models.json
+# The gate's config allows `claude-sessions mail` and `claude-sessions keepalive` outright, after
+# the bash catch-all so last-match-wins keeps them allowed: the managed policy has a pi session run
+# `mail list` every turn and the keepalive skill runs `keepalive`, and a judge and a prompt on
+# each would make both unusable. The file's schema takes no comment field, so the reason is here.
+COPY pi-permission-system.json /opt/pi/seed/extensions/pi-permission-system/config.json
+COPY pi-permission-classifier.json /opt/pi/seed/extensions/pi-permission-classifier/config.json
+# Parsed here, as the managed settings are, because each is hand-edited and none of them says
+# much when it is malformed: the gate falls back to asking for everything, and the judge
+# registers nothing.
+RUN for f in /opt/pi/seed/settings.json /opt/pi/seed/models.json \
+             /opt/pi/seed/extensions/pi-permission-system/config.json \
+             /opt/pi/seed/extensions/pi-permission-classifier/config.json; do \
+         python3 -c 'import json, sys; json.load(open(sys.argv[1]))' "$f" || exit 1; done \
+    && printf 'packages_dir=npm\n' > /opt/pi/seed/LAYOUT \
+    && chmod a+rX /opt/pi/seed/extensions /opt/pi/seed/extensions/pi-permission-system \
+        /opt/pi/seed/extensions/pi-permission-classifier \
+    && chmod a+r /opt/pi/seed/settings.json /opt/pi/seed/models.json /opt/pi/seed/LAYOUT \
+        /opt/pi/seed/extensions/pi-permission-system/config.json \
+        /opt/pi/seed/extensions/pi-permission-classifier/config.json
 
 # Create the dev user at the HOST owner's uid/gid, passed by the Makefile as build
 # args (`make base`; the published base bakes 1001), so what it shares with the host — the
@@ -739,57 +784,9 @@ WORKDIR /workspace
 # found the same mistake in the hub on 2026-10-27.
 RUN mkdir -p /home/dev/.claude /home/dev/.config/gh /home/dev/.config/fish \
         /home/dev/.ssh-host /home/dev/.ssh/cp /home/dev/.local/share /home/dev/.local/bin \
-        /home/dev/.screen /home/dev/.env.d \
+        /home/dev/.screen /home/dev/.env.d /home/dev/.local/share/pi \
     && chmod 700 /home/dev/.ssh-host /home/dev/.ssh /home/dev/.ssh/cp \
         /home/dev/.screen /home/dev/.env.d
-
-# ── Jcode: a third agent harness, alongside Crush (owner, 2026-10-16) ─────────────────
-# 1jehuang/jcode, a Rust CLI agent, reached the same plain way: `ssh -t <c> in-workspace`,
-# then `jcode`. It is NOT offloaded and is not in a zmx session — like Crush, the
-# claude-sessions menu and offloader know nothing about it. Unlike Crush that is a decision
-# made on purpose: jcode is light enough not to need offloading, and its own 5-minute idle
-# timeout reaps the background server it detaches (setsid()) when a session runs.
-#
-# PINNED AND HASH-PINNED, the cloudflared model, because jcode has no signed repository —
-# only unsigned GitHub release tarballs with a self-vouching SHA256SUMS. A pin means a
-# manual bump per release: JCODE_VERSION and the two per-arch hashes below. The tarball is
-# one static ELF on arm64; on amd64 the `jcode-linux-x86_64` entry is a wrapper script that
-# execs the real static binary, `jcode-linux-x86_64.bin`, which is what is installed.
-#
-# INSTALLED THE WAY JCODE ITSELF INSTALLS, so its own updater works. `jcode update` (and
-# `--auto-update`, on by default) downloads a new release into ~/.jcode/builds/versions/
-# and repoints the `stable` symlink; the launcher on PATH follows it. That only works when
-# the launcher and ~/.jcode are writable by `dev` — a root-owned /usr/local/bin copy makes
-# `jcode update` fail — which is why this layer runs as `dev` (it is past the USER line) and
-# why the binary is not in /usr/local/bin. ~/.jcode is a volume (infra-jcode in compose.yaml),
-# so an update and the provider login under config/jcode survive a recreate; the launcher at
-# ~/.local/bin/jcode is in the image, first on PATH.
-ARG JCODE_VERSION=0.98.1
-ARG JCODE_SHA256_arm64=571917f4029b2f72c4045423871c40f30f93064f9938eb9f1910ea8f14797100
-ARG JCODE_SHA256_amd64=449a8ed50aa9ac75e6afe9b8e916814172ff7cc63913c7ae1f9abd5b1bc5323c
-RUN set -eux; \
-    arch="$(dpkg --print-architecture)"; \
-    case "$arch" in \
-      arm64) sha="${JCODE_SHA256_arm64}"; jarch=aarch64; src=jcode-linux-aarch64 ;; \
-      amd64) sha="${JCODE_SHA256_amd64}"; jarch=x86_64;   src=jcode-linux-x86_64.bin ;; \
-      *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
-    esac; \
-    curl -fsSLo /tmp/jcode.tar.gz \
-      "https://github.com/1jehuang/jcode/releases/download/v${JCODE_VERSION}/jcode-linux-${jarch}.tar.gz"; \
-    echo "${sha}  /tmp/jcode.tar.gz" | sha256sum -c -; \
-    tar -xzf /tmp/jcode.tar.gz -C /tmp "$src"; \
-    mkdir -p "/home/dev/.jcode/builds/versions/${JCODE_VERSION}" \
-             "/home/dev/.jcode/builds/stable"; \
-    install -m 0755 "/tmp/$src" "/home/dev/.jcode/builds/versions/${JCODE_VERSION}/jcode"; \
-    ln -sfn "../versions/${JCODE_VERSION}/jcode" "/home/dev/.jcode/builds/stable/jcode"; \
-    printf '%s\n' "${JCODE_VERSION}" > "/home/dev/.jcode/builds/stable-version"; \
-    ln -sfn "/home/dev/.jcode/builds/stable/jcode" "/home/dev/.local/bin/jcode"; \
-    rm -f /tmp/jcode.tar.gz "/tmp/$src"; \
-    case "$(jcode --version)" in \
-      "jcode v${JCODE_VERSION}"*) : ;; \
-      *) echo "jcode --version does not name ${JCODE_VERSION}" >&2; exit 1 ;; \
-    esac; \
-    jcode --version
 
 # THE BUILD'S OWN CHECK THAT CLAUDE CODE CAN STILL UPDATE ITSELF, run as `dev` because
 # that is the account whose answer counts — it is the same question Claude Code asks
@@ -815,7 +812,10 @@ RUN test -w "${NPM_CONFIG_PREFIX}/lib/node_modules" \
     && test -w "${NPM_CONFIG_PREFIX}/bin" \
     && { HOME=/home/dev CLAUDE_CONFIG_DIR=/tmp/claude-build-check claude --version \
          || echo "WARNING: claude did not answer --version in this build (QEMU on the arm64 leg?) — the prefix is writable, so the build stands; check the container's boot log"; } \
-    && rm -rf /tmp/claude-build-check
+    && rm -rf /tmp/claude-build-check \
+    && { HOME=/home/dev PI_CODING_AGENT_DIR=/tmp/pi-build-check pi --version \
+         || echo "WARNING: pi did not answer --version in this build; check the container's boot log"; } \
+    && rm -rf /tmp/pi-build-check
 
 # The in-container sshd: port 2222, non-root, key-only, no forwarding.
 COPY --chown=${USER_UID}:${USER_GID} sshd_config /home/dev/sshd_config
@@ -837,5 +837,8 @@ COPY --chown=${USER_UID}:${USER_GID} config.fish /home/dev/.config/fish/config.f
 COPY --chown=${USER_UID}:${USER_GID} login.sh /home/dev/login.sh
 
 COPY --chown=${USER_UID}:${USER_GID} entrypoint.sh /home/dev/entrypoint.sh
+# Sourced by it, from beside it: the functions that seed pi's agent dir, in a file of their
+# own so dev/test_entrypoint_pi.sh can call them without running the entrypoint.
+COPY --chown=${USER_UID}:${USER_GID} pi-seed.sh /home/dev/pi-seed.sh
 
 CMD ["bash", "/home/dev/entrypoint.sh"]

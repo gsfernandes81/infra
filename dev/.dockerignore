@@ -11,7 +11,7 @@
 README.md
 Makefile
 status.sh
-crush-latest
+test_entrypoint_pi.sh
 
 # The hub is its own image, built from hub/; the sidecar's ingress is mounted, not baked.
 hub/
