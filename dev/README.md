@@ -383,7 +383,7 @@ reconnects by itself.
   their clones into `~/.dd-dev-secrets` and `~/.ds-dev-secrets` in step 2. or3's keys are
   already in `~/.or3-dev-secrets`.
 - **Nothing reads the host clones any more.** Each child builds straight from its repo on
-  GitHub (`main`), with its own Dockerfile, on base `2026.10.29.1` passed as the `BASE_TAG`
+  GitHub (`main`), with its own Dockerfile, on base `2026.10.30` passed as the `BASE_TAG`
   build arg each already takes — so no child repo changes first. or3, being private, is
   fetched over ssh with its deploy key from `~/.or3-dev-secrets`. Once step 1's listing is
   clean, the clones of or3, destiny-director and dossier on zero can be deleted.
@@ -591,14 +591,25 @@ for its own builds (dd and ds add `build-essential`). Every binary that runs as 
 downloads is hash-pinned per arch in `Dockerfile.base`; the npm and PyPI ones are
 version-pinned, as Claude Code is.
 
-## Crush and Jcode, on trial
+## Pi, Crush and Jcode, on trial
 
-Two more agent harnesses in the base, the owner's calls (their rows in
+Three more agent harnesses in the base, the owner's calls (their rows in
 [`../docs/decisions.md`](../docs/decisions.md), their layers in `Dockerfile.base`). `ssh dev`,
-`s` on a container, then `crush` or `jcode`; the first start asks for a provider.
+`s` on a container, then `pi`, `crush` or `jcode`. Crush and jcode ask for a provider at their
+first start; pi's is set in the image.
 
-- **No slot**: neither runs in a zmx session, so a dropped connection ends it, and the menu and
-  offloader know nothing about either. `crush --continue` picks up the last session.
+- **Pi** is pinned at `1.4.0` and on its way to a slot of its own
+  ([`../plans/pi-harness.md`](../plans/pi-harness.md)); the menu is claude-sessions' work. Its
+  model is `qwen/qwen3.8-flash` over OpenRouter, with the key read from
+  `/run/github/openrouter-key`. Its state is in `~/.local/share/pi`, on the volume. Its
+  packages are baked into the image, each pinned: `@gotgenes/pi-permission-system` and
+  `pi-permission-classifier`, `cc-safety-net`, `pi-subagents`, `pi-web-access`, `pi-lens`,
+  `@nredd/pi-dev-tools`, `pi-powerline-footer` and `pi-themes`. The gate asks before every edit
+  and every shell command, the session's model answers what it can, and it denies any path
+  outside `/workspace`. Install telemetry is off and pi does not check for updates.
+- **No slot**: Crush and jcode run in no zmx session, and pi does not yet, so a dropped
+  connection ends any of them, and the menu and offloader know nothing about them.
+  `crush --continue` picks up the last session.
 - **State**: Crush's key and settings in `~/.local/share/crush` (a volume; `~/.config/crush` is
   not), jcode's everything, login included, under `~/.jcode`; per-project `.crush/` and
   `.jcode/`, which the repo ignores. **Decline any offer to initialise a project** — it writes

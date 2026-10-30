@@ -440,6 +440,107 @@ RUN set -eux; \
     test "$(crush --version)" = "crush version v${CRUSH_VERSION}"; \
     crush --version
 
+# ── pi: a fourth agent harness, on trial, on its way to a slot (owner, 2026-10-30) ─────
+# earendil-works/pi (pi.dev), reached like Crush and Jcode for now: `ssh -t <c> in-workspace`,
+# then `pi`. Its model is qwen/qwen3.8-flash over OpenRouter, with the key read from the file
+# the hub mounts at /run/github/openrouter-key and never from the environment (pi-models.json).
+# The claude-sessions menu learns pi from a release of its own; until then pi has no slot and a
+# dropped link ends it. plans/pi-harness.md is the design.
+#
+# VERSION-PINNED FROM npm INTO /opt/npm-global, beside the language servers, and bumped by a
+# rebuild. PI_SKIP_VERSION_CHECK stops it asking pi.dev for a newer one at every start.
+# --ignore-scripts costs nothing at 1.4.0: the only install scripts in its tree are a version
+# warning in protobufjs and a no-op echo in @google/genai. The tree is chowned back to dev
+# afterwards for the node block's reason: Claude Code updates itself there.
+#
+# STATE ON THE VOLUME, PACKAGES IN THE IMAGE. PI_CODING_AGENT_DIR puts pi's agent dir in
+# ~/.local/share/pi, which every child mounts a volume over, so sessions survive a recreate. The
+# packages cannot live there: a volume shows the image's content only while it is empty, so a
+# package bump would never reach a container that had started once. `pi install` writes them
+# to <agent dir>/npm and offers no other place, so the build installs them with the agent dir
+# pointed at /opt/pi/seed, and the entrypoint links <agent dir>/npm to /opt/pi/seed/npm.
+# /opt/pi/seed/LAYOUT names that directory for it (packages_dir=npm).
+# PI_PACKAGE_DIR IS NOT THE SWITCH FOR THIS, although its name reads like one: it moves pi's OWN
+# install (its package.json, themes and docs), and pointed anywhere else it leaves pi without
+# them. Read from pi 1.4.0's config.js and package-manager.js.
+#
+# THE SEED is what the entrypoint copies into the agent dir: settings.json, into which each
+# `pi install` below appends its package in install order, models.json, and the two extension
+# configs. The package list is put back at every start and the rest only when absent; the
+# entrypoint says which. tuiMode is regular because pi's default, fullscreen, takes the
+# alternate screen and turns on mouse tracking, the pair that broke scrolling over ssh from the
+# phone for Claude Code (claude-sessions issue #8).
+#
+# THE PACKAGES, each pinned here; npm resolves their own dependencies once, in this layer:
+#   pi-permission-classifier and @gotgenes/pi-permission-system, the judge and the gate. The
+#     judge installs FIRST: pi runs session_start in package order, the gate announces itself
+#     from its own session_start, and a judge listed after it misses that and joins only after
+#     the first turn.
+#     The gate's config turns the judge on by naming it in authorizerChain. Reads are allowed;
+#     write and edit ask inside /workspace and are denied outside it; any path outside the
+#     working tree (/workspace, where pi starts) is denied; bash and every other tool take the
+#     gate's default, ask; and an ask nobody answers in five minutes is denied. The judge's
+#     config is `{}`: the session model judges, and a failure defers to the gate's prompt and
+#     never allows. The skills' real directory, /opt/claude-sessions/skills, is readable too.
+#   cc-safety-net: fixed blocks on rm -rf, force-push, curl | sh and reads of secrets.
+#   pi-subagents, pi-web-access and @nredd/pi-dev-tools.
+#   pi-lens, diagnostics after edits. Its ast-grep binary arrives as an npm platform package
+#     (@ast-grep/cli-linux-arm64-gnu or -x64-gnu) that @ast-grep/cli pins exactly, so npm's
+#     registry integrity hash is the pin; the postinstall only links it into place. At run time
+#     pi-lens would also fetch linters and language servers from GitHub releases into
+#     ~/.pi-lens, unpinned and unhashed. PI_LENS_DISABLE_TOOL_INSTALL and
+#     PI_LENS_DISABLE_LSP_INSTALL stop that, and it uses what this image already carries.
+#   pi-powerline-footer, in plain characters (POWERLINE_NERD_FONTS=0 and the ascii preset)
+#     because Termux's default font has no Nerd Font glyphs. Auto follow-up and working vibes
+#     are off; both send what you type to a model outside the session's.
+#   pi-themes, so /theme can match the terminal. The built-in dark stays the default.
+#
+# ROOT-OWNED, /opt/pi and all of it, unlike the npm tree: the gate's code and the seed it is
+# restored from are what an agent in the session should not be able to edit. A package bump is
+# a rebuild, as pi's own is.
+ENV PI_CODING_AGENT_DIR=/home/dev/.local/share/pi \
+    PI_SKIP_VERSION_CHECK=1 \
+    PI_LENS_DISABLE_TOOL_INSTALL=1 \
+    PI_LENS_DISABLE_LSP_INSTALL=1 \
+    POWERLINE_NERD_FONTS=0
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.4.0 \
+    && npm cache clean --force \
+    && chown -R "${USER_UID}:${USER_GID}" /opt/npm-global \
+    && if grep -rqF 'qwen/qwen3.8-flash' "${NPM_CONFIG_PREFIX}/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle"; then \
+         echo "pi's built-in OpenRouter list carries qwen/qwen3.8-flash; pi-models.json repeats it unchanged"; \
+       else \
+         echo "pi's built-in OpenRouter list lacks qwen/qwen3.8-flash; pi-models.json is what defines it"; \
+       fi
+COPY pi-settings.json /opt/pi/seed/settings.json
+# A throwaway HOME, so npm's cache and logs land nowhere the image keeps. PI_OFFLINE keeps pi's
+# own catalogue refresh out of a build; the installs are explicit and still run.
+RUN set -eux; \
+    export HOME=/tmp/pi-build-home PI_CODING_AGENT_DIR=/opt/pi/seed PI_OFFLINE=1; \
+    for p in \
+        npm:pi-permission-classifier@0.6.0 npm:@gotgenes/pi-permission-system@42.0.0 \
+        npm:cc-safety-net@2.7.0 npm:pi-subagents@0.84.0 npm:pi-web-access@0.46.0 \
+        npm:pi-lens@4.4.7 npm:@nredd/pi-dev-tools@0.7.0 \
+        npm:pi-powerline-footer@0.22.0 npm:pi-themes@1.0.1; do \
+      pi install "$p" || exit 1; \
+    done; \
+    test -n "$(ls -A /opt/pi/seed/npm/node_modules)"; \
+    test -x /opt/pi/seed/npm/node_modules/@ast-grep/cli/ast-grep; \
+    python3 -c 'import json; p = json.load(open("/opt/pi/seed/settings.json"))["packages"]; assert len(p) == 9 and p[0].startswith("npm:pi-permission-classifier@"), p'; \
+    pi list; \
+    rm -rf /tmp/pi-build-home
+COPY pi-models.json /opt/pi/seed/models.json
+COPY pi-permission-system.json /opt/pi/seed/extensions/pi-permission-system/config.json
+COPY pi-permission-classifier.json /opt/pi/seed/extensions/pi-permission-classifier/config.json
+# Parsed here, as the managed settings are, because each is hand-edited and none of them says
+# much when it is malformed: the gate falls back to asking for everything, and the judge
+# registers nothing.
+RUN for f in /opt/pi/seed/settings.json /opt/pi/seed/models.json \
+             /opt/pi/seed/extensions/pi-permission-system/config.json \
+             /opt/pi/seed/extensions/pi-permission-classifier/config.json; do \
+         python3 -c 'import json, sys; json.load(open(sys.argv[1]))' "$f" || exit 1; done \
+    && printf 'packages_dir=npm\n' > /opt/pi/seed/LAYOUT \
+    && chmod -R a+rX /opt/pi
+
 # Create the dev user at the HOST owner's uid/gid, passed by the Makefile as build
 # args (`make base`; the published base bakes 1001), so what it shares with the host — the
 # secrets directories, the files a container writes into a mount — reads as gavin's. Guard against a
@@ -739,7 +840,7 @@ WORKDIR /workspace
 # found the same mistake in the hub on 2026-10-27.
 RUN mkdir -p /home/dev/.claude /home/dev/.config/gh /home/dev/.config/fish \
         /home/dev/.ssh-host /home/dev/.ssh/cp /home/dev/.local/share /home/dev/.local/bin \
-        /home/dev/.screen /home/dev/.env.d \
+        /home/dev/.screen /home/dev/.env.d /home/dev/.local/share/pi \
     && chmod 700 /home/dev/.ssh-host /home/dev/.ssh /home/dev/.ssh/cp \
         /home/dev/.screen /home/dev/.env.d
 
@@ -815,7 +916,10 @@ RUN test -w "${NPM_CONFIG_PREFIX}/lib/node_modules" \
     && test -w "${NPM_CONFIG_PREFIX}/bin" \
     && { HOME=/home/dev CLAUDE_CONFIG_DIR=/tmp/claude-build-check claude --version \
          || echo "WARNING: claude did not answer --version in this build (QEMU on the arm64 leg?) — the prefix is writable, so the build stands; check the container's boot log"; } \
-    && rm -rf /tmp/claude-build-check
+    && rm -rf /tmp/claude-build-check \
+    && { HOME=/home/dev PI_CODING_AGENT_DIR=/tmp/pi-build-check pi --version \
+         || echo "WARNING: pi did not answer --version in this build; check the container's boot log"; } \
+    && rm -rf /tmp/pi-build-check
 
 # The in-container sshd: port 2222, non-root, key-only, no forwarding.
 COPY --chown=${USER_UID}:${USER_GID} sshd_config /home/dev/sshd_config

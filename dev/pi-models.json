@@ -1,0 +1,30 @@
+{
+  "$schema": "https://pi.dev/schemas/models.schema.json",
+  "providers": {
+    "openrouter": {
+      "apiKey": "!cat /run/github/openrouter-key",
+      "models": [
+        {
+          "id": "qwen/qwen3.8-flash",
+          "name": "Qwen: Qwen3.8 Flash",
+          "api": "openai-completions",
+          "baseUrl": "https://openrouter.ai/api/v1",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "cost": { "input": 0.15, "output": 0.47, "cacheRead": 0.016, "cacheWrite": 0 },
+          "contextWindow": 1000000,
+          "maxTokens": 131072,
+          "compat": {
+            "supportsDeveloperRole": false,
+            "thinkingFormat": "openrouter",
+            "supportsStrictMode": true,
+            "sendSessionAffinityHeaders": true
+          },
+          "inputLimits": {
+            "images": { "resize": { "maxWidth": 2000, "maxHeight": 2000, "maxBytes": 4718592, "jpegQuality": 80 } }
+          }
+        }
+      ]
+    }
+  }
+}
