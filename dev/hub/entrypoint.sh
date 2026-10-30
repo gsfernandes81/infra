@@ -158,7 +158,8 @@ fi
 # any copy a container still holds is removed and pi in it has no key; nothing else fails. A
 # file in each container's tokens directory, never the environment: no secret reaches a
 # container that way. Copied once per start, never watched: the key changes when the owner
-# changes it, and `make up` restarts the hub. Through a temp file and a rename, as the public
+# changes it, and `make restart C=hub` then copies it (`make up` recreates the hub only when
+# its image or config changed). Through a temp file and a rename, as the public
 # key above, so a pi starting mid-copy reads the old key or the new one. Never printed.
 # AFTER the container list, and after `github-tokens dirs` made each directory.
 if [ -s "$SECRETS/openrouter-key" ]; then

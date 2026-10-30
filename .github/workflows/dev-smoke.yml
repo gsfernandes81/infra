@@ -124,6 +124,27 @@ jobs:
       - name: Build the base (make base)
         run: make -C dev base SUDO=
 
+      # A chmod in a later layer than the files it touches copies each one up into that layer,
+      # which is how pi's ~300 MB package tree was once carried twice. So a layer that runs a
+      # chmod and fetches or installs nothing must stay under 1 MB. Calibrated by the pi install
+      # layer, which must parse as more than 1 MB, or the sizes are not being read at all.
+      - name: Check no layer that only changes modes carries files (docker history)
+        run: |
+          img=ghcr.io/gsfernandes81/gsrpi-dev-base:$(sed -n 's/^x-base-tag: &base-tag //p' dev/compose.yaml)
+          docker history --no-trunc --format '{{.Size}}\t{{.CreatedBy}}' "$img" > history.txt
+          grep -wE 'pi|chmod' history.txt | cut -c1-240 | sed 's/^/  docker history: /'
+          awk -F'\t' '
+            function bytes(s,   u) { u = s; sub(/^[0-9.]+/, "", u)
+              return (s + 0) * (u == "kB" ? 1e3 : u == "MB" ? 1e6 : u == "GB" ? 1e9 : 1) }
+            $2 ~ /pi install/ { cal = bytes($1) }
+            $2 ~ /chmod/ && $2 !~ /curl|wget|apt-get|npm install|pi install|uv tool/ {
+              n++; if (bytes($1) > 1e6) { bad++; print "FAIL  " $1 " in a layer that only changes modes: " substr($2, 1, 160) } }
+            END {
+              if (cal <= 1e6) { print "FAIL  the pi install layer reads " cal " bytes: the sizes are not parsed"; exit 1 }
+              if (bad) exit 1
+              printf "PASS  %d layers that only change modes, each under 1 MB (the pi install layer: %d MB)\n", n, cal / 1e6 }
+          ' history.txt
+
       # A runner never had the old projects, so the external volumes zero keeps are made here,
       # empty — after checking that `make up` refuses without them, which is the cutover's net.
       - name: Check make up refuses missing volumes, then create them (make volumes)
@@ -272,8 +293,13 @@ jobs:
             docker exec infra sh -c "cat \"\$PI_CODING_AGENT_DIR\"/extensions/pi-permission-system/logs/*.jsonl" \
               | grep -F classifier.decision | grep -qF "rm -rf /workspace/.pi-gate-probe"'
           docker exec infra rm -rf /workspace/.pi-gate-probe /tmp/pi-gate-probe /tmp/pi-stub-model.js
-          check "no pi is left running after the pi checks" sh -c \
-            '[ -z "$(docker exec infra ps -eo comm= | grep -x pi)" ]'
+          # The same scan the measure step uses: comm pi, or the mark pi puts in its children's
+          # environment, so an orphaned child (ty) counts too. A scan that cannot run fails.
+          pi_left_none() { local out
+            out=$(docker exec infra sh -c 'for p in /proc/[0-9]*; do c=$(cat "$p/comm" 2>/dev/null) || continue; if [ "$c" = pi ] || tr "\0" "\n" < "$p/environ" 2>/dev/null | grep -qx PI_CODING_AGENT=true; then printf "%s(%s) " "${p#/proc/}" "$c"; fi; done; true') \
+              || { echo "  could not scan infra's processes"; return 1; }
+            [ -z "$out" ] || { echo "  still running: $out"; return 1; }; }
+          check "no pi, and nothing pi started, is left running after the pi checks" pi_left_none
           check "mail who reaches the server from infra with its token" sh -c \
             'docker exec -e CLAUDE_SESSIONS_SLOT=claude-1 infra claude-sessions mail who >who.txt 2>&1; cat who.txt | sed "s/^/  who: /"; grep -qiE "infra|no live|no session" who.txt'
           check "a send to an address nobody holds is refused, not accepted" sh -c \
@@ -391,11 +417,18 @@ jobs:
           exp=$(( $(date +%s) * 1000 + 3600000 ))
           printf '{"claudeAiOauth":{"accessToken":"at-smoke","refreshToken":"rt-smoke","expiresAt":%s,"scopes":["user:inference"],"subscriptionType":"max"}}' "$exp" \
             | docker exec -i infra sh -c 'umask 077; cat > "$CLAUDE_SECURESTORAGE_CONFIG_DIR/.credentials.json"'
-          make -s -C dev verify SUDO= | grep -E '^(auth|login dir)' | tee login.txt
+          make -s -C dev verify SUDO= | grep -E '^(auth|login dir|pi |pi-ext|pi-tui)' | tee login.txt
           grep -q '^auth      : claude logged in — the shared login' login.txt || { echo "FAIL  not logged in on the shared login"; exit 1; }
           echo "PASS  logged in on the shared login"
           grep -q '^login dir : honoured' login.txt || { echo "FAIL  the variable is not honoured"; exit 1; }
           echo "PASS  the variable is honoured"
+          # pi's three readouts, the ones the handoff tells the owner to expect on zero.
+          grep '^pi        : ' login.txt | grep -qv MISSING || { echo "FAIL  make verify's pi line is absent or MISSING"; exit 1; }
+          echo "PASS  make verify reads a pi version"
+          grep -q '^pi-ext    : linked' login.txt || { echo "FAIL  the claude-sessions extension is not linked"; exit 1; }
+          echo "PASS  the claude-sessions extension is linked"
+          grep -q '^pi-tui    : --tui-mode present' login.txt || { echo "FAIL  pi --help does not list --tui-mode"; exit 1; }
+          echo "PASS  pi still takes --tui-mode"
           docker exec infra rm -f /home/dev/.claude-logins/true/.credentials.json
 
       # Since claude-sessions 0.7.0 an idle menu rewrites its load line when the figures change
@@ -631,7 +664,11 @@ jobs:
           hook1=$(hooklen)
           ix "tail -c +$((hook0 + 1)) $reg/hook.log" 2>/dev/null | sed 's/^/  hook.log: /' || true
           check "hook.log gained nothing from the pi hooks ($hook0 bytes before, $hook1 after)" [ "$hook1" = "$hook0" ]
-          ix 'tail -n 3 /tmp/pi-1.stderr /tmp/pi-rpc.log' 2>/dev/null | sed 's/^/  pi output: /' || true
+          # The slot's stderr whole, and pi's own debug log if it wrote one: a package that opens
+          # a dialog at start is named here or nowhere.
+          ix 'cat /tmp/pi-1.stderr' 2>/dev/null | sed 's/^/  pi-1.stderr: /' || true
+          ix 'tail -n 3 /tmp/pi-rpc.log' 2>/dev/null | sed 's/^/  pi-rpc.log: /' || true
+          ix 'f="$PI_CODING_AGENT_DIR/pi-debug.log"; [ ! -f "$f" ] || tail -n 20 "$f"' 2>/dev/null | sed 's/^/  pi-debug.log: /' || true
           # Whatever is left goes now, so no later step meets it.
           [ -z "$gone" ] || ix "kill -KILL $gone" 2>/dev/null || true
           [ -z "$zl" ] || docker exec infra zmx kill pi-1 >/dev/null 2>&1 || true

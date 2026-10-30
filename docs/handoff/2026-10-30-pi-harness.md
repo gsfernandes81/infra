@@ -46,8 +46,8 @@ Findings, not started:
 
 5. **A package opens a dialog when pi starts, and it stays open.** A fresh pi slot reads
    `needs_you`, the amber `!`, before any prompt. Which package is not known yet; the gate and
-   pi-lens are the first suspects. The smoke step prints only the last three lines of the
-   slot's stderr, so printing it whole is the way to name the package. Infra owes
+   pi-lens are the first suspects. The smoke step prints the slot's stderr whole and the tail
+   of pi's `pi-debug.log`, so a run's log is where to name the package. Infra owes
    claude-sessions a mail naming it.
 6. **Idle CPU on arm64 is unproven.** The offloader counts an idle slot as quiet only under
    3000 ms of CPU per three-minute window. On amd64, pi alone used about 1.2 s over 180 s
@@ -60,6 +60,11 @@ Findings, not started:
 8. **Termux's handling of pi's extended-key queries is untested.** Whether Termux answers
    them, and whether any key misbehaves when it does not, shows at the first attach from the
    phone. Not a blocker.
+9. **Two pinned dependencies carry published advisories.** Pi 1.4.0 pins `undici` 8.10.2,
+   which has advisories against it, one a TLS-validation bypass when custom TLS options are
+   passed; `pi-permission-classifier` pins `zod` 4.4.3, which has a high-severity one.
+   Nothing to fix in infra: both are pinned inside the packages, so they move when pi and the
+   judge release, and the next pi bump should check both.
 
-This note is deleted when all eight are closed. Its reasoning is already in the pi row, so
+This note is deleted when all nine are closed. Its reasoning is already in the pi row, so
 nothing needs moving first.
