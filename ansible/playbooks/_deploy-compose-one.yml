@@ -100,12 +100,14 @@
   # password with echo off most likely stays in stdout. On pearl-wallet's first deploy
   # (2026-10-30) the script found no one-shots and stdout_lines still read [''], whose empty
   # name "did not run in this up", so a deploy whose container came up healthy was reported
-  # as failed. Both facts repeat the filter, because one set_fact cannot read a variable it
+  # as failed. Only lines shaped like a container name are kept, so a line that is not a name
+  # (sudo's line break, a diagnostic merged in by `-tt`) is dropped, since it would otherwise
+  # become a one-shot that "did not run". Both facts repeat the filter, because one set_fact cannot read a variable it
   # is setting.
   ansible.builtin.set_fact:
-    dep_oneshot: "{{ dep_oneshot_out.stdout_lines | default([]) | map('trim') | select | list }}"
+    dep_oneshot: "{{ dep_oneshot_out.stdout_lines | default([]) | map('trim') | select | select('match', '^[A-Za-z0-9][A-Za-z0-9_.-]*$') | list }}"
     dep_oneshot_done_re: >-
-      {% set names = dep_oneshot_out.stdout_lines | default([]) | map('trim') | select | list %}{{ '^(' ~ (names | map('regex_escape') | join('|')) ~ ') Exited [(]0[)]' if names | length > 0 else '(?!)' }}
+      {% set names = dep_oneshot_out.stdout_lines | default([]) | map('trim') | select | select('match', '^[A-Za-z0-9][A-Za-z0-9_.-]*$') | list %}{{ '^(' ~ (names | map('regex_escape') | join('|')) ~ ') Exited [(]0[)]' if names | length > 0 else '(?!)' }}
 
 - name: Read the variable names in .env for {{ dep.name }}
   # Names only: sed prints the part before the `=`, so a value never reaches a register or a

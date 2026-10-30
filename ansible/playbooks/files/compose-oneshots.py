@@ -26,6 +26,10 @@
 # exit is non-zero, because a `CalledProcessError` traceback shows the exit status and not the
 # reason, and the play that ran this printed no cause at all.
 #
+# A retry that succeeds prints nothing. The play's `-tt` channel merges stderr into stdout, and
+# every line of output is read as a container name, so a note on the success path became a
+# one-shot that "did not run in this up" and failed a deploy that had worked.
+#
 # Run by ansible.builtin.script from the playbooks, on the host, as root (the docker socket).
 import json
 import os
@@ -52,7 +56,6 @@ def read_config():
     plain = compose("config", "--format", "json")
     if plain.returncode == 0:
         return json.loads(plain.stdout)
-    sys.stderr.write(f"compose-oneshots: plain config read failed: {last_line(plain.stderr)}\n")
 
     listed = compose("config", "--services")
     if listed.returncode != 0:
@@ -72,7 +75,10 @@ def read_config():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     if retry.returncode != 0:
-        sys.stderr.write(f"compose-oneshots: retry with build.ssh reset failed:\n{retry.stderr}")
+        sys.stderr.write(
+            f"compose-oneshots: plain config read failed: {last_line(plain.stderr)}\n"
+            f"compose-oneshots: retry with build.ssh reset failed:\n{retry.stderr}"
+        )
         sys.exit(1)
     return json.loads(retry.stdout)
 
