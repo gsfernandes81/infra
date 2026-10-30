@@ -46,7 +46,7 @@ lint, read a playbook against the real `ansible.cfg` — and are not wired to th
 | `cloudflared.yml` | the hub tunnel's ingress, and the whole of it: `dev.gsrpi.uk` → the hub, `or3-dev.gsrpi.uk` → or3 |
 | `Dockerfile.base` | `gsrpi-dev-base`, which every dev container is `FROM` — Debian trixie slim, Node 22, Claude Code, gh, zmx, screen, sshd, Helix, the tools and language servers, Crush, Jcode |
 | `Dockerfile` | infra: the base + ansible-core, the collections and the docker CLI |
-| `entrypoint.sh` | every container's PID 1: ssh material and the hub's key → Claude config → clone or pull the workspace → link the env files → `child-init.sh` → `reconcile` → keep-alive skill → **sshd (fg)** |
+| `entrypoint.sh` | every container's PID 1: ssh material and the hub's key → Claude config → pi's agent dir (`pi-seed.sh`, sourced; its offline test is `test_entrypoint_pi.sh`) → clone or pull the workspace → link the env files → `child-init.sh` → `reconcile` → keep-alive skill → **sshd (fg)** |
 | `dev-door` | sshd's `ForceCommand` in every container: a forwarded command as given, otherwise a login shell in `/workspace` |
 | `in-workspace` | on PATH: run a command in `/workspace`, so no client names the path |
 | `gh`, `git-credential-hub` | the `gh` wrapper and git's credential helper, both reading the hub's token |
@@ -601,7 +601,9 @@ first start; pi's is set in the image.
 - **Pi** is pinned at `1.4.0` and on its way to a slot of its own
   ([`../plans/pi-harness.md`](../plans/pi-harness.md)); the menu is claude-sessions' work. Its
   model is `qwen/qwen3.8-flash` over OpenRouter, with the key read from
-  `/run/github/openrouter-key`. Its state is in `~/.local/share/pi`, on the volume. Its
+  `/run/github/openrouter-key`. Its state is in `~/.local/share/pi`, on the volume, and the
+  entrypoint re-seeds it at every start: the image's package list always, its other settings
+  and configs only where the volume has none. Its
   packages are baked into the image, each pinned: `@gotgenes/pi-permission-system` and
   `pi-permission-classifier`, `cc-safety-net`, `pi-subagents`, `pi-web-access`, `pi-lens`,
   `@nredd/pi-dev-tools`, `pi-powerline-footer` and `pi-themes`. The gate asks before every edit

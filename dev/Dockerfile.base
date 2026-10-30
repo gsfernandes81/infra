@@ -944,5 +944,8 @@ COPY --chown=${USER_UID}:${USER_GID} config.fish /home/dev/.config/fish/config.f
 COPY --chown=${USER_UID}:${USER_GID} login.sh /home/dev/login.sh
 
 COPY --chown=${USER_UID}:${USER_GID} entrypoint.sh /home/dev/entrypoint.sh
+# Sourced by it, from beside it: the functions that seed pi's agent dir, in a file of their
+# own so dev/test_entrypoint_pi.sh can call them without running the entrypoint.
+COPY --chown=${USER_UID}:${USER_GID} pi-seed.sh /home/dev/pi-seed.sh
 
 CMD ["bash", "/home/dev/entrypoint.sh"]

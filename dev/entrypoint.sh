@@ -3,8 +3,8 @@
 # sessions' orphans get reaped).
 #
 # Order matters and is not arbitrary:
-#   ssh (+ the hub's key) -> claude state -> clone or pull -> env links -> child-init
-#   -> sshd host key -> reconcile -> keep-alive skill -> sshd(fg)
+#   ssh (+ the hub's key) -> claude state -> pi's agent dir -> clone or pull -> env links
+#   -> child-init -> sshd host key -> reconcile -> keep-alive skill -> sshd(fg)
 #
 # NO OFFLOADER AND NO TUNNEL HERE since base 2026.10.26: both are the hub's (dev/hub/). The hub
 # runs `claude-sessions offload` in this container over ssh every three minutes, and the way in
@@ -274,6 +274,29 @@ if dirty:
     os.chmod(path, 0o600)
 PY
 
+# ── pi: its agent dir on the volume, seeded and linked at every start ────────
+# pi keeps its settings, its package list and its policy in PI_CODING_AGENT_DIR, which the
+# image points into the ~/.local/share volume; the volume hides what the image baked there,
+# so the image keeps its copy in /opt/pi/seed and pi-seed.sh restores it. The functions and
+# their reasoning are in that file, beside this one, so its test can call them without
+# running this. The managed policy is linked from /etc, where Claude reads it; if it were ever
+# missing, the dangling link reads to pi as no file, as the missing file does to Claude. The
+# skills and the extension are linked further down, with Claude's skills.
+PI_DIR="${PI_CODING_AGENT_DIR:-$HOME/.local/share/pi}"
+PI_SEED_SH="$(dirname "${BASH_SOURCE[0]}")/pi-seed.sh"
+# shellcheck source-path=SCRIPTDIR source=pi-seed.sh
+if ! . "$PI_SEED_SH"; then
+    say "pi: could not load $PI_SEED_SH — its agent dir is not seeded or linked"
+elif [ ! -d /opt/pi/seed ]; then
+    say "pi: no /opt/pi/seed in this image — its agent dir is not seeded"
+elif pi_seed /opt/pi/seed "$PI_DIR"; then
+    if pi_link /etc/claude-code/CLAUDE.md "$PI_DIR/CLAUDE.md"; then
+        say "pi policy: $PI_DIR/CLAUDE.md -> /etc/claude-code/CLAUDE.md"
+    else
+        say "pi policy: could not link $PI_DIR/CLAUDE.md — pi starts without the managed policy"
+    fi
+fi
+
 # ── the workspace ───────────────────────────────────────────────────────────
 git config --global --add safe.directory /workspace 2>/dev/null || true
 git config --global user.name  "${GIT_USER_NAME:-Gavin Fernandes}"
@@ -511,7 +534,16 @@ for skill in keepalive mail-send mail-read mail-reply; do
         rm -rf "$link"
         say "skill $skill NOT in the hub's volume — removed here"
     fi
+    # pi reads the same four, from its agent dir (pi-seed.sh § pi_link_skill).
+    if declare -F pi_link_skill >/dev/null; then
+        pi_link_skill /opt/claude-sessions "$PI_DIR" "$skill"
+    fi
 done
+
+# pi's hook into claude-sessions, linked like a skill (pi-seed.sh § pi_link_extension).
+if declare -F pi_link_extension >/dev/null; then
+    pi_link_extension /opt/claude-sessions "$PI_DIR"
+fi
 
 # ── the offloader and the tunnel: the hub's, since base 2026.10.26 ────────────
 # This entrypoint started both until then: a fixed-rate loop running `claude-sessions offload`
