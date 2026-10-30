@@ -11,6 +11,10 @@
 #    the owner's own terminal, because creating it prints the seed (README.md, step 1, and
 #    docs/decisions.md § Pearl wallet on `zero`). So this hook stops the deploy, and says
 #    how.
+#
+# Until that wallet exists, check 2 also stops `-e deployment=all`, which ends at the
+# first failure (server-deploy-compose.yml's header), possibly before `zero`'s other
+# deployments. The README's step 2 says to deploy pearl-wallet by name until then.
 
 - name: Check the pearl-wallet tag matches the Dockerfile
   # Read on the control node, from the commit the host was just pulled to. regex_findall

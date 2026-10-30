@@ -66,6 +66,10 @@ cd ~/infra/ansible; ansible-playbook playbooks/server-deploy-compose.yml -e depl
 
 The play shows its plan, asks once, starts the container and waits for its healthcheck.
 
+Until step 1 is done, deploy pearl-wallet by name only. The preflight hook fails while
+there is no wallet, and `-e deployment=all` stops at the first failure, so it would
+stop at pearl-wallet and may not reach `zero`'s other deployments.
+
 ### 3. Give the pool an address
 
 ```fish
@@ -86,6 +90,10 @@ sudo docker exec pearl-wallet prlctl listtransactions
 
 A balance of 0 just after a start can mean the light client has not caught up yet. The
 log shows how far it is: `sudo docker logs --tail 20 pearl-wallet`.
+
+A container that restarts again and again may be hitting its 256 MB cap.
+`sudo docker inspect -f '{{.State.OOMKilled}}' pearl-wallet` reads `true` when it is;
+raise `mem_limit` in `compose.yaml` and redeploy.
 
 ## Sending
 
@@ -109,20 +117,22 @@ today, and the light client only looks for coins from a wallet's date onwards, s
 balance would read 0.
 
 `--createfromfile` reads a JSON file holding the passphrase, the seed and the date as
-Unix seconds. Use the date on the paper, or any earlier date; an earlier date costs only
-a longer scan. The file holds the seed, so it lives in RAM and is deleted at once.
+Unix seconds. Use the day before the date on the paper, which is safe in any timezone,
+or any earlier date; an earlier date costs only a longer scan. The file holds the seed,
+so it lives in RAM and is deleted at once.
 
 ```fish
 # on the new host: restore the wallet from the seed
 cd ~/infra/deployments/pearl-wallet
 sudo docker compose build
-date -d 2026-10-30 +%s                  # the date on the paper, as Unix seconds
+date -d 2026-10-29 +%s                  # the day before the paper's date, as Unix seconds
 sudo install -m 0400 -o 65532 /dev/null /dev/shm/pearl-restore.json
 sudo vi /dev/shm/pearl-restore.json     # {"PrivatePassphrase": "…", "Seed": "word1 … word12", "Bday": "<seconds>"}
 sudo docker compose run --rm -it -v /dev/shm/pearl-restore.json:/restore.json:ro pearl-wallet --createfromfile=/restore.json
 sudo rm /dev/shm/pearl-restore.json
 ```
 
+Oyster prints the seed phrase once more as it finishes; clear the screen afterwards.
 Then step 2. This path has not been rehearsed yet.
 
 ## Bumping Oyster
