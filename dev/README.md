@@ -383,7 +383,7 @@ reconnects by itself.
   their clones into `~/.dd-dev-secrets` and `~/.ds-dev-secrets` in step 2. or3's keys are
   already in `~/.or3-dev-secrets`.
 - **Nothing reads the host clones any more.** Each child builds straight from its repo on
-  GitHub (`main`), with its own Dockerfile, on base `2026.10.30` passed as the `BASE_TAG`
+  GitHub (`main`), with its own Dockerfile, on base `2026.10.30.1` passed as the `BASE_TAG`
   build arg each already takes — so no child repo changes first. or3, being private, is
   fetched over ssh with its deploy key from `~/.or3-dev-secrets`. Once step 1's listing is
   clean, the clones of or3, destiny-director and dossier on zero can be deleted.
@@ -985,14 +985,51 @@ A second agent harness beside Claude Code in every container, the owner's call (
   has a pi session run `claude-sessions mail list` at the start of a turn.
 - **Pinned** at `1.4.0`, and pi does not check for updates; a bump is a rebuild. Its state is
   in `~/.local/share/pi`, on the volume, and the entrypoint re-seeds it at every start: the
-  image's package list always, its other settings and configs only where the volume has
-  none. Its packages are baked into the image, each pinned: `@gotgenes/pi-permission-system`
-  and `pi-permission-classifier`, `cc-safety-net`, `pi-subagents`, `pi-web-access`,
-  `pi-lens`, `@nredd/pi-dev-tools`, `pi-powerline-footer` and `pi-themes`. The gate asks
-  before every edit and every shell command but `claude-sessions mail` and `keepalive`, which
-  the policy and the keepalive skill run each turn; the session's model answers what it can,
-  and the gate denies any path outside `/workspace`. Pi ignores a repo's `.pi/` directory, which could
-  otherwise replace the gate. Install telemetry is off.
+  image's package list, its footer settings (`powerline`) and the gate's two configs always,
+  its other settings and `models.json` only where the volume has none. Its packages are baked
+  into the image, each pinned: `@gotgenes/pi-permission-system` and
+  `pi-permission-classifier`, `cc-safety-net`, `pi-subagents`, `pi-web-access`, `pi-lens`,
+  `@nredd/pi-dev-tools`, `pi-powerline-footer` and `pi-themes`. Pi ignores a repo's `.pi/`
+  directory, which could otherwise replace the gate. Install telemetry is off.
+- **The footer's welcome card is off** from base `2026.10.30.1`. It waited for a key at every
+  start, so a fresh slot showed in the menu as waiting on the owner.
+
+### How the gate decides
+
+The gate is `@gotgenes/pi-permission-system`, and its judge is `pi-permission-classifier`,
+which asks the session's own model. Since base `2026.10.30.1` it works like Claude Code's auto
+mode, by the owner's call: the container is the boundary, and no call waits on a prompt.
+
+- **Allowed outright:** reading any file; writing or editing any file under `/workspace`
+  except inside a `.git` directory; `claude-sessions mail` and `claude-sessions keepalive`,
+  which the policy and the keepalive skill run each turn.
+- **Judged:** every other shell command, writes outside `/workspace`, edits to a repo's
+  `.git` (its config and hooks can turn a plain push into a force push), and every other tool
+  (subagents, web access). The write rules go by the path as written, so a link inside
+  `/workspace` that points outside it is written through without the judge. The judge answers allow or deny, never "ask the owner". When
+  it cannot tell, it denies with "could not be confirmed safe". When it cannot answer at all
+  (a timeout, a model error, no key), it denies at once with a reason that names the failure
+  and ends "Retry later or take another route". The agent reads the reason and carries on.
+- **Always denied, before the judge sees it:** any write under pi's own directory,
+  `~/.local/share/pi`, which holds the gate's config and pi's trust decisions, by any path
+  the gate can resolve, a link included (a link whose target does not exist yet is not
+  resolved, and a path a shell variable computes goes to the judge);
+  and `git push` with `--force`, `--force-with-lease`, `-f` as a
+  flag of its own, a `+` refspec, or `--mirror`. Combined short flags such as `git push -uf`
+  are left to `cc-safety-net`. Under the gate,
+  `cc-safety-net` blocks `rm -rf` on dangerous targets, `git reset --hard`, force pushes,
+  `curl | sh` and reads of SSH keys and `.env` files, however the command is wrapped.
+- **What the judge reads besides the call:** the managed policy, through the agent dir's
+  `CLAUDE.md` link, and a repo's own `CLAUDE.md` only when pi trusts the repo and the file is
+  under 16 KiB; each `classifier.decision` line names the files it dropped and why.
+- **To see what it decided**, read the gate's review log, one JSON line per event:
+  `~/.local/share/pi/extensions/pi-permission-system/logs/pi-permission-system-permission-review.jsonl`.
+  A judge's answer is a `classifier.decision` line with its `verdict`; a rule's deny is a
+  `permission_request.blocked` line naming the rule.
+- **To change it**, edit `dev/pi-permission-system.json` or `dev/pi-permission-classifier.json`
+  and rebuild the base. The seed wins: the entrypoint copies both over the volume's at every
+  start, so an edit on the volume, or a `/permission-model` choice inside pi, lasts until the
+  container next starts.
 
 ## Secrets
 

@@ -9,6 +9,7 @@
   "workingVibe": "off",
   "powerline": {
     "preset": "ascii",
-    "autoFollowUp": false
+    "autoFollowUp": false,
+    "welcome": false
   }
 }

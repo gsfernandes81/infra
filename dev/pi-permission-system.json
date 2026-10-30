@@ -1,21 +1,27 @@
 {
   "$schema": "https://raw.githubusercontent.com/gotgenes/pi-packages/main/packages/pi-permission-system/schemas/permissions.schema.json",
-  "promptTimeoutMs": 300000,
+  "promptTimeoutMs": 30000,
   "authorizerChain": ["permission-judge"],
   "piInfrastructureReadPaths": ["/opt/claude-sessions/skills"],
   "permission": {
     "*": "ask",
+    "path": "allow",
+    "path_write": { "*": "allow", "/home/dev/.local/share/pi/*": "deny" },
+    "external_directory": "allow",
     "read": "allow",
     "grep": "allow",
     "find": "allow",
     "ls": "allow",
+    "write": { "*": "ask", "/workspace/*": "allow", "/workspace/*.git/*": "ask" },
+    "edit": { "*": "ask", "/workspace/*": "allow", "/workspace/*.git/*": "ask" },
     "bash": {
       "*": "ask",
       "claude-sessions mail *": "allow",
-      "claude-sessions keepalive *": "allow"
-    },
-    "write": { "*": "deny", "/workspace/*": "ask" },
-    "edit": { "*": "deny", "/workspace/*": "ask" },
-    "external_directory": "deny"
+      "claude-sessions keepalive *": "allow",
+      "git *push*--force*": { "action": "deny", "reason": "force pushes are denied in the dev containers; push without --force, or ask the owner to do it" },
+      "git *push* -f *": { "action": "deny", "reason": "force pushes are denied in the dev containers; push without -f, or ask the owner to do it" },
+      "git *push* +*": { "action": "deny", "reason": "a +refspec is a force push, and force pushes are denied in the dev containers; push without the +, or ask the owner to do it" },
+      "git *push*--mirror*": { "action": "deny", "reason": "a mirror push overwrites and deletes remote refs, and is denied in the dev containers; ask the owner to do it" }
+    }
   }
 }

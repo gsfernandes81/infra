@@ -408,13 +408,15 @@ RUN npm install -g \
 #     judge installs FIRST: pi runs session_start in package order, the gate announces itself
 #     from its own session_start, and a judge listed after it misses that and joins only after
 #     the first turn.
-#     The gate's config turns the judge on by naming it in authorizerChain. Reads are allowed;
-#     write and edit ask inside /workspace and are denied outside it; any path outside the
-#     working tree (/workspace, where pi starts) is denied; bash and every other tool take the
-#     gate's default, ask, except the hub's own CLI (below the COPY of the gate's config); and
-#     an ask nobody answers in five minutes is denied. The judge's
-#     config is `{}`: the session model judges, and a failure defers to the gate's prompt and
-#     never allows. The skills' real directory, /opt/claude-sessions/skills, is readable too.
+#     The gate's config turns the judge on by naming it in authorizerChain. Reads are allowed,
+#     and writes and edits under /workspace outside a .git; any other write, bash and every
+#     other tool ask, and the judge answers, except the hub's own CLI (below the COPY of the
+#     gate's config), the force and mirror pushes the gate denies by rule, and writes under
+#     pi's own directory, denied on path_write, which also sees where a link resolves. The judge runs on the session model
+#     and answers allow or deny only: an uncertain answer denies, and so does a failure, at
+#     once and with its reason, so no call waits on a prompt. The gate's 30 s prompt timeout is
+#     a backstop for an ask the judge never saw. The skills' real directory,
+#     /opt/claude-sessions/skills, is readable too.
 #   cc-safety-net: fixed blocks on rm -rf, force-push, curl | sh and reads of secrets.
 #   pi-subagents, pi-web-access and @nredd/pi-dev-tools.
 #   pi-lens, diagnostics after edits. Its ast-grep binary arrives as an npm platform package

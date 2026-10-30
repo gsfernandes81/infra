@@ -11,7 +11,9 @@ Built on 2026-10-30 and green in the smoke test, on GitHub's amd64 runner only. 
 and links the policy, the four skills and the claude-sessions extension. The hub pins
 claude-sessions 0.10.0, which starts a pi slot with `p`, and copies `openrouter-key` from
 `$HUB_SECRETS` into every container. The managed policy tells a pi session how to read its
-mail. The reasons are the pi row in [`decisions.md`](../decisions.md); how pi is used is
+mail. From base `2026.10.30.1` pi's gate allows reads and edits in `/workspace`, has the judge
+answer everything else allow or deny with no prompt, denies force pushes by rule, and the
+footer's welcome card is off. The reasons are the pi row in [`decisions.md`](../decisions.md); how pi is used is
 [`dev/README.md`](../../dev/README.md) § *pi*. The plan, `plans/pi-harness.md`, is deleted:
 both repos built their side.
 
@@ -30,7 +32,7 @@ The owner's, in this order, each on zero:
    read -s -P 'OpenRouter key: ' k; and printf '%s\n' $k > ~/.dev-secrets/openrouter-key; set -e k
    ```
 
-2. **The deploy**, once this is on `main` and `dev-base.yml` has published `2026.10.30`: the
+2. **The deploy**, once this is on `main` and `dev-base.yml` has published `2026.10.30.1`: the
    recreate play from the phone, as [`dev/README.md`](../../dev/README.md) § *Four copies of
    this, now one base* gives it (`make up` on zero is the break glass). It rebuilds the hub
    with claude-sessions 0.10.0 and the new policy, and recreates every container on the new
@@ -44,14 +46,12 @@ The owner's, in this order, each on zero:
 
 Findings, not started:
 
-5. **The startup dialog is `pi-powerline-footer`'s welcome card.** Named on 2026-10-30 from
-   the first slot on zero: the footer draws a "Press any key to continue" card with an 18 s
-   countdown at every start (its `welcome.ts`), and that is the prompt that sets `needs_you`,
-   the amber `!`, on a fresh slot; on a terminal it dismisses itself, in the smoke run's rpc
-   pi it stayed open. Turning the card off is a line in the footer's seed config
-   (`dev/pi-powerline-footer.json` or its settings key; the package's README names it), which
-   is a base rebuild and a tag bump, so it rides the next bump (item 7's pin, or sooner if the
-   owner wants it). claude-sessions has the name (mail, 2026-10-30 11:07Z).
+5. **The startup dialog was `pi-powerline-footer`'s welcome card, and it is off from base
+   `2026.10.30.1`** (`"welcome": false` under `powerline` in `dev/pi-settings.json`, a key the
+   entrypoint now re-seeds at every start). It drew a "Press any key to continue" card with a
+   countdown at every start, and that prompt set `needs_you`, the amber `!`, on a fresh slot.
+   Open until that base is on zero: then a fresh `p` slot should show no `!` before its first
+   prompt. claude-sessions has the name (mail, 2026-10-30 11:07Z).
 6. **Idle CPU on arm64 is unproven.** The offloader counts an idle slot as quiet only under
    3000 ms of CPU per three-minute window. On amd64, pi alone used about 1.2 s over 180 s
    idle, its `ty` child not counted. If an idle pi slot on zero goes over, it is never
