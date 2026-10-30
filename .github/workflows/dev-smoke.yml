@@ -87,6 +87,9 @@ jobs:
           # and GitHub refuses, which the log says. infra's token is written by hand below.
           openssl genrsa -out "$s/hub/github-app.pem" 2048 2>/dev/null
           chmod 600 "$s/hub/github-app.pem"
+          # A dummy OpenRouter key, so the hub's copy into every container's /run/github is tried.
+          printf 'sk-or-smoke\n' > "$s/hub/openrouter-key"
+          chmod 600 "$s/hub/openrouter-key"
           # The client key goes into infra's authorized_keys as well, so the forwarding
           # rules every container's sshd shares can be tried with a key that is not the hub's.
           for d in hub infra; do cp "$s/client.pub" "$s/$d/authorized_keys"; chmod 600 "$s/$d/authorized_keys"; done
@@ -196,8 +199,10 @@ jobs:
           # which the server must refuse rather than accept and lose.
           check "the mail server answers GET /who (401 without a token)" sh -c \
             '[ "$(docker exec dev-hub python3 -c "import http.client as h; c=h.HTTPConnection(\"127.0.0.1\",8025,timeout=3); c.request(\"GET\",\"/who\"); print(c.getresponse().status)")" = 401 ]'
-          check "/run/github holds the GitHub token and the mail-token, 0644, and nothing else" sh -c \
-            '[ "$(docker exec infra ls -A /run/github | sort | tr "\n" " ")" = "mail-token token " ] && [ "$(docker exec infra stat -c %a /run/github/mail-token)" = 644 ]'
+          check "/run/github holds the GitHub token, the mail-token and the OpenRouter key, 0644, and nothing else" sh -c \
+            '[ "$(docker exec infra ls -A /run/github | sort | tr "\n" " ")" = "mail-token openrouter-key token " ] && [ "$(docker exec infra stat -c %a /run/github/mail-token)" = 644 ] && [ "$(docker exec infra stat -c %a /run/github/openrouter-key)" = 644 ]'
+          check "the OpenRouter key in infra is the one in HUB_SECRETS" sh -c \
+            '[ "$(docker exec infra cat /run/github/openrouter-key)" = sk-or-smoke ]'
           check "mail who reaches the server from infra with its token" sh -c \
             'docker exec -e CLAUDE_SESSIONS_SLOT=claude-1 infra claude-sessions mail who >who.txt 2>&1; cat who.txt | sed "s/^/  who: /"; grep -qiE "infra|no live|no session" who.txt'
           check "a send to an address nobody holds is refused, not accepted" sh -c \

@@ -107,8 +107,8 @@ ssh dev
 On zero, `make login` (`C=<c>` for another container) reports the hub's token, runs `claude
 auth login` if needed, and clones the workspace if start-up could not; re-running it is safe.
 Then `make verify` should read `sshd: running in the foreground`, `auth: claude logged in`,
-`tunnel: the hub's, serving dev`, `hub: key authorised; claude-sessions 0.9.0 here,
-claude-sessions 0.9.0 at the hub`, `github: the hub's token for gsfernandes81/infra, until …`,
+`tunnel: the hub's, serving dev`, `hub: key authorised; claude-sessions 0.10.0 here,
+claude-sessions 0.10.0 at the hub`, `github: the hub's token for gsfernandes81/infra, until …`,
 all collections installed, and `fleet: no route to zero/one/two`.
 
 **The memory pool is opt-in**: `DEV_CGROUP_PARENT=/devpool` puts every dev container and
@@ -601,7 +601,9 @@ first start; pi's is set in the image.
 - **Pi** is pinned at `1.4.0` and on its way to a slot of its own
   ([`../plans/pi-harness.md`](../plans/pi-harness.md)); the menu is claude-sessions' work. Its
   model is `qwen/qwen3.8-flash` over OpenRouter, with the key read from
-  `/run/github/openrouter-key`. Its state is in `~/.local/share/pi`, on the volume, and the
+  `/run/github/openrouter-key`, which the hub copies at its start, beside each container's
+  mail-token, from `openrouter-key` in `$HUB_SECRETS` (put there by hand). Without that file pi
+  has no key. Its state is in `~/.local/share/pi`, on the volume, and the
   entrypoint re-seeds it at every start: the image's package list always, its other settings
   and configs only where the volume has none. Its
   packages are baked into the image, each pinned: `@gotgenes/pi-permission-system` and
@@ -895,7 +897,7 @@ copies in is ignored.
 
 [`gsfernandes81/claude-sessions`](https://github.com/gsfernandes81/claude-sessions) is the
 session registry: one JSON file per slot under `~/.local/share/claude-sessions/` (on a volume),
-kept current by Claude Code's own hooks. The hub pins **v0.9.0** and installs it for every
+kept current by Claude Code's own hooks. The hub pins **v0.10.0** and installs it for every
 container (*The hub*). A bump reaches every container when the hub is recreated, with no
 container restarted: hooks and offload passes run the binary from the volume each time, and
 each container's agent is started by the hub's menu over ssh and ends with that connection, so
@@ -994,7 +996,7 @@ zero, each mounted read-only into the one container that needs it:
 
 | `.env` line, default | Mounted | Holds |
 |---|---|---|
-| `HUB_SECRETS`, `~/.dev-secrets` | the hub, `/run/hub-secrets` | `authorized_keys` — the clients allowed to `ssh dev`; `github-app.pem` — the GitHub App's key, put there by hand; `tunnel.json` — mounted into the sidecar alone |
+| `HUB_SECRETS`, `~/.dev-secrets` | the hub, `/run/hub-secrets` | `authorized_keys` — the clients allowed to `ssh dev`; `github-app.pem` — the GitHub App's key, put there by hand; `openrouter-key` — optional, the OpenRouter key pi uses, put there by hand and copied into every container's `/run/github`; `tunnel.json` — mounted into the sidecar alone |
 | `INFRA_SECRETS`, `~/.infra-dev-secrets` | infra, `/run/infra-secrets` | nothing, by default. A client key in an `authorized_keys` here would let it straight in; no fleet key is ever put here (*What it is not*) |
 | `OR3_SECRETS`, `~/.or3-dev-secrets` | or3, `/run/or3-secrets` | the or3ecr key, the phone's `authorized_keys`, and or3's deploy key — lent to BuildKit to fetch or3's private repo, and no GitHub credential inside the container. Written by or3's `dev/seed-secrets.sh` |
 | `DD_SECRETS`, `DS_SECRETS` | destiny-director, dossier | what was each clone's `.dev-ssh/` |
