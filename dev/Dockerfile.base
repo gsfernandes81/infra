@@ -394,9 +394,9 @@ RUN npm install -g \
 # them. Read from pi 1.4.0's config.js and package-manager.js.
 #
 # THE SEED is what the entrypoint copies into the agent dir: settings.json, into which each
-# `pi install` below appends its package in install order, models.json, and the two extension
-# configs. The package list is put back at every start and the rest only when absent; the
-# entrypoint says which. tuiMode is regular because pi's default, fullscreen, takes the
+# `pi install` below appends its package in install order, models.json, and the gate's config.
+# The package list, the footer's settings and the gate's config are put back at every start, and
+# the rest only when absent; the entrypoint says which. tuiMode is regular because pi's default, fullscreen, takes the
 # alternate screen and turns on mouse tracking, the pair that broke scrolling over ssh from the
 # phone for Claude Code (claude-sessions issue #8). defaultProjectTrust is never, so pi skips a
 # repo's .pi/ without asking: a trusted .pi/ could carry a gate config that replaces this one
@@ -404,18 +404,12 @@ RUN npm install -g \
 # from the agent dir, which project trust does not govern, so `never` leaves them all loaded.
 #
 # THE PACKAGES, each pinned here; npm resolves their own dependencies once, in this layer:
-#   pi-permission-classifier and @gotgenes/pi-permission-system, the judge and the gate. The
-#     judge installs FIRST: pi runs session_start in package order, the gate announces itself
-#     from its own session_start, and a judge listed after it misses that and joins only after
-#     the first turn.
-#     The gate's config turns the judge on by naming it in authorizerChain. Reads are allowed;
-#     write and edit ask inside /workspace and are denied outside it; any path outside the
-#     working tree (/workspace, where pi starts) is denied; bash and every other tool take the
-#     gate's default, ask, except the hub's own CLI (below the COPY of the gate's config); and
-#     an ask nobody answers in five minutes is denied. The judge's
-#     config is `{}`: the session model judges, and a failure defers to the gate's prompt and
-#     never allows. The skills' real directory, /opt/claude-sessions/skills, is readable too.
-#   cc-safety-net: fixed blocks on rm -rf, force-push, curl | sh and reads of secrets.
+#   @gotgenes/pi-permission-system, the gate. Its config runs it in yoloMode, the owner's call:
+#     everything is allowed and nothing prompts, except its explicit deny rules, which yolo
+#     leaves standing (force pushes in every spelling, and mirror pushes). Its review log keeps
+#     a line for each call yolo approved and each it denied.
+#   cc-safety-net: fixed blocks on rm -rf, force-push, curl | sh and reads of secrets, under
+#     the gate.
 #   pi-subagents, pi-web-access and @nredd/pi-dev-tools.
 #   pi-lens, diagnostics after edits. Its ast-grep binary arrives as an npm platform package
 #     (@ast-grep/cli-linux-arm64-gnu or -x64-gnu) that @ast-grep/cli pins exactly, so npm's
@@ -452,7 +446,7 @@ COPY pi-settings.json /opt/pi/seed/settings.json
 RUN set -eux; \
     export HOME=/tmp/pi-build-home PI_CODING_AGENT_DIR=/opt/pi/seed PI_OFFLINE=1; \
     for p in \
-        npm:pi-permission-classifier@0.6.0 npm:@gotgenes/pi-permission-system@42.0.0 \
+        npm:@gotgenes/pi-permission-system@42.0.0 \
         npm:cc-safety-net@2.7.0 npm:pi-subagents@0.84.0 npm:pi-web-access@0.46.0 \
         npm:pi-lens@4.4.7 npm:@nredd/pi-dev-tools@0.7.0 \
         npm:pi-powerline-footer@0.22.0 npm:pi-themes@1.0.1; do \
@@ -460,30 +454,26 @@ RUN set -eux; \
     done; \
     test -n "$(ls -A /opt/pi/seed/npm/node_modules)"; \
     test -x /opt/pi/seed/npm/node_modules/@ast-grep/cli/ast-grep; \
-    python3 -c 'import json; p = json.load(open("/opt/pi/seed/settings.json"))["packages"]; assert len(p) == 9 and p[0].startswith("npm:pi-permission-classifier@"), p'; \
+    python3 -c 'import json; p = json.load(open("/opt/pi/seed/settings.json"))["packages"]; assert len(p) == 8 and p[0].startswith("npm:@gotgenes/pi-permission-system@"), p'; \
     pi list; \
     rm -rf /tmp/pi-build-home; \
     chmod -R a+rX /opt/pi
 COPY pi-models.json /opt/pi/seed/models.json
 # The gate's config allows `claude-sessions mail` and `claude-sessions keepalive` outright, after
-# the bash catch-all so last-match-wins keeps them allowed: the managed policy has a pi session run
-# `mail list` every turn and the keepalive skill runs `keepalive`, and a judge and a prompt on
-# each would make both unusable. The file's schema takes no comment field, so the reason is here.
+# the bash catch-all so last-match-wins keeps them allowed. Under yoloMode they would be allowed
+# anyway; the rules keep the calls the managed policy and the keepalive skill make every turn out
+# of the review log. Reads are allowed outright for the same reason, so the log holds the calls
+# worth reading. The file's schema takes no comment field, so the reason is here.
 COPY pi-permission-system.json /opt/pi/seed/extensions/pi-permission-system/config.json
-COPY pi-permission-classifier.json /opt/pi/seed/extensions/pi-permission-classifier/config.json
 # Parsed here, as the managed settings are, because each is hand-edited and none of them says
-# much when it is malformed: the gate falls back to asking for everything, and the judge
-# registers nothing.
+# much when it is malformed: the gate falls back to asking for everything.
 RUN for f in /opt/pi/seed/settings.json /opt/pi/seed/models.json \
-             /opt/pi/seed/extensions/pi-permission-system/config.json \
-             /opt/pi/seed/extensions/pi-permission-classifier/config.json; do \
+             /opt/pi/seed/extensions/pi-permission-system/config.json; do \
          python3 -c 'import json, sys; json.load(open(sys.argv[1]))' "$f" || exit 1; done \
     && printf 'packages_dir=npm\n' > /opt/pi/seed/LAYOUT \
     && chmod a+rX /opt/pi/seed/extensions /opt/pi/seed/extensions/pi-permission-system \
-        /opt/pi/seed/extensions/pi-permission-classifier \
     && chmod a+r /opt/pi/seed/settings.json /opt/pi/seed/models.json /opt/pi/seed/LAYOUT \
-        /opt/pi/seed/extensions/pi-permission-system/config.json \
-        /opt/pi/seed/extensions/pi-permission-classifier/config.json
+        /opt/pi/seed/extensions/pi-permission-system/config.json
 
 # Create the dev user at the HOST owner's uid/gid, passed by the Makefile as build
 # args (`make base`; the published base bakes 1001), so what it shares with the host — the

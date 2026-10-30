@@ -32,21 +32,18 @@ sys.exit(0 if eval(sys.argv[1]) else 1)' "$@"
 }
 
 # A seed shaped like the image's /opt/pi/seed: settings with the packages `pi install`
-# appended, models.json, the two extension configs, the package tree, and LAYOUT.
+# appended, models.json, the gate's config, the package tree, and LAYOUT.
 SEED="$T/opt/pi/seed"
-mkdir -p "$SEED/extensions/pi-permission-system" "$SEED/extensions/pi-permission-classifier" \
-    "$SEED/npm/node_modules/cc-safety-net"
+mkdir -p "$SEED/extensions/pi-permission-system" "$SEED/npm/node_modules/cc-safety-net"
 cat > "$SEED/settings.json" <<'JSON'
 {"defaultProvider": "openrouter", "defaultModel": "qwen/qwen3.8-flash",
  "enableInstallTelemetry": false, "theme": "dark",
  "powerline": {"preset": "ascii", "welcome": false},
- "packages": [{"source": "npm:pi-permission-classifier@1.0.0"},
-              {"source": "npm:@gotgenes/pi-permission-system@2.0.0"},
+ "packages": [{"source": "npm:@gotgenes/pi-permission-system@2.0.0"},
               {"source": "npm:cc-safety-net@0.3.0"}]}
 JSON
 echo '{"providers": {"openrouter": {}}}' > "$SEED/models.json"
 echo '{"*": "ask"}' > "$SEED/extensions/pi-permission-system/config.json"
-echo '{}' > "$SEED/extensions/pi-permission-classifier/config.json"
 echo 'packages_dir=npm' > "$SEED/LAYOUT"
 
 # ── pi_seed_settings ────────────────────────────────────────────────────────
@@ -92,20 +89,16 @@ PI="$T/pi1"
 pi_seed "$SEED" "$PI" > "$T/out" 2>&1
 check "an absent models.json is copied from the seed" cmp -s "$SEED/models.json" "$PI/models.json"
 check "the gate's config is copied" cmp -s "$SEED/extensions/pi-permission-system/config.json" "$PI/extensions/pi-permission-system/config.json"
-check "the classifier's config is copied" cmp -s "$SEED/extensions/pi-permission-classifier/config.json" "$PI/extensions/pi-permission-classifier/config.json"
 check "the package tree is a link to the seed's" test "$(readlink "$PI/npm")" = "$SEED/npm"
 
-# The gate's two configs are infra's policy, not the owner's settings: an edit on the volume
-# (by the agent, or by /permission-model) is undone at the next start.
-PI="$T/pi2"; mkdir -p "$PI/npm/node_modules/stale" "$PI/extensions/pi-permission-system" \
-    "$PI/extensions/pi-permission-classifier"
+# The gate's config is infra's policy, not the owner's settings: an edit on the volume is
+# undone at the next start.
+PI="$T/pi2"; mkdir -p "$PI/npm/node_modules/stale" "$PI/extensions/pi-permission-system"
 echo '{"mine": true}' > "$PI/models.json"
 echo '{"bash": "allow"}' > "$PI/extensions/pi-permission-system/config.json"
-echo '{"verdicts": "allow-deny-defer"}' > "$PI/extensions/pi-permission-classifier/config.json"
 pi_seed "$SEED" "$PI" > "$T/out" 2>&1
 check "a present models.json is untouched" test "$(cat "$PI/models.json")" = '{"mine": true}'
 check "an edited gate config is replaced with the seed's" cmp -s "$SEED/extensions/pi-permission-system/config.json" "$PI/extensions/pi-permission-system/config.json"
-check "an edited classifier config is replaced with the seed's" cmp -s "$SEED/extensions/pi-permission-classifier/config.json" "$PI/extensions/pi-permission-classifier/config.json"
 check "the replaced gate config is mode 600" test "$(stat -c %a "$PI/extensions/pi-permission-system/config.json")" = 600
 check "and the replacement is said" grep -q '^\[entrypoint\] pi extensions/pi-permission-system/config.json: restored from the image$' "$T/out"
 pi_seed "$SEED" "$PI" > "$T/out" 2>&1
