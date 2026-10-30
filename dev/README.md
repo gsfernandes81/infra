@@ -989,8 +989,9 @@ A second agent harness beside Claude Code in every container, the owner's call (
   none. Its packages are baked into the image, each pinned: `@gotgenes/pi-permission-system`
   and `pi-permission-classifier`, `cc-safety-net`, `pi-subagents`, `pi-web-access`,
   `pi-lens`, `@nredd/pi-dev-tools`, `pi-powerline-footer` and `pi-themes`. The gate asks
-  before every edit and every shell command, the session's model answers what it can, and it
-  denies any path outside `/workspace`. Pi ignores a repo's `.pi/` directory, which could
+  before every edit and every shell command but `claude-sessions mail` and `keepalive`, which
+  the policy and the keepalive skill run each turn; the session's model answers what it can,
+  and the gate denies any path outside `/workspace`. Pi ignores a repo's `.pi/` directory, which could
   otherwise replace the gate. Install telemetry is off.
 
 ## Secrets

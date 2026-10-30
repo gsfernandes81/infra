@@ -400,8 +400,8 @@ RUN npm install -g \
 # alternate screen and turns on mouse tracking, the pair that broke scrolling over ssh from the
 # phone for Claude Code (claude-sessions issue #8). defaultProjectTrust is never, so pi skips a
 # repo's .pi/ without asking: a trusted .pi/ could carry a gate config that replaces this one
-# and packages that pi would install unpinned at start. The repos ship none, and the base's own
-# packages and skills come from the agent dir, which project trust does not govern.
+# and packages that pi would install unpinned at start. The base's own packages and skills come
+# from the agent dir, which project trust does not govern, so `never` leaves them all loaded.
 #
 # THE PACKAGES, each pinned here; npm resolves their own dependencies once, in this layer:
 #   pi-permission-classifier and @gotgenes/pi-permission-system, the judge and the gate. The
@@ -411,7 +411,8 @@ RUN npm install -g \
 #     The gate's config turns the judge on by naming it in authorizerChain. Reads are allowed;
 #     write and edit ask inside /workspace and are denied outside it; any path outside the
 #     working tree (/workspace, where pi starts) is denied; bash and every other tool take the
-#     gate's default, ask; and an ask nobody answers in five minutes is denied. The judge's
+#     gate's default, ask, except the hub's own CLI (below the COPY of the gate's config); and
+#     an ask nobody answers in five minutes is denied. The judge's
 #     config is `{}`: the session model judges, and a failure defers to the gate's prompt and
 #     never allows. The skills' real directory, /opt/claude-sessions/skills, is readable too.
 #   cc-safety-net: fixed blocks on rm -rf, force-push, curl | sh and reads of secrets.
@@ -445,7 +446,9 @@ RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.4.0 \
        fi
 COPY pi-settings.json /opt/pi/seed/settings.json
 # A throwaway HOME, so npm's cache and logs land nowhere the image keeps. PI_OFFLINE keeps pi's
-# own catalogue refresh out of a build; the installs are explicit and still run.
+# own catalogue refresh out of a build; the installs are explicit and still run. The modes are
+# set in THIS layer: a chmod in a later one copies every file it touches up into that layer, and
+# the package tree is some 300 MB. The smoke test reads the layer sizes back.
 RUN set -eux; \
     export HOME=/tmp/pi-build-home PI_CODING_AGENT_DIR=/opt/pi/seed PI_OFFLINE=1; \
     for p in \
@@ -459,8 +462,13 @@ RUN set -eux; \
     test -x /opt/pi/seed/npm/node_modules/@ast-grep/cli/ast-grep; \
     python3 -c 'import json; p = json.load(open("/opt/pi/seed/settings.json"))["packages"]; assert len(p) == 9 and p[0].startswith("npm:pi-permission-classifier@"), p'; \
     pi list; \
-    rm -rf /tmp/pi-build-home
+    rm -rf /tmp/pi-build-home; \
+    chmod -R a+rX /opt/pi
 COPY pi-models.json /opt/pi/seed/models.json
+# The gate's config allows `claude-sessions mail` and `claude-sessions keepalive` outright, after
+# the bash catch-all so last-match-wins keeps them allowed: the managed policy has a pi session run
+# `mail list` every turn and the keepalive skill runs `keepalive`, and a judge and a prompt on
+# each would make both unusable. The file's schema takes no comment field, so the reason is here.
 COPY pi-permission-system.json /opt/pi/seed/extensions/pi-permission-system/config.json
 COPY pi-permission-classifier.json /opt/pi/seed/extensions/pi-permission-classifier/config.json
 # Parsed here, as the managed settings are, because each is hand-edited and none of them says
@@ -471,7 +479,11 @@ RUN for f in /opt/pi/seed/settings.json /opt/pi/seed/models.json \
              /opt/pi/seed/extensions/pi-permission-classifier/config.json; do \
          python3 -c 'import json, sys; json.load(open(sys.argv[1]))' "$f" || exit 1; done \
     && printf 'packages_dir=npm\n' > /opt/pi/seed/LAYOUT \
-    && chmod -R a+rX /opt/pi
+    && chmod a+rX /opt/pi/seed/extensions /opt/pi/seed/extensions/pi-permission-system \
+        /opt/pi/seed/extensions/pi-permission-classifier \
+    && chmod a+r /opt/pi/seed/settings.json /opt/pi/seed/models.json /opt/pi/seed/LAYOUT \
+        /opt/pi/seed/extensions/pi-permission-system/config.json \
+        /opt/pi/seed/extensions/pi-permission-classifier/config.json
 
 # Create the dev user at the HOST owner's uid/gid, passed by the Makefile as build
 # args (`make base`; the published base bakes 1001), so what it shares with the host — the

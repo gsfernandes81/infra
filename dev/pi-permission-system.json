@@ -9,6 +9,11 @@
     "grep": "allow",
     "find": "allow",
     "ls": "allow",
+    "bash": {
+      "*": "ask",
+      "claude-sessions mail *": "allow",
+      "claude-sessions keepalive *": "allow"
+    },
     "write": { "*": "deny", "/workspace/*": "ask" },
     "edit": { "*": "deny", "/workspace/*": "ask" },
     "external_directory": "deny"
