@@ -1,0 +1,66 @@
+---
+# pearl-wallet's checks before the .env check and the plan, included by
+# playbooks/_deploy-compose-one.yml (the contract: server-deploy-compose.yml's header).
+# It writes nothing, so it runs the same under --check.
+#
+# 1. The image tag in compose.yaml names the release the Dockerfile unpacks. The tag is
+#    what decides whether `up` builds, so a Dockerfile bump without it would plan
+#    "nothing to change" forever.
+# 2. A wallet exists in the volume. Oyster exits at start without one, and `restart:
+#    unless-stopped` would turn that into a loop. The wallet is created by hand, once, in
+#    the owner's own terminal, because creating it prints the seed (README.md, step 1, and
+#    docs/decisions.md § Pearl wallet on `zero`). So this hook stops the deploy, and says
+#    how.
+
+- name: Check the pearl-wallet tag matches the Dockerfile
+  # Read on the control node, from the commit the host was just pulled to. regex_findall
+  # with one group returns the group, so the pattern needs no backreference: a backslash
+  # in a folded scalar reaches Jinja as an escape.
+  vars:
+    pearl_release: >-
+      {{ lookup('file', control_checkout ~ '/deployments/pearl-wallet/Dockerfile')
+         | regex_findall('releases/download/(v[0-9][0-9.]*)/') | first }}
+    pearl_image: >-
+      {{ (lookup('file', control_checkout ~ '/deployments/pearl-wallet/compose.yaml') | from_yaml)
+         .services['pearl-wallet'].image }}
+  ansible.builtin.assert:
+    that: pearl_image == 'pearl-wallet:' ~ pearl_release
+    fail_msg: >-
+      compose.yaml builds {{ pearl_image }}, and the Dockerfile unpacks {{ pearl_release }}.
+      Bump both in one commit, with the checksum; the README's "Bumping Oyster" says how.
+      Nothing was changed.
+    success_msg: "image tag matches the Dockerfile ({{ pearl_release }})"
+
+- name: Read the wallet volume on {{ dep.host }}
+  # rc 1 when the volume does not exist yet, which reads as no wallet.
+  ansible.builtin.command:
+    cmd: docker volume inspect pearl-wallet_wallet
+  register: pearl_volume
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  become: true
+  delegate_to: "{{ dep.host }}"
+
+- name: "If the volume exists: stat the wallet file"
+  # Its own register name, and the assert below defaults it, because a skipped task
+  # overwrites a register (CLAUDE.md § Shell traps).
+  ansible.builtin.stat:
+    path: "{{ (pearl_volume.stdout | from_json | first).Mountpoint }}/mainnet/wallet.db"
+    get_checksum: false
+  register: pearl_wallet_db
+  check_mode: false
+  become: true
+  delegate_to: "{{ dep.host }}"
+  when: pearl_volume.rc == 0
+
+- name: Check a Pearl wallet exists on {{ dep.host }}
+  ansible.builtin.assert:
+    that: pearl_wallet_db.stat.exists | default(false)
+    fail_msg: >-
+      There is no Pearl wallet on {{ dep.host }} yet, so Oyster would exit at start. Create
+      it once, by hand, in your own terminal (deployments/pearl-wallet/README.md, step 1):
+      ssh {{ dep.host }}, then `cd {{ dep_dir }}; sudo docker compose build; sudo docker
+      compose run --rm -it pearl-wallet --create`. Write the seed down on paper. Then run
+      this play again. Nothing was started.
+    success_msg: "the wallet exists"

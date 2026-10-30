@@ -1667,6 +1667,47 @@ the why. Supersedes the two struck bullets in *Agent mail* above; the rest of th
   any HTTP answer meaning alive (401 the expected one), in python because the hub image is
   python's and carries no curl.
 
+## Pearl wallet on `zero`: Oyster alone, on the light client
+
+**Decided 2026-10-30**, the owner's ask: a wallet on `zero`, in a small container, to hold
+Pearl mining-pool payouts. A wallet only, not a miner. **Written 2026-10-30, not yet
+deployed**: `deployments/pearl-wallet/`, whose README is the setup.
+
+- **Oyster alone, with no `pearld`.** Oyster's light client (`usespv=1`, which upstream's
+  own `install.sh` sets) asks peers for block headers and compact filters, so `zero` keeps
+  no chain and runs one process under a 256 MB cap. A full node would add the chain's disk
+  and a second long-running service, for a wallet that mostly receives.
+- **From upstream's release tarball, checked against its sha256, not upstream's
+  Dockerfile.** That Dockerfile builds on an unpinned `alpine:latest`, and the release's
+  `oyster` links glibc. The base is distroless `cc-debian13`, pinned by digest, because
+  `oyster` needs glibc 2.39 and Debian 12 ships 2.36. The image is about 70 MB.
+- **No `SOURCE` file.** `bin/check-sources` compares a pinned `SOURCE` with a source
+  checkout on the host, and this image is built from a release download. The Dockerfile's
+  URL and checksum are the pin, as calibre-web's image digest is its.
+- **The wallet is created by hand, once, and not by Ansible.** Creation shows the seed,
+  the wallet's only backup. Automating a step that runs once would put the most sensitive
+  code in the repo where it never runs again, and would send the seed through Ansible's
+  output, which on this repo has already hidden a one-time secret (`display_ok_hosts`,
+  `no_log`). Oyster's own `--create` shows the seed in the owner's terminal and waits for
+  `OK`. The owner asked for compose and Ansible first and agreed to this on that reasoning.
+  The preflight hook stops a deploy until a wallet exists, because Oyster exits at start
+  without one.
+- **No public-data passphrase.** With one, Oyster needs it at every start, so it would
+  have to be stored on `zero`. The keys stay encrypted by the private passphrase, which is
+  stored nowhere.
+- **The RPC password is in git, and is not a secret.** Oyster will not start its RPC server
+  without one, and reads it only from a flag or its config file. The server listens on the
+  container's own loopback, so only `docker exec`, which is root on `zero`, reaches it, and
+  root can read the wallet file anyway. Generating it into `.env` would have meant passing
+  it as a flag, readable in `ps` on the host, to protect nothing.
+- **The seed on paper is the backup, and the volume is not backed up.** A copy of the
+  wallet file is a second place the keys live, and it recovers nothing the seed cannot. The
+  paper carries the creation date as well. A restore through `--create` dates the wallet
+  at the restore, and the light client looks for coins only from a wallet's date onwards,
+  so a restore uses `--createfromfile` with the original date (the README).
+- **No ports, a read-only root, every capability dropped.** The light client's peer
+  connections are outbound, and nothing outside the container needs the RPC.
+
 ## The lesson worth keeping
 
 

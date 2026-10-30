@@ -19,7 +19,7 @@ Any deployment starts with stock Compose, on its host, from its directory:
 ```sh
 cd ~/infra/deployments/torrents && sudo docker compose up -d
 #   one:  torrents | send2ereader | garmin-mcp | calibre-web
-#   zero: immich | syncthing
+#   zero: immich | syncthing | pearl-wallet
 ```
 
 The repo's own checks:
@@ -75,7 +75,7 @@ docs/                  read these
 | Host | Hardware | Runs | In repo |
 |---|---|---|---|
 | `one` | Pi 4 | torrents, send2ereader (own tunnel and sidecar, cut over 2026-10-25, owner-reported; its README); calibre-web **started 2026-10-25, owner-reported** (own tunnel, sidecar; its README is the setup); garmin-mcp **deployed 2026-10-24** (Garmin Connect MCP for claude.ai: its read tools plus five workout and activity-notes writes; own tunnel, sidecar, deployed by Ansible — its README); ionic-traces **stopped by decision**, and since 2026-10-25 no longer placed under `hosts/one/` — its exited containers and data remain on `one`, its files in `deployments/` | yes |
-| `zero` | Pi 5 | Immich (+ db, ml, redis), Syncthing — **all critical, remote** | yes |
+| `zero` | Pi 5 | Immich (+ db, ml, redis), Syncthing — **all critical, remote**; pearl-wallet **added 2026-10-30, not yet deployed** (Pearl's Oyster wallet alone, on the light client, for pool payouts; created by hand, then deployed by Ansible — its README) | yes |
 | `two` | Pi 1 B+, armv6, ~475 MB | destiny-director (**test** bot + its Postgres) **stopped 2026-10-25, files kept** ([#11](https://github.com/gsfernandes81/infra/issues/11)); lifeboat duties **planned, not built** | stays on Alpine |
 
 Target OS for `one` and `zero`: **openSUSE MicroOS** (see [roadmap](docs/roadmap.md)).
@@ -115,7 +115,7 @@ exists, and the first run of it found exactly that on `one`.
 | Host | |
 |---|---|
 | `one` | **8080** qBittorrent (via gluetun) · ~~**7777** ionic-traces~~ — **stopped**, see [2c](docs/management-plane.md#sequencing-and-where-podman-fits) · **8384/22000** syncthing · *send2ereader, calibre-web and garmin-mcp publish nothing — each is reached only through its own tunnel's sidecar* |
-| `zero` | **2283** Immich · **8384/22000** syncthing · *the dev containers publish nothing — `ssh dev`, or `make shell` on zero* |
+| `zero` | **2283** Immich · **8384/22000** syncthing · *the dev containers publish nothing — `ssh dev`, or `make shell` on zero* · *pearl-wallet publishes nothing; its RPC is on the container's own loopback* |
 | `two` | **none published** — the bot's web UI (8080) and break-glass sshd (2222) exist inside the container and are deliberately not mapped. See the commented `ports:` block in `deployments/destiny-director/compose.yaml` |
 
 Both Syncthings and `torrent` are on **host or shared networking**, so `docker ps` shows

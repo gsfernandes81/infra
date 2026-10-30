@@ -1,0 +1,57 @@
+# pearl-wallet on `zero`: Pearl's Oyster wallet daemon, alone, holding the owner's pool
+# payouts. It syncs over Pearl's light client, so there is no pearld and no copy of the
+# chain. Nothing is published; the owner reaches it with `docker exec` on zero.
+# Setup, daily use, sending: README.md beside this. The reasoning: docs/decisions.md
+# § Pearl wallet on `zero`.
+#
+# THE WALLET IS CREATED BY HAND, ONCE, before the first deploy (README.md, step 1). Oyster
+# exits at start when there is no wallet, so the deploy's preflight hook
+# (ansible/deploy-hooks/pearl-wallet/preflight.yml) refuses to start it until one exists.
+#
+# The image is BUILT here from the Dockerfile beside this, tagged with the release it
+# unpacks. `pull_policy: never`, as garmin-mcp's: built only when the tag is absent, never
+# pulled, so a same-named image on Docker Hub can never stand in for it. A bump is the
+# Dockerfile's version and checksum and the tag below, in one commit.
+name: pearl-wallet
+
+services:
+  pearl-wallet:
+    build:
+      context: .
+    image: pearl-wallet:v1.5.5
+    pull_policy: never
+    container_name: pearl-wallet
+    restart: unless-stopped
+    volumes:
+      # The wallet file, the light client's headers and filters, Oyster's TLS pair and its
+      # log. On zero's root filesystem under /var/lib/docker, not /media, so the mount
+      # guards do not apply. Not backed up: the seed on paper is the backup (README.md).
+      - wallet:/home/nonroot/.oyster
+      - ./oyster.conf:/etc/oyster/oyster.conf:ro
+      - ./prlctl.conf:/home/nonroot/.prlctl/prlctl.conf:ro
+    # No `ports:`. The RPC server listens on the container's own loopback (oyster.conf),
+    # and the light client's peer connections are all outbound.
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    # getbalance needs the wallet open and the RPC server up, and no chain connection, so
+    # a healthy reading means Oyster is serving, synced or not. A reading, not an action:
+    # nothing restarts on it. The deploy play waits for it after `up`.
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/prlctl", "getbalance"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # Oyster closes the wallet database on SIGTERM; give it the time to.
+    stop_grace_period: 30s
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  wallet:
