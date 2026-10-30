@@ -1670,8 +1670,9 @@ the why. Supersedes the two struck bullets in *Agent mail* above; the rest of th
 ## Pearl wallet on `zero`: Oyster alone, on the light client
 
 **Decided 2026-10-30**, the owner's ask: a wallet on `zero`, in a small container, to hold
-Pearl mining-pool payouts. A wallet only, not a miner. **Written 2026-10-30, not yet
-deployed**: `deployments/pearl-wallet/`, whose README is the setup.
+Pearl mining-pool payouts. A wallet only, not a miner. **Deployed 2026-10-30,
+owner-reported** (up, healthy, a receiving address issued): `deployments/pearl-wallet/`,
+whose README is the setup.
 
 - **Oyster alone, with no `pearld`.** Oyster's light client (`usespv=1`, which upstream's
   own `install.sh` sets) asks peers for block headers and compact filters, so `zero` keeps

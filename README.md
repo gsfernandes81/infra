@@ -75,7 +75,7 @@ docs/                  read these
 | Host | Hardware | Runs | In repo |
 |---|---|---|---|
 | `one` | Pi 4 | torrents, send2ereader (own tunnel and sidecar, cut over 2026-10-25, owner-reported; its README); calibre-web **started 2026-10-25, owner-reported** (own tunnel, sidecar; its README is the setup); garmin-mcp **deployed 2026-10-24** (Garmin Connect MCP for claude.ai: its read tools plus five workout and activity-notes writes; own tunnel, sidecar, deployed by Ansible — its README); ionic-traces **stopped by decision**, and since 2026-10-25 no longer placed under `hosts/one/` — its exited containers and data remain on `one`, its files in `deployments/` | yes |
-| `zero` | Pi 5 | Immich (+ db, ml, redis), Syncthing — **all critical, remote**; pearl-wallet **added 2026-10-30, not yet deployed** (Pearl's Oyster wallet alone, on the light client, for pool payouts; created by hand, then deployed by Ansible — its README) | yes |
+| `zero` | Pi 5 | Immich (+ db, ml, redis), Syncthing — **all critical, remote**; pearl-wallet **deployed 2026-10-30, owner-reported** (Pearl's Oyster wallet alone, on the light client, for pool payouts; created by hand, then deployed by Ansible — its README) | yes |
 | `two` | Pi 1 B+, armv6, ~475 MB | destiny-director (**test** bot + its Postgres) **stopped 2026-10-25, files kept** ([#11](https://github.com/gsfernandes81/infra/issues/11)); lifeboat duties **planned, not built** | stays on Alpine |
 
 Target OS for `one` and `zero`: **openSUSE MicroOS** (see [roadmap](docs/roadmap.md)).
