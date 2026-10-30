@@ -8,9 +8,10 @@
 // else in the run is the container's own: the agent dir, the packages, the gate's config.
 //
 // Its script: a request that offers a `bash` tool and holds no tool result yet is answered
-// with one bash call, $PI_SMOKE_COMMAND; anything else (the tool result coming back) is
-// answered "done". $PI_SMOKE_TOOL and $PI_SMOKE_ARGS (a JSON object) make the one call to
-// another tool instead, `write` for the write checks.
+// with one bash call, $PI_SMOKE_COMMAND; anything else (the tool result coming back, or the
+// permission judge asking with its own single tool) is answered "done". So the judge gets no
+// verdict from it, which the judge counts as uncertain. $PI_SMOKE_TOOL and $PI_SMOKE_ARGS (a
+// JSON object) make the one call to another tool instead, `write` for the edit check.
 import http from "node:http";
 
 export default async function (pi) {

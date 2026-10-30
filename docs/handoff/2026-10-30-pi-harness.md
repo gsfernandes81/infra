@@ -11,10 +11,7 @@ Built on 2026-10-30 and green in the smoke test, on GitHub's amd64 runner only. 
 and links the policy, the four skills and the claude-sessions extension. The hub pins
 claude-sessions 0.10.0, which starts a pi slot with `p`, and copies `openrouter-key` from
 `$HUB_SECRETS` into every container. The managed policy tells a pi session how to read its
-mail. From base `2026.10.30.1` pi's gate runs in `yoloMode` with no judge and eight packages,
-denying only force and mirror pushes by rule above `cc-safety-net`, and the footer's welcome
-card is off. The
-reasons are the pi row in [`decisions.md`](../decisions.md); how pi is used is
+mail. The reasons are the pi row in [`decisions.md`](../decisions.md); how pi is used is
 [`dev/README.md`](../../dev/README.md) § *pi*. The plan, `plans/pi-harness.md`, is deleted:
 both repos built their side.
 
@@ -33,7 +30,7 @@ The owner's, in this order, each on zero:
    read -s -P 'OpenRouter key: ' k; and printf '%s\n' $k > ~/.dev-secrets/openrouter-key; set -e k
    ```
 
-2. **The deploy**, once this is on `main` and `dev-base.yml` has published `2026.10.30.1`: the
+2. **The deploy**, once this is on `main` and `dev-base.yml` has published `2026.10.30`: the
    recreate play from the phone, as [`dev/README.md`](../../dev/README.md) § *Four copies of
    this, now one base* gives it (`make up` on zero is the break glass). It rebuilds the hub
    with claude-sessions 0.10.0 and the new policy, and recreates every container on the new
@@ -66,11 +63,9 @@ Findings, not started:
    phone. Not a blocker.
 9. **Two pinned dependencies carry published advisories.** Pi 1.4.0 pins `undici` 8.10.2,
    which has advisories against it, one a TLS-validation bypass when custom TLS options are
-   passed; `pi-permission-classifier` pinned `zod` 4.4.3, which has a high-severity one. The
-   classifier left the image in base `2026.10.30.1`, so that pin went with it; other packages
-   still use `zod` at whatever version the build resolves. Nothing to fix in infra: `undici` is
-   pinned inside pi, so it moves when pi releases, and the next pi bump should check it and
-   the resolved `zod`.
+   passed; `pi-permission-classifier` pins `zod` 4.4.3, which has a high-severity one.
+   Nothing to fix in infra: both are pinned inside the packages, so they move when pi and the
+   judge release, and the next pi bump should check both.
 
 10. **`mail-read` and `mail-reply` do not load in pi.** Their `SKILL.md` frontmatter has an
     unquoted `description:` containing `: `, which Claude Code tolerates and pi's strict YAML

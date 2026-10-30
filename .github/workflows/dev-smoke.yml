@@ -250,7 +250,7 @@ jobs:
           docker exec -e PI_OFFLINE=1 infra timeout 60 pi list </dev/null > pi-list.txt 2>&1 || true
           sed 's/^/  pi list: /' pi-list.txt
           check "pi lists its packages offline, each installed under the agent dir" sh -c '
-            for p in @gotgenes/pi-permission-system cc-safety-net pi-subagents \
+            for p in pi-permission-classifier @gotgenes/pi-permission-system cc-safety-net pi-subagents \
                      pi-web-access pi-lens @nredd/pi-dev-tools pi-powerline-footer pi-themes; do
               grep -qx "    /home/dev/.local/share/pi/npm/node_modules/$p" pi-list.txt || { echo "not installed: $p"; exit 1; }
             done
@@ -280,10 +280,11 @@ jobs:
               pi --mode json --no-session -e /tmp/pi-stub-model.js --model smoke/stub "$@" "run: $c" </dev/null > "$n.jsonl" 2> "$n.err" || true
             jq -c 'select(.type == "tool_execution_end") | {isError, text: .result.content[0].text}' "$n.jsonl" > "$n.txt" 2>&1 || true
             sed "s/^/  $n: /" "$n.txt"; }
-          # approved <text>: the gate's review log holds a call yolo approved whose entry carries
-          # <text>. Under yoloMode every call no rule allows or denies is approved and logged.
-          approved() { docker exec infra sh -c 'cat "$PI_CODING_AGENT_DIR"/extensions/pi-permission-system/logs/*.jsonl' \
-            | grep -F permission_request.auto_approved | grep -qF "$1"; }
+          # judged <text>: the gate's review log holds a judge's decision whose entry carries <text>.
+          # A bash decision carries the command; a write decision carries only "surface":"write",
+          # so the write checks run in order and the first expects none.
+          judged() { docker exec infra sh -c 'cat "$PI_CODING_AGENT_DIR"/extensions/pi-permission-system/logs/*.jsonl' \
+            | grep -F classifier.decision | grep -qF "$1"; }
           docker exec infra sh -c 'rm -rf /tmp/pi-probe-remote.git && git init -q --bare /tmp/pi-probe-remote.git'
           pigate gate-deny "git push --force --dry-run /tmp/pi-probe-remote.git HEAD:refs/heads/pi-probe"
           check "pi's gate denies a force push by its explicit rule, on a scripted model's tool call" sh -c \
@@ -293,23 +294,29 @@ jobs:
           pigate gate-none "git push --force --dry-run /tmp/pi-probe-remote.git HEAD:refs/heads/pi-probe" --no-extensions
           check "and with no extensions loaded the same call runs (calibration)" sh -c \
             'grep -q "\"isError\":false" gate-none.txt && grep -qF "HEAD -> pi-probe" gate-none.txt'
-          # The open half: under yoloMode a shell command and a write run with no prompt, outside
-          # /workspace as well as inside it. The force-push deny above is what shows the gate is on.
+          # Inside /workspace a shell command goes to the judge (its decision is in the gate's review
+          # log). The stub gives it no verdict, which the judge counts as uncertain, and under
+          # `verdicts: allow-deny` an uncertain answer is a deny, never a question for the owner.
           docker exec infra mkdir -p /workspace/.pi-gate-probe
-          pigate gate-shell "rm -rf /workspace/.pi-gate-probe"
-          gate_shell_ran() { grep -q '"isError":false' gate-shell.txt && ! docker exec infra test -e /workspace/.pi-gate-probe &&
-            approved "rm -rf /workspace/.pi-gate-probe"; }
-          check "a shell command runs with no prompt, and the review log says yolo approved it" gate_shell_ran
+          pigate gate-ask "rm -rf /workspace/.pi-gate-probe"
+          gate_ask_judged() { docker exec infra test -d /workspace/.pi-gate-probe && grep -qF "permission-judge" gate-ask.txt &&
+            ! grep -qF "no interactive UI is available" gate-ask.txt && judged "rm -rf /workspace/.pi-gate-probe"; }
+          check "a shell command inside /workspace goes to the judge, which answers it without asking" gate_ask_judged
+          # An edit inside /workspace is allowed outright, with no judge call, as Claude Code's auto
+          # mode allows in-project edits. A write outside it goes to the judge, which the stub
+          # leaves uncertain, so that write is denied: the pair shows the rule, not a gate that is off.
           docker exec infra rm -f /workspace/.pi-edit-probe /tmp/pi-edit-probe
           PI_SMOKE_TOOL=write PI_SMOKE_ARGS='{"path":"/workspace/.pi-edit-probe","content":"probe\n"}' \
             pigate gate-edit "write /workspace/.pi-edit-probe"
-          check "a write inside /workspace is allowed" sh -c \
-            'grep -q "\"isError\":false" gate-edit.txt && docker exec infra test -f /workspace/.pi-edit-probe'
+          gate_edit_allowed() { grep -q '"isError":false' gate-edit.txt && docker exec infra test -f /workspace/.pi-edit-probe &&
+            ! judged '"surface":"write"'; }
+          check "a write inside /workspace is allowed with no judge call" gate_edit_allowed
           PI_SMOKE_TOOL=write PI_SMOKE_ARGS='{"path":"/tmp/pi-edit-probe","content":"probe\n"}' \
             pigate gate-edit-out "write /tmp/pi-edit-probe"
-          check "a write to /tmp is allowed" sh -c \
-            'grep -q "\"isError\":false" gate-edit-out.txt && docker exec infra test -f /tmp/pi-edit-probe'
-          docker exec infra rm -rf /workspace/.pi-gate-probe /workspace/.pi-edit-probe /tmp/pi-edit-probe /tmp/pi-probe-remote.git /tmp/pi-stub-model.js
+          gate_edit_out_judged() { grep -q '"isError":true' gate-edit-out.txt && ! docker exec infra test -e /tmp/pi-edit-probe &&
+            judged '"surface":"write"'; }
+          check "and a write outside /workspace goes to the judge (calibration)" gate_edit_out_judged
+          docker exec infra rm -rf /workspace/.pi-gate-probe /workspace/.pi-edit-probe /tmp/pi-probe-remote.git /tmp/pi-stub-model.js
           # The same scan the measure step uses: comm pi, or the mark pi puts in its children's
           # environment, so an orphaned child (ty) counts too. A scan that cannot run fails.
           pi_left_none() { local out
@@ -629,7 +636,7 @@ jobs:
           docker exec -d -w /workspace -e PI_OFFLINE=1 -e CLAUDE_SESSIONS_SLOT=pi-2 infra sh -c \
             'echo $$ > /tmp/pi-rpc.pid; rm -f /tmp/pi-rpc.in; mkfifo /tmp/pi-rpc.in; exec 3<>/tmp/pi-rpc.in; exec pi --mode rpc --no-session <&3 3<&- >/tmp/pi-rpc.log 2>&1'
           pidof_slot() { docker exec infra python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("pid") or "")' "$reg/$1.json" 2>/dev/null || true; }
-          # pi loads its eight packages before session_start fires the hook, and on a runner that
+          # pi loads its nine packages before session_start fires the hook, and on a runner that
           # took over 20 s with two starting at once (run 41004350726), so the wait is generous.
           tui=""; for i in $(seq 120); do
             tui=$(pidof_slot pi-1); [ -n "$tui" ] && ix "test -s $reg/pi-2.json" 2>/dev/null && break; sleep 1; done

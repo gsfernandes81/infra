@@ -1,0 +1,4 @@
+{
+  "verdicts": "allow-deny",
+  "onError": "defer"
+}

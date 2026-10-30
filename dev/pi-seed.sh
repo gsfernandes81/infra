@@ -120,11 +120,12 @@ pi_link() {
 
 # pi_seed <seed dir> <agent dir>
 # The settings merge, then models.json copied where absent, since the owner may edit it on the
-# volume and a deleted one comes back at the next start. The gate's config is infra's policy,
-# not the owner's settings, so the seed's copy replaces the volume's at every start: an agent may
-# write it during a session, and a policy that drifted on one volume would be a policy nobody
-# reviewed. To change it, change dev/pi-permission-system.json and rebuild. Any other extension
-# file is copied where absent. Then the package tree, linked where LAYOUT says pi looks for it.
+# volume and a deleted one comes back at the next start. The gate's config and the classifier's
+# are infra's policy, not the owner's settings, so the seed's copy replaces the volume's at every
+# start: an agent, or /permission-model, may write either during a session, and a policy that
+# drifted on one volume would be a policy nobody reviewed. To change them, change the seed files
+# in dev/ and rebuild. Any other extension file is copied where absent. Then the package tree,
+# linked where LAYOUT says pi looks for it.
 pi_seed() {
     local seed="$1" dir="$2" rel pkgs
     mkdir -p "$dir" || { say "pi: could not create $dir — its agent dir is not seeded"; return 1; }
@@ -132,7 +133,7 @@ pi_seed() {
     pi_copy_absent "$seed/models.json" "$dir/models.json" models.json
     while IFS= read -r rel; do
         case "$rel" in
-            extensions/pi-permission-system/config.json)
+            extensions/pi-permission-system/config.json | extensions/pi-permission-classifier/config.json)
                 pi_copy_seed "$seed/$rel" "$dir/$rel" "$rel" ;;
             *) pi_copy_absent "$seed/$rel" "$dir/$rel" "$rel" ;;
         esac
