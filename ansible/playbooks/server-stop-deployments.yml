@@ -167,9 +167,10 @@
           {% set out = [] %}{% for r in sd_before.results %}{% for l in r.stdout_lines %}{% set f = l.split(' ', 4) %}{% set _ = out.append({'host': r.item.host, 'dep': r.item.name, 'service': f[0], 'name': f[1], 'id': f[2], 'state': f[3], 'status': f[4] | default('')}) %}{% endfor %}{% endfor %}{{ out }}
         sd_empty: >-
           {{ sd_before.results | rejectattr('stdout_lines') | map(attribute='item') | list }}
-        # host/deployment/container of every one-shot, matching sd_rows' fields.
+        # host/deployment/container of every one-shot, matching sd_rows' fields. Blank lines
+        # dropped, as in _deploy-compose-one.yml's "Note the one-shots of", which says why.
         sd_oneshot: >-
-          {% set out = [] %}{% for r in sd_oneshots.results | default([]) %}{% for n in r.stdout_lines | default([]) %}{% set _ = out.append(r.item.host ~ '/' ~ r.item.name ~ '/' ~ n) %}{% endfor %}{% endfor %}{{ out }}
+          {% set out = [] %}{% for r in sd_oneshots.results | default([]) %}{% for n in r.stdout_lines | default([]) | map('trim') | select %}{% set _ = out.append(r.item.host ~ '/' ~ r.item.name ~ '/' ~ n) %}{% endfor %}{% endfor %}{{ out }}
 
     - name: Note the containers this run would change
       ansible.builtin.set_fact:
