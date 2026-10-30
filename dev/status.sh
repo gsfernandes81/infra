@@ -397,11 +397,6 @@ print("sessions start in %s mode" % v if v else
     # more, so no field in its binary is load-bearing for the offloader (the timer tools'
     # names, claude-sessions#13, were never added for the same reason).
     tool sessions 'no claude-sessions — the hub'"'"'s volume is not mounted at /opt/claude-sessions' claude-sessions --version
-    # Unpinned (the latest at the base's build), so this is the only readout of which one a
-    # container has once CI's log has expired. MISSING is also what a base built with
-    # CRUSH_VERSION=none looks like.
-    tool crush 'no crush — a base before 2026.10.11, or one built with CRUSH_VERSION=none' crush --version
-    tool jcode 'no jcode — a base before 2026.10.16' jcode --version
     # Pi (base 2026.10.30), and the two things a pi slot leans on that nothing else reads
     # back. `pi-ext` is the claude-sessions extension the entrypoint links from the hub's
     # volume (v0.10.0 ships it): without it pi fires no hook, so the menu never binds a pi slot

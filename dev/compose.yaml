@@ -345,7 +345,6 @@ services:
       - infra-gh:/home/dev/.config/gh
       - infra-ssh-host:/home/dev/.ssh-host
       - infra-local-share:/home/dev/.local/share
-      - infra-jcode:/home/dev/.jcode
 
   # ── the other repos' containers, ported from each repo's own compose file ───────
   # All three move in at the one cutover (dev/README.md § "The cutover from the old layout").
@@ -691,7 +690,6 @@ volumes:
   infra-gh: { external: true, name: infra-dev_infra-gh }
   infra-ssh-host: { external: true, name: infra-dev_infra-ssh-host }
   infra-local-share: { external: true, name: infra-dev_infra-local-share }
-  infra-jcode: { external: true, name: infra-dev_infra-jcode }
   or3-workspace:
   or3-env:
   dd-workspace:

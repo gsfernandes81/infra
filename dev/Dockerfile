@@ -13,9 +13,7 @@
 #
 # `make base` remains the OFFLINE FALLBACK: it builds the identical image locally UNDER
 # THE SAME NAME, and docker prefers a local image over a pull, so a GitHub outage or a
-# metered month means building on the host with children none the wiser. Identical but
-# for Crush, which is the latest release on the day it is built; with GitHub or
-# repo.charm.sh down, `make base CRUSH_VERSION=none` builds without it.
+# metered month means building on the host with children none the wiser.
 ARG BASE_TAG=2026.10.26
 FROM ghcr.io/gsfernandes81/gsrpi-dev-base:${BASE_TAG}
 

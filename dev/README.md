@@ -44,7 +44,7 @@ lint, read a playbook against the real `ansible.cfg` — and are not wired to th
 | `compose.yaml` | the project: `hub`, its `cloudflared` sidecar (profile `tunnel`), `infra`, and `or3`, `destiny-director` (+ `dd-postgres`), `dossier`, `invective`, `nibbles`, `ionic-traces`, `claude-sessions`, all started by default; one network, `dev`; **nothing published on the host**. The base tag is its `x-base-tag` line, each container's repo an anchor at the top |
 | `hub/` | the hub's image: `Dockerfile` (claude-sessions pinned by release and per-arch SHA-256), `entrypoint.sh`, `door` (installed as `hub-door`, its sshd's `ForceCommand`), `health` (`hub-health`, its healthcheck), `github-tokens` (the token broker) and its offline test, `managed-CLAUDE.md` (the agent-mail policy every container loads), `sshd_config`, and `ssh_config` — how it reaches each container |
 | `cloudflared.yml` | the hub tunnel's ingress, and the whole of it: `dev.gsrpi.uk` → the hub, `or3-dev.gsrpi.uk` → or3 |
-| `Dockerfile.base` | `gsrpi-dev-base`, which every dev container is `FROM` — Debian trixie slim, Node 22, Claude Code, gh, zmx, screen, sshd, Helix, the tools and language servers, Crush, Jcode |
+| `Dockerfile.base` | `gsrpi-dev-base`, which every dev container is `FROM` — Debian trixie slim, Node 22, Claude Code, gh, zmx, screen, sshd, Helix, the tools and language servers, pi |
 | `Dockerfile` | infra: the base + ansible-core, the collections and the docker CLI |
 | `entrypoint.sh` | every container's PID 1: ssh material and the hub's key → Claude config → pi's agent dir (`pi-seed.sh`, sourced; its offline test is `test_entrypoint_pi.sh`) → clone or pull the workspace → link the env files → `child-init.sh` → `reconcile` → keep-alive skill → **sshd (fg)** |
 | `dev-door` | sshd's `ForceCommand` in every container: a forwarded command as given, otherwise a login shell in `/workspace` |
@@ -594,12 +594,13 @@ for its own builds (dd and ds add `build-essential`). Every binary that runs as 
 downloads is hash-pinned per arch in `Dockerfile.base`; the npm and PyPI ones are
 version-pinned, as Claude Code is.
 
-## Pi, Crush and Jcode, on trial
+## Pi, on trial
 
-Three more agent harnesses in the base, the owner's calls (their rows in
-[`../docs/decisions.md`](../docs/decisions.md), their layers in `Dockerfile.base`). `ssh dev`,
-`s` on a container, then `pi`, `crush` or `jcode`. Crush and jcode ask for a provider at their
-first start; pi's is set in the image.
+A second agent harness in the base, the owner's call (its row in
+[`../docs/decisions.md`](../docs/decisions.md), its layer in `Dockerfile.base`). `ssh dev`,
+`s` on a container, then `pi`. Its provider is set in the image. The two harnesses on trial
+before it were dropped on 2026-10-30, when pi was chosen; their rows in `decisions.md` keep the
+record.
 
 - **Pi** is pinned at `1.4.0` and on its way to a slot of its own
   ([`../plans/pi-harness.md`](../plans/pi-harness.md)); the menu is claude-sessions' work. Its
@@ -619,19 +620,8 @@ first start; pi's is set in the image.
   is its version, `pi-ext` says whether the claude-sessions extension is linked (without it the
   menu and the offloader never see a pi slot), and `pi-tui` whether pi still takes the
   `--tui-mode` flag every pi slot is started with.
-- **No slot**: Crush and jcode run in no zmx session, and pi does not yet, so a dropped
-  connection ends any of them, and the menu and offloader know nothing about them.
-  `crush --continue` picks up the last session.
-- **State**: Crush's key and settings in `~/.local/share/crush` (a volume; `~/.config/crush` is
-  not), jcode's everything, login included, under `~/.jcode`; per-project `.crush/` and
-  `.jcode/`, which the repo ignores. **Decline any offer to initialise a project** — it writes
-  an `AGENTS.md`, a second `CLAUDE.md`.
-- **Versions**: Crush is the latest release when the base was built (`crush-latest`; `make base
-  CRUSH_VERSION=none` without it when GitHub or `repo.charm.sh` is down). Jcode is hash-pinned
-  and bumped by hand, then updates itself into `~/.jcode/builds`, which is why it is installed
-  as `dev` with a launcher in `~/.local/bin`. `make verify` names both.
-- **Telemetry** is left at each default: Crush's metrics are on (`CRUSH_DISABLE_METRICS=1` —
-  the owner's call, not yet made); jcode's installer, which phones home, is not used.
+- **No slot yet**: pi runs in no zmx session, so a dropped connection ends it, and the menu
+  and offloader know nothing about it.
 
 ## How a container is used
 
@@ -864,8 +854,7 @@ Its preflight builds the images one at a time (`make build`), each child from it
 `main`, then it plans, asks, recreates every container, and probes the hub's reach into each.
 Every session in every container ends; volumes, logins and history stay. The same command
 is the refresh when only the children's `main`s moved. `make base` builds the identical
-image locally under the ghcr name (Crush aside: it takes that day's release), and docker
-prefers a local image over a pull: the fallback for no network, or not waiting.
+image locally under the ghcr name, and docker prefers a local image over a pull: the fallback for no network, or not waiting.
 
 **A published tag is never overwritten** (the workflow refuses without `force`), and **a push
 that changes a file the image is built from without bumping the tag fails the run** — the
@@ -874,8 +863,8 @@ count, since one cannot reach the image; shell scripts compare byte for byte.
 
 **A bump pulls only the layers that changed**: the workflow keeps a registry build cache (the
 `buildcache` tag) and pushes zstd layers, and `Dockerfile.base` pins its python base by
-digest so the cache cannot move under it; a bump near the bottom of the file ships a few MiB,
-plus ~25 MB when Crush has released. A pull of the whole image on a bump that did not move
+digest so the cache cannot move under it; a bump near the bottom of the file ships a few MiB.
+A pull of the whole image on a bump that did not move
 that digest means the cache missed (shared layers print `Already exists`). **Moving the python
 digest is the refresh** — Debian's security updates arrive only then, for one full pull per
 host. zstd needs Docker 23 or newer. The base is Debian trixie, for glibc 2.41 (`make verify`'s
@@ -1012,8 +1001,7 @@ zero, each mounted read-only into the one container that needs it:
 but the control node's own public key. **The hub's private key is in none of them**: it is made
 in, and never leaves, the `hub-state` volume. A repo's `.env` files are in its env volume. The
 Claude login (`*-claude`, or the shared `claude-login` volume while
-`compose.yaml`'s shared-logins switch reads true), Crush's key (`~/.local/share/crush`) and jcode's login (`~/.jcode`)
-are on the containers' external volumes, which `make down-volumes` leaves alone.
+`compose.yaml`'s shared-logins switch reads true) is on the containers' external volumes, which `make down-volumes` leaves alone.
 
 **What a container can reach:**
 

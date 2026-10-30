@@ -72,9 +72,7 @@ name: dev-base
 #   the base       pinned by digest in Dockerfile.base. A floating FROM would change
 #                  under the cache every few weeks and turn a small bump into a full
 #                  pull. Moving that digest is how the image gets fresh Debian packages
-#                  and a fresh Claude Code on purpose; nothing else re-runs apt now
-#                  but the Crush layer, which re-runs when Charm releases (the Which
-#                  Crush step) — ~25 MB, rather than on every bump.
+#                  and a fresh Claude Code on purpose; nothing else re-runs apt now.
 #
 # Proven locally on 2026-10-06 against a throwaway registry, with a fresh buildx builder
 # for every build, as a CI runner has. Changing a late ARG kept every earlier layer's
@@ -281,18 +279,6 @@ jobs:
             exit 1
           fi
 
-      # Crush is the latest release, resolved HERE rather than inside the build, so the
-      # layer misses the cache only when Charm releases and both architecture legs install
-      # the same version — dev/Dockerfile.base, the Crush layer, has the reasons. A failed
-      # lookup fails the run: re-run it, or build locally with `make base CRUSH_VERSION=none`.
-      - name: Which Crush
-        id: crush
-        if: steps.decide.outputs.build == 'true'
-        run: |
-          ver=$(sh dev/crush-latest)
-          echo "version=$ver" >> "$GITHUB_OUTPUT"
-          echo "Crush $ver" >> "$GITHUB_STEP_SUMMARY"
-
       - uses: docker/setup-qemu-action@v3
         if: steps.decide.outputs.build == 'true'
       - uses: docker/setup-buildx-action@v3
@@ -311,11 +297,9 @@ jobs:
           context: dev
           file: dev/Dockerfile.base
           platforms: linux/arm64,linux/amd64
-          # CRUSH_VERSION is resolved by the step above, once, for both legs.
           build-args: |
             USER_UID=1001
             USER_GID=1001
-            CRUSH_VERSION=${{ steps.crush.outputs.version }}
           tags: ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
           # `outputs` replaces `push: true`; the tag above names the image. See the header
           # for why both the cache and the image are zstd.
