@@ -553,8 +553,11 @@ directory at the hub's next start.
 the hub and infra on GitHub's runner, brings them up with `make` and stand-in keys, and
 checks, each by name — the hub reaching infra with its own key, a client key reaching the
 hub's door, the hooks drop-in, the binary and the GitHub token arriving through their mounts,
-the workspace cloned over https with that token, the tools on `PATH`, and dossier building
-straight from its GitHub URL. Its header lists what it cannot check (the Pi, the pool,
+the workspace cloned over https with that token, the tools on `PATH`, pi's packages, links and
+gate (the gate meets a real tool call from a scripted model, `ci/pi-stub-model.js`, since the
+runner has no key), a pi slot binding as the menu starts one, and dossier building straight
+from its GitHub URL. The job summary carries two idle pis' CPU and memory over the offloader's
+window, the figures claude-sessions asked for. Its header lists what it cannot check (the Pi, the pool,
 Cloudflare, the App, or3). Dispatched with a claude-sessions ref, it builds the hub's binary
 from that ref instead of the pinned release, through `ci/compose.smoke.yaml` and the
 Makefile's `COMPOSE_OVERRIDE`; neither is ever used on zero.
@@ -612,7 +615,10 @@ first start; pi's is set in the image.
   `@nredd/pi-dev-tools`, `pi-powerline-footer` and `pi-themes`. The gate asks before every edit
   and every shell command, the session's model answers what it can, and it denies any path
   outside `/workspace`. Pi ignores a repo's `.pi/` directory, which could otherwise replace the
-  gate. Install telemetry is off and pi does not check for updates.
+  gate. Install telemetry is off and pi does not check for updates. `make verify`'s `pi` line
+  is its version, `pi-ext` says whether the claude-sessions extension is linked (without it the
+  menu and the offloader never see a pi slot), and `pi-tui` whether pi still takes the
+  `--tui-mode` flag every pi slot is started with.
 - **No slot**: Crush and jcode run in no zmx session, and pi does not yet, so a dropped
   connection ends any of them, and the menu and offloader know nothing about them.
   `crush --continue` picks up the last session.
