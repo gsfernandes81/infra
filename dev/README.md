@@ -383,7 +383,7 @@ reconnects by itself.
   their clones into `~/.dd-dev-secrets` and `~/.ds-dev-secrets` in step 2. or3's keys are
   already in `~/.or3-dev-secrets`.
 - **Nothing reads the host clones any more.** Each child builds straight from its repo on
-  GitHub (`main`), with its own Dockerfile, on base `2026.10.30.1` passed as the `BASE_TAG`
+  GitHub (`main`), with its own Dockerfile, on base `2026.10.31.1` passed as the `BASE_TAG`
   build arg each already takes — so no child repo changes first. or3, being private, is
   fetched over ssh with its deploy key from `~/.or3-dev-secrets`. Once step 1's listing is
   clean, the clones of or3, destiny-director and dossier on zero can be deleted.
@@ -993,6 +993,11 @@ A second agent harness beside Claude Code in every container, the owner's call (
   directory, which could otherwise replace the gate. Install telemetry is off.
 - **The footer's welcome card is off** from base `2026.10.30.1`. It waited for a key at every
   start, so a fresh slot showed in the menu as waiting on the owner.
+- **The footer shows the context window, not the session's token total** from base
+  `2026.10.31.1`. The `ascii` preset's `token_total` segment (the `⊛` figure) adds input,
+  output and cache tokens over the whole session, so it only climbs and reads as "883k" on a
+  model with a 200k window. `disabledSegments: ["token_total"]` leaves `context_pct`, tokens
+  in the window out of its size and the percent.
 
 ### How the gate decides
 
