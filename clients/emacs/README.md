@@ -59,6 +59,7 @@ as `undo` or `refer`, and the key appears beside the match.
 |---|---|
 | `Space` | the Space menu: `f` files, `b` buffers, `s` symbols, `d` diagnostics, `a` code actions, `r` rename, `k` hover docs, `/` search |
 | `Space ?` | the command palette: `M-x` with keys, as in Helix |
+| `:` | `M-x` too, except that `:w`, `:q`, `:q!`, `:wq` and `:x`, typed exactly, do what they do in Helix. `:q` refuses while the file has unsaved changes; `:q!` throws them away. Both close this terminal's view, as `C-x C-c` does, and leave the server running |
 | `g` | the goto menu: `g d` definition, `g r` references |
 | `u` / `U` | undo / redo |
 | `i`, `a`, `o` | insert |

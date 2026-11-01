@@ -52,7 +52,50 @@
     "SPC s" #'imenu               "SPC d" #'flymake-show-buffer-diagnostics
     "SPC a" #'eglot-code-actions  "SPC r" #'eglot-rename
     "SPC k" #'eldoc-doc-buffer    "SPC /" #'project-find-regexp
-    "SPC ?" #'execute-extended-command))   ; the command palette, as in Helix
+    "SPC ?" #'execute-extended-command)    ; the command palette, as in Helix
+  (hel-keymap-global-set :state 'normal ":" #'private-colon))
+
+;; Helix's :q, :q!, :w, :wq and :x on hel's `:', which is otherwise M-x. Typed exactly,
+;; they run on Enter; anything else is M-x as before. Our own because evil's ex line,
+;; the obvious donor, needs evil loaded beside hel, and its :q! under a server keeps the
+;; unsaved buffer or, outside one, kills the server. Here :q! reverts first, so the edit
+;; is gone, and the quits close this terminal's view (C-x C-c), never the server.
+(defun private-q ()
+  (interactive)
+  (if (and (buffer-file-name) (buffer-modified-p))
+      (user-error "Unsaved changes: :w saves them, :q! discards them")
+    (save-buffers-kill-terminal)))
+(defun private-q! ()
+  (interactive)
+  (when (buffer-modified-p)
+    (if (buffer-file-name) (revert-buffer t t) (set-buffer-modified-p nil)))
+  (save-buffers-kill-terminal))
+(defun private-wq ()
+  (interactive)
+  (save-buffer)
+  (save-buffers-kill-terminal))
+(defconst private-colon-commands
+  '(("q" . private-q) ("q!" . private-q!) ("w" . save-buffer)
+    ("wq" . private-wq) ("x" . private-wq)))
+(defun private-colon (arg)
+  "Run one of `private-colon-commands' if typed exactly, else M-x."
+  (interactive "P")
+  (let ((name (minibuffer-with-setup-hook
+                  ;; :append, so this runs after icomplete has set its own Enter up
+                  (:append (lambda ()
+                             (let ((map (current-local-map)))
+                               (use-local-map
+                                (make-composed-keymap
+                                 (define-keymap "RET"
+                                   (lambda () (interactive)
+                                     (if (assoc (minibuffer-contents) private-colon-commands)
+                                         (exit-minibuffer)
+                                       (call-interactively (keymap-lookup map "RET")))))
+                                 map)))))
+                (read-extended-command))))
+    (if-let* ((command (cdr (assoc name private-colon-commands))))
+        (call-interactively command)
+      (execute-extended-command arg name))))
 
 ;; Learn keys from M-x, as from Helix's Space ?: each command is listed with its key, and
 ;; matching anywhere in the name finds hel's own commands (typing `undo' lists
