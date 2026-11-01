@@ -29,10 +29,19 @@ runs download only what `lazy-lock.json` moved.
 Space opens a menu of every leader key, and `Space s k` searches all keybinds by name.
 `nvim +Tutor` teaches the motions, as `hx --tutor` does in Helix.
 
-The look is LazyVim's own, with four changes for a phone held upright: the command
-line sits on the bottom line, long lines wrap as in Helix (at a word, keeping their
-indent, marked `↪`), inlay hints start off, and inline diagnostic text shows on the
-cursor's line only. Anything more is LazyVim's to maintain, not this config's.
+The look is LazyVim's own, with changes only where it failed on a phone held upright,
+each one a LazyVim, noice or Neovim setting:
+
+- the command line sits on the bottom line, not in a box mid-screen;
+- long lines wrap as in Helix: at a word, keeping their indent, marked `↪`;
+- inlay hints start off, and inline diagnostic text shows on the cursor's line only;
+- the file tree (`Space e`) closes when it opens a file;
+- the start screen is 40 columns wide and drops its logo on a narrow screen;
+- the statusline drops the git branch and clock below 80 columns, so the file name fits;
+- `K`'s hover is Neovim's own, which wraps to fit. To scroll a long one, press `K`
+  again to enter it, then `q` to leave.
+
+Anything more is LazyVim's to maintain, not this config's.
 
 | Key | Does |
 |---|---|
@@ -122,7 +131,7 @@ connection.
 | `lua/plugins/lsp.lua` | Mason off, servers from the system |
 | `lua/plugins/llama.lua` | `llama.vim`: its settings, its keys, its failure message |
 | `lua/plugins/treesitter.lua` | parsers compile four at a time, for the phone's memory |
-| `lua/plugins/ui.lua` | the command line at the bottom; fewer inline hints, for portrait |
+| `lua/plugins/ui.lua` | the portrait fixes in the list above, except the wrap |
 | `lazy-lock.json` | the plugin commits |
 
 LazyVim's per-client file, `lazyvim.json`, lives in Neovim's state directory rather than
