@@ -73,12 +73,10 @@
 ;; unsaved buffer or, outside one, kills the server. Here :q! reverts first, so the edit
 ;; is gone, and the quits close this terminal's view (C-x C-c), never the server.
 (defun private-q ()
-  (interactive)
   (if (and (buffer-file-name) (buffer-modified-p))
       (user-error "Unsaved changes: :w saves them, :q! discards them")
     (save-buffers-kill-terminal)))
 (defun private-q! ()
-  (interactive)
   (when (buffer-modified-p)
     (cond ((and (buffer-file-name) (file-exists-p (buffer-file-name)))
            (revert-buffer t t))
@@ -87,15 +85,14 @@
           (t (set-buffer-modified-p nil))))
   (save-buffers-kill-terminal))
 (defun private-wq ()
-  (interactive)
   (save-buffer)
   (save-buffers-kill-terminal))
 (defconst private-colon-commands
   '(("q" . private-q) ("q!" . private-q!) ("w" . save-buffer)
     ("wq" . private-wq) ("x" . private-wq)))
-;; hel would otherwise ask, with several cursors, whether to run these once per cursor.
-(mapc #'hel-set-single-cursor-command
-      '(private-colon private-q private-q! private-wq))
+;; Plain functions, not commands, so M-x does not list them. hel would otherwise ask,
+;; with several cursors, whether to run `:' once per cursor.
+(hel-set-single-cursor-command 'private-colon)
 
 (defun private-colon--setup ()
   "Make Enter run a `private-colon-commands' entry typed exactly, else what it did."
@@ -113,15 +110,20 @@
   (interactive "P")
   ;; The hook stays for the whole read, as M-X re-enters the minibuffer; depth 90, so
   ;; it wraps icomplete's Enter. last-typed lets M-x suggest a shorter way, as it does.
+  ;; The prompt is `: ', so this is told apart from M-x; M-X still cycles on to M-x's
+  ;; own command sets.
   (let* ((execute-extended-command--last-typed nil)
+         (extended-command-versions
+          (cons (list ": " (lambda () read-extended-command-predicate))
+                extended-command-versions))
          (name (progn (add-hook 'minibuffer-setup-hook #'private-colon--setup 90)
-                      (unwind-protect (read-extended-command)
+                      (unwind-protect (read-extended-command ": ")
                         (remove-hook 'minibuffer-setup-hook #'private-colon--setup)))))
     (if-let* ((command (cdr (assoc name private-colon-commands))))
         (progn
           ;; keep q, w and q! out of M-x's history, where they would be "[No match]"
           (setq extended-command-history (delete name extended-command-history))
-          (call-interactively command))
+          (funcall command))
       (execute-extended-command arg name execute-extended-command--last-typed))))
 
 ;; Learn keys from M-x, as from Helix's Space ?: each command is listed with its key, and
