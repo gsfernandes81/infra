@@ -55,7 +55,7 @@ same files in the context. So each child's workflow:
 
 | Repo | `dev-image.yml` | On infra's base | Cache in `compose.yaml` | State |
 |---|---|---|---|---|
-| claude-sessions | yes, amd64 + arm64 | no: its own default | yes, its own two | mailed 2026-11-01: add `base_tag`, read infra's tag on push |
+| claude-sessions | yes, amd64 + arm64, `base_tag` input | yes, since claude-sessions cf00afc | yes, its own two | **done 2026-11-01**: infra's first dispatch ran claude-sessions run 41313446768 on base `2026.11.01`, arm64 in 19s from its cache |
 | or3 | to be confirmed by or3 | to be confirmed | no | mailed 2026-11-01: the owner believes it is cached; or3 checks and says how zero reads a private package |
 | destiny-director | no | — | yes (ref not built yet) | mailed 2026-11-01 |
 | dossier | no | — | yes (ref not built yet) | mailed 2026-11-01 |
@@ -64,6 +64,9 @@ same files in the context. So each child's workflow:
 | ionic-traces | no | — | yes (ref not built yet) | mailed 2026-11-01 |
 
 ## The owner's steps, once
+
+**Done 2026-11-01.** The App exists and is installed on all seven; infra's dev-cache run
+41313394751 minted its token and dispatched claude-sessions. Kept for a re-install.
 
 1. **Create a GitHub App for dispatch only**, under the account (Settings, Developer
    settings, GitHub Apps, New). Webhook off. Repository permissions: **Actions: Read and
