@@ -206,6 +206,11 @@ jobs:
           docker exec -i dev-hub sh -c 'umask 077; cat > /tmp/client' < "$SMOKE_SECRETS/client"
           check "a client key reaches the hub's door" sh -c \
             '[ "$(docker exec dev-hub ssh -F /dev/null -i /tmp/client -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null dev@127.0.0.1 echo door-ok)" = door-ok ]'
+          # The remote view's way in (claude-sessions 0.11.0): `claude-remote dev` runs exactly
+          # `ssh -T -C dev claude-sessions relay`. -T and -C as it does, so the door's no-tty path
+          # and compression are what is tested.
+          check "the door runs claude-sessions relay for a client, -T -C" sh -c \
+            '[ "$(docker exec dev-hub ssh -T -C -F /dev/null -i /tmp/client -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null dev@127.0.0.1 claude-sessions relay --version </dev/null)" = "$(docker exec dev-hub claude-sessions --version)" ]'
           check "the hooks drop-in is mounted" \
             docker exec infra test -s /etc/claude-code/managed-settings.d/claude-sessions.json
           check "the managed policy is in place, root-owned, 644" sh -c \

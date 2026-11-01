@@ -102,13 +102,15 @@ On each client — the machine you ssh *from*:
 ```sh
 ansible-playbook playbooks/client-home-ssh-config.yml -e container=dev
 ssh dev
+ansible-playbook playbooks/client-home-claude-remote.yml   # optional: the remote view
+claude-remote dev
 ```
 
 On zero, `make login` (`C=<c>` for another container) reports the hub's token, runs `claude
 auth login` if needed, and clones the workspace if start-up could not; re-running it is safe.
 Then `make verify` should read `sshd: running in the foreground`, `auth: claude logged in`,
-`tunnel: the hub's, serving dev`, `hub: key authorised; claude-sessions 0.10.1 here,
-claude-sessions 0.10.1 at the hub`, `github: the hub's token for gsfernandes81/infra, until …`,
+`tunnel: the hub's, serving dev`, `hub: key authorised; claude-sessions 0.11.0 here,
+claude-sessions 0.11.0 at the hub`, `relay: claude-sessions 0.11.0`, `github: the hub's token for gsfernandes81/infra, until …`,
 all collections installed, and `fleet: no route to zero/one/two`.
 
 **The memory pool is opt-in**: `DEV_CGROUP_PARENT=/devpool` puts every dev container and
@@ -869,7 +871,7 @@ copies in is ignored.
 
 [`gsfernandes81/claude-sessions`](https://github.com/gsfernandes81/claude-sessions) is the
 session registry: one JSON file per slot under `~/.local/share/claude-sessions/` (on a volume),
-kept current by Claude Code's own hooks. The hub pins **v0.10.1** and installs it for every
+kept current by Claude Code's own hooks. The hub pins **v0.11.0** and installs it for every
 container (*The hub*). A bump reaches every container when the hub is recreated, with no
 container restarted: hooks and offload passes run the binary from the volume each time, and
 each container's agent is started by the hub's menu over ssh and ends with that connection, so
@@ -960,6 +962,33 @@ Overrides, neither normally worth setting: `CLAUDE_SESSIONS_DIR` (the registry) 
 `ZMX_DIR` — each must be the same for every login and the hub's pass, so set one in compose or
 not at all. **Never set `ZMX_SESSION_PREFIX`**: slot names would disagree. A source checkout of
 claude-sessions goes at `~/.local/share/src/claude-sessions`, never at the registry's path.
+
+### The remote view: `claude-remote dev`
+
+From claude-sessions 0.11.0, a phone or WSL can draw Claude Code itself instead of a terminal
+on the far end. `claude-remote dev` runs `ssh -T -C -o BatchMode=yes dev claude-sessions relay`
+over the same `dev` block and tunnel as `ssh dev`. Typing, scrollback and editing stay on the
+client, and only a small stream crosses the link, which reconnects by itself. In the container
+a remote session is an ordinary `claude-<n>` slot whose program is `claude-sessions holder`,
+running `claude -p` headless. The menu, offloading, archiving and mail treat it as any other
+slot. How it works is claude-sessions' `docs/remote-view.md`.
+
+**Infra's part is three things.**
+
+- **The pin above.** The hub's `relay` and every container's `remote` and `holder` come from it.
+- **The door.** The hub's door already runs a forwarded command as given, before any tty test,
+  so `relay` reaches the binary instead of the menu. `make verify` and `make status C=hub`
+  have a `relay` line that runs the door with that command set, as sshd would. The smoke test
+  sends it through the hub's sshd with `-T -C`.
+- **The client.** `ansible/playbooks/client-home-claude-remote.yml` installs the same binary
+  as `claude-remote`, into `$PREFIX/bin` on Termux or `~/.local/bin` elsewhere. It reads the
+  version and both hashes from `dev/hub/Dockerfile`, so the client always matches the hub's
+  relay, and a hub bump is a re-run of that play on each client. The `dev` ssh block needs
+  nothing new: it already has `Compression yes`, ServerAlive 30/3 and no ControlMaster.
+
+**Still open:** cloudflared's idle timeout on the phone, which claude-sessions is to measure
+before the view's dead-link timing is final. It may move the client's `ServerAliveInterval`
+from 30 to 60. That is the owner's call.
 
 ## pi
 

@@ -40,6 +40,7 @@ hub_status() {
     d exec dev-hub sh -c 'l=$HOME/.hub/github-tokens.log; [ -f "$l" ] || { echo "no token pass yet"; exit 0; }; for h in $(github-tokens hosts); do grep " $h: " "$l" | tail -n 1; done; tail -n 1 "$l" | grep -v -E " [a-z0-9-]+: " || true' 2>/dev/null \
         | sed 's/^/            /'
     printf 'sessions  : %s\n' "$(d exec dev-hub claude-sessions --version 2>/dev/null || echo 'no claude-sessions in the hub')"
+    printf 'relay     : %s\n' "$(relay_line)"
     printf 'tunnel    : %s\n' "$(tunnel_line)"
 }
 
@@ -152,6 +153,15 @@ hub_line() {
     here="$(d exec "$CONTAINER" claude-sessions --version 2>/dev/null || echo 'no claude-sessions')"
     there="$(d exec dev-hub claude-sessions --version 2>/dev/null || echo 'no hub')"
     echo "$key; $here here, $there at the hub"
+}
+
+# THE REMOTE VIEW'S WAY IN (claude-sessions 0.11.0): `claude-remote dev` on the phone runs
+# `ssh -T -C dev claude-sessions relay`, so what must hold is that the hub's door passes that
+# command through as given. This runs the door itself with the forwarded command set, as sshd
+# would, and no tty: everything but sshd and the tunnel. The smoke test covers sshd.
+relay_line() {
+    d exec dev-hub sh -c 'SSH_ORIGINAL_COMMAND="claude-sessions relay --version" timeout 10 hub-door </dev/null 2>&1 | head -1' 2>/dev/null \
+        | grep . || echo 'no answer from the door — make status C=hub'
 }
 
 # Which Claude login this container is on (compose.yaml § THE CLAUDE LOGIN), and whether it is in.
@@ -452,6 +462,7 @@ print((" ".join(sorted(h)) if h else "PRESENT BUT EMPTY — no hooks in it")
     # here the one the hub installed — the same bytes as the hub's own, since this container
     # runs it from the hub's volume.
     printf 'hub       : %s\n' "$(hub_line)"
+    printf 'relay     : %s\n' "$(relay_line)"
     printf 'hub health: %s\n' "$(d exec dev-hub hub-health 2>&1 || true)"
     printf 'github    : %s\n' "$(github_line)"
     printf 'login dir : %s\n' "$(login_dir_line)"

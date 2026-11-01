@@ -1,0 +1,123 @@
+---
+# CLAUDE-REMOTE ON THE MACHINE YOU RUN IT FROM: the phone (Termux) or WSL on the laptop.
+#
+#     cd ansible
+#     ansible-playbook playbooks/client-home-claude-remote.yml
+#     claude-remote dev
+#
+# `claude-remote` is the remote view of claude-sessions 0.11.0 (its docs/remote-view.md): it
+# draws Claude Code on this machine from a small stream over one ssh link, `ssh -T -C -o
+# BatchMode=yes dev claude-sessions relay`, and reconnects by itself. It is the claude-sessions
+# binary installed under the name `claude-remote`. It needs the `dev` ssh block that
+# client-home-ssh-config.yml writes, and nothing else on this side.
+#
+# THE VERSION AND BOTH HASHES ARE READ FROM dev/hub/Dockerfile, the hub's pin, and are not
+# repeated here. The client talks to the hub's `relay`, so the two move together: a hub bump is
+# a client bump, and there is one place to make it. A run after a bump installs the new
+# binary; a run on the current version changes nothing. The download is checked against the
+# pinned sha256 before it is moved into place, so a wrong hash leaves the old binary alone.
+#
+# WHERE IT GOES: `$PREFIX/bin` on Termux, which is on PATH there and writable without root;
+# `~/.local/bin` anywhere else, where WSL's default profile puts it on PATH. `-e bin_dir=…`
+# overrides both. A static musl binary, so there is nothing to install beside it.
+#
+# THIS PLAY WRITES ON THE CONTROL NODE ONLY, one file, and reaches only github.com. It
+# touches no host in the fleet and needs no become.
+#
+# FROM THIS DIRECTORY, for the reason _assert-inventory.yml gives.
+# NO NEW COLLECTIONS: ansible.builtin throughout.
+
+- name: Check the inventory is loaded
+  ansible.builtin.import_playbook: _assert-inventory.yml
+  vars:
+    required_group: control
+
+- name: Install claude-remote on this client
+  hosts: control
+  gather_facts: false
+
+  vars:
+    # lookup('env','HOME'), never ~: on Termux the passwd entry reports /data, which is not
+    # writable (host_vars/localhost.yml has the same trap for remote_tmp).
+    home: "{{ lookup('env', 'HOME') }}"
+    termux: "{{ (lookup('env', 'TERMUX_VERSION') | length) > 0 }}"
+    install_dir: >-
+      {{ bin_dir if bin_dir is defined
+         else (lookup('env', 'PREFIX') ~ '/bin' if termux | bool else home ~ '/.local/bin') }}
+    dest: "{{ install_dir }}/claude-remote"
+    hub_dockerfile: "{{ lookup('file', playbook_dir ~ '/../../dev/hub/Dockerfile') }}"
+    cs_version: "{{ hub_dockerfile | regex_search('(?m)^ARG CLAUDE_SESSIONS_VERSION=(\\S+)$', '\\1') | default([''], true) | first }}"
+    cs_sha_arm64: "{{ hub_dockerfile | regex_search('(?m)^ARG CLAUDE_SESSIONS_SHA256_arm64=([0-9a-f]{64})$', '\\1') | default([''], true) | first }}"
+    cs_sha_amd64: "{{ hub_dockerfile | regex_search('(?m)^ARG CLAUDE_SESSIONS_SHA256_amd64=([0-9a-f]{64})$', '\\1') | default([''], true) | first }}"
+
+  tasks:
+    - name: Check the hub's pin reads from dev/hub/Dockerfile
+      ansible.builtin.assert:
+        that:
+          - cs_version | length > 0
+          - cs_sha_arm64 | length == 64
+          - cs_sha_amd64 | length == 64
+        fail_msg: >-
+          dev/hub/Dockerfile no longer has ARG CLAUDE_SESSIONS_VERSION and both
+          CLAUDE_SESSIONS_SHA256_{arm64,amd64} lines in the shape this play reads. Fix the
+          regexes here rather than pinning a second copy.
+        success_msg: "the hub pins claude-sessions {{ cs_version }}"
+
+    - name: Read this machine's architecture
+      ansible.builtin.command: uname -m
+      register: cr_arch
+      changed_when: false
+
+    - name: Check the architecture has a release binary
+      ansible.builtin.assert:
+        that: cr_arch.stdout in ['aarch64', 'arm64', 'x86_64', 'amd64']
+        fail_msg: "claude-sessions publishes aarch64 and x86_64 musl binaries; this machine is {{ cr_arch.stdout }}"
+        success_msg: "{{ cr_arch.stdout }}"
+
+    - name: Create the install directory if missing
+      ansible.builtin.file:
+        path: "{{ install_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Download claude-remote, checked against the pin
+      vars:
+        triple: "{{ 'aarch64' if cr_arch.stdout in ['aarch64', 'arm64'] else 'x86_64' }}"
+        sha: "{{ cs_sha_arm64 if triple == 'aarch64' else cs_sha_amd64 }}"
+      ansible.builtin.get_url:
+        url: "https://github.com/gsfernandes81/claude-sessions/releases/download/v{{ cs_version }}/claude-sessions-v{{ cs_version }}-{{ triple }}-linux-musl"
+        dest: "{{ dest }}"
+        checksum: "sha256:{{ sha }}"
+        mode: "0755"
+
+    # The binary prints `claude-remote <version>` when it runs under this name, which also
+    # proves it starts here (a static musl binary on Termux is the case worth proving).
+    - name: Read the version claude-remote reports
+      ansible.builtin.command: "{{ dest }} --version"
+      register: cr_version
+      changed_when: false
+      failed_when: false
+
+    - name: Check claude-remote runs and is the pinned version
+      ansible.builtin.assert:
+        that: cr_version.stdout | trim == 'claude-remote ' ~ cs_version
+        fail_msg: >-
+          {{ dest }} answered '{{ cr_version.stdout | trim }}{{ cr_version.stderr | trim }}'
+          (exit {{ cr_version.rc }}), not 'claude-remote {{ cs_version }}'.
+        success_msg: "{{ cr_version.stdout | trim }} at {{ dest }}"
+
+    - name: Read whether the install directory is on PATH
+      ansible.builtin.shell: command -v claude-remote
+      register: cr_path
+      changed_when: false
+      failed_when: false
+
+    # changed_when: true, because ansible.cfg hides ok tasks and this message is the point.
+    - name: Print how to start the remote view
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'Run: claude-remote dev' if (cr_path.stdout | trim) == dest
+             else dest ~ ' is installed, but `claude-remote` on PATH is '
+                  ~ ((cr_path.stdout | trim) or 'nothing') ~ '. Add ' ~ install_dir
+                  ~ ' to PATH, or run it by its full path: ' ~ dest ~ ' dev' }}
+      changed_when: true
