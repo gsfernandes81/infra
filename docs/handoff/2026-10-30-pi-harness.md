@@ -60,6 +60,8 @@ Findings, not started:
 7. **claude-sessions 0.10.1.** Its commit `0aba963` hands pi's events to the hook one at a
    time, so a prompt answered at once cannot leave the `!` set. It reaches the fleet only in
    a release, which is the owner's to cut; infra then bumps the pin and its two hashes.
+   **Pinned on `main` 2026-11-01** (released at v0.10.1); open until the hub is rebuilt on
+   zero and `make verify` reads `0.10.1` at the hub and in every container.
 8. **Termux's handling of pi's extended-key queries is untested.** Whether Termux answers
    them, and whether any key misbehaves when it does not, shows at the first attach from the
    phone. Not a blocker.
@@ -75,7 +77,8 @@ Findings, not started:
     skills and prints the error at start, so a pi session has `keepalive` and `mail-send` and
     reads mail from the policy's sentence alone. The files are claude-sessions' (shipped by
     its `install`); its agent was asked on 2026-10-30 to quote the two descriptions for
-    0.10.1. Nothing to change in infra; the pin bump of item 7 brings the fix.
+    0.10.1. Nothing to change in infra; the pin bump of item 7 brings the fix. v0.10.1's notes
+    say the two descriptions are quoted; open until a pi slot on zero starts without the error.
 
 This note is deleted when all ten are closed. Its reasoning is already in the pi row, so
 nothing needs moving first.
