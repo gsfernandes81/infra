@@ -55,6 +55,53 @@ local base = (vim.env.LLAMA_BASE_URL or "http://127.0.0.1:8080"):gsub("/+$", "")
 local endpoint_fim = vim.env.LLAMA_FIM_ENDPOINT or (base .. "/infill")
 local model_fim = vim.env.LLAMA_FIM_MODEL or ""
 
+-- When the server is away, suggestions turn off quietly and come back when it answers.
+--
+-- A check of the server's /health, which needs no key and which the router answers too,
+-- runs as the plugin loads and then at most every 20 seconds while you type. Each change
+-- is one notice. Only llama.vim's automatic suggestions are switched, the way its own
+-- :LlamaToggleAutoFim does: llama#enable starts a timer that never stops, so cycling the
+-- whole plugin on every outage would pile them up. vim.g.llama_server_up holds the
+-- latest answer.
+local health = { url = endpoint_fim:gsub("/infill$", "") .. "/health", last = 0, running = false }
+
+local function set_auto_fim(on)
+  vim.cmd("let g:llama_config.auto_fim = " .. (on and "v:true" or "v:false"))
+  vim.fn["llama#setup_autocmds"]()
+end
+
+local function on_health(up)
+  local was = vim.g.llama_server_up
+  vim.g.llama_server_up = up
+  if up == was then
+    return
+  end
+  set_auto_fim(up)
+  if up and was ~= nil then
+    vim.notify("llama-server answered: suggestions on", vim.log.levels.INFO)
+  elseif not up then
+    vim.notify(("llama-server not reachable at %s: suggestions off until it answers"):format(endpoint_fim))
+  end
+end
+
+local function check_health(force)
+  local now = vim.uv.now()
+  if health.running or (not force and now - health.last < 20000) then
+    return
+  end
+  health.running, health.last = true, now
+  vim.system(
+    { "curl", "--silent", "--output", "/dev/null", "--connect-timeout", "2", "--max-time", "4", health.url },
+    {},
+    function(out)
+      vim.schedule(function()
+        health.running = false
+        on_health(out.code == 0)
+      end)
+    end
+  )
+end
+
 local function hint_shown()
   if vim.fn.exists("*llama#is_fim_hint_shown") == 0 then
     return false
@@ -92,6 +139,8 @@ return {
         api_key = api_key(),
         -- Timings in the status line, not inline: inline text crowds a phone-width line.
         show_info = 1,
+        -- Off until the health check above hears the server.
+        auto_fim = false,
         keymap_fim_accept_full = "",
         keymap_fim_accept_line = "",
         -- The defaults for these begin with <leader>, which is Space. In insert mode that
@@ -114,12 +163,20 @@ return {
       LazyVim.cmp.actions.ai_accept = function()
         return accept("full")
       end
+      -- Its own group: llama#disable clears the `llama` group wholesale.
+      vim.api.nvim_create_autocmd({ "InsertEnter", "TextChangedI" }, {
+        group = vim.api.nvim_create_augroup("infra_llama_health", { clear = true }),
+        callback = function()
+          check_health(false)
+        end,
+      })
+      check_health(true)
     end,
   },
-  -- With no server reachable, llama.vim reports every failed request ("FIM job failed
-  -- with exit code: 7", curl's "could not connect"), and LazyVim shows each one as a
-  -- popup over the code. Sent to the corner instead, where it still says why nothing
-  -- completes.
+  -- A server that goes away between two health checks fails the requests in between, and
+  -- llama.vim reports each one ("FIM job failed with exit code: 7"), which LazyVim would
+  -- show as a popup over the code. Sent to the corner instead, until the next check
+  -- turns suggestions off.
   {
     "folke/noice.nvim",
     opts = function(_, opts)

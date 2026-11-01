@@ -77,8 +77,12 @@ that Windows Firewall lets in:
 set -gx LLAMA_BASE_URL "http://"(ip route show default | awk '{print $3}')":8080"
 ```
 
-With no server reachable, each failed request shows for two seconds in the bottom right
-corner, and editing carries on.
+When the server is not reachable, suggestions are off and editing carries on as plain
+Neovim, with one notice saying so. Neovim asks the server's `/health` as it starts and
+then at most every 20 seconds while you type, so suggestions come back on their own when
+the server answers, with a second notice, and go off again if it disappears. A request
+that fails between two checks shows for two seconds in the bottom right corner.
+`:LlamaStatus` shows what the server reports.
 
 ## Updating the plugins
 
