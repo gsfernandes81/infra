@@ -174,8 +174,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #     administrator"). It is the variable the binary checks FIRST, before DISABLE_AUTOUPDATER
 #     and before ~/.claude.json's autoUpdates, which is a per-user key and no managed setting
 #     (read from 2.1.311, and proved with `claude update`);
-#   - `requiredMaximumVersion` in the same file, which stops any newer claude from starting
-#     at all, whichever way it arrived: a `claude install` into ~/.local/bin, which is first
+#   - `requiredMaximumVersion` in the same file, which should stop any newer claude from
+#     starting at all (read from the binary, NOT YET SEEN ON A BOX: writing the managed file
+#     needs root), whichever way it arrived: a `claude install` into ~/.local/bin, which is first
 #     on PATH, or an `npm i -g` as dev into this prefix. The binary enforces it from managed
 #     settings only and skips it for `update`, `install` and `doctor`. The build below fails
 #     if it is not this version, so a bump that misses the file cannot ship a claude that
@@ -781,21 +782,17 @@ RUN mkdir -p /home/dev/.claude /home/dev/.config/gh /home/dev/.config/fish \
     && chmod 700 /home/dev/.ssh-host /home/dev/.ssh /home/dev/.ssh/cp \
         /home/dev/.screen /home/dev/.env.d
 
-# THE BUILD'S OWN CHECK THAT CLAUDE CODE CAN STILL UPDATE ITSELF, run as `dev` because
-# that is the account whose answer counts — it is the same question Claude Code asks
-# before every background update, asked at build time where a wrong answer is a failed
-# build rather than an image whose claude quietly never moves again. A missing chown, a
-# child that re-roots the prefix, a future npm that lays the tree out differently: each
-# one lands here.
+# THE BUILD'S OWN CHECK THAT THE NPM PREFIX IS STILL dev's, run as `dev` because that is
+# the account whose answer counts. Until 2026-11-01 this guarded Claude Code's self-update;
+# Claude Code is pinned now, and the prefix stays dev-owned for pi's tree (the node block
+# says why). A missing chown, a child that re-roots the prefix, a future npm that lays the
+# tree out differently: each one lands here.
 #
-# `claude --version` runs beside it and is DELIBERATELY NOT FATAL, which is the one
-# place here that guesses rather than refuses. The arm64 leg of dev-base.yml builds under
-# QEMU on a GitHub runner, this binary is a large self-contained one, and an emulator
-# declining to run it would fail the whole base build for a reason that says nothing
-# about the image — while the thing this file is actually asserting, the writability
-# above, has already passed. A container that really did get a broken claude says so at
-# its first start: the entrypoint prints the version in the boot log and `make verify`
-# reads it off the running container.
+# `claude --version` and `pi --version` beside it are READOUTS, not checks. The pin's fatal
+# version test is in the node block, and it runs under QEMU on dev-base.yml's arm64 leg
+# without trouble (run 41173976184, 2026-10-31, printed 2.1.311 on both legs). pi's stays
+# non-fatal: a container that really did get a broken pi says so at its first start, in
+# the boot log and in `make verify`.
 #
 # Pointed at a throwaway CLAUDE_CONFIG_DIR: /home/dev/.claude is a volume mountpoint in
 # every child, an empty volume inherits whatever the image left there, and config written

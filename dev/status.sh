@@ -289,8 +289,9 @@ verify() {
     # (Dockerfile.base says how). This line compares what `claude` on PATH runs with
     # requiredMaximumVersion in the managed settings, the ceiling the build holds to the pin.
     # Anything but "the pin" is a claude that got here some other way, a native install in
-    # ~/.local/bin or an `npm i -g`. A newer one refuses to start, so the `claude` line above
-    # shows its refusal instead of a version.
+    # ~/.local/bin or an `npm i -g`. A newer one should refuse to start (not yet seen on a
+    # box). If `--version` is gated too, this reads "answers nothing" and the `claude` line
+    # above is empty.
     printf 'claudepin : %s\n' "$(d exec "$CONTAINER" sh -c '
 pin=$(python3 -c "import json; print(json.load(open(\"/etc/claude-code/managed-settings.json\")).get(\"requiredMaximumVersion\") or \"\")" 2>/dev/null)
 v=$(claude --version 2>/dev/null | cut -d" " -f1)
@@ -311,8 +312,8 @@ else echo "NOT THE PIN — claude on PATH answers ${v:-nothing}, managed setting
         printf 'autoupdate: %s\n' 'could not read `claude doctor` — run it in the container'
     else
         case "$autoupdate" in
-            *DISABLE_UPDATES*) printf 'autoupdate: %s\n' "off — $autoupdate" ;;
-            *) printf 'autoupdate: %s\n' "NOT OFF — claude doctor says ${autoupdate:-nothing}; managed settings' env.DISABLE_UPDATES is not in force" ;;
+            *DISABLE_UPDATES*) printf 'autoupdate: %s\n' "off by DISABLE_UPDATES — $autoupdate" ;;
+            *) printf 'autoupdate: %s\n' "NOT OFF — claude doctor says ${autoupdate:-nothing}; DISABLE_UPDATES is not in force (the managed settings' env key should set it)" ;;
         esac
     fi
     # AGENT VIEW OFF, PRINTED AS TWO SWITCHES rather than one verdict. The managed

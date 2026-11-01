@@ -642,7 +642,9 @@ the same in every container, and it changes only when someone decides it should.
 `claude-managed-settings.json` hold the pin:
 
 - `env.DISABLE_UPDATES` turns off the background updater, and makes `claude update` refuse.
-- `requiredMaximumVersion` stops any newer claude from starting, however it arrived.
+- `requiredMaximumVersion` should stop any newer claude from starting, however it arrived.
+  That is read from the binary and not yet seen on a box. The check is a newer `claude install`
+  in a rebuilt container, then `claude --version` and `make verify`.
 
 The build fails if either key disagrees with the version it installs. The reasons are the pin
 row in [`../docs/decisions.md`](../docs/decisions.md).

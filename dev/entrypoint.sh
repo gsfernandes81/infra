@@ -220,7 +220,9 @@ mkdir -p "$CFG"
 # Captured before it is tested, not `… | head -1 || echo`: a `||` after a pipeline tests
 # the LAST command in it, so `head` succeeding on empty input would report a claude that
 # answered when none did. CLAUDE.md § *Shell traps* has the general form.
-claude_version="$(timeout 20 claude --version 2>/dev/null | head -1)"
+# `2>&1` so a claude that refuses to start (one above the pin's requiredMaximumVersion) puts
+# its refusal in the log, not "did not answer".
+claude_version="$(timeout 20 claude --version 2>&1 | head -1)"
 say "claude ${claude_version:-DID NOT ANSWER --version — this container has no working claude}"
 
 # A file left holding empty tokens is worse than no file: `claude auth status` reports
