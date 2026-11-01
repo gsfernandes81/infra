@@ -83,6 +83,10 @@ so the first suggestion waits for that. With `--models-max 1`, a `LLAMA_INST_MOD
 differs from the completion model swaps the two in and out of memory. `:LlamaStatus`
 shows whether each model is configured and loaded.
 
+Another AI extra from `:LazyExtras` can run alongside it, such as `ai.copilot-native`
+with `copilot-language-server` on the PATH (Mason is off here). Tab accepts the llama
+suggestion when one shows, and the other's otherwise.
+
 `llama.vim` passes the key to `curl` on its command line, so another local user can read
 it from the process list while a request runs. Neovim warns at start when the key file is
 readable by others.

@@ -168,8 +168,12 @@ return {
       }
     end,
     config = function()
+      -- Tab falls through to whatever held this hook before, such as a LazyVim AI extra
+      -- (Copilot), when no llama suggestion is showing; replacing it outright left Tab
+      -- unable to accept the other's suggestions.
+      local before = LazyVim.cmp.actions.ai_accept
       LazyVim.cmp.actions.ai_accept = function()
-        return accept("full")
+        return accept("full") or (before ~= nil and before())
       end
       -- Its own group: llama#disable clears the `llama` group wholesale.
       vim.api.nvim_create_autocmd({ "InsertEnter", "TextChangedI" }, {
