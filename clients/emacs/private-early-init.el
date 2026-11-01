@@ -17,3 +17,9 @@
 ;; Emacs 31), so nothing to download. Set here, before Solo's defaults; its defcustom then
 ;; keeps it.
 (setq emacs-solo-use-custom-theme 'catppuccin)
+
+;; Solo's banner in *scratch*, where `emacs' with no file opens, is 84 columns of block
+;; letters and wraps into a jumble at 46. The same facts on one line instead.
+(setq emacs-solo-scratch-banner
+      (lambda () (format ";; Emacs Solo: %s, %d packages\n\n"
+                         (emacs-init-time "%.2f s") (length package-activated-list))))

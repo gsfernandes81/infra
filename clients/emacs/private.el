@@ -45,6 +45,10 @@
               (setq-local word-wrap t)))
           90)
 
+;; Line numbers only as wide as the numbers on screen; Solo reserves 4 columns, which on
+;; a 46-column screen is room for code.
+(setopt display-line-numbers-width nil)
+
 ;; Hover docs (SPC k) at the bottom, a third of the screen tall, instead of half of it.
 (add-to-list 'display-buffer-alist
              '("\\*eldoc" (display-buffer-reuse-window display-buffer-at-bottom)
