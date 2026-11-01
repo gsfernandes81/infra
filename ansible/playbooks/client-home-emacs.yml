@@ -59,8 +59,8 @@
     # The same tools under each distro's names. termux-services is the runit that runs the
     # emacsd service; Arch has no service, as `emacs` starts the server on first use. fish
     # because emacs.fish is how `emacs` reaches the server, and emacsd/run starts through
-    # it. aspell and its English dictionary because evil loads flyspell, and Solo's
-    # flyspell setup fails on en_US without them.
+    # it. aspell and its English dictionary for evil's z=, ]s and [s, and because Solo's
+    # flyspell setup fails on en_US without them the first time flyspell loads.
     packages:
       termux: [emacs, git, fish, tree-sitter-python, tree-sitter-markdown, ruff, ty, python-pip, termux-services, aspell, aspell-en]
       arch: [emacs-nox, git, fish, tree-sitter-python, tree-sitter-markdown, ruff, ty, python-pipx, aspell, aspell-en]

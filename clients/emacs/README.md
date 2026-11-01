@@ -66,6 +66,7 @@ what you want, such as `undo` or `refer`, and the key appears beside the match.
 | `C-u`, `C-d` | half a page up, down |
 | `i`, `a`, `o` | insert |
 | `q` | in a pane you cannot type in (references, diagnostics, help), closes it; elsewhere it records a macro, as in Vim |
+| Enter, Tab | in the references or diagnostics list, Enter jumps to the entry; Tab, in references, jumps and closes the list |
 | `Esc`, `C-g` | cancel; in insert mode, `Esc` goes back to normal mode |
 | Tab | in insert mode, accepts the grey suggestion from llama-server |
 | `C-h k`, `C-h b` | what a key does; every key active now |

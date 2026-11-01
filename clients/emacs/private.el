@@ -64,6 +64,13 @@
              '("\\*eldoc" (display-buffer-reuse-window display-buffer-at-bottom)
                (window-height . 0.33)))
 
+;; NORMAL, INSERT and the rest at the left of the status line, INSERT in the warning
+;; colour.
+(defun private-evil-tag ()
+  (when (bound-and-true-p evil-state)
+    (propertize (format " %s" (upcase (symbol-name evil-state)))
+                'face (if (eq evil-state 'insert) 'warning 'mode-line-emphasis))))
+
 ;; NANO's modeline (Nicolas Rougier, GNU ELPA) in place of Solo's, set up before evil,
 ;; which copies the current line into each buffer it starts in; at the bottom where
 ;; Solo's was. It shortens the buffer name on a narrow screen and never the line:column on
@@ -87,8 +94,9 @@
 ;; C-i walk the jump list, and Space opens a small menu. :q, :w, :wq, :x and the rest are
 ;; evil's own ex line. Panes you cannot type in (references, diagnostics, help: special
 ;; modes) open in evil's motion state, where q is theirs and closes them, not Vim's macro
-;; recorder. evil loads flyspell, so the play installs aspell and its English
-;; dictionary.
+;; recorder; Enter and Tab are handed back to the reference and diagnostic lists, where
+;; motion state would take them. The play installs aspell and its English dictionary
+;; for evil's z=, ]s and [s, and for Solo's flyspell setup, which expects them.
 (use-package evil
   :ensure t
   :demand t
@@ -101,6 +109,12 @@
   :config
   (evil-mode 1)
   (evil-set-initial-state 'special-mode 'motion)  ; and every mode derived from it
+  (with-eval-after-load 'xref
+    (evil-define-key 'motion xref--xref-buffer-mode-map
+      (kbd "RET") #'xref-goto-xref (kbd "TAB") #'xref-quit-and-goto-xref))
+  (with-eval-after-load 'flymake
+    (evil-define-key 'motion flymake-diagnostics-buffer-mode-map
+      (kbd "RET") #'flymake-goto-diagnostic))
   (evil-define-key 'normal 'global "gr" #'xref-find-references "U" #'evil-redo)
   (evil-set-leader '(normal motion) (kbd "SPC"))
   (evil-define-key '(normal motion) 'global
@@ -109,13 +123,6 @@
     (kbd "<leader>a") #'eglot-code-actions  (kbd "<leader>r") #'eglot-rename
     (kbd "<leader>k") #'eldoc-doc-buffer    (kbd "<leader>/") #'project-find-regexp
     (kbd "<leader>?") #'execute-extended-command))  ; the command palette, as in Helix
-
-;; NORMAL, INSERT and the rest at the left of the status line, INSERT in the warning
-;; colour.
-(defun private-evil-tag ()
-  (when (bound-and-true-p evil-state)
-    (propertize (format " %s" (upcase (symbol-name evil-state)))
-                'face (if (eq evil-state 'insert) 'warning 'mode-line-emphasis))))
 
 ;; Learn keys from M-x, as from Helix's Space ?: each command is listed with its key, and
 ;; matching anywhere in the name finds evil's own commands (typing `undo' lists
