@@ -34,7 +34,7 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 
 | I want to… | Run | Needs |
 |---|---|---|
-| set up this phone or laptop: every ssh alias, every service token (the fleet's `fleet-<client>` too, never expiring), Windows too from WSL | `client-home-ssh-config.yml` | the [API token](#the-cloudflare-api-token) on this machine; it mints the service tokens itself |
+| set up this phone or laptop: every ssh alias, every service token (the fleet's `fleet-<client>` too, never expiring), Windows too from WSL, and on the phone `ssh g14`, the tunnel to the laptop's llama-server | `client-home-ssh-config.yml` | the [API token](#the-cloudflare-api-token) on this machine; it mints the service tokens itself |
 | put the remote view on this phone or laptop (`claude-remote dev`), or move it to the hub's new claude-sessions after a pin bump | `client-home-claude-remote.yml` | the `dev` block from the play above; reaches github.com only |
 | set up Neovim on this phone or WSL: packages, `~/.config/nvim` linked to [`clients/nvim`](../clients/nvim/README.md), plugins at the pinned commits, parsers, a check that `ty` and `ruff` attach | `client-home-nvim.yml` · `-K` on Arch when a package is missing · `--check` lists what it would install | Termux or Arch; reaches GitHub and the package mirror |
 | rotate one dev container's service token on this client, or add it once its tunnel exists | `client-home-ssh-config.yml -e container=or3-dev -e replace_token=true` | the same |

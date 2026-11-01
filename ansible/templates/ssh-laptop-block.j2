@@ -1,0 +1,34 @@
+{# ASCII only, like the fleet block, so the file stays readable under any codepage. #}
+# The laptop. GENERATED: edit ansible/templates/ssh-laptop-block.j2 and re-run
+# playbooks/client-home-ssh-config.yml, not this. Reasoning: docs/ssh-clients.md
+#
+#   ssh {{ laptop_alias }}                   tunnel up, in the background; llama-server is
+#                             then at 127.0.0.1:{{ laptop_local_port }} here
+#   ssh -O check {{ laptop_alias }}          is it up
+#   ssh -O exit {{ laptop_alias }}           tunnel down
+#   ssh -o HostName=<ip> {{ laptop_alias }}  the laptop at another address
+#
+# The laptop's key accepts this client for the tunnel and nothing else: no shell, one
+# port. The LAN it sits on is not trusted, so its host key is pinned in the file below
+# and never learned from whoever answers; a stranger on its address fails the check.
+Host {{ laptop_alias }}
+  HostName {{ laptop_address }}
+  Port {{ laptop_port }}
+  User {{ laptop_user }}
+  HostKeyAlias {{ laptop_alias }}
+  UserKnownHostsFile ~/.ssh/known_hosts.{{ laptop_alias }}
+  StrictHostKeyChecking yes
+  UpdateHostKeys no
+  IdentityFile ~/.ssh/id_ed25519
+  IdentitiesOnly yes
+  PasswordAuthentication no
+  LocalForward 127.0.0.1:{{ laptop_local_port }} 127.0.0.1:{{ laptop_remote_port }}
+  ExitOnForwardFailure yes
+  SessionType none
+  ForkAfterAuthentication yes
+  ControlMaster auto
+  ControlPath ~/.ssh/cm/%n-%r
+  ControlPersist yes
+  ConnectTimeout 5
+  ServerAliveInterval 30
+  ServerAliveCountMax 3

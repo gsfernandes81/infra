@@ -388,6 +388,53 @@ plane can see that laptop to calibrate the check against.
 `cloudflared.exe`, and the POSIX `ProxyCommand` runs under WSL's `/bin/sh`, not under
 Windows.
 
+## The laptop: a tunnel to its llama-server
+
+`clients/nvim/` gets code completion from a llama-server on the laptop (`G14-GS`,
+Windows), and asks for it at `127.0.0.1:8080`. On the phone, `ssh g14` puts the laptop's
+`127.0.0.1:8080` there: it authenticates, opens the forward, and goes to the background.
+`ssh -O check g14` says whether it is up, and `ssh -O exit g14` takes it down. Neovim
+notices either way within 20 seconds and turns suggestions on or off.
+
+**Why ssh and not the LAN address.** The laptop and the phone share Wi-Fi nobody here
+controls. Anyone on it can take the laptop's address, by IP or by mDNS name, after
+knocking the laptop off the network. ssh checks the laptop's host key before it sends
+anything, so that impostor gets a refused connection and nothing else: no prompt, no API
+key, no login. The host key is **pinned** in `~/.ssh/known_hosts.g14`, written by the play
+from the value in `_client-laptop-ssh.yml`, rather than learned on first connect, when the
+first answer could already be the impostor. A reinstalled laptop has a new key: update
+that value and re-run.
+
+**The address is `10.1.0.125`**, and `ssh -o HostName=<ip> g14` reaches it at another.
+`G14-GS.local` would survive a new address, but nobody has yet shown that Termux resolves
+`.local` names.
+
+**The laptop's side, set up by hand on 2026-11-01** (Windows is not an Ansible target):
+
+- Windows' own OpenSSH server, the optional feature, started at boot.
+- Port 22 open only from the Wi-Fi adapter's local subnet, on any network profile, by a
+  rule named `sshd-lan`. The installer's rule, which allowed any address on Private
+  networks, is disabled.
+- `PasswordAuthentication no` and `KbdInteractiveAuthentication no` at the top of
+  `C:\ProgramData\ssh\sshd_config`, where they win over the `Match` block below.
+- The phone's key in `C:\ProgramData\ssh\administrators_authorized_keys`, as
+  `restrict,port-forwarding,permitopen="127.0.0.1:8080" ssh-ed25519 …`. That key opens the
+  one forward and nothing else: no shell, no other port. The account is an administrator,
+  and Windows' sshd reads an administrator's keys from that file only, which needs
+  elevation to edit; a key in the user's own `.ssh` would let any program running as the
+  user grant itself an elevated login.
+
+**WSL needs no tunnel.** It runs on the laptop and reaches llama-server through the NAT
+gateway (`LLAMA_BASE_URL` in `clients/nvim/README.md`), so the play writes no `g14` block
+there. That path needs llama-server to listen beyond `127.0.0.1`. The tunnel works either
+way, because it ends at the laptop's own loopback; keeping port 8080 shut to the Wi-Fi is
+a firewall rule on the laptop.
+
+Proved before it landed against a throwaway sshd set up the same way: the forward came up
+and answered, a second `ssh g14` was harmless, `-O check` and `-O exit` worked, a forward
+to another port was refused by the server, and a different host key on the same address
+failed with `REMOTE HOST IDENTIFICATION HAS CHANGED` and opened nothing.
+
 ## Letting a new client in
 
 Two halves. The ssh block and the service token are things a client *holds*;

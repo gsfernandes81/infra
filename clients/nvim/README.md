@@ -44,8 +44,11 @@ Space opens a menu of every leader key, and `Space s k` searches all keybinds by
 ## The completion server
 
 With nothing set, `llama.vim` asks `http://127.0.0.1:8080/infill`, llama-server's own
-default port. An ssh forward or `tailscale serve` from the machine running llama-server
-puts it there. These change that, and none of them is tracked:
+default port. On the phone, `ssh g14` puts the laptop's llama-server there, through a
+tunnel that `client-home-ssh-config.yml` sets up with the laptop's host key pinned, and
+`ssh -O exit g14` takes it down; `docs/ssh-clients.md` § The laptop says why a tunnel
+and not the laptop's LAN address. These change where it asks, and none of them is
+tracked:
 
 | Set | When |
 |---|---|
