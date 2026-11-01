@@ -34,9 +34,9 @@ runs download only what the pin moved.
 ## Running it
 
 `emacs FILE` opens FILE in the running Emacs server, in the terminal you typed it in.
-`emacs.fish` makes `emacs` mean `emacsclient -t -a ''`, so Emacs starts once and every
-later open is instant. With no server running, the first `emacs` starts one. `EDITOR` and
-`VISUAL` point at the same command.
+`emacs.fish` makes `emacs` mean `emacsclient -t`, so Emacs starts once and every later
+open is instant. With no server running, the first `emacs` starts one, because the file
+also sets `ALTERNATE_EDITOR` empty. `EDITOR` and `VISUAL` point at the same command.
 
 - **On Termux** the `emacsd` runit service keeps a server up: `sv status emacsd`, `sv
   restart emacsd`, and its log in `$PREFIX/var/log/sv/emacsd/current`. termux-services
@@ -44,8 +44,10 @@ later open is instant. With no server running, the first `emacs` starts one. `ED
   and open a new one.
 - **On Arch** there is no service; the first `emacs` starts the server.
 - **The real program** is still there as `command emacs`.
-- **Stopping the server:** `emacsclient -e '(kill-emacs)'`. That is how a change to the
-  `LLAMA_*` variables reaches it: the server reads them when it starts.
+- **Restarting the server** is how a change to the `LLAMA_*` variables reaches it: the
+  server reads them when it starts. On Termux `sv restart emacsd`, and `sv down emacsd`
+  stops it; on Arch `emacsclient -e '(kill-emacs)'`, and the next `emacs` starts a new
+  one.
 
 ## Keys worth knowing
 
@@ -73,9 +75,10 @@ environment, so they are set in fish's `conf.d`:
 |---|---|
 | `LLAMA_BASE_URL` | where llama-server is: `http://host:port`, with or without `/v1`. Default `http://127.0.0.1:8080`, where `ssh g14` forwards the laptop's |
 | `LLAMA_FIM_MODEL` | the router's name for the completion model, sent with every request |
-| `LLAMA_API_KEY` | the key, read again on every request |
+| `LLAMA_API_KEY` | the key, read again on every request. Unset, `none` is sent, which a llama-server without `--api-key` accepts |
 
-With no server reachable, nothing shows: `minuet` logs the failure and gives up after 3 s.
+With no server reachable, or a wrong key, nothing shows: `minuet` logs the failure and
+gives up after 3 s.
 `docs/ssh-clients.md` § The laptop says how the phone reaches the laptop's llama-server.
 
 ## Updating

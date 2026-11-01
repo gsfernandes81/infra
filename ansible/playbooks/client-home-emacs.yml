@@ -57,10 +57,12 @@
     prefix: "{{ lookup('env', 'PREFIX') }}"
 
     # The same tools under each distro's names. termux-services is the runit that runs the
-    # emacsd service; Arch has no service, as `emacs` starts the server on first use.
+    # emacsd service; Arch has no service, as `emacs` starts the server on first use. fish
+    # because emacs.fish is how `emacs` reaches the server, and emacsd/run starts through
+    # it.
     packages:
-      termux: [emacs, git, tree-sitter-python, tree-sitter-markdown, ruff, ty, python-pip, termux-services]
-      arch: [emacs-nox, git, tree-sitter-python, tree-sitter-markdown, ruff, ty, python-pipx]
+      termux: [emacs, git, fish, tree-sitter-python, tree-sitter-markdown, ruff, ty, python-pip, termux-services]
+      arch: [emacs-nox, git, fish, tree-sitter-python, tree-sitter-markdown, ruff, ty, python-pipx]
 
   tasks:
     - name: Check clients/emacs/SOURCE holds a URL and a sha
@@ -120,9 +122,23 @@
              if client_os == 'termux' else
              packages.arch | difference(installed_arch.stdout_lines | map('split') | map('first')) }}
 
+    # rass is a 52 KB Python wheel that no distro packages (Arch has it only in the AUR).
+    # `shell` for `command -v`, a builtin; the play's own PATH includes ~/.local/bin
+    # below.
+    - name: Read whether rass is on PATH
+      ansible.builtin.shell: command -v rass
+      environment:
+        PATH: "{{ home }}/.local/bin:{{ lookup('env', 'PATH') }}"
+      register: rass_path
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
     - name: "--check only: print the packages it would install"
       ansible.builtin.debug:
-        msg: "would install: {{ missing | join(' ') if missing else 'nothing' }}"
+        msg: >-
+          would install: {{ (missing + (['rassumfrassum (pip)'] if rass_path.rc != 0 else []))
+                            | join(' ') or 'nothing' }}
       changed_when: true
       when: ansible_check_mode
 
@@ -139,18 +155,6 @@
       # Not under --check: pacman's own dry run still wants sudo, and the line above
       # already says what would be installed.
       when: client_os == 'arch' and missing | length > 0 and not ansible_check_mode
-
-    # rass is a 52 KB Python wheel that no distro packages (Arch has it only in the AUR).
-    # `shell` for `command -v`, a builtin; the play's own PATH includes ~/.local/bin
-    # below.
-    - name: Read whether rass is on PATH
-      ansible.builtin.shell: command -v rass
-      environment:
-        PATH: "{{ home }}/.local/bin:{{ lookup('env', 'PATH') }}"
-      register: rass_path
-      changed_when: false
-      failed_when: false
-      check_mode: false
 
     - name: "If no rass: install rassumfrassum with pip or pipx"
       ansible.builtin.command:
@@ -216,7 +220,7 @@
         state: link
       loop: [private-early-init.el, private.el]
 
-    - name: Install the packages private.el uses
+    - name: "Not --check: install the packages private.el uses"
       ansible.builtin.command:
         argv: [emacs, --batch, "--init-directory={{ emacs_dir }}", -l, "{{ scripts }}/install.el"]
       environment:
@@ -267,8 +271,9 @@
           loop: [run, log/run]
           register: emacsd_files
 
-        # sv needs SVDIR, which termux-services sets in new sessions; runsvdir starts any
-        # service directory without a `down` file within seconds of it appearing.
+        # sv needs SVDIR, which termux-services sets in new sessions. runsvdir starts any
+        # service directory without a `down` file within seconds of it appearing, so a
+        # failure right after the first copy may only mean it has not looked yet.
         - name: "Termux: read the emacsd service's status"
           ansible.builtin.command:
             argv: [sv, status, emacsd]
@@ -282,12 +287,16 @@
         - name: "Termux: print how the emacsd service stands"
           ansible.builtin.debug:
             msg: >-
-              {{ 'emacsd: ' ~ emacsd_status.stdout | trim
-                 if emacsd_status.rc == 0 and emacsd_status.stdout is search('^run:')
-                 else 'emacsd is installed but not running yet. termux-services starts its
-                 supervisor at login: close every Termux session and open a new one, then
-                 `sv status emacsd`. Until then `emacs FILE` starts a server itself.' }}{{
-                 ' The run script changed: `sv restart emacsd` applies it (open buffers close).'
+              {{ ('emacsd: ' ~ emacsd_status.stdout | trim)
+                 if emacsd_status.stdout is search('^(run|down):') else
+                 ('emacsd is installed but runit has not picked it up yet. Run '
+                  ~ '`sv status emacsd` in a few seconds; if it still fails, the '
+                  ~ 'supervisor is not running: close every Termux session and open '
+                  ~ 'a new one. Until then `emacs FILE` starts a server itself.') }}{{
+                 ' (`sv up emacsd` starts it)'
+                 if emacsd_status.stdout is search('^down:') else '' }}{{
+                 ' The run script changed: `sv restart emacsd` applies it (open '
+                 ~ 'buffers close).'
                  if emacsd_before.stat.exists and emacsd_files is changed
                     and emacsd_status.stdout is search('^run:') else '' }}
           changed_when: true

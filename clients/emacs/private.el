@@ -104,7 +104,12 @@
                "/v1" (string-remove-suffix "/" (or (getenv "LLAMA_BASE_URL") "http://127.0.0.1:8080")))))
     (plist-put minuet-openai-fim-compatible-options :end-point (concat base "/v1/completions")))
   (plist-put minuet-openai-fim-compatible-options :name "llama.cpp")
-  (plist-put minuet-openai-fim-compatible-options :api-key "LLAMA_API_KEY") ; env var NAME, read per request
+  ;; Read on every request. With no key set, minuet refuses to run and puts an error in
+  ;; the echo area at every pause in typing, so a placeholder goes instead: a llama-server
+  ;; without --api-key ignores it, and one with a key answers 401, which minuet logs.
+  (plist-put minuet-openai-fim-compatible-options :api-key
+             (lambda () (let ((key (getenv "LLAMA_API_KEY")))
+                          (if (member key '(nil "")) "none" key))))
   (plist-put minuet-openai-fim-compatible-options :model (or (getenv "LLAMA_FIM_MODEL") "Qwen3Coder-30B-A3B"))
   (minuet-set-nested-plist minuet-openai-fim-compatible-options nil :template :suffix)
   (minuet-set-optional-options
