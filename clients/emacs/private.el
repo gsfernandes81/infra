@@ -49,6 +49,13 @@
 ;; a 46-column screen is room for code.
 (setopt display-line-numbers-width nil)
 
+;; Language servers stay up after their last file closes; Solo stops them. Through the
+;; Emacs server every :q closes the last Python buffer, so each reopen restarted rass, ty
+;; and ruff, and rass, slower to exit on the phone than jsonrpc's 0.3 s grace, left a
+;; "Sentinel ... still hasn't run" warning window each time. Kept up, they hold about
+;; 80 MB for a small project; M-x eglot-shutdown-all frees it.
+(setopt eglot-autoshutdown nil)
+
 ;; Hover docs (SPC k) at the bottom, a third of the screen tall, instead of half of it.
 (add-to-list 'display-buffer-alist
              '("\\*eldoc" (display-buffer-reuse-window display-buffer-at-bottom)
