@@ -80,7 +80,11 @@
 (defun private-q! ()
   (interactive)
   (when (buffer-modified-p)
-    (if (buffer-file-name) (revert-buffer t t) (set-buffer-modified-p nil)))
+    (cond ((and (buffer-file-name) (file-exists-p (buffer-file-name)))
+           (revert-buffer t t))
+          ((buffer-file-name)             ; a new file: nothing on disk to go back to
+           (erase-buffer) (set-buffer-modified-p nil))
+          (t (set-buffer-modified-p nil))))
   (save-buffers-kill-terminal))
 (defun private-wq ()
   (interactive)
@@ -89,25 +93,36 @@
 (defconst private-colon-commands
   '(("q" . private-q) ("q!" . private-q!) ("w" . save-buffer)
     ("wq" . private-wq) ("x" . private-wq)))
+;; hel would otherwise ask, with several cursors, whether to run these once per cursor.
+(mapc #'hel-set-single-cursor-command
+      '(private-colon private-q private-q! private-wq))
+
+(defun private-colon--setup ()
+  "Make Enter run a `private-colon-commands' entry typed exactly, else what it did."
+  (let ((map (current-local-map)))
+    (use-local-map
+     (make-composed-keymap
+      (define-keymap "RET"
+        (lambda () (interactive)
+          (if (assoc (minibuffer-contents) private-colon-commands)
+              (exit-minibuffer)
+            (call-interactively (keymap-lookup map "RET")))))
+      map))))
 (defun private-colon (arg)
   "Run one of `private-colon-commands' if typed exactly, else M-x."
   (interactive "P")
-  (let ((name (minibuffer-with-setup-hook
-                  ;; :append, so this runs after icomplete has set its own Enter up
-                  (:append (lambda ()
-                             (let ((map (current-local-map)))
-                               (use-local-map
-                                (make-composed-keymap
-                                 (define-keymap "RET"
-                                   (lambda () (interactive)
-                                     (if (assoc (minibuffer-contents) private-colon-commands)
-                                         (exit-minibuffer)
-                                       (call-interactively (keymap-lookup map "RET")))))
-                                 map)))))
-                (read-extended-command))))
+  ;; The hook stays for the whole read, as M-X re-enters the minibuffer; depth 90, so
+  ;; it wraps icomplete's Enter. last-typed lets M-x suggest a shorter way, as it does.
+  (let* ((execute-extended-command--last-typed nil)
+         (name (progn (add-hook 'minibuffer-setup-hook #'private-colon--setup 90)
+                      (unwind-protect (read-extended-command)
+                        (remove-hook 'minibuffer-setup-hook #'private-colon--setup)))))
     (if-let* ((command (cdr (assoc name private-colon-commands))))
-        (call-interactively command)
-      (execute-extended-command arg name))))
+        (progn
+          ;; keep q, w and q! out of M-x's history, where they would be "[No match]"
+          (setq extended-command-history (delete name extended-command-history))
+          (call-interactively command))
+      (execute-extended-command arg name execute-extended-command--last-typed))))
 
 ;; Learn keys from M-x, as from Helix's Space ?: each command is listed with its key, and
 ;; matching anywhere in the name finds hel's own commands (typing `undo' lists
