@@ -1,6 +1,10 @@
 {
   "disableAgentView": true,
   "autoUpdatesChannel": "stable",
+  "requiredMaximumVersion": "2.1.311",
+  "env": {
+    "DISABLE_UPDATES": "1"
+  },
   "permissions": {
     "defaultMode": "auto"
   },

@@ -14,7 +14,6 @@
 #   make fleet       prove zero, one and two answer — by ssh, then by ansible
 #   make collections check the image's collections against ansible/requirements.yml
 #   make claude      the hub's menu, as `ssh dev` lands on it
-#   make claude-update  update Claude Code now in one container, and say whether it updates itself
 #   make shell       a login shell in one container
 #   make logs        follow one container's log (= its sshd's)
 #   make boot-log    one container's start-up lines, from the top
@@ -91,7 +90,7 @@ DOCKER  := $(SUDO) docker
 BASE_TAG := $(shell sed -n 's/^x-base-tag: &base-tag //p' $(CURDIR)/compose.yaml)
 
 .PHONY: help dev base up restart stop down down-volumes status verify collections logs \
-	boot-log tunnel-log idle offload-log sessions login claude claude-update shell fleet \
+	boot-log tunnel-log idle offload-log sessions login claude shell fleet \
 	_require-env _require-secrets _require-uid _require-own-names _require-no-retired _require-volumes volumes \
 	check check-names build
 
@@ -378,18 +377,3 @@ claude:
 shell:
 	$(DOCKER) exec -it $(CONTAINER) sh -c 'exec "$$(getent passwd "$$(id -u)" | cut -d: -f7)" -l'
 
-# Claude Code updates ITSELF in the background and the new version takes effect at the
-# next `claude`, so this is not how it normally moves — it is how you move it NOW,
-# without waiting for a session to notice, and how you see what state the mechanism is
-# in. The second command is the readout, and the line to look for is `Can't auto-update`,
-# NOT `Auto-updates: enabled` — measured 2026-09-21, the latter says `enabled` even on an
-# install that cannot write its own directory and will never move. status.sh's
-# `autoupdate` line explains that at length; this prints both and lets you read them.
-#
-# Not `-it`: both commands print and exit, and a tty here would only matter if one of
-# them decided to ask something, which is exactly what a management target should not do.
-claude-update:
-	$(DOCKER) exec $(CONTAINER) claude update
-	$(DOCKER) exec $(CONTAINER) sh -c \
-	  "claude doctor 2>/dev/null | grep -E \"^(Auto-updates|Auto-update channel|Last update attempt):|Can't auto-update\"" \
-	  || echo "claude doctor said nothing about updating — run it in the container: make shell"

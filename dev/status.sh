@@ -284,39 +284,36 @@ verify() {
     tool zmx    'the pinned zmx tarball did not reach /usr/local/bin' zmx version
     tool gh     'the release tarball did not unpack to /usr/local/bin' gh --version
     tool screen 'no screen in the image' screen --version
-    tool claude 'no claude in the image at all — not an update that failed' claude --version
-    # The version above is not what a rebuild landed any more — Claude Code updates
-    # itself in place, so it is whatever this container has reached by now. THIS line is
-    # the one that says whether it still can.
-    #
-    # AND IT DELIBERATELY DOES NOT READ `Auto-updates:`, WHICH IS THE OBVIOUS FIELD AND
-    # THE WRONG ONE. Measured 2026-09-21 against Claude Code 2.1.278, both ways round:
-    # with the npm prefix owned by the account that runs claude, and with it owned by
-    # root as the old image had it, `claude doctor` prints `Auto-updates: enabled` in
-    # BOTH cases — that field reports the DISABLE_AUTOUPDATER setting and nothing about
-    # whether an update can land. The difference between the two runs was a warning,
-    # `Can't auto-update: npm global folder isn't writable`, and that string is
-    # therefore what this looks for. A check calibrated against a known-good container
-    # only would have passed for the wrong reason on a container that could not update
-    # at all, which is the failure this repo keeps re-learning.
-    #
-    # `Last update attempt` is the corroboration: `success -> <version> (<date>)` is an
-    # update that actually happened in this container, which no amount of reading
-    # settings can fake.
-    local doctor autoupdate blocked attempt channel
+    tool claude 'no claude in the image at all' claude --version
+    # THE PIN (2026-11-01): Claude Code is installed at one version and does not update itself
+    # (Dockerfile.base says how). This line compares what `claude` on PATH runs with
+    # requiredMaximumVersion in the managed settings, the ceiling the build holds to the pin.
+    # Anything but "the pin" is a claude that got here some other way, a native install in
+    # ~/.local/bin or an `npm i -g`. A newer one refuses to start, so the `claude` line above
+    # shows its refusal instead of a version.
+    printf 'claudepin : %s\n' "$(d exec "$CONTAINER" sh -c '
+pin=$(python3 -c "import json; print(json.load(open(\"/etc/claude-code/managed-settings.json\")).get(\"requiredMaximumVersion\") or \"\")" 2>/dev/null)
+v=$(claude --version 2>/dev/null | cut -d" " -f1)
+if [ -z "$pin" ]; then echo "NO requiredMaximumVersion in managed settings — a base from before the pin"
+elif [ "$v" = "$pin" ]; then echo "$v, the pin"
+else echo "NOT THE PIN — claude on PATH answers ${v:-nothing}, managed settings pin $pin"; fi' 2>/dev/null \
+        || echo 'could not ask the container')"
+    # Updates off, from `claude doctor`'s `Auto-updates:` field. Before the pin this line
+    # deliberately ignored that field, which says `enabled` on an install that cannot update
+    # (measured on 2.1.278). For OFF it is the right field: it names the switch that turned
+    # updates off, read on 2.1.311 as `disabled (set by env: DISABLE_UPDATES)`. Anything else
+    # means the managed `env` key is not in force, and claude may move off the pin at its
+    # next start (only to versions at or below the ceiling).
+    local doctor autoupdate
     doctor="$(d exec "$CONTAINER" sh -c 'timeout 30 claude doctor 2>/dev/null' 2>/dev/null)"
     autoupdate="$(printf '%s\n' "$doctor" | sed -n 's/^Auto-updates: *//p' | head -1)"
-    blocked="$(printf '%s\n' "$doctor" | grep -o "Can't auto-update.*" | head -1)"
-    attempt="$(printf '%s\n' "$doctor" | sed -n 's/^Last update attempt: *//p' | head -1)"
-    # The channel, which the image's managed settings put on `stable` (2026-10-07); `latest`
-    # here means an image from before that, or a settings file Claude Code ignored.
-    channel="$(printf '%s\n' "$doctor" | sed -n 's/^Auto-update channel: *//p' | head -1)"
     if [ -z "$doctor" ]; then
         printf 'autoupdate: %s\n' 'could not read `claude doctor` — run it in the container'
-    elif [ -n "$blocked" ]; then
-        printf 'autoupdate: %s\n' "BLOCKED — $blocked (see dev/README.md)"
     else
-        printf 'autoupdate: %s\n' "$autoupdate, ${channel:-unknown} channel, nothing blocking it; last attempt: ${attempt:-unknown}"
+        case "$autoupdate" in
+            *DISABLE_UPDATES*) printf 'autoupdate: %s\n' "off — $autoupdate" ;;
+            *) printf 'autoupdate: %s\n' "NOT OFF — claude doctor says ${autoupdate:-nothing}; managed settings' env.DISABLE_UPDATES is not in force" ;;
+        esac
     fi
     # AGENT VIEW OFF, PRINTED AS TWO SWITCHES rather than one verdict. The managed
     # settings file is the authority — no project or user settings file can override it —
@@ -382,8 +379,8 @@ print("sessions start in %s mode" % v if v else
       "NOT SET — sessions start in default mode and ask (a base before 2026.10.29.1)")
 ' 2>&1 || true)"
     # The three names claude-sessions (v0.3.8+) sets on every slot's claude so it scrolls in
-    # the terminal's own buffer. They come from inside Claude Code's binary, and Claude Code
-    # updates itself in a running container — so a rename would leave the variables set,
+    # the terminal's own buffer. They come from inside Claude Code's binary, which changes at
+    # each pin bump (and, before 2026-11-01, under a running container) — so a rename would leave the variables set,
     # read by nothing, and scrolling quietly back to round trips. Counted in the binary the
     # container runs right now, WORD-BOUNDED: the binary also holds
     # CLAUDE_CODE_DISABLE_MOUSE_CLICKS, which an unanchored match counts as MOUSE, so a

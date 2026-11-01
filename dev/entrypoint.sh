@@ -207,12 +207,11 @@ fi
 # It persists in the infra-claude volume and survives rebuilds.
 mkdir -p "$CFG"
 
-# WHICH CLAUDE THIS CONTAINER STARTED WITH, and the reason it is worth a line in every
-# boot log: the version is no longer a property of the image. Claude Code updates itself
-# in place now — the reasoning is in Dockerfile.base's node block — so `make boot-log` is
-# the only place that records what a container was actually running on a given day, and
-# the difference between this line and `claude --version` today is the update that
-# happened while it ran.
+# WHICH CLAUDE THIS CONTAINER STARTED WITH. Since 2026-11-01 it is the image's pinned
+# version (Dockerfile.base's node block), and this line is how `make boot-log` shows it.
+# From 2026-09-21 until then Claude Code updated itself, and this line was the only record
+# of what a container ran on a given day. A line here that is not the pin means a claude
+# arrived some other way (`make verify`'s `claudepin` line says which).
 #
 # `--version` asks nothing of the network and answers in milliseconds. The timeout is
 # there because this runs ahead of the door and a readout must not be able to hold it

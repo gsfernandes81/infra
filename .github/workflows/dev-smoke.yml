@@ -345,6 +345,18 @@ jobs:
             '[ -z "$(timeout 2 docker exec infra claude-sessions mail-hook </dev/null)" ]'
           docker exec dev-hub sh -c 'tail -n 8 ~/.hub/mail.log' | sed 's/^/  mail.log: /'
           check "Claude Code is installed" docker exec infra claude --version
+          # The pin (decisions.md, 2026-11-01): the claude on PATH is the managed settings'
+          # ceiling, and `claude update` refuses because env.DISABLE_UPDATES is in force.
+          claude_is_pin() { local v pin
+            v=$(docker exec infra claude --version | cut -d' ' -f1)
+            pin=$(docker exec infra python3 -c 'import json; print(json.load(open("/etc/claude-code/managed-settings.json"))["requiredMaximumVersion"])')
+            echo "  claude $v, pin $pin"; [ -n "$v" ] && [ "$v" = "$pin" ]; }
+          check "Claude Code is the pinned version" claude_is_pin
+          claude_update_refuses() { local out
+            out=$(docker exec infra timeout 60 claude update </dev/null 2>&1)
+            printf '%s\n' "$out" | sed 's/^/  update: /'
+            printf '%s\n' "$out" | grep -q 'Updates are disabled by your administrator'; }
+          check "claude update refuses, so updates are off" claude_update_refuses
           check "git asks the hub's helper for github.com" sh -c \
             '[ "$(docker exec infra git config --global credential.https://github.com.helper)" = hub ]'
           check "gh uses the hub's token" sh -c \

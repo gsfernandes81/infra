@@ -51,7 +51,7 @@ lint, read a playbook against the real `ansible.cfg` — and are not wired to th
 | `in-workspace` | on PATH: run a command in `/workspace`, so no client names the path |
 | `gh`, `git-credential-hub` | the `gh` wrapper and git's credential helper, both reading the hub's token |
 | `sshd_config` / `ssh_config` | the one in-container daemon config, and the baked half of how a container reaches out |
-| `config.fish`, `screenrc`, `claude-managed-settings.json` | fish's config (a login shell lands in `/workspace`), screen's, and Claude Code's managed settings (agent view off, stable channel, auto mode as every session's starting permission mode) |
+| `config.fish`, `screenrc`, `claude-managed-settings.json` | fish's config (a login shell lands in `/workspace`), screen's, and Claude Code's managed settings (agent view off, the version pin with updates off, auto mode as every session's starting permission mode) |
 | `login.sh` | in the image: the interactive login walkthrough, and the clone if start-up could not make it — `make login` |
 | `status.sh` | on the host: the readouts — `make status`, `verify`, `fleet`, `collections`, `boot-log` |
 | `ci/compose.smoke.yaml` | the smoke test's override; never used on zero |
@@ -635,25 +635,28 @@ and the same sessions as `ssh dev`, not a second set.
 
 ## Claude Code in here
 
-**It updates itself, so the version in the image is a floor**; a new version takes effect at
-the next `claude`. That works because the npm prefix, `/opt/npm-global`, is owned by `dev` —
-and not under `/home/dev`, where a volume would hide it. Node stays for it: the updater shells
-out to `npm`, and without npm fails saying *"Check your internet connection"*. The reasons are
-the rows on not pinning it and on the stable channel in [`../docs/decisions.md`](../docs/decisions.md).
+**It is pinned at one version, and does not update itself** (owner, 2026-11-01). Every
+container runs `CLAUDE_CODE_VERSION` from `Dockerfile.base`, 2.1.311 today, the version
+claude-sessions' agent chose and checked. So what claude-sessions reads from Claude Code is
+the same in every container, and it changes only when someone decides it should. Two keys in
+`claude-managed-settings.json` hold the pin:
+
+- `env.DISABLE_UPDATES` turns off the background updater, and makes `claude update` refuse.
+- `requiredMaximumVersion` stops any newer claude from starting, however it arrived.
+
+The build fails if either key disagrees with the version it installs. The reasons are the pin
+row in [`../docs/decisions.md`](../docs/decisions.md).
 
 | | |
 |---|---|
-| what a container runs now | `make verify` — the `claude` line |
-| whether it can still update itself | `make verify` — the `autoupdate` line, from `claude doctor` |
-| what it started with, and when | `make boot-log` — the entrypoint prints the version at every start |
-| update now, without waiting | `make claude-update` |
-| stop updating | `DISABLE_AUTOUPDATER: "1"` in the service's `environment:` in `compose.yaml`, then a redeploy |
-| which channel | **`stable`**, from `claude-managed-settings.json` — about a week behind `latest`. Forward only: a new container starts on the build day's `latest` and stays until stable passes it. Changing it is that file and a base bump; managed settings outrank `~/.claude/settings.json` |
+| what a container runs now | `make verify`, the `claude` line |
+| whether that is the pin | `make verify`, the `claudepin` line |
+| whether updates are off | `make verify`, the `autoupdate` line (`claude doctor`'s `Auto-updates:` field, which should name `DISABLE_UPDATES`) |
+| what it started with, and when | `make boot-log`: the entrypoint prints the version at every start |
+| move to a new version | `CLAUDE_CODE_VERSION` in `Dockerfile.base`, `requiredMaximumVersion` in `claude-managed-settings.json`, and `BASE_TAG`, in one commit; then the deploy, which recreates every container |
 
-**The `autoupdate` line does not read `claude doctor`'s `Auto-updates:` field**, which says
-`enabled` whether or not an update can land (measured on 2.1.278, both ways round). It looks
-for the warning `Can't auto-update: npm global folder isn't writable`, with `Last update
-attempt: success → …` as corroboration. `BLOCKED — …` is that warning.
+Before the pin, from 2026-09-21, Claude Code updated itself along the stable channel. The
+`autoUpdatesChannel` key is still in the file, and has no effect while updates are off.
 
 **The agent view is off, and cannot be turned back on in here.** One **←** at an empty prompt
 starts a `claude daemon` with warm spares: measured on 2.1.286, an idle session went from
@@ -700,9 +703,9 @@ gone stale meanwhile.
 directory, so containers sharing one directory refresh the login once between them, as
 processes on one machine do. Read from Claude Code 2.1.311 and proved against a stand-in login
 server; the reasoning and the tests are in [`../docs/decisions.md`](../docs/decisions.md).
-Because Claude Code updates itself, **`make verify`'s `login dir` line proves it each time**: it
+Because a version bump could drop it, **`make verify`'s `login dir` line proves it each time**: it
 asks for the login once as configured and once pointed at an empty directory, and reads
-`NOT HONOURED` the day an update stops reading the variable. The fix that day is flipping it to `false`.
+`NOT HONOURED` the day a new version stops reading the variable. The fix that day is flipping it to `false`.
 
 The `auth` line in `make status` says which login a container is on. Where each lives:
 `~/.claude-logins/true` is the shared volume, `~/.claude-logins/false` the container's own
@@ -1084,7 +1087,6 @@ make login        # the walkthrough: the token, the fleet, claude's login, the w
 make fleet        # ssh to each host, then `ansible fleet -m ping` — says there is no fleet access
 make collections  # the image's collections vs ansible/requirements.yml
 make claude       # the hub's menu, as `ssh dev` lands on it
-make claude-update # update Claude Code now in one container, and say whether it updates itself
 make shell        # a login shell in one container (fish in infra, bash in the hub)
 make logs         # follow one container's log (= its sshd's)
 make boot-log     # one container's entrypoint lines, from the top, ANSI stripped

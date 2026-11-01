@@ -26,9 +26,8 @@ USER root
 # the same run from in here crosses nothing that costs anything.
 #
 # ansible-core, never the `ansible` metapackage — the same rule as the phone, and
-# ansible/README.md has the sizes. PINNED EXACTLY, and the contrast with Claude Code in
-# the base is now the sharper one: that is unpinned AND updates itself, this cannot. The
-# reason is specific to there being two control nodes — a playbook that works on one and
+# ansible/README.md has the sizes. PINNED EXACTLY, as Claude Code in the base is since
+# 2026-11-01. The reason here is specific to there being two control nodes — a playbook that works on one and
 # not the other is the failure mode, and a floating version makes that arrive at a moment
 # of its own choosing. A claude that is a week newer than the phone's costs nothing of
 # the kind; an ansible that is costs a run you cannot reproduce. The phone is on 2.21.0

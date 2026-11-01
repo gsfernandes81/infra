@@ -66,12 +66,10 @@
 # child's ARG BASE_TAG when that repo is ready — children pin a tag, never `latest`,
 # so a base rebuild cannot change a container behind its repo's back.
 #
-# ONE THING THE TAG DOES NOT PIN, since 2026-09-21: **Claude Code updates itself.** The
-# tag still fixes every other byte in here, and a container still starts on the version
-# the tag was built with — but that version is a floor, not a ceiling, and a container
-# left running will move past it on its own. That is deliberate and the reasoning is at
-# the node block below; it is stated here because this paragraph would otherwise read
-# as a promise the image no longer keeps.
+# CLAUDE CODE IS PINNED BY THE TAG AGAIN, since 2026-11-01. From 2026-09-21 it updated
+# itself, so a container moved past the version its tag was built with. Now the tag fixes
+# its version as it fixes every other byte, and the node block below says how that is
+# held.
 #
 # The repo is NOT copied in: each container clones it into its own workspace volume at
 # /workspace on first start (entrypoint.sh).
@@ -122,11 +120,10 @@
 # on build day. So a bump weeks after the last one would quietly be a full download
 # again.
 #
-# MOVING THIS DIGEST IS THE REFRESH, and the only one for Debian and Claude Code. With the
-# cache, the apt layer, NodeSource and the npm install of Claude Code never re-run on their
-# own. Debian security updates reach this image only when this line moves, and so do the
-# fresher Claude Code (it updates itself anyway, so that part matters little) and apt's
-# package set. Bump it on purpose, with a BASE_TAG bump, roughly monthly or on a Debian
+# MOVING THIS DIGEST IS THE REFRESH, and the only one for Debian. With the cache, the apt
+# layer and NodeSource never re-run on their own. Debian security updates reach this image
+# only when this line moves, and so does apt's package set. Claude Code moves only with
+# CLAUDE_CODE_VERSION at the node block. Bump it on purpose, with a BASE_TAG bump, roughly monthly or on a Debian
 # security notice: every Pi then pulls the whole image once. The digest is the
 # MULTI-ARCH INDEX, not one platform's manifest, so it serves both legs of the build. Read
 # the current one with `docker buildx imagetools inspect python:3.13-slim-trixie`, the
@@ -162,26 +159,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && if ! grep -qx /usr/bin/fish /etc/shells; then echo /usr/bin/fish >> /etc/shells; fi
 
-# ── Node 22 LTS, and a Claude Code that can replace itself ──────────────────
-# Claude Code is NOT pinned here and never was: `npm install -g` takes whatever the
-# registry serves on build day. What changed on 2026-09-21 is that the copy it installs
-# can now UPDATE ITSELF, which it could not before and did not say so where anybody
-# would see it.
+# ── Node 22 LTS, and Claude Code at one pinned version ─────────────────────
+# CLAUDE CODE IS PINNED, EXACTLY, AND DOES NOT UPDATE ITSELF (owner, 2026-11-01). Every
+# session in every container runs CLAUDE_CODE_VERSION below and nothing else, so what
+# claude-sessions reads from it (hook events, the scroll switches, the stream-json control
+# protocol a headless slot speaks) is the same everywhere and moves only on purpose. The
+# version is the one claude-sessions' agent chose and checked (decisions.md, the pin row).
 #
-# WHY IT COULD NOT. `npm install -g` as root writes into /usr/lib/node_modules, which is
-# root-owned; every session in this container runs as `dev`. Claude Code checks whether
-# it can write its own install directory before it updates, finds it cannot, and
-# mentions it once at start-up — inside a TUI, in a container people arrive at over ssh
-# and then leave running for weeks. So the version baked on build day was the version
-# you kept, and moving it meant a base rebuild plus a BASE_TAG bump in four repos, for a
-# program that ships several releases a week. That is a pin nobody can keep up with, and
-# what it actually produced was containers months behind with no signal saying so.
+# THREE LOCKS, EACH CHECKED BY THIS BUILD OR BY `make verify`:
+#   - the version here, which the RUN below refuses to build past if `claude --version`
+#     disagrees;
+#   - `env.DISABLE_UPDATES` in claude-managed-settings.json, which turns off the
+#     background updater and makes `claude update` refuse ("Updates are disabled by your
+#     administrator"). It is the variable the binary checks FIRST, before DISABLE_AUTOUPDATER
+#     and before ~/.claude.json's autoUpdates, which is a per-user key and no managed setting
+#     (read from 2.1.311, and proved with `claude update`);
+#   - `requiredMaximumVersion` in the same file, which stops any newer claude from starting
+#     at all, whichever way it arrived: a `claude install` into ~/.local/bin, which is first
+#     on PATH, or an `npm i -g` as dev into this prefix. The binary enforces it from managed
+#     settings only and skips it for `update`, `install` and `doctor`. The build below fails
+#     if it is not this version, so a bump that misses the file cannot ship a claude that
+#     refuses to start.
 #
-# WHAT MAKES IT WORK is one property and nothing else: the npm prefix is owned by the
-# account that runs claude. /opt/npm-global, chowned to the dev user below, on PATH. The
-# updater then rewrites /opt/npm-global/bin/claude in place, so every caller — an ssh
-# session, `make claude`, the offloader matching on the process name — keeps naming the
-# same thing and gets the new binary at its next start.
+# A BUMP is CLAUDE_CODE_VERSION, requiredMaximumVersion in claude-managed-settings.json, and
+# BASE_TAG, in one commit, then the deploy. The new version reaches a container only when
+# that container is recreated on the new base. Nothing moves underneath a running one.
+#
+# THE NPM PREFIX STAYS OWNED BY dev, as it was when the updater needed to rewrite it. pi's
+# packages live here too, and a root-owned prefix is a change of its own for another day.
+# The ceiling above is what stops a dev-owned prefix from becoming a back door to a newer
+# claude.
 #
 # NOT UNDER /home/dev, and that is the whole reason it is /opt rather than the
 # conventional ~/.npm-global. Every dev container mounts named volumes over paths inside
@@ -191,28 +198,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # `claude` on a rebuild months later for a reason nobody would connect back. Under /opt
 # nothing can shadow it.
 #
-# `~/.local/bin` IS FIRST ON PATH for the one case this cannot control: that is where
-# Claude Code's own installer puts its launcher, so if `claude install` is ever run in
-# here, or an update migrates this to a native install, the newer of the two answers to
-# `claude` rather than whichever was installed first.
+# `~/.local/bin` IS FIRST ON PATH, which is where Claude Code's own installer puts its
+# launcher. Before the pin, that let an update that migrated to a native install answer to
+# `claude`. Now a native install there that is newer than the pin refuses to start (the
+# ceiling above), which `make verify` shows as a `claude` line that is not the pin.
 #
-# NODE AND NPM STAY IN THIS IMAGE FOR THIS, which is the trap the next tidy-up will
-# meet: the `claude` npm installs is a NATIVE binary that does not run on Node, so
-# nothing in ordinary use needs Node in here any more — but the updater for an npm
-# install shells out to `npm`, and with npm off PATH it fails reporting "Check your
-# internet connection", which points at the network rather than at the missing tool.
-# Measured 2026-09-21 by running the update both ways round. Removing Node would look
-# free and would silently stop this moving again.
+# NODE AND NPM STAY IN THIS IMAGE: pi runs on Node, and the claude-code package's postinstall
+# is a Node script. The `claude` it installs is a native binary that does not run on Node.
 #
-# THE START STILL NEEDS NO NETWORK, which is the rule the baked collections and the
-# baked cloudflared are here for as well. The image carries a working claude; the update
-# is opportunistic, happens in the background of a session, and takes effect at the next
-# start. A container with no route out runs what it was built with, exactly as before.
-#
-# TO TURN IT OFF: `DISABLE_AUTOUPDATER: "1"` in a child's compose `environment:`. That
-# is Claude Code's own variable rather than a `DEV_*` of ours — a second name for a
-# switch the vendor already has is a second thing to remember — and the entrypoint
-# publishes the environment into ~/.ssh/environment, so it reaches ssh sessions too.
+# THE START NEEDS NO NETWORK, which is the rule the baked collections and the baked
+# cloudflared are here for as well. A container with no route out runs what it was built
+# with.
 #
 # ONE TRAP THIS CREATES: NPM_CONFIG_PREFIX is set for every user in the image, so a
 # child that does `USER root` and `npm install -g` lands its package in this same tree,
@@ -226,13 +222,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # and the fallback is trixie's own `nodejs` (20.x), which costs an EBADENGINE warning
 # from the claude-code package and nothing else, because that package's payload is a
 # native binary that does not run on node.
+ARG CLAUDE_CODE_VERSION=2.1.311
 ENV NPM_CONFIG_PREFIX=/opt/npm-global \
     PATH=/home/dev/.local/bin:/opt/npm-global/bin:/opt/claude-sessions/bin:$PATH
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/* \
-    && npm install -g @anthropic-ai/claude-code \
+    && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
     && npm cache clean --force \
+    && test "$(claude --version | cut -d' ' -f1)" = "${CLAUDE_CODE_VERSION}" \
     && chown -R "${USER_UID}:${USER_GID}" /opt/npm-global
 
 # GitHub CLI, from the release tarball rather than GitHub's apt repository — the
@@ -380,7 +378,7 @@ RUN npm install -g \
 # rebuild. PI_SKIP_VERSION_CHECK stops it asking pi.dev for a newer one at every start.
 # --ignore-scripts costs nothing at 1.4.0: the only install scripts in its tree are a version
 # warning in protobufjs and a no-op echo in @google/genai. The tree is chowned back to dev
-# afterwards for the node block's reason: Claude Code updates itself there.
+# afterwards because the prefix is dev's (the node block says why it stays so).
 #
 # STATE ON THE VOLUME, PACKAGES IN THE IMAGE. PI_CODING_AGENT_DIR puts pi's agent dir in
 # ~/.local/share/pi, which every child mounts a volume over, so sessions survive a recreate. The
@@ -540,8 +538,7 @@ RUN if ! getent group "${USER_GID}" >/dev/null; then \
 #
 # PATH AND NPM_CONFIG_PREFIX ARE NOT HERE. They are set at the node block above,
 # because the build steps between there and here have to run with them — an ENV only
-# applies from where it is written. What they are for is the whole of that block's
-# comment: they are what lets Claude Code update itself.
+# applies from where it is written. That block's comment says what they are for.
 ENV TZ=Etc/UTC \
     CLAUDE_CONFIG_DIR=/home/dev/.claude \
     CLAUDE_CODE_DISABLE_AGENT_VIEW=1 \
@@ -624,27 +621,17 @@ RUN chmod 0755 /usr/local/bin/in-workspace
 # the session that started it ON PURPOSE, so with the view on, the sweep would kill working
 # supervisors. Turning the view back on anywhere means stopping the offloader there first.
 #
-# THE SAME FILE PUTS CLAUDE CODE ON THE STABLE UPDATE CHANNEL (2026-10-07):
-# `"autoUpdatesChannel": "stable"` — about a week behind `latest`, skipping releases with
-# major regressions (code.claude.com/docs/en/setup). It is FORWARD-ONLY, and that is
-# accepted (owner, 2026-10-07): the image carries whatever `latest` was when the npm layer
-# above last ran — with the cache that is when the python digest last moved, not build day
-# (`2026.10.07.1` carries 2.1.291) — and the updater never steps down, so a container stays
-# on that version until stable passes it, then follows stable.
-#
-# A LONG-RUNNING claude REINSTALLS ITSELF EVERY 30 MINUTES AFTER AN UPDATE (measured
-# 2026-10-08, claude-sessions#14). The updater replaces the file on disk, but the process
-# keeps running the binary it started from, and the updater compares THAT version with the
-# channel's: infra-dev's claude, started on 2.1.292, reinstalled 2.1.293 every half hour —
-# ~250 MB each time, 13 GB a day of writes — until it exits. Stable makes the trigger
-# rarer (it moves about weekly) but does not remove it; a restart of that claude ends it,
-# and the offloader restarts idle ones anyway. or3-dev, on stable and already ahead of it,
-# had nothing to install and did not loop. Checked in 2.1.292: the background updater and `claude update` both skip a
-# channel version at or below the running one. Managed
-# settings because it is one line in a file that already exists, and because nothing else
-# baked survives: ~/.claude is a volume, and a default written into it would be hidden from
-# every container after the one that created it. The cost, chosen: a container cannot be
-# switched back to `latest` from inside it — that is an edit here and a base bump.
+# THE SAME FILE HOLDS THE CLAUDE CODE PIN (2026-11-01): `env.DISABLE_UPDATES` and
+# `requiredMaximumVersion`, the two locks the npm block above explains. Managed settings
+# because the owner asked for it there, and because nothing else baked survives: ~/.claude
+# is a volume, and a default written into it would be hidden from every container after the
+# one that created it. An `env` key in managed settings reaches every claude, a headless
+# `claude -p` included, and no settings file of a user's or a repo's can unset it.
+# `"autoUpdatesChannel": "stable"` stays in the file from 2026-10-07 and does nothing while
+# updates are off. It is what the channel goes back to if the pin is ever lifted, and lifting
+# it is a decision (decisions.md), not just deleting two keys. Until 2026-11-01 Claude Code
+# updated itself along that channel. A claude left running across an update then reinstalled
+# every 30 minutes (claude-sessions#14), which the pin ends.
 #
 # AUTO MODE IS EVERY SESSION'S STARTING PERMISSION MODE (owner, 2026-10-29), as
 # `permissions.defaultMode` in the same file, for the same reason: ~/.claude is a volume. It is
@@ -674,13 +661,17 @@ COPY claude-plugins /opt/claude-plugins
 # (the file says in which order it looks).
 COPY ty-lsp /usr/local/bin/ty-lsp
 # Parsed here because it is hand-edited and Claude Code ignores a malformed settings file
-# WHOLE and says nothing — the agent view would be back on, the channel back on latest and
-# sessions back to asking for every tool call.
+# WHOLE and says nothing — the agent view would be back on, Claude Code updating itself and
+# sessions back to asking for every tool call. The second check holds the pin's two keys to
+# CLAUDE_CODE_VERSION, so a bump cannot ship a ceiling below the claude it installs.
 RUN chmod 0644 /etc/claude-code/managed-settings.json \
     && chmod -R a+rX /opt/claude-plugins && chmod 0755 /usr/local/bin/ty-lsp \
     && for f in /etc/claude-code/managed-settings.json /opt/claude-plugins/.claude-plugin/marketplace.json \
                 /opt/claude-plugins/ty-lsp/.claude-plugin/plugin.json /opt/claude-plugins/ty-lsp/.lsp.json; do \
-         python3 -c 'import json, sys; json.load(open(sys.argv[1]))' "$f" || exit 1; done
+         python3 -c 'import json, sys; json.load(open(sys.argv[1]))' "$f" || exit 1; done \
+    && python3 -c 'import json, sys; m = json.load(open("/etc/claude-code/managed-settings.json")); \
+assert m.get("requiredMaximumVersion") == sys.argv[1], "requiredMaximumVersion is not CLAUDE_CODE_VERSION " + sys.argv[1]; \
+assert m.get("env", {}).get("DISABLE_UPDATES") == "1", "env.DISABLE_UPDATES is not \"1\""' "${CLAUDE_CODE_VERSION}"
 
 # ── claude-sessions: NOT IN THIS IMAGE since 2026.10.26 — the hub installs it ───────
 # The binary, the hooks drop-in that names it and the keep-alive skill arrive from the hub's
