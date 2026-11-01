@@ -38,6 +38,8 @@ each one a LazyVim, noice or Neovim setting:
 - the file tree (`Space e`) closes when it opens a file;
 - the start screen is 40 columns wide and drops its logo on a narrow screen;
 - the statusline drops the git branch and clock below 80 columns, so the file name fits;
+- scrolling is not animated, and typed keys are not echoed in the statusline: both
+  made it redraw several times per scroll, which flickered on the phone;
 - `K`'s hover is Neovim's own, which wraps to fit. To scroll a long one, press `K`
   again to enter it, then `q` to leave.
 

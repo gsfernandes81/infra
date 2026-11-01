@@ -12,3 +12,8 @@ vim.opt.wrap = true
 vim.opt.linebreak = true
 vim.opt.breakindent = true
 vim.opt.showbreak = "↪ "
+
+-- No keys echoed in the statusline as they are typed (LazyVim shows Vim's showcmd
+-- there). Every scroll key flashed in and out, shifting the statusline: on the phone
+-- that read as flicker. Space sequences still get the which-key menu.
+vim.opt.showcmd = false

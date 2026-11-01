@@ -12,6 +12,8 @@
 --                  at its default 60, a phone cut off both the logo and the menu's keys
 --   statusline     no git branch or clock below 80 columns, which left no room for the
 --                  file's name
+--   scrolling      not animated. Ctrl-d stepped through six positions on its way, and
+--                  the statusline redrew at each; on the phone it flickered
 --   hover (K)      drawn by Neovim, not noice. noice sized the popup for unwrapped text,
 --                  so on a narrow screen its last lines were cut off; Neovim wraps to the
 --                  window each time. To scroll a long one, K again to enter it, then q
@@ -30,6 +32,7 @@ return {
     "folke/snacks.nvim",
     opts = {
       picker = { sources = { explorer = { auto_close = true } } },
+      scroll = { enabled = false },
       dashboard = {
         width = 40,
         sections = {
