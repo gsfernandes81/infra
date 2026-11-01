@@ -49,12 +49,15 @@
 ;; a 46-column screen is room for code.
 (setopt display-line-numbers-width nil)
 
-;; Language servers stay up after their last file closes; Solo stops them. Through the
-;; Emacs server every :q closes the last Python buffer, so each reopen restarted rass, ty
-;; and ruff, and rass, slower to exit on the phone than jsonrpc's 0.3 s grace, left a
-;; "Sentinel ... still hasn't run" warning window each time. Kept up, they hold about
-;; 80 MB for a small project; M-x eglot-shutdown-all frees it.
-(setopt eglot-autoshutdown nil)
+;; No warning window for jsonrpc; its warnings stay in *Messages*, which jsonrpc writes
+;; them to as well. Solo stops a language server when its last file closes, and jsonrpc
+;; gives it 0.3 s to exit (a constant, not a setting) before killing it and warning. rass
+;; is slower than that on the phone, so every :q of the last Python file opened a
+;; "Sentinel ... still hasn't run" window at the next open. Nothing is lost: rass has
+;; passed the exit on to ty and ruff by then. The log setting, because the display one
+;; is ignored here: with the client's frame gone, Emacs holds the warning for the next
+;; frame as it does a daemon's startup warnings, and shows it whatever that one says.
+(add-to-list 'warning-suppress-log-types '(jsonrpc))
 
 ;; Hover docs (SPC k) at the bottom, a third of the screen tall, instead of half of it.
 (add-to-list 'display-buffer-alist
