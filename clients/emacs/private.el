@@ -51,7 +51,7 @@
 
 ;; No warning window for jsonrpc; its warnings stay in *Messages*, which jsonrpc writes
 ;; them to as well. Solo stops a language server when its last file closes, and jsonrpc
-;; gives it 0.3 s to exit (a constant, not a setting) before killing it and warning. rass
+;; gives it 0.3 s to exit (a constant, not a setting) before warning and killing it. rass
 ;; is slower than that on the phone, so every :q of the last Python file opened a
 ;; "Sentinel ... still hasn't run" window at the next open. rass has already been asked
 ;; to exit by then; it is only slow to. The log setting, because the display one
