@@ -33,6 +33,18 @@
                   (concat (if (numberp prefix) (make-string prefix ?\s) prefix) private-wrap-marker)
                 prefix)))
 
+;; Questions in the minibuffer wrap, and the minibuffer grows to show them (Solo's
+;; resize-mini-windows). Solo truncates every minibuffer line, so at 46 columns C-x C-c's
+;; "Save file …? (y, n, !, …)" scrolled sideways and showed only its tail. Not while
+;; completing: there, truncation keeps each M-x candidate on one line. Depth 90, to run
+;; after Solo's hook.
+(add-hook 'minibuffer-setup-hook
+          (lambda ()
+            (unless minibuffer-completion-table
+              (setq truncate-lines nil)
+              (setq-local word-wrap t)))
+          90)
+
 ;; Hover docs (SPC k) at the bottom, a third of the screen tall, instead of half of it.
 (add-to-list 'display-buffer-alist
              '("\\*eldoc" (display-buffer-reuse-window display-buffer-at-bottom)
