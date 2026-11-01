@@ -991,6 +991,10 @@ slot. How it works is claude-sessions' `docs/remote-view.md`.
 **Infra's part is three things.**
 
 - **The pin above.** The hub's `relay` and every container's `remote` and `holder` come from it.
+  Since 0.13.0 the view's `/btw` runs a second, short-lived `claude` in the container
+  (`claude-sessions remote btw`), over the same `ssh -T` path from the hub. claude-sessions
+  refuses it when the container's cgroup has no room for another claude, so the container's
+  `mem_limit` sets that limit. A refused side question is that limit, not a bug.
 - **The door.** The hub's door already runs a forwarded command as given, before any tty test,
   so `relay` reaches the binary instead of the menu. `make verify` and `make status C=hub`
   have a `relay` line that runs the door with that command set, as sshd would. The smoke test
