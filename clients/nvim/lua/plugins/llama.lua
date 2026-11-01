@@ -7,7 +7,9 @@
 --   LLAMA_BASE_URL       the server's address, `http://host:port`, with or without /v1;
 --                        the owner's WSL shell sets it to the Windows host's NAT address
 --   LLAMA_FIM_ENDPOINT   the full /infill URL, which wins over LLAMA_BASE_URL
---   LLAMA_FIM_MODEL      the completion model's name, for llama-server's router mode
+--   LLAMA_FIM_MODEL      the completion model's name; required with llama-server's
+--                        router, which refuses a request without one, and llama.vim
+--                        drops the refusal silently (:LlamaStatus shows it)
 --   LLAMA_INST_MODEL     the model for instructions (Space a i on a selection); defaults
 --                        to the completion model
 --   LLAMA_API_KEY        the key, when llama-server runs with --api-key

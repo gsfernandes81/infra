@@ -56,6 +56,14 @@ puts it there. These change that, and none of them is tracked:
 | `LLAMA_API_KEY` | llama-server has `--api-key`: the key |
 | `~/.config/llama/api-key` | the key from a file instead: one line, mode 600 |
 
+**With llama-server's router, `LLAMA_FIM_MODEL` is required.** The router picks the
+model from each request's `model` field and refuses a request without one, and
+`llama.vim` drops that refusal silently: no suggestions and no message. Set it to a name
+or alias from the router's `/v1/models`. The router loads a model on its first request,
+so the first suggestion waits for that. With `--models-max 1`, a `LLAMA_INST_MODEL` that
+differs from the completion model swaps the two in and out of memory. `:LlamaStatus`
+shows whether each model is configured and loaded.
+
 `llama.vim` passes the key to `curl` on its command line, so another local user can read
 it from the process list while a request runs. Neovim warns at start when the key file is
 readable by others.
