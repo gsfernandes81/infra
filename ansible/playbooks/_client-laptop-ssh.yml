@@ -1,7 +1,7 @@
 ---
 # NOT A PLAYBOOK YOU RUN — the underscore says so. client-home-ssh-config.yml imports
 # it; run that. This half writes the laptop's block into this client's ~/.ssh/config: an
-# ssh tunnel to the llama-server on the laptop, which clients/nvim/ asks at 127.0.0.1.
+# ssh tunnel to the llama-server on the laptop, which clients/emacs/ asks at 127.0.0.1.
 #
 # WHY A TUNNEL. The laptop and the phone share a LAN nobody here controls, and an
 # address on it, by IP or mDNS name, can be taken by anyone who knocks the laptop off.
@@ -57,7 +57,7 @@
     # C:\ProgramData\ssh\ssh_host_ed25519_key.pub on the laptop, read 2026-11-01, comment
     # dropped. Fingerprint SHA256:ZzNixJrEAhRMvQHyWMT5eIPWiuxR4B6vLtWt6WS0bK4.
     laptop_host_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEFFhgwp8xT/WYrrYWrV9vXp7d1sNn2VHw0chUycOwwK
-    # 8080 at both ends: llama-server's port on the laptop, and clients/nvim's default.
+    # 8080 at both ends: llama-server's port on the laptop, and clients/emacs's default.
     laptop_remote_port: 8080
     laptop_local_port: 8080
 

@@ -1,0 +1,6 @@
+# <upstream-url> <pinned-sha>
+# Emacs Solo, the distribution this config is a private layer on. client-home-emacs.yml checks
+# this commit out in ~/.emacs.d; it never pulls a newer one on its own. To move the pin: read
+# Solo's changes since this commit, try the new commit (README.md, "Updating Solo"), then change
+# the sha here and re-run the play on each client.
+https://github.com/LionyxML/emacs-solo 8757febec4bb1d86c195c66d31dd9abb3f293180

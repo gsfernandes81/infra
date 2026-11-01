@@ -102,7 +102,7 @@
   # -e container=<alias> a one-container run rather than a whole one.
   when: container is not defined
 
-# The laptop: an ssh tunnel to its llama-server, for clients/nvim on the phone. After the
+# The laptop: an ssh tunnel to its llama-server, for clients/emacs on the phone. After the
 # fleet half, which makes ~/.ssh/config LF before any block is written. Not on WSL, which is
 # on the laptop; the half says so and writes nothing there.
 - name: Write the laptop's ssh tunnel block

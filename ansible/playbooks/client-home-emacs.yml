@@ -1,0 +1,320 @@
+---
+# EMACS ON THE MACHINE YOU RUN IT FROM: the phone (Termux) or Arch in WSL. From ansible/:
+#
+#     ansible-playbook playbooks/client-home-emacs.yml          # Termux
+#     ansible-playbook playbooks/client-home-emacs.yml -K       # Arch: pacman needs sudo
+#     ansible-playbook playbooks/client-home-emacs.yml --check  # what it would install
+#
+# -K is needed on Arch only when a package is missing: the play reads what is installed
+# without sudo and asks pacman for the rest.
+#
+# The editor is Emacs Solo (a distribution, pinned in clients/emacs/SOURCE) with a private
+# layer of ours (clients/emacs/private*.el): NANO's modeline, hel for Helix keys, corfu,
+# minuet's ghost text from llama-server, soft wrap with Helix's ↪. In order, the play:
+#   1. installs Emacs 31 and what the config uses: git, the python and markdown
+#      tree-sitter grammars, ty, ruff, and rass, which runs the two as one language
+#      server for eglot;
+#   2. checks Solo out at the pinned commit in ~/.emacs.d and links our two files into it;
+#   3. installs the four packages our layer uses, headless, so the first start does not
+#      freeze while it downloads them;
+#   4. links clients/emacs/emacs.fish into fish's conf.d: `emacs` becomes emacsclient;
+#   5. on Termux, installs the emacsd runit service, the Emacs server that emacsclient
+#      opens;
+#   6. removes ~/.config/nvim when it is the link the retired Neovim play made.
+#
+# A first run downloads about 5 MB on top of the packages: Solo's clone, the package
+# archive indexes (MELPA's is 2.6 MB uncompressed) and the packages. Later runs download
+# only what the pin moved.
+#
+# It reaches no host in the fleet and changes nothing outside this client. It refuses an
+# ~/.emacs.d it did not make, and an ~/.emacs file, rather than move them. What the config
+# does is clients/emacs/README.md.
+#
+# NO NEW COLLECTIONS: ansible.builtin, and community.general for pacman, which
+# requirements.yml already lists.
+
+- name: Check the inventory is loaded
+  ansible.builtin.import_playbook: _assert-inventory.yml
+  vars:
+    required_group: control
+
+- name: Set up Emacs on this client
+  hosts: control
+  gather_facts: false
+
+  vars:
+    # lookup('env', 'HOME'), never ~: on Termux the passwd entry says /data, which is not
+    # writable (host_vars/localhost.yml has the same trap for remote_tmp).
+    home: "{{ lookup('env', 'HOME') }}"
+    emacs_dir: "{{ home }}/.emacs.d"
+    emacs_source: "{{ control_checkout }}/clients/emacs"
+    config_home: "{{ lookup('env', 'XDG_CONFIG_HOME') or home ~ '/.config' }}"
+    scripts: "{{ playbook_dir }}/files/client-home-emacs"
+    # SOURCE's one line that is not a comment: `<url> <sha>`.
+    solo_pin: >-
+      {{ lookup('file', emacs_source ~ '/SOURCE').splitlines()
+         | reject('match', '^\s*(#|$)') | first | split }}
+    prefix: "{{ lookup('env', 'PREFIX') }}"
+
+    # The same tools under each distro's names. termux-services is the runit that runs the
+    # emacsd service; Arch has no service, as `emacs` starts the server on first use.
+    packages:
+      termux: [emacs, git, tree-sitter-python, tree-sitter-markdown, ruff, ty, python-pip, termux-services]
+      arch: [emacs-nox, git, tree-sitter-python, tree-sitter-markdown, ruff, ty, python-pipx]
+
+  tasks:
+    - name: Check clients/emacs/SOURCE holds a URL and a sha
+      ansible.builtin.assert:
+        that:
+          - solo_pin | length == 2
+          - solo_pin[0] is match('https://')
+          - solo_pin[1] is match('^[0-9a-f]{40}$')
+        fail_msg: "clients/emacs/SOURCE should end in one line, `<https url> <40-hex sha>`"
+        quiet: true
+
+    - name: Probe for /etc/arch-release
+      ansible.builtin.stat:
+        path: /etc/arch-release
+      register: arch_release
+
+    - name: Note whether this client is Termux or Arch
+      ansible.builtin.set_fact:
+        client_os: >-
+          {{ 'termux' if lookup('env', 'TERMUX_VERSION') | length > 0
+             else 'arch' if arch_release.stat.exists else 'other' }}
+
+    - name: Check this client is Termux or Arch
+      ansible.builtin.assert:
+        that: client_os != 'other'
+        fail_msg: >-
+          This play knows Termux and Arch Linux, and this is neither. The config in
+          clients/emacs is not tied to either; only the package names here are.
+        quiet: true
+
+    # Unprivileged reads of what is installed, so a run with nothing to install needs no
+    # sudo. Both commands exit non-zero when any name is missing and list only the
+    # installed ones on stdout, so the missing set is what stdout does not name.
+    - name: "Termux: read which packages are installed"
+      ansible.builtin.command:
+        argv: "{{ ['dpkg-query', '-W', '-f', '${Package} ${db:Status-Abbrev}\n'] + packages.termux }}"
+      register: installed_termux
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: client_os == 'termux'
+
+    - name: "Arch: read which packages are installed"
+      ansible.builtin.command:
+        argv: "{{ ['pacman', '-Q'] + packages.arch }}"
+      register: installed_arch
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: client_os == 'arch'
+
+    - name: Note which packages are missing
+      ansible.builtin.set_fact:
+        missing: >-
+          {{ packages.termux | difference(installed_termux.stdout_lines
+               | select('search', ' ii ?$') | map('split') | map('first'))
+             if client_os == 'termux' else
+             packages.arch | difference(installed_arch.stdout_lines | map('split') | map('first')) }}
+
+    - name: "--check only: print the packages it would install"
+      ansible.builtin.debug:
+        msg: "would install: {{ missing | join(' ') if missing else 'nothing' }}"
+      changed_when: true
+      when: ansible_check_mode
+
+    - name: "Termux: install the missing packages with pkg"
+      ansible.builtin.command:
+        argv: "{{ ['pkg', 'install', '-y'] + missing }}"
+      when: client_os == 'termux' and missing | length > 0 and not ansible_check_mode
+
+    - name: "Arch: install the missing packages with pacman"
+      community.general.pacman:
+        name: "{{ missing }}"
+        state: present
+      become: true
+      # Not under --check: pacman's own dry run still wants sudo, and the line above
+      # already says what would be installed.
+      when: client_os == 'arch' and missing | length > 0 and not ansible_check_mode
+
+    # rass is a 52 KB Python wheel that no distro packages (Arch has it only in the AUR).
+    # `shell` for `command -v`, a builtin; the play's own PATH includes ~/.local/bin
+    # below.
+    - name: Read whether rass is on PATH
+      ansible.builtin.shell: command -v rass
+      environment:
+        PATH: "{{ home }}/.local/bin:{{ lookup('env', 'PATH') }}"
+      register: rass_path
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: "If no rass: install rassumfrassum with pip or pipx"
+      ansible.builtin.command:
+        argv: "{{ ['pip', 'install', 'rassumfrassum'] if client_os == 'termux'
+                  else ['pipx', 'install', 'rassumfrassum'] }}"
+      when: rass_path.rc != 0 and not ansible_check_mode
+
+    # Emacs reads ~/.emacs or ~/.emacs.el in preference to ~/.emacs.d/init.el, so either
+    # would hide Solo without a word.
+    - name: Probe for ~/.emacs and ~/.emacs.el
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: ["{{ home }}/.emacs", "{{ home }}/.emacs.el"]
+      register: dot_emacs
+
+    - name: Read ~/.emacs.d's git origin, if it is a checkout
+      ansible.builtin.command:
+        argv: [git, -C, "{{ emacs_dir }}", remote, get-url, origin]
+      register: emacs_dir_origin
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Probe for ~/.emacs.d
+      ansible.builtin.stat:
+        path: "{{ emacs_dir }}"
+      register: emacs_dir_stat
+
+    # A config this play did not make is someone's, and so are the packages under it.
+    # Moving them is a decision, so it is left to a person.
+    - name: Check ~/.emacs.d is absent or Solo, and no ~/.emacs
+      ansible.builtin.assert:
+        that:
+          - dot_emacs.results | selectattr('stat.exists') | list | length == 0
+          - not emacs_dir_stat.stat.exists or emacs_dir_origin.stdout | trim == solo_pin[0]
+        fail_msg: >-
+          {{ 'An ~/.emacs file would be read instead of ~/.emacs.d. '
+             if dot_emacs.results | selectattr('stat.exists') | list else '' }}{{
+             emacs_dir ~ ' exists and is not a checkout of ' ~ solo_pin[0] ~ '. '
+             if emacs_dir_stat.stat.exists and emacs_dir_origin.stdout | trim != solo_pin[0] else '' }}Move
+          them aside and run this again: mv {{ emacs_dir }} {{ emacs_dir }}.before-infra
+          (and the same for ~/.emacs or ~/.emacs.el).
+        quiet: true
+
+    # depth 1 at a sha: GitHub answers a fetch of any reachable commit, but the git module
+    # honours depth for a sha only with a refspec; without one it cloned the whole history
+    # (1.8 MB against 0.3 MB, measured). force: false, so a local edit inside Solo stops
+    # the run instead of being thrown away.
+    - name: Check Emacs Solo out at the pinned commit
+      ansible.builtin.git:
+        repo: "{{ solo_pin[0] }}"
+        dest: "{{ emacs_dir }}"
+        version: "{{ solo_pin[1] }}"
+        refspec: "{{ solo_pin[1] }}"
+        depth: 1
+        force: false
+
+    # Solo's .gitignore covers both names, so links here never dirty its checkout.
+    - name: Link our two files into ~/.emacs.d
+      ansible.builtin.file:
+        src: "{{ emacs_source }}/{{ item }}"
+        dest: "{{ emacs_dir }}/{{ item }}"
+        state: link
+      loop: [private-early-init.el, private.el]
+
+    - name: Install the packages private.el uses
+      ansible.builtin.command:
+        argv: [emacs, --batch, "--init-directory={{ emacs_dir }}", -l, "{{ scripts }}/install.el"]
+      environment:
+        PATH: "{{ home }}/.local/bin:{{ lookup('env', 'PATH') }}"
+      timeout: 1800
+      register: install
+      changed_when: install.stdout_lines[-1] | default('') == 'changed'
+      failed_when: >-
+        install.rc != 0
+        or install.stdout_lines[-1] | default('') not in ['changed', 'unchanged']
+      when: not ansible_check_mode
+
+    - name: Create fish's conf.d directory
+      ansible.builtin.file:
+        path: "{{ config_home }}/fish/conf.d"
+        state: directory
+
+    - name: Link emacs.fish into fish's conf.d
+      ansible.builtin.file:
+        src: "{{ emacs_source }}/emacs.fish"
+        dest: "{{ config_home }}/fish/conf.d/infra-emacs.fish"
+        state: link
+
+    # ── the Emacs server on Termux ─────────────────────────────────────────────
+    # Copied, not linked: runsv runs ./run from the service directory, and a copy keeps
+    # the running service independent of what the checkout holds mid-pull.
+    - name: "Termux: install the emacsd service"
+      when: client_os == 'termux'
+      block:
+        - name: "Termux: create the emacsd service and log directories"
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+          loop:
+            - "{{ prefix }}/var/service/emacsd/log"
+            - "{{ prefix }}/var/log/sv/emacsd"
+
+        - name: "Termux: probe for an existing emacsd run script"
+          ansible.builtin.stat:
+            path: "{{ prefix }}/var/service/emacsd/run"
+          register: emacsd_before
+
+        - name: "Termux: write the emacsd run scripts"
+          ansible.builtin.copy:
+            src: "{{ emacs_source }}/emacsd/{{ item }}"
+            dest: "{{ prefix }}/var/service/emacsd/{{ item }}"
+            mode: "0755"
+          loop: [run, log/run]
+          register: emacsd_files
+
+        # sv needs SVDIR, which termux-services sets in new sessions; runsvdir starts any
+        # service directory without a `down` file within seconds of it appearing.
+        - name: "Termux: read the emacsd service's status"
+          ansible.builtin.command:
+            argv: [sv, status, emacsd]
+          environment:
+            SVDIR: "{{ prefix }}/var/service"
+          register: emacsd_status
+          changed_when: false
+          failed_when: false
+          check_mode: false
+
+        - name: "Termux: print how the emacsd service stands"
+          ansible.builtin.debug:
+            msg: >-
+              {{ 'emacsd: ' ~ emacsd_status.stdout | trim
+                 if emacsd_status.rc == 0 and emacsd_status.stdout is search('^run:')
+                 else 'emacsd is installed but not running yet. termux-services starts its
+                 supervisor at login: close every Termux session and open a new one, then
+                 `sv status emacsd`. Until then `emacs FILE` starts a server itself.' }}{{
+                 ' The run script changed: `sv restart emacsd` applies it (open buffers close).'
+                 if emacsd_before.stat.exists and emacsd_files is changed
+                    and emacsd_status.stdout is search('^run:') else '' }}
+          changed_when: true
+
+    # ── the retired Neovim setup ───────────────────────────────────────────────
+    # client-home-nvim.yml linked ~/.config/nvim to clients/nvim, both retired on
+    # 2026-11-01, so the link dangles after a pull. Only that link goes; Neovim's plugins
+    # and parsers in ~/.local/share/nvim (about 120 MB) are the owner's to delete or keep.
+    - name: Read what ~/.config/nvim is now
+      ansible.builtin.stat:
+        path: "{{ config_home }}/nvim"
+        follow: false
+      register: old_nvim
+
+    - name: "If the Neovim play's link: remove ~/.config/nvim"
+      ansible.builtin.file:
+        path: "{{ config_home }}/nvim"
+        state: absent
+      when:
+        - old_nvim.stat.islnk | default(false)
+        - old_nvim.stat.lnk_target == control_checkout ~ '/clients/nvim'
+      register: nvim_link_removed
+
+    - name: "If removed: print where Neovim's data still is"
+      ansible.builtin.debug:
+        msg: >-
+          Removed the ~/.config/nvim link to the retired clients/nvim. Neovim's plugins and
+          parsers are still in {{ home }}/.local/share/nvim; `rm -rf` it to reclaim the space.
+      changed_when: true
+      when: nvim_link_removed is changed

@@ -1,0 +1,11 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# runit service for termux-services: the Emacs server, so `emacs FILE` (emacsclient) opens
+# at once. ansible/playbooks/client-home-emacs.yml copies this to
+# $PREFIX/var/service/emacsd/.
+#
+# Through a login fish, so the server gets what conf.d sets: the LLAMA_* variables minuet
+# reads, and the PATH with ty, ruff and rass. runit starts services with a bare
+# environment otherwise. The absolute path to emacs: conf.d's `emacs` function would run
+# emacsclient instead.
+exec 2>&1
+exec fish -l -c 'exec $PREFIX/bin/emacs --fg-daemon'

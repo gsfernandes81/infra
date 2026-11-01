@@ -391,11 +391,11 @@ Windows.
 
 ## The laptop: a tunnel to its llama-server
 
-`clients/nvim/` gets code completion from a llama-server on the laptop (`G14-GS`,
+`clients/emacs/` gets code completion from a llama-server on the laptop (`G14-GS`,
 Windows), and asks for it at `127.0.0.1:8080`. On the phone, `ssh g14` puts the laptop's
 `127.0.0.1:8080` there: it authenticates, opens the forward, and goes to the background.
-`ssh -O check g14` says whether it is up, and `ssh -O exit g14` takes it down. Neovim
-notices either way within 20 seconds and turns suggestions on or off.
+`ssh -O check g14` says whether it is up, and `ssh -O exit g14` takes it down. With the
+tunnel down, Emacs shows no suggestions and no error; they appear again once it is up.
 
 **Why ssh and not the LAN address.** The laptop and the phone share Wi-Fi nobody here
 controls. Anyone on it can take the laptop's address, by IP or by mDNS name, after
@@ -443,7 +443,7 @@ if a stale one is in the way it carries on without one. The tunnel then works, b
 pid, kill that pid, and `rm ~/.ssh/cm/g14-gavin`.
 
 **WSL needs no tunnel.** It runs on the laptop and reaches llama-server through the NAT
-gateway (`LLAMA_BASE_URL` in `clients/nvim/README.md`), so the play writes no `g14` block
+gateway (`LLAMA_BASE_URL` in `clients/emacs/README.md`), so the play writes no `g14` block
 there. That path needs llama-server to listen beyond `127.0.0.1`. The tunnel works either
 way, because it ends at the laptop's own loopback; keeping port 8080 shut to the Wi-Fi is
 a firewall rule on the laptop.
