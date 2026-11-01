@@ -14,7 +14,8 @@
 # THE VERSION AND BOTH HASHES ARE READ FROM dev/hub/Dockerfile, the hub's pin, and are not
 # repeated here. The client talks to the hub's `relay`, so the two move together: a hub bump is
 # a client bump, and there is one place to make it. A run after a bump installs the new
-# binary; a run on the current version changes nothing. The download is checked against the
+# binary; a run on the current version reinstalls nothing (the recap's one change is the
+# closing message, which ansible.cfg would otherwise hide). The download is checked against the
 # pinned sha256 before it is moved into place, so a wrong hash leaves the old binary alone.
 #
 # WHERE IT GOES: `$PREFIX/bin` on Termux, which is on PATH there and writable without root;
@@ -57,10 +58,12 @@
           - cs_version | length > 0
           - cs_sha_arm64 | length == 64
           - cs_sha_amd64 | length == 64
+          - not (termux | bool) or bin_dir is defined or (lookup('env', 'PREFIX') | length) > 0
         fail_msg: >-
           dev/hub/Dockerfile no longer has ARG CLAUDE_SESSIONS_VERSION and both
-          CLAUDE_SESSIONS_SHA256_{arm64,amd64} lines in the shape this play reads. Fix the
-          regexes here rather than pinning a second copy.
+          CLAUDE_SESSIONS_SHA256_{arm64,amd64} lines in the shape this play reads (fix the
+          regexes here rather than pinning a second copy), or this is Termux with PREFIX unset
+          (run it from a Termux shell, or pass -e bin_dir=…).
         success_msg: "the hub pins claude-sessions {{ cs_version }}"
 
     - name: Read this machine's architecture
@@ -74,11 +77,18 @@
         fail_msg: "claude-sessions publishes aarch64 and x86_64 musl binaries; this machine is {{ cr_arch.stdout }}"
         success_msg: "{{ cr_arch.stdout }}"
 
+    - name: Read whether the install directory exists
+      ansible.builtin.stat:
+        path: "{{ install_dir }}"
+      register: cr_dir
+
+    # Only when missing, so a run never changes the mode of $PREFIX/bin, which is Termux's.
     - name: Create the install directory if missing
       ansible.builtin.file:
         path: "{{ install_dir }}"
         state: directory
         mode: "0755"
+      when: not cr_dir.stat.exists
 
     - name: Download claude-remote, checked against the pin
       vars:
