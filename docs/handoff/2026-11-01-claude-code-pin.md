@@ -6,8 +6,8 @@
 ## Where it stands
 
 On `main`: the hub pins claude-sessions 0.11.0, and base `2026.11.01` installs Claude Code
-2.1.311 with updates off and a version ceiling (dev-base and dev-smoke green on `f08d6b1`; the
-0.11.0 pin's own smoke run is to be read before the deploy), both in `dev/claude-managed-settings.json`. The reasons are the pin row in
+2.1.311 with updates off and a version ceiling (dev-base and dev-smoke green on `f08d6b1`, and
+again on `ec1fd7e` with 0.11.0, where the smoke test ran `relay` through the hub's sshd), both in `dev/claude-managed-settings.json`. The reasons are the pin row in
 [`decisions.md`](../decisions.md). How it is read is in [`dev/README.md`](../../dev/README.md)
 § *Claude Code in here*. The version was chosen by claude-sessions' agent (mail, 2026-11-01).
 
