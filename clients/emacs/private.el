@@ -54,85 +54,62 @@
              '("\\*eldoc" (display-buffer-reuse-window display-buffer-at-bottom)
                (window-height . 0.33)))
 
-(add-to-list 'package-archives '("melpa" . "https://melpa.org/packages/") t) ; hel lives on MELPA
-(setq package-archive-priorities '(("gnu" . 3) ("nongnu" . 2) ("melpa" . 1))) ; MELPA only when needed
-
-;; Helix-style modal editing: ESC works in a terminal, gd/gr go through eglot's xref.
-(use-package hel
+;; NANO's modeline (Nicolas Rougier, GNU ELPA) in place of Solo's, set up before evil,
+;; which copies the current line into each buffer it starts in; at the bottom where
+;; Solo's was. It shortens the buffer name on a narrow screen and never the line:column on
+;; the right; Solo's line is cut from the right at 46 columns, position first.
+(use-package nano-modeline
   :ensure t
   :demand t
+  :config                                ; NANO's prog-mode line, with evil's NORMAL/INSERT tag first
+  (nano-modeline-footer '((private-evil-tag) " " (nano-modeline-buffer-status) " "
+                          (nano-modeline-buffer-name) " " (nano-modeline-git-info))
+                        '((nano-modeline-cursor-position)) t))   ; t: the default for every buffer
+
+;; MELPA for evil's current snapshot: NonGNU ELPA's evil, 1.15.0, predates Emacs 31 and
+;; needed a fix to start on it.
+(add-to-list 'package-archives '("melpa" . "https://melpa.org/packages/") t)
+(setq package-archive-priorities '(("gnu" . 3) ("nongnu" . 2) ("melpa" . 1))) ; MELPA only when needed
+(add-to-list 'package-pinned-packages '(evil . "melpa"))
+
+;; Vim keys, keeping the Helix habits: gd and gr go through eglot (gr is Vim's
+;; replace-char, so it is bound here), U redoes, C-u and C-d scroll half a page, C-o and
+;; C-i walk the jump list, and Space opens a small menu. :q, :w, :wq, :x and the rest are
+;; evil's own ex line. Panes you cannot type in (references, diagnostics, help: special
+;; modes) open in evil's motion state, where q is theirs and closes them, not Vim's macro
+;; recorder. evil loads flyspell, so the play installs aspell and its English
+;; dictionary.
+(use-package evil
+  :ensure t
+  :demand t
+  :init
+  (setq evil-undo-system 'undo-redo     ; Emacs's own undo-redo, which U and C-r use
+        evil-want-C-u-scroll t
+        ;; no <N> tag of evil's: it gives each buffer its own status line, which hides
+        ;; NANO's; private-evil-tag shows the state there instead
+        evil-mode-line-format nil)
   :config
-  (hel-mode 1)
-  (hel-keymap-global-set :state 'normal          ; a small Helix space menu
-    "SPC f" #'project-find-file   "SPC b" #'switch-to-buffer
-    "SPC s" #'imenu               "SPC d" #'flymake-show-buffer-diagnostics
-    "SPC a" #'eglot-code-actions  "SPC r" #'eglot-rename
-    "SPC k" #'eldoc-doc-buffer    "SPC /" #'project-find-regexp
-    "SPC ?" #'execute-extended-command)    ; the command palette, as in Helix
-  (hel-keymap-global-set :state 'normal ":" #'private-colon))
+  (evil-mode 1)
+  (evil-set-initial-state 'special-mode 'motion)  ; and every mode derived from it
+  (evil-define-key 'normal 'global "gr" #'xref-find-references "U" #'evil-redo)
+  (evil-set-leader '(normal motion) (kbd "SPC"))
+  (evil-define-key '(normal motion) 'global
+    (kbd "<leader>f") #'project-find-file   (kbd "<leader>b") #'switch-to-buffer
+    (kbd "<leader>s") #'imenu               (kbd "<leader>d") #'flymake-show-buffer-diagnostics
+    (kbd "<leader>a") #'eglot-code-actions  (kbd "<leader>r") #'eglot-rename
+    (kbd "<leader>k") #'eldoc-doc-buffer    (kbd "<leader>/") #'project-find-regexp
+    (kbd "<leader>?") #'execute-extended-command))  ; the command palette, as in Helix
 
-;; Helix's :q, :q!, :w, :wq and :x on hel's `:', which is otherwise M-x. Typed exactly,
-;; they run on Enter; anything else is M-x as before. Our own because evil's ex line,
-;; the obvious donor, needs evil loaded beside hel, and its :q! under a server keeps the
-;; unsaved buffer or, outside one, kills the server. Here :q! reverts first, so the edit
-;; is gone, and the quits close this terminal's view (C-x C-c), never the server.
-(defun private-q ()
-  (if (and (buffer-file-name) (buffer-modified-p))
-      (user-error "Unsaved changes: :w saves them, :q! discards them")
-    (save-buffers-kill-terminal)))
-(defun private-q! ()
-  (when (buffer-modified-p)
-    (cond ((and (buffer-file-name) (file-exists-p (buffer-file-name)))
-           (revert-buffer t t))
-          ((buffer-file-name)             ; a new file: nothing on disk to go back to
-           (erase-buffer) (set-buffer-modified-p nil))
-          (t (set-buffer-modified-p nil))))
-  (save-buffers-kill-terminal))
-(defun private-wq ()
-  (save-buffer)
-  (save-buffers-kill-terminal))
-(defconst private-colon-commands
-  '(("q" . private-q) ("q!" . private-q!) ("w" . save-buffer)
-    ("wq" . private-wq) ("x" . private-wq)))
-;; Plain functions, not commands, so M-x does not list them. hel would otherwise ask,
-;; with several cursors, whether to run `:' once per cursor.
-(hel-set-single-cursor-command 'private-colon)
-
-(defun private-colon--setup ()
-  "Make Enter run a `private-colon-commands' entry typed exactly, else what it did."
-  (let ((map (current-local-map)))
-    (use-local-map
-     (make-composed-keymap
-      (define-keymap "RET"
-        (lambda () (interactive)
-          (if (assoc (minibuffer-contents) private-colon-commands)
-              (exit-minibuffer)
-            (call-interactively (keymap-lookup map "RET")))))
-      map))))
-(defun private-colon (arg)
-  "Run one of `private-colon-commands' if typed exactly, else M-x."
-  (interactive "P")
-  ;; The hook stays for the whole read, as M-X re-enters the minibuffer; depth 90, so
-  ;; it wraps icomplete's Enter. last-typed lets M-x suggest a shorter way, as it does.
-  ;; The prompt is `: ', so this is told apart from M-x; M-X still cycles on to M-x's
-  ;; own command sets.
-  (let* ((execute-extended-command--last-typed nil)
-         (extended-command-versions
-          (cons (list ": " (lambda () read-extended-command-predicate))
-                extended-command-versions))
-         (name (progn (add-hook 'minibuffer-setup-hook #'private-colon--setup 90)
-                      (unwind-protect (read-extended-command ": ")
-                        (remove-hook 'minibuffer-setup-hook #'private-colon--setup)))))
-    (if-let* ((command (cdr (assoc name private-colon-commands))))
-        (progn
-          ;; keep q, w and q! out of M-x's history, where they would be "[No match]"
-          (setq extended-command-history (delete name extended-command-history))
-          (funcall command))
-      (execute-extended-command arg name execute-extended-command--last-typed))))
+;; NORMAL, INSERT and the rest at the left of the status line, INSERT in the warning
+;; colour.
+(defun private-evil-tag ()
+  (when (bound-and-true-p evil-state)
+    (propertize (format " %s" (upcase (symbol-name evil-state)))
+                'face (if (eq evil-state 'insert) 'warning 'mode-line-emphasis))))
 
 ;; Learn keys from M-x, as from Helix's Space ?: each command is listed with its key, and
-;; matching anywhere in the name finds hel's own commands (typing `undo' lists
-;; `hel-undo (u)'). By default M-x matches from the start only, which hid them.
+;; matching anywhere in the name finds evil's own commands (typing `undo' lists
+;; `evil-undo (u)'). By default M-x matches from the start only, which hid them.
 (add-to-list 'completion-category-overrides '(command (styles substring basic)))
 
 ;; A completion popup: Emacs 31 draws child frames in a terminal, so no corfu-terminal.
@@ -196,21 +173,7 @@
                          (plist-get ctx :after-cursor)))
    :template)
   (minuet-set-optional-options minuet-openai-fim-compatible-options :max_tokens 56)
-  ;; suggest only while typing, not in hel's normal state
-  (add-to-list 'minuet-auto-suggestion-block-predicates
-               (lambda () (and (bound-and-true-p hel-local-mode)
-                               (not (bound-and-true-p hel-insert-state)))))
+  ;; minuet's own default already holds suggestions back outside evil's insert state
   (add-hook 'prog-mode-hook #'minuet-auto-suggestion-mode)
   (dolist (b (buffer-list))
     (with-current-buffer b (when (derived-mode-p 'prog-mode) (minuet-auto-suggestion-mode)))))
-
-;; NANO's modeline (Nicolas Rougier, GNU ELPA) in place of Solo's, at the bottom where
-;; Solo's was. It shortens the buffer name on a narrow screen and never the line:column on
-;; the right; Solo's line is cut from the right at 46 columns, position first.
-(use-package nano-modeline
-  :ensure t
-  :demand t
-  :config                                ; NANO's prog-mode line, with hel's NORMAL/INSERT tag first
-  (nano-modeline-footer '((hel-state-mode-line-tag) " " (nano-modeline-buffer-status) " "
-                          (nano-modeline-buffer-name) " " (nano-modeline-git-info))
-                        '((nano-modeline-cursor-position)) t))   ; t: the default for every buffer

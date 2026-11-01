@@ -2,12 +2,12 @@
 ;; emacs --batch --init-directory ~/.emacs.d -l install.el
 ;;
 ;; Loads Solo as a real start does (early-init.el, init.el), then our private.el, whose
-;; `use-package :ensure' forms install hel, corfu, minuet and nano-modeline. Without this
+;; `use-package :ensure' forms install evil, corfu, minuet and nano-modeline. Without this
 ;; the first interactive start does it, and the screen freezes for half a minute. Prints
 ;; `changed' or `unchanged' on the last line; exits non-zero naming any package still
 ;; missing.
 
-(defconst install-wanted '(hel corfu minuet nano-modeline))
+(defconst install-wanted '(evil corfu minuet nano-modeline))
 
 (defun install-installed ()
   (require 'package)

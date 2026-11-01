@@ -9,7 +9,7 @@
 # without sudo and asks pacman for the rest.
 #
 # The editor is Emacs Solo (a distribution, pinned in clients/emacs/SOURCE) with a private
-# layer of ours (clients/emacs/private*.el): NANO's modeline, hel for Helix keys, corfu,
+# layer of ours (clients/emacs/private*.el): NANO's modeline, evil for Vim keys, corfu,
 # minuet's ghost text from llama-server, soft wrap with Helix's ↪. In order, the play:
 #   1. installs Emacs 31 and what the config uses: git, the python and markdown
 #      tree-sitter grammars, ty, ruff, and rass, which runs the two as one language
@@ -59,10 +59,11 @@
     # The same tools under each distro's names. termux-services is the runit that runs the
     # emacsd service; Arch has no service, as `emacs` starts the server on first use. fish
     # because emacs.fish is how `emacs` reaches the server, and emacsd/run starts through
-    # it.
+    # it. aspell and its English dictionary because evil loads flyspell, and Solo's
+    # flyspell setup fails on en_US without them.
     packages:
-      termux: [emacs, git, fish, tree-sitter-python, tree-sitter-markdown, ruff, ty, python-pip, termux-services]
-      arch: [emacs-nox, git, fish, tree-sitter-python, tree-sitter-markdown, ruff, ty, python-pipx]
+      termux: [emacs, git, fish, tree-sitter-python, tree-sitter-markdown, ruff, ty, python-pip, termux-services, aspell, aspell-en]
+      arch: [emacs-nox, git, fish, tree-sitter-python, tree-sitter-markdown, ruff, ty, python-pipx, aspell, aspell-en]
 
   tasks:
     - name: Check clients/emacs/SOURCE holds a URL and a sha

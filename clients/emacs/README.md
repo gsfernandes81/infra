@@ -6,9 +6,9 @@ features, with a small private layer of ours in the two files Solo sets aside fo
 
 - `private-early-init.el`: the Catppuccin Mocha theme (one of Solo's own) and a Termux
   grammar fix.
-- `private.el`: NANO's modeline, Helix-style keys (`hel`), an eager completion popup
-  (`corfu`), ghost-text suggestions from llama-server (`minuet`), and soft wrap marked
-  with `↪` as in Helix.
+- `private.el`: NANO's modeline, Vim keys (`evil`) with a few Helix habits kept, an
+  eager completion popup (`corfu`), ghost-text suggestions from llama-server (`minuet`),
+  and soft wrap marked with `↪` as in Helix.
 
 Solo's own files are never edited, so updating Solo is a change of its pin in `SOURCE`.
 
@@ -51,18 +51,22 @@ also sets `ALTERNATE_EDITOR` empty. `EDITOR` and `VISUAL` point at the same comm
 
 ## Keys worth knowing
 
-The keys are Helix's, through `hel`. Prefix keys show a menu of what can follow
-(which-key), and `M-x` lists every command with its key. Type part of what you want, such
-as `undo` or `refer`, and the key appears beside the match.
+The keys are Vim's, through `evil`, with a few Helix habits kept. Prefix keys show a menu
+of what can follow (which-key), and `M-x` lists every command with its key. Type part of
+what you want, such as `undo` or `refer`, and the key appears beside the match.
 
 | Key | Does |
 |---|---|
 | `Space` | the Space menu: `f` files, `b` buffers, `s` symbols, `d` diagnostics, `a` code actions, `r` rename, `k` hover docs, `/` search |
 | `Space ?` | the command palette: `M-x` with keys, as in Helix |
-| `:` | `M-x` too, with `:` as its prompt, except that `:w`, `:q`, `:q!`, `:wq` and `:x`, typed exactly, do what they do in Helix. `:q` refuses while the file has unsaved changes; `:q!` throws them away. Both close this terminal's view, as `C-x C-c` does, and leave the server running; other files changed in this terminal still get the save question |
-| `g` | the goto menu: `g d` definition, `g r` references |
-| `u` / `U` | undo / redo |
+| `:` | evil's command line: `:w`, `:q`, `:wq`, `:x`, `:s/a/b/`. `:q` asks whether to save unsaved changes, then closes this terminal's view and leaves the server running. `:q!` closes it too, but the server keeps the unsaved edit, so the next open shows it until it is saved or reverted (`:e!`) |
+| `gd`, `gr` | go to the definition; list the references |
+| `C-o`, `C-i` | back and forward through the jump list |
+| `u` / `U` | undo / redo (`C-r` redoes too) |
+| `C-u`, `C-d` | half a page up, down |
 | `i`, `a`, `o` | insert |
+| `q` | in a pane you cannot type in (references, diagnostics, help), closes it; elsewhere it records a macro, as in Vim |
+| `Esc`, `C-g` | cancel; in insert mode, `Esc` goes back to normal mode |
 | Tab | in insert mode, accepts the grey suggestion from llama-server |
 | `C-h k`, `C-h b` | what a key does; every key active now |
 
@@ -87,7 +91,10 @@ gives up after 3 s.
 - **Solo:** read its changes since the commit in `SOURCE`, try the new commit, then change
   the sha in `SOURCE` and re-run the play on each client.
 - **Packages:** `M-x package-upgrade-all`. Their versions are not pinned; each client
-  takes what the archives hold when it installs or upgrades.
+  takes what the archives hold when it installs or upgrades. `evil` comes from MELPA, as
+  NonGNU ELPA's release predates Emacs 31.
+- **From hel:** a client set up before 2026-11-01 still has `hel` installed, unused.
+  `M-x package-delete RET hel` removes it.
 
 ## The files
 
