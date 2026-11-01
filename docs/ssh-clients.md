@@ -23,12 +23,13 @@ also writes the Windows side. It reaches no host in the fleet; it writes files o
 machine executing it. `ansible/README.md` is how to run it, including the flag for a
 container whose tunnel does not exist yet.
 
-Two blocks land in `~/.ssh/config`, each edited in place on re-runs:
+Three blocks land in `~/.ssh/config`, each edited in place on re-runs:
 
 | Marker | Written by | Holds |
 |---|---|---|
 | `# BEGIN infra-fleet` | `client-home-ssh-config.yml` (its fleet half) → `templates/ssh-fleet-block.j2` | the three Pis, three ways each; their ProxyCommand is `~/.config/fleet/access-ssh` |
 | `# BEGIN <alias>` | `client-home-ssh-config.yml` (its dev half, once per alias) → `templates/ssh-dev-block.j2` | `dev`, the hub; `or3-dev`, for the phone's vessel tunnel; and the others' old blocks until they are retired after the cutover |
+| `# BEGIN infra-laptop` | `client-home-ssh-config.yml` (its laptop half) → `templates/ssh-laptop-block.j2` | `g14`, the tunnel to the laptop's llama-server, first in the file; not written on WSL |
 
 Do not hand-edit between the markers. Change the template and re-run — a hand edit
 survives until the next run and then vanishes, which is the worst of both.
@@ -405,6 +406,11 @@ from the value in `_client-laptop-ssh.yml`, rather than learned on first connect
 first answer could already be the impostor. A reinstalled laptop has a new key: update
 that value and re-run.
 
+**The block is first in the file**, unlike the others, which sit above `Host *`. ssh takes
+the first value it reads, so a `Host *`, `Match` or `Include` above the block would
+override the pin without a word; nothing above it, nothing can. The play moves a block it
+finds lower down. It uses `~/.ssh/id_ed25519`, the key the phone already has.
+
 **The address is `10.1.0.125`**, and `ssh -o HostName=<ip> g14` reaches it at another.
 `G14-GS.local` would survive a new address, but nobody has yet shown that Termux resolves
 `.local` names.
@@ -418,11 +424,23 @@ that value and re-run.
 - `PasswordAuthentication no` and `KbdInteractiveAuthentication no` at the top of
   `C:\ProgramData\ssh\sshd_config`, where they win over the `Match` block below.
 - The phone's key in `C:\ProgramData\ssh\administrators_authorized_keys`, as
-  `restrict,port-forwarding,permitopen="127.0.0.1:8080" ssh-ed25519 …`. That key opens the
-  one forward and nothing else: no shell, no other port. The account is an administrator,
-  and Windows' sshd reads an administrator's keys from that file only, which needs
-  elevation to edit; a key in the user's own `.ssh` would let any program running as the
-  user grant itself an elevated login.
+  `restrict,port-forwarding,permitopen="127.0.0.1:8080" ssh-ed25519 …`, with the file's
+  access cut to Administrators and SYSTEM, without which sshd ignores it. That key opens
+  the one forward and nothing else: no shell, no other port. The account is an
+  administrator, and Windows' sshd reads an administrator's keys from that file only,
+  which needs elevation to edit; a key in the user's own `.ssh` would let any program
+  running as the user grant itself an elevated login.
+- `AllowTcpForwarding local` at the top of `sshd_config`. `port-forwarding` on the key
+  line allows remote forwards as well, and a remote forward is a listener on the laptop's
+  loopback; this refuses them. `permitlisten="none"` on the key line was tried first and
+  made sshd reject the key outright.
+
+**On the phone, two things about Android.** It stops a backgrounded Termux after a while,
+and the tunnel with it: `ssh g14` again brings it back, and `termux-wake-lock` keeps
+Termux running. And Termux's ssh cannot move a control socket into place atomically, so
+if a stale one is in the way it carries on without one. The tunnel then works, but
+`ssh -O check g14` says nothing is running and `ssh -O exit g14` cannot stop it. Find its
+pid, kill that pid, and `rm ~/.ssh/cm/g14-gavin`.
 
 **WSL needs no tunnel.** It runs on the laptop and reaches llama-server through the NAT
 gateway (`LLAMA_BASE_URL` in `clients/nvim/README.md`), so the play writes no `g14` block

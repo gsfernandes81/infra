@@ -11,6 +11,9 @@
 # The laptop's key accepts this client for the tunnel and nothing else: no shell, one
 # port. The LAN it sits on is not trusted, so its host key is pinned in the file below
 # and never learned from whoever answers; a stranger on its address fails the check.
+#
+# FIRST IN THE FILE, and kept there by the play: ssh takes the first value it reads, so
+# a `Host *`, `Match` or `Include` above this block would override the pin.
 Host {{ laptop_alias }}
   HostName {{ laptop_address }}
   Port {{ laptop_port }}

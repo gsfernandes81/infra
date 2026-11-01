@@ -16,6 +16,14 @@
 # below and a re-run.
 #
 # NOT ON WSL. WSL runs on the laptop itself and reaches its llama-server without one.
+# Told by WSL_DISTRO_NAME, which WSL sets in every shell, or by either interop entry:
+# `WSLInterop` is absent when WSL runs systemd, which registers `WSLInterop-late`.
+#
+# AT THE TOP OF ~/.ssh/config, not above `Host *` like the other blocks. ssh takes the
+# first value it reads, so a `Host *`, `Match` or `Include` above this block would win
+# over its pin (StrictHostKeyChecking, UserKnownHostsFile, HostKeyAlias) without a word.
+# Nothing above it, nothing can. A block found lower down, where earlier runs put it, is
+# moved up.
 #
 # THIS PLAY WRITES ON THE CLIENT ONLY: one block, one known-hosts file. It reaches no
 # host and needs no become. On a whole run it comes after the fleet half, which has
@@ -54,10 +62,19 @@
     laptop_local_port: 8080
 
   tasks:
-    - name: Probe for WSL
+    - name: Probe for WSL's interop entries
       ansible.builtin.stat:
-        path: /proc/sys/fs/binfmt_misc/WSLInterop
+        path: "{{ item }}"
+      loop:
+        - /proc/sys/fs/binfmt_misc/WSLInterop
+        - /proc/sys/fs/binfmt_misc/WSLInterop-late
       register: wsl_probe
+
+    - name: Note whether this client is WSL
+      ansible.builtin.set_fact:
+        on_wsl: >-
+          {{ lookup('env', 'WSL_DISTRO_NAME') | length > 0
+             or wsl_probe.results | selectattr('stat.exists') | list | length > 0 }}
 
     - name: "If WSL: note the laptop block is not needed here"
       ansible.builtin.debug:
@@ -65,10 +82,10 @@
           This is WSL, on the laptop itself: its llama-server is reached without a tunnel,
           so no {{ laptop_alias }} block is written here.
       changed_when: true
-      when: wsl_probe.stat.exists
+      when: on_wsl | bool
 
     - name: Write the laptop block and its pinned host key
-      when: not wsl_probe.stat.exists
+      when: not on_wsl | bool
       block:
         - name: Create ~/.ssh and ~/.ssh/cm, mode 700
           ansible.builtin.file:
@@ -87,12 +104,35 @@
             content: "{{ laptop_alias }} {{ laptop_host_key }}\n"
             mode: "0600"
 
-        # Above `Host *`, for the reason the fleet half gives: first value wins.
-        - name: Write the laptop block in ~/.ssh/config above Host *
+        # check_mode: false because it only reads; a missing file reads as empty.
+        - name: Read ~/.ssh/config to find the laptop block
+          ansible.builtin.slurp:
+            src: "{{ ssh_config }}"
+          register: laptop_cfg
+          failed_when: false
+          check_mode: false
+
+        # On top means nothing but blank lines and comments above the marker. Absent
+        # counts as not on top, which only matters for a file that already has content.
+        - name: Note whether the laptop block is at the top
+          ansible.builtin.set_fact:
+            laptop_on_top: >-
+              {{ ((laptop_cfg.content | default('') | b64decode).split('# BEGIN infra-laptop')[0]).splitlines()
+                 | reject('match', '^\s*(#.*)?$') | list | length == 0 }}
+
+        - name: "If not at the top: delete the laptop block"
           ansible.builtin.blockinfile:
             path: "{{ ssh_config }}"
             create: true
             marker: "# {mark} infra-laptop (ansible/playbooks/client-home-ssh-config.yml)"
-            insertbefore: '^Host \*\s*$'
+            state: absent
+          when: not laptop_on_top | bool
+
+        - name: Write the laptop block at the top of ~/.ssh/config
+          ansible.builtin.blockinfile:
+            path: "{{ ssh_config }}"
+            create: true
+            marker: "# {mark} infra-laptop (ansible/playbooks/client-home-ssh-config.yml)"
+            insertbefore: BOF
             block: "{{ lookup('template', '../templates/ssh-laptop-block.j2') }}"
             mode: "0600"

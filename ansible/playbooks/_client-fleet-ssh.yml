@@ -264,8 +264,8 @@
       ansible.builtin.debug:
         msg: >-
           {{ ssh_config }} has CRLF line endings. A real run converts it to LF first; this
-          dry run cannot, so the diff below shows the fleet block ADDED under the existing
-          one. The real run edits it in place.
+          dry run cannot, so the diffs below show the fleet and laptop blocks ADDED beside
+          the existing ones. The real run edits them in place.
       changed_when: true
       when:
         - ansible_check_mode
