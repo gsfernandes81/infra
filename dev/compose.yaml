@@ -158,6 +158,15 @@ services:
       args:
         USER_UID: ${HOST_UID:?set HOST_UID in dev/.env — the checkout owner's uid; the dev host play writes it}
         USER_GID: ${HOST_GID:?set HOST_GID in dev/.env — the checkout owner's gid; the dev host play writes it}
+      # LAYERS BUILT IN CI, READ HERE (owner, 2026-11-01). Each repo that owns a Dockerfile
+      # builds it on a native arm64 runner on x-base-tag and pushes a registry cache, so this
+      # build pulls layers instead of running each step: infra's own two (this one and infra)
+      # in .github/workflows/dev-cache.yml, each child in its own repo's dev-image.yml, which
+      # dev-cache.yml dispatches with the base tag. Every service built from a context
+      # outside this repo names `<repo>-dev:buildcache-arm64`. A miss, or a cache that
+      # cannot be read, is the uncached build, never a failed one.
+      cache_from:
+        - type=registry,ref=ghcr.io/gsfernandes81/gsrpi-dev-base:buildcache-hub-arm64
     image: dev-hub
     container_name: dev-hub
     # `dev` is what the menu's home is headed with, and what `ssh dev` names.
@@ -307,6 +316,8 @@ services:
       dockerfile: Dockerfile
       args:
         BASE_TAG: *base-tag
+      cache_from:
+        - type=registry,ref=ghcr.io/gsfernandes81/gsrpi-dev-base:buildcache-infra-arm64
     image: infra
     container_name: infra
     hostname: infra   # Claude Code shows this as the machine title
@@ -411,6 +422,8 @@ services:
       dockerfile: Dockerfile.dev
       args:
         BASE_TAG: *base-tag
+      cache_from:
+        - type=registry,ref=ghcr.io/gsfernandes81/destiny-director-dev:buildcache-arm64
     image: destiny-director
     container_name: destiny-director
     hostname: destiny-director
@@ -489,6 +502,8 @@ services:
       dockerfile: Dockerfile.dev
       args:
         BASE_TAG: *base-tag
+      cache_from:
+        - type=registry,ref=ghcr.io/gsfernandes81/dossier-dev:buildcache-arm64
     image: dossier
     container_name: dossier
     hostname: dossier
@@ -533,6 +548,8 @@ services:
       dockerfile: Dockerfile.dev
       args:
         BASE_TAG: *base-tag
+      cache_from:
+        - type=registry,ref=ghcr.io/gsfernandes81/invective-dev:buildcache-arm64
     image: invective
     container_name: invective
     hostname: invective
@@ -565,6 +582,8 @@ services:
       dockerfile: Dockerfile.dev
       args:
         BASE_TAG: *base-tag
+      cache_from:
+        - type=registry,ref=ghcr.io/gsfernandes81/nibbles-dev:buildcache-arm64
     image: nibbles
     container_name: nibbles
     hostname: nibbles
@@ -597,6 +616,8 @@ services:
       dockerfile: Dockerfile.dev
       args:
         BASE_TAG: *base-tag
+      cache_from:
+        - type=registry,ref=ghcr.io/gsfernandes81/ionic-traces-dev:buildcache-arm64
     image: ionic-traces
     container_name: ionic-traces
     hostname: ionic-traces
@@ -642,7 +663,9 @@ services:
       # pull. Still built here and on x-base-tag, because a pinned prebuilt image would stay
       # on whatever base it was built against and a base bump would need that repo to move
       # first. When the bases differ, nothing after FROM matches and zero compiles, slower and
-      # still correct. A cache that cannot be read (GitHub down) is an ERROR line on the
+      # still correct; since 2026-11-01 infra's dev-cache.yml dispatches that workflow with
+      # x-base-tag after every base, so the arm64 cache is built on ours (the note at the
+      # hub's cache_from). A cache that cannot be read (GitHub down) is an ERROR line on the
       # import step and an uncached build, never a failed one.
       cache_from:
         - type=registry,ref=ghcr.io/gsfernandes81/claude-sessions-dev:buildcache-arm64

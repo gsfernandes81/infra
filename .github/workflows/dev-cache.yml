@@ -1,0 +1,254 @@
+name: dev-cache
+
+# Keep a registry layer cache of every dev image dev/compose.yaml builds, on the base tag
+# it names, so zero's build pulls layers instead of running each step (owner, 2026-11-01;
+# docs/decisions.md has the row). zero still builds every image itself, from the same
+# contexts with the same args; each service's `cache_from` names the cache.
+#
+# EACH REPO CACHES WHAT IT OWNS. The `cache` job builds the images whose Dockerfiles live
+# in this repo, the hub and infra, and pushes `gsrpi-dev-base:buildcache-<service>-arm64`.
+# Every other image is built from another repo's Dockerfile, and that repo builds its own
+# cache in its own `.github/workflows/dev-image.yml`, as
+# `ghcr.io/gsfernandes81/<repo>-dev:buildcache-arm64`. The `dispatch` job runs each of
+# those with `base_tag`, so their caches move to a new base when it is published. The
+# contract they implement is in plans/dev-image-caches.md.
+#
+# WHAT A HIT NEEDS. The same base digest, the same args, the same Dockerfile and the same
+# files in the context. So the targets, contexts and args come from compose.yaml through
+# `buildx bake --print`, never from a list in here. HOST_UID and HOST_GID are 1001, gavin
+# on zero, as in dev-base.yml: the hub's image takes them as build args, so another value
+# would miss there.
+#
+# THE DISPATCH CREDENTIAL is a GitHub App of its own, installed on the child repos with
+# Actions: write and nothing else: its id in the `DEV_DISPATCH_APP_ID` variable, its key
+# in the `DEV_DISPATCH_APP_KEY` secret. Until both exist the dispatch job says so and
+# passes, and a repo with no dev-image.yml yet is a warning, so the rollout is one repo at
+# a time.
+#
+# THE CHECK. After the push, a fresh builder with no local state builds infra's targets
+# again from the registry caches alone, and the run fails if any RUN, COPY or ADD step
+# executed instead of hitting. That is the question zero's build asks. It cannot prove
+# zero's own BuildKit agrees; `docker buildx history ls` on zero after a deploy shows
+# that.
+
+on:
+  # After every dev-base run on main that passed, whether it published a base or found
+  # nothing to publish: a push touching dev/ can change infra's or the hub's image without
+  # changing the base.
+  workflow_run:
+    workflows: [dev-base]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+# Two runs writing the same cache tags would race; the second waits.
+concurrency:
+  group: dev-cache
+  cancel-in-progress: false
+
+env:
+  CACHE_IMAGE: ghcr.io/${{ github.repository_owner }}/gsrpi-dev-base
+
+jobs:
+  cache:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    outputs:
+      repos: ${{ steps.targets.outputs.repos }}
+      names: ${{ steps.targets.outputs.names }}
+      tag: ${{ steps.targets.outputs.tag }}
+    steps:
+      # The commit dev-base just ran on, not whatever main has moved to since.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Log in to ghcr
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      # compose.yaml requires these to interpolate at all. Only HOST_UID and HOST_GID
+      # reach a build; the rest stand in, as dev-smoke.yml's do. Bake parses or3's deploy
+      # key even though or3 is not built here, so a throwaway key sits there; an empty
+      # file fails.
+      - name: Write a stand-in dev/.env
+        run: |
+          s="$RUNNER_TEMP/secrets"
+          mkdir -p "$s/hub" "$s/infra" "$s/or3" "$s/dd" "$s/ds"
+          ssh-keygen -q -t ed25519 -N '' -C dev-cache-stand-in -f "$s/or3/id_ed25519_or3_deploy"
+          sed -e "s#^HUB_SECRETS=.*#HUB_SECRETS=$s/hub#" \
+              -e "s#^INFRA_SECRETS=.*#INFRA_SECRETS=$s/infra#" \
+              -e "s#^OR3_SECRETS=.*#OR3_SECRETS=$s/or3#" \
+              -e "s#^DD_SECRETS=.*#DD_SECRETS=$s/dd#" \
+              -e "s#^DS_SECRETS=.*#DS_SECRETS=$s/ds#" \
+              -e 's#^COMPOSE_PROFILES=.*#COMPOSE_PROFILES=#' \
+              -e 's#^HUB_TUNNEL_ID=.*#HUB_TUNNEL_ID=none#' \
+              -e 's#^HUB_GITHUB_APP_ID=.*#HUB_GITHUB_APP_ID=1#' \
+              -e 's#^HOST_UID=.*#HOST_UID=1001#' \
+              -e 's#^HOST_GID=.*#HOST_GID=1001#' \
+              dev/.env.example > dev/.env
+
+      # Splits compose.yaml's targets by where the Dockerfile lives. A context in this
+      # checkout is this job's to cache, and the step fails if compose.yaml does not list
+      # that cache, since zero would then never read it. A context on GitHub names the
+      # repo the dispatch job asks. Writes push.json and verify.json, the two bake
+      # overrides.
+      - name: Read the targets from compose.yaml
+        id: targets
+        working-directory: dev
+        run: |
+          tag=$(sed -n 's/^x-base-tag: &base-tag //p' compose.yaml)
+          [ -n "$tag" ] || { echo "no x-base-tag line in dev/compose.yaml" >&2; exit 1; }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          docker buildx bake -f compose.yaml --print > "$RUNNER_TEMP/print.json"
+          python3 - "$RUNNER_TEMP" "$CACHE_IMAGE" <<'EOF'
+          import json, os, re, sys
+          tmp, image = sys.argv[1], sys.argv[2]
+          targets = json.load(open(f"{tmp}/print.json"))["target"]
+          push, verify, own, repos, unlisted = {}, {}, [], [], []
+          for name, t in sorted(targets.items()):
+              m = re.match(r"(?:https://github\.com/|git@github\.com:)([^/]+/[^/#]+?)(?:\.git)?#", t["context"])
+              if m:
+                  repos.append(m.group(1))
+                  continue
+              ref = f"{image}:buildcache-{name}-arm64"
+              prior = [c["ref"] for c in t.get("cache-from") or [] if c.get("type") == "registry"]
+              if ref not in prior:
+                  unlisted.append(name)
+              common = {"platforms": ["linux/arm64"], "output": ["type=cacheonly"]}
+              push[name] = dict(common, **{
+                  "cache-from": [f"type=registry,ref={ref}"],
+                  "cache-to": [f"type=registry,ref={ref},mode=max,compression=zstd,oci-mediatypes=true"],
+              })
+              verify[name] = dict(common, **{"cache-from": [f"type=registry,ref={ref}"]})
+              own.append(name)
+          json.dump({"target": push}, open(f"{tmp}/push.json", "w"))
+          json.dump({"target": verify}, open(f"{tmp}/verify.json", "w"))
+          print("cached here:", " ".join(own))
+          print("dispatched:", " ".join(repos))
+          # The dispatch job reads these even if a later step here fails.
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"own={' '.join(own)}\nrepos={' '.join(repos)}\n")
+              f.write(f"names={','.join(r.split('/')[1] for r in repos)}\n")
+          for name in unlisted:
+              print(f"::error::compose.yaml's {name} has no cache_from for {image}:buildcache-{name}-arm64")
+          if unlisted or not own:
+              sys.exit(1)
+          EOF
+
+      # BUILDX_BAKE_ENTITLEMENTS_FS=0 as dev/Makefile sets it on zero, for the same
+      # reason: bake would otherwise ask for filesystem access to or3's key path.
+      - name: Build and push each cache
+        working-directory: dev
+        env:
+          BUILDX_BAKE_ENTITLEMENTS_FS: '0'
+          TARGETS: ${{ steps.targets.outputs.own }}
+        run: |
+          # shellcheck disable=SC2086  # one target per word
+          docker buildx bake -f compose.yaml -f "$RUNNER_TEMP/push.json" $TARGETS
+
+      # A builder created here has no local cache, so every hit below came from the
+      # registry. The parse is calibrated: it must see at least one step, or it is reading
+      # nothing.
+      - name: Check a fresh builder hits the cache on every step
+        working-directory: dev
+        env:
+          BUILDX_BAKE_ENTITLEMENTS_FS: '0'
+          TARGETS: ${{ steps.targets.outputs.own }}
+        run: |
+          docker buildx create --name verify --driver docker-container >/dev/null
+          # shellcheck disable=SC2086  # one target per word
+          docker buildx bake --builder verify --progress plain \
+            -f compose.yaml -f "$RUNNER_TEMP/verify.json" $TARGETS 2>&1 | tee "$RUNNER_TEMP/verify.log"
+          python3 - "$RUNNER_TEMP/verify.log" <<'EOF'
+          import re, sys
+          steps, cached = {}, set()
+          for line in open(sys.argv[1]):
+              m = re.match(r"#(\d+) (\[[^\]]+\] (?:RUN|COPY|ADD) .*)", line.rstrip())
+              if m:
+                  steps[m.group(1)] = m.group(2)[:160]
+              m = re.match(r"#(\d+) CACHED$", line.rstrip())
+              if m:
+                  cached.add(m.group(1))
+          ran = [steps[v] for v in steps if v not in cached]
+          print(f"{len(steps)} steps, {len(steps) - len(ran)} from the cache")
+          if not steps:
+              print("::error::the build log showed no RUN, COPY or ADD step; the check is reading nothing")
+              sys.exit(1)
+          for s in ran:
+              print(f"::error::ran instead of hitting the cache: {s}")
+          sys.exit(1 if ran else 0)
+          EOF
+
+      - name: Note what was cached
+        env:
+          TARGETS: ${{ steps.targets.outputs.own }}
+        run: |
+          echo "Cached for zero (arm64), every step checked: \`$TARGETS\`, in \`$CACHE_IMAGE:buildcache-<service>-arm64\`." \
+            >> "$GITHUB_STEP_SUMMARY"
+
+  # Independent of infra's own cache: a failure there does not hold the children back.
+  dispatch:
+    needs: cache
+    if: always() && needs.cache.outputs.repos != ''
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Check the dispatch App is configured
+        id: app
+        env:
+          APP_ID: ${{ vars.DEV_DISPATCH_APP_ID }}
+          HAS_KEY: ${{ secrets.DEV_DISPATCH_APP_KEY != '' }}
+        run: |
+          if [ -n "$APP_ID" ] && [ "$HAS_KEY" = true ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::DEV_DISPATCH_APP_ID or DEV_DISPATCH_APP_KEY is not set; no child repo was asked to rebuild its cache"
+            echo "Not dispatched: the dispatch App is not configured (plans/dev-image-caches.md)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # The token is limited to the repos compose.yaml builds from and to Actions: write,
+      # whatever else the App is ever granted.
+      - name: Mint a token for the child repos
+        id: token
+        if: steps.app.outputs.ok == 'true'
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.DEV_DISPATCH_APP_ID }}
+          private-key: ${{ secrets.DEV_DISPATCH_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ needs.cache.outputs.names }}
+          permission-actions: write
+
+      # A repo with no dev-image.yml yet is a warning, not a failure: the rollout is one
+      # repo at a time, and the summary lists who was asked.
+      - name: Dispatch each child's dev-image.yml with the base tag
+        if: steps.app.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          REPOS: ${{ needs.cache.outputs.repos }}
+          TAG: ${{ needs.cache.outputs.tag }}
+        run: |
+          asked=""; missed=""
+          for r in $REPOS; do
+            if gh workflow run dev-image.yml -R "$r" --ref main -f "base_tag=$TAG" 2> err.txt; then
+              asked="$asked $r"
+            else
+              echo "::warning::$r: $(head -c 300 err.txt)"
+              missed="$missed $r"
+            fi
+          done
+          {
+            echo "Dispatched dev-image.yml with base_tag=\`$TAG\`:${asked:- none}."
+            [ -z "$missed" ] || echo "Not dispatched (no dev-image.yml, or the App is not installed there):$missed."
+          } >> "$GITHUB_STEP_SUMMARY"

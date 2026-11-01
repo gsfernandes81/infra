@@ -834,6 +834,21 @@ Every session in every container ends; volumes, logins and history stay. The sam
 is the refresh when only the children's `main`s moved. `make base` builds the identical
 image locally under the ghcr name, and docker prefers a local image over a pull: the fallback for no network, or not waiting.
 
+**CI builds those images first, so zero's build is mostly pulls.** Each repo that owns a
+Dockerfile builds it in CI on a native arm64 runner on `x-base-tag` and pushes a registry
+cache, which that service's `cache_from` names. zero still builds every image itself; a
+step CI already ran is a cache hit and a layer pull. A miss is the build zero always did,
+and is still correct. `.github/workflows/dev-cache.yml` does this for the hub and infra
+after every `dev-base` run that passes, then dispatches each child repo's `dev-image.yml`
+with the base tag, through a GitHub App that can only run workflows. The contract a child
+keeps, and which children have one yet, are in
+[`plans/dev-image-caches.md`](../plans/dev-image-caches.md).
+
+So after a base bump, wait for the children's `dev-image` runs as well as `dev-base`
+before the recreate play. A deploy that does not wait is slower, not wrong. On zero, `sudo
+docker buildx history ls` shows each build's duration: seconds per image when the cache
+hit.
+
 **A published tag is never overwritten** (the workflow refuses without `force`), and **a push
 that changes a file the image is built from without bumping the tag fails the run** — the
 files are derived from `Dockerfile.base`'s `COPY` lines. Comments in `Dockerfile.base` do not
