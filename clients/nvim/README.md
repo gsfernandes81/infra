@@ -29,6 +29,11 @@ runs download only what `lazy-lock.json` moved.
 Space opens a menu of every leader key, and `Space s k` searches all keybinds by name.
 `nvim +Tutor` teaches the motions, as `hx --tutor` does in Helix.
 
+The look is LazyVim's own, with four changes for a phone held upright: the command
+line sits on the bottom line, long lines wrap as in Helix (at a word, keeping their
+indent, marked `↪`), inlay hints start off, and inline diagnostic text shows on the
+cursor's line only. Anything more is LazyVim's to maintain, not this config's.
+
 | Key | Does |
 |---|---|
 | `gd` / `gr` / `K` | definition, references, hover (from `ty`) |
@@ -112,11 +117,12 @@ connection.
 |---|---|
 | `init.lua` | where LazyVim keeps its per-client state, then the plugin manager |
 | `lua/config/lazy.lua` | the plugin list: LazyVim, its Python extra, and `lua/plugins/` |
-| `lua/config/options.lua` | `ty` and `ruff` as the Python servers |
+| `lua/config/options.lua` | `ty` and `ruff` as the Python servers; Helix's soft wrap |
 | `lua/config/keymaps.lua` | `U` as redo |
 | `lua/plugins/lsp.lua` | Mason off, servers from the system |
 | `lua/plugins/llama.lua` | `llama.vim`: its settings, its keys, its failure message |
 | `lua/plugins/treesitter.lua` | parsers compile four at a time, for the phone's memory |
+| `lua/plugins/ui.lua` | the command line at the bottom; fewer inline hints, for portrait |
 | `lazy-lock.json` | the plugin commits |
 
 LazyVim's per-client file, `lazyvim.json`, lives in Neovim's state directory rather than

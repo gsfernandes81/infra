@@ -70,6 +70,13 @@ local function set_auto_fim(on)
   vim.fn["llama#setup_autocmds"]()
 end
 
+-- A line in the bottom right corner, not a notification popup: the noice route below
+-- sends it there. "Not reachable" shows on every start without the tunnel, and a popup
+-- would cover half a phone's width each time.
+local function say(msg)
+  vim.api.nvim_echo({ { msg } }, false, {})
+end
+
 local function on_health(up)
   local was = vim.g.llama_server_up
   vim.g.llama_server_up = up
@@ -78,9 +85,10 @@ local function on_health(up)
   end
   set_auto_fim(up)
   if up and was ~= nil then
-    vim.notify("llama-server answered: suggestions on", vim.log.levels.INFO)
+    say("llama on: the server answered")
   elseif not up then
-    vim.notify(("llama-server not reachable at %s: suggestions off until it answers"):format(endpoint_fim))
+    -- Short enough for a phone held upright: the address without scheme or path.
+    say(("llama off: no server at %s"):format(endpoint_fim:gsub("^%a+://", ""):gsub("/infill$", "")))
   end
 end
 
@@ -183,6 +191,10 @@ return {
       opts.routes = opts.routes or {}
       table.insert(opts.routes, {
         filter = { event = "msg_show", find = "job failed with exit code" },
+        view = "mini",
+      })
+      table.insert(opts.routes, {
+        filter = { event = "msg_show", find = "^llama o[nf]+:" },
         view = "mini",
       })
     end,
