@@ -53,8 +53,8 @@
 ;; them to as well. Solo stops a language server when its last file closes, and jsonrpc
 ;; gives it 0.3 s to exit (a constant, not a setting) before killing it and warning. rass
 ;; is slower than that on the phone, so every :q of the last Python file opened a
-;; "Sentinel ... still hasn't run" window at the next open. Nothing is lost: rass has
-;; passed the exit on to ty and ruff by then. The log setting, because the display one
+;; "Sentinel ... still hasn't run" window at the next open. rass has already been asked
+;; to exit by then; it is only slow to. The log setting, because the display one
 ;; is ignored here: with the client's frame gone, Emacs holds the warning for the next
 ;; frame as it does a daemon's startup warnings, and shows it whatever that one says.
 (add-to-list 'warning-suppress-log-types '(jsonrpc))
