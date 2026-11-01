@@ -43,24 +43,31 @@ Space opens a menu of every leader key, and `Space s k` searches all keybinds by
 
 ## The completion server
 
-`llama.vim` asks `http://127.0.0.1:8012/infill` by default. An ssh forward or `tailscale
-serve` from the machine running llama-server puts it there. Three environment variables
-and one file change that, and none of them is tracked:
+With nothing set, `llama.vim` asks `http://127.0.0.1:8080/infill`, llama-server's own
+default port. An ssh forward or `tailscale serve` from the machine running llama-server
+puts it there. These change that, and none of them is tracked:
 
 | Set | When |
 |---|---|
-| `LLAMA_FIM_ENDPOINT` | the server is elsewhere: the full `/infill` URL |
+| `LLAMA_BASE_URL` | the server is elsewhere: `http://host:port`, with or without `/v1` |
+| `LLAMA_FIM_ENDPOINT` | the full `/infill` URL; it wins over `LLAMA_BASE_URL` |
 | `LLAMA_FIM_MODEL` | llama-server runs in router mode: the completion model's name |
 | `LLAMA_INST_MODEL` | instructions should use a different model from completion |
-| `~/.config/llama/api-key` | llama-server has `--api-key`: the key, one line, mode 600 |
+| `LLAMA_API_KEY` | llama-server has `--api-key`: the key |
+| `~/.config/llama/api-key` | the key from a file instead: one line, mode 600 |
 
 `llama.vim` passes the key to `curl` on its command line, so another local user can read
-it from the process list while a request runs. Neovim warns at start when the file itself
-is readable by others.
+it from the process list while a request runs. Neovim warns at start when the key file is
+readable by others.
 
-From WSL, `127.0.0.1` is the Linux side. A llama-server on Windows is reached through it
-only with WSL's mirrored networking, `networkingMode=mirrored` in `.wslconfig`.
-Otherwise set `LLAMA_FIM_ENDPOINT` to the Windows host's address.
+In WSL with its default NAT networking, `127.0.0.1` is the Linux side, and the Windows
+host is the default route's gateway. Exporting that as `LLAMA_BASE_URL`, as the owner's
+fish config does, reaches a llama-server on Windows that listens beyond `127.0.0.1` and
+that Windows Firewall lets in:
+
+```fish
+set -gx LLAMA_BASE_URL "http://"(ip route show default | awk '{print $3}')":8080"
+```
 
 With no server reachable, each failed request shows for two seconds in the bottom right
 corner, and editing carries on.

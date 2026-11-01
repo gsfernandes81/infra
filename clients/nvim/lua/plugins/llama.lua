@@ -1,14 +1,17 @@
 -- Fill-in-the-middle completion from a llama-server, shown as grey text after the cursor.
 --
--- The server is not on the client. By default llama.vim talks to 127.0.0.1:8012, which is
--- where an ssh forward or `tailscale serve` to the machine running llama-server puts it.
--- The overrides, all optional and none tracked:
+-- The server is not on the client. With nothing set, this talks to 127.0.0.1:8080,
+-- llama-server's own default port, where an ssh forward or `tailscale serve` to the
+-- machine running it puts it. The settings, all optional and none tracked:
 --
---   LLAMA_FIM_ENDPOINT   the full /infill URL, when the server is somewhere else
+--   LLAMA_BASE_URL       the server's address, `http://host:port`, with or without /v1;
+--                        the owner's WSL shell sets it to the Windows host's NAT address
+--   LLAMA_FIM_ENDPOINT   the full /infill URL, which wins over LLAMA_BASE_URL
 --   LLAMA_FIM_MODEL      the completion model's name, for llama-server's router mode
 --   LLAMA_INST_MODEL     the model for instructions (Space a i on a selection); defaults
 --                        to the completion model
---   ~/.config/llama/api-key   one line, mode 600, when llama-server runs with --api-key
+--   LLAMA_API_KEY        the key, when llama-server runs with --api-key
+--   ~/.config/llama/api-key   the key from a file instead, one line, mode 600
 --
 -- Keys, in insert mode while a suggestion shows:
 --   Tab         accept all of it
@@ -27,6 +30,9 @@
 -- llama.vim hands the key to curl on its command line, so while a request runs any local
 -- user can read it from the process list. The file at least should not add a second way.
 local function api_key()
+  if (vim.env.LLAMA_API_KEY or "") ~= "" then
+    return vim.env.LLAMA_API_KEY
+  end
   local path = (vim.env.XDG_CONFIG_HOME or vim.fn.expand("~/.config")) .. "/llama/api-key"
   local f = io.open(path, "r")
   if not f then
@@ -43,7 +49,8 @@ local function api_key()
   return key
 end
 
-local endpoint_fim = vim.env.LLAMA_FIM_ENDPOINT or "http://127.0.0.1:8012/infill"
+local base = (vim.env.LLAMA_BASE_URL or "http://127.0.0.1:8080"):gsub("/+$", ""):gsub("/v1$", "")
+local endpoint_fim = vim.env.LLAMA_FIM_ENDPOINT or (base .. "/infill")
 local model_fim = vim.env.LLAMA_FIM_MODEL or ""
 
 local function hint_shown()
