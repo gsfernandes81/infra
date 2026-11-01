@@ -18,12 +18,13 @@
 #   5. opens a Python file headless and checks that ty and ruff attach and that
 #      blink.cmp's native matcher loads.
 #
-# A first run downloads about 60 MB on top of the packages: 50 MB of plugin history from
-# GitHub, 9 MB of parser sources and 2 MB for blink.cmp's matcher (measured 2026-11-01).
-# On the phone that is the metered radio. Later runs download only what lazy-lock.json
-# moved.
+# A first run downloads about 60 MB on top of the packages and apt's or pacman's lists:
+# 50 MB of plugin history from GitHub, 9 MB of parser sources and 2 MB for blink.cmp's
+# matcher (measured 2026-11-01). On the phone that is the metered radio. Later runs
+# download only what lazy-lock.json moved.
 #
-# It reaches no host in the fleet and changes nothing outside this client. It refuses an
+# It reaches no host in the fleet and changes nothing outside this client: the packages,
+# the ~/.config/nvim link, and Neovim's own data and state directories. It refuses an
 # ~/.config/nvim it did not make rather than move it. What the config does, and how to
 # update the plugin pins, is clients/nvim/README.md.
 #
@@ -47,8 +48,9 @@
     nvim_source: "{{ control_checkout }}/clients/nvim"
     scripts: "{{ playbook_dir }}/files/client-home-nvim"
 
-    # The same tools under each distro's names. Neovim on Termux brings its own
-    # tree-sitter library and bundled parsers; `tree-sitter` there is the CLI as well.
+    # The same tools under each distro's names. On Termux, `tree-sitter` is the CLI as well
+    # as the library, and `clang` provides `cc`. The parsers Termux's neovim package
+    # bundles are not where nvim-treesitter looks, so every wanted parser is compiled.
     packages:
       termux: [neovim, git, curl, ripgrep, fd, clang, tree-sitter, ruff, ty, lua-language-server]
       arch: [neovim, git, curl, ripgrep, fd, gcc, tree-sitter-cli, ruff, ty, lua-language-server]
@@ -145,11 +147,11 @@
           mv {{ home }}/.local/share/nvim {{ home }}/.local/share/nvim.before-infra
         quiet: true
 
+    # No mode: the directory is usually ~/.config, which is the user's, not this play's.
     - name: Create the directory ~/.config/nvim goes in
       ansible.builtin.file:
         path: "{{ nvim_config | dirname }}"
         state: directory
-        mode: "0700"
 
     - name: Link ~/.config/nvim to clients/nvim
       ansible.builtin.file:
@@ -175,27 +177,36 @@
             fail_msg: "{{ nvim_version.stdout_lines[0] }}: clients/nvim wants 0.12 or newer"
             quiet: true
 
+        # A timeout, because this is the network step: a fetch that stalls on a weak radio
+        # should fail the run, not hold it open.
         - name: Install plugins at lazy-lock.json's commits
           ansible.builtin.command:
             argv: [nvim, --headless, --cmd, "luafile {{ scripts }}/restore.lua"]
+          timeout: 1800
           register: restore
           changed_when: restore.stdout_lines[-1] | default('') == 'changed'
           failed_when: >-
             restore.rc != 0
             or restore.stdout_lines[-1] | default('') not in ['changed', 'unchanged']
 
+        # Named here so a missing one fails as itself, not as twenty-five failed compiles.
+        - name: Check tree-sitter and a C compiler are on PATH
+          ansible.builtin.shell: command -v tree-sitter && command -v cc
+          changed_when: false
+
         # One retry: a phone can lose a compile to memory pressure, and the retry builds
         # only what is still missing.
         - name: Compile the syntax parsers
           ansible.builtin.command:
-            argv: [nvim, --headless, "+luafile {{ scripts }}/parsers.lua"]
+            argv: [nvim, --headless, --cmd, "luafile {{ scripts }}/parsers.lua"]
           register: parsers
           retries: 1
           delay: 5
           until: parsers.rc == 0
-          changed_when: >-
-            parsers.rc == 0
-            and (parsers.stdout_lines[-1].split()[0] != parsers.stdout_lines[-1].split()[1])
+          changed_when: parsers.stdout_lines[-1] | default('') == 'changed'
+          failed_when: >-
+            parsers.rc != 0
+            or parsers.stdout_lines[-1] | default('') not in ['changed', 'unchanged']
 
         - name: Create a scratch Python file for the check
           ansible.builtin.tempfile:

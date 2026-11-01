@@ -13,7 +13,10 @@ if not vim.uv.fs_stat(lazypath) then
       { out, "WarningMsg" },
       { "\nPress any key to exit..." },
     }, true, {})
-    vim.fn.getchar()
+    -- Headless (the client play) has nobody to press a key, and would wait forever.
+    if not vim.tbl_contains(vim.v.argv, "--headless") then
+      vim.fn.getchar()
+    end
     os.exit(1)
   end
 end

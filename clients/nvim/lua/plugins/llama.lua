@@ -8,23 +8,38 @@
 --   LLAMA_FIM_MODEL      the completion model's name, for llama-server's router mode
 --   LLAMA_INST_MODEL     the model for instructions (Space a i on a selection); defaults
 --                        to the completion model
---   ~/.config/llama/api-key   one line, when llama-server was started with --api-key
+--   ~/.config/llama/api-key   one line, mode 600, when llama-server runs with --api-key
 --
 -- Keys, in insert mode while a suggestion shows:
 --   Tab         accept all of it
 --   Shift-Tab   accept its first line
 --   Ctrl-L / Ctrl-H   next / previous suggestion
 --
+-- Keys for instructions, under LazyVim's Space a (AI) group:
+--   Space a i   on a selection: send an instruction about it
+--   Space a a / Space a x   accept / cancel the result
+--   Space a r / Space a c   rerun / continue it
+--   Space a d   the debug pane
+--
 -- Tab and Shift-Tab are routed through blink.cmp instead of being llama.vim's own. Both
 -- plugins map those keys per buffer, and llama.vim removes its mapping when the
 -- suggestion goes away, which would take blink's snippet and completion Tab with it.
+-- llama.vim hands the key to curl on its command line, so while a request runs any local
+-- user can read it from the process list. The file at least should not add a second way.
 local function api_key()
-  local f = io.open(vim.fn.expand("~/.config/llama/api-key"), "r")
+  local path = (vim.env.XDG_CONFIG_HOME or vim.fn.expand("~/.config")) .. "/llama/api-key"
+  local f = io.open(path, "r")
   if not f then
     return ""
   end
   local key = vim.trim(f:read("*a") or "")
   f:close()
+  local stat = vim.uv.fs_stat(path)
+  if stat and bit.band(stat.mode, tonumber("077", 8)) ~= 0 then
+    vim.schedule(function()
+      vim.notify(path .. " is readable by others; chmod 600 it", vim.log.levels.WARN)
+    end)
+  end
   return key
 end
 
@@ -74,9 +89,13 @@ return {
         -- makes every typed space wait to see whether a mapping follows.
         keymap_fim_trigger = "",
         keymap_fim_accept_word = "",
-        -- Moved under LazyVim's <leader>a (AI) group, away from <leader>l,
-        -- which is LazyVim's plugin manager.
+        -- Moved under LazyVim's <leader>a (AI) group, away from <leader>l, which is
+        -- LazyVim's plugin manager. Accept and cancel default to <Tab> and <Esc>, which
+        -- llama.vim maps in normal mode for good, taking Esc's clearing of search
+        -- highlights and Tab's jump forward (Ctrl-I) from every buffer.
         keymap_inst_trigger = "<leader>ai",
+        keymap_inst_accept = "<leader>aa",
+        keymap_inst_cancel = "<leader>ax",
         keymap_inst_rerun = "<leader>ar",
         keymap_inst_continue = "<leader>ac",
         keymap_debug_toggle = "<leader>ad",
@@ -101,6 +120,21 @@ return {
         view = "mini",
       })
     end,
+  },
+  -- llama.vim's mappings carry no descriptions, so the Space menu would list them blank.
+  {
+    "folke/which-key.nvim",
+    opts = {
+      spec = {
+        { "<leader>a", group = "ai (llama)", mode = { "n", "x" } },
+        { "<leader>ai", desc = "Instruction on selection", mode = "x" },
+        { "<leader>aa", desc = "Accept instruction result" },
+        { "<leader>ax", desc = "Cancel instruction" },
+        { "<leader>ar", desc = "Rerun instruction" },
+        { "<leader>ac", desc = "Continue instruction" },
+        { "<leader>ad", desc = "llama.vim debug pane" },
+      },
+    },
   },
   {
     "saghen/blink.cmp",

@@ -20,9 +20,9 @@ installs the plugins at the pinned commits, compiles the syntax parsers, and che
 `ty` and `ruff` attach. It refuses an existing `~/.config/nvim` that it did not make and
 prints the two `mv` commands that move it and its plugin data aside.
 
-A first run downloads about 60 MB after the packages: 50 MB of plugin history from
-GitHub, 9 MB of parser sources, 2 MB for `blink.cmp`'s matcher. Later runs download only
-what `lazy-lock.json` moved.
+A first run downloads about 60 MB after the packages and their package lists: 50 MB of
+plugin history from GitHub, 9 MB of parser sources, 2 MB for `blink.cmp`'s matcher. Later
+runs download only what `lazy-lock.json` moved.
 
 ## Keys worth knowing
 
@@ -38,6 +38,8 @@ Space opens a menu of every leader key, and `Space s k` searches all keybinds by
 | Tab | in insert mode, accepts the grey suggestion from llama-server |
 | Shift-Tab | accepts the suggestion's first line only |
 | `Space a i` | on a selection, sends an instruction to llama-server |
+| `Space a a` / `Space a x` | accepts / cancels the instruction's result |
+| `Space a r` / `Space a c` | reruns / continues the instruction |
 
 ## The completion server
 
@@ -50,7 +52,11 @@ and one file change that, and none of them is tracked:
 | `LLAMA_FIM_ENDPOINT` | the server is elsewhere: the full `/infill` URL |
 | `LLAMA_FIM_MODEL` | llama-server runs in router mode: the completion model's name |
 | `LLAMA_INST_MODEL` | instructions should use a different model from completion |
-| `~/.config/llama/api-key` | llama-server runs with `--api-key`: the key, one line |
+| `~/.config/llama/api-key` | llama-server has `--api-key`: the key, one line, mode 600 |
+
+`llama.vim` passes the key to `curl` on its command line, so another local user can read
+it from the process list while a request runs. Neovim warns at start when the file itself
+is readable by others.
 
 From WSL, `127.0.0.1` is the Linux side. A llama-server on Windows is reached through it
 only with WSL's mirrored networking, `networkingMode=mirrored` in `.wslconfig`.
@@ -70,6 +76,11 @@ code. To move the pins:
 3. Commit the lock file.
 4. On the other client, pull and run the play, or run `:Lazy restore` there.
 
+When `:Lazy restore` cannot reach a pinned commit, on a weak signal for example, it
+reports no error and rewrites `lazy-lock.json` to the commits it was left on. `git diff`
+shows that, and `git checkout clients/nvim/lazy-lock.json` undoes it. The play checks each
+plugin against the lock itself and leaves the file alone.
+
 Nothing checks for updates in the background, because the phone is on a metered
 connection.
 
@@ -83,6 +94,7 @@ connection.
 | `lua/config/keymaps.lua` | `U` as redo |
 | `lua/plugins/lsp.lua` | Mason off, servers from the system |
 | `lua/plugins/llama.lua` | `llama.vim`: its settings, its keys, its failure message |
+| `lua/plugins/treesitter.lua` | parsers compile four at a time, for the phone's memory |
 | `lazy-lock.json` | the plugin commits |
 
 LazyVim's per-client file, `lazyvim.json`, lives in Neovim's state directory rather than
