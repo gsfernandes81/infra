@@ -1,0 +1,220 @@
+---
+# NEOVIM ON THE MACHINE YOU RUN IT FROM: the phone (Termux) or Arch in WSL. From ansible/:
+#
+#     ansible-playbook playbooks/client-home-nvim.yml            # Termux
+#     ansible-playbook playbooks/client-home-nvim.yml -K         # Arch: pacman needs sudo
+#     ansible-playbook playbooks/client-home-nvim.yml --check    # what it would install
+#
+# -K is needed on Arch only when a package is missing: the play reads what is installed
+# without sudo and asks pacman for the rest.
+#
+# In order, it:
+#   1. installs Neovim and what the config needs: git, curl, ripgrep and fd for LazyVim's
+#      search, ty and ruff for Python, lua-language-server, and a C compiler and the
+#      tree-sitter CLI for the syntax parsers;
+#   2. links ~/.config/nvim to clients/nvim in THIS checkout, so a pull is an update;
+#   3. installs every plugin at the commit clients/nvim/lazy-lock.json pins;
+#   4. compiles the syntax parsers;
+#   5. opens a Python file headless and checks that ty and ruff attach and that
+#      blink.cmp's native matcher loads.
+#
+# A first run downloads about 60 MB on top of the packages: 50 MB of plugin history from
+# GitHub, 9 MB of parser sources and 2 MB for blink.cmp's matcher (measured 2026-11-01).
+# On the phone that is the metered radio. Later runs download only what lazy-lock.json
+# moved.
+#
+# It reaches no host in the fleet and changes nothing outside this client. It refuses an
+# ~/.config/nvim it did not make rather than move it. What the config does, and how to
+# update the plugin pins, is clients/nvim/README.md.
+#
+# NO NEW COLLECTIONS: ansible.builtin, and community.general for pacman, which
+# requirements.yml already lists.
+
+- name: Check the inventory is loaded
+  ansible.builtin.import_playbook: _assert-inventory.yml
+  vars:
+    required_group: control
+
+- name: Set up Neovim on this client
+  hosts: control
+  gather_facts: false
+
+  vars:
+    # lookup('env', 'HOME'), never ~: on Termux the passwd entry says /data, which is not
+    # writable (host_vars/localhost.yml has the same trap for remote_tmp).
+    home: "{{ lookup('env', 'HOME') }}"
+    nvim_config: "{{ lookup('env', 'XDG_CONFIG_HOME') or home ~ '/.config' }}/nvim"
+    nvim_source: "{{ control_checkout }}/clients/nvim"
+    scripts: "{{ playbook_dir }}/files/client-home-nvim"
+
+    # The same tools under each distro's names. Neovim on Termux brings its own
+    # tree-sitter library and bundled parsers; `tree-sitter` there is the CLI as well.
+    packages:
+      termux: [neovim, git, curl, ripgrep, fd, clang, tree-sitter, ruff, ty, lua-language-server]
+      arch: [neovim, git, curl, ripgrep, fd, gcc, tree-sitter-cli, ruff, ty, lua-language-server]
+
+  tasks:
+    - name: Probe for /etc/arch-release
+      ansible.builtin.stat:
+        path: /etc/arch-release
+      register: arch_release
+
+    - name: Note whether this client is Termux or Arch
+      ansible.builtin.set_fact:
+        client_os: >-
+          {{ 'termux' if lookup('env', 'TERMUX_VERSION') | length > 0
+             else 'arch' if arch_release.stat.exists else 'other' }}
+
+    - name: Check this client is Termux or Arch
+      ansible.builtin.assert:
+        that: client_os != 'other'
+        fail_msg: >-
+          This play knows Termux and Arch Linux, and this is neither. The config in
+          clients/nvim is not tied to either; only the package names here are.
+        quiet: true
+
+    # Unprivileged reads of what is installed, so a run with nothing to install needs no
+    # sudo. Both commands exit non-zero when any name is missing and list only the
+    # installed ones on stdout, so the missing set is what stdout does not name.
+    - name: "Termux: read which packages are installed"
+      ansible.builtin.command:
+        argv: "{{ ['dpkg-query', '-W', '-f', '${Package} ${db:Status-Abbrev}\n'] + packages.termux }}"
+      register: installed_termux
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: client_os == 'termux'
+
+    - name: "Arch: read which packages are installed"
+      ansible.builtin.command:
+        argv: "{{ ['pacman', '-Q'] + packages.arch }}"
+      register: installed_arch
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: client_os == 'arch'
+
+    - name: Note which packages are missing
+      ansible.builtin.set_fact:
+        missing: >-
+          {{ packages.termux | difference(installed_termux.stdout_lines
+               | select('search', ' ii ?$') | map('split') | map('first'))
+             if client_os == 'termux' else
+             packages.arch | difference(installed_arch.stdout_lines | map('split') | map('first')) }}
+
+    - name: "--check only: print the packages it would install"
+      ansible.builtin.debug:
+        msg: "would install: {{ missing | join(' ') if missing else 'nothing' }}"
+      changed_when: true
+      when: ansible_check_mode
+
+    - name: "Termux: install the missing packages with pkg"
+      ansible.builtin.command:
+        argv: "{{ ['pkg', 'install', '-y'] + missing }}"
+      when: client_os == 'termux' and missing | length > 0 and not ansible_check_mode
+
+    - name: "Arch: install the missing packages with pacman"
+      community.general.pacman:
+        name: "{{ missing }}"
+        state: present
+      become: true
+      # Not under --check: pacman's own dry run still wants sudo, and the line above
+      # already says what would be installed.
+      when: client_os == 'arch' and missing | length > 0 and not ansible_check_mode
+
+    - name: Read what ~/.config/nvim is now
+      ansible.builtin.stat:
+        path: "{{ nvim_config }}"
+        follow: false
+      register: nvim_config_stat
+
+    # A config this play did not make is someone's, and their plugin data in
+    # ~/.local/share/nvim was built for it. Moving both is a decision, so it is left to a
+    # person.
+    - name: Check ~/.config/nvim is absent or this link
+      ansible.builtin.assert:
+        that: >-
+          not nvim_config_stat.stat.exists
+          or (nvim_config_stat.stat.islnk and nvim_config_stat.stat.lnk_source == nvim_source)
+        fail_msg: >-
+          {{ nvim_config }} already exists
+          ({{ 'a link to ' ~ nvim_config_stat.stat.lnk_source | default('?')
+              if nvim_config_stat.stat.islnk | default(false) else 'not a link' }}).
+          Move it aside, with the plugin data it used, and run this again:
+          mv {{ nvim_config }} {{ nvim_config }}.before-infra;
+          mv {{ home }}/.local/share/nvim {{ home }}/.local/share/nvim.before-infra
+        quiet: true
+
+    - name: Create the directory ~/.config/nvim goes in
+      ansible.builtin.file:
+        path: "{{ nvim_config | dirname }}"
+        state: directory
+        mode: "0700"
+
+    - name: Link ~/.config/nvim to clients/nvim
+      ansible.builtin.file:
+        src: "{{ nvim_source }}"
+        dest: "{{ nvim_config }}"
+        state: link
+
+    # Everything below runs Neovim, so it needs the packages above to be installed, which
+    # --check did not do.
+    - name: Run Neovim to install and check the config
+      when: not ansible_check_mode
+      block:
+        - name: Read the Neovim version
+          ansible.builtin.command:
+            argv: [nvim, --version]
+          register: nvim_version
+          changed_when: false
+
+        # LazyVim needs 0.11.2; the config and its checks were tested on 0.12.6.
+        - name: Check Neovim is 0.12 or newer
+          ansible.builtin.assert:
+            that: nvim_version.stdout_lines[0] | regex_search('[0-9]+\.[0-9]+\.[0-9]+') is version('0.12.0', '>=')
+            fail_msg: "{{ nvim_version.stdout_lines[0] }}: clients/nvim wants 0.12 or newer"
+            quiet: true
+
+        - name: Install plugins at lazy-lock.json's commits
+          ansible.builtin.command:
+            argv: [nvim, --headless, --cmd, "luafile {{ scripts }}/restore.lua"]
+          register: restore
+          changed_when: restore.stdout_lines[-1] | default('') == 'changed'
+          failed_when: >-
+            restore.rc != 0
+            or restore.stdout_lines[-1] | default('') not in ['changed', 'unchanged']
+
+        # One retry: a phone can lose a compile to memory pressure, and the retry builds
+        # only what is still missing.
+        - name: Compile the syntax parsers
+          ansible.builtin.command:
+            argv: [nvim, --headless, "+luafile {{ scripts }}/parsers.lua"]
+          register: parsers
+          retries: 1
+          delay: 5
+          until: parsers.rc == 0
+          changed_when: >-
+            parsers.rc == 0
+            and (parsers.stdout_lines[-1].split()[0] != parsers.stdout_lines[-1].split()[1])
+
+        - name: Create a scratch Python file for the check
+          ansible.builtin.tempfile:
+            suffix: .py
+          register: scratch_py
+          # Scratch, not client state: a run that installs nothing reads as unchanged.
+          changed_when: false
+
+        - name: Check ty, ruff and blink.cmp's matcher load
+          ansible.builtin.command:
+            argv: [nvim, --headless, "+luafile {{ scripts }}/check.lua"]
+          environment:
+            NVIM_CHECK_FILE: "{{ scratch_py.path }}"
+          changed_when: false
+
+      always:
+        - name: Remove the scratch Python file
+          ansible.builtin.file:
+            path: "{{ scratch_py.path }}"
+            state: absent
+          changed_when: false
+          when: scratch_py.path is defined

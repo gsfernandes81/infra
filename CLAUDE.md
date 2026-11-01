@@ -45,6 +45,9 @@ Full orientation is `README.md`; the reasoning is `docs/decisions.md`. Quick map
   `dev/Makefile` only (it computes `HOST_UID` from the checkout's owner; a second copy of
   that guard is how root-owned files end up in a mount). The top-level `Makefile` forwards
   `dev-*` to it.
+- **`clients/nvim/`** — the Neovim config for the phone and WSL, linked into
+  `~/.config/nvim` by `client-home-nvim.yml`. `lazy-lock.json` pins its plugins; its
+  README says how to move the pins.
 - **`docs/`, `plans/`, `docs/handoff/`** — see the next section. **`docs/history/`** holds
   one finished plan, kept as a record of how the design was arrived at and marked *do
   not follow*; it is not a destination.

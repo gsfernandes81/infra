@@ -9,9 +9,10 @@ is missing from it.
 
 **The `client-` plays are the exception, and only because they target the client.**
 `client-home-ssh-config.yml` writes `~/.ssh/config` on whatever machine runs it and reaches
-no host at all (`client-home-claude-remote.yml` likewise installs one binary there), so it is run wherever that client is — the phone, or WSL on the laptop,
-where one run also configures Windows. See *The laptop is two clients* below. That is not
-a second control plane: it cannot touch a Pi.
+no host at all. `client-home-claude-remote.yml` likewise installs one binary there, and
+`client-home-nvim.yml` sets up Neovim there. Each is run wherever that client is: the
+phone, or WSL on the laptop, where one run of the ssh play also configures Windows. See
+*The laptop is two clients* below. That is not a second control plane: it cannot touch a Pi.
 
 The design and the reasoning are in
 [`../docs/management-plane.md`](../docs/management-plane.md); this file is how to run it.
@@ -35,6 +36,7 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 |---|---|---|
 | set up this phone or laptop: every ssh alias, every service token (the fleet's `fleet-<client>` too, never expiring), Windows too from WSL | `client-home-ssh-config.yml` | the [API token](#the-cloudflare-api-token) on this machine; it mints the service tokens itself |
 | put the remote view on this phone or laptop (`claude-remote dev`), or move it to the hub's new claude-sessions after a pin bump | `client-home-claude-remote.yml` | the `dev` block from the play above; reaches github.com only |
+| set up Neovim on this phone or WSL: packages, `~/.config/nvim` linked to [`clients/nvim`](../clients/nvim/README.md), plugins at the pinned commits, parsers, a check that `ty` and `ruff` attach | `client-home-nvim.yml` · `-K` on Arch when a package is missing · `--check` lists what it would install | Termux or Arch; reaches GitHub and the package mirror |
 | rotate one dev container's service token on this client, or add it once its tunnel exists | `client-home-ssh-config.yml -e container=or3-dev -e replace_token=true` | the same |
 | let a new phone or laptop into the dev containers | `server-add-authorized-keys.yml -e client_pubkey_file=~/laptop.pub` | a route to `zero` |
 | gate one Pi's ssh hostname behind Access, admitting each client's fleet token, proved from here and undone if the proof fails. **One host per run, `one` first, `zero` last** | `server-create-fleet-ssh-access.yml -e host=one` · `-e remove=true` to undo · no `-K` | the API token, and this client set up by the play above |

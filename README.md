@@ -67,6 +67,7 @@ hosts/two/setup/       how `two` was built — one reviewed root script, not on 
 bin/                   the scripts above (_infra.py is their shared header parser)
 ansible/               the management plane — playbooks, the fleet-inventory generator
 dev/                   every dev container on zero, one compose project, behind `ssh dev`
+clients/nvim/           Neovim for the phone and WSL, set up by ansible's client-home-nvim.yml
 docs/                  read these
 ```
 
