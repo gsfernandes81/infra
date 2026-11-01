@@ -49,6 +49,12 @@
 ;; a 46-column screen is room for code.
 (setopt display-line-numbers-width nil)
 
+;; A Python file shows at once and its language server connects behind it. eglot's
+;; default waits up to 3 s for the server first, and as Solo stops the server when its
+;; last file closes, nearly every open started one: measured through the Emacs server,
+;; 0.3 s here and about a second on the phone, against 0.06 s without the wait.
+(setopt eglot-sync-connect nil)
+
 ;; No warning window for jsonrpc; its warnings stay in *Messages*, which jsonrpc writes
 ;; them to as well. Solo stops a language server when its last file closes, and jsonrpc
 ;; gives it 0.3 s to exit (a constant, not a setting) before killing it and warning. rass
