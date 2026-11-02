@@ -114,6 +114,15 @@ stage "forced into emergency.target on a good snapshot (/etc/sim-fail-hard): is 
 # checker then reboots once and starts emergency.target. The kept units must leave ssh
 # answering, with the stacks stopped.
 ssh_vm 'rm -f /etc/sim-fail; rm -f /var/lib/misc/health-check.rebooted; touch /etc/sim-fail-hard' || true
+# What systemd will do with the units emergency mode is meant to keep, recorded before the
+# box goes dark: the drop-ins in force, and every dependency that could pull them down.
+# shellcheck disable=SC2016  # the loop runs in the guest, so its variables expand there
+ssh_vm 'for u in sshd.service NetworkManager.service dbus.service dbus-broker.service dbus.socket; do
+		echo "== $u"; systemctl show "$u" -p IgnoreOnIsolate -p Requires -p Requisite -p BindsTo \
+			-p PartOf -p Conflicts -p DropInPaths -p DefaultDependencies 2>&1; done
+	systemctl show emergency.target emergency.service -p Conflicts -p ConflictedBy -p Wants 2>&1
+	ls -la /etc/systemd/system/emergency.target.wants 2>&1
+	ls -d /var/log/journal 2>&1' 2>&1 | tee -a report.txt
 before=$(ssh_vm cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo none)
 ssh_vm 'systemctl reboot' || true
 reached=no
@@ -133,6 +142,17 @@ if [ "$reached" = yes ]; then
 else
 	echo "NOT REACHABLE: no ssh with emergency.target active within 12 minutes" | tee -a report.txt
 	screenshots
+	# A hard reset, then the dark boot's own journal: which jobs stopped the kept units, and
+	# what asked for them. sim-fail-hard goes first, through the next boot's first ssh,
+	# before health-checker can fail again; if it cannot, the screens are the record.
+	python3 -I "$here/qmp.py" qmp.sock "system_reset" | tee -a report.txt || true
+	if wait_for_ssh; then
+		ssh_vm 'rm -f /etc/sim-fail-hard'
+		ssh_vm 'journalctl --list-boots --no-pager | tail -n 4
+			journalctl -b -1 -o short-precise --no-pager \
+				| grep -iE "isolat|emergency|transaction|Stopping (OpenSSH|Network Manager|D-Bus)|Stopped target (Basic|System Init)|Job .* (sshd|NetworkManager|dbus)" \
+				| head -n 60' 2>&1 | tee -a report.txt
+	fi
 fi
 
 kill "$(cat qemu.pid)" 2>/dev/null || true
