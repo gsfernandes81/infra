@@ -1806,8 +1806,10 @@ The stacks stop, which is what emergency mode is for.
   - D-Bus (`dbus-broker`) ships without default dependencies and must run before
     `basic.target`. It gets `IgnoreOnIsolate` alone: ordered after `basic.target`, it made
     a cycle that took D-Bus and the network down on a normal boot.
-  - Kept services order after `sysinit.target` alone. Ordered after `basic.target` too,
-    which their default dependencies would add, they kept emergency mode from starting.
+  - Kept services order after `sysinit.target` alone. Two runs that added
+    `After=basic.target` never reached the emergency shell, but neither did a run without
+    it, and the dispatcher below proved the cause. So `sysinit.target` alone is what is
+    proven, not that `basic.target` breaks anything.
   - NetworkManager, kept up, activates its dispatcher over D-Bus. With default
     dependencies the dispatcher pulled `sysinit.target` back, which brought the console
     password watcher, which conflicts with `emergency.service` and cancelled the emergency
