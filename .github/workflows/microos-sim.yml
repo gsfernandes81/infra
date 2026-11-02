@@ -65,6 +65,48 @@ jobs:
             ${{ runner.temp }}/microos/serial.log
           if-no-files-found: warn
 
+  late-disks:
+    # zero's array in miniature (one bcache cache, two backing disks, btrfs RAID1) on
+    # simulated USB disks that appear after boot: does MicroOS assemble and mount it by
+    # itself, and what does a RequiresMountsFor= service do meanwhile?
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Give the runner user /dev/kvm
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install qemu
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils
+
+      - name: Build the array, boot without it, hot-plug it
+        run: sim/microos/run-late-disks.sh "$RUNNER_TEMP/late"
+
+      - name: Put the report in the job summary
+        if: always()
+        run: |
+          {
+            echo '```'
+            cat "$RUNNER_TEMP/late/report.txt" 2>/dev/null || echo 'no report'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: microos-late-disks
+          path: |
+            ${{ runner.temp }}/late/report.txt
+            ${{ runner.temp }}/late/serial.log
+          if-no-files-found: warn
+
   aarch64-packages:
     # MicroOS on aarch64 installs from Tumbleweed's ports repositories, which the Tumbleweed
     # container on an arm64 runner also uses. Asking them is enough to know a package exists

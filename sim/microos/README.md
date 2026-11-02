@@ -32,15 +32,26 @@ The run's ssh key is made fresh in the runner and dies with it. The job fails on
 the VM does not boot or answer ssh; every answer is in the job summary and in the
 `microos-probe` artifact, with the VM's serial log.
 
+## Late disks
+
+`run-late-disks.sh` builds `zero`'s array in miniature on three simulated USB disks: one
+bcache cache in front of two backing disks, and btrfs RAID1 on the two bcache devices,
+mounted by an fstab entry with `nofail` and `context=`. A stand-in service needs the mount
+through `RequiresMountsFor=`, as a deployment would. The script then boots the VM without
+the disks, hot-plugs them a minute later through qemu's QMP socket (`qmp.py`), and reports
+at each stage: whether udev registers the bcache devices by itself, whether systemd mounts
+the array when it completes, what the stand-in service did, and whether the bare
+mountpoint refused a write. It ends with a reboot with the disks present.
+
 ## What a green run does not show
 
-The probe runs on x86_64 under KVM, not on a Pi. It does not exercise USB bridges, real
-disks, Cloudflare, or any host's own first-boot script. Those come in later simulations or
-on the bench at the visit.
+The simulations run on x86_64 under KVM, not on a Pi; the USB disks are qemu's. It does
+not exercise USB bridges, real disks, Cloudflare, or any host's own first-boot script.
+Those come in later simulations or on the bench at the visit.
 
 ## Running it elsewhere
 
-`sim/microos/run-probe.sh <workdir>` runs on any Linux machine with KVM,
-`qemu-system-x86_64`, `qemu-img`, `mke2fs` and an ssh client. It writes only inside
+`run-probe.sh <workdir>` and `run-late-disks.sh <workdir>` run on any Linux machine with
+KVM, `qemu-system-x86_64`, `qemu-img`, `mke2fs` and an ssh client. It writes only inside
 `<workdir>`. Do not run it in the `infra` container: that container is on `zero`, has no
 KVM, and would compete with Immich.

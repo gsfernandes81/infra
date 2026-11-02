@@ -1,0 +1,39 @@
+#!/bin/bash
+# combustion: network
+#
+# First-boot script for the late-disks simulation VM only (sim/microos/README.md); not a
+# host's. Runs once inside a transactional-update shell, from the config drive's
+# "combustion" directory.
+set -euxo pipefail
+
+install -d -m 700 /root/.ssh
+install -m 600 authorized_keys /root/.ssh/authorized_keys
+systemctl enable sshd
+
+zypper --non-interactive install bcache-tools btrfsprogs
+
+# The array's mountpoint, made in the snapshot as a host's first-boot script would.
+mkdir -p /media/array
+
+mkdir -p /etc/rebootmgr
+printf '[rebootmgr]\nstrategy=off\n' > /etc/rebootmgr/rebootmgr.conf
+printf 'REBOOT_METHOD=none\n' > /etc/transactional-update.conf
+
+# A stand-in for a deployment that needs the array, as a compose service would through
+# docker.service: it records what it read, and is guarded by RequiresMountsFor=.
+cat > /etc/systemd/system/sim-consumer.service <<'UNIT'
+[Unit]
+Description=Stand-in for a service that needs /media/array
+RequiresMountsFor=/media/array
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'cat /media/array/f > /run/sim-consumer.out'
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl enable sim-consumer.service
+
+echo "combustion-late-disks: done" > /dev/console
