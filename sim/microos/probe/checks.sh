@@ -38,14 +38,27 @@ echo "-- with :z, which relabels the host path:"
 run docker run --rm -v /media/simtest/z:/data:z docker.io/library/alpine:3.20 \
 	sh -c 'cat /data/f && echo from-container > /data/g && echo write-ok'
 run ls -dZ /media/simtest/z /media/simtest/z/f
-echo "-- labelled once by a policy rule instead, so the compose files keep their mounts:"
-mkdir -p /media/simtest/p && echo from-host > /media/simtest/p/f
-run sh -c 'command -v semanage restorecon chcon'
-run semanage fcontext -a -t container_file_t '/media/simtest/p(/.*)?'
-run restorecon -R -v /media/simtest/p
-run docker run --rm -v /media/simtest/p:/data docker.io/library/alpine:3.20 \
+echo "-- labelled by chcon, which writes the label into the data disk's xattrs:"
+mkdir -p /media/simtest/c && echo from-host > /media/simtest/c/f
+run chcon -R -t container_file_t /media/simtest/c
+run docker run --rm -v /media/simtest/c:/data docker.io/library/alpine:3.20 \
 	sh -c 'cat /data/f && echo from-container > /data/g && echo write-ok'
-run ls -dZ /media/simtest/p /media/simtest/p/f /media/simtest/p/g
+run ls -dZ /media/simtest/c/f /media/simtest/c/g
+echo "-- labelled by the context= mount option, which writes nothing to the disk:"
+run umount /media/simtest
+truncate -s 1G /var/tmp/simctx.img
+run mkfs.btrfs -q /var/tmp/simctx.img
+run mount -o loop /var/tmp/simctx.img /media/simtest
+echo from-host > /media/simtest/f
+run umount /media/simtest
+run mount -o loop,context=system_u:object_r:container_file_t:s0 /var/tmp/simctx.img /media/simtest
+run ls -dZ /media/simtest /media/simtest/f
+run docker run --rm -v /media/simtest:/data docker.io/library/alpine:3.20 \
+	sh -c 'cat /data/f && echo from-container > /data/g && echo write-ok'
+run umount /media/simtest
+run mount -o loop /var/tmp/simctx.img /media/simtest
+echo "-- the same disk mounted without context= afterwards, to show nothing was written:"
+run ls -dZ /media/simtest/f /media/simtest/g
 
 section "the bare mountpoint, with nothing mounted on it"
 run umount /media/simtest
@@ -71,7 +84,21 @@ run systemctl is-enabled transactional-update.timer
 run systemctl list-timers transactional-update.timer --no-pager
 run sh -c 'systemctl cat transactional-update.service 2>&1 | head -n 30'
 run sh -c 'cat /etc/transactional-update.conf /usr/etc/transactional-update.conf 2>&1'
-run sh -c 'grep -n -i reboot /usr/share/transactional-update/transactional-update.conf 2>&1 | head'
+run sh -c 'ls -la /etc/rebootmgr/ 2>&1; cat /etc/transactional-update.conf 2>&1'
+
+section "the daily update, run now: does the box stay up?"
+boot_before=$(cat /proc/sys/kernel/random/boot_id)
+run sh -c 'snapper list --columns number,description | tail -n 3'
+run timeout 1200 systemctl start transactional-update.service
+run systemctl status transactional-update.service --no-pager --lines 0
+sleep 30
+if [ "$(cat /proc/sys/kernel/random/boot_id)" = "$boot_before" ]; then
+	echo "still up after the update: no reboot"
+else
+	echo "REBOOTED: boot id changed"
+fi
+run sh -c 'snapper list --columns number,description | tail -n 3'
+run sh -c 'journalctl -u transactional-update.service --no-pager | grep -iE "reboot|snapshot" | tail -n 10'
 
 
 section "bcache: does a udev rule register devices by itself?"

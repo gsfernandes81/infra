@@ -27,5 +27,12 @@ mkdir -p /media/simtest
 cp /usr/etc/rebootmgr.conf /root/rebootmgr.vendor.conf 2>/dev/null \
 	|| echo "no /usr/etc/rebootmgr.conf" > /root/rebootmgr.vendor.conf
 printf '[rebootmgr]\nstrategy=off\n' > /etc/rebootmgr.conf
+# rebootmgr ships its defaults in /usr/share/rebootmgr/ and ignored /etc/rebootmgr.conf in
+# the first runs; this tries the override directory that layout implies.
+mkdir -p /etc/rebootmgr
+printf '[rebootmgr]\nstrategy=off\n' > /etc/rebootmgr/rebootmgr.conf
+# What the daily update does once it has built a snapshot: none means it never reboots, and
+# the snapshot waits for the next reboot the owner chooses.
+printf 'REBOOT_METHOD=none\n' > /etc/transactional-update.conf
 
 echo "combustion-probe: done" > /dev/console
