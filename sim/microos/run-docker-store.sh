@@ -19,7 +19,9 @@ cd "$work"
 "$here/docker-store/make-store.sh" "$PWD/store.img" 2>&1 | tee report.txt
 fetch_image
 make_config_drive "$here/docker-store"
-boot_vm -drive "file=$PWD/store.img,if=virtio,format=raw,serial=simstore"
+# The serial goes on the device, not the drive: qemu refuses serial= on -drive.
+boot_vm -drive "file=$PWD/store.img,if=none,id=store,format=raw" \
+	-device "virtio-blk-pci,drive=store,serial=simstore"
 wait_for_ssh
 ssh_vm 'systemctl is-system-running --wait' || true
 ssh_vm 'bash -s' < "$here/docker-store/checks.sh" | tee -a report.txt

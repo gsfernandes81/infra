@@ -17,7 +17,7 @@ run cat /run/sim-consumer.out
 run sh -c 'journalctl -u media-array.mount -o short-precise --no-pager | tail -n 4'
 # The guard is checked only while nothing is mounted, so a file written into the array
 # itself is never mistaken for one that got past the bare mountpoint.
-if findmnt -q /media/array; then
+if mountpoint -q /media/array; then
 	echo "guard: not checked, the array is mounted"
 elif touch /media/array/guard-failed 2>/dev/null; then
 	echo "GUARD FAILED: wrote into the bare mountpoint"

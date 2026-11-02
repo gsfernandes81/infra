@@ -63,7 +63,7 @@ assert_three_disks() {
 wait_for_mount() {
 	local i
 	for i in $(seq 1 45); do
-		if ssh_vm 'findmnt -q /media/array'; then
+		if ssh_vm 'mountpoint -q /media/array'; then
 			echo "array mounted ~$((i * 2)) s after the check began" | tee -a report.txt
 			return 0
 		fi
