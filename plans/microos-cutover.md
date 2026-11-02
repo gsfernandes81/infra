@@ -106,45 +106,68 @@ test and the visit's own checks do that.
   the two bcache devices. Plugged in after boot, the disks were registered and attached by
   bcache-tools' own udev rule, and btrfs assembled the array. `bcache-register` and its
   hardcoded UUIDs are not carried to MicroOS.
-- **Late disks: the result is not settled.** With the disks present at boot, or plugged in
-  20 seconds after power-on, the array mounted at boot and a `RequiresMountsFor=` service
-  ran without hands. 20 seconds is inside systemd's default 90 s device timeout, so the
-  180 s `x-systemd.device-timeout=` that run also set was not what made it work. Plugged
-  in after boot, the array at first stayed unmounted unless a udev rule added the mount to
-  the array's `SYSTEMD_WANTS`. But once the stand-in service was also `WantedBy=` the
-  mount unit, the array mounted by itself in the same late stage with no rule and no
-  longer timeout, in two runs. Why that change matters is not understood, so the next runs
-  separate the two cases before any fstab or udev setting is chosen.
+- **Late disks: a udev rule mounts the array, and a unit wanted by the mount restarts what
+  needs it.** The late-disks job ran three variants side by side on 2026-11-02, each
+  booting without the disks and plugging them in at set moments. The table below has the
+  results. The 120 s plug is past systemd's default 90 s device timeout and inside the 180
+  seconds set by `x-systemd.device-timeout=`, so the longer timeout is what let a slow
+  array mount at boot. bcache assembled whichever disk came first. Why a unit wanted by
+  the mount also makes the mount start is not understood, so the hosts use both: the udev
+  rule for the mount, whose mechanism is documented, and a unit wanted by the mount that
+  restarts the stacks on that array.
 
-- **Docker's store carries over in place.** Alpine 3.24's own Docker (29.9.2) made a store
-  on btrfs with the containerd image store, as on the fleet: a pulled image, a locally
-  made one, a named volume with data, and an exited container. MicroOS's Docker (29.7.2,
-  containerd 2.4.2) took it over mounted as `/var/lib/docker` and listed all of it, but
-  new containers failed with `exec ... permission denied` until one `restorecon -R
-  /var/lib/docker`. After that the volume's data and the local image both read back. So
-  `one`'s apps, `garmin-mcp`'s local build, and `zero`'s dev and pearl-wallet volumes can
-  stay where they are. The relabel writes SELinux labels into the store. That Alpine's
-  Docker then ignores them, so a rollback is unaffected, is expected and not yet tested.
+| Variant | Plugged after boot | After boot, cache last | At 120 s, 180 s timeout |
+|---|---|---|---|
+| nothing added | stays unmounted | stays unmounted | mounted at boot, service ran |
+| service also `WantedBy=` the mount | mounted in 2 s, service ran | the same | the same |
+| udev rule adds the mount to `SYSTEMD_WANTS` | mounted in 2 s, service not started | the same | the same |
 
 - **A late array brings back only the containers that fail without it.** A container under
   Docker's own `restart: always`, as the fleet's stacks run, crash-looped while the bare
   mountpoint was empty and read-only, and its next restart after the mount came up on the
-  array, because Docker binds a volume afresh at every start. That container exits when
-  its file is missing. A service that starts cleanly on an empty directory, as Syncthing,
-  Immich's server and qBittorrent may, keeps running against the bare mountpoint and never
-  sees the array, because a later mount does not reach into a running container. Those
-  stacks need a restart once their array mounts; how is open.
+  array, in every variant, because Docker binds a volume afresh at every start. That
+  container exits when its file is missing. A service that starts cleanly on an empty
+  directory, as Syncthing, Immich's server and qBittorrent may, keeps running against the
+  bare mountpoint and never sees the array, because a later mount does not reach into a
+  running container. The restart unit above is for those.
 - **sudo asks for root's password.** MicroOS ships `Defaults targetpw` with `ALL ALL=(ALL)
   ALL`, and no `wheel` group. Each first-boot script adds a drop-in with both
   `Defaults:gavin !targetpw` and `gavin ALL=(ALL) ALL`, so `gavin` types his own password
   as on Alpine. That needs his password hash in the carry-over.
 - **The owner's tools exist:** fish, htop, nano, curl, jq and git.
 
-Still open: the late-disk result above, how a tolerant stack restarts once its array
-mounts, the compose shapes the fleet's stacks use (a project network, a published port, a
-shared network namespace; the first try failed on the test itself), and disks plugged
-cache-last.
+- **The fleet's compose shapes work.** A stack with a project network, a port published on
+  `127.0.0.1` and a service sharing another's network namespace, as qBittorrent shares
+  gluetun's, came up: the port answered from the host, a service reached another by name,
+  and the namespace-sharing one reached it on `127.0.0.1`.
 
+Still open: whether the 32-bit `cloudflared` runs on MicroOS's kernel (§ *Waiting on the
+owner*), which needs the bench.
+
+## Waiting on the owner
+
+These are the owner's calls. Each blocks the first-boot scripts or a play until it is
+made.
+
+1. **The update policy, per host.** Either the daily update stays on and takes effect at
+   the next boot of any kind, or its timer is disabled and nothing changes until the owner
+   runs `transactional-update` (§ *What the simulation has answered*).
+2. **Which `cloudflared`.** The fleet runs Cloudflare's 32-bit `arm` build on all three
+   hosts, so the staggered rollout tests what every host runs
+   ([`decisions.md`](../docs/decisions.md) § *One cloudflared build on all three*).
+   MicroOS offers openSUSE's `aarch64` package, which `transactional-update` would update
+   outside that rollout. Keeping the rule means the binary in `/usr/local/bin`, which
+   MicroOS leaves writable. Whether a 32-bit binary runs on MicroOS's kernel is untested:
+   GitHub's arm64 runners cannot run 32-bit code, so slice 1's bench test is the first
+   place to see it.
+3. **How Syncthing runs on `one`:** as a compose deployment, as on `zero`, or as
+   openSUSE's package under systemd.
+4. **Where each host's first-boot files live.** The proposal is
+   `hosts/<host>/microos/combustion/script`, beside an fstab fragment the script appends
+   to the image's own `/etc/fstab`, since MicroOS writes its root entries at install.
+5. **`three`'s tunnel.** `server-create-tunnel.yml` was written for 2g's migration of a
+   host that already has one. A first tunnel for a new host needs a variant of it, which
+   the owner runs from the phone with the Cloudflare API token.
 
 ## Docs this changes
 
