@@ -173,8 +173,8 @@ done
 if [ "$reached" = yes ]; then
 	sleep 20
 	# shellcheck disable=SC2016  # runs in the guest, so its expansions happen there
-	ssh_vm 'for u in emergency.target sshd NetworkManager dbus-broker sim-tunnel \
-			systemd-user-sessions sim-stack; do echo "$u: $(systemctl is-active $u)"; done
+	ssh_vm 'for u in emergency.target emergency.service sshd NetworkManager dbus-broker \
+			sim-tunnel systemd-user-sessions sim-stack; do echo "$u: $(systemctl is-active $u)"; done
 		ls -la /run/nologin 2>&1
 		journalctl -b -u health-checker --no-pager | tail -n 3' 2>&1 | tee -a report.txt
 	pass "ssh answered on the boot health-checker sent to emergency mode"
@@ -192,7 +192,7 @@ if [ "$reached" = yes ]; then
 	else
 		fail "no sulogin on the console, so emergency mode offers no root login"
 	fi
-	for u in sshd NetworkManager dbus-broker sim-tunnel systemd-user-sessions; do
+	for u in sshd NetworkManager dbus-broker sim-tunnel; do
 		active "$u" && pass "$u is up in emergency mode" || fail "$u is not up in emergency mode"
 	done
 	active sim-stack && fail "the stack stand-in is still running in emergency mode" \

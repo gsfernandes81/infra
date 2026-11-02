@@ -124,17 +124,26 @@ esac
 PLUGIN
 chmod 755 /usr/libexec/health-checker/sim-tunnel.sh
 
-# Emergency mode keeps the ways in: sshd, the network, D-Bus, user sessions and the
-# tunnel's stand-in stay up, and the stack stand-in stops, which is what emergency mode is
-# for. health-checker enters it with `systemctl start emergency.target`, and
-# sysinit.target conflicts with emergency mode, so entering it stops sysinit.target and
-# every unit that Requires it (the diagnostic run's unit dump). Default dependencies are
-# that requirement plus some ordering. Each kept unit drops them and keeps the ordering it
-# needs: a service after sysinit, a socket after sysinit and before sockets.target. IgnoreOnIsolate covers the other way in, an
-# isolate such as a typed `systemctl emergency`; health-checker's start does not need it.
-# A unit this image lacks is skipped.
+# Emergency mode keeps the ways in: sshd, the network, D-Bus and the tunnel's stand-in stay
+# up, and the stack stand-in stops, which is what emergency mode is for. health-checker
+# enters it with `systemctl start emergency.target`, and sysinit.target conflicts with
+# emergency mode, so entering it stops sysinit.target and every unit that Requires it (the
+# diagnostic run's unit dump). Default dependencies are that requirement plus some
+# ordering. Each kept unit drops them and keeps the ordering it needs: a service after
+# sysinit, a socket after sysinit and before sockets.target. IgnoreOnIsolate covers the
+# other way in, an isolate such as a typed `systemctl emergency`; health-checker's start
+# does not need it. A unit this image lacks is skipped.
+#
+# systemd-user-sessions is not kept. It writes /run/nologin when it stops, which turns away
+# every login but root's, and root may not log in over ssh, so gavin would be locked out.
+# Kept up instead, it stopped the emergency shell from starting at all (every run since it
+# was added). So it stops as before, and its stop no longer writes /run/nologin.
+mkdir -p /etc/systemd/system/systemd-user-sessions.service.d
+printf '%s\n' '[Service]' 'ExecStop=' \
+	> /etc/systemd/system/systemd-user-sessions.service.d/no-nologin-on-stop.conf
+
 for unit in sshd.service NetworkManager.service wicked.service sim-tunnel.service \
-	dbus.socket dbus.service dbus-broker.service systemd-user-sessions.service; do
+	dbus.socket dbus.service dbus-broker.service; do
 	[ -e "/usr/lib/systemd/system/$unit" ] || [ -e "/etc/systemd/system/$unit" ] || continue
 	mkdir -p "/etc/systemd/system/$unit.d"
 	# D-Bus ships without default dependencies and must run before basic.target, so it
