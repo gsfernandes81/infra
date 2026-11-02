@@ -161,37 +161,39 @@ stage "forced into emergency mode on a good snapshot (/etc/sim-fail-hard): is th
 # active, and the stack stand-in must have stopped. The forced failure clears itself after
 # the emergency boot (the plugin), so a hard reset ends the stage.
 ssh_vm 'rm -f /var/lib/misc/health-check.rebooted; echo 0 > /etc/sim-fail-hard'
+serial_before=$(wc -c < serial.log)
 ssh_vm 'systemctl reboot' || true
-reached=no
-for _ in $(seq 1 72); do
+# First watch without touching: sulogin's prompt goes to the console, which is the serial
+# log. An ssh login starts the user's systemd manager, which requires sysinit.target, which
+# conflicts with emergency mode, so polling over ssh could itself end the emergency mode it
+# was looking for; earlier runs that did only that never saw the emergency shell.
+prompt=no
+for _ in $(seq 1 60); do
 	sleep 10
-	if ssh_vm 'journalctl -b --no-pager | grep -q "starting emergency shell"' 2>/dev/null; then
-		reached=yes
+	if tail -c +"$serial_before" serial.log | grep -aq "root password for maintenance"; then
+		prompt=yes
 		break
 	fi
 done
-if [ "$reached" = yes ]; then
+python3 -I "$here/qmp.py" qmp.sock "screendump $PWD/emergency.ppm" >/dev/null || true
+python3 -I "$here/ppm2png.py" emergency.ppm emergency.png || true
+if [ "$prompt" = yes ]; then
+	pass "sulogin asked for root's password on the console, before any ssh login"
+else
+	fail "no sulogin prompt on the console within 10 minutes"
+fi
+# Then the way in: ssh, the kept units, the stacks stopped. What the login does to
+# emergency mode is recorded, not asserted.
+if ssh_vm 'journalctl -b --no-pager | grep -q "starting emergency shell"' 2>/dev/null; then
 	sleep 20
 	# shellcheck disable=SC2016  # runs in the guest, so its expansions happen there
 	ssh_vm 'for u in emergency.target emergency.service sshd NetworkManager dbus-broker \
 			sim-tunnel systemd-user-sessions sim-stack; do echo "$u: $(systemctl is-active $u)"; done
+		echo "sulogin after an ssh login: $(pgrep -x sulogin >/dev/null && echo running || echo gone)"
 		ls -la /run/nologin 2>&1
-		journalctl -b -u health-checker --no-pager | tail -n 3' 2>&1 | tee -a report.txt
+		journalctl -b -o short-precise --no-pager | grep -iE "emergency|sulogin" | tail -n 8' \
+		2>&1 | tee -a report.txt
 	pass "ssh answered on the boot health-checker sent to emergency mode"
-	# Recorded rather than asserted: a run with a root password set read emergency.target as
-	# inactive while the stack stayed stopped and the boot did not resume, and what that
-	# state means is not settled. The console and the units' own history say more.
-	ssh_vm 'systemctl status emergency.service emergency.target --no-pager --lines 6 2>&1 | head -n 30
-		journalctl -b -o short-precise --no-pager | grep -iE "emergency|sulogin|transaction|job .* (failed|canceled|cancelled)" | tail -n 16' \
-		2>&1 | tee -a report.txt || true
-	python3 -I "$here/qmp.py" qmp.sock "screendump $PWD/emergency.ppm" >/dev/null || true
-	python3 -I "$here/ppm2png.py" emergency.ppm emergency.png || true
-	# The root login the hosts need in emergency mode is sulogin's prompt on the console.
-	if ssh_vm 'pgrep -x sulogin >/dev/null'; then
-		pass "sulogin is waiting on the console for root's password"
-	else
-		fail "no sulogin on the console, so emergency mode offers no root login"
-	fi
 	for u in sshd NetworkManager dbus-broker sim-tunnel; do
 		active "$u" && pass "$u is up in emergency mode" || fail "$u is not up in emergency mode"
 	done
@@ -199,7 +201,7 @@ if [ "$reached" = yes ]; then
 		|| pass "the stack stand-in stopped"
 	ssh_vm 'test ! -e /run/nologin' && pass "no /run/nologin" || fail "/run/nologin exists"
 else
-	fail "no ssh on the boot health-checker sent to emergency mode, within 12 minutes"
+	fail "no ssh on the boot health-checker sent to emergency mode"
 	screenshots
 fi
 python3 -I "$here/qmp.py" qmp.sock "system_reset" >/dev/null || true
