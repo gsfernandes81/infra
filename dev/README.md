@@ -29,8 +29,10 @@ lint, read a playbook against the real `ansible.cfg` — and are not wired to th
   decided 2026-10-25, [`../docs/management-plane.md`](../docs/management-plane.md) § *A
   control node inside the fleet*. Playbooks run from the phone. `make fleet` and the `fleet`
   line in `make verify` say so, and it is not a fault.
-- **Not a Remote Control host.** No dev container runs one ([`../docs/decisions.md`](../docs/decisions.md),
-  2026-08-25). One way in everywhere, `ssh dev`; adding it back is a decision, not a variable.
+- **Not a Remote Control host.** No dev container runs a Remote Control daemon ([`../docs/decisions.md`](../docs/decisions.md),
+  2026-08-25). One way in everywhere, `ssh dev`; adding a daemon back is a decision, not a variable.
+  A session may still turn Remote Control on for itself with Claude Code's `/rc`, in a slot or in
+  `claude-remote` (claude-sessions 0.13.8), and it ends with that session's claude.
 - **Not a holder of the docker socket.** See *The socket line somebody will add*.
 - **Not a tunnel endpoint, except or3's.** The phone holds a reverse forward into or3 to
   reach the vessel LAN. The one `sshd_config` allows `-R` only, the hub's key is `restrict`
@@ -109,8 +111,8 @@ claude-remote dev
 On zero, `make login` (`C=<c>` for another container) reports the hub's token, runs `claude
 auth login` if needed, and clones the workspace if start-up could not; re-running it is safe.
 Then `make verify` should read `sshd: running in the foreground`, `auth: claude logged in`,
-`tunnel: the hub's, serving dev`, `hub: key authorised; claude-sessions 0.13.6 here,
-claude-sessions 0.13.6 at the hub`, `relay: claude-sessions 0.13.6`, `github: the hub's token for gsfernandes81/infra, until …`,
+`tunnel: the hub's, serving dev`, `hub: key authorised; claude-sessions 0.13.8 here,
+claude-sessions 0.13.8 at the hub`, `relay: claude-sessions 0.13.8`, `github: the hub's token for gsfernandes81/infra, until …`,
 all collections installed, and `fleet: no route to zero/one/two`.
 
 **The memory pool is opt-in**: `DEV_CGROUP_PARENT=/devpool` puts every dev container and
@@ -886,7 +888,7 @@ copies in is ignored.
 
 [`gsfernandes81/claude-sessions`](https://github.com/gsfernandes81/claude-sessions) is the
 session registry: one JSON file per slot under `~/.local/share/claude-sessions/` (on a volume),
-kept current by Claude Code's own hooks. The hub pins **v0.13.6** and installs it for every
+kept current by Claude Code's own hooks. The hub pins **v0.13.8** and installs it for every
 container (*The hub*). A bump reaches every container when the hub is recreated, with no
 container restarted: hooks and offload passes run the binary from the volume each time, and
 each container's agent is started by the hub's menu over ssh and ends with that connection, so
