@@ -39,6 +39,18 @@ wait_for_new_boot() {
 	return 1
 }
 
+# What the screen shows, for a guest that stops answering: GRUB and the early boot write to
+# the display, not to the serial log. Saves screen-<n>.png and qemu's run state.
+screenshots() {
+	local n
+	for n in 1 2 3; do
+		python3 -I "$here/qmp.py" qmp.sock "screendump $PWD/screen-$n.ppm" "info status" \
+			| tee -a report.txt || true
+		convert "screen-$n.ppm" "screen-$n.png" 2>/dev/null && rm -f "screen-$n.ppm"
+		sleep 120
+	done
+}
+
 # Reboots, counting the boots the guest goes through until it settles.
 reboot_and_settle() {
 	local before
@@ -78,9 +90,20 @@ state
 ssh_vm 'ls -l /usr/share/sim-good-update' 2>&1 | tee -a report.txt || true
 
 stage "the check failing on a snapshot that has booted fine (/etc/sim-fail), then a reboot"
+# The case the cloudflared plugin must never be able to cause, by an outage or by a
+# mistake in /etc: the previous run lost the guest here, so this stage records what it can
+# see instead of stopping the script.
 ssh_vm 'touch /etc/sim-fail'
-reboot_and_settle
-state
-ssh_vm 'rm -f /etc/sim-fail; systemctl list-units --state=active --type=service --no-pager --no-legend | wc -l' 2>&1 | tee -a report.txt || true
+if reboot_and_settle; then
+	state
+	ssh_vm 'rm -f /etc/sim-fail; systemctl list-units --state=active --type=service --no-pager --no-legend | wc -l' 2>&1 | tee -a report.txt || true
+else
+	echo "NO SETTLED BOOT: the guest is not answering; screenshots follow" | tee -a report.txt
+	screenshots
+	if wait_for_ssh; then
+		echo "it answered after the screenshots" | tee -a report.txt
+		state
+	fi
+fi
 
 kill "$(cat qemu.pid)" 2>/dev/null || true
