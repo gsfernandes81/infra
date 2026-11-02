@@ -131,8 +131,14 @@ section "bcache: does a udev rule register devices by itself?"
 run rpm -q bcache-tools
 run sh -c 'rpm -ql bcache-tools | grep -i rules'
 
+section "sudo: whose password does it ask for?"
+run sh -c 'rpm -qa | grep -i sudo | sort'
+run sh -c 'grep -vE "^(#|$)" /etc/sudoers /usr/etc/sudoers 2>&1 | head -n 20'
+run sh -c 'ls /etc/sudoers.d /usr/etc/sudoers.d 2>&1; cat /etc/sudoers.d/* /usr/etc/sudoers.d/* 2>/dev/null | grep -vE "^(#|$)"'
+run sh -c 'getent group wheel; grep -E "^(UID_MIN|GID_MIN)" /etc/login.defs /usr/etc/login.defs 2>/dev/null'
+
 section "packages a host needs"
 for p in cloudflared bcache-tools smartmontools btrfsprogs docker docker-compose \
-	zram-generator syncthing; do
+	zram-generator syncthing fish htop nano curl jq git; do
 	run zypper --non-interactive --quiet search --match-exact "$p"
 done
