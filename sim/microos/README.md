@@ -67,8 +67,9 @@ inside the snapshot, as the package's does. A plugin in `/usr/libexec/health-che
 also inside the snapshot, checks it as the hosts' `cloudflared` plugin will, with the same
 guard: it passes unchecked on a snapshot health-checker has already recorded as working.
 The VM has a root password, as the hosts will, and the drop-ins that keep sshd, the
-network, D-Bus, user sessions and the stand-in up in emergency mode, beside a stack
-stand-in that must stop there.
+network and its dispatcher, D-Bus, the console gettys and the stand-in up in emergency
+mode, beside a stack stand-in that must stop there. `systemd-user-sessions` stops as
+usual, but its stop no longer writes `/run/nologin`.
 
 Each stage asserts its outcome, and any FAIL fails the job:
 
@@ -79,8 +80,11 @@ Each stage asserts its outcome, and any FAIL fails the job:
 - a check failing on a snapshot that had booted fine changes nothing, and the box stays
   out of emergency mode;
 - a check forced to fail on every boot sends the box to emergency mode, where it must
-  hold, answer ssh with the kept units up and the stack stand-in stopped, and have no
-  `/run/nologin`.
+  answer ssh with the kept units up, offer a console login on `tty1` and the serial port,
+  have the stack stand-in stopped, and have no `/run/nologin`. Whether the emergency shell
+  itself still holds is recorded with a screenshot, not asserted: it lasts only until
+  something pulls `sysinit.target` back, which is why the console login rests on the kept
+  gettys.
 
 A guest that stops answering is photographed through QMP (`ppm2png.py` converts the
 screens). `rollback/cloudflared.sh` separately runs the commands the hosts' plugin will

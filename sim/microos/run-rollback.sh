@@ -170,7 +170,7 @@ ssh_vm 'systemctl reboot' || true
 prompt=no
 for _ in $(seq 1 60); do
 	sleep 10
-	if tail -c +"$serial_before" serial.log | grep -aq "root password for maintenance"; then
+	if tail -c +"$serial_before" serial.log | grep -aq "root password for system maintenance"; then
 		prompt=yes
 		break
 	fi
