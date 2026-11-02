@@ -38,7 +38,14 @@ echo "-- with :z, which relabels the host path:"
 run docker run --rm -v /media/simtest/z:/data:z docker.io/library/alpine:3.20 \
 	sh -c 'cat /data/f && echo from-container > /data/g && echo write-ok'
 run ls -dZ /media/simtest/z /media/simtest/z/f
-run sh -c 'journalctl -k --no-pager | grep -i "avc:.*denied" | tail -n 5'
+echo "-- labelled once by a policy rule instead, so the compose files keep their mounts:"
+mkdir -p /media/simtest/p && echo from-host > /media/simtest/p/f
+run sh -c 'command -v semanage restorecon chcon'
+run semanage fcontext -a -t container_file_t '/media/simtest/p(/.*)?'
+run restorecon -R -v /media/simtest/p
+run docker run --rm -v /media/simtest/p:/data docker.io/library/alpine:3.20 \
+	sh -c 'cat /data/f && echo from-container > /data/g && echo write-ok'
+run ls -dZ /media/simtest/p /media/simtest/p/f /media/simtest/p/g
 
 section "the bare mountpoint, with nothing mounted on it"
 run umount /media/simtest
@@ -57,8 +64,15 @@ echo "-- set at runtime; the after-reboot section shows whether it persists:"
 run rebootmgrctl set-strategy off
 run rebootmgrctl get-strategy
 run sh -c 'ls -la /etc/rebootmgr* 2>&1; cat /etc/rebootmgr.conf 2>&1'
+run cat /usr/share/rebootmgr/rebootmgr.conf
+run sh -c 'ls -la /etc/rebootmgr 2>&1; systemctl cat rebootmgr.service 2>&1 | head -n 30'
+run rebootmgrctl status
 run systemctl is-enabled transactional-update.timer
 run systemctl list-timers transactional-update.timer --no-pager
+run sh -c 'systemctl cat transactional-update.service 2>&1 | head -n 30'
+run sh -c 'cat /etc/transactional-update.conf /usr/etc/transactional-update.conf 2>&1'
+run sh -c 'grep -n -i reboot /usr/share/transactional-update/transactional-update.conf 2>&1 | head'
+
 
 section "bcache: does a udev rule register devices by itself?"
 run rpm -q bcache-tools
