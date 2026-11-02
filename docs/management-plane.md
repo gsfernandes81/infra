@@ -526,6 +526,21 @@ ones that answer the question this document started from.
 | 6 | ~~`dd` off `two`~~ | `two`, `one` | arm64 CI, upstream | **Dropped 2026-10-25**, the owner's call: moving `destiny-director` follows its own needs, not this plan — [gsfernandes81/infra#11](https://github.com/gsfernandes81/infra/issues/11), which may or may not end in a PR. The number is kept so the others do not shift |
 | 7 | **Rootless podman on `one`** — roadmap §2 | `one` | 3, MicroOS on `one` | **Deferred to MicroOS, 2026-10-25** — the owner's call, so `one` converts once, with memory limits, instead of on OpenRC without them and then again ([`decisions.md`](decisions.md)) |
 | 8 | ~~`two` as the scheduled read-only control node~~ | `two` | ~~6, 7~~ — none since 2026-10-25 | **Dropped 2026-10-25**, the owner's call: no control node inside the fleet. It needed Ansible on a Pi and a key on `two` reaching `zero` and `one`, which this repo refuses, and its one unique benefit, alerting with nobody at the phone, goes to the proposed Cloudflare Worker monitor (see 2h's notes), which needs no key on the fleet. The number is kept. |
+| 9 | **`three` joins; `one` becomes the off-site mirror; MicroOS on `three` and `one`, `zero` if time allows** | all four, edge | the November 2026 visit | **Planned 2026-11-02**: [`plans/three.md`](../plans/three.md) for the end state, [`plans/microos-cutover.md`](../plans/microos-cutover.md) for the visit. MicroOS keeps Docker; Phase 7 follows over ssh ([`decisions.md`](decisions.md)) |
+
+**Filed 2026-11-02, no phase number: `zero`'s `sdb` is SMR and worn, and both of its hard
+disks are past their load-cycle rating.** `sdb` (WD10SPZX) is SMR, as WD's own list says,
+and read 6 reported-uncorrectable reads, 8 command timeouts and 1.22 million load cycles.
+`sdc` (the WD Elements disk) read 1.33 million. Both are about twice the design figure,
+with no reallocated or pending sectors. bcache's 97 % hit ratio leaves the disks idle, and
+idle laptop disks park their heads every few seconds. btrfs's counters were all zero, and
+the last scrub, 2026-08-03, was clean. Phase 9 replaces `sdb`; `sdc` waits for errors or
+space. No scrub has run since August, and nothing schedules one.
+
+**Filed 2026-11-02, no phase number: `one`'s SSD shows 182 SATA link downshifts.** The
+MX500 itself is near new (98 % life left). The likeliest cause is August's bridge stalls
+from the failing SP900. It matters because the same Sabrent moves to `three` in Phase 9; a
+count that keeps rising there points at the enclosure.
 
 **Filed 2026-10-27, no phase number — dev's build key under podman.** `dev/Makefile` runs
 Compose with `BUILDX_BAKE_ENTITLEMENTS_FS=0` so buildx may read or3-dev's deploy key, which is

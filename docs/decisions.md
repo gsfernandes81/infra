@@ -1720,6 +1720,22 @@ whose README is the setup.
 - **No ports, a read-only root, every capability dropped.** The light client's peer
   connections are outbound, and nothing outside the container needs the RPC.
 
+## MicroOS runs Docker first; podman follows over ssh
+
+**Decided 2026-11-02**, the owner's call, for the November 2026 visit
+([`plans/microos-cutover.md`](../plans/microos-cutover.md)). The hosts that move to
+MicroOS keep Docker and their compose files as they are. Rootless podman and Quadlet
+(Phase 7) come after, as a separate change.
+
+- **The OS is the only change that needs the owner at the cluster.** The visit leaves
+  about 10 hours in slices, so it holds that one change. A container runtime can be
+  changed over ssh from anywhere.
+- **One change at a time keeps one suspect.** A box that fails on its first MicroOS boot
+  has a new OS to blame and not a new runtime as well. `dev/compose.yaml` in particular
+  leans on Docker (`cgroup_parent`, `BUILDX_BAKE_ENTITLEMENTS_FS`).
+- **It does not reopen Phase 7.** Rootless podman's memory limits are still the reason to
+  convert, and MicroOS is still what makes them possible.
+
 ## The lesson worth keeping
 
 

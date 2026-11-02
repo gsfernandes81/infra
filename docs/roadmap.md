@@ -41,6 +41,9 @@ rootful.
 
 ## 3. openSUSE MicroOS — the target
 
+**Scheduled for the November 2026 visit**: `three` and `one` first, `zero` if time allows,
+all on Docker at first ([`plans/microos-cutover.md`](../plans/microos-cutover.md)).
+
 **Decided — and gated on being ashore, not on anything technical.** Reconfirmed by the
 owner 2026-08-29: it is waiting for physical presence, and it is **not set in stone** —
 it can be overturned. Transactional/immutable root with btrfs snapshots and automatic
