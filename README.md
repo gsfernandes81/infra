@@ -68,6 +68,7 @@ bin/                   the scripts above (_infra.py is their shared header parse
 ansible/               the management plane — playbooks, the fleet-inventory generator
 dev/                   every dev container on zero, one compose project, behind `ssh dev`
 clients/emacs/         the editor for the phone and WSL, set up by ansible's client-home-emacs.yml
+sim/microos/           CI simulations of the MicroOS move, run on GitHub's runners, never on a host
 docs/                  read these
 ```
 

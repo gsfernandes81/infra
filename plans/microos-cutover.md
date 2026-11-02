@@ -72,7 +72,7 @@ slice, because the infra container moves with it. Podman comes later still.
 
 ## What the simulation has answered
 
-The simulations (`sim/microos/`, on the `microos-sim` branch until reviewed) ran on
+The simulations (`sim/microos/`, run by `.github/workflows/microos-sim.yml`) ran on
 2026-11-02 against MicroOS 20261030, kernel 7.3, Docker 29.7.2 and Compose 5.6.1. They run
 on x86_64 under KVM, with qemu's USB disks and small loop-mounted filesystems. None of it
 shows how a Pi, a Sabrent or Argon bridge, or a full-size array behaves; slice 1's bench
