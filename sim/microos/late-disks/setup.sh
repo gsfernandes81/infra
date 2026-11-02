@@ -36,3 +36,12 @@ echo "UUID=$uuid /media/array btrfs nofail,context=system_u:object_r:container_f
 	>> /etc/fstab
 systemctl daemon-reload
 tail -n 1 /etc/fstab
+
+# A container started by Docker's own restart policy, as the fleet's stacks are, with the
+# array bind-mounted: systemd never starts it, so only Docker can bring it back.
+mount /media/array
+docker run -d --restart always --name simapp -v /media/array:/data \
+	docker.io/library/alpine:3.20 sh -c 'cat /data/f && sleep 3600'
+sleep 5
+docker logs simapp
+umount /media/array || { docker stop simapp; umount /media/array; docker start simapp; }

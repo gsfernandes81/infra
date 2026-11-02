@@ -10,7 +10,8 @@ install -d -m 700 /root/.ssh
 install -m 600 authorized_keys /root/.ssh/authorized_keys
 systemctl enable sshd
 
-zypper --non-interactive install bcache-tools btrfsprogs
+zypper --non-interactive install bcache-tools btrfsprogs docker
+systemctl enable docker
 
 # The array's mountpoint, made in the snapshot as a host's first-boot script would.
 mkdir -p /media/array

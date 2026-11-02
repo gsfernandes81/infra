@@ -15,3 +15,6 @@ run systemctl status media-array.mount --no-pager --lines 5
 run systemctl status sim-consumer.service --no-pager --lines 5
 run cat /run/sim-consumer.out
 run sh -c 'touch /media/array/written-while-unmounted-would-be-here; ls /media/array'
+run docker ps -a --filter name=simapp --format '{{.Names}} {{.Status}} restarts={{.RunningFor}}'
+run docker inspect simapp --format 'restarts={{.RestartCount}} running={{.State.Running}}'
+run sh -c 'docker logs simapp 2>&1 | tail -n 4'
