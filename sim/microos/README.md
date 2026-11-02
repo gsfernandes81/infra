@@ -58,6 +58,20 @@ as on the fleet, with a pulled image, a named volume holding data, a locally mad
 and an exited container. The VM mounts the image as `/var/lib/docker` and reports what it
 can still use, first as the store arrives and then after `restorecon` labels it.
 
+## Rollback
+
+`run-rollback.sh` asks whether MicroOS's `health-checker` rolls a box back from an update
+that breaks the service its plugin checks. A real `cloudflared` cannot run without a
+tunnel's credentials, so a stand-in service takes its place: its binary lives in `/usr`,
+inside the snapshot, as the package's does, and a plugin in
+`/usr/local/libexec/health-checker/` checks it the way the hosts' `cloudflared` plugin
+will. The VM records a good snapshot, takes an update that breaks the stand-in, and
+reboots; then an update that does not; then makes the check fail on a snapshot that has
+already booted fine. Each stage reports which snapshot booted and what health-checker
+logged. Separately, `rollback/cloudflared.sh` runs the commands that plugin will rely on
+against openSUSE's `cloudflared` package, with a configuration shaped as the fleet's and
+no credentials.
+
 ## What a green run does not show
 
 The simulations run on x86_64 under KVM, not on a Pi; the USB disks are qemu's. It does

@@ -1,0 +1,65 @@
+#!/bin/bash
+# combustion: network
+#
+# First-boot script for the rollback simulation VM only (sim/microos/README.md); not a
+# host's. Installs health-checker with a plugin for a stand-in service, built the way the
+# hosts' cloudflared plugin will be, and openSUSE's cloudflared for its commands.
+set -euxo pipefail
+
+install -d -m 700 /root/.ssh
+install -m 600 authorized_keys /root/.ssh/authorized_keys
+systemctl enable sshd
+
+zypper --non-interactive install health-checker cloudflared
+systemctl enable health-checker.service
+
+mkdir -p /etc/rebootmgr
+printf '[rebootmgr]\nstrategy=off\n' > /etc/rebootmgr/rebootmgr.conf
+printf 'REBOOT_METHOD=none\n' > /etc/transactional-update.conf
+systemctl disable transactional-update.timer
+
+# The stand-in for cloudflared: its binary lives in /usr, inside the snapshot, as the
+# package's does, so an update can break it.
+cat > /usr/bin/sim-tunnel <<'BIN'
+#!/bin/sh
+exec sleep infinity
+BIN
+chmod 755 /usr/bin/sim-tunnel
+cat > /etc/systemd/system/sim-tunnel.service <<'UNIT'
+[Unit]
+Description=Stand-in for cloudflared, for the health-checker simulation
+
+[Service]
+ExecStart=/usr/bin/sim-tunnel
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl enable sim-tunnel.service
+
+# health-checker must run after the service its plugin checks.
+mkdir -p /etc/systemd/system/health-checker.service.d
+printf '[Unit]\nAfter=sim-tunnel.service\n' \
+	> /etc/systemd/system/health-checker.service.d/after-sim-tunnel.conf
+
+# The plugin, where an admin's go. It checks the service itself, and fails only on that,
+# or on /etc/sim-fail, which the last stage uses to fail a snapshot that has booted fine.
+install -d /usr/local/libexec/health-checker
+cat > /usr/local/libexec/health-checker/sim-tunnel.sh <<'PLUGIN'
+#!/bin/sh
+case "$1" in
+check)
+	[ -e /etc/sim-fail ] && { echo "sim-tunnel: /etc/sim-fail present"; exit 1; }
+	for _ in $(seq 1 30); do
+		systemctl is-active -q sim-tunnel.service && exit 0
+		sleep 2
+	done
+	echo "sim-tunnel: service not active after 60 s"
+	exit 1
+	;;
+stop) exit 0 ;;
+esac
+PLUGIN
+chmod 755 /usr/local/libexec/health-checker/sim-tunnel.sh
+
+echo "combustion-rollback: done" > /dev/console
