@@ -107,6 +107,47 @@ jobs:
             ${{ runner.temp }}/late/serial.log
           if-no-files-found: warn
 
+  docker-store:
+    # Whether MicroOS's Docker can take over the /var/lib/docker Alpine's Docker leaves on the
+    # fleet's SSDs: the store is made by Alpine 3.24's own package, then mounted in the VM.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Give the runner user /dev/kvm
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install qemu and btrfs-progs
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils btrfs-progs
+
+      - name: Make an Alpine Docker store and hand it to MicroOS
+        run: sim/microos/run-docker-store.sh "$RUNNER_TEMP/store"
+
+      - name: Put the report in the job summary
+        if: always()
+        run: |
+          {
+            echo '```'
+            cat "$RUNNER_TEMP/store/report.txt" 2>/dev/null || echo 'no report'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: microos-docker-store
+          path: |
+            ${{ runner.temp }}/store/report.txt
+            ${{ runner.temp }}/store/serial.log
+          if-no-files-found: warn
+
   aarch64-packages:
     # MicroOS on aarch64 installs from Tumbleweed's ports repositories, which the Tumbleweed
     # container on an arm64 runner also uses. Asking them is enough to know a package exists

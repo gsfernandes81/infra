@@ -43,6 +43,16 @@ at each stage: whether udev registers the bcache devices by itself, whether syst
 the array when it completes, what the stand-in service did, and whether the bare
 mountpoint refused a write. It ends with a reboot with the disks present.
 
+## Docker's store
+
+`run-docker-store.sh` asks whether MicroOS's Docker can take over the `/var/lib/docker`
+that Alpine's Docker leaves on `one`'s SSD and `zero`'s `sda2`.
+`docker-store/make-store.sh` runs Alpine 3.24's own Docker package in a privileged
+container on the runner and leaves a store on a btrfs image: the containerd image store,
+as on the fleet, with a pulled image, a named volume holding data, a locally made image
+and an exited container. The VM mounts the image as `/var/lib/docker` and reports what it
+can still use, first as the store arrives and then after `restorecon` labels it.
+
 ## What a green run does not show
 
 The simulations run on x86_64 under KVM, not on a Pi; the USB disks are qemu's. It does
@@ -51,7 +61,8 @@ Those come in later simulations or on the bench at the visit.
 
 ## Running it elsewhere
 
-`run-probe.sh <workdir>` and `run-late-disks.sh <workdir>` run on any Linux machine with
-KVM, `qemu-system-x86_64`, `qemu-img`, `mke2fs` and an ssh client. It writes only inside
-`<workdir>`. Do not run it in the `infra` container: that container is on `zero`, has no
-KVM, and would compete with Immich.
+`run-probe.sh`, `run-late-disks.sh` and `run-docker-store.sh`, each given a work
+directory, run on any Linux machine with KVM, `qemu-system-x86_64`, `qemu-img`, `mke2fs`
+and an ssh client; `run-docker-store.sh` also needs Docker, btrfs-progs and sudo for one
+loop mount. Each writes only inside its work directory. Do not run it in the `infra`
+container: that container is on `zero`, has no KVM, and would compete with Immich.
