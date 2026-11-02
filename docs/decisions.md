@@ -1796,18 +1796,35 @@ The stacks stop, which is what emergency mode is for.
   have been gone until someone reached it.
 - **How it is done, as the simulation found it.** `sysinit.target` conflicts with
   emergency mode, so entering it stops `sysinit.target`, and every unit that `Requires` it
-  stops too. Default dependencies are that requirement. Each kept unit gets a drop-in with
-  `DefaultDependencies=no`, `After=sysinit.target` (the ordering without the requirement),
-  `Conflicts=` and `Before=shutdown.target`, and `IgnoreOnIsolate=yes`, and is wanted by
-  `emergency.target`. The kept units are sshd, NetworkManager, D-Bus (`dbus.socket`,
-  `dbus-broker`), `systemd-user-sessions` (whose stop writes `/run/nologin`, which turns
-  away every login but root's), `cloudflared`, and on the Singapore box its second way in.
-  *What is proven so far, and what is not:* with them, ssh answered on a VM health-checker
-  had sent to emergency mode, with all of them active. But that VM's root was locked, so
-  `sulogin` failed and the boot partly resumed: the box had left emergency mode by then.
-  That the kept units survive emergency mode as it holds, with the root password the hosts
-  will have, and that the stacks stop, is not yet shown; the next simulation sets a root
-  password and checks both.
+  stops too; default dependencies are that requirement. Each kept service gets a drop-in
+  with `DefaultDependencies=no`, `After=sysinit.target` alone, `Conflicts=` and
+  `Before=shutdown.target`, and `IgnoreOnIsolate=yes`, and is wanted by
+  `emergency.target`; a kept socket is ordered `Before=sockets.target` as well. The kept
+  units are sshd, NetworkManager and its dispatcher, `dbus.socket`, `cloudflared`, the
+  gettys on `tty1` and the serial port, and on the Singapore box its second way in.
+- **Four things the simulation found the hard way.**
+  - D-Bus (`dbus-broker`) ships without default dependencies and must run before
+    `basic.target`. It gets `IgnoreOnIsolate` alone: ordered after `basic.target`, it made
+    a cycle that took D-Bus and the network down on a normal boot.
+  - Kept services order after `sysinit.target` alone. Ordered after `basic.target` too,
+    which their default dependencies would add, they kept emergency mode from starting.
+  - NetworkManager, kept up, activates its dispatcher over D-Bus. With default
+    dependencies the dispatcher pulled `sysinit.target` back, which brought the console
+    password watcher, which conflicts with `emergency.service` and cancelled the emergency
+    shell. Emergency mode lasts only until something like that happens, so the console
+    login rests on the kept gettys, which take root's password, not on the emergency
+    shell.
+  - `systemd-user-sessions` writes `/run/nologin` when it stops, which turns away every
+    login but root's, and root may not log in over ssh. Kept up, it too stopped the
+    emergency shell from starting. So it stops as usual, and a drop-in clears its
+    `ExecStop=`.
+- **What is proven.** In the rollback simulation, with a root password set, a VM that
+  health-checker sent to emergency mode reached the emergency shell, answered ssh, had
+  sshd, NetworkManager, D-Bus, the tunnel's stand-in and both gettys up, had the stack
+  stand-in stopped and no `/run/nologin`, and showed a login prompt with its network
+  address on `tty1`. Every normal boot with these drop-ins logged no ordering cycle and no
+  D-Bus failure. The Pi's serial port has another name (`ttyAMA0` or `ttyS0`), which slice
+  1's bench test reads.
 - **A second way in for the Singapore box,** because when `cloudflared` is what broke,
   keeping it up helps nothing. Tailscale is the candidate (roadmap §5 names it) and
   openSUSE packages it; the owner has not yet chosen. The UK boxes have the LAN and each

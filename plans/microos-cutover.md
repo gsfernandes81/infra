@@ -47,7 +47,8 @@ slice, because the infra container moves with it. Podman comes later still.
    - makes the host's `/media/*` mountpoints and appends its fstab fragment;
    - installs the `cloudflared` unit and the guarded health-check plugin in
      `/usr/libexec/health-checker/`;
-   - gives the kept units their emergency drop-ins;
+   - gives the kept units their emergency drop-ins, and clears `systemd-user-sessions`'
+     `ExecStop=`;
    - disables `transactional-update.timer` and sets the two reboot files, because nothing
      on this fleet restarts without the owner's say.
 
@@ -149,15 +150,14 @@ test and the visit's own checks do that.
   gluetun's, came up: the port answered from the host, a service reached another by name,
   and the namespace-sharing one reached it on `127.0.0.1`.
 
-- **A bad update rolls itself back, and a good box is never stranded.** The rollback
-  simulation broke a stand-in for `cloudflared` inside an update: the box booted the new
-  snapshot once, the plugin failed, and health-checker returned it to the previous one. A
-  good update stayed. With the plugin's guard, a check failing on a snapshot that had
-  already passed left the box up. Forced into emergency mode, it answered ssh with the
-  kept units active, but with root locked the boot had partly resumed by then; the run
-  with a root password set, as the hosts will have, is the one that shows emergency mode
-  holding with them up ([`decisions.md`](../docs/decisions.md) § *Emergency mode on a
-  MicroOS host keeps a way in*).
+- **A bad update rolls itself back, a good box is never stranded, and emergency mode keeps
+  a way in.** The rollback simulation broke a stand-in for `cloudflared` inside an update:
+  the box booted the new snapshot once, the plugin failed, and health-checker returned it
+  to the previous one. A good update stayed. With the plugin's guard, a check failing on a
+  snapshot that had already passed left the box up. Forced into emergency mode with a root
+  password set, the box answered ssh and offered a console login, with the stacks stopped
+  ([`decisions.md`](../docs/decisions.md) § *Emergency mode on a MicroOS host keeps a way
+  in*, with the four things that took finding). Every stage asserts its outcome.
 - **openSUSE's `cloudflared` package ships no systemd unit,** prints an empty version, and
   cannot update itself (`read-only file system`), which is the safe failure. Each host's
   unit is its own tracked file, and its config sets `no-autoupdate: true`. `cloudflared
@@ -166,10 +166,8 @@ test and the visit's own checks do that.
   open /boot/grub2/grubenv: Read-only file system`). GRUB uses that flag to fall back
   after a boot that never reached userspace, a kernel panic for one, so that fallback may
   not work. The Pi boots differently; slice 1's bench test checks it there.
-- **With root locked, emergency mode does not hold.** `sulogin` fails, emergency mode goes
-  inactive and part of the boot resumes (30 services against 38). With the root password
-  the owner chose, `sulogin` should wait at the console and emergency mode should hold;
-  the rollback simulation now sets one to check that.
+- **With root locked, the console is dead in emergency mode.** `sulogin` refuses a locked
+  root, which is why each host gets a root password (`decisions.md`).
 
 Still open: the second way in for the Singapore box (Tailscale is packaged; the owner
 chooses), and the GRUB fallback on a Pi.
