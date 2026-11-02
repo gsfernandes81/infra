@@ -1,0 +1,26 @@
+#!/bin/bash
+# combustion: network
+#
+# First-boot script for the CI probe VM only (sim/microos/README.md). It is NOT a host's
+# first-boot script: the hosts' own live under hosts/<host>/ and carry no CI key.
+#
+# Combustion runs this once, inside a transactional-update shell, from the "combustion"
+# directory of the config drive, and boots straight into the snapshot it leaves.
+set -euxo pipefail
+
+# The run's throwaway key, written beside this script by run-probe.sh.
+install -d -m 700 /root/.ssh
+install -m 600 authorized_keys /root/.ssh/authorized_keys
+systemctl enable sshd
+
+# What a fleet host would carry, so the probe can say whether it installs and starts.
+zypper --non-interactive install docker docker-compose bcache-tools smartmontools btrfsprogs
+systemctl enable docker
+
+# Keep a copy of the vendor reboot policy before this script changes it, so the probe can
+# report MicroOS's default rather than ours.
+cp /usr/etc/rebootmgr.conf /root/rebootmgr.vendor.conf 2>/dev/null \
+	|| echo "no /usr/etc/rebootmgr.conf" > /root/rebootmgr.vendor.conf
+printf '[rebootmgr]\nstrategy=off\n' > /etc/rebootmgr.conf
+
+echo "combustion-probe: done" > /dev/console
