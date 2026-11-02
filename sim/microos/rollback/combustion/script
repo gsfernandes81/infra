@@ -83,9 +83,12 @@ chmod 755 /usr/libexec/health-checker/sim-tunnel.sh
 
 # Emergency mode keeps the ways in: sshd, the network, and the tunnel's stand-in survive
 # the isolate (IgnoreOnIsolate) and are started by it if they were not up yet. Docker and
-# everything else stop, which is what emergency mode is for. A unit this image lacks is
-# skipped, so the same lines suit NetworkManager or wicked.
-for unit in sshd.service NetworkManager.service wicked.service sim-tunnel.service; do
+# everything else stop, which is what emergency mode is for. D-Bus stays too, because
+# NetworkManager needs it: a screenshot of the unguarded run showed emergency mode stopping
+# D-Bus along with sshd and NetworkManager. A unit this image lacks is skipped, so the same
+# lines suit NetworkManager or wicked, and dbus-broker or dbus-daemon.
+for unit in sshd.service NetworkManager.service wicked.service sim-tunnel.service \
+	dbus.socket dbus.service dbus-broker.service; do
 	systemctl cat "$unit" >/dev/null 2>&1 || continue
 	mkdir -p "/etc/systemd/system/$unit.d"
 	printf '[Unit]\nIgnoreOnIsolate=yes\n' > "/etc/systemd/system/$unit.d/keep-in-emergency.conf"
