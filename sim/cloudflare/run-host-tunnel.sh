@@ -87,7 +87,12 @@ play_verbose() {
 	rm -f play-verbose.log
 	return $rc
 }
-says() { grep -qF "$1" play.log; }
+# The repo's callback wraps a long message onto continuation lines marked ↪, so a phrase
+# can be split across lines. says() unwraps them and collapses whitespace before matching.
+says() {
+	python3 -I -c 'import re, sys; print(re.sub(r"\s+", " ", open(sys.argv[1]).read().replace("\u21aa", " ")))' play.log \
+		| grep -qF "$1"
+}
 
 echo "== no target, a host not in the inventory, a group name, a host that has a tunnel"
 if play; then fail "ran with no -e target"; else
