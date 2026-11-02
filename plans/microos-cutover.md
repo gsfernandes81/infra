@@ -98,12 +98,20 @@ Compose 5.6.1.
   meaning, or its timer is disabled so nothing changes until the owner runs it.
 - **Every package exists for aarch64:** docker, docker-compose, cloudflared, bcache-tools,
   smartmontools, btrfsprogs, zram-generator and syncthing.
-- **bcache-tools ships `69-bcache.rules`.** Whether udev then registers disks that appear
-  late, so that `bcache-register` is not needed, is still untested.
+- **bcache needs no script.** The late-disks simulation built `zero`'s layout in miniature
+  on three simulated USB disks: one bcache cache, two backing disks, btrfs RAID1 across
+  the two bcache devices. Plugged in after boot, the disks were registered and attached by
+  bcache-tools' own udev rule, and btrfs assembled the array. `bcache-register` and its
+  hardcoded UUIDs are not carried to MicroOS.
+- **Late disks mount with two settings.** With the disks present at boot, or plugged in 20
+  seconds after power-on within a 180 s `x-systemd.device-timeout=`, the array mounted at
+  boot and a `RequiresMountsFor=` service ran without hands. Plugged in after that
+  timeout, the array mounted by itself only with a udev rule that adds the mount to the
+  array's `SYSTEMD_WANTS`; without the rule it stayed unmounted. Either way the service
+  that needs it stayed failed and must be started again, which the next run tests.
 
-Still open: bcache and btrfs RAID1 on disks that appear after boot, and whether MicroOS's
-Docker reads the Alpine Docker's `/var/lib/docker` on `one`'s SSD and `zero`'s `sda2`.
-Volumes such as `garmin-tokens` and pearl-wallet's need a proven carry-over either way.
+Still open: whether MicroOS's Docker reads the Alpine Docker's `/var/lib/docker` on
+`one`'s SSD and `zero`'s `sda2`, and how a service restarts once a late array mounts.
 
 ## Docs this changes
 
