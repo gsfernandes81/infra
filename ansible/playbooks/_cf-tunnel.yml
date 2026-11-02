@@ -104,14 +104,31 @@
   # second tunnel and written its credentials over the live ones. Anything but
   # "File not found" now stops the play. Lowercased because older ansible-core wrote
   # "file not found", and the module text comes from the control node's version.
+  #
+  # no_log, because the registered result holds the file itself, TunnelSecret included,
+  # and a run with the default callback and -v (ansible.cfg's escape hatch for a transcript)
+  # prints it. no_log also censors the failure, so the read never fails here: the assert
+  # below names any failure but "not found", from the module's message, which carries no
+  # secret (CLAUDE.md § Verifying changes, the no_log pattern).
   ansible.builtin.slurp:
     src: "{{ cf_creds_path }}"
   register: cf_creds_existing
   become: "{{ cf_creds_become | default(false) }}"
-  failed_when:
-    - cf_creds_existing.content is not defined
-    - "'file not found' not in (cf_creds_existing.msg | default('') | lower)"
+  failed_when: false
   check_mode: false
+  no_log: true
+
+- name: Check the credentials read found the file or none
+  ansible.builtin.assert:
+    that: >-
+      cf_creds_existing.content is defined
+      or 'file not found' in (cf_creds_existing.msg | default('') | lower)
+    fail_msg: >-
+      Could not read {{ cf_creds_path }} on {{ inventory_hostname }}:
+      {{ cf_creds_existing.msg | default('no message') }}. Nothing has been created; a
+      tunnel is never minted over credentials that exist but cannot be read.
+    success_msg: >-
+      {{ 'credentials found' if cf_creds_existing.content is defined else 'no credentials yet' }}
 
 - name: "Existing tunnel only: note the tunnel id"
   ansible.builtin.set_fact:

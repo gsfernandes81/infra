@@ -1,0 +1,140 @@
+---
+# CREATE A HOST'S OWN TUNNEL, for a host that has none: `three`, first, at the November 2026
+# visit (plans/microos-cutover.md). One host per run:
+#
+#     cd ansible
+#     ansible-playbook playbooks/server-create-host-tunnel.yml -e target=three -K --check
+#     ansible-playbook playbooks/server-create-host-tunnel.yml -e target=three -K
+#
+# NOT server-create-tunnel.yml. That play is 2g's: it makes a second tunnel beside a host's
+# existing one, for a cutover. This one makes a host's first, by the same shared tasks the
+# dev containers and the deployment sidecars use (_cf-tunnel.yml), so a new host's tunnel is
+# made the way every other new tunnel on this fleet is.
+#
+# WHAT IT MAKES: a locally-managed tunnel named for the host, its credentials at
+# /etc/cloudflared/<host>.json (root, 0600), and the proxied CNAME ssh-<host>.<dns_zone>.
+# root, because the host's cloudflared runs as root, as on every host here: openSUSE's
+# package ships no unit, so the unit is the host's own tracked file and says so. A unit
+# that ran as another user could not read the file and would die on start.
+# Every object is looked up before it is made, so a re-run after a partial failure finishes
+# the job and a re-run after a whole one changes nothing. It refuses a host that already
+# has a tracked tunnel config.
+#
+# WHAT IT DOES NOT, each because a later step owns it:
+#   - write the tunnel's config.yml. That is hosts/<host>/system/cloudflared-config.yml,
+#     committed with the tunnel id this play prints and installed by bin/install-system-file
+#     like every tracked /etc file;
+#   - start cloudflared, which is the host's first-boot script's and the owner's;
+#   - gate the hostname behind Access. server-create-fleet-ssh-access.yml does that once the
+#     connector is up, and refuses a hostname that is not in the host's tracked ingress.
+#
+# -K IS REQUIRED: the credentials are written as root, and ansible.cfg asks for no sudo
+# password unless told to. The API token is read from cf_api_token_file
+# (group_vars/all.yml), never passed as a variable (_cf-api-token.yml says why).
+#
+# The host must be in the inventory's [fleet] group, reachable by the alias or the
+# ansible_host it is given there. Before its tunnel exists, that is its LAN address.
+
+- name: Check the inventory is loaded
+  ansible.builtin.import_playbook: _assert-inventory.yml
+  vars:
+    required_group: fleet
+
+- name: Check a target was named
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check -e target names a host in the inventory
+      # Without it the play below matches no host, is skipped whole, and exits 0 having made
+      # nothing, which reads as success (_assert-inventory.yml, the same trap).
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target in groups['all']
+        fail_msg: >-
+          Name the host: -e target=<host>, one that is in the inventory. Nothing has been
+          created.
+        # | default: both messages render before the test, so a bare {{ target }} here would
+        # crash on the very case this task exists to catch (CLAUDE.md § Shell traps).
+        success_msg: "target: {{ target | default('?') }}"
+
+- name: Create a host's first tunnel
+  hosts: "{{ target }}"
+  gather_facts: false
+  become: false
+
+  vars:
+    cf_api: https://api.cloudflare.com/client/v4
+    cf_zone: "{{ dns_zone }}"
+    cf_name: "{{ inventory_hostname }}"
+    cf_hostname: "ssh-{{ inventory_hostname }}.{{ dns_zone }}"
+    # The filler for ids only a write could produce, inline wherever one is rendered. Why
+    # inline and not a set_fact is beside its definition in _dev-container-tunnel.yml.
+    cf_unknown_id: WOULD-BE-CREATED-BY-A-REAL-RUN
+
+  tasks:
+    - name: Check {{ inventory_hostname }} is a fleet host
+      # `-e target=` names a host to write as root on; refuse a typo or the control node
+      # rather than make a tunnel for something that is not a box.
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname in groups['fleet']
+          - inventory_hostname not in groups['control'] | default([])
+        fail_msg: >-
+          {{ inventory_hostname }} is not in the inventory's [fleet] group. Add it there,
+          with ansible_host set to its LAN address until its tunnel exists. Nothing has
+          been created.
+        success_msg: "{{ inventory_hostname }} is a fleet host"
+
+    - name: Read whether hosts/{{ inventory_hostname }} has a tunnel config
+      # A host with a tracked cloudflared-config.yml already has its tunnel, and this play
+      # is for one that has none: run against zero, one or two it would converge on their
+      # live credentials only because they happen to sit at the same path. Refuse instead.
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../../hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
+      register: host_tunnel_config
+      delegate_to: localhost
+
+    - name: Check {{ inventory_hostname }} has no tunnel yet
+      ansible.builtin.assert:
+        that: not host_tunnel_config.stat.exists
+        fail_msg: >-
+          hosts/{{ inventory_hostname }}/system/cloudflared-config.yml exists, so
+          {{ inventory_hostname }} already has a tunnel. This play makes a host's first one;
+          server-create-tunnel.yml is 2g's play for a second. Nothing has been created.
+        success_msg: "{{ inventory_hostname }} has no tracked tunnel config"
+
+    - name: Read and check the Cloudflare API token
+      ansible.builtin.import_tasks: _cf-api-token.yml
+
+    - name: Create /etc/cloudflared on {{ inventory_hostname }}
+      ansible.builtin.file:
+        path: /etc/cloudflared
+        state: directory
+        mode: "0755"
+      become: true
+
+    - name: Create the tunnel and its DNS record
+      ansible.builtin.import_tasks: _cf-tunnel.yml
+      vars:
+        cf_creds_path: "/etc/cloudflared/{{ inventory_hostname }}.json"
+        cf_creds_become: true
+        cf_dns_comment: >-
+          {{ inventory_hostname }} host tunnel — ansible/playbooks/server-create-host-tunnel.yml
+        cf_dead_tunnel_hint: >-
+          {{ inventory_hostname }}'s cloudflared reads it and cannot connect until you do,
+          so ssh-{{ inventory_hostname }}.{{ dns_zone }} stays down.
+
+    - name: Print the tunnel id and the steps after this
+      # changed_when: true, or display_ok_hosts = False in ansible.cfg hides the one thing
+      # this play exists to hand on (ansible.cfg, beside the setting).
+      ansible.builtin.debug:
+        msg: |
+          {{ inventory_hostname }}'s tunnel is {{ cf_tunnel_id | default(cf_unknown_id, true) }}.
+          Next:
+            1. Commit hosts/{{ inventory_hostname }}/system/cloudflared-config.yml naming that
+               tunnel, with ssh-{{ inventory_hostname }}.{{ dns_zone }} -> ssh://127.0.0.1:22.
+            2. Install it with bin/install-system-file on {{ inventory_hostname }}, and start
+               cloudflared there.
+            3. Gate the hostname: server-create-fleet-ssh-access.yml -e host={{ inventory_hostname }}.
+      changed_when: true
