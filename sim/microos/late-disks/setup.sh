@@ -34,6 +34,25 @@ umount /media/array
 # nofail so a missing array never stops the boot; context= as the probe proved.
 echo "UUID=$uuid /media/array btrfs nofail,context=system_u:object_r:container_file_t:s0 0 0" \
 	>> /etc/fstab
+# What this run's variant adds (run-late-disks.sh passes VARIANT): plain adds nothing;
+# wantedby makes the stand-in service wanted by the mount unit as well; udev adds a rule that
+# asks systemd for the mount when the array's btrfs reports ready.
+case "${VARIANT:?}" in
+plain) ;;
+wantedby)
+	mkdir -p /etc/systemd/system/media-array.mount.wants
+	ln -sf /etc/systemd/system/sim-consumer.service \
+		/etc/systemd/system/media-array.mount.wants/sim-consumer.service
+	;;
+udev)
+	printf '%s\n' \
+		"SUBSYSTEM==\"block\", ENV{ID_FS_UUID}==\"$uuid\", ENV{SYSTEMD_READY}!=\"0\", ENV{SYSTEMD_WANTS}+=\"media-array.mount\"" \
+		> /etc/udev/rules.d/90-sim-array.rules
+	cat /etc/udev/rules.d/90-sim-array.rules
+	udevadm control --reload
+	;;
+*) echo "unknown VARIANT $VARIANT" >&2; exit 1 ;;
+esac
 systemctl daemon-reload
 tail -n 1 /etc/fstab
 

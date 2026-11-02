@@ -33,9 +33,7 @@ RemainAfterExit=yes
 ExecStart=/bin/sh -c 'cat /media/array/f > /run/sim-consumer.out'
 
 [Install]
-# multi-user.target starts it at boot; the mount unit starts it again when an array that
-# arrived late is mounted.
-WantedBy=multi-user.target media-array.mount
+WantedBy=multi-user.target
 UNIT
 systemctl enable sim-consumer.service
 

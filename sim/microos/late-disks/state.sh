@@ -14,7 +14,17 @@ run findmnt /media/array
 run systemctl status media-array.mount --no-pager --lines 5
 run systemctl status sim-consumer.service --no-pager --lines 5
 run cat /run/sim-consumer.out
-run sh -c 'touch /media/array/written-while-unmounted-would-be-here; ls /media/array'
+run sh -c 'journalctl -u media-array.mount -o short-precise --no-pager | tail -n 4'
+# The guard is checked only while nothing is mounted, so a file written into the array
+# itself is never mistaken for one that got past the bare mountpoint.
+if findmnt -q /media/array; then
+	echo "guard: not checked, the array is mounted"
+elif touch /media/array/guard-failed 2>/dev/null; then
+	echo "GUARD FAILED: wrote into the bare mountpoint"
+	rm -f /media/array/guard-failed
+else
+	echo "guard: the bare mountpoint refused a write"
+fi
 run docker ps -a --filter name=simapp --format '{{.Names}} {{.Status}} restarts={{.RunningFor}}'
 run docker inspect simapp --format 'restarts={{.RestartCount}} running={{.State.Running}}'
 run sh -c 'docker logs simapp 2>&1 | tail -n 4'

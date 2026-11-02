@@ -1,6 +1,7 @@
 """Sends human-monitor commands to a qemu QMP socket, one per argument, and prints each
 reply. Used by run-late-disks.sh to hot-plug the simulated USB disks; run it with
-python3 -I so nothing in the working directory is imported."""
+python3 -I so nothing in the working directory is imported. A failure worded in a way this
+does not catch still shows up: run-late-disks.sh checks the guest sees all three disks."""
 import json
 import socket
 import sys

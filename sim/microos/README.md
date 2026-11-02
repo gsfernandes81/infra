@@ -37,11 +37,16 @@ the VM does not boot or answer ssh; every answer is in the job summary and in th
 `run-late-disks.sh` builds `zero`'s array in miniature on three simulated USB disks: one
 bcache cache in front of two backing disks, and btrfs RAID1 on the two bcache devices,
 mounted by an fstab entry with `nofail` and `context=`. A stand-in service needs the mount
-through `RequiresMountsFor=`, as a deployment would. The script then boots the VM without
-the disks, hot-plugs them a minute later through qemu's QMP socket (`qmp.py`), and reports
-at each stage: whether udev registers the bcache devices by itself, whether systemd mounts
-the array when it completes, what the stand-in service did, and whether the bare
-mountpoint refused a write. It ends with a reboot with the disks present.
+through `RequiresMountsFor=`, and a container under `restart: always` bind-mounts it, as a
+deployment would. The VM then boots without the disks, and `qmp.py` plugs them in through
+qemu's QMP socket at chosen moments: after boot has given up on them, 120 s after power-on
+with a 180 s device timeout, and after boot again with the cache last. Each stage reports
+when the disks were plugged, how long the mount took, what bcache, systemd and Docker did,
+and whether the bare mountpoint refused a write.
+
+CI runs it three times, one variant each, so the effect of each setting stays separate:
+`plain` adds nothing, `wantedby` makes the stand-in service wanted by the mount unit, and
+`udev` adds a rule that asks systemd for the mount when the array's btrfs is ready.
 
 ## Docker's store
 
@@ -61,8 +66,8 @@ Those come in later simulations or on the bench at the visit.
 
 ## Running it elsewhere
 
-`run-probe.sh`, `run-late-disks.sh` and `run-docker-store.sh`, each given a work
-directory, run on any Linux machine with KVM, `qemu-system-x86_64`, `qemu-img`, `mke2fs`
-and an ssh client; `run-docker-store.sh` also needs Docker, btrfs-progs and sudo for one
-loop mount. Each writes only inside its work directory. Do not run it in the `infra`
-container: that container is on `zero`, has no KVM, and would compete with Immich.
+`run-probe.sh`, `run-late-disks.sh` (with a variant) and `run-docker-store.sh`, each given
+a work directory, run on any Linux machine with KVM, `qemu-system-x86_64`, `qemu-img`,
+`mke2fs` and an ssh client; `run-docker-store.sh` also needs Docker, btrfs-progs and sudo
+for one loop mount. Each writes only inside its work directory. Do not run it in the
+`infra` container: that container is on `zero`, has no KVM, and would compete with Immich.

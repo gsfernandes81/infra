@@ -20,9 +20,11 @@ on:
 permissions:
   contents: read
 
+# Runs queue rather than cancel: each report is evidence, and a push mid-run would
+# otherwise throw away the one in progress.
 concurrency:
   group: microos-sim-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   probe:
@@ -69,8 +71,15 @@ jobs:
     # zero's array in miniature (one bcache cache, two backing disks, btrfs RAID1) on
     # simulated USB disks that appear after boot: does MicroOS assemble and mount it by
     # itself, and what does a RequiresMountsFor= service do meanwhile?
+    # One run per variant, so what each setting changes is not confused with another:
+    # plain adds nothing, wantedby makes the stand-in service wanted by the mount unit,
+    # udev adds a rule that asks for the mount when the array is ready.
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [plain, wantedby, udev]
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -87,7 +96,7 @@ jobs:
           sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils
 
       - name: Build the array, boot without it, hot-plug it
-        run: sim/microos/run-late-disks.sh "$RUNNER_TEMP/late"
+        run: sim/microos/run-late-disks.sh "$RUNNER_TEMP/late" "${{ matrix.variant }}"
 
       - name: Put the report in the job summary
         if: always()
@@ -101,7 +110,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: microos-late-disks
+          name: microos-late-disks-${{ matrix.variant }}
           path: |
             ${{ runner.temp }}/late/report.txt
             ${{ runner.temp }}/late/serial.log
@@ -166,3 +175,10 @@ jobs:
               zypper --non-interactive --quiet search --match-exact --details "$p" || echo "NOT FOUND: $p"
             done' | tee packages.txt
           { echo '```'; cat packages.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: microos-aarch64-packages
+          path: packages.txt
+          if-no-files-found: warn

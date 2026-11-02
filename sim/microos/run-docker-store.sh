@@ -19,7 +19,7 @@ cd "$work"
 "$here/docker-store/make-store.sh" "$PWD/store.img" 2>&1 | tee report.txt
 fetch_image
 make_config_drive "$here/docker-store"
-boot_vm -drive "file=$PWD/store.img,if=virtio,format=raw"
+boot_vm -drive "file=$PWD/store.img,if=virtio,format=raw,serial=simstore"
 wait_for_ssh
 ssh_vm 'systemctl is-system-running --wait' || true
 ssh_vm 'bash -s' < "$here/docker-store/checks.sh" | tee -a report.txt

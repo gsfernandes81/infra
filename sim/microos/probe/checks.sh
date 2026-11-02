@@ -89,7 +89,7 @@ YAML
 run docker compose -f /root/stack/compose.yaml up -d
 sleep 10
 run sh -c 'curl -fsS http://127.0.0.1:18080/ | grep -o "Welcome to nginx"'
-run sh -c 'docker compose -f /root/stack/compose.yaml logs client sidecar | grep -o "Welcome to nginx\|bad address.*\|error.*"'
+run sh -c 'docker compose -f /root/stack/compose.yaml logs --no-color | tail -n 30'
 run docker compose -f /root/stack/compose.yaml ps -a
 run docker compose -f /root/stack/compose.yaml down
 run rpm -q iptables nftables
