@@ -93,7 +93,14 @@ for unit in sshd.service NetworkManager.service wicked.service sim-tunnel.servic
 	# wicked.service, which this image lacks, and add-wants then failed the whole first boot.
 	[ -e "/usr/lib/systemd/system/$unit" ] || [ -e "/etc/systemd/system/$unit" ] || continue
 	mkdir -p "/etc/systemd/system/$unit.d"
-	printf '[Unit]\nIgnoreOnIsolate=yes\n' > "/etc/systemd/system/$unit.d/keep-in-emergency.conf"
+	# sysinit.target conflicts with emergency.target and emergency.service, so entering
+	# emergency mode stops it, and every unit that Requires it stops too. Default
+	# dependencies are that Requires; without them the unit keeps the ordering (After=)
+	# and loses the requirement, so emergency mode no longer drags it down. The diagnostic
+	# run showed sshd, NetworkManager and dbus.socket each Requiring sysinit.target.
+	printf '%s\n' '[Unit]' 'DefaultDependencies=no' 'After=sysinit.target' \
+		'Conflicts=shutdown.target' 'Before=shutdown.target' 'IgnoreOnIsolate=yes' \
+		> "/etc/systemd/system/$unit.d/keep-in-emergency.conf"
 	systemctl add-wants emergency.target "$unit"
 done
 
