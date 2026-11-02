@@ -73,8 +73,8 @@ cat > /root/stack/compose.yaml <<'YAML'
 name: simstack
 services:
   web:
-    image: docker.io/library/alpine:3.20
-    command: sh -c 'mkdir -p /www && echo from-web > /www/index.html && httpd -f -p 80 -h /www'
+    # Alpine's busybox has no httpd applet, so the first try at this exited at once.
+    image: docker.io/library/nginx:1.27-alpine
     ports: ["127.0.0.1:18080:80"]
   client:
     # Reaches web by its service name over the project network, as stacks here do.
@@ -88,8 +88,9 @@ services:
 YAML
 run docker compose -f /root/stack/compose.yaml up -d
 sleep 10
-run curl -fsS http://127.0.0.1:18080/
-run docker compose -f /root/stack/compose.yaml logs client sidecar
+run sh -c 'curl -fsS http://127.0.0.1:18080/ | grep -o "Welcome to nginx"'
+run sh -c 'docker compose -f /root/stack/compose.yaml logs client sidecar | grep -o "Welcome to nginx\|bad address.*\|error.*"'
+run docker compose -f /root/stack/compose.yaml ps -a
 run docker compose -f /root/stack/compose.yaml down
 run rpm -q iptables nftables
 
