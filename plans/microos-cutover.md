@@ -51,8 +51,8 @@ slice, because the infra container moves with it. Podman comes later still.
    - disables `transactional-update.timer` and sets the two reboot files, because nothing
      on this fleet restarts without the owner's say.
 
-   A simulation boots each script before the visit, and checks among other things that an
-   ssh login as root is refused with a valid key in place.
+A simulation boots each script before the visit, and checks among other things that an ssh
+login as root is refused with a valid key in place.
 2. **A carry-over step for what is not in git:** tunnel credentials
    (`/etc/cloudflared/<host>.json`), every deployment's `.env`, the dev containers'
    secrets directories on `zero`, `gavin`'s password hash and `authorized_keys`, root's
@@ -153,8 +153,10 @@ test and the visit's own checks do that.
   simulation broke a stand-in for `cloudflared` inside an update: the box booted the new
   snapshot once, the plugin failed, and health-checker returned it to the previous one. A
   good update stayed. With the plugin's guard, a check failing on a snapshot that had
-  already passed left the box up. Forced into emergency mode, it still answered ssh, with
-  the kept units active ([`decisions.md`](../docs/decisions.md) § *Emergency mode on a
+  already passed left the box up. Forced into emergency mode, it answered ssh with the
+  kept units active, but with root locked the boot had partly resumed by then; the run
+  with a root password set, as the hosts will have, is the one that shows emergency mode
+  holding with them up ([`decisions.md`](../docs/decisions.md) § *Emergency mode on a
   MicroOS host keeps a way in*).
 - **openSUSE's `cloudflared` package ships no systemd unit,** prints an empty version, and
   cannot update itself (`read-only file system`), which is the safe failure. Each host's
@@ -167,7 +169,7 @@ test and the visit's own checks do that.
 - **With root locked, emergency mode does not hold.** `sulogin` fails, emergency mode goes
   inactive and part of the boot resumes (30 services against 38). With the root password
   the owner chose, `sulogin` should wait at the console and emergency mode should hold;
-  the first-boot simulation, which sets one, checks that.
+  the rollback simulation now sets one to check that.
 
 Still open: the second way in for the Singapore box (Tailscale is packaged; the owner
 chooses), and the GRUB fallback on a Pi.

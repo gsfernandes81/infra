@@ -1769,6 +1769,13 @@ build on all three*, above).
   (`error_decision_legacy`). So neither an ISP outage nor a mistake in `/etc` can send a
   working box to emergency mode, and a bad update still rolls back. The simulation showed
   both.
+- **The guard has two limits.** It reads `LAST_WORKING_BTRFS_ID`, which health-checker
+  writes only when it boots through legacy GRUB. With the newer boot loader setup
+  (`/boot/efi/loader/entries`, grub2-bls or systemd-boot) health-checker deletes that file
+  on every pass, so the guard would check every boot and protect nothing. The plugin
+  refuses to run unguarded there, and slice 1's bench test checks which setup a Pi has.
+  And the guard exempts only the last working snapshot: after the owner rolls back by hand
+  to an older one, a failing check there makes health-checker roll forward again.
 - **`cloudflared`'s own updater stays off.** The package lives in the read-only `/usr`,
   and updates arrive with the OS.
 - **Nothing updates until the owner runs it.** `transactional-update.timer` is disabled on
@@ -1795,8 +1802,12 @@ The stacks stop, which is what emergency mode is for.
   `emergency.target`. The kept units are sshd, NetworkManager, D-Bus (`dbus.socket`,
   `dbus-broker`), `systemd-user-sessions` (whose stop writes `/run/nologin`, which turns
   away every login but root's), `cloudflared`, and on the Singapore box its second way in.
-  With them, a VM health-checker sent to emergency mode answered ssh with all of them
-  active.
+  *What is proven so far, and what is not:* with them, ssh answered on a VM health-checker
+  had sent to emergency mode, with all of them active. But that VM's root was locked, so
+  `sulogin` failed and the boot partly resumed: the box had left emergency mode by then.
+  That the kept units survive emergency mode as it holds, with the root password the hosts
+  will have, and that the stacks stop, is not yet shown; the next simulation sets a root
+  password and checks both.
 - **A second way in for the Singapore box,** because when `cloudflared` is what broke,
   keeping it up helps nothing. Tailscale is the candidate (roadmap §5 names it) and
   openSUSE packages it; the owner has not yet chosen. The UK boxes have the LAN and each
