@@ -23,7 +23,7 @@ is the only change that needs the owner in person; podman (Phase 7) follows over
 
 | # | Slice | Hours | Ends with |
 |---|---|---|---|
-| 1 | Bench test at home: boot `three` on its MicroOS card | 1 | `three` proven on its own hardware; the fleet untouched |
+| 1 | Bench test: boot `three` on its MicroOS card before it joins the stack | 1 | `three` proven on its own hardware; the fleet untouched |
 | 2 | `zero`'s disk swap, borrowing `one`'s Sabrent ([`three.md`](three.md)) | 2 | `zero` on the new disk, still on Alpine |
 | 3 | `one`'s Sabrent and SSD to `three`; `one`'s apps up on `three` | 1.5 | the apps on `three` under Docker |
 | 4 | `one`'s board into the Argon, on its MicroOS card; Syncthing paired | 1.5 | seeding over the LAN, unattended |
@@ -42,7 +42,9 @@ slice, because the infra container moves with it. Podman comes later still.
 1. **One first-boot script per host.** MicroOS runs a Combustion script on its first boot.
    Each host's is a literal file under `hosts/<host>/`, reviewed like any boot-path file
    and not generated. It sets users, ssh keys, hostname and packages, and it carries no
-   secret.
+   secret. It also turns automatic reboots off (`rebootmgrctl set-strategy off`) on every
+   host, because nothing on this fleet restarts without the owner's say. The owner sets
+   each host's policy later, over ssh.
 2. **A carry-over step for what is not in git:** tunnel credentials
    (`/etc/cloudflared/<host>.json`), every deployment's `.env`, and **the ssh host keys**,
    so every client's pinned `known_hosts` entry still matches. Each goes at mode 600,
@@ -65,17 +67,18 @@ slice, because the infra container moves with it. Podman comes later still.
 
 ## What the simulation answers first
 
-- **SELinux.** MicroOS enforces SELinux by default, and Docker bind mounts into `/media/*`
-  may be refused until the paths are labelled. It would break every compose file at once.
+- **SELinux.** MicroOS enforces SELinux by default. Whether openSUSE's Docker refuses bind
+  mounts into `/media/*` until the paths are labelled depends on how its daemon is
+  configured, and is unknown here. If it does, every compose file breaks at once.
 - **bcache without `bcache-register`.** bcache-tools' udev rules register devices on
   systemd distributions. If that holds for disks that appear late, `zero`'s hardcoded-UUID
   script is not needed on MicroOS.
 - **Docker's existing data.** `one`'s SSD and `zero`'s `sda2` hold `/var/lib/docker` on
   the containerd image store. If MicroOS's Docker cannot read it, images are pulled again;
   volumes such as `garmin-tokens` need a proven carry-over either way.
-- **Automatic updates and reboots.** MicroOS applies updates daily and reboots in a
-  maintenance window by default. Nothing on this fleet restarts without the owner's say,
-  so the owner decides the window, per host, before `zero` goes onto MicroOS.
+- **Automatic updates and reboots.** MicroOS installs updates daily, and `rebootmgr`
+  reboots the box afterwards by its own policy. The simulation checks that the first-boot
+  script's setting holds across an update.
 - **Packaging:** Docker and its compose plugin, `cloudflared`, `bcache-tools` and
   `smartmontools` for aarch64.
 
