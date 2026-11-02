@@ -63,14 +63,29 @@ can still use, first as the store arrives and then after `restorecon` labels it.
 `run-rollback.sh` asks whether MicroOS's `health-checker` rolls a box back from an update
 that breaks the service its plugin checks. A real `cloudflared` cannot run without a
 tunnel's credentials, so a stand-in service takes its place: its binary lives in `/usr`,
-inside the snapshot, as the package's does, and a plugin in
-`/usr/local/libexec/health-checker/` checks it the way the hosts' `cloudflared` plugin
-will. The VM records a good snapshot, takes an update that breaks the stand-in, and
-reboots; then an update that does not; then makes the check fail on a snapshot that has
-already booted fine. Each stage reports which snapshot booted and what health-checker
-logged. Separately, `rollback/cloudflared.sh` runs the commands that plugin will rely on
-against openSUSE's `cloudflared` package, with a configuration shaped as the fleet's and
-no credentials.
+inside the snapshot, as the package's does. A plugin in `/usr/libexec/health-checker/`,
+also inside the snapshot, checks it as the hosts' `cloudflared` plugin will, with the same
+guard: it passes unchecked on a snapshot health-checker has already recorded as working.
+The VM has a root password, as the hosts will, and the drop-ins that keep sshd, the
+network, D-Bus, user sessions and the stand-in up in emergency mode, beside a stack
+stand-in that must stop there.
+
+Each stage asserts its outcome, and any FAIL fails the job:
+
+- after a clean reboot, health-checker has recorded a working snapshot, and the boot
+  logged no D-Bus connection failure under the kept units' new ordering;
+- an update that breaks the stand-in is rolled back, by the broken boot's own log;
+- an update that does not is kept;
+- a check failing on a snapshot that had booted fine changes nothing, and the box stays
+  out of emergency mode;
+- a check forced to fail on every boot sends the box to emergency mode, where it must
+  hold, answer ssh with the kept units up and the stack stand-in stopped, and have no
+  `/run/nologin`.
+
+A guest that stops answering is photographed through QMP (`ppm2png.py` converts the
+screens). `rollback/cloudflared.sh` separately runs the commands the hosts' plugin will
+rely on against openSUSE's `cloudflared` package, with a configuration shaped as the
+fleet's and no credentials.
 
 ## What a green run does not show
 

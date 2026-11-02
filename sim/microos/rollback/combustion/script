@@ -6,6 +6,11 @@
 # hosts' cloudflared plugin will be, and openSUSE's cloudflared for its commands.
 set -euxo pipefail
 
+# A root password, as every MicroOS host will have (docs/decisions.md): with root locked,
+# sulogin fails in emergency mode and the boot partly resumes, which is not the case to test.
+# This one is the simulation's own and guards a throwaway VM.
+echo 'root:sim-root-password-not-a-secret' | chpasswd
+
 install -d -m 700 /root/.ssh
 install -m 600 authorized_keys /root/.ssh/authorized_keys
 systemctl enable sshd
@@ -25,6 +30,19 @@ cat > /usr/bin/sim-tunnel <<'BIN'
 exec sleep infinity
 BIN
 chmod 755 /usr/bin/sim-tunnel
+# A stand-in for a stack: an ordinary service, which emergency mode must stop.
+cat > /etc/systemd/system/sim-stack.service <<'UNIT'
+[Unit]
+Description=Stand-in for a stack, which emergency mode must stop
+
+[Service]
+ExecStart=/bin/sleep infinity
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl enable sim-stack.service
+
 cat > /etc/systemd/system/sim-tunnel.service <<'UNIT'
 [Unit]
 Description=Stand-in for cloudflared, for the health-checker simulation
@@ -74,6 +92,13 @@ check)
 			exit 1
 		fi
 	fi
+	# With a BLS boot (grub2-bls, systemd-boot) health-checker deletes the state file the
+	# guard reads on every pass, so the guard could not tell a good snapshot from a new one
+	# and every boot would be checked. Refuse to check at all there, and say so.
+	if [ -d /boot/efi/loader/entries ]; then
+		echo "sim-tunnel: BLS boot, no state file to guard with; passing unchecked"
+		exit 0
+	fi
 	current=$(findmnt --output OPTIONS --noheadings / | sed -e 's|.*subvolid=\([0-9]\+\).*|\1|')
 	last=$(sed -n 's/^LAST_WORKING_BTRFS_ID=//p' /var/lib/misc/health-check.state 2>/dev/null)
 	if [ -n "$last" ] && [ "$current" = "$last" ]; then
@@ -93,26 +118,26 @@ esac
 PLUGIN
 chmod 755 /usr/libexec/health-checker/sim-tunnel.sh
 
-# Emergency mode keeps the ways in: sshd, the network, and the tunnel's stand-in survive
-# the isolate (IgnoreOnIsolate) and are started by it if they were not up yet. Docker and
-# everything else stop, which is what emergency mode is for. D-Bus stays too, because
-# NetworkManager needs it: a screenshot of the unguarded run showed emergency mode stopping
-# D-Bus along with sshd and NetworkManager. A unit this image lacks is skipped, so the same
-# lines suit NetworkManager or wicked, and dbus-broker or dbus-daemon.
-# systemd-user-sessions too: stopping it writes /run/nologin, which turns away every login
-# but root's, so gavin could not log in to a box in emergency mode.
+# Emergency mode keeps the ways in: sshd, the network, D-Bus, user sessions and the
+# tunnel's stand-in stay up, and the stack stand-in stops, which is what emergency mode is
+# for. health-checker enters it with `systemctl start emergency.target`, and
+# sysinit.target conflicts with emergency mode, so entering it stops sysinit.target and
+# every unit that Requires it (the diagnostic run's unit dump). Default dependencies are
+# that requirement plus some ordering. Each kept unit drops them and keeps the ordering
+# alone, so a normal boot orders it as before: a service after sysinit and basic, a socket
+# after sysinit and before sockets.target. IgnoreOnIsolate covers the other way in, an
+# isolate such as a typed `systemctl emergency`; health-checker's start does not need it.
+# A unit this image lacks is skipped.
 for unit in sshd.service NetworkManager.service wicked.service sim-tunnel.service \
 	dbus.socket dbus.service dbus-broker.service systemd-user-sessions.service; do
-	# The unit file itself, not `systemctl cat`: inside Combustion's shell that answered for
-	# wicked.service, which this image lacks, and add-wants then failed the whole first boot.
 	[ -e "/usr/lib/systemd/system/$unit" ] || [ -e "/etc/systemd/system/$unit" ] || continue
 	mkdir -p "/etc/systemd/system/$unit.d"
-	# sysinit.target conflicts with emergency.target and emergency.service, so entering
-	# emergency mode stops it, and every unit that Requires it stops too. Default
-	# dependencies are that Requires; without them the unit keeps the ordering (After=)
-	# and loses the requirement, so emergency mode no longer drags it down. The diagnostic
-	# run showed sshd, NetworkManager and dbus.socket each Requiring sysinit.target.
-	printf '%s\n' '[Unit]' 'DefaultDependencies=no' 'After=sysinit.target' \
+	case "$unit" in
+	*.socket) order='After=sysinit.target
+Before=sockets.target' ;;
+	*) order='After=sysinit.target basic.target' ;;
+	esac
+	printf '%s\n' '[Unit]' 'DefaultDependencies=no' "$order" \
 		'Conflicts=shutdown.target' 'Before=shutdown.target' 'IgnoreOnIsolate=yes' \
 		> "/etc/systemd/system/$unit.d/keep-in-emergency.conf"
 	systemctl add-wants emergency.target "$unit"
