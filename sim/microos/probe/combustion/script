@@ -17,6 +17,11 @@ systemctl enable sshd
 zypper --non-interactive install docker docker-compose bcache-tools smartmontools btrfsprogs
 systemctl enable docker
 
+# The root filesystem is read-only outside a transactional-update shell, /media included, so
+# a data mountpoint exists only if a snapshot made it. This one is made here, as a host's
+# first-boot script would make its /media/* mountpoints.
+mkdir -p /media/simtest
+
 # Keep a copy of the vendor reboot policy before this script changes it, so the probe can
 # report MicroOS's default rather than ours.
 cp /usr/etc/rebootmgr.conf /root/rebootmgr.vendor.conf 2>/dev/null \

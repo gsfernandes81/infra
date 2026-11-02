@@ -23,16 +23,40 @@ run docker version --format '{{.Server.Version}}'
 run docker compose version
 run docker info --format 'driver={{.Driver}} root={{.DockerRootDir}} security={{.SecurityOptions}}'
 
-section "bind mount into /media, as the compose files do (no :z label)"
-mkdir -p /media/simtest && echo from-host > /media/simtest/f
+section "bind mounts from an unlabelled btrfs at /media/simtest (the fleet's data arrives so)"
+# A fresh filesystem has no SELinux labels, as the fleet's Alpine-made btrfs will not.
+truncate -s 1G /var/tmp/simtest.img
+run mkfs.btrfs -q /var/tmp/simtest.img
+run mount -o loop /var/tmp/simtest.img /media/simtest
+echo from-host > /media/simtest/f
+mkdir -p /media/simtest/z && echo from-host > /media/simtest/z/f
+run ls -dZ /media/simtest /media/simtest/f
+echo "-- without a label, as every compose file here mounts:"
 run docker run --rm -v /media/simtest:/data docker.io/library/alpine:3.20 \
 	sh -c 'cat /data/f && echo from-container > /data/g && echo write-ok'
-run ls -lZ /media/simtest
+echo "-- with :z, which relabels the host path:"
+run docker run --rm -v /media/simtest/z:/data:z docker.io/library/alpine:3.20 \
+	sh -c 'cat /data/f && echo from-container > /data/g && echo write-ok'
+run ls -dZ /media/simtest/z /media/simtest/z/f
+run sh -c 'journalctl -k --no-pager | grep -i "avc:.*denied" | tail -n 5'
+
+section "the bare mountpoint, with nothing mounted on it"
+run umount /media/simtest
+run touch /media/simtest/should-fail
+run docker run --rm -v /media/simtest:/data docker.io/library/alpine:3.20 \
+	sh -c 'echo x > /data/should-fail && echo WRITE-SUCCEEDED'
+run ls -la /media/simtest
 
 section "automatic updates and reboots"
 run cat /root/rebootmgr.vendor.conf
 run cat /etc/rebootmgr.conf
 run rebootmgrctl get-strategy
+run sh -c 'rpm -ql rebootmgr | grep -vE "/man/|/doc/|/licenses/"'
+run sh -c 'ls -la /etc/rebootmgr* /usr/etc/rebootmgr* /usr/share/rebootmgr* 2>&1'
+echo "-- set at runtime; the after-reboot section shows whether it persists:"
+run rebootmgrctl set-strategy off
+run rebootmgrctl get-strategy
+run sh -c 'ls -la /etc/rebootmgr* 2>&1; cat /etc/rebootmgr.conf 2>&1'
 run systemctl is-enabled transactional-update.timer
 run systemctl list-timers transactional-update.timer --no-pager
 

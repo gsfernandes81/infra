@@ -15,8 +15,10 @@ checks again. The report records which image it tested, because the image change
 
 The probe answers:
 
-- whether SELinux enforces, and whether Docker refuses a bind mount into `/media` without
-  a label, as every compose file here makes them;
+- whether SELinux enforces, and whether Docker refuses a bind mount from an unlabelled
+  btrfs at `/media`, as every compose file here makes them, and whether `:z` fixes it;
+- whether the read-only root refuses writes to a bare `/media` mountpoint, which would
+  make it the mount guard `chattr +i` is on Alpine;
 - which Docker and compose plugin openSUSE ships, and whether they start;
 - what reboot policy MicroOS ships, and whether a first-boot setting of `strategy=off`
   survives a reboot;
