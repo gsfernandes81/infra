@@ -142,9 +142,21 @@ mkdir -p /etc/systemd/system/systemd-user-sessions.service.d
 printf '%s\n' '[Service]' 'ExecStop=' \
 	> /etc/systemd/system/systemd-user-sessions.service.d/no-nologin-on-stop.conf
 
-for unit in sshd.service NetworkManager.service wicked.service sim-tunnel.service \
-	dbus.socket dbus.service dbus-broker.service; do
-	[ -e "/usr/lib/systemd/system/$unit" ] || [ -e "/etc/systemd/system/$unit" ] || continue
+#
+# NetworkManager-dispatcher and the console gettys join them. NetworkManager, kept up,
+# activates its dispatcher over D-Bus; with default dependencies the dispatcher pulled
+# sysinit.target back, which brought the console password watcher, which conflicts with
+# emergency.service and cancelled the emergency shell before it started (the screenshot
+# of that run). And because emergency mode lasts only until something like that happens,
+# the console login does not rest on it: the gettys on tty1 and the serial port stay up,
+# and take root's password as sulogin would.
+for unit in sshd.service NetworkManager.service NetworkManager-dispatcher.service \
+	wicked.service sim-tunnel.service dbus.socket dbus.service dbus-broker.service \
+	getty@tty1.service serial-getty@ttyS0.service; do
+	# A template instance (getty@tty1) exists if its template does.
+	file=$unit
+	case "$unit" in *@*) file="${unit%%@*}@.service" ;; esac
+	[ -e "/usr/lib/systemd/system/$file" ] || [ -e "/etc/systemd/system/$file" ] || continue
 	mkdir -p "/etc/systemd/system/$unit.d"
 	# D-Bus ships without default dependencies and must run before basic.target, so it
 	# already survives emergency mode and its own ordering is deliberate. Ordering it after

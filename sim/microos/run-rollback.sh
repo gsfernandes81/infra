@@ -177,24 +177,27 @@ for _ in $(seq 1 60); do
 done
 python3 -I "$here/qmp.py" qmp.sock "screendump $PWD/emergency.ppm" >/dev/null || true
 python3 -I "$here/ppm2png.py" emergency.ppm emergency.png || true
+# Recorded, not asserted: the emergency shell lasts only until something pulls
+# sysinit.target back, so the console login rests on the kept gettys instead (below).
 if [ "$prompt" = yes ]; then
-	pass "sulogin asked for root's password on the console, before any ssh login"
+	echo "NOTE: sulogin asked for root's password on the serial console" | tee -a report.txt
 else
-	fail "no sulogin prompt on the console within 10 minutes"
+	echo "NOTE: no sulogin prompt on the serial console; the screenshot shows the screen" | tee -a report.txt
 fi
 # Then the way in: ssh, the kept units, the stacks stopped. What the login does to
 # emergency mode is recorded, not asserted.
 if ssh_vm 'journalctl -b --no-pager | grep -q "starting emergency shell"' 2>/dev/null; then
 	sleep 20
 	# shellcheck disable=SC2016  # runs in the guest, so its expansions happen there
-	ssh_vm 'for u in emergency.target emergency.service sshd NetworkManager dbus-broker \
-			sim-tunnel systemd-user-sessions sim-stack; do echo "$u: $(systemctl is-active $u)"; done
+	ssh_vm 'for u in emergency.target emergency.service sshd NetworkManager \
+			NetworkManager-dispatcher dbus-broker sim-tunnel getty@tty1 serial-getty@ttyS0 \
+			systemd-user-sessions sim-stack; do echo "$u: $(systemctl is-active $u)"; done
 		echo "sulogin after an ssh login: $(pgrep -x sulogin >/dev/null && echo running || echo gone)"
 		ls -la /run/nologin 2>&1
 		journalctl -b -o short-precise --no-pager | grep -iE "emergency|sulogin" | tail -n 8' \
 		2>&1 | tee -a report.txt
 	pass "ssh answered on the boot health-checker sent to emergency mode"
-	for u in sshd NetworkManager dbus-broker sim-tunnel; do
+	for u in sshd NetworkManager dbus-broker sim-tunnel getty@tty1 serial-getty@ttyS0; do
 		active "$u" && pass "$u is up in emergency mode" || fail "$u is not up in emergency mode"
 	done
 	active sim-stack && fail "the stack stand-in is still running in emergency mode" \
