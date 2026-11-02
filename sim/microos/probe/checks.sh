@@ -67,6 +67,32 @@ run docker run --rm -v /media/simtest:/data docker.io/library/alpine:3.20 \
 	sh -c 'echo x > /data/should-fail && echo WRITE-SUCCEEDED'
 run ls -la /media/simtest
 
+section "a compose stack shaped like the fleet's: a network, a published port, a shared namespace"
+mkdir -p /root/stack
+cat > /root/stack/compose.yaml <<'YAML'
+name: simstack
+services:
+  web:
+    image: docker.io/library/alpine:3.20
+    command: sh -c 'mkdir -p /www && echo from-web > /www/index.html && httpd -f -p 80 -h /www'
+    ports: ["127.0.0.1:18080:80"]
+  client:
+    # Reaches web by its service name over the project network, as stacks here do.
+    image: docker.io/library/alpine:3.20
+    command: sh -c 'sleep 3; wget -qO- http://web/ && sleep 3600'
+  sidecar:
+    # Shares web's network namespace, as qBittorrent shares gluetun's.
+    image: docker.io/library/alpine:3.20
+    network_mode: "service:web"
+    command: sh -c 'sleep 3; wget -qO- http://127.0.0.1/ && sleep 3600'
+YAML
+run docker compose -f /root/stack/compose.yaml up -d
+sleep 10
+run curl -fsS http://127.0.0.1:18080/
+run docker compose -f /root/stack/compose.yaml logs client sidecar
+run docker compose -f /root/stack/compose.yaml down
+run rpm -q iptables nftables
+
 section "automatic updates and reboots"
 run cat /root/rebootmgr.vendor.conf
 run cat /etc/rebootmgr.conf
