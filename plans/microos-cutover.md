@@ -48,13 +48,14 @@ slice, because the infra container moves with it. Podman comes later still.
    the owner's say.
 2. **A carry-over step for what is not in git:** tunnel credentials
    (`/etc/cloudflared/<host>.json`), every deployment's `.env`, the dev containers'
-   secrets directories on `zero`, `gavin`'s password hash and `authorized_keys`, and **the
-   ssh host keys**, so every client's pinned `known_hosts` entry still matches. They
-   travel on the Combustion USB stick itself. On the old Alpine system, the owner copies
-   them into a `carry/` directory on the stick at mode 600, as root. The first-boot script
-   installs them from there. The stick then holds live secrets: the owner keeps it with
-   the other secret-bearing media and erases it with `blkdiscard` after the host is
-   proven, not with a file delete, which flash keeps. One stick serves one host at a time.
+   secrets directories on `zero`, `gavin`'s password hash and `authorized_keys`, root's
+   password hash, and **the ssh host keys**, so every client's pinned `known_hosts` entry
+   still matches. They travel on the Combustion USB stick itself. On the old Alpine
+   system, the owner copies them into a `carry/` directory on the stick at mode 600, as
+   root. The first-boot script installs them from there. The stick then holds live
+   secrets: the owner keeps it with the other secret-bearing media and erases it with
+   `blkdiscard` after the host is proven, not with a file delete, which flash keeps. One
+   stick serves one host at a time.
 3. **`three`'s tunnel and ssh alias, created over the phone before the visit.** Its
    hostname is `three.<dns_zone>`, derived as every alias is.
 4. **Ansible for MicroOS.** Packages go through `transactional-update` and take effect at

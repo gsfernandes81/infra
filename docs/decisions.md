@@ -1770,6 +1770,29 @@ build on all three*, above).
   runs `transactional-update` and the reboot over ssh, and the health check covers both.
   Automatic update and reboot can return per host once the rollback is proven on a Pi.
 
+## MicroOS hosts have a root password for the console, and root never logs in over ssh
+
+**Decided 2026-11-02**, the owner's call, for every host that moves to MicroOS
+([`plans/microos-cutover.md`](../plans/microos-cutover.md)).
+
+- **Emergency mode's only login is root's password.** MicroOS ships root locked, and the
+  console login in emergency mode (`sulogin`) accepts root alone. The rollback simulation
+  shows the result on screen: *Cannot open access to console, the root account is locked*.
+  With root locked, a box in emergency mode that has also lost ssh or its network can only
+  be reinstalled.
+- **So each host gets a long root password,** which the owner keeps protected. Its hash
+  reaches the host through the carry-over on the Combustion stick, never through git, and
+  the first-boot script sets it. `zero` and the Singapore box do not share one. The
+  console then works from `two`'s serial line in the UK, or in Singapore by someone local
+  with a keyboard, a screen and the password read to them.
+- **Not a password-free console** (`SYSTEMD_SULOGIN_FORCE=1`). It would give root to
+  anyone at the keyboard, against the physical-access threat roadmap §4 is built on.
+- **Root never logs in over ssh, by three layers.** `sshd-infra.conf`, carried to every
+  MicroOS host, sets `PermitRootLogin no` and `PasswordAuthentication no`. Root is given
+  no `authorized_keys`. And the first-boot simulation checks the drop-in wins over
+  openSUSE's stock configuration, both in `sshd -T` and by an ssh login as root with a
+  valid key, which must be refused.
+
 ## The lesson worth keeping
 
 
