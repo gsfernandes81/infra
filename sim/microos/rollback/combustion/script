@@ -42,10 +42,13 @@ mkdir -p /etc/systemd/system/health-checker.service.d
 printf '[Unit]\nAfter=sim-tunnel.service\n' \
 	> /etc/systemd/system/health-checker.service.d/after-sim-tunnel.conf
 
-# The plugin, where an admin's go. It checks the service itself, and fails only on that,
-# or on /etc/sim-fail, which the last stage uses to fail a snapshot that has booted fine.
-install -d /usr/local/libexec/health-checker
-cat > /usr/local/libexec/health-checker/sim-tunnel.sh <<'PLUGIN'
+# The plugin. The first run put it in /usr/local/libexec/health-checker, the admins'
+# directory, and it was never there at runtime: /usr/local is a subvolume of its own,
+# mounted over what this snapshot wrote. In /usr/libexec it is inside the snapshot, so the
+# check rolls back with the OS it checks. It checks the service itself, and fails only on
+# that, or on /etc/sim-fail, which the last stage uses to fail a snapshot that has booted
+# fine.
+cat > /usr/libexec/health-checker/sim-tunnel.sh <<'PLUGIN'
 #!/bin/sh
 case "$1" in
 check)
@@ -60,6 +63,6 @@ check)
 stop) exit 0 ;;
 esac
 PLUGIN
-chmod 755 /usr/local/libexec/health-checker/sim-tunnel.sh
+chmod 755 /usr/libexec/health-checker/sim-tunnel.sh
 
 echo "combustion-rollback: done" > /dev/console

@@ -28,3 +28,7 @@ echo "-- what the package's binary does when asked to update itself:"
 run timeout 60 cloudflared update
 run sh -c 'ls /usr/libexec/health-checker/ /usr/local/libexec/health-checker/ 2>&1'
 run sh -c 'ls /boot/efi/loader/entries 2>&1 | head; cat /etc/sysconfig/bootloader 2>/dev/null | grep -E "^LOADER_TYPE"'
+echo "-- where grubenv is, since health-checker could not write /boot/grub2/grubenv:"
+run sh -c 'ls -la /boot/grub2/grubenv /boot/writable 2>&1; findmnt -no TARGET,OPTIONS /boot/writable 2>&1'
+run sh -c 'grep -rn "grubenv\|editenv" /usr/libexec/health-checker /usr/sbin/health-checker 2>/dev/null | head -n 10'
+run rpm -q grub2
