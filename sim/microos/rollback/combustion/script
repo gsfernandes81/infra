@@ -30,6 +30,12 @@ cat > /usr/bin/sim-tunnel <<'BIN'
 exec sleep infinity
 BIN
 chmod 755 /usr/bin/sim-tunnel
+# The journal's warnings and errors also go to the serial console, so a boot that never
+# reaches ssh still says why in the serial log CI keeps.
+mkdir -p /etc/systemd/journald.conf.d
+printf '%s\n' '[Journal]' 'ForwardToConsole=yes' 'TTYPath=/dev/ttyS0' 'MaxLevelConsole=warning' \
+	> /etc/systemd/journald.conf.d/sim-console.conf
+
 # A stand-in for a stack: an ordinary service, which emergency mode must stop.
 cat > /etc/systemd/system/sim-stack.service <<'UNIT'
 [Unit]
