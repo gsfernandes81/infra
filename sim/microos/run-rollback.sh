@@ -92,10 +92,12 @@ ssh_vm 'ls -l /usr/share/sim-good-update' 2>&1 | tee -a report.txt || true
 
 stage "the check failing on a snapshot that has booted fine (/etc/sim-fail), then a reboot"
 # The case the cloudflared plugin must never be able to cause, by an outage or by a
-# mistake in /etc: the previous run lost the guest here, so this stage records what it can
-# see instead of stopping the script.
+# mistake in /etc. Without the plugin's guard, health-checker rebooted once and then
+# started emergency.target, and the guest never answered again; with it, the guest must
+# come back on the same snapshot, reachable. If it does not, screenshots follow.
 ssh_vm 'touch /etc/sim-fail'
 if reboot_and_settle; then
+	echo "SETTLED: the guest came back after a failing check on a good snapshot" | tee -a report.txt
 	state
 	ssh_vm 'rm -f /etc/sim-fail; systemctl list-units --state=active --type=service --no-pager --no-legend | wc -l' 2>&1 | tee -a report.txt || true
 else

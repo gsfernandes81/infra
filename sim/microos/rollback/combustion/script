@@ -48,10 +48,23 @@ printf '[Unit]\nAfter=sim-tunnel.service\n' \
 # check rolls back with the OS it checks. It checks the service itself, and fails only on
 # that, or on /etc/sim-fail, which the last stage uses to fail a snapshot that has booted
 # fine.
+#
+# THE GUARD: on a snapshot health-checker has already recorded as working, the plugin
+# passes without checking. health-checker answers a failure there with one reboot and then
+# emergency.target, which stops sshd and the network (its source, error_decision_legacy):
+# a remote box gone until someone reaches its console. The real check runs only on a new
+# snapshot's first boot, where a failure means a rollback. The current snapshot is read
+# the way health-checker reads it, from the subvolid / is mounted with.
 cat > /usr/libexec/health-checker/sim-tunnel.sh <<'PLUGIN'
 #!/bin/sh
 case "$1" in
 check)
+	current=$(findmnt --output OPTIONS --noheadings / | sed -e 's|.*subvolid=\([0-9]\+\).*|\1|')
+	last=$(sed -n 's/^LAST_WORKING_BTRFS_ID=//p' /var/lib/misc/health-check.state 2>/dev/null)
+	if [ -n "$last" ] && [ "$current" = "$last" ]; then
+		echo "sim-tunnel: snapshot $current already passed; not checked"
+		exit 0
+	fi
 	[ -e /etc/sim-fail ] && { echo "sim-tunnel: /etc/sim-fail present"; exit 1; }
 	for _ in $(seq 1 30); do
 		systemctl is-active -q sim-tunnel.service && exit 0
