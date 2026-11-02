@@ -99,7 +99,15 @@ good=$(default_snapshot)
 ssh_vm 'grep -q "^LAST_WORKING_BTRFS_ID=" /var/lib/misc/health-check.state' \
 	&& pass "health-checker recorded a working snapshot ($good)" \
 	|| fail "health-check.state has no LAST_WORKING_BTRFS_ID, so the guard has nothing to read"
-# A normal boot must stay clean with the kept units' new ordering.
+# A normal boot must stay clean with the kept units' new ordering: no cycle, which systemd
+# breaks by dropping a job (one such took D-Bus and the network down), and no unit that
+# found the bus missing.
+if ssh_vm 'journalctl -b --no-pager | grep -qi "ordering cycle"'; then
+	fail "a normal boot found an ordering cycle with the kept units' drop-ins"
+	ssh_vm 'journalctl -b --no-pager | grep -i -A2 "ordering cycle" | head -n 12' | tee -a report.txt
+else
+	pass "a normal boot found no ordering cycle"
+fi
 if ssh_vm 'journalctl -b --no-pager | grep -q "Failed to connect to bus"'; then
 	fail "a normal boot logged 'Failed to connect to bus' with the kept units' ordering"
 else
