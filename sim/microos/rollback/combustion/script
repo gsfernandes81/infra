@@ -138,17 +138,19 @@ for unit in sshd.service NetworkManager.service wicked.service sim-tunnel.servic
 	dbus.socket dbus.service dbus-broker.service systemd-user-sessions.service; do
 	[ -e "/usr/lib/systemd/system/$unit" ] || [ -e "/etc/systemd/system/$unit" ] || continue
 	mkdir -p "/etc/systemd/system/$unit.d"
-	# A unit that ships without default dependencies already survives emergency mode, and
-	# its own ordering is deliberate: dbus-broker must run before basic.target, and ordering
-	# it after basic.target made a cycle that took D-Bus and the network down on a normal
-	# boot. Such a unit gets IgnoreOnIsolate alone.
-	vendor=/usr/lib/systemd/system/$unit
-	[ -e "$vendor" ] || vendor=/etc/systemd/system/$unit
-	if grep -q '^DefaultDependencies=no' "$vendor"; then
+	# D-Bus ships without default dependencies and must run before basic.target, so it
+	# already survives emergency mode and its own ordering is deliberate. Ordering it after
+	# basic.target made a cycle, which systemd broke by deleting D-Bus's start job, and the
+	# network never came up on a normal boot (the serial log of that run). So it gets
+	# IgnoreOnIsolate alone. Named, not detected: an earlier grep for its
+	# DefaultDependencies line missed it through the dbus.service alias.
+	case "$unit" in
+	dbus.service | dbus-broker.service)
 		printf '%s\n' '[Unit]' 'IgnoreOnIsolate=yes' > "/etc/systemd/system/$unit.d/keep-in-emergency.conf"
 		systemctl add-wants emergency.target "$unit"
 		continue
-	fi
+		;;
+	esac
 	case "$unit" in
 	*.socket) order='After=sysinit.target
 Before=sockets.target' ;;
