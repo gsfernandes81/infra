@@ -475,7 +475,7 @@ services:
   # host its .env's DATABASE_URL names, so that is its alias here; the container keeps its
   # old name. Dev-only credentials, as in that repo.
   dd-postgres:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     container_name: dd-postgres
     restart: "no"
     # In the pool with the dev containers: it is dev work's memory, not the host's.
