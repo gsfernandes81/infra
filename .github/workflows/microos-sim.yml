@@ -196,7 +196,7 @@ jobs:
           path: |
             ${{ runner.temp }}/rollback/report.txt
             ${{ runner.temp }}/rollback/serial.log
-            ${{ runner.temp }}/rollback/screen-*.png
+            ${{ runner.temp }}/rollback/screen-*
           if-no-files-found: warn
 
   aarch64-packages:

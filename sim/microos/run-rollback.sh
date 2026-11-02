@@ -46,7 +46,8 @@ screenshots() {
 	for n in 1 2 3; do
 		python3 -I "$here/qmp.py" qmp.sock "screendump $PWD/screen-$n.ppm" "info status" \
 			| tee -a report.txt || true
-		convert "screen-$n.ppm" "screen-$n.png" 2>/dev/null && rm -f "screen-$n.ppm"
+		python3 -I "$here/ppm2png.py" "screen-$n.ppm" "screen-$n.png" \
+			|| echo "screen-$n: could not convert; the .ppm is kept" | tee -a report.txt
 		sleep 120
 	done
 }
