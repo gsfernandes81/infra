@@ -89,7 +89,9 @@ chmod 755 /usr/libexec/health-checker/sim-tunnel.sh
 # lines suit NetworkManager or wicked, and dbus-broker or dbus-daemon.
 for unit in sshd.service NetworkManager.service wicked.service sim-tunnel.service \
 	dbus.socket dbus.service dbus-broker.service; do
-	systemctl cat "$unit" >/dev/null 2>&1 || continue
+	# The unit file itself, not `systemctl cat`: inside Combustion's shell that answered for
+	# wicked.service, which this image lacks, and add-wants then failed the whole first boot.
+	[ -e "/usr/lib/systemd/system/$unit" ] || [ -e "/etc/systemd/system/$unit" ] || continue
 	mkdir -p "/etc/systemd/system/$unit.d"
 	printf '[Unit]\nIgnoreOnIsolate=yes\n' > "/etc/systemd/system/$unit.d/keep-in-emergency.conf"
 	systemctl add-wants emergency.target "$unit"
