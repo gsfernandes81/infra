@@ -109,4 +109,30 @@ else
 	fi
 fi
 
+stage "forced into emergency.target on a good snapshot (/etc/sim-fail-hard): is there still a way in?"
+# The guard cannot help here by design: the check fails whatever the snapshot. health-
+# checker then reboots once and starts emergency.target. The kept units must leave ssh
+# answering, with the stacks stopped.
+ssh_vm 'rm -f /etc/sim-fail; rm -f /var/lib/misc/health-check.rebooted; touch /etc/sim-fail-hard' || true
+before=$(ssh_vm cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo none)
+ssh_vm 'systemctl reboot' || true
+reached=no
+for _ in $(seq 1 72); do
+	sleep 10
+	if [ "$(ssh_vm 'systemctl is-active emergency.target' 2>/dev/null)" = active ]; then
+		reached=yes
+		break
+	fi
+done
+if [ "$reached" = yes ]; then
+	echo "REACHABLE IN EMERGENCY: ssh answered with emergency.target active" | tee -a report.txt
+	ssh_vm 'cat /proc/sys/kernel/random/boot_id; systemctl is-active sshd sim-tunnel docker 2>&1;
+		systemctl list-units --state=active --type=service --no-pager --no-legend | wc -l;
+		journalctl -b -u health-checker --no-pager | tail -n 6' 2>&1 | tee -a report.txt
+	echo "boot id before the reboot: $before" | tee -a report.txt
+else
+	echo "NOT REACHABLE: no ssh with emergency.target active within 12 minutes" | tee -a report.txt
+	screenshots
+fi
+
 kill "$(cat qemu.pid)" 2>/dev/null || true

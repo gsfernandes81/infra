@@ -59,6 +59,9 @@ cat > /usr/libexec/health-checker/sim-tunnel.sh <<'PLUGIN'
 #!/bin/sh
 case "$1" in
 check)
+	# /etc/sim-fail-hard fails even a known-good snapshot, to drive the box into
+	# emergency.target on purpose and see whether the way in survives it.
+	[ -e /etc/sim-fail-hard ] && { echo "sim-tunnel: /etc/sim-fail-hard present"; exit 1; }
 	current=$(findmnt --output OPTIONS --noheadings / | sed -e 's|.*subvolid=\([0-9]\+\).*|\1|')
 	last=$(sed -n 's/^LAST_WORKING_BTRFS_ID=//p' /var/lib/misc/health-check.state 2>/dev/null)
 	if [ -n "$last" ] && [ "$current" = "$last" ]; then
@@ -77,5 +80,16 @@ stop) exit 0 ;;
 esac
 PLUGIN
 chmod 755 /usr/libexec/health-checker/sim-tunnel.sh
+
+# Emergency mode keeps the ways in: sshd, the network, and the tunnel's stand-in survive
+# the isolate (IgnoreOnIsolate) and are started by it if they were not up yet. Docker and
+# everything else stop, which is what emergency mode is for. A unit this image lacks is
+# skipped, so the same lines suit NetworkManager or wicked.
+for unit in sshd.service NetworkManager.service wicked.service sim-tunnel.service; do
+	systemctl cat "$unit" >/dev/null 2>&1 || continue
+	mkdir -p "/etc/systemd/system/$unit.d"
+	printf '[Unit]\nIgnoreOnIsolate=yes\n' > "/etc/systemd/system/$unit.d/keep-in-emergency.conf"
+	systemctl add-wants emergency.target "$unit"
+done
 
 echo "combustion-rollback: done" > /dev/console

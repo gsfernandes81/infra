@@ -32,3 +32,7 @@ echo "-- where grubenv is, since health-checker could not write /boot/grub2/grub
 run sh -c 'ls -la /boot/grub2/grubenv /boot/writable 2>&1; findmnt -no TARGET,OPTIONS /boot/writable 2>&1'
 run sh -c 'grep -rn "grubenv\|editenv" /usr/libexec/health-checker /usr/sbin/health-checker 2>/dev/null | head -n 10'
 run rpm -q grub2
+echo "-- a second way in, for a box with nothing else near it:"
+run zypper --non-interactive --quiet search --match-exact tailscale
+run sh -c 'systemctl list-unit-files NetworkManager.service wicked.service --no-pager 2>&1'
+run sh -c 'cat /usr/lib/systemd/system/emergency.target /usr/lib/systemd/system/emergency.service 2>&1 | grep -vE "^#|^$"'
