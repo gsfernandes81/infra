@@ -125,19 +125,28 @@ ssh_vm 'for u in sshd.service NetworkManager.service dbus.service dbus-broker.se
 	ls -d /var/log/journal 2>&1' 2>&1 | tee -a report.txt
 before=$(ssh_vm cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo none)
 ssh_vm 'systemctl reboot' || true
+# Reached means ssh answers on a boot whose journal shows health-checker starting the
+# emergency shell. An earlier version asked `systemctl is-active emergency.target` instead,
+# which never read "active" once sulogin had failed on the locked root, and reported a box
+# that was answering ssh as unreachable.
 reached=no
 for _ in $(seq 1 72); do
 	sleep 10
-	if [ "$(ssh_vm 'systemctl is-active emergency.target' 2>/dev/null)" = active ]; then
+	if ssh_vm 'journalctl -b --no-pager | grep -q "starting emergency shell"' 2>/dev/null; then
 		reached=yes
 		break
 	fi
 done
 if [ "$reached" = yes ]; then
-	echo "REACHABLE IN EMERGENCY: ssh answered with emergency.target active" | tee -a report.txt
-	ssh_vm 'cat /proc/sys/kernel/random/boot_id; systemctl is-active sshd sim-tunnel docker 2>&1;
-		systemctl list-units --state=active --type=service --no-pager --no-legend | wc -l;
-		journalctl -b -u health-checker --no-pager | tail -n 6' 2>&1 | tee -a report.txt
+	echo "REACHABLE IN EMERGENCY: ssh answered on the boot health-checker sent to emergency mode" \
+		| tee -a report.txt
+	# shellcheck disable=SC2016  # runs in the guest, so its expansions happen there
+	ssh_vm 'echo "boot $(cat /proc/sys/kernel/random/boot_id)"
+		for u in emergency.target emergency.service sshd NetworkManager dbus-broker sim-tunnel \
+			systemd-user-sessions systemd-logind; do echo "$u: $(systemctl is-active $u)"; done
+		ls -la /run/nologin 2>&1
+		echo "active services: $(systemctl list-units --state=active --type=service --no-pager --no-legend | wc -l)"
+		journalctl -b -u health-checker --no-pager | tail -n 4' 2>&1 | tee -a report.txt
 	echo "boot id before the reboot: $before" | tee -a report.txt
 else
 	echo "NOT REACHABLE: no ssh with emergency.target active within 12 minutes" | tee -a report.txt
