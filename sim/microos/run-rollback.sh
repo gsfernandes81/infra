@@ -113,7 +113,7 @@ stage "forced into emergency.target on a good snapshot (/etc/sim-fail-hard): is 
 # The guard cannot help here by design: the check fails whatever the snapshot. health-
 # checker then reboots once and starts emergency.target. The kept units must leave ssh
 # answering, with the stacks stopped.
-ssh_vm 'rm -f /etc/sim-fail; rm -f /var/lib/misc/health-check.rebooted; touch /etc/sim-fail-hard' || true
+ssh_vm 'rm -f /etc/sim-fail; rm -f /var/lib/misc/health-check.rebooted; echo 0 > /etc/sim-fail-hard' || true
 # What systemd will do with the units emergency mode is meant to keep, recorded before the
 # box goes dark: the drop-ins in force, and every dependency that could pull them down.
 # shellcheck disable=SC2016  # the loop runs in the guest, so its variables expand there
@@ -141,6 +141,11 @@ if [ "$reached" = yes ]; then
 	echo "boot id before the reboot: $before" | tee -a report.txt
 else
 	echo "NOT REACHABLE: no ssh with emergency.target active within 12 minutes" | tee -a report.txt
+	echo "-- one ssh attempt, verbose, to show where it stops:" | tee -a report.txt
+	ssh -vv -i key -p "$ssh_port" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+		-o ConnectTimeout=10 -o BatchMode=yes root@127.0.0.1 true 2>&1 \
+		| grep -vE 'debug2: (ciphers|MACs|compression|host key algorithms|KEX algorithms)' \
+		| tail -n 25 | tee -a report.txt || true
 	screenshots
 	# A hard reset, then the dark boot's own journal: which jobs stopped the kept units, and
 	# what asked for them. sim-fail-hard goes first, through the next boot's first ssh,

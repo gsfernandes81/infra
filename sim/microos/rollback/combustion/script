@@ -61,7 +61,19 @@ case "$1" in
 check)
 	# /etc/sim-fail-hard fails even a known-good snapshot, to drive the box into
 	# emergency.target on purpose and see whether the way in survives it.
-	[ -e /etc/sim-fail-hard ] && { echo "sim-tunnel: /etc/sim-fail-hard present"; exit 1; }
+	# It fails twice, the boot health-checker reboots and the one it sends to emergency mode,
+	# and then removes itself, so a hard reset brings the box back to show the dark boot's
+	# journal.
+	if [ -e /etc/sim-fail-hard ]; then
+		n=$(cat /etc/sim-fail-hard 2>/dev/null)
+		if [ "${n:-0}" -ge 2 ]; then
+			rm -f /etc/sim-fail-hard
+		else
+			echo $(( ${n:-0} + 1 )) > /etc/sim-fail-hard
+			echo "sim-tunnel: /etc/sim-fail-hard, failure $(( ${n:-0} + 1 ))"
+			exit 1
+		fi
+	fi
 	current=$(findmnt --output OPTIONS --noheadings / | sed -e 's|.*subvolid=\([0-9]\+\).*|\1|')
 	last=$(sed -n 's/^LAST_WORKING_BTRFS_ID=//p' /var/lib/misc/health-check.state 2>/dev/null)
 	if [ -n "$last" ] && [ "$current" = "$last" ]; then
@@ -87,8 +99,10 @@ chmod 755 /usr/libexec/health-checker/sim-tunnel.sh
 # NetworkManager needs it: a screenshot of the unguarded run showed emergency mode stopping
 # D-Bus along with sshd and NetworkManager. A unit this image lacks is skipped, so the same
 # lines suit NetworkManager or wicked, and dbus-broker or dbus-daemon.
+# systemd-user-sessions too: stopping it writes /run/nologin, which turns away every login
+# but root's, so gavin could not log in to a box in emergency mode.
 for unit in sshd.service NetworkManager.service wicked.service sim-tunnel.service \
-	dbus.socket dbus.service dbus-broker.service; do
+	dbus.socket dbus.service dbus-broker.service systemd-user-sessions.service; do
 	# The unit file itself, not `systemctl cat`: inside Combustion's shell that answered for
 	# wicked.service, which this image lacks, and add-wants then failed the whole first boot.
 	[ -e "/usr/lib/systemd/system/$unit" ] || [ -e "/etc/systemd/system/$unit" ] || continue
