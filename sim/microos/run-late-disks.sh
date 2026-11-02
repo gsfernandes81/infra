@@ -67,4 +67,30 @@ reboot_vm
 ssh_vm 'systemctl is-system-running --wait' || true
 state
 
+stage "tuning: a 180 s device timeout and a udev rule that asks for the mount"
+ssh_vm 'bash -s' < "$here/late-disks/tune.sh" 2>&1 | tee -a report.txt
+ssh_vm 'systemctl poweroff' || true
+wait_for_poweroff
+
+stage "boot without the disks, which are plugged 20 s after power-on"
+boot_vm
+sleep 20
+python3 -I "$here/qmp.py" qmp.sock "${disk_cmds[@]}" | tee -a report.txt
+wait_for_ssh
+ssh_vm 'systemctl is-system-running --wait' || true
+ssh_vm 'systemd-analyze blame --no-pager | grep -E "media-array|sim-consumer"' 2>&1 | tee -a report.txt || true
+state
+ssh_vm 'systemctl poweroff' || true
+wait_for_poweroff
+
+stage "boot without the disks, which are plugged 4 minutes after power-on, after the timeout"
+boot_vm
+wait_for_ssh
+ssh_vm 'systemctl is-system-running --wait' || true
+sleep_left=$((240 - 60))
+sleep "$sleep_left"
+python3 -I "$here/qmp.py" qmp.sock "${disk_cmds[@]}" | tee -a report.txt
+sleep 45
+state
+
 kill "$(cat qemu.pid)" 2>/dev/null || true
