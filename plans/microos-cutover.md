@@ -39,12 +39,13 @@ slice, because the infra container moves with it. Podman comes later still.
 
 ## Before the visit
 
-1. **One first-boot script per host.** MicroOS runs a Combustion script on its first boot.
-   Each host's is a literal file under `hosts/<host>/`, reviewed like any boot-path file
-   and not generated. It sets users, ssh keys, hostname and packages, makes the host's
-   `/media/*` mountpoints, and carries no secret. It also turns automatic reboots off on
-   every host with the two files the simulation proved, because nothing on this fleet
-   restarts without the owner's say. The owner sets each host's policy later, over ssh.
+1. **One first-boot script per host,** at `hosts/<host>/microos/combustion/script`.
+   MicroOS runs it once, at first boot. It is reviewed like any boot-path file and not
+   generated. It sets users, ssh keys, hostname and packages, makes the host's `/media/*`
+   mountpoints, appends the host's fstab fragment, installs the `cloudflared` health-check
+   plugin, and carries no secret. It disables `transactional-update.timer` and sets the
+   two reboot files the simulation proved, because nothing on this fleet restarts without
+   the owner's say.
 2. **A carry-over step for what is not in git:** tunnel credentials
    (`/etc/cloudflared/<host>.json`), every deployment's `.env`, the dev containers'
    secrets directories on `zero`, `gavin`'s password hash and `authorized_keys`, and **the
@@ -97,8 +98,7 @@ test and the visit's own checks do that.
   rebooting: run in the VM, it built a new snapshot, logged *Reboots are disabled*, and
   the VM stayed up. Both files were set together, so the run shows them sufficient
   together, not each alone. The update then takes effect at the next boot of any kind, a
-  power cut included. **The owner decides per host** whether the daily update stays on
-  with that meaning, or its timer is disabled so nothing changes until the owner runs it.
+  power cut included, which is why the owner chose to disable the timer instead.
 - **Every package exists for aarch64:** docker, docker-compose, cloudflared, bcache-tools,
   smartmontools, btrfsprogs, zram-generator and syncthing.
 - **bcache needs no script.** The late-disks simulation built `zero`'s layout in miniature
@@ -141,33 +141,27 @@ test and the visit's own checks do that.
   gluetun's, came up: the port answered from the host, a service reached another by name,
   and the namespace-sharing one reached it on `127.0.0.1`.
 
-Still open: whether the 32-bit `cloudflared` runs on MicroOS's kernel (§ *Waiting on the
-owner*), which needs the bench.
+Still open: the `health-checker` rollback for a broken `cloudflared`, which the next
+simulation tests.
 
-## Waiting on the owner
+## Decided, 2026-11-02
 
-These are the owner's calls. Each blocks the first-boot scripts or a play until it is
-made.
+The owner settled the open calls on 2026-11-02.
 
-1. **The update policy, per host.** Either the daily update stays on and takes effect at
-   the next boot of any kind, or its timer is disabled and nothing changes until the owner
-   runs `transactional-update` (§ *What the simulation has answered*).
-2. **Which `cloudflared`.** The fleet runs Cloudflare's 32-bit `arm` build on all three
-   hosts, so the staggered rollout tests what every host runs
-   ([`decisions.md`](../docs/decisions.md) § *One cloudflared build on all three*).
-   MicroOS offers openSUSE's `aarch64` package, which `transactional-update` would update
-   outside that rollout. Keeping the rule means the binary in `/usr/local/bin`, which
-   MicroOS leaves writable. Whether a 32-bit binary runs on MicroOS's kernel is untested:
-   GitHub's arm64 runners cannot run 32-bit code, so slice 1's bench test is the first
-   place to see it.
-3. **How Syncthing runs on `one`:** as a compose deployment, as on `zero`, or as
-   openSUSE's package under systemd.
-4. **Where each host's first-boot files live.** The proposal is
-   `hosts/<host>/microos/combustion/script`, beside an fstab fragment the script appends
-   to the image's own `/etc/fstab`, since MicroOS writes its root entries at install.
-5. **`three`'s tunnel.** `server-create-tunnel.yml` was written for 2g's migration of a
-   host that already has one. A first tunnel for a new host needs a variant of it, which
-   the owner runs from the phone with the Cloudflare API token.
+1. **No automatic updates.** `transactional-update.timer` is disabled on every MicroOS
+   host; the owner runs updates and the reboot over ssh
+   ([`decisions.md`](../docs/decisions.md) § *MicroOS hosts take openSUSE's cloudflared*).
+2. **openSUSE's `cloudflared`,** guarded by a `health-checker` plugin that rolls a bad
+   update back, as that section says. The simulation proves the rollback path before any
+   host relies on it.
+3. **Syncthing on `one` runs under compose,** as on `zero`. Every service stays in a
+   container.
+4. **Each host's first-boot files** live at `hosts/<host>/microos/combustion/script`,
+   beside an fstab fragment the script appends to the image's own `/etc/fstab`, since
+   MicroOS writes its root entries at install.
+5. **`three`'s tunnel** comes from a new play for a host that has none. The simulation
+   tests it against a stand-in for Cloudflare's API, so no account is needed, and Fable
+   reviews it adversarially.
 
 ## Docs this changes
 

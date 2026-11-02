@@ -68,7 +68,19 @@ Immich's library on `zero`, and the send-only folder type is what keeps it from 
 
 A mirror copies deletions too. `one` takes a daily btrfs snapshot of each folder from a
 systemd timer of its own, and the snapshots make it a backup. A monthly scrub and a SMART
-check report to the owner, so a dead drive is noticed.
+check report to the owner, so a dead drive is noticed. Syncthing runs under compose, as on
+`zero`.
+
+The drives keep spinning. Syncthing serves blocks to other devices whenever they ask, so a
+disk spun down would wake at random times, and a few dozen spin-ups a day wear it faster
+than spinning, which NAS drives are rated for. What `one` does instead:
+
+- Syncthing's full rescan runs daily, not hourly (`rescanIntervalS`). Its file watcher
+  still catches changes as they happen, and a receive-only mirror changes rarely.
+- For the drives' first week, the owner reads `Load_Cycle_Count` daily. A count climbing
+  by hundreds a day means the heads park too eagerly, which wore `zero`'s laptop disks
+  out; the idle timer is then lengthened while the drives are new.
+- The array is scrubbed monthly, not weekly.
 
 The owner seeds the first copy over the LAN while `one` is still in the UK, and tests a
 restore from it there. After the move, Syncthing finds `zero` again through global

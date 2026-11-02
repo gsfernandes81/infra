@@ -397,6 +397,11 @@ should be amended when that repo is next touched.
 
 ## One cloudflared build on all three, including the two that are `aarch64`
 
+**⚠︎SUPERSEDED IN PART 2026-11-02** by *MicroOS hosts take openSUSE's cloudflared* below:
+each host that moves to MicroOS leaves this build and the staggered rollout at its move.
+`two` stays on Alpine with this build. What follows stays the record of why the build was
+uniform.
+
 **All three hosts run the 32-bit `arm` build.** `two` is `armv6l` and needs it; `zero`
 and `one` are `aarch64` and could run `arm64`. They do not, on purpose.
 
@@ -1735,6 +1740,35 @@ MicroOS keep Docker and their compose files as they are. Rootless podman and Qua
   leans on Docker (`cgroup_parent`, `BUILDX_BAKE_ENTITLEMENTS_FS`).
 - **It does not reopen Phase 7.** Rootless podman's memory limits are still the reason to
   convert, and MicroOS is still what makes them possible.
+
+## MicroOS hosts take openSUSE's cloudflared, and a health check rolls a bad update back
+
+**Decided 2026-11-02**, the owner's call, for the hosts that move to MicroOS
+([`plans/microos-cutover.md`](../plans/microos-cutover.md)). Each takes openSUSE's
+`aarch64` package of `cloudflared` and leaves the staggered rollout (*One cloudflared
+build on all three*, above).
+
+- **The package moves with the OS, inside a snapshot.** An update that breaks
+  `cloudflared` breaks it in a new snapshot, which MicroOS can leave. The 32-bit build
+  would be a hand-placed binary in `/usr/local/bin`, outside every snapshot, and would
+  keep the AArch32 dependency that section names as its strongest argument against.
+- **A health-checker plugin decides whether the new snapshot stays.** MicroOS's
+  `health-checker` runs plugins at boot, admins' from
+  `/usr/local/libexec/health-checker/`. A plugin that fails on a new snapshot's first boot
+  rolls the box back to the last snapshot that worked. So an update that breaks the box's
+  way in reverts itself.
+- **The plugin tests `cloudflared` itself, not the tunnel.** It checks that the service
+  runs, that its configuration validates and that its metrics port answers. It does not
+  check that Cloudflare's edge answers. On a snapshot that has already booted fine, a
+  failing plugin makes health-checker reboot once and then stop services, so a check that
+  an ISP outage could fail would take a working box down on an ordinary reboot.
+- **`cloudflared`'s own updater stays off.** The package lives in the read-only `/usr`,
+  and updates arrive with the OS.
+- **Nothing updates until the owner runs it.** `transactional-update.timer` is disabled on
+  every MicroOS host, also the owner's call: staging an update to take effect at the next
+  boot of any kind, a power cut included, is the one choice that is neither. The owner
+  runs `transactional-update` and the reboot over ssh, and the health check covers both.
+  Automatic update and reboot can return per host once the rollback is proven on a Pi.
 
 ## The lesson worth keeping
 
