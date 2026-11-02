@@ -13,8 +13,12 @@
 #
 # WHAT IT MAKES: a locally-managed tunnel named for the host, its credentials at
 # /etc/cloudflared/<host>.json (root, 0600), and the proxied CNAME ssh-<host>.<dns_zone>.
+# root, because the host's cloudflared runs as root, as on every host here: openSUSE's
+# package ships no unit, so the unit is the host's own tracked file and says so. A unit
+# that ran as another user could not read the file and would die on start.
 # Every object is looked up before it is made, so a re-run after a partial failure finishes
-# the job and a re-run after a whole one changes nothing.
+# the job and a re-run after a whole one changes nothing. It refuses a host that already
+# has a tracked tunnel config.
 #
 # WHAT IT DOES NOT, each because a later step owns it:
 #   - write the tunnel's config.yml. That is hosts/<host>/system/cloudflared-config.yml,
@@ -50,7 +54,9 @@
         fail_msg: >-
           Name the host: -e target=<host>, one that is in the inventory. Nothing has been
           created.
-        success_msg: "target: {{ target }}"
+        # | default: both messages render before the test, so a bare {{ target }} here would
+        # crash on the very case this task exists to catch (CLAUDE.md § Shell traps).
+        success_msg: "target: {{ target | default('?') }}"
 
 - name: Create a host's first tunnel
   hosts: "{{ target }}"
@@ -79,6 +85,24 @@
           with ansible_host set to its LAN address until its tunnel exists. Nothing has
           been created.
         success_msg: "{{ inventory_hostname }} is a fleet host"
+
+    - name: Read whether hosts/{{ inventory_hostname }} has a tunnel config
+      # A host with a tracked cloudflared-config.yml already has its tunnel, and this play
+      # is for one that has none: run against zero, one or two it would converge on their
+      # live credentials only because they happen to sit at the same path. Refuse instead.
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../../hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
+      register: host_tunnel_config
+      delegate_to: localhost
+
+    - name: Check {{ inventory_hostname }} has no tunnel yet
+      ansible.builtin.assert:
+        that: not host_tunnel_config.stat.exists
+        fail_msg: >-
+          hosts/{{ inventory_hostname }}/system/cloudflared-config.yml exists, so
+          {{ inventory_hostname }} already has a tunnel. This play makes a host's first one;
+          server-create-tunnel.yml is 2g's play for a second. Nothing has been created.
+        success_msg: "{{ inventory_hostname }} has no tracked tunnel config"
 
     - name: Read and check the Cloudflare API token
       ansible.builtin.import_tasks: _cf-api-token.yml

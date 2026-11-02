@@ -14,7 +14,7 @@ TOKEN = "sim-token"
 ZONE_ID = "zone-sim"
 ACCOUNT_ID = "acct-sim"
 STATE = {"tunnels": {}, "records": {}, "requests": [],
-         "refuse_writes": False, "tunnel_secrets": {}}
+         "refuse_writes": False, "refuse_dns": False, "tunnel_secrets": {}}
 
 
 def envelope(result=None, errors=None):
@@ -48,6 +48,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/__control" and method == "POST":
             change = self.body()
             STATE["refuse_writes"] = bool(change.get("refuse_writes", STATE["refuse_writes"]))
+            STATE["refuse_dns"] = bool(change.get("refuse_dns", STATE["refuse_dns"]))
+            if change.get("unproxy_records"):
+                for r in STATE["records"].values():
+                    r["proxied"] = False
+            if change.get("plant_a_record"):
+                rid = str(uuid.uuid4())
+                STATE["records"][rid] = {"id": rid, "type": "A", "name": change["plant_a_record"],
+                                         "content": "192.0.2.1", "proxied": False, "comment": None}
             if change.get("delete_tunnels"):
                 for t in STATE["tunnels"].values():
                     t["deleted_at"] = "2026-11-02T00:00:00Z"
@@ -55,7 +63,8 @@ class Handler(BaseHTTPRequestHandler):
                 for r in STATE["records"].values():
                     r["content"] = "elsewhere.example.invalid"
             if change.get("reset"):
-                STATE.update(tunnels={}, records={}, refuse_writes=False, tunnel_secrets={})
+                STATE.update(tunnels={}, records={}, refuse_writes=False, refuse_dns=False,
+                             tunnel_secrets={})
             return self.reply(200, {"ok": True})
 
         STATE["requests"].append(f"{method} {path}")
@@ -77,6 +86,9 @@ class Handler(BaseHTTPRequestHandler):
             b = self.body()
             if b.get("config_src") != "local" or not b.get("name") or not b.get("tunnel_secret"):
                 return self.reply(400, envelope(errors=[{"code": 1001, "message": f"bad tunnel body: {sorted(b)}"}]))
+            # Cloudflare refuses a second live tunnel of the same name.
+            if any(t["name"] == b["name"] and not t["deleted_at"] for t in STATE["tunnels"].values()):
+                return self.reply(409, envelope(errors=[{"code": 1013, "message": "You already have a tunnel with this name"}]))
             tid = str(uuid.uuid4())
             STATE["tunnels"][tid] = {"id": tid, "name": b["name"], "deleted_at": None,
                                      "config_src": b["config_src"]}
@@ -96,9 +108,14 @@ class Handler(BaseHTTPRequestHandler):
                      if r["type"] == want_type and r["name"] == want_name]
             return self.reply(200, envelope(found))
         if (p == records and method == "POST") or (p.startswith(records + "/") and method == "PUT"):
-            if STATE["refuse_writes"]:
+            if STATE["refuse_writes"] or STATE["refuse_dns"]:
                 return self.reply(403, envelope(errors=[{"code": 10000, "message": "Authentication error: this token may not edit DNS"}]))
             b = self.body()
+            # Cloudflare refuses a CNAME at a name that already holds another record type.
+            clash = [r for r in STATE["records"].values()
+                     if r["name"] == b.get("name") and r["type"] != b.get("type")]
+            if clash:
+                return self.reply(400, envelope(errors=[{"code": 81053, "message": "An A, AAAA, or CNAME record with that host already exists."}]))
             rid = p.rsplit("/", 1)[1] if method == "PUT" else str(uuid.uuid4())
             if method == "PUT" and rid not in STATE["records"]:
                 return self.reply(404, envelope(errors=[{"code": 81044, "message": "Record not found"}]))
