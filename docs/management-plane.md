@@ -537,6 +537,14 @@ idle laptop disks park their heads every few seconds. btrfs's counters were all 
 the last scrub, 2026-08-03, was clean. Phase 9 replaces `sdb`; `sdc` waits for errors or
 space. No scrub has run since August, and nothing schedules one.
 
+**Filed 2026-11-02, no phase number: a token missing a read permission fails censored in
+`_cf-tunnel.yml`.** Its three reads (the zone, an existing tunnel, the CNAME) are `no_log`
+and keep `uri`'s default status handling, so a 403 for a missing Zone:Read or Tunnel:Read
+prints `hidden (no_log)` and not Cloudflare's reason. The writes already follow the
+pattern that fixes this (CLAUDE.md § Verifying changes): `failed_when: false`, print the
+body's errors, then assert. The reads want the same. Found by Fable's review of
+`server-create-host-tunnel.yml`; every play that makes a tunnel shares the tasks.
+
 **Filed 2026-11-02, no phase number: `one`'s SSD shows 182 SATA link downshifts.** The
 MX500 itself is near new (98 % life left). The likeliest cause is August's bridge stalls
 from the failing SP900. It matters because the same Sabrent moves to `three` in Phase 9; a
