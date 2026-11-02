@@ -110,8 +110,17 @@ Compose 5.6.1.
   array's `SYSTEMD_WANTS`; without the rule it stayed unmounted. Either way the service
   that needs it stayed failed and must be started again, which the next run tests.
 
-Still open: whether MicroOS's Docker reads the Alpine Docker's `/var/lib/docker` on
-`one`'s SSD and `zero`'s `sda2`, and how a service restarts once a late array mounts.
+- **Docker's store carries over in place.** Alpine 3.24's own Docker (29.9.2) made a store
+  on btrfs with the containerd image store, as on the fleet: a pulled image, a locally
+  made one, a named volume with data, and an exited container. MicroOS's Docker (29.7.2,
+  containerd 2.4.2) took it over mounted as `/var/lib/docker` and listed all of it, but
+  every container failed with `exec ... permission denied` until one `restorecon -R
+  /var/lib/docker`. After that the volume's data and the local image both read back. So
+  `one`'s apps, `garmin-mcp`'s local build, and `zero`'s dev and pearl-wallet volumes stay
+  where they are. The relabel writes SELinux labels into the store, which Alpine's Docker
+  ignores, so a rollback is unaffected.
+
+Still open: how a service restarts once a late array mounts.
 
 ## Docs this changes
 
