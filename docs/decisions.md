@@ -1754,15 +1754,21 @@ build on all three*, above).
   would be a hand-placed binary in `/usr/local/bin`, outside every snapshot, and would
   keep the AArch32 dependency that section names as its strongest argument against.
 - **A health-checker plugin decides whether the new snapshot stays.** MicroOS's
-  `health-checker` runs plugins at boot, admins' from
-  `/usr/local/libexec/health-checker/`. A plugin that fails on a new snapshot's first boot
-  rolls the box back to the last snapshot that worked. So an update that breaks the box's
-  way in reverts itself.
-- **The plugin tests `cloudflared` itself, not the tunnel.** It checks that the service
-  runs, that its configuration validates and that its metrics port answers. It does not
-  check that Cloudflare's edge answers. On a snapshot that has already booted fine, a
-  failing plugin makes health-checker reboot once and then stop services, so a check that
-  an ISP outage could fail would take a working box down on an ordinary reboot.
+  `health-checker` runs its plugins at boot. A plugin that fails on a new snapshot's first
+  boot rolls the box back to the last snapshot that worked, so an update that breaks the
+  box's way in reverts itself. *Amended the same day after the rollback simulation
+  (`sim/microos/run-rollback.sh`):* the plugin lives in `/usr/libexec/health-checker/`,
+  inside the snapshot, so the check rolls back with the OS it checks. The admins'
+  directory, `/usr/local/libexec/health-checker/`, is a subvolume of its own mounted over
+  what a first-boot script writes, and a plugin put there was never seen.
+- **The plugin tests `cloudflared` itself, not the tunnel, and only on a new snapshot.**
+  It checks that the service runs, that its configuration validates and that its metrics
+  port answers, never that Cloudflare's edge answers. On a snapshot health-checker has
+  already recorded as working, it passes without checking. health-checker's source and the
+  simulation agree on why: a failure there means one reboot and then `emergency.target`
+  (`error_decision_legacy`). So neither an ISP outage nor a mistake in `/etc` can send a
+  working box to emergency mode, and a bad update still rolls back. The simulation showed
+  both.
 - **`cloudflared`'s own updater stays off.** The package lives in the read-only `/usr`,
   and updates arrive with the OS.
 - **Nothing updates until the owner runs it.** `transactional-update.timer` is disabled on
@@ -1770,6 +1776,31 @@ build on all three*, above).
   boot of any kind, a power cut included, is the one choice that is neither. The owner
   runs `transactional-update` and the reboot over ssh, and the health check covers both.
   Automatic update and reboot can return per host once the rollback is proven on a Pi.
+
+## Emergency mode on a MicroOS host keeps a way in
+
+**Decided 2026-11-02**, the owner's call, after the rollback simulation lost a VM to
+emergency mode for good. Whatever sends a MicroOS host to emergency mode (a health-checker
+plugin, a failed mount, MicroOS's own checks), sshd, the network and the tunnel stay up.
+The stacks stop, which is what emergency mode is for.
+
+- **Why it is needed.** Entering emergency mode stopped NetworkManager, D-Bus, sshd and
+  the tunnel, and with root locked even the console refused a login. A remote box would
+  have been gone until someone reached it.
+- **How it is done, as the simulation found it.** `sysinit.target` conflicts with
+  emergency mode, so entering it stops `sysinit.target`, and every unit that `Requires` it
+  stops too. Default dependencies are that requirement. Each kept unit gets a drop-in with
+  `DefaultDependencies=no`, `After=sysinit.target` (the ordering without the requirement),
+  `Conflicts=` and `Before=shutdown.target`, and `IgnoreOnIsolate=yes`, and is wanted by
+  `emergency.target`. The kept units are sshd, NetworkManager, D-Bus (`dbus.socket`,
+  `dbus-broker`), `systemd-user-sessions` (whose stop writes `/run/nologin`, which turns
+  away every login but root's), `cloudflared`, and on the Singapore box its second way in.
+  With them, a VM health-checker sent to emergency mode answered ssh with all of them
+  active.
+- **A second way in for the Singapore box,** because when `cloudflared` is what broke,
+  keeping it up helps nothing. Tailscale is the candidate (roadmap §5 names it) and
+  openSUSE packages it; the owner has not yet chosen. The UK boxes have the LAN and each
+  other.
 
 ## MicroOS hosts have a root password for the console, and root never logs in over ssh
 
