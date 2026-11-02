@@ -182,7 +182,7 @@ if [ "$reached" = yes ]; then
 	# inactive while the stack stayed stopped and the boot did not resume, and what that
 	# state means is not settled. The console and the units' own history say more.
 	ssh_vm 'systemctl status emergency.service emergency.target --no-pager --lines 6 2>&1 | head -n 30
-		journalctl -b -o short-precise --no-pager | grep -E "emergency|Emergency|sulogin" | tail -n 12' \
+		journalctl -b -o short-precise --no-pager | grep -iE "emergency|sulogin|transaction|job .* (failed|canceled|cancelled)" | tail -n 16' \
 		2>&1 | tee -a report.txt || true
 	python3 -I "$here/qmp.py" qmp.sock "screendump $PWD/emergency.ppm" >/dev/null || true
 	python3 -I "$here/ppm2png.py" emergency.ppm emergency.png || true

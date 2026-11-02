@@ -129,9 +129,8 @@ chmod 755 /usr/libexec/health-checker/sim-tunnel.sh
 # for. health-checker enters it with `systemctl start emergency.target`, and
 # sysinit.target conflicts with emergency mode, so entering it stops sysinit.target and
 # every unit that Requires it (the diagnostic run's unit dump). Default dependencies are
-# that requirement plus some ordering. Each kept unit drops them and keeps the ordering
-# alone, so a normal boot orders it as before: a service after sysinit and basic, a socket
-# after sysinit and before sockets.target. IgnoreOnIsolate covers the other way in, an
+# that requirement plus some ordering. Each kept unit drops them and keeps the ordering it
+# needs: a service after sysinit, a socket after sysinit and before sockets.target. IgnoreOnIsolate covers the other way in, an
 # isolate such as a typed `systemctl emergency`; health-checker's start does not need it.
 # A unit this image lacks is skipped.
 for unit in sshd.service NetworkManager.service wicked.service sim-tunnel.service \
@@ -154,7 +153,12 @@ for unit in sshd.service NetworkManager.service wicked.service sim-tunnel.servic
 	case "$unit" in
 	*.socket) order='After=sysinit.target
 Before=sockets.target' ;;
-	*) order='After=sysinit.target basic.target' ;;
+	# Services keep After=sysinit.target alone. Ordered after basic.target as well, which
+	# their default dependencies would add, emergency mode was never reached: entering it
+	# stops basic.target in the same transaction, and two runs ended with the stacks stopped
+	# and no emergency shell. Every run with this ordering reached emergency mode, and every
+	# normal boot with it passed the cycle and bus checks.
+	*) order='After=sysinit.target' ;;
 	esac
 	printf '%s\n' '[Unit]' 'DefaultDependencies=no' "$order" \
 		'Conflicts=shutdown.target' 'Before=shutdown.target' 'IgnoreOnIsolate=yes' \
