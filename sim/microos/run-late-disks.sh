@@ -83,12 +83,11 @@ state
 ssh_vm 'systemctl poweroff' || true
 wait_for_poweroff
 
-stage "boot without the disks, which are plugged 4 minutes after power-on, after the timeout"
+stage "boot without the disks, which are plugged in after the 180 s timeout has passed"
 boot_vm
 wait_for_ssh
 ssh_vm 'systemctl is-system-running --wait' || true
-sleep_left=$((240 - 60))
-sleep "$sleep_left"
+sleep 30
 python3 -I "$here/qmp.py" qmp.sock "${disk_cmds[@]}" | tee -a report.txt
 sleep 45
 state
