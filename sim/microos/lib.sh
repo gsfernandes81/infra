@@ -41,14 +41,14 @@ boot_vm() {
 	rm -f qmp.sock
 	qemu-system-x86_64 \
 		-enable-kvm -cpu host -m 4096 -smp 2 \
-		-drive file=disk.qcow2,if=virtio,format=qcow2 \
-		-drive file=combustion.img,if=virtio,format=raw \
+		-drive file="$PWD/disk.qcow2",if=virtio,format=qcow2 \
+		-drive file="$PWD/combustion.img",if=virtio,format=raw \
 		-device qemu-xhci,id=xhci \
 		-netdev user,id=n0,hostfwd=tcp:127.0.0.1:${ssh_port}-:22 \
 		-device virtio-net-pci,netdev=n0 \
-		-qmp unix:qmp.sock,server=on,wait=off \
-		-display none -monitor none -serial file:serial.log \
-		-pidfile qemu.pid -daemonize "$@"
+		-qmp "unix:$PWD/qmp.sock,server=on,wait=off" \
+		-display none -monitor none -serial "file:$PWD/serial.log" \
+		-pidfile "$PWD/qemu.pid" -daemonize "$@"
 }
 
 # Waits for qemu to exit after the guest powers off.

@@ -22,7 +22,9 @@ def main(path, commands):
             if "event" not in reply:
                 break
         print(request.get("arguments", {}).get("command-line", request["execute"]), "->", reply)
-        if "error" in reply:
+        # A human-monitor command reports its own failure as text in a successful reply.
+        text = reply.get("return", "")
+        if "error" in reply or (isinstance(text, str) and ("Error" in text or "Could not" in text)):
             sys.exit(1)
 
 

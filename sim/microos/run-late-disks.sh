@@ -27,9 +27,10 @@ disk_args=()
 disk_cmds=()
 for d in cache back0 back1; do
 	serial=SIM$(echo "$d" | tr '[:lower:]' '[:upper:]')
-	disk_args+=(-drive "if=none,id=$d,file=$d.qcow2,format=qcow2"
+	# Absolute paths: qemu's -daemonize moves its working directory to /.
+	disk_args+=(-drive "if=none,id=$d,file=$PWD/$d.qcow2,format=qcow2"
 		-device "usb-storage,bus=xhci.0,drive=$d,id=u$d,serial=$serial")
-	disk_cmds+=("drive_add 0 if=none,id=$d,file=$d.qcow2,format=qcow2"
+	disk_cmds+=("drive_add 0 if=none,id=$d,file=$PWD/$d.qcow2,format=qcow2"
 		"device_add usb-storage,bus=xhci.0,drive=$d,id=u$d,serial=$serial")
 done
 
