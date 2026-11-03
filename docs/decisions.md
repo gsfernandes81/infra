@@ -343,6 +343,10 @@ are not obviously compatible, and that has not been resolved.
 > **no box holds a key to another.** The two are separate facts and conflating them cost
 > an outage — see the box at the end.
 
+> **Amended 2026-11-03.** One exception, granted by the owner: `zero` holds a write-only
+> key to one backup directory on `three`. Its reasons and limits are in *`three` is the
+> off-site backup* below; the rule otherwise stands.
+
 **Nothing in this repo runs over SSH between boxes on its own behalf.** Fleet work is
 done *on* the box it concerns.
 
@@ -1747,12 +1751,14 @@ MicroOS keep Docker and their compose files as they are. Rootless podman and Qua
 **⚠︎SUPERSEDED IN PART 2026-11-03**, the owner's call: the health-checker plugin and its
 guard are dropped, so no host carries them. The guard reads a state file that belongs to
 health-checker, does nothing on a BLS boot, and covers only the last good snapshot, and an
-unguarded plugin can send a good box to emergency mode. Whether another documented
-mechanism can roll back an update that breaks `cloudflared`, and how often `cloudflared`
-releases and openSUSE's package have actually been faulty, are being researched before the
-owner decides; the owner leans towards Tailscale and `cloudflared` both as ways into every
-box. The rest of this section stands: openSUSE's package, its updater off, and no
-automatic updates.
+unguarded plugin can send a good box to emergency mode. Research the same day found no
+other documented rollback on openSUSE (Fedora IoT's greenboot belongs to that OS), and
+found that a faulty `cloudflared` release is rare, about three to five in four and a half
+years, and did its harm through unattended updates. openSUSE's package lags upstream by
+one to three months. The owner leans towards Tailscale and `cloudflared` both as ways into
+every box. The rest of this section stands: openSUSE's package, its updater off, and no
+automatic updates. Its last sentence, that automatic updates could return, is replaced by
+*Updates are by hand on every host* below.
 
 **Decided 2026-11-02**, the owner's call, for the hosts that move to MicroOS
 ([`plans/microos-cutover.md`](../plans/microos-cutover.md)). Each takes openSUSE's
@@ -1874,6 +1880,51 @@ The stacks stop, which is what emergency mode is for.
   no `authorized_keys`. And the first-boot simulation checks the drop-in wins over
   openSUSE's stock configuration, both in `sshd -T` and by an ssh login as root with a
   valid key, which must be refused.
+
+## Updates are by hand on every host, as a habit
+
+**Decided 2026-11-03**, the owner's call, for the whole fleet, on Alpine and on the new OS
+alike.
+
+- **No host updates or reboots on a timer.** The owner runs the update and the reboot
+  over ssh and watches the box come back. An update staged for the next boot takes effect
+  at a power cut as well, and nothing rolls a bad one back since the health-check plugin
+  was dropped (above).
+- **It is a habit, so it does not lapse:** monthly, from a recurring reminder on the
+  owner's phone, and sooner for a security fix in something the fleet exposes, such as
+  `cloudflared`, `openssh` or Docker. `zero` goes last, at least a day after the others,
+  so a bad update meets a less critical box first.
+- **One command per host.** A play updates the host, reboots it, and reports done only
+  once the box answers over each of its ways in. On `three`, the owner then unlocks the
+  array (*`three` is the off-site backup*, below).
+- **`one` carries live agent sessions**, which its reboot ends, so the owner checks for
+  live slots first. A hub feature that warns live agents before a reboot is a request for
+  `claude-sessions`, not yet filed.
+
+## `three` is the off-site backup: rsync from `zero`, snapshots on `three`
+
+**Decided 2026-11-03**, the owner's call. The design is in
+[`plans/three.md`](../plans/three.md) § *Backups* and § *Encryption*; this records why.
+
+- **An exception to *no box holds a key to another* (above), granted by the owner.**
+  `zero` holds one key to `three`, and it can do one thing: write into one directory,
+  through `rrsync -wo`, from `zero`'s tailnet address, with no shell, forwarding or
+  terminal. The rule exists so a compromised box cannot reach the rest of the fleet. This
+  key reaches a directory whose history `three`'s root snapshots out of the key's reach,
+  so a compromised `zero` can at worst spoil the newest copy.
+- **Push, not pull.** A pull would put a key that reads `zero`'s data on the box that
+  sits unattended abroad.
+- **rsync, not Syncthing's encrypted untrusted device.** That mode is still labelled beta
+  and has about twenty open issues of its own, among them a share stuck short of 100 %
+  after deletes (#8914) and deletes that never arrive (#10528). LUKS protects the data at
+  rest instead.
+- **LUKS with Adiantum, unlocked by hand after each boot, with no key file.** A Pi 4 has
+  no AES instructions, and a key file on the box protects nothing when the box is taken.
+  Unlocking costs one command per reboot, and reboots are already the owner's to run.
+- **Syncthing's identity lives inside the encrypted volume**, so a stolen `three` cannot
+  pass itself off to `zero`. The tunnel credentials and the tailnet key stay outside,
+  because they are how the owner reaches the box to unlock it, and are revoked after a
+  theft.
 
 ## The lesson worth keeping
 

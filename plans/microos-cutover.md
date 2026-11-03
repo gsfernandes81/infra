@@ -1,9 +1,11 @@
 # MicroOS at the November 2026 visit
 
-A proposal from 2026-11-02. It moves `three` and `one` to openSUSE MicroOS at the visit,
-and `zero` too if time allows. It also carries out [`three.md`](three.md). When the visit
-has done it, the reasoning moves to [`docs/decisions.md`](../docs/decisions.md) and this
-file is deleted.
+A proposal from 2026-11-02, revised 2026-11-03. It moves `one` and `three` to a new OS at
+the visit and carries out [`three.md`](three.md); `zero` stays on Alpine. The OS is not
+chosen yet: openSUSE MicroOS, Leap 16.1 in its immutable mode, or Fedora IoT. This file
+says MicroOS, the OS the simulations ran, until the owner picks. When the visit has done
+it, the reasoning moves to [`docs/decisions.md`](../docs/decisions.md) and this file is
+deleted.
 
 ## The constraint
 
@@ -21,21 +23,28 @@ is the only change that needs the owner in person; podman (Phase 7) follows over
 
 ## The slices
 
+Names follow the SD cards (`three.md`): the 8 GB board becomes `one`, and the 1 GB board
+that is `one` today becomes `three`.
+
 | # | Slice | Hours | Ends with |
 |---|---|---|---|
-| 1 | Bench test: boot `three` on its MicroOS card before it joins the stack | 1 | `three` proven on its own hardware; the fleet untouched |
+| 1 | Bench test: boot the 8 GB board on `one`'s new card before it joins the stack | 1 | the new OS proven on that board; the fleet untouched |
 | 2 | `zero`'s disk swap, borrowing `one`'s Sabrent ([`three.md`](three.md)) | 2 | `zero` on the new disk, still on Alpine |
-| 3 | `one`'s Sabrent and SSD to `three`; `one`'s apps up on `three` | 1.5 | the apps on `three` under Docker |
-| 4 | `one`'s board into the Argon, on its MicroOS card; Syncthing paired | 1.5 | seeding over the LAN, unattended |
-| 5 | `zero` on MicroOS, only if every gate holds | 3 | `zero` on MicroOS, or back on its Alpine card |
-| | spare | 1 | |
+| 3 | `one` moves to the 8 GB board, with its Sabrent, SSD and new card; its apps up under Docker | 1.5 | `one` serving from the new board |
+| 4 | The 1 GB board into the Argon as `three`, on its new card, with the first WD Red under LUKS; `zero` and `three` on the tailnet; the first backup | 2 | seeding over the LAN, unattended |
+| 5 | A restore from one of `three`'s snapshots; Syncthing on `three` if its memory allows | 1 | the backup proven |
+| | spare | 2.5 | |
 
-Slice 5 runs only if slices 1 to 4 are done, at least 4 hours remain, at least one full
-day remains before departure, and slice 2 has run for a day. The disk swap and the OS
-change never share a day.
+Slice 3's rollback is the old board with the Alpine card, so slice 4 waits until slice 3
+has run for a day. The disk swap and `one`'s move never share a day.
 
-After the visit, over ssh: the dev hub moves to `three`, at a quiet time and not in a
-slice, because the infra container moves with it. Podman comes later still.
+**`zero` stays on Alpine this visit**, the owner's call of 2026-11-03. The disk swap is
+its only change. It moves to the new OS only once that OS has been proven on a Pi 5,
+because it is the box whose failure costs most, and slice 1 proves a Pi 4.
+
+After the visit, over ssh: the dev hub moves to `one`, at a quiet time and not in a slice,
+because the infra container moves with it. Podman comes later still. `three` ships to
+Singapore at a date the owner picks.
 
 ## Before the visit
 
@@ -64,9 +73,11 @@ login as root is refused with a valid key in place.
 3. **`three`'s tunnel and ssh alias, created over the phone before the visit.** Its
    hostname is `three.<dns_zone>`, derived as every alias is.
 4. **Ansible for MicroOS.** Packages go through `transactional-update` and take effect at
-   a reboot. systemd units replace the OpenRC pieces: `cloudflared`, `zram-swap`,
-   `devpool` (a systemd slice), and the fstab entries with `nofail` and
-   `RequiresMountsFor=`.
+   a reboot. One play per OS runs the owner's update on one host: it updates, reboots, and
+   reports done only once the box answers over each of its ways in
+   ([`decisions.md`](../docs/decisions.md) § *Updates are by hand on every host*). systemd
+   units replace the OpenRC pieces: `cloudflared`, `zram-swap`, `devpool` (a systemd
+   slice), and the fstab entries with `nofail` and `RequiresMountsFor=`.
 5. **A CI simulation on GitHub Actions.** The repo is public, so the runners are free. An
    x86_64 MicroOS VM under KVM tests the logic, because none of it depends on the CPU, and
    one aarch64 run checks that every package exists for the Pi. The VM boots from the
@@ -74,7 +85,12 @@ login as root is refused with a valid key in place.
    secrets, and reboots through `transactional-update`. Disks hot-added after boot test
    `nofail`, `RequiresMountsFor=` and the mount guards against late USB disks. bcache
    under btrfs RAID1 on virtual disks tests `zero`'s assembly.
-6. **A runbook for the visit**, one section per slice, each with its checks and its
+6. **The backup's pieces, as tracked files:** `three`'s `backup` user and its one
+   `authorized_keys` line, the snapshot timer that skips a running rsync, the LUKS unlock
+   command, and `zero`'s cron job and backup-age check ([`three.md`](three.md)). The
+   simulation checks that the key cannot open a shell, read a file, or write outside
+   `incoming`, and that a run against a locked volume fails cleanly and the next succeeds.
+7. **A runbook for the visit**, one section per slice, each with its checks and its
    rollback.
 
 ## What the simulation has answered
@@ -165,10 +181,18 @@ test and the visit's own checks do that.
 - **With root locked, the console is dead in emergency mode.** `sulogin` refuses a locked
   root, which is why each host gets a root password (`decisions.md`).
 
-Still open: the second way in for every box (the owner leans towards Tailscale beside
-`cloudflared` on each), whether anything replaces the dropped health-check plugin for
-rolling back an update that breaks `cloudflared` (being researched), and the GRUB fallback
-on a Pi.
+Still open:
+
+- **The OS**, between MicroOS, Leap 16.1's immutable mode and Fedora IoT; research on the
+  end state of each is running.
+- **The second way in on every box.** The owner leans towards Tailscale beside
+  `cloudflared`; `zero` and `three` run it anyway, for the backup.
+- **The GRUB fallback on a Pi**, which slice 1 checks.
+- **Locking the Pi's boot firmware** on an openSUSE host (`zypper addlock u-boot-rpiarm64
+  'raspberrypi-firmware*'`). U-Boot and the firmware live on the FAT boot partition,
+  outside every snapshot, so a rollback cannot undo them, and updates to them broke Pi 4
+  boot four times between 2020 and 2025. Locked, they change only when the owner unlocks
+  them deliberately.
 
 ## Decided, 2026-11-02
 
@@ -178,7 +202,8 @@ The owner settled the open calls on 2026-11-02.
    host; the owner runs updates and the reboot over ssh
    ([`decisions.md`](../docs/decisions.md) § *MicroOS hosts take openSUSE's cloudflared*).
 2. **openSUSE's `cloudflared`.** The `health-checker` plugin that was to roll a bad update
-   back was dropped on 2026-11-03; what, if anything, replaces it waits on research.
+   back was dropped on 2026-11-03. Research found no other documented mechanism on
+   openSUSE; Fedora IoT's greenboot is that OS's own, so it is part of the OS choice.
 3. **Syncthing on `one` runs under compose,** as on `zero`. Every service stays in a
    container.
 4. **Each host's first-boot files** live at `hosts/<host>/microos/combustion/script`,
@@ -188,7 +213,17 @@ The owner settled the open calls on 2026-11-02.
    tests it against a stand-in for Cloudflare's API, so no account is needed, and Fable
    reviews it adversarially.
 
+## Decided, 2026-11-03
+
+1. **Names follow the SD cards**, and `zero` stays on Alpine this visit (*The slices*).
+2. **Updates are by hand on every host, as a habit** (`decisions.md`).
+3. **`three`'s backup is rsync pushed from `zero`, with snapshots on `three`, and its
+   array is LUKS, unlocked by hand** (`decisions.md`, [`three.md`](three.md)).
+4. **`three` also runs Syncthing for access from Asia**, deferred if its memory proves
+   short ([`three.md`](three.md)).
+
 ## Docs this changes
 
-roadmap §3 (scheduled, with `one` and `three` first), `docs/host-setup.md` and
-`docs/recovery.md` for systemd, every host README, and `README.md`'s host table.
+roadmap §3 (scheduled, with `one` and `three` first, `zero` after a Pi 5 is proven),
+`docs/host-setup.md` and `docs/recovery.md` for systemd, every host README, and
+`README.md`'s host table.

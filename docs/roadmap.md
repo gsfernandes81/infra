@@ -41,8 +41,10 @@ rootful.
 
 ## 3. openSUSE MicroOS — the target
 
-**Scheduled for the November 2026 visit**: `three` and `one` first, `zero` if time allows,
-all on Docker at first ([`plans/microos-cutover.md`](../plans/microos-cutover.md)).
+**Scheduled for the November 2026 visit**: `one` and `three`, on Docker at first; `zero`
+stays on Alpine until the new OS is proven on a Pi 5. Which immutable OS (MicroOS, Leap
+16.1's immutable mode or Fedora IoT) is open
+([`plans/microos-cutover.md`](../plans/microos-cutover.md)).
 
 **Decided — and gated on being ashore, not on anything technical.** Reconfirmed by the
 owner 2026-08-29: it is waiting for physical presence, and it is **not set in stone** —
