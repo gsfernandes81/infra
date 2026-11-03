@@ -48,8 +48,11 @@ Singapore at a date the owner picks.
 
 ## Before the visit
 
-1. **One first-boot script per host,** at `hosts/<host>/microos/combustion/script`.
-   MicroOS runs it once, at first boot. It is reviewed like any boot-path file and not
+1. **One first-boot script per host,** at `hosts/<host>/leap/combustion/script`, with the
+   steps every host shares in `leap/firstboot.sh` ([`leap/README.md`](../leap/README.md)).
+   **`one`'s is written** and booted in CI (`sim/microos/run-host.sh`), with its own values
+   (uid, subvolume ids, address) read off the box on 2026-11-03; `three`'s follows. Leap runs it
+   once, at first boot. It is reviewed like any boot-path file and not
    generated, and carries no secret. It:
    - sets users, `gavin`'s sudo drop-in, ssh keys (none for root), hostname, the root
      password from the carry-over, and packages;
@@ -58,18 +61,21 @@ Singapore at a date the owner picks.
      pins, with its unit, and Tailscale from its repo;
    - installs Docker's Compose binary the same way, pinned by version and SHA-256, in
      `/usr/local/lib/docker/cli-plugins/`, and not openSUSE's `docker-compose`;
-   - disables `transactional-update.timer` and sets the two reboot files, because nothing
-     on this fleet restarts without the owner's say.
+   - masks `transactional-update.timer`, since the first boot's presets undo a disable,
+     and sets the two reboot files, because nothing on this fleet restarts without the
+     owner's say;
+   - keeps sshd, the network, `cloudflared`, `tailscaled` and logins up in rescue mode.
 
 A simulation boots each script before the visit, and checks among other things that an ssh
 login as root is refused with a valid key in place.
 2. **A carry-over step for what is not in git:** tunnel credentials
-   (`/etc/cloudflared/<host>.json`), every deployment's `.env`, the dev containers'
+   (`/etc/cloudflared/<host>.json`), every deployment's `.env` and
+   `~gavin/.<deployment>-secrets`, the named volumes as tar files, the dev containers'
    secrets directories on `zero`, `gavin`'s password hash and `authorized_keys`, root's
    password hash, and **the ssh host keys**, so every client's pinned `known_hosts` entry
-   still matches. They travel on the Combustion USB stick itself. On the old Alpine
-   system, the owner copies them into a `carry/` directory on the stick at mode 600, as
-   root. The first-boot script installs them from there. The stick then holds live
+   still matches. They travel on the Combustion USB stick itself: `leap/make-stick`,
+   run as root on the old Alpine system, **written**, builds the whole stick and refuses
+   one with anything missing. The first-boot script installs them from there. The stick then holds live
    secrets: the owner keeps it with the other secret-bearing media and erases it with
    `blkdiscard` after the host is proven, not with a file delete, which flash keeps. One
    stick serves one host at a time.
@@ -202,7 +208,7 @@ test and the visit's own checks do that.
   and the namespace-sharing one reached it on `127.0.0.1`.
 
 - **A bad update rolls itself back, and a good box is never stranded.** The rollback
-  simulation broke a stand-in for `cloudflared` inside an update: the box booted the new
+  simulation (deleted on 2026-11-03 with the plugin it tested) broke a stand-in for `cloudflared` inside an update: the box booted the new
   snapshot once, the plugin failed, and health-checker returned it to the previous one. A
   good update stayed. With the plugin's guard, a check failing on a snapshot that had
   already passed left the box up. Every stage asserts its outcome. Keeping a way in
@@ -234,11 +240,6 @@ test and the visit's own checks do that.
 Still open:
 
 - **The GRUB fallback on a Pi**, which slice 1 checks.
-- **Locking the Pi's boot firmware** on an openSUSE host (`zypper addlock u-boot-rpiarm64
-  'raspberrypi-firmware*'`). U-Boot and the firmware live on the FAT boot partition,
-  outside every snapshot, so a rollback cannot undo them, and updates to them broke Pi 4
-  boot four times between 2020 and 2025. Locked, they change only when the owner unlocks
-  them deliberately.
 
 ## Decided, 2026-11-02
 
@@ -274,6 +275,8 @@ The owner settled the open calls on 2026-11-02.
    emergency way in (`decisions.md`).
 7. **Leap hosts carry Docker's own Compose binary until Leap's repositories offer a
    Compose at or above the deploy play's 5.5.0 floor** (`decisions.md`).
+8. **The Pi's boot firmware is locked** by each first boot, U-Boot, firmware and EEPROM
+   image alike, and changes only with someone at the console (`decisions.md`).
 
 ## Docs this changes
 

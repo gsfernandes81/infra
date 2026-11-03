@@ -99,6 +99,40 @@ GRUB or BLS), since they decide differently.
 Not tested: a mount failing at once on an update's first boot, and a disk that arrives
 during boot, inside the device timeout, which is the fleet's usual case.
 
+## A host's first boot
+
+`run-host.sh <workdir> <host>` boots the host's real first-boot script
+(`hosts/<host>/leap/combustion/script`, [`leap/README.md`](../../leap/README.md)) from a
+stick laid out as `leap/make-stick` lays it out. The carry-over is made up for the run: a
+fresh ssh host key, password hashes for a password only the run knows, the run's key as
+gavin's, stand-in tunnel credentials, `.env` files and volumes. `host/<host>.sh` gives a
+stand-in for each `FILL-FROM-` placeholder still in the host's files, and makes the host's
+disks: for `one`, a btrfs SSD with one's filesystem UUID and its subvolumes in the order
+that gives the fstab's ids, and a swap disk with its UUID, both on USB. The VM sits on
+one's own subnet, so its static address answers.
+
+The run then checks, each as PASS or FAIL, and any FAIL fails the job:
+
+- from outside: the host key is the carried one, sshd offers public keys only, root is
+  refused over ssh even with a valid key in its `authorized_keys`, by `PermitRootLogin` as
+  sshd's own log says, and root logs in on the serial console with its password;
+- on the box (`host/checks.sh`): the static address, SELinux, gavin's uid, shell and sudo,
+  root's password, sshd's settings, every data mount by `subvolid=`, swap, the read-only
+  bare `/media`, Docker on its new store on the SSD with a fresh pull and a read through
+  the `context=` mount, upstream's Compose, the pinned `cloudflared` and its ingress,
+  `tailscaled` from Tailscale's repository, the update timer, the reboot strategy, the
+  checkout, and the carry-over's files and modes;
+- in rescue mode (`host/rescue.sh`), entered with `systemctl isolate`: gavin logs in, and
+  sshd, the network, `cloudflared`, `tailscaled` and logins are up while Docker is down;
+- after a reboot, proved by a new boot id, the box checks again on its static address.
+
+When gavin cannot log in, the run logs in as root on the serial console
+(`serial-login.py`), or uses the initramfs's emergency shell if the boot stopped there,
+and prints what the box knows about why.
+
+The stand-in tunnel credentials cannot connect, so the run shows `cloudflared` installed,
+enabled and retrying, not serving.
+
 ## What a green run does not show
 
 The simulations run on x86_64 under KVM, not on a Pi; the USB disks are qemu's. It does
@@ -107,8 +141,10 @@ Those come in later simulations or on the bench at the visit.
 
 ## Running it elsewhere
 
-`run-probe.sh`, `run-late-disks.sh` (with a variant), `run-docker-store.sh` and
-`run-health-mounts.sh`, each given a work directory, run on any Linux
-machine with KVM, `qemu-system-x86_64`, `qemu-img`, `mke2fs` and an ssh client; `run-docker-store.sh` also needs Docker, btrfs-progs and sudo
-for one loop mount. Each writes only inside its work directory. Do not run it in the
-`infra` container: that container is on `zero`, has no KVM, and would compete with Immich.
+`run-probe.sh`, `run-late-disks.sh` (with a variant), `run-docker-store.sh`,
+`run-health-mounts.sh` and `run-host.sh` (with a host), each given a work directory, run
+on any Linux machine with KVM, `qemu-system-x86_64`, `qemu-img`, `mke2fs` and an ssh
+client. `run-docker-store.sh` also needs Docker, btrfs-progs and sudo for one loop mount,
+and `run-host.sh` needs btrfs-progs, openssl and sudo for one loop mount. Each writes only
+inside its work directory. Do not run them in the `infra` container: that container is on
+`zero`, has no KVM, and would compete with Immich.

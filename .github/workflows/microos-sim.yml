@@ -13,9 +13,9 @@ name: microos-sim
 
 on:
   push:
-    paths: ['sim/microos/**', '.github/workflows/microos-sim.yml']
+    paths: ['sim/microos/**', '.github/workflows/microos-sim.yml', 'leap/**', 'hosts/*/leap/**']
   pull_request:
-    paths: ['sim/microos/**', '.github/workflows/microos-sim.yml']
+    paths: ['sim/microos/**', '.github/workflows/microos-sim.yml', 'leap/**', 'hosts/*/leap/**']
   workflow_dispatch:
 
 permissions:
@@ -225,4 +225,51 @@ jobs:
             ${{ runner.temp }}/health/report.txt
             ${{ runner.temp }}/health/serial.log
             ${{ runner.temp }}/health/screen-*
+          if-no-files-found: warn
+
+  host:
+    # Each Leap host's real first-boot script (hosts/<host>/leap/combustion/script), booted
+    # from a stick laid out as leap/make-stick lays it out, with stand-ins for the carry-over
+    # and the host's disks; then its ways in, users, disks, Docker, pins and rescue mode are
+    # checked. Unlike the jobs above, any FAIL fails the job: this is the script's proof.
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [one]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Give the runner user /dev/kvm
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install qemu and btrfs-progs
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils btrfs-progs
+
+      - name: Boot ${{ matrix.host }}'s first-boot script and check the box it makes
+        run: sim/microos/run-host.sh "$RUNNER_TEMP/host" "${{ matrix.host }}"
+
+      - name: Put the report in the job summary
+        if: always()
+        run: |
+          {
+            echo '```'
+            cat "$RUNNER_TEMP/host/report.txt" 2>/dev/null || echo 'no report'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: leap-host-${{ matrix.host }}
+          path: |
+            ${{ runner.temp }}/host/report.txt
+            ${{ runner.temp }}/host/serial.log
           if-no-files-found: warn

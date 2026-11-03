@@ -1,0 +1,217 @@
+#!/bin/bash
+# Boots a host's real first-boot script (hosts/<host>/leap/combustion/script) in a Leap 16.1
+# Immutable VM, from a stick laid out as leap/make-stick lays it out but filled with
+# stand-ins, then checks the box it makes: its ways in, its users and sudo, its disks and
+# Docker, its pinned binaries, and rescue mode. CI runs it (.github/workflows/microos-sim.yml).
+#
+# Usage: sim/microos/run-host.sh <workdir> <host>
+# It writes only inside <workdir>, except one loop mount under sudo to make the stand-in
+# SSD's subvolumes. Every check prints PASS or FAIL; any FAIL fails the run.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+repo=$(cd "$here/../.." && pwd)
+work=${1:?usage: run-host.sh <workdir> <host>}
+host=${2:?usage: run-host.sh <workdir> <host>}
+mkdir -p "$work"
+cd "$work"
+
+# shellcheck source=sim/microos/lib.sh
+. "$here/lib.sh"
+# shellcheck source=sim/microos/host/one.sh
+. "$here/host/$host.sh"
+
+report() { tee -a report.txt; }
+: > report.txt
+
+fetch_image | report
+
+# ── the stick, as make-stick lays it out ─────────────────────────────────────
+# The host's files are copied as they are, then each FILL-FROM- placeholder is replaced by
+# the stand-in host/<host>.sh gives it. A placeholder with no stand-in stops the run, so a
+# new one cannot slip through untested.
+rm -rf stick key key.pub && mkdir -p stick/combustion/carry
+ssh-keygen -q -t ed25519 -N '' -f key
+s=stick/combustion
+install -D -m 755 "$repo/hosts/$host/leap/combustion/script" "$s/script"
+install -D -m 644 "$repo/leap/firstboot.sh" "$s/leap/firstboot.sh"
+install -D -m 644 "$repo/leap/tailscale-repo.gpg" "$s/leap/tailscale-repo.gpg"
+install -D -m 644 "$repo/hosts/$host/leap/fstab.append" "$s/host/fstab.append"
+mkdir -p "$s/host/system" && cp -p "$repo/hosts/$host/leap/system/"* "$s/host/system/"
+for token in "${!standin[@]}"; do
+	# Not every placeholder is on the stick (a host's volumes list is read by make-stick).
+	{ grep -rl -- "$token" stick || true; } | xargs -r sed -i "s|$token|${standin[$token]}|g"
+done
+if grep -rn 'FILL-FROM-' stick; then
+	echo "FAIL a placeholder above has no stand-in in sim/microos/host/$host.sh" | report
+	exit 1
+fi
+echo "stand-ins used: ${!standin[*]}" | report
+
+# The carry-over, made up for this run.
+password=$(openssl rand -hex 12)
+c=$s/carry
+mkdir -p "$c/ssh" "$c/shadow" "$c/gavin" "$c/cloudflared" "$c/env" "$c/volumes"
+ssh-keygen -q -t ed25519 -N '' -C "sim $host" -f "$c/ssh/ssh_host_ed25519_key"
+root_password=$(openssl rand -hex 12)
+openssl passwd -6 "$root_password" > "$c/shadow/root"
+openssl passwd -6 "$password" > "$c/shadow/gavin"
+cp key.pub "$c/gavin/authorized_keys"
+printf '{"AccountTag":"sim","TunnelSecret":"c2lt","TunnelID":"%s"}\n' "$tunnel_id" \
+	> "$c/cloudflared/$host.json"
+for dep in "${deployments[@]}"; do
+	printf 'SIM_STANDIN=1\n' > "$c/env/$dep.env"
+	mkdir -p "$c/home/.$dep-secrets"
+	printf '{}\n' > "$c/home/.$dep-secrets/tunnel.json"
+done
+for vol in "${volumes[@]}"; do
+	mkdir -p "vol-$vol" && echo "$vol" > "vol-$vol/marker"
+	tar -C "vol-$vol" -cf "$c/volumes/$vol.tar" .
+done
+mke2fs -q -t ext4 -L combustion -d stick combustion.img 64M
+
+# ── the host's disks ─────────────────────────────────────────────────────────
+make_disks | report
+
+# ── boot ─────────────────────────────────────────────────────────────────────
+# The guest must answer on its static address, from the first boot on: the host's script
+# installs its profile in Combustion's prepare stage, so even the initramfs's network uses
+# it. The first address qemu's DHCP hands out is tried as well, so a box that missed its
+# profile is still reached and examined, and reported as a FAIL. The port that answered is
+# kept in a file, because the functions below run inside pipelines.
+static_port=$ssh_port
+dhcp_port=$((ssh_port + 1))
+ssh_as() {
+	ssh -q -i key -p "$(cat port 2>/dev/null || echo "$static_port")" \
+		-o StrictHostKeyChecking=no -o UserKnownHostsFile=known \
+		-o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 \
+		-o BatchMode=yes "$@"
+}
+# Answers once gavin can log in with the run's key. `wait_gavin static` accepts only the
+# static address.
+wait_gavin() {
+	local i p ports=("$static_port" "$dhcp_port")
+	[ "${1:-}" = static ] && ports=("$static_port")
+	for i in $(seq 1 120); do
+		for p in "${ports[@]}"; do
+			echo "$p" > port
+			if ssh_as gavin@127.0.0.1 true 2>/dev/null; then
+				if [ "$p" = "$static_port" ]; then
+					echo "gavin's ssh up after ~$((i * 5))s, on $sim_address"
+				else
+					echo "FAIL gavin's ssh answered on the DHCP address only, not $sim_address"
+				fi
+				return 0
+			fi
+		done
+		sleep 5
+	done
+	echo "FAIL gavin cannot log in after 10 minutes; the console says why:"
+	python3 -I "$here/serial-login.py" serial.sock "$root_password" "$(cat <<'DIAG'
+systemctl --no-pager --failed; systemctl --no-pager status sshd | head -n 20
+journalctl -b --no-pager -u sshd | tail -n 30
+getent passwd gavin; ls -laZ /home/gavin /home/gavin/.ssh; findmnt /home
+sshd -T 2>&1 | grep -iE '^(authorizedkeysfile|permitrootlogin|passwordauthentication|allowusers|usepam) '
+ausearch --input-logs -m avc -ts boot < /dev/null 2>&1 | tail -n 20
+ip -br addr; nmcli -f NAME,DEVICE,FILENAME connection show
+journalctl -b --no-pager -u combustion | tail -n 40
+DIAG
+)" "journalctl --no-pager -b | grep -iE 'combustion|prepare|NetworkManager|nm-initrd' | tail -n 60" ||
+		tail -n 80 serial.log
+	return 1
+}
+# Runs a script on the guest as root through gavin's sudo, which reads his password first.
+as_root() {
+	ssh_as gavin@127.0.0.1 "cat > /tmp/sim-$1" < "$here/host/$1"
+	printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 \
+		"sudo -S -p '' env EXPECT_UID=$expect_uid EXPECT_GID=$expect_gid EXPECT_CLOUDFLARED=$expect_cloudflared bash /tmp/sim-$1"
+}
+
+# What checks.sh compares against, read from the files the box was made from.
+expect_uid=$(sed -n 's/^gavin_uid=//p' "$repo/hosts/$host/leap/combustion/script")
+expect_gid=$(sed -n 's/^gavin_gid=//p' "$repo/hosts/$host/leap/combustion/script")
+expect_cloudflared=$(sed -n 's/^cloudflared_version=//p' "$repo/leap/firstboot.sh")
+
+rm -f known
+sim_netdev="user,id=n0,net=$sim_net,host=$sim_gateway,dns=$sim_dns"
+sim_netdev+=",hostfwd=tcp:127.0.0.1:$static_port-$sim_address:22"
+sim_netdev+=",hostfwd=tcp:127.0.0.1:$dhcp_port-$sim_dhcp_address:22"
+sim_serial_socket=$PWD/serial.sock
+boot_vm "${disk_args[@]}"
+wait_gavin | report
+
+# ── what only the runner can see ─────────────────────────────────────────────
+{
+	echo "===== from outside"
+	want=$(awk '{print $2}' "$c/ssh/ssh_host_ed25519_key.pub")
+	have=$(ssh-keyscan -t ed25519 -p "$(cat port)" 127.0.0.1 2>/dev/null | awk '{print $3}')
+	[ "$want" = "$have" ] && echo "PASS the host key is the carried one" \
+		|| echo "FAIL the host key is not the carried one"
+	# Not through ssh_as: its -q hides the refusal this reads.
+	if ssh -i key -p "$(cat port)" -o StrictHostKeyChecking=no -o UserKnownHostsFile=known \
+		-o BatchMode=yes -o PubkeyAuthentication=no gavin@127.0.0.1 true 2> pw.err; then
+		echo "FAIL a login without a key got in"
+	elif grep -q 'Permission denied (publickey)' pw.err; then
+		echo "PASS sshd offers publickey only"
+	else
+		echo "FAIL sshd's refusal was not publickey-only: $(cat pw.err)"
+	fi
+	# A valid key in root's authorized_keys, which the box never has, must still be refused.
+	{ printf '%s\n' "$password"; cat key.pub; } |
+		ssh_as gavin@127.0.0.1 "sudo -S -p '' sh -c 'install -d -m 700 /root/.ssh; cat > /root/.ssh/authorized_keys'"
+	if ssh_as root@127.0.0.1 true 2>/dev/null; then
+		echo "FAIL root logged in over ssh with a valid key"
+	elif printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 \
+		"sudo -S -p '' journalctl -b --no-pager -u sshd" | grep -q 'ROOT LOGIN REFUSED'; then
+		echo "PASS root is refused over ssh with a valid key in place, by PermitRootLogin"
+	else
+		echo "FAIL root was refused, but not by PermitRootLogin: the key may not have been read"
+	fi
+	# The console takes root's password: the way in when nothing else is left.
+	if python3 -I "$here/serial-login.py" serial.sock "$root_password" true >/dev/null; then
+		echo "PASS root logs in on the serial console with its password"
+	else
+		echo "FAIL root cannot log in on the serial console"
+	fi
+	printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 "sudo -S -p '' rm -f /root/.ssh/authorized_keys"
+} 2>&1 | report
+
+{ echo "===== first boot"; as_root checks.sh; } 2>&1 | report
+
+# ── rescue mode keeps a way in ───────────────────────────────────────────────
+{
+	echo "===== rescue mode"
+	printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 \
+		"sudo -S -p '' systemctl --no-block isolate rescue.target" || true
+	sleep 30
+	wait_gavin
+	as_root rescue.sh
+	printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 \
+		"sudo -S -p '' systemctl --no-block isolate default.target" || true
+	sleep 30
+	wait_gavin
+} 2>&1 | report
+
+# ── a reboot ─────────────────────────────────────────────────────────────────
+{
+	echo "===== after a reboot"
+	before=$(ssh_as gavin@127.0.0.1 cat /proc/sys/kernel/random/boot_id)
+	printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 "sudo -S -p '' systemctl reboot" || true
+	sleep 30
+	# From the second boot the host's own profile must hold: one's address is what every
+	# client and sshd's PermitOpen name.
+	wait_gavin static
+	# A box still shutting down answers too; only a new boot id proves the checks below
+	# are about the boot after.
+	after=$(ssh_as gavin@127.0.0.1 cat /proc/sys/kernel/random/boot_id)
+	[ "$before" != "$after" ] && echo "PASS the box rebooted" || echo "FAIL the box did not reboot"
+	as_root checks.sh
+} 2>&1 | report
+
+kill "$(cat qemu.pid)" 2>/dev/null || true
+
+if grep -q '^FAIL' report.txt; then
+	echo "$(grep -c '^FAIL' report.txt) checks failed" >&2
+	exit 1
+fi
+echo "every check passed"

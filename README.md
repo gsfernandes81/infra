@@ -64,6 +64,8 @@ someone deploys.
 deployments/<name>/    what a deployment is — compose.yaml, .env (ignored), SOURCE
 hosts/<host>/          where it runs — symlinks into deployments/, tracked /etc copies
 hosts/two/setup/       how `two` was built — one reviewed root script, not on any PATH
+hosts/<host>/leap/     the host's move to Leap: its first-boot script, its Leap /etc copies
+leap/                  what every Leap host shares: the first-boot steps and the stick builder
 bin/                   the scripts above (_infra.py is their shared header parser)
 ansible/               the management plane — playbooks, the fleet-inventory generator
 dev/                   every dev container on zero, one compose project, behind `ssh dev`

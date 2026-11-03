@@ -1955,6 +1955,15 @@ depends on Docker or podman, and each is current within a monthly update of upst
   checks that the 16.0 one installs. **Auto-update is switched off in the admin console
   before the first box joins**, since new tailnets turn it on for every device that
   joins.
+- **The Pis join tagged, `tag:fleet`, so their keys never expire** (the owner's call,
+  2026-11-03). A tailnet's key expiry is at most 180 days, and a box months away cannot be
+  logged in again by hand; a tagged device has expiry off by default and belongs to the
+  tailnet, not to the owner's account. The policy's `tagOwners` names `tag:fleet` before the
+  first Pi joins, and each joins with `sudo tailscale up --advertise-tags=tag:fleet`. Tags
+  also let the policy limit what each box reaches, `zero` to `three` for the backup first.
+  The cost is a key that outlives a theft, so the theft plan's first step stays removing
+  the node in the admin console ([`plans/three.md`](../plans/three.md)). Phones and laptops
+  stay untagged, under the tailnet's expiry.
 - **From the phone, Tailscale is the emergency way in.** Android allows one VPN and that
   slot is taken, which still rules Tailscale out for daily use (the llama-server row
   above). In an emergency the owner gives the slot to Tailscale; the owner judged that
@@ -1990,13 +1999,32 @@ depends on Docker or podman, and each is current within a monthly update of upst
 **Decided 2026-11-03**, the owner's call, to be proven in CI before a host carries it. Each
 host's first-boot script runs `systemctl add-wants rescue.target` for `sshd`,
 `NetworkManager`, `cloudflared` and `tailscaled`, so a box the owner sends to rescue mode,
-or that a failure drops there, still answers over both ways in. Rescue mode keeps
-`sysinit.target`, so this adds four wants and changes no other unit's dependencies, which
+or that a failure drops there, still answers over both ways in, and for
+`systemd-user-sessions`, found in the simulation: rescue mode stops it otherwise, and its
+stop writes `/run/nologin`, which turns away every login but root's. Rescue mode keeps
+`sysinit.target`, so this adds five wants and changes no other unit's dependencies, which
 is what sank the emergency-mode design above. Emergency mode itself stays stock: it is
 reached only when the root filesystem or `sysinit.target` fails, and the root password
 keeps its console. health-checker sends a failed boot to emergency mode, not rescue; an
 upstream request for a configurable target is outward-facing, so the owner decides who
 files it.
+
+## The Pi's boot firmware is locked on every Leap host
+
+**Decided 2026-11-03**, the owner's call. Each host's first boot runs `zypper addlock
+'u-boot-rpi*' 'raspberrypi-firmware*' 'raspberrypi-eeprom*'`: U-Boot, the GPU firmware with
+`config.txt` and the device trees, and the Pi 4's bootloader image.
+
+- **Why:** they live on the FAT boot partition, outside every snapshot, so neither a
+  rollback nor health-checker can undo a bad update to them, and updates to them broke
+  Pi 4 boot four times between 2020 and 2025. The kernel and its `dtb-broadcom` stay
+  unlocked, inside the snapshot, where a rollback covers them.
+- **They change only on purpose,** with someone at the console: in one
+  `transactional-update shell`, `zypper removelock` the patterns, update those packages,
+  `zypper addlock` them again, then reboot and watch it come up. Never on a box that is
+  away.
+- **A monthly update that will not resolve because of a lock** says so and changes
+  nothing; the owner then decides, rather than the solver.
 
 ## Leap hosts carry upstream's Compose until openSUSE's reaches the deploy play's floor
 

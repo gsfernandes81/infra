@@ -28,7 +28,11 @@ Full orientation is `README.md`; the reasoning is `docs/decisions.md`. Quick map
 - **`hosts/<host>/`** — where it runs: symlinks into `deployments/`, plus `system/` —
   tracked copies of `/etc` files, each carrying an `infra-` header that says where it
   installs (`hosts/zero/system/README.md`). `hosts/two/setup/` is the whole build of
-  `two`, one reviewed root script, on no PATH.
+  `two`, one reviewed root script, on no PATH. `hosts/<host>/leap/` is the host's move to
+  Leap, ahead of it: its first-boot script and the `/etc` copies that replace `system/`
+  once it has moved.
+- **`leap/`** — what every Leap host's first boot shares (`firstboot.sh`) and
+  `make-stick`, which builds a host's first-boot stick on its old system. Its README.
 - **`bin/`** — `check-sources`, `check-system-drift` (reports, never writes),
   `install-system-file` (writes, never restarts), `check-boot-layout`,
   `check-mount-guards`, `hw-inventory`. `_infra.py` is their shared header parser. **Not
