@@ -40,8 +40,9 @@ check "root has no ssh key" sh -c '! test -s /root/.ssh/authorized_keys'
 
 echo "-- sshd"
 show sh -c 'sshd -T | grep -E "^(permitrootlogin|passwordauthentication|kbdinteractiveauthentication|allowtcpforwarding|permitopen) "'
-check "sshd refuses root and passwords" sh -c '
-	t=$(sshd -T); echo "$t" | grep -qx "permitrootlogin no" && echo "$t" | grep -qx "passwordauthentication no"'
+check "sshd refuses root, passwords and keyboard-interactive" sh -c '
+	t=$(sshd -T); echo "$t" | grep -qx "permitrootlogin no" && echo "$t" | grep -qx "passwordauthentication no" &&
+	echo "$t" | grep -qx "kbdinteractiveauthentication no"'
 
 echo "-- data mounts, one per fstab entry below /media and for Docker's store"
 awk '$2 ~ "^/media/" || $2 == "/var/lib/docker" { print $2 }' /etc/fstab | while read -r m; do

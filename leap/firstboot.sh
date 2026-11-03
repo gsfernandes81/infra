@@ -134,7 +134,10 @@ install_host_keys() {
 }
 
 # Tailscale's repository, trusted through the reviewed copy of its key, then every package.
+# The repository goes in first: the first simulated boot added it with the other /etc
+# files, after the packages, and got openSUSE's tailscale.
 install_packages() {
+	install_tracked "$stick/host/system/tailscale.repo"
 	rpm --import "$stick/leap/tailscale-repo.gpg"
 	zypper --non-interactive addlock docker-compose
 	zypper --non-interactive refresh
