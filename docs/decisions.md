@@ -1815,8 +1815,8 @@ well, which a rolling distribution can break with any update. The guarded plugin
 hosts take openSUSE's cloudflared*, above) already keeps the cloudflared check from
 sending a good box to emergency mode; the root password keeps the console. Keeping a way
 in through `rescue.target` instead, where `systemctl add-wants` is enough because rescue
-mode keeps `sysinit.target`, is to be raised with the owner later. What follows is the
-record of what was tried and found.
+mode keeps `sysinit.target`, was taken the same day (*Rescue mode keeps a way in on every
+Leap host*, below). What follows is the record of what was tried and found.
 
 **Decided 2026-11-02**, the owner's call, after the rollback simulation lost a VM to
 emergency mode for good. Whatever sends a MicroOS host to emergency mode (a health-checker
@@ -1984,6 +1984,19 @@ depends on Docker or podman, and each is current within a monthly update of upst
 - **Leap over MicroOS** for the reasons the research gave: it changes in one supervised
   step every year or so instead of continuously, and it is supported to 2028 with minor
   releases to 2031. 16.1 was scheduled to reach GA on 2026-11-03, ahead of the visit.
+
+## Rescue mode keeps a way in on every Leap host
+
+**Decided 2026-11-03**, the owner's call, to be proven in CI before a host carries it. Each
+host's first-boot script runs `systemctl add-wants rescue.target` for `sshd`,
+`NetworkManager`, `cloudflared` and `tailscaled`, so a box the owner sends to rescue mode,
+or that a failure drops there, still answers over both ways in. Rescue mode keeps
+`sysinit.target`, so this adds four wants and changes no other unit's dependencies, which
+is what sank the emergency-mode design above. Emergency mode itself stays stock: it is
+reached only when the root filesystem or `sysinit.target` fails, and the root password
+keeps its console. health-checker sends a failed boot to emergency mode, not rescue; an
+upstream request for a configurable target is outward-facing, so the owner decides who
+files it.
 
 ## Leap hosts carry upstream's Compose until openSUSE's reaches the deploy play's floor
 
