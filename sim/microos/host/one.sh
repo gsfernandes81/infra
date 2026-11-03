@@ -13,6 +13,8 @@ sim_gateway=192.168.86.1
 # qemu's own resolver; the guest's static profile names public ones, which qemu also reaches.
 sim_dns=192.168.86.3
 sim_address=192.168.86.101
+# The first address qemu's DHCP hands out.
+sim_dhcp_address=192.168.86.15
 
 tunnel_id=1e7fde2e-ac2f-4a5e-8ad4-591208c1e2a6
 deployments=(calibre-web garmin-mcp send2ereader torrents)

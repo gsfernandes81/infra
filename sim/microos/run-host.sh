@@ -73,19 +73,35 @@ mke2fs -q -t ext4 -L combustion -d stick combustion.img 64M
 make_disks | report
 
 # ── boot ─────────────────────────────────────────────────────────────────────
+# The guest is reached on its static address, or on the first address qemu's DHCP hands
+# out. Combustion's first boot runs its network from the initramfs, by DHCP, so the first
+# boot may answer only there; the port that answered is kept in a file, because the
+# functions below run inside pipelines.
+static_port=$ssh_port
+dhcp_port=$((ssh_port + 1))
 ssh_as() {
-	ssh -q -i key -p "$ssh_port" -o StrictHostKeyChecking=no -o UserKnownHostsFile=known \
+	ssh -q -i key -p "$(cat port 2>/dev/null || echo "$static_port")" \
+		-o StrictHostKeyChecking=no -o UserKnownHostsFile=known \
 		-o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 \
 		-o BatchMode=yes "$@"
 }
-# Answers once gavin can log in with the run's key.
+# Answers once gavin can log in with the run's key. `wait_gavin static` accepts only the
+# static address.
 wait_gavin() {
-	local i
+	local i p ports=("$static_port" "$dhcp_port")
+	[ "${1:-}" = static ] && ports=("$static_port")
 	for i in $(seq 1 120); do
-		if ssh_as gavin@127.0.0.1 true 2>/dev/null; then
-			echo "gavin's ssh up after ~$((i * 5))s"
-			return 0
-		fi
+		for p in "${ports[@]}"; do
+			echo "$p" > port
+			if ssh_as gavin@127.0.0.1 true 2>/dev/null; then
+				if [ "$p" = "$static_port" ]; then
+					echo "gavin's ssh up after ~$((i * 5))s, on $sim_address"
+				else
+					echo "gavin's ssh up after ~$((i * 5))s, on the DHCP address only"
+				fi
+				return 0
+			fi
+		done
 		sleep 5
 	done
 	echo "FAIL gavin cannot log in after 10 minutes; serial log follows"
@@ -99,7 +115,9 @@ as_root() {
 }
 
 rm -f known
-sim_netdev="user,id=n0,net=$sim_net,host=$sim_gateway,dns=$sim_dns,hostfwd=tcp:127.0.0.1:${ssh_port}-$sim_address:22"
+sim_netdev="user,id=n0,net=$sim_net,host=$sim_gateway,dns=$sim_dns"
+sim_netdev+=",hostfwd=tcp:127.0.0.1:$static_port-$sim_address:22"
+sim_netdev+=",hostfwd=tcp:127.0.0.1:$dhcp_port-$sim_dhcp_address:22"
 boot_vm "${disk_args[@]}"
 wait_gavin | report
 
@@ -107,7 +125,7 @@ wait_gavin | report
 {
 	echo "===== from outside"
 	want=$(awk '{print $2}' "$c/ssh/ssh_host_ed25519_key.pub")
-	have=$(ssh-keyscan -t ed25519 -p "$ssh_port" 127.0.0.1 2>/dev/null | awk '{print $3}')
+	have=$(ssh-keyscan -t ed25519 -p "$(cat port)" 127.0.0.1 2>/dev/null | awk '{print $3}')
 	[ "$want" = "$have" ] && echo "PASS the host key is the carried one" \
 		|| echo "FAIL the host key is not the carried one"
 	if ssh_as -o PubkeyAuthentication=no gavin@127.0.0.1 true 2> pw.err; then
@@ -149,7 +167,9 @@ wait_gavin | report
 	echo "===== after a reboot"
 	printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 "sudo -S -p '' systemctl reboot" || true
 	sleep 30
-	wait_gavin
+	# From the second boot the host's own profile must hold: one's address is what every
+	# client and sshd's PermitOpen name.
+	wait_gavin static
 	as_root checks.sh
 } 2>&1 | report
 

@@ -22,7 +22,11 @@ show sh -c '. /etc/os-release; echo "$PRETTY_NAME"; uname -r; hostname'
 check "systemd reached running, nothing failed" sh -c '
 	s=$(systemctl is-system-running --wait); f=$(systemctl --failed --no-legend)
 	echo "state: $s"; echo "$f"; [ "$s" = running ] && [ -z "$f" ]'
-check "the static address is up" sh -c 'ip -4 -br addr | tee /dev/stderr | grep -q "192\.168\.86\.10[0-9]/"'
+# Which address is up is the harness's to judge: the first boot may still run the
+# initramfs's DHCP connection, and from the second boot only the static one is accepted.
+show ip -4 -br addr
+show nmcli -f NAME,DEVICE,ACTIVE,FILENAME connection show
+show sh -c 'journalctl -b -u NetworkManager --no-pager | grep -iE "policy|activation|keyfile|wired|initrd" | tail -n 15'
 check "SELinux enforces" sh -c '[ "$(getenforce)" = Enforcing ]'
 
 echo "-- users and sudo"
