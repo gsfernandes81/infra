@@ -45,8 +45,7 @@ slice, because the infra container moves with it. Podman comes later still.
    - sets users, `gavin`'s sudo drop-in, ssh keys (none for root), hostname, the root
      password from the carry-over, and packages;
    - makes the host's `/media/*` mountpoints and appends its fstab fragment;
-   - installs the `cloudflared` unit and the guarded health-check plugin in
-     `/usr/libexec/health-checker/`;
+   - installs the `cloudflared` unit;
    - disables `transactional-update.timer` and sets the two reboot files, because nothing
      on this fleet restarts without the owner's say.
 
@@ -166,8 +165,10 @@ test and the visit's own checks do that.
 - **With root locked, the console is dead in emergency mode.** `sulogin` refuses a locked
   root, which is why each host gets a root password (`decisions.md`).
 
-Still open: the second way in for the Singapore box (Tailscale is packaged; the owner
-chooses), and the GRUB fallback on a Pi.
+Still open: the second way in for every box (the owner leans towards Tailscale beside
+`cloudflared` on each), whether anything replaces the dropped health-check plugin for
+rolling back an update that breaks `cloudflared` (being researched), and the GRUB fallback
+on a Pi.
 
 ## Decided, 2026-11-02
 
@@ -176,9 +177,8 @@ The owner settled the open calls on 2026-11-02.
 1. **No automatic updates.** `transactional-update.timer` is disabled on every MicroOS
    host; the owner runs updates and the reboot over ssh
    ([`decisions.md`](../docs/decisions.md) § *MicroOS hosts take openSUSE's cloudflared*).
-2. **openSUSE's `cloudflared`,** guarded by a `health-checker` plugin that rolls a bad
-   update back, as that section says. The simulation proves the rollback path before any
-   host relies on it.
+2. **openSUSE's `cloudflared`.** The `health-checker` plugin that was to roll a bad update
+   back was dropped on 2026-11-03; what, if anything, replaces it waits on research.
 3. **Syncthing on `one` runs under compose,** as on `zero`. Every service stays in a
    container.
 4. **Each host's first-boot files** live at `hosts/<host>/microos/combustion/script`,

@@ -1744,6 +1744,16 @@ MicroOS keep Docker and their compose files as they are. Rootless podman and Qua
 
 ## MicroOS hosts take openSUSE's cloudflared, and a health check rolls a bad update back
 
+**⚠︎SUPERSEDED IN PART 2026-11-03**, the owner's call: the health-checker plugin and its
+guard are dropped, so no host carries them. The guard reads a state file that belongs to
+health-checker, does nothing on a BLS boot, and covers only the last good snapshot, and an
+unguarded plugin can send a good box to emergency mode. Whether another documented
+mechanism can roll back an update that breaks `cloudflared`, and how often `cloudflared`
+releases and openSUSE's package have actually been faulty, are being researched before the
+owner decides; the owner leans towards Tailscale and `cloudflared` both as ways into every
+box. The rest of this section stands: openSUSE's package, its updater off, and no
+automatic updates.
+
 **Decided 2026-11-02**, the owner's call, for the hosts that move to MicroOS
 ([`plans/microos-cutover.md`](../plans/microos-cutover.md)). Each takes openSUSE's
 `aarch64` package of `cloudflared` and leaves the staggered rollout (*One cloudflared
