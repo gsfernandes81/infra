@@ -78,8 +78,11 @@ check "cloudflared is the pinned binary, enabled" sh -c '
 check "the tunnel's ingress validates" \
 	/usr/local/bin/cloudflared tunnel --config /etc/cloudflared/config.yml ingress validate
 show systemctl status cloudflared --no-pager --lines 3
-check "tailscaled runs, from Tailscale's repo" sh -c '
-	systemctl is-active tailscaled && rpm -q --qf "%{VENDOR}\n" tailscale | tee /dev/stderr | grep -qi tailscale'
+# Tailscale's packages carry no vendor, so the signing key is what tells them from
+# openSUSE's: Tailscale's is 458CA832957F5868 (leap/README.md).
+check "tailscaled runs, signed by Tailscale's key" sh -c '
+	systemctl is-active tailscaled &&
+	rpm -q --qf "%{VERSION} %{RSAHEADER:pgpsig}\n" tailscale | tee /dev/stderr | grep -qi 458ca832957f5868'
 show sh -c 'firewall-cmd --list-all 2>&1 | head -n 10'
 
 echo "-- reboots and updates are the owner's"
