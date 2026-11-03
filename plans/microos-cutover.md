@@ -56,6 +56,8 @@ Singapore at a date the owner picks.
    - makes the host's `/media/*` mountpoints and appends its fstab fragment;
    - installs Cloudflare's `cloudflared` binary at a version and SHA-256 the script
      pins, with its unit, and Tailscale from its repo;
+   - installs Docker's Compose binary the same way, pinned by version and SHA-256, in
+     `/usr/local/lib/docker/cli-plugins/`, and not openSUSE's `docker-compose`;
    - disables `transactional-update.timer` and sets the two reboot files, because nothing
      on this fleet restarts without the owner's say.
 
@@ -76,9 +78,12 @@ login as root is refused with a valid key in place.
 4. **Ansible for MicroOS.** Packages go through `transactional-update` and take effect at
    a reboot. One play per OS runs the owner's update on one host: it updates, reboots, and
    reports done only once the box answers over each of its ways in
-   ([`decisions.md`](../docs/decisions.md) § *Updates are by hand on every host*). systemd
-   units replace the OpenRC pieces: `cloudflared`, `zram-swap`, `devpool` (a systemd
-   slice), and the fstab entries with `nofail` and `RequiresMountsFor=`.
+   ([`decisions.md`](../docs/decisions.md) § *Updates are by hand on every host*). It moves
+   the Compose pin, keeping the previous binary, and reports the Compose Leap's own
+   repositories offer; the deploy play's Compose check, which names Alpine's `apk` command
+   today, names this play on a Leap host. systemd units replace the OpenRC pieces:
+   `cloudflared`, `zram-swap`, `devpool` (a systemd slice), and the fstab entries with
+   `nofail` and `RequiresMountsFor=`.
 5. **A CI simulation on GitHub Actions.** The repo is public, so the runners are free. An
    x86_64 MicroOS VM under KVM tests the logic, because none of it depends on the CPU, and
    one aarch64 run checks that every package exists for the Pi. The VM boots from the
@@ -228,14 +233,6 @@ test and the visit's own checks do that.
 
 Still open:
 
-- **Where a Leap host's Compose comes from.** Proposed, 2026-11-03: upstream's binary,
-  pinned by version and SHA-256 per architecture in the first-boot script, as
-  `cloudflared` is, and moved by the same monthly play, which keeps the previous binary;
-  openSUSE's `docker-compose` is not installed. It sits outside every snapshot, so a
-  rollback leaves it as it is. Set aside: openSUSE's `Virtualization:containers` repository,
-  which has Compose 5.6.1 for Leap 16.1 but is a development project that also carries a
-  newer Docker, containerd and runc than Leap's; and Docker's own repository, which has
-  nothing for openSUSE.
 - **The GRUB fallback on a Pi**, which slice 1 checks.
 - **Locking the Pi's boot firmware** on an openSUSE host (`zypper addlock u-boot-rpiarm64
   'raspberrypi-firmware*'`). U-Boot and the firmware live on the FAT boot partition,
@@ -275,6 +272,8 @@ The owner settled the open calls on 2026-11-02.
 6. **Two ways into every box: Cloudflare's own `cloudflared` binary and Tailscale from
    its own repo**, neither through a container runtime; Tailscale is the phone's
    emergency way in (`decisions.md`).
+7. **Leap hosts carry Docker's own Compose binary until Leap's repositories offer a
+   Compose at or above the deploy play's 5.5.0 floor** (`decisions.md`).
 
 ## Docs this changes
 

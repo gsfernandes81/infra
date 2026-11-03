@@ -1984,6 +1984,31 @@ depends on Docker or podman, and each is current within a monthly update of upst
   step every year or so instead of continuously, and it is supported to 2028 with minor
   releases to 2031. 16.1 was scheduled to reach GA on 2026-11-03, ahead of the visit.
 
+## Leap hosts carry upstream's Compose until openSUSE's reaches the deploy play's floor
+
+**Decided 2026-11-03**, the owner's call, for every Leap host. Leap 16.1 ships Compose
+2.33.1, and the deploy play refuses any Compose before 5.5.0 (*The deploy play refuses a
+host whose Compose is older than 5.5.0*, above), so it would refuse every Leap host.
+
+- **Docker's own static binary, pinned in `/usr/local/lib/docker/cli-plugins/`.** The
+  first-boot script pins the version and each architecture's SHA-256, installs only on a
+  match, and leaves openSUSE's `docker-compose` uninstalled. The monthly update play moves
+  the pin and keeps the previous binary beside it, as `server-update-cloudflared.yml`
+  does. It starts at 5.6.1, the version `zero` runs. The probe showed it on Leap 16.1 on
+  2026-11-03: Docker runs it ahead of openSUSE's copy, a user who is not root reads its
+  version, it ran the fleet-shaped stack and a build through Leap's buildx, and it was
+  still in use after a new snapshot booted.
+- **It sits outside the snapshots**, like `cloudflared`, so an OS rollback leaves it as it
+  is; the previous binary is the way back from a bad Compose.
+- **This lasts until openSUSE's own repositories for the host's Leap release carry a
+  Compose at or above the deploy play's floor.** The monthly update reports the version
+  Leap offers, so the owner sees the day it arrives. Then the host installs the package and
+  the binary goes, as one change.
+- **Set aside:** openSUSE's `Virtualization:containers` repository, which builds Compose
+  5.6.1 for Leap 16.1 but is a development project that also carries a newer Docker,
+  containerd and runc than Leap's, so adding it would put the whole container stack on it;
+  and Docker's own repository, which has nothing for openSUSE.
+
 ## The lesson worth keeping
 
 
