@@ -45,7 +45,7 @@ esac
 # left as a recommendation of docker's: the host runs upstream's, and a lock also stops a
 # later update pulling it back in.
 common_packages=(docker docker-buildx smartmontools btrfsprogs fish htop nano curl jq git
-	python3 rsync tailscale)
+	python3 rsync tailscale zram-generator)
 
 say() { echo "firstboot: $*" > /dev/console; echo "firstboot: $*"; }
 die() { say "STOPPED: $*"; exit 1; }

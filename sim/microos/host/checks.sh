@@ -45,7 +45,11 @@ done
 check "no data entry names a subvol=, which health-checker's plugin would act on" sh -c '
 	! awk '\''$2 ~ "^/media/" || $2 == "/var/lib/docker" || $2 == "/mnt"'\'' /etc/fstab |
 		grep -E "[[:space:],]subvol="'
-check "swap on the SSD is on" sh -c 'swapon --show --noheadings | tee /dev/stderr | grep -q .'
+check "swap on the SSD is on" sh -c 'swapon --show --noheadings | tee /dev/stderr | grep -q "^/dev/sd"'
+if [ -e /etc/systemd/zram-generator.conf ]; then
+	check "zram swap is on, ahead of the SSD's" sh -c '
+		swapon --show=NAME,PRIO --noheadings | tee /dev/stderr | grep -qE "^/dev/zram0 +100$"'
+fi
 check "the bare /media refuses a write" sh -c '! touch /media/sim-write-test 2>/dev/null'
 
 echo "-- Docker"
