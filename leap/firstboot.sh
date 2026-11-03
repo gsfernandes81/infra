@@ -12,6 +12,13 @@
 # read-only afterwards. A failed command stops the script, and Combustion then leaves the
 # image unconfigured rather than half-configured: set -e in the host's script is the point.
 #
+# THE SHELL MOUNTS LESS THAN IT SEEMS. transactional-update's shell binds /root, /var/log
+# and a few /var paths into the new snapshot, and not /home or /usr/local: a write there
+# lands in the snapshot's own directory, under the subvolume that covers it at boot, and is
+# never seen. The first simulated boot lost gavin's home and both pinned binaries that way.
+# So mount_subvolumes mounts them first, and label_subvolumes labels what was written,
+# since this runs before the SELinux policy is loaded and the boot's relabel skips them.
+#
 # Nothing here is generated: each file it installs is a reviewed file from the repo,
 # installed at the path its own infra- header names, or a carry-over file copied verbatim.
 
@@ -52,6 +59,19 @@ die() { say "STOPPED: $*"; exit 1; }
 
 # Combustion's copy of the stick's combustion/ directory, which the script runs from.
 stick=$PWD
+
+mount_subvolumes() {
+	local d
+	for d in /home /usr/local; do
+		findmnt -n "$d" >/dev/null || mount "$d"
+	done
+}
+
+label_subvolumes() {
+	local policy
+	policy=$(sed -n 's/^SELINUXTYPE=//p' /etc/selinux/config)
+	setfiles -F "/etc/selinux/$policy/contexts/files/file_contexts" /home /usr/local /root
+}
 
 # Installs one tracked file at the path and mode its infra- header declares, the header the
 # repo's tools read (bin/_infra.py). A file without a full header stops the script.

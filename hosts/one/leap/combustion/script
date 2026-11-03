@@ -30,6 +30,7 @@ gavin_gid=1000
 
 say "starting $host"
 check_carry "$host"
+mount_subvolumes
 
 echo "$host" > /etc/hostname
 # shellcheck disable=SC2119  # one needs no packages beyond the common ones
@@ -55,5 +56,6 @@ cat "$stick/host/fstab.append" >> /etc/fstab
 enable_units
 clone_infra
 keep_volume_tars
+label_subvolumes
 
 say "done; $host boots into its configured snapshot next"
