@@ -2,23 +2,40 @@
 # Shared by the simulations in this directory; sourced, never run. Every function works in
 # the current directory, which the caller has made its own work directory.
 
-image_url=https://download.opensuse.org/tumbleweed/appliances/openSUSE-MicroOS.x86_64-kvm-and-xen.qcow2
+# The image under test: Leap 16.1 in its Immutable mode, the fleet's chosen OS
+# (docs/decisions.md), by default. SIM_OS=microos runs Tumbleweed's MicroOS instead, the
+# image these simulations were first written against, for comparison.
+case "${SIM_OS:-leap}" in
+leap) image_url=https://download.opensuse.org/distribution/leap/16.1/appliances/Leap-16.1-Immutable.x86_64-Base-qcow.qcow2 ;;
+microos) image_url=https://download.opensuse.org/tumbleweed/appliances/openSUSE-MicroOS.x86_64-kvm-and-xen.qcow2 ;;
+*) echo "unknown SIM_OS ${SIM_OS}: leap or microos" >&2; exit 1 ;;
+esac
 ssh_port=2222
 
-# Downloads Tumbleweed's current MicroOS image, checks it against the published checksum,
-# and prints which build it is, because the image changes daily.
+# Downloads the image, checks it against the published checksum, and prints which build it
+# is, because both change: MicroOS daily, Leap with each maintenance update.
 fetch_image() {
 	local want have
-	curl -fsSL -o microos.qcow2 "$image_url"
-	curl -fsSL -o microos.qcow2.sha256 "$image_url.sha256"
-	want=$(awk '{print $1; exit}' microos.qcow2.sha256)
-	have=$(sha256sum microos.qcow2 | awk '{print $1}')
+	curl -fsSL -o base.qcow2 "$image_url"
+	curl -fsSL -o base.qcow2.sha256 "$image_url.sha256"
+	want=$(awk '{print $1; exit}' base.qcow2.sha256)
+	have=$(sha256sum base.qcow2 | awk '{print $1}')
 	if [ "$want" != "$have" ]; then
 		echo "image checksum mismatch: want $want, have $have" >&2
 		return 1
 	fi
-	echo "image: $(awk '{print $2; exit}' microos.qcow2.sha256) sha256 $have"
-	qemu-img create -q -f qcow2 -F qcow2 -b microos.qcow2 disk.qcow2 30G
+	echo "image: $(awk '{print $2; exit}' base.qcow2.sha256) sha256 $have," \
+		"$(curl -fsSIL "$image_url" | sed -n 's/^last-modified: //Ip' | tr -d '\r' | tail -n 1)"
+	# The overlay must be at least the image's own size: a smaller one cuts the root
+	# partition off the end of the disk, and the guest finds no root. Leap's image is 32 GiB
+	# and MicroOS's 20, so 40G suits both; the overlay is sparse and costs nothing.
+	local base_size
+	base_size=$(qemu-img info --output=json base.qcow2 | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["virtual-size"])')
+	if [ "$base_size" -gt $((40 * 1024 * 1024 * 1024)) ]; then
+		echo "the image is $base_size bytes, larger than the 40G overlay; raise it" >&2
+		return 1
+	fi
+	qemu-img create -q -f qcow2 -F qcow2 -b base.qcow2 disk.qcow2 40G
 }
 
 # Builds the Combustion config drive from <dir>/combustion/script, with a throwaway ssh

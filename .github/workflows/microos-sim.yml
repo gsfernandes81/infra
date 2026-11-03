@@ -1,7 +1,8 @@
 name: microos-sim
 
-# The first of the MicroOS simulations in plans/microos-cutover.md: boot openSUSE MicroOS
-# under KVM with a Combustion config, install what a fleet host would carry, and report what
+# The simulations in plans/microos-cutover.md: boot openSUSE Leap 16.1 in its Immutable
+# mode (sim/microos/lib.sh; SIM_OS=microos runs MicroOS, which they were first written
+# for) under KVM with a Combustion config, install what a fleet host would carry, and report what
 # the plan's open questions turn on (SELinux and bind mounts into /media, Docker and its
 # compose plugin, the default reboot policy, bcache's udev rule, packages). The report is the
 # job summary and an artifact; the job fails only when the VM does not boot or answer ssh.
@@ -46,7 +47,7 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils
 
-      - name: Boot MicroOS and run the probe
+      - name: Boot the image and run the probe
         run: sim/microos/run-probe.sh "$RUNNER_TEMP/microos"
 
       - name: Put the report in the job summary
@@ -200,7 +201,7 @@ jobs:
           if-no-files-found: warn
 
   aarch64-packages:
-    # MicroOS on aarch64 installs from Tumbleweed's ports repositories, which the Tumbleweed
+    # Leap 16.1 on a Pi installs from Leap's aarch64 repositories, which the Leap 16.1
     # container on an arm64 runner also uses. Asking them is enough to know a package exists
     # for the Pi; nothing here boots.
     runs-on: ubuntu-24.04-arm
@@ -208,11 +209,11 @@ jobs:
     steps:
       - name: Search the aarch64 repositories
         run: |
-          docker run --rm registry.opensuse.org/opensuse/tumbleweed:latest sh -c '
+          docker run --rm registry.opensuse.org/opensuse/leap:16.1 sh -c '
             zypper --non-interactive --quiet refresh >/dev/null
             uname -m
-            for p in docker docker-compose cloudflared bcache-tools smartmontools \
-                btrfsprogs zram-generator syncthing; do
+            for p in docker docker-compose cloudflared tailscale bcache-tools smartmontools \
+                btrfsprogs zram-generator syncthing health-checker cryptsetup rsync; do
               echo "== $p"
               zypper --non-interactive --quiet search --match-exact --details "$p" || echo "NOT FOUND: $p"
             done' | tee packages.txt

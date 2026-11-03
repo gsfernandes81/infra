@@ -6,6 +6,13 @@
 # "combustion" directory.
 set -euxo pipefail
 
+# Leap's first-boot wizard waits at the console for answers and powers the box off if it
+# fails (OnFailure=poweroff.target). It runs only while /var/lib/YaST2/reconfig_system
+# exists, which a successful Combustion run removes; the mask is in case one does not.
+# Its unit file is kept for the probe (systemctl cat refuses to run in this chroot).
+cat /usr/lib/systemd/system/jeos-firstboot.service > /root/jeos-firstboot.unit 2>&1 || true
+systemctl mask jeos-firstboot.service || true
+
 install -d -m 700 /root/.ssh
 install -m 600 authorized_keys /root/.ssh/authorized_keys
 systemctl enable sshd
