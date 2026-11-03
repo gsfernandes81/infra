@@ -1955,6 +1955,15 @@ depends on Docker or podman, and each is current within a monthly update of upst
   checks that the 16.0 one installs. **Auto-update is switched off in the admin console
   before the first box joins**, since new tailnets turn it on for every device that
   joins.
+- **The Pis join tagged, `tag:fleet`, so their keys never expire** (the owner's call,
+  2026-11-03). A tailnet's key expiry is at most 180 days, and a box months away cannot be
+  logged in again by hand; a tagged device has expiry off by default and belongs to the
+  tailnet, not to the owner's account. The policy's `tagOwners` names `tag:fleet` before the
+  first Pi joins, and each joins with `sudo tailscale up --advertise-tags=tag:fleet`. Tags
+  also let the policy limit what each box reaches, `zero` to `three` for the backup first.
+  The cost is a key that outlives a theft, so the theft plan's first step stays removing
+  the node in the admin console ([`plans/three.md`](../plans/three.md)). Phones and laptops
+  stay untagged, under the tailnet's expiry.
 - **From the phone, Tailscale is the emergency way in.** Android allows one VPN and that
   slot is taken, which still rules Tailscale out for daily use (the llama-server row
   above). In an emergency the owner gives the slot to Tailscale; the owner judged that
