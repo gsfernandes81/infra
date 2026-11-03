@@ -28,6 +28,21 @@ if echo "$f" | grep -qx import-pubring-from-rpmdb.service &&
 	echo "KNOWN import-pubring-from-rpmdb.service failed stopping its gpg-agent, as openSUSE's does"
 	systemctl reset-failed import-pubring-from-rpmdb.service
 fi
+# And proof the failure stays its own: nothing requires the unit or is bound to it, its
+# keyring holds every key the rpm database does, and the only reader of that keyring
+# (systemd-importd, for machinectl pull) is shown, installed or not.
+show systemctl show import-pubring-from-rpmdb.service \
+	-p RequiredBy -p RequisiteOf -p BoundBy -p PartOf -p WantedBy -p TriggeredBy -p Before
+show systemctl list-dependencies --reverse --plain import-pubring-from-rpmdb.service
+check "nothing requires import-pubring-from-rpmdb or is bound to it" sh -c '
+	systemctl show import-pubring-from-rpmdb.service -p RequiredBy -p RequisiteOf -p BoundBy -p PartOf |
+		tee /dev/stderr | grep -vqE "^[A-Za-z]+=$" && exit 1 || exit 0'
+check "its keyring holds every key in the rpm database" sh -c '
+	k=$(gpg --no-options --homedir "$(mktemp -d)" --no-default-keyring \
+		--keyring /etc/systemd/import-pubring.gpg --list-keys --with-colons 2>/dev/null | grep -c "^pub")
+	r=$(rpm -q gpg-pubkey | wc -l); echo "keyring $k, rpm database $r"; [ "$k" -eq "$r" ]
+	gpgconf --kill gpg-agent 2>/dev/null; true'
+show sh -c 'rpm -q systemd-container; command -v machinectl || echo "no machinectl"'
 check "systemd reached running, nothing failed" sh -c '
 	s=$(systemctl is-system-running --wait); f=$(systemctl --failed --no-legend --plain)
 	echo "state: $s"; echo "$f"
