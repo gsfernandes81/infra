@@ -122,8 +122,8 @@ reboot_vm() {
 # Waits for the guest to answer on a boot other than <boot id>, through however many
 # reboots health-checker makes on the way, then for it to settle. Each new boot is held for
 # 100 s before it counts, longer than health-checker takes to decide, so a snapshot about
-# to be rolled back is never taken for a settled one. Used by run-rollback.sh and
-# run-health-mounts.sh, which append to report.txt.
+# to be rolled back is never taken for a settled one. Used by run-health-mounts.sh, which
+# appends to report.txt.
 wait_for_new_boot() {
 	local before=$1 now
 	for _ in $(seq 1 90); do

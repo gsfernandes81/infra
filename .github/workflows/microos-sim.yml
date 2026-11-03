@@ -158,48 +158,6 @@ jobs:
             ${{ runner.temp }}/store/serial.log
           if-no-files-found: warn
 
-  rollback:
-    # Whether health-checker rolls back an update that breaks the service its plugin checks,
-    # keeps one that does not, and what it does when the check fails on a good snapshot.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Give the runner user /dev/kvm
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Install qemu
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils
-
-      - name: Break an update and watch health-checker
-        run: sim/microos/run-rollback.sh "$RUNNER_TEMP/rollback"
-
-      - name: Put the report in the job summary
-        if: always()
-        run: |
-          {
-            echo '```'
-            cat "$RUNNER_TEMP/rollback/report.txt" 2>/dev/null || echo 'no report'
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: microos-rollback
-          path: |
-            ${{ runner.temp }}/rollback/report.txt
-            ${{ runner.temp }}/rollback/serial.log
-            ${{ runner.temp }}/rollback/screen-*
-          if-no-files-found: warn
-
   aarch64-packages:
     # Leap 16.1 on a Pi installs from Leap's aarch64 repositories, which the Leap 16.1
     # container on an arm64 runner also uses. Asking them is enough to know a package exists

@@ -1778,7 +1778,8 @@ build on all three*, above).
   `health-checker` runs its plugins at boot. A plugin that fails on a new snapshot's first
   boot rolls the box back to the last snapshot that worked, so an update that breaks the
   box's way in reverts itself. *Amended the same day after the rollback simulation
-  (`sim/microos/run-rollback.sh`):* the plugin lives in `/usr/libexec/health-checker/`,
+  (`sim/microos/run-rollback.sh`, deleted on 2026-11-03 with the plugin; git history keeps
+  it):* the plugin lives in `/usr/libexec/health-checker/`,
   inside the snapshot, so the check rolls back with the OS it checks. The admins'
   directory, `/usr/local/libexec/health-checker/`, is a subvolume of its own mounted over
   what a first-boot script writes, and a plugin put there was never seen.

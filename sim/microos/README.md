@@ -70,33 +70,6 @@ as on the fleet, with a pulled image, a named volume holding data, a locally mad
 and an exited container. The VM mounts the image as `/var/lib/docker` and reports what it
 can still use, first as the store arrives and then after `restorecon` labels it.
 
-## Rollback
-
-`run-rollback.sh` asks whether MicroOS's `health-checker` rolls a box back from an update
-that breaks the service its plugin checks. A real `cloudflared` cannot run without a
-tunnel's credentials, so a stand-in service takes its place: its binary lives in `/usr`,
-inside the snapshot, as the package's does. A plugin in `/usr/libexec/health-checker/`,
-also inside the snapshot, checks it as the hosts' `cloudflared` plugin will, with the same
-guard: it passes unchecked on a snapshot health-checker has already recorded as working.
-
-Each stage asserts its outcome, and any FAIL fails the job:
-
-- after a clean reboot, health-checker has recorded a working snapshot, and the boot
-  logged no ordering cycle and no D-Bus connection failure;
-- an update that breaks the stand-in is rolled back, by the broken boot's own log;
-- an update that does not is kept;
-- a check failing on a snapshot that had booted fine changes nothing, and the box stays
-  out of emergency mode.
-
-A guest that stops answering is photographed through QMP (`ppm2png.py` converts the
-screens). `rollback/cloudflared.sh` separately runs the commands the hosts' plugin will
-rely on against openSUSE's `cloudflared` package, with a configuration shaped as the
-fleet's and no credentials.
-
-This simulation also once proved a way to keep sshd and the network up in emergency mode.
-The owner dropped that design; `docs/decisions.md` § *Emergency mode on a MicroOS host
-keeps a way in* records what it took, and git history keeps the code.
-
 ## Data mounts and health-checker
 
 `run-health-mounts.sh` asks what stock `health-checker`, with no plugin of ours, does
@@ -134,8 +107,8 @@ Those come in later simulations or on the bench at the visit.
 
 ## Running it elsewhere
 
-`run-probe.sh`, `run-late-disks.sh` (with a variant), `run-docker-store.sh`,
-`run-rollback.sh` and `run-health-mounts.sh`, each given a work directory, run on any Linux
+`run-probe.sh`, `run-late-disks.sh` (with a variant), `run-docker-store.sh` and
+`run-health-mounts.sh`, each given a work directory, run on any Linux
 machine with KVM, `qemu-system-x86_64`, `qemu-img`, `mke2fs` and an ssh client; `run-docker-store.sh` also needs Docker, btrfs-progs and sudo
 for one loop mount. Each writes only inside its work directory. Do not run it in the
 `infra` container: that container is on `zero`, has no KVM, and would compete with Immich.
