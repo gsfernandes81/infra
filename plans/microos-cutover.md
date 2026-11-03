@@ -98,8 +98,8 @@ login as root is refused with a valid key in place.
 
 **On Leap 16.1, 2026-11-03.** Every job reran on Leap 16.1's own Immutable VM image
 (Build 3.13) and answered as below for MicroOS, except where a point says otherwise:
-health-checker's rollback, its mount plugin and the strand, late disks, SELinux, the read
--only root, the reboot files and the packages. What only Leap showed:
+health-checker's rollback, its mount plugin and the strand, late disks, SELinux, the
+read-only root, the reboot files and the packages. What only Leap showed:
 
 - **Docker cannot take over Alpine's store; it starts on an empty one.** After
   `restorecon`, every new container died at its first exec (exit 139), even from an image
