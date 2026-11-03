@@ -1748,6 +1748,11 @@ MicroOS keep Docker and their compose files as they are. Rootless podman and Qua
 
 ## MicroOS hosts take openSUSE's cloudflared, and a health check rolls a bad update back
 
+**⚠︎SUPERSEDED 2026-11-03 for the package as well**, the owner's call: openSUSE's
+`cloudflared` lagged ten releases and four security fixes on Leap 16.1, so the hosts
+take Cloudflare's own binary (*Every box has two ways in*, below). Only *Nothing updates
+until the owner runs it* still stands, now as *Updates are by hand on every host*.
+
 **⚠︎SUPERSEDED IN PART 2026-11-03**, the owner's call: the health-checker plugin and its
 guard are dropped, so no host carries them. The guard reads a state file that belongs to
 health-checker, does nothing on a BLS boot, and covers only the last good snapshot, and an
@@ -1928,6 +1933,31 @@ alike.
   pass itself off to `zero`. The tunnel credentials and the tailnet key stay outside,
   because they are how the owner reaches the box to unlock it, and are revoked after a
   theft.
+
+## Every box has two ways in: Cloudflare's binary and Tailscale's own repo
+
+**Decided 2026-11-03**, the owner's call, for every host that changes OS. Neither way in
+depends on Docker or podman, and each is current within a monthly update of upstream.
+
+- **`cloudflared` is Cloudflare's static `cloudflared-linux-arm64` binary**, run by the
+  host's own tracked unit with `--no-autoupdate`. Distro packages lag: Leap 16.1 shipped
+  2026.9.1, ten releases and four security fixes behind, and Fedora has none. On an
+  immutable host it lives in `/usr/local`, outside the snapshots, so an OS rollback never
+  takes the way in with it. `server-update-cloudflared.yml` updates it by hand each month
+  and keeps the previous binary beside it, because Cloudflare's repo holds only the newest
+  version. `cloudflared service install` is never run: it now enables an update timer.
+  Its security fixes appear as `VULN-` lines in `RELEASE_NOTES`, not as advisories, so
+  the monthly check reads those.
+- **Tailscale comes from Tailscale's own signed repo**, which keeps old versions, so a
+  bad release can be downgraded. Every stable distro package lacked the fix for
+  TS-2026-013 on 2026-11-03. Leap 16.1 has no path of its own there yet; the bench test
+  checks that the 16.0 one installs. **Auto-update is switched off in the admin console
+  before the first box joins**, since new tailnets turn it on for every device that
+  joins.
+- **From the phone, Tailscale is the emergency way in.** Android allows one VPN and that
+  slot is taken, which still rules Tailscale out for daily use (the llama-server row
+  above). In an emergency the owner gives the slot to Tailscale; the owner judged that
+  acceptable. Tailscale also carries `zero`'s backup to `three`.
 
 ## The lesson worth keeping
 

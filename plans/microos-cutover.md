@@ -54,7 +54,8 @@ Singapore at a date the owner picks.
    - sets users, `gavin`'s sudo drop-in, ssh keys (none for root), hostname, the root
      password from the carry-over, and packages;
    - makes the host's `/media/*` mountpoints and appends its fstab fragment;
-   - installs the `cloudflared` unit;
+   - installs Cloudflare's `cloudflared` binary at a version and SHA-256 the script
+     pins, with its unit, and Tailscale from its repo;
    - disables `transactional-update.timer` and sets the two reboot files, because nothing
      on this fleet restarts without the owner's say.
 
@@ -197,8 +198,6 @@ Still open:
 
 - **The OS**, between MicroOS, Leap 16.1's immutable mode and Fedora IoT; research on the
   end state of each is running.
-- **The second way in on every box.** The owner leans towards Tailscale beside
-  `cloudflared`; `zero` and `three` run it anyway, for the backup.
 - **The GRUB fallback on a Pi**, which slice 1 checks.
 - **Locking the Pi's boot firmware** on an openSUSE host (`zypper addlock u-boot-rpiarm64
   'raspberrypi-firmware*'`). U-Boot and the firmware live on the FAT boot partition,
@@ -233,6 +232,9 @@ The owner settled the open calls on 2026-11-02.
    array is LUKS, unlocked by hand** (`decisions.md`, [`three.md`](three.md)).
 4. **`three` also runs Syncthing for access from Asia**, deferred if its memory proves
    short ([`three.md`](three.md)).
+5. **Two ways into every box: Cloudflare's own `cloudflared` binary and Tailscale from
+   its own repo**, neither through a container runtime; Tailscale is the phone's
+   emergency way in (`decisions.md`).
 
 ## Docs this changes
 
