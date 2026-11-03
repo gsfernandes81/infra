@@ -1990,8 +1990,10 @@ depends on Docker or podman, and each is current within a monthly update of upst
 **Decided 2026-11-03**, the owner's call, to be proven in CI before a host carries it. Each
 host's first-boot script runs `systemctl add-wants rescue.target` for `sshd`,
 `NetworkManager`, `cloudflared` and `tailscaled`, so a box the owner sends to rescue mode,
-or that a failure drops there, still answers over both ways in. Rescue mode keeps
-`sysinit.target`, so this adds four wants and changes no other unit's dependencies, which
+or that a failure drops there, still answers over both ways in, and for
+`systemd-user-sessions`, found in the simulation: rescue mode stops it otherwise, and its
+stop writes `/run/nologin`, which turns away every login but root's. Rescue mode keeps
+`sysinit.target`, so this adds five wants and changes no other unit's dependencies, which
 is what sank the emergency-mode design above. Emergency mode itself stays stock: it is
 reached only when the root filesystem or `sysinit.target` fails, and the root password
 keeps its console. health-checker sends a failed boot to emergency mode, not rescue; an

@@ -123,8 +123,14 @@ DIAG
 # Runs a script on the guest as root through gavin's sudo, which reads his password first.
 as_root() {
 	ssh_as gavin@127.0.0.1 "cat > /tmp/sim-$1" < "$here/host/$1"
-	printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 "sudo -S -p '' bash /tmp/sim-$1"
+	printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 \
+		"sudo -S -p '' env EXPECT_UID=$expect_uid EXPECT_GID=$expect_gid EXPECT_CLOUDFLARED=$expect_cloudflared bash /tmp/sim-$1"
 }
+
+# What checks.sh compares against, read from the files the box was made from.
+expect_uid=$(sed -n 's/^gavin_uid=//p' "$repo/hosts/$host/leap/combustion/script")
+expect_gid=$(sed -n 's/^gavin_gid=//p' "$repo/hosts/$host/leap/combustion/script")
+expect_cloudflared=$(sed -n 's/^cloudflared_version=//p' "$repo/leap/firstboot.sh")
 
 rm -f known
 sim_netdev="user,id=n0,net=$sim_net,host=$sim_gateway,dns=$sim_dns"
@@ -155,8 +161,17 @@ wait_gavin | report
 		ssh_as gavin@127.0.0.1 "sudo -S -p '' sh -c 'install -d -m 700 /root/.ssh; cat > /root/.ssh/authorized_keys'"
 	if ssh_as root@127.0.0.1 true 2>/dev/null; then
 		echo "FAIL root logged in over ssh with a valid key"
+	elif printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 \
+		"sudo -S -p '' journalctl -b --no-pager -u sshd" | grep -q 'ROOT LOGIN REFUSED'; then
+		echo "PASS root is refused over ssh with a valid key in place, by PermitRootLogin"
 	else
-		echo "PASS root is refused over ssh with a valid key in place"
+		echo "FAIL root was refused, but not by PermitRootLogin: the key may not have been read"
+	fi
+	# The console takes root's password: the way in when nothing else is left.
+	if python3 -I "$here/serial-login.py" serial.sock "$root_password" true >/dev/null; then
+		echo "PASS root logs in on the serial console with its password"
+	else
+		echo "FAIL root cannot log in on the serial console"
 	fi
 	printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 "sudo -S -p '' rm -f /root/.ssh/authorized_keys"
 } 2>&1 | report
@@ -180,11 +195,16 @@ wait_gavin | report
 # ── a reboot ─────────────────────────────────────────────────────────────────
 {
 	echo "===== after a reboot"
+	before=$(ssh_as gavin@127.0.0.1 cat /proc/sys/kernel/random/boot_id)
 	printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 "sudo -S -p '' systemctl reboot" || true
 	sleep 30
 	# From the second boot the host's own profile must hold: one's address is what every
 	# client and sshd's PermitOpen name.
 	wait_gavin static
+	# A box still shutting down answers too; only a new boot id proves the checks below
+	# are about the boot after.
+	after=$(ssh_as gavin@127.0.0.1 cat /proc/sys/kernel/random/boot_id)
+	[ "$before" != "$after" ] && echo "PASS the box rebooted" || echo "FAIL the box did not reboot"
 	as_root checks.sh
 } 2>&1 | report
 

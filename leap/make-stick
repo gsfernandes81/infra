@@ -39,8 +39,22 @@ case "$dev" in /dev/sd[a-z]) ;; *) die "$dev is not a whole /dev/sdX disk" ;; es
 name=${dev#/dev/}
 readlink -f "/sys/block/$name" | grep -q '/usb' || die "$dev is not on USB"
 grep -q "^$dev" /proc/mounts && die "$dev or a partition of it is mounted"
+grep -q "^$dev" /proc/swaps && die "$dev or a partition of it is in use as swap"
+# A disk this box's fstab names is never a stick, whatever its size.
+for uuid in $(blkid -o value -s UUID "$dev"* 2>/dev/null); do
+	grep -q "$uuid" /etc/fstab && die "$dev holds $uuid, which /etc/fstab names"
+done
 size_gb=$(( $(cat "/sys/block/$name/size") / 2 / 1024 / 1024 ))
 [ "$size_gb" -le 256 ] || die "$dev is ${size_gb}G, too large to be a stick"
+
+# A named volume copied while its container writes to it may be torn, so each must be idle.
+if [ -f "$hostdir/volumes" ]; then
+	for vol in $(grep -v '^#' "$hostdir/volumes"); do
+		if [ -n "$(docker ps -q --filter "volume=$vol")" ]; then
+			die "a running container uses $vol; stop its deployment first"
+		fi
+	done
+fi
 
 # The carry-over must be complete before anything is erased.
 root_hash=$(awk -F: '$1 == "root" { print $2 }' /etc/shadow)
@@ -56,6 +70,10 @@ printf 'ERASE %s (%sG) for %s? Type the device name to go on: ' "$dev" "$size_gb
 read -r answer
 [ "$answer" = "$dev" ] || die "not confirmed; nothing written"
 
+# Zero the start of the disk first: a stick's old partition table can survive mkfs on the
+# whole disk, and the kernel would then read partitions over the new filesystem, so the
+# label Combustion looks for would never appear.
+dd if=/dev/zero of="$dev" bs=1M count=4 2>/dev/null
 mkfs.ext4 -q -F -L combustion "$dev"
 mnt=$(mktemp -d)
 mount "$dev" "$mnt"
@@ -105,6 +123,8 @@ fi
 chmod -R go-rwx "$c"
 
 sync
+# Proved by reading it back, not by mkfs's exit status: the label is all Combustion uses.
+blkid "$dev" | grep -q 'LABEL="combustion"' || die "$dev does not answer to LABEL=combustion"
 echo "make-stick: $dev holds $host's first boot. Names only, no contents:"
 (cd "$mnt" && find . -type f | sort)
 echo "make-stick: erase it with blkdiscard once $host is proven."

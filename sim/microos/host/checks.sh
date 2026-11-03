@@ -32,7 +32,8 @@ show sh -c 'journalctl -b -u NetworkManager --no-pager | grep -iE "policy|activa
 check "SELinux enforces" sh -c '[ "$(getenforce)" = Enforcing ]'
 
 echo "-- users and sudo"
-show id gavin
+check "gavin keeps his uid and gid, ${EXPECT_UID:?}:${EXPECT_GID:?}" sh -c '
+	id gavin; [ "$(id -u gavin):$(id -g gavin)" = "$EXPECT_UID:$EXPECT_GID" ]'
 check "gavin's shell is fish" sh -c 'getent passwd gavin | tee /dev/stderr | grep -q ":/usr/bin/fish$"'
 check "gavin's sudo asks for his own password" sh -c 'sudo -l -U gavin | tee /dev/stderr | grep -q "!targetpw"'
 check "root has a password, for the console" sh -c 'passwd -S root | tee /dev/stderr | grep -qE "^root P"'
@@ -58,6 +59,10 @@ if [ -e /etc/systemd/zram-generator.conf ]; then
 		swapon --show=NAME,PRIO --noheadings | tee /dev/stderr | grep -qE "^/dev/zram0 +100$"'
 fi
 check "the bare /media refuses a write" sh -c '! touch /media/sim-write-test 2>/dev/null'
+show findmnt -no TARGET,OPTIONS /var/lib/docker /media/torrents
+check "no mount was refused for differing SELinux options on one superblock" \
+	sh -c '! journalctl -k -b --no-pager | grep -i "same superblock"'
+show ls -Zd /var/lib/docker /var/lib/docker/containerd
 
 echo "-- Docker"
 check "Docker runs, on the store on the SSD" sh -c '
@@ -74,7 +79,8 @@ check "openSUSE's docker-compose is not installed" sh -c '! rpm -q docker-compos
 
 echo "-- the two ways in"
 check "cloudflared is the pinned binary, enabled" sh -c '
-	/usr/local/bin/cloudflared --version; systemctl is-enabled cloudflared'
+	/usr/local/bin/cloudflared --version | tee /dev/stderr | grep -q "version ${EXPECT_CLOUDFLARED:?} " &&
+	systemctl is-enabled cloudflared'
 check "the tunnel's ingress validates" \
 	/usr/local/bin/cloudflared tunnel --config /etc/cloudflared/config.yml ingress validate
 show systemctl status cloudflared --no-pager --lines 3
@@ -100,4 +106,6 @@ check "each .env is in place at 0600" sh -c '
 check "each secrets directory is gavin's" sh -c '
 	ls -d /home/gavin/.*-secrets && [ -z "$(find /home/gavin/.*-secrets ! -user gavin)" ]'
 check "the volume tars wait in /root/volumes" sh -c 'ls -l /root/volumes/*.tar'
-check "the tunnel credentials are root's alone" sh -c 'stat -c "%a %U %n" /etc/cloudflared/*.json | tee /dev/stderr | grep -qv "^600 root" && exit 1 || true'
+check "the tunnel credentials are there, and root's alone" sh -c '
+	ls /etc/cloudflared/*.json >/dev/null 2>&1 &&
+	! stat -c "%a %U %n" /etc/cloudflared/*.json | tee /dev/stderr | grep -v "^600 root"'

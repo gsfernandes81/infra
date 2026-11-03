@@ -7,8 +7,7 @@
 # shell, and boots straight into the snapshot it leaves. It copies only the stick's
 # combustion/ directory, unmounts the stick, and runs the script from the copy, so
 # everything the script reads lives under combustion/: this library, the host's files and
-# the carry-over. Before the script runs, it mounts the image's own fstab inside the new
-# root, so /home, /var and /usr/local are writable here. Every write to the root filesystem happens here or never, because the root is
+# the carry-over. Every write to the root filesystem happens here or never, because the root is
 # read-only afterwards. A failed command stops the script, and Combustion then leaves the
 # image unconfigured rather than half-configured: set -e in the host's script is the point.
 #
@@ -82,6 +81,11 @@ install_tracked() {
 	mode=$(sed -n 's/^# infra-mode:[[:space:]]*//p' "$file")
 	[ -n "$path" ] && [ -n "$name" ] && [ -n "$mode" ] || die "$file has no full infra- header"
 	install -D -m "$mode" "$file" "$path/$name"
+	# sudo refuses to run at all over one bad file in sudoers.d, which would leave only the
+	# console to elevate on.
+	if [ "$path" = /etc/sudoers.d ]; then
+		visudo -cf "$path/$name" >/dev/null || die "$file is not valid sudoers"
+	fi
 }
 
 # Downloads a pinned binary and installs it only if its SHA-256 matches.

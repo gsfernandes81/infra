@@ -40,8 +40,10 @@ set_root_password
 make_gavin "$gavin_uid" "$gavin_gid"
 install_host_keys
 
-# Every tracked file for this host's /etc, each at the path its header names.
+# Every tracked file for this host's /etc, each at the path its header names. Notes kept
+# beside them (*.md, *.toml) are not installed, as bin/_infra.py skips them.
 for f in "$stick"/host/system/*; do
+	case "$f" in *.md | *.toml) continue ;; esac
 	install_tracked "$f"
 done
 install -D -m 600 "$stick/carry/cloudflared/$host.json" "/etc/cloudflared/$host.json"

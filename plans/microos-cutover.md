@@ -50,8 +50,8 @@ Singapore at a date the owner picks.
 
 1. **One first-boot script per host,** at `hosts/<host>/leap/combustion/script`, with the
    steps every host shares in `leap/firstboot.sh` ([`leap/README.md`](../leap/README.md)).
-   **`one`'s is written** and booted in CI (`sim/microos/run-host.sh`); its own values (uid,
-   subvolume ids, address) wait on a read of the box, and `three`'s follows. Leap runs it
+   **`one`'s is written** and booted in CI (`sim/microos/run-host.sh`), with its own values
+   (uid, subvolume ids, address) read off the box on 2026-11-03; `three`'s follows. Leap runs it
    once, at first boot. It is reviewed like any boot-path file and not
    generated, and carries no secret. It:
    - sets users, `gavin`'s sudo drop-in, ssh keys (none for root), hostname, the root
