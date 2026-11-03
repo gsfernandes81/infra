@@ -60,7 +60,7 @@ its own repository, openSUSE's `docker-compose` locked out), installs `cloudflar
 Compose from their pinned downloads after checking each SHA-256, sets root's password,
 makes `gavin` with his old uid and gid, his password and his keys, installs the old ssh
 host keys and every file in `system/`, makes the `/media` mountpoints, appends the fstab
-entries, enables the units, turns off the update timer and the reboot strategy, keeps
+entries, enables the units, masks the update timer, turns off the reboot strategy, keeps
 sshd, the network, `cloudflared`, `tailscaled` and logins up in rescue mode, clones this
 repository into `~gavin/infra` with each deployment's `.env`, and leaves the volume tar
 files in `/root/volumes` for the runbook to restore once Docker runs.

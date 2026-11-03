@@ -20,8 +20,10 @@ show() { printf '$ %s\n' "$*"; "$@" 2>&1 | sed 's/^/  /'; }
 echo "-- the box"
 show sh -c '. /etc/os-release; echo "$PRETTY_NAME"; uname -r; hostname'
 check "systemd reached running, nothing failed" sh -c '
-	s=$(systemctl is-system-running --wait); f=$(systemctl --failed --no-legend)
-	echo "state: $s"; echo "$f"; [ "$s" = running ] && [ -z "$f" ]'
+	s=$(systemctl is-system-running --wait); f=$(systemctl --failed --no-legend --plain)
+	echo "state: $s"; echo "$f"
+	for u in $(echo "$f" | awk "{print \$1}"); do journalctl -b --no-pager -u "$u" | tail -n 12; done
+	[ "$s" = running ] && [ -z "$f" ]'
 # Which address is up is the harness's to judge: the first boot may still run the
 # initramfs's DHCP connection, and from the second boot only the static one is accepted.
 show ip -4 -br addr
@@ -80,7 +82,8 @@ check "tailscaled runs, from Tailscale's repo" sh -c '
 show sh -c 'firewall-cmd --list-all 2>&1 | head -n 10'
 
 echo "-- reboots and updates are the owner's"
-check "the update timer is off" sh -c '[ "$(systemctl is-enabled transactional-update.timer)" = disabled ]'
+check "the update timer is masked" sh -c '
+	s=$(systemctl is-enabled transactional-update.timer); echo "$s"; [ "$s" = masked ]'
 check "rebootmgr's strategy is off" sh -c 'rebootmgrctl get-strategy | tee /dev/stderr | grep -q off'
 check "jeos-firstboot is masked" sh -c '[ "$(systemctl is-enabled jeos-firstboot.service)" = masked ]'
 

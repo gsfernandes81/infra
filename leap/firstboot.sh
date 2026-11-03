@@ -154,7 +154,9 @@ install_binaries() {
 # (decisions.md § Rescue mode keeps a way in on every Leap host).
 enable_units() {
 	systemctl enable sshd.service docker.service cloudflared.service tailscaled.service
-	systemctl disable transactional-update.timer
+	# Masked, not disabled: systemd applies the image's presets on a first boot, and Leap's
+	# enable this timer, so a disable here was undone at the first start.
+	systemctl mask transactional-update.timer
 	# systemd-user-sessions as well: rescue mode would otherwise stop it, its stop writes
 	# /run/nologin, and that refuses every login but root's, which sshd refuses anyway.
 	systemctl add-wants rescue.target sshd.service NetworkManager.service \

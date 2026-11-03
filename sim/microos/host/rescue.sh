@@ -16,7 +16,10 @@ check() {
 	fi
 }
 
+# A target waits for the units it wants to finish starting, and cloudflared here has
+# stand-in credentials, so it takes its whole 90 s start timeout; allow for that.
 check "the box is in rescue mode" sh -c '
+	for i in $(seq 1 36); do systemctl is-active --quiet rescue.target && break; sleep 5; done
 	systemctl is-active rescue.target && ! systemctl is-active --quiet multi-user.target'
 for u in sshd NetworkManager cloudflared tailscaled systemd-user-sessions; do
 	# cloudflared has stand-in credentials here, so it may be between retries.

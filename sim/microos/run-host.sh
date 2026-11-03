@@ -141,7 +141,9 @@ wait_gavin | report
 	have=$(ssh-keyscan -t ed25519 -p "$(cat port)" 127.0.0.1 2>/dev/null | awk '{print $3}')
 	[ "$want" = "$have" ] && echo "PASS the host key is the carried one" \
 		|| echo "FAIL the host key is not the carried one"
-	if ssh_as -o PubkeyAuthentication=no gavin@127.0.0.1 true 2> pw.err; then
+	# Not through ssh_as: its -q hides the refusal this reads.
+	if ssh -i key -p "$(cat port)" -o StrictHostKeyChecking=no -o UserKnownHostsFile=known \
+		-o BatchMode=yes -o PubkeyAuthentication=no gavin@127.0.0.1 true 2> pw.err; then
 		echo "FAIL a login without a key got in"
 	elif grep -q 'Permission denied (publickey)' pw.err; then
 		echo "PASS sshd offers publickey only"
