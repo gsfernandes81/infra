@@ -1962,8 +1962,7 @@ depends on Docker or podman, and each is current within a monthly update of upst
 ## Two OSes in the end state: Leap 16.1 on the Pis that can run it, Alpine on `two`
 
 **Decided 2026-11-03**, the owner's call. `zero`, `one` and `three` move to openSUSE Leap
-16.1; `two` stays on Alpine. Whether Leap runs in its Immutable mode or its standard mode
-is still open (*plans/microos-cutover.md*).
+16.1, in its Immutable mode; `two` stays on Alpine.
 
 - **No third OS, ever.** `two` is a Pi 1 B+, an ARMv6 board no other candidate builds for,
   so Alpine stays in the fleet regardless. Fedora IoT and AlmaLinux, ranked second and
@@ -1972,6 +1971,15 @@ is still open (*plans/microos-cutover.md*).
   host's move goes wrong, that host keeps or returns to its Alpine card. A fleet on one
   OS everywhere would earn its own points, so the owner may replace `two` with a 64-bit
   board Leap supports (a Pi 3, Pi Zero 2 W, Pi 4 or Pi 5) when a cheap one turns up.
+- **Immutable mode, not standard**, the owner's call the same day. An update lands whole
+  in a new snapshot or not at all, so a power cut mid-update cannot leave a half-updated
+  box. The read-only root is the mount guard, as the simulation proved, so `chattr +i`
+  does not come back, and nothing outside `/etc` drifts. Stock health-checker rolls back
+  a boot that fails its checks. The costs fall on what the owner already does: every
+  package change takes a reboot, which monthly manual updates include, `cloudflared` lives
+  in `/usr/local`, and data mounts name subvolumes by `subvolid=` so health-checker cannot
+  strand a box (*plans/microos-cutover.md*). Standard Leap would update without most
+  reboots, but would bring back the writable root and leave no automatic rollback.
 - **Leap over MicroOS** for the reasons the research gave: it changes in one supervised
   step every year or so instead of continuously, and it is supported to 2028 with minor
   releases to 2031. 16.1 was scheduled to reach GA on 2026-11-03, ahead of the visit.

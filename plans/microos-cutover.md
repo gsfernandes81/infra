@@ -2,9 +2,8 @@
 
 A proposal from 2026-11-02, revised 2026-11-03. It moves `one` and `three` to a new OS at
 the visit and carries out [`three.md`](three.md); `zero` stays on Alpine. The OS is
-openSUSE Leap 16.1, decided 2026-11-03 (`decisions.md`), with `two` on Alpine; whether
-in its Immutable or standard mode is open. This file still says MicroOS where the
-simulations ran MicroOS. When the visit has done
+openSUSE Leap 16.1 in its Immutable mode, decided 2026-11-03 (`decisions.md`), with `two`
+on Alpine. This file still says MicroOS where the simulations ran MicroOS. When the visit has done
 it, the reasoning moves to [`docs/decisions.md`](../docs/decisions.md) and this file is
 deleted.
 
@@ -197,7 +196,6 @@ test and the visit's own checks do that.
 
 Still open:
 
-- **Leap's mode, Immutable or standard.**
 - **The GRUB fallback on a Pi**, which slice 1 checks.
 - **Locking the Pi's boot firmware** on an openSUSE host (`zypper addlock u-boot-rpiarm64
   'raspberrypi-firmware*'`). U-Boot and the firmware live on the FAT boot partition,
@@ -232,7 +230,9 @@ The owner settled the open calls on 2026-11-02.
    array is LUKS, unlocked by hand** (`decisions.md`, [`three.md`](three.md)).
 4. **`three` also runs Syncthing for access from Asia**, deferred if its memory proves
    short ([`three.md`](three.md)).
-5. **Two ways into every box: Cloudflare's own `cloudflared` binary and Tailscale from
+5. **Leap 16.1 in its Immutable mode on `zero`, `one` and `three`; Alpine on `two`, and
+   as the fallback** (`decisions.md`).
+6. **Two ways into every box: Cloudflare's own `cloudflared` binary and Tailscale from
    its own repo**, neither through a container runtime; Tailscale is the phone's
    emergency way in (`decisions.md`).
 

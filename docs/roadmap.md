@@ -43,7 +43,7 @@ rootful.
 
 **Scheduled for the November 2026 visit**: `one` and `three`, on Docker at first; `zero`
 stays on Alpine until the new OS is proven on a Pi 5. **The OS is openSUSE Leap 16.1**,
-decided 2026-11-03, with `two` staying on Alpine; its Immutable or standard mode is open
+in its Immutable mode, decided 2026-11-03, with `two` staying on Alpine
 ([`plans/microos-cutover.md`](../plans/microos-cutover.md), `decisions.md`). The text
 below was written for MicroOS and holds for Leap's Immutable mode.
 
