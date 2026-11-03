@@ -94,6 +94,50 @@ run docker compose -f /root/stack/compose.yaml ps -a
 run docker compose -f /root/stack/compose.yaml down
 run rpm -q iptables nftables
 
+section "upstream's Compose in /usr/local, as a host would carry it"
+# Leap 16.1 ships Compose 2.33.1, below the 5.5.0 the deploy play requires
+# (ansible/playbooks/_deploy-compose-one.yml). A host would carry upstream's static binary
+# instead, pinned by version and SHA-256 as cloudflared is, in /usr/local, which takes writes
+# outside a transactional-update shell only if it is a subvolume of its own. Docker's CLI
+# looks in /usr/local/lib/docker/cli-plugins before openSUSE's /usr/lib/docker/cli-plugins.
+# The pin is the fleet's version today; the SHA-256 is for the x86_64 binary this VM runs.
+compose_ver=5.6.1
+compose_sha=47737f4236e6d3ccea7291995203f8f018058783b4c3a9469119811a0b5db8c0
+plugins=/usr/local/lib/docker/cli-plugins
+run findmnt -T /usr/local -o TARGET,SOURCE,FSTYPE,OPTIONS
+run curl -fsSL -o /var/tmp/docker-compose \
+	"https://github.com/docker/compose/releases/download/v$compose_ver/docker-compose-linux-$(uname -m)"
+run sh -c "echo '$compose_sha  /var/tmp/docker-compose' | sha256sum -c -"
+run install -D -m 755 /var/tmp/docker-compose "$plugins/docker-compose"
+run ls -lZ "$plugins/docker-compose"
+run docker compose version
+run sh -c "docker info --format '{{range .ClientInfo.Plugins}}{{.Name}} {{.Version}} {{.Path}}{{println}}{{end}}'"
+echo "-- as a user who is not root, as the deploy play reads the version:"
+run runuser -u nobody -- docker compose version --short
+run rpm -q docker-buildx
+echo "-- the fleet-shaped stack again, under upstream's Compose:"
+run docker compose -f /root/stack/compose.yaml up -d
+sleep 10
+run sh -c 'curl -fsS http://127.0.0.1:18080/ | grep -o "Welcome to nginx"'
+run docker compose -f /root/stack/compose.yaml ps -a
+run docker compose -f /root/stack/compose.yaml down
+echo "-- a build, which Compose 5 hands to buildx:"
+mkdir -p /root/buildstack
+printf 'FROM docker.io/library/alpine:3.20\nRUN echo built > /built\n' > /root/buildstack/Dockerfile
+cat > /root/buildstack/compose.yaml <<'YAML'
+name: simbuild
+services:
+  built:
+    build: .
+    image: simbuild:1
+    command: cat /built
+YAML
+run docker compose -f /root/buildstack/compose.yaml build
+run docker compose -f /root/buildstack/compose.yaml run --rm built
+run docker compose -f /root/buildstack/compose.yaml down --rmi local
+echo "-- a new snapshot, so the reboot below shows whether /usr/local carries over:"
+run transactional-update --non-interactive run true
+
 section "automatic updates and reboots"
 run cat /root/rebootmgr.vendor.conf
 run cat /etc/rebootmgr.conf

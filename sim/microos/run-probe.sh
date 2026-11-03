@@ -36,7 +36,9 @@ ssh_vm 'systemctl is-system-running --wait' || true
 	echo
 	echo "##### after one reboot"
 	ssh_vm 'snapper list --columns number,date,description | tail -n 5; getenforce;
-		systemctl is-active docker; rebootmgrctl get-strategy'
+		systemctl is-active docker; rebootmgrctl get-strategy;
+		echo "-- Compose after booting a new snapshot (upstream 5.6.1 if /usr/local carried over):";
+		docker compose version --short'
 } | tee -a report.txt
 
 kill "$(cat qemu.pid)" 2>/dev/null || true
