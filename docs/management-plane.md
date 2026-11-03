@@ -528,6 +528,14 @@ ones that answer the question this document started from.
 | 8 | ~~`two` as the scheduled read-only control node~~ | `two` | ~~6, 7~~ — none since 2026-10-25 | **Dropped 2026-10-25**, the owner's call: no control node inside the fleet. It needed Ansible on a Pi and a key on `two` reaching `zero` and `one`, which this repo refuses, and its one unique benefit, alerting with nobody at the phone, goes to the proposed Cloudflare Worker monitor (see 2h's notes), which needs no key on the fleet. The number is kept. |
 | 9 | **The 8 GB Pi 4 becomes `one`; the old `one` board becomes `three`, the off-site backup; Leap 16.1 Immutable on `one` and `three`, `zero` on Alpine until it is proven on a Pi 5, `two` on Alpine for good** | all four, edge | the November 2026 visit | **Planned 2026-11-02, revised 2026-11-03**: [`plans/three.md`](../plans/three.md) for the end state, [`plans/microos-cutover.md`](../plans/microos-cutover.md) for the visit. The new OS keeps Docker; Phase 7 follows over ssh ([`decisions.md`](decisions.md)). Leap runs in its Immutable mode |
 
+**Filed 2026-11-03, no phase number: the btrfs subvolume ids a host's fstab names are
+recorded nowhere a tool checks.** Leap hosts mount every data subvolume by `subvolid=`
+(`hosts/one/leap/fstab.append`), and the ids were read off `one` by hand. `bin/hw-inventory`
+should list each btrfs filesystem's subvolumes, id and path, into the host's generated
+`hardware.md`, so a wrong id shows as a diff rather than as a mount that never happens.
+Raised in Fable's review of the first-boot branch; the owner's call that it belongs in
+`hw-inventory`.
+
 **Filed 2026-11-03, no phase number: `one` runs two things the repo does not record.**
 (a) `/etc/periodic/15min/disk-watch`, run by root's cron every 15 minutes, is a wrapper
 that runs `/home/gavin/disk-watch.sh`, a script in gavin's home that is in no repo, so root
