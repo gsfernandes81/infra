@@ -528,6 +528,18 @@ ones that answer the question this document started from.
 | 8 | ~~`two` as the scheduled read-only control node~~ | `two` | ~~6, 7~~ — none since 2026-10-25 | **Dropped 2026-10-25**, the owner's call: no control node inside the fleet. It needed Ansible on a Pi and a key on `two` reaching `zero` and `one`, which this repo refuses, and its one unique benefit, alerting with nobody at the phone, goes to the proposed Cloudflare Worker monitor (see 2h's notes), which needs no key on the fleet. The number is kept. |
 | 9 | **The 8 GB Pi 4 becomes `one`; the old `one` board becomes `three`, the off-site backup; Leap 16.1 Immutable on `one` and `three`, `zero` on Alpine until it is proven on a Pi 5, `two` on Alpine for good** | all four, edge | the November 2026 visit | **Planned 2026-11-02, revised 2026-11-03**: [`plans/three.md`](../plans/three.md) for the end state, [`plans/microos-cutover.md`](../plans/microos-cutover.md) for the visit. The new OS keeps Docker; Phase 7 follows over ssh ([`decisions.md`](decisions.md)). Leap runs in its Immutable mode |
 
+**Filed 2026-11-03, no phase number: `one` runs two things the repo does not record.**
+(a) `/etc/periodic/15min/disk-watch`, run by root's cron every 15 minutes, is a wrapper
+that runs `/home/gavin/disk-watch.sh`, a script in gavin's home that is in no repo, so root
+runs a file gavin can edit. Leap has no `/etc/periodic`, so it moves to a tracked script and
+a systemd timer in `one`'s first boot, once its contents are read. (b) `zram-init` is in
+`one`'s default runlevel with the package's own `/etc/init.d/zram-init` and
+`/etc/conf.d/zram-init` (768 MB zstd swap at priority 16383; its `/tmp` device unused).
+`docs/host-setup.md` says Alpine's package ships neither, so `rc-update add zram-init` fails:
+true of the armhf package it was checked against in August, not of `one`'s, so the doc
+wants correcting from `apk info -L zram-init` on each host. On Leap, `zram-generator`
+replaces it. Found reading `one` for its first-boot script.
+
 **Filed 2026-11-03, no phase number: every host's `cloudflared` still updates itself,
 against *Updates are by hand on every host* ([`decisions.md`](decisions.md)).** Row 2h's
 staggered `--autoupdate-freq` is live on all three (`hosts/*/system/cloudflared`: `one` 6 h,
