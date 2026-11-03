@@ -53,7 +53,8 @@ password=$(openssl rand -hex 12)
 c=$s/carry
 mkdir -p "$c/ssh" "$c/shadow" "$c/gavin" "$c/cloudflared" "$c/env" "$c/volumes"
 ssh-keygen -q -t ed25519 -N '' -C "sim $host" -f "$c/ssh/ssh_host_ed25519_key"
-openssl passwd -6 "$(openssl rand -hex 12)" > "$c/shadow/root"
+root_password=$(openssl rand -hex 12)
+openssl passwd -6 "$root_password" > "$c/shadow/root"
 openssl passwd -6 "$password" > "$c/shadow/gavin"
 cp key.pub "$c/gavin/authorized_keys"
 printf '{"AccountTag":"sim","TunnelSecret":"c2lt","TunnelID":"%s"}\n' "$tunnel_id" \
@@ -105,8 +106,17 @@ wait_gavin() {
 		done
 		sleep 5
 	done
-	echo "FAIL gavin cannot log in after 10 minutes; serial log follows"
-	tail -n 80 serial.log
+	echo "FAIL gavin cannot log in after 10 minutes; the console says why:"
+	python3 -I "$here/serial-login.py" serial.sock "$root_password" "$(cat <<'DIAG'
+systemctl --no-pager --failed; systemctl --no-pager status sshd | head -n 20
+journalctl -b --no-pager -u sshd | tail -n 30
+getent passwd gavin; ls -laZ /home/gavin /home/gavin/.ssh; findmnt /home
+sshd -T 2>&1 | grep -iE '^(authorizedkeysfile|permitrootlogin|passwordauthentication|allowusers|usepam) '
+ausearch --input-logs -m avc -ts boot < /dev/null 2>&1 | tail -n 20
+ip -br addr; nmcli -f NAME,DEVICE,FILENAME connection show
+journalctl -b --no-pager -u combustion | tail -n 40
+DIAG
+)" || tail -n 80 serial.log
 	return 1
 }
 # Runs a script on the guest as root through gavin's sudo, which reads his password first.
@@ -119,6 +129,7 @@ rm -f known
 sim_netdev="user,id=n0,net=$sim_net,host=$sim_gateway,dns=$sim_dns"
 sim_netdev+=",hostfwd=tcp:127.0.0.1:$static_port-$sim_address:22"
 sim_netdev+=",hostfwd=tcp:127.0.0.1:$dhcp_port-$sim_dhcp_address:22"
+sim_serial_socket=$PWD/serial.sock
 boot_vm "${disk_args[@]}"
 wait_gavin | report
 

@@ -57,6 +57,14 @@ make_config_drive() {
 # caller is never tried first. A caller may set sim_netdev to replace the user network,
 # as run-host.sh does to give the guest a host's own subnet.
 boot_vm() {
+	# The serial console goes to serial.log; with sim_serial_socket set, it is also a socket
+	# a caller can log in through (run-host.sh, serial-login.py), and still logged.
+	local serial=(-serial "file:$PWD/serial.log")
+	if [ -n "${sim_serial_socket:-}" ]; then
+		rm -f "$sim_serial_socket"
+		serial=(-chardev "socket,id=ser0,path=$sim_serial_socket,server=on,wait=off,logfile=$PWD/serial.log"
+			-serial chardev:ser0)
+	fi
 	rm -f qmp.sock
 	qemu-system-x86_64 \
 		-enable-kvm -cpu host -m 4096 -smp 2 \
@@ -67,7 +75,7 @@ boot_vm() {
 		-netdev "${sim_netdev:-user,id=n0,hostfwd=tcp:127.0.0.1:${ssh_port}-:22}" \
 		-device virtio-net-pci,netdev=n0 \
 		-qmp "unix:$PWD/qmp.sock,server=on,wait=off" \
-		-display none -monitor none -serial "file:$PWD/serial.log" \
+		-display none -monitor none "${serial[@]}" \
 		-pidfile "$PWD/qemu.pid" -daemonize "$@"
 }
 
