@@ -1,11 +1,21 @@
 #!/bin/bash
-# combustion: network
+# combustion: prepare network
 #
 # one's first-boot script for Leap 16.1 Immutable, run once by Combustion from the stick
 # leap/make-stick builds (leap/README.md). Reviewed like any boot-path file; it carries no
 # secret, and reads the carry-over from the stick. The steps it shares with every Leap
 # host are in leap/firstboot.sh; what follows is one's own.
 set -euo pipefail
+
+# Combustion runs this first with --prepare, in the initramfs, before any network is up.
+# one's own profile goes in there, so the first boot's network, which Combustion needs for
+# the packages, already runs on 192.168.86.101 instead of the initramfs's default DHCP; the
+# same profile is installed into the system below, so the system carries straight on.
+if [ "${1-}" = --prepare ]; then
+	install -D -m 600 host/system/wired.nmconnection \
+		/etc/NetworkManager/system-connections/wired.nmconnection
+	exit 0
+fi
 
 host=one
 # gavin's uid and gid on one's Alpine system, kept so his files on the SSD stay his.

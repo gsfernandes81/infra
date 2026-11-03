@@ -52,7 +52,10 @@ flash keeps.
 
 ## What the first boot does
 
-In order: checks the carry-over, sets the hostname, installs the packages (Tailscale's from
+Combustion runs the script twice. First with `--prepare`, in the initramfs before any
+network is up: the host's NetworkManager profile goes in there, so the network Combustion
+brings up for the packages already uses the host's own address rather than a DHCP lease.
+Then for real, in the new system, in order: checks the carry-over, sets the hostname, installs the packages (Tailscale's from
 its own repository, openSUSE's `docker-compose` locked out), installs `cloudflared` and
 Compose from their pinned downloads after checking each SHA-256, sets root's password,
 makes `gavin` with his old uid and gid, his password and his keys, installs the old ssh

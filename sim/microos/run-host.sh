@@ -73,10 +73,11 @@ mke2fs -q -t ext4 -L combustion -d stick combustion.img 64M
 make_disks | report
 
 # ── boot ─────────────────────────────────────────────────────────────────────
-# The guest is reached on its static address, or on the first address qemu's DHCP hands
-# out. Combustion's first boot runs its network from the initramfs, by DHCP, so the first
-# boot may answer only there; the port that answered is kept in a file, because the
-# functions below run inside pipelines.
+# The guest must answer on its static address, from the first boot on: the host's script
+# installs its profile in Combustion's prepare stage, so even the initramfs's network uses
+# it. The first address qemu's DHCP hands out is tried as well, so a box that missed its
+# profile is still reached and examined, and reported as a FAIL. The port that answered is
+# kept in a file, because the functions below run inside pipelines.
 static_port=$ssh_port
 dhcp_port=$((ssh_port + 1))
 ssh_as() {
@@ -97,7 +98,7 @@ wait_gavin() {
 				if [ "$p" = "$static_port" ]; then
 					echo "gavin's ssh up after ~$((i * 5))s, on $sim_address"
 				else
-					echo "gavin's ssh up after ~$((i * 5))s, on the DHCP address only"
+					echo "FAIL gavin's ssh answered on the DHCP address only, not $sim_address"
 				fi
 				return 0
 			fi
