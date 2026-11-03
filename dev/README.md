@@ -32,7 +32,7 @@ lint, read a playbook against the real `ansible.cfg` — and are not wired to th
 - **Not a Remote Control host.** No dev container runs a Remote Control daemon ([`../docs/decisions.md`](../docs/decisions.md),
   2026-08-25). One way in everywhere, `ssh dev`; adding a daemon back is a decision, not a variable.
   A session may still turn Remote Control on for itself with Claude Code's `/rc`, in a slot or in
-  `claude-remote` (claude-sessions 0.13.8), and it ends with that session's claude.
+  `claude-remote` (since claude-sessions 0.13.8), and it ends with that session's claude.
 - **Not a holder of the docker socket.** See *The socket line somebody will add*.
 - **Not a tunnel endpoint, except or3's.** The phone holds a reverse forward into or3 to
   reach the vessel LAN. The one `sshd_config` allows `-R` only, the hub's key is `restrict`
@@ -1004,7 +1004,8 @@ slot. How it works is claude-sessions' `docs/remote-view.md`.
 - **The client.** `ansible/playbooks/client-home-claude-remote.yml` installs the same binary
   as `claude-remote`, into `$PREFIX/bin` on Termux or `~/.local/bin` elsewhere. It reads the
   version and both hashes from `dev/hub/Dockerfile`, so the client always matches the hub's
-  relay, and a hub bump is a re-run of that play on each client. The `dev` ssh block needs
+  relay. A hub bump may be a client bump: the release notes say whether the client must
+  follow, and a re-run of that play on each client is how it does. The `dev` ssh block needs
   nothing new: it already has `Compression yes`, ServerAlive 30/3 and no ControlMaster.
 
 **Still open:** cloudflared's idle timeout on the phone, which claude-sessions is to measure

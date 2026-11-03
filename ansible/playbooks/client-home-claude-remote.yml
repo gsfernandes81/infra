@@ -12,11 +12,13 @@
 # client-home-ssh-config.yml writes, and nothing else on this side.
 #
 # THE VERSION AND BOTH HASHES ARE READ FROM dev/hub/Dockerfile, the hub's pin, and are not
-# repeated here. The client talks to the hub's `relay`, so the two move together: a hub bump is
-# a client bump, and there is one place to make it. A run after a bump installs the new
-# binary; a run on the current version reinstalls nothing (the recap's one change is the
-# closing message, which ansible.cfg would otherwise hide). The download is checked against the
-# pinned sha256 before it is moved into place, so a wrong hash leaves the old binary alone.
+# repeated here. The client talks to the hub's `relay`, so the two move together: the play
+# always installs the hub's pin, and there is one place to make it. A release's notes say
+# whether a hub bump needs the client re-run or the old client still talks to the new relay.
+# A run after a bump installs the new binary; a run on the current version reinstalls
+# nothing (the recap's one change is the closing message, which ansible.cfg would otherwise
+# hide). The download is checked against the pinned sha256 before it is moved into place,
+# so a wrong hash leaves the old binary alone.
 #
 # WHERE IT GOES: `$PREFIX/bin` on Termux, which is on PATH there and writable without root;
 # `~/.local/bin` anywhere else, where WSL's default profile puts it on PATH. `-e bin_dir=…`
