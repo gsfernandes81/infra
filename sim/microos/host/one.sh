@@ -2,11 +2,10 @@
 # shellcheck disable=SC2034,SC2054  # read by run-host.sh; commas belong to qemu
 # one's stand-ins for sim/microos/run-host.sh; sourced, never run.
 
-# What each FILL-FROM-ONE placeholder still in one's files becomes in the simulation; the
-# real value comes from one itself. The subvolume id is the one make_disks below produces.
-declare -A standin=(
-	[FILL-FROM-ONE-var-lib-docker-leap]=263
-)
+# What each FILL-FROM-ONE placeholder still in one's files would become in the simulation.
+# None is left: every value is one's own, read off the box on 2026-11-03, and make_disks
+# below gives the subvolumes the ids one's fstab names.
+declare -A standin=()
 
 # qemu's user network on one's own subnet, so its static address answers.
 sim_net=192.168.86.0/24

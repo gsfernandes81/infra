@@ -4,6 +4,6 @@ UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/torrents-config	btrfs	nofail,x-
 UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/syncthing-config	btrfs	nofail,x-systemd.device-timeout=180s,subvolid=259,context=system_u:object_r:container_file_t:s0,autodefrag,noatime,acl,discard=async 0 0
 UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/calibre/library	btrfs	nofail,x-systemd.device-timeout=180s,subvolid=260,context=system_u:object_r:container_file_t:s0,autodefrag,noatime,acl,discard=async 0 0
 UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/media/calibre/config	btrfs	nofail,x-systemd.device-timeout=180s,subvolid=261,context=system_u:object_r:container_file_t:s0,autodefrag,noatime,acl,discard=async 0 0
-UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/var/lib/docker	btrfs	nofail,x-systemd.device-timeout=180s,subvolid=FILL-FROM-ONE-var-lib-docker-leap,autodefrag,noatime,acl,discard=async 0 0
+UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/var/lib/docker	btrfs	nofail,x-systemd.device-timeout=180s,subvolid=263,autodefrag,noatime,acl,discard=async 0 0
 UUID=adc3a286-d7c1-4fef-885f-b3ca6f790a86	/mnt	btrfs	noauto,autodefrag,noatime,acl,discard=async 0 0
 UUID=d2bb5b47-1a76-40a0-8b37-1dad005dc7c9	none	swap	defaults,nofail 0 0
