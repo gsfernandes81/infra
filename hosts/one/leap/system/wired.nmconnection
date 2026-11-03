@@ -5,7 +5,9 @@
 # infra-mode: 0600
 #
 # one's own address, set on the host as on Alpine, so it stays 192.168.86.101 on a board
-# with a new MAC: sshd's PermitOpen and every client's ssh config name it. No interface
+# with a new MAC: sshd's PermitOpen and every client's ssh config name it. The values are
+# Alpine's /etc/network/interfaces and /etc/resolv.conf on 2026-11-03; IPv6 takes the
+# router's advertised address, as Alpine did. No interface
 # name, so it holds on whatever Leap calls the Pi's port. NetworkManager reads only a
 # root-owned file at mode 0600.
 [connection]
@@ -16,8 +18,9 @@ autoconnect-priority=100
 
 [ipv4]
 method=manual
-address1=192.168.86.101/FILL-FROM-ONE-prefix,FILL-FROM-ONE-gateway
-dns=FILL-FROM-ONE-dns;
+address1=192.168.86.101/24,192.168.86.1
+dns=1.1.1.1;8.8.8.8;
+dns-search=lan;
 
 [ipv6]
-method=FILL-FROM-ONE-ipv6
+method=auto

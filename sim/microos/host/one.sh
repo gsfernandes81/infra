@@ -2,24 +2,16 @@
 # shellcheck disable=SC2034,SC2054  # read by run-host.sh; commas belong to qemu
 # one's stand-ins for sim/microos/run-host.sh; sourced, never run.
 
-# What each FILL-FROM-ONE placeholder becomes in the simulation. The subvolume ids are the
-# ones make_disks below produces; the real values come from one itself.
+# What each FILL-FROM-ONE placeholder still in one's files becomes in the simulation; the
+# real value comes from one itself. The subvolume id is the one make_disks below produces.
 declare -A standin=(
-	[FILL-FROM-ONE-gavin-uid]=1000
-	[FILL-FROM-ONE-gavin-gid]=1000
-	[FILL-FROM-ONE-calibre-library]=260
-	[FILL-FROM-ONE-calibre-config]=261
 	[FILL-FROM-ONE-var-lib-docker-leap]=263
-	[FILL-FROM-ONE-prefix]=24
-	[FILL-FROM-ONE-gateway]=192.168.86.1
-	[FILL-FROM-ONE-dns]=192.168.86.3
-	[FILL-FROM-ONE-ipv6]=disabled
-	[FILL-FROM-ONE-garmin-tokens-volume]=garmin-mcp_garmin-tokens
 )
 
 # qemu's user network on one's own subnet, so its static address answers.
 sim_net=192.168.86.0/24
 sim_gateway=192.168.86.1
+# qemu's own resolver; the guest's static profile names public ones, which qemu also reaches.
 sim_dns=192.168.86.3
 sim_address=192.168.86.101
 
@@ -37,12 +29,12 @@ make_disks() {
 	mkfs.btrfs -q -f -U adc3a286-d7c1-4fef-885f-b3ca6f790a86 ssd.img
 	m=$(mktemp -d)
 	sudo mount -o loop ssd.img "$m"
-	for n in ionic-mysql torrents torrents-config syncthing-config media-calibre-library \
+	for n in media-ionic-mysql media-torrents media-torrents-config media-syncthing-config media-calibre-library \
 		media-calibre-config var-lib-docker var-lib-docker-leap; do
 		sudo btrfs subvolume create "$m/$n" >/dev/null
 	done
-	echo marker | sudo tee "$m/torrents/marker" >/dev/null
-	sudo chown 1000:1000 "$m/torrents/marker"
+	echo marker | sudo tee "$m/media-torrents/marker" >/dev/null
+	sudo chown 1000:1000 "$m/media-torrents/marker"
 	sudo btrfs subvolume list "$m"
 	sudo umount "$m"
 	rmdir "$m"

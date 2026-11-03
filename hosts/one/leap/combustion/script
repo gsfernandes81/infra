@@ -9,8 +9,8 @@ set -euo pipefail
 
 host=one
 # gavin's uid and gid on one's Alpine system, kept so his files on the SSD stay his.
-gavin_uid=FILL-FROM-ONE-gavin-uid
-gavin_gid=FILL-FROM-ONE-gavin-gid
+gavin_uid=1000
+gavin_gid=1000
 
 # shellcheck source=leap/firstboot.sh
 . ./leap/firstboot.sh
