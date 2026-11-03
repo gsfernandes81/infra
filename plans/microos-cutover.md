@@ -97,6 +97,33 @@ login as root is refused with a valid key in place.
 
 ## What the simulation has answered
 
+**On Leap 16.1, 2026-11-03.** Every job reran on Leap 16.1's own Immutable VM image
+(Build 3.13) and answered as below for MicroOS, except where a point says otherwise:
+health-checker's rollback, its mount plugin and the strand, late disks, SELinux, the read
+-only root, the reboot files and the packages. What only Leap showed:
+
+- **Docker cannot take over Alpine's store; it starts on an empty one.** After
+  `restorecon`, every new container died at its first exec (exit 139), even from an image
+  pulled fresh, and the audit log said why: the store's layers carry
+  `container_var_lib_t`, which Leap's policy does not let a container read. MicroOS's
+  policy labelled the same store correctly. A store Leap's Docker makes itself works, as
+  the probe's compose stack did. So each host's Docker on Leap gets a new, empty store:
+  on `one` a new subvolume beside `var-lib-docker`, which stays as it is for the Alpine
+  card. Images are pulled or rebuilt. Named volumes, which live in the store
+  (`garmin-tokens` on `one`, and the dev hub's when it moves), go across as tar files.
+- **The first-boot wizard does not run.** `jeos-firstboot` waits for a file that a
+  successful Combustion run deletes; the scripts mask it as well, because it powers the
+  box off when it fails.
+- **firewalld is on**, allowing ssh and DHCPv6. Ports published on `127.0.0.1` and
+  outbound tunnels are unaffected; Tailscale under it is a bench check.
+- **sshd allows passwords by default** (`passwordauthentication yes`); the hosts'
+  `sshd-infra.conf` turns that off, and the first-boot simulation is to prove it.
+- **Docker 29.4 and Compose 2.33.1**, older than MicroOS's 29.7 and 5.6. The fleet's
+  compose files want a `docker compose config` check under 2.33 before the visit.
+- **About 650 MB in use** with Docker running, which matters on `three`'s 1 GB.
+
+**On MicroOS, 2026-11-02:**
+
 The simulations (`sim/microos/`, run by `.github/workflows/microos-sim.yml`) ran on
 2026-11-02 against MicroOS 20261030, kernel 7.3, Docker 29.7.2 and Compose 5.6.1. They run
 on x86_64 under KVM, with qemu's USB disks and small loop-mounted filesystems. None of it
