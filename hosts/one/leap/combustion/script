@@ -1,0 +1,46 @@
+#!/bin/bash
+# combustion: network
+#
+# one's first-boot script for Leap 16.1 Immutable, run once by Combustion from the stick
+# leap/make-stick builds (leap/README.md). Reviewed like any boot-path file; it carries no
+# secret, and reads the carry-over from the stick. The steps it shares with every Leap
+# host are in leap/firstboot.sh; what follows is one's own.
+set -euo pipefail
+
+host=one
+# gavin's uid and gid on one's Alpine system, kept so his files on the SSD stay his.
+gavin_uid=FILL-FROM-ONE-gavin-uid
+gavin_gid=FILL-FROM-ONE-gavin-gid
+
+# shellcheck source=leap/firstboot.sh
+. ./leap/firstboot.sh
+
+say "starting $host"
+check_carry "$host"
+
+echo "$host" > /etc/hostname
+# shellcheck disable=SC2119  # one needs no packages beyond the common ones
+install_packages
+install_binaries
+set_root_password
+make_gavin "$gavin_uid" "$gavin_gid"
+install_host_keys
+
+# Every tracked file for this host's /etc, each at the path its header names.
+for f in "$stick"/host/system/*; do
+	install_tracked "$f"
+done
+install -D -m 600 "$stick/carry/cloudflared/$host.json" "/etc/cloudflared/$host.json"
+
+# The data mountpoints exist only if this snapshot makes them, and while nothing is mounted
+# on one the read-only root refuses every write to it: the mount guard chattr +i was on
+# Alpine. Then the SSD's entries, after the image's own root entries.
+mkdir -p /media/ionic-mysql /media/torrents /media/torrents-config /media/syncthing-config \
+	/media/calibre/library /media/calibre/config
+cat "$stick/host/fstab.append" >> /etc/fstab
+
+enable_units
+clone_infra
+keep_volume_tars
+
+say "done; $host boots into its configured snapshot next"

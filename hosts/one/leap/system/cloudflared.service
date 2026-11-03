@@ -1,0 +1,33 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /etc/systemd/system
+# infra-name: cloudflared.service
+# infra-mode: 0644
+#
+# The tunnel, one of the box's two ways in. The binary is Cloudflare's own, pinned in the
+# first-boot script and installed in /usr/local/bin, outside every snapshot, so an OS
+# rollback never takes the way in with it (docs/decisions.md § Every box has two ways in).
+#
+# --no-autoupdate because updates are by hand on this fleet: the monthly play moves the
+# pin and keeps the previous binary. `cloudflared service install` is never run, because
+# it now enables an update timer of its own.
+#
+# It never gives up restarting: StartLimitIntervalSec=0, because a way in that systemd
+# stopped retrying after five quick failures is a box nobody can reach. Type=notify makes
+# "active" mean connected. The start timeout is bounded, where upstream's is infinite, so a
+# box with no network still finishes booting and the unit just tries again.
+[Unit]
+Description=Cloudflare Tunnel
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/cloudflared --no-autoupdate --config /etc/cloudflared/config.yml tunnel run
+Restart=always
+RestartSec=10s
+TimeoutStartSec=90s
+
+[Install]
+WantedBy=multi-user.target

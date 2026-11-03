@@ -1,0 +1,110 @@
+#!/bin/sh
+# Builds a host's Leap first-boot stick, on that host's OLD system, as root:
+#
+#   sudo leap/make-stick <host> <device>      e.g. sudo leap/make-stick one /dev/sdb
+#
+# It ERASES <device>. It writes an ext4 filesystem labelled `combustion`, which Combustion
+# finds at the new system's first boot, holding the host's reviewed first-boot files from
+# this checkout and the carry-over read from this live system: ssh host keys, password
+# hashes, gavin's authorized_keys, the host's tunnel credentials, each deployment's .env and
+# ~gavin/.<deployment>-secrets directory, and the named volumes the host lists.
+# leap/README.md says what each part is.
+#
+# THE STICK THEN HOLDS LIVE SECRETS. Keep it with the other secret-bearing media, and once
+# the new system is proven, erase it with `blkdiscard`, which flash honours, not by deleting
+# files, which flash keeps.
+#
+# POSIX sh, because it runs on Alpine. It reads; the only thing it writes is the stick.
+set -eu
+
+die() { echo "make-stick: $*" >&2; exit 1; }
+
+[ $# -eq 2 ] || die "usage: make-stick <host> <device>"
+host=$1
+dev=$2
+repo=$(cd "$(dirname "$0")/.." && pwd)
+hostdir=$repo/hosts/$host/leap
+
+[ "$(id -u)" -eq 0 ] || die "run as root: the carry-over is root's to read"
+[ -d "$hostdir" ] || die "no $hostdir"
+# The carry-over is this box's own, so building one host's stick on another would carry
+# the wrong keys and credentials.
+[ "$(hostname)" = "$host" ] || die "this is $(hostname), not $host"
+if grep -rl 'FILL-FROM-' "$hostdir" >/dev/null 2>&1; then
+	die "a placeholder is left in: $(grep -rl 'FILL-FROM-' "$hostdir" | tr '\n' ' ')"
+fi
+
+# Only a whole USB disk that nothing has mounted, and small enough to be a stick.
+case "$dev" in /dev/sd[a-z]) ;; *) die "$dev is not a whole /dev/sdX disk" ;; esac
+name=${dev#/dev/}
+readlink -f "/sys/block/$name" | grep -q '/usb' || die "$dev is not on USB"
+grep -q "^$dev" /proc/mounts && die "$dev or a partition of it is mounted"
+size_gb=$(( $(cat "/sys/block/$name/size") / 2 / 1024 / 1024 ))
+[ "$size_gb" -le 256 ] || die "$dev is ${size_gb}G, too large to be a stick"
+
+# The carry-over must be complete before anything is erased.
+root_hash=$(awk -F: '$1 == "root" { print $2 }' /etc/shadow)
+gavin_hash=$(awk -F: '$1 == "gavin" { print $2 }' /etc/shadow)
+case "$root_hash" in \$*) ;; *) die "root has no password; set one with passwd first (the console needs it)" ;; esac
+case "$gavin_hash" in \$*) ;; *) die "gavin has no password hash" ;; esac
+[ -s /home/gavin/.ssh/authorized_keys ] || die "no /home/gavin/.ssh/authorized_keys"
+[ -s "/etc/cloudflared/$host.json" ] || die "no /etc/cloudflared/$host.json"
+[ -s /etc/ssh/ssh_host_ed25519_key ] || die "no ed25519 host key"
+
+lsblk -o NAME,SIZE,MODEL,TRAN "$dev" 2>/dev/null || true
+printf 'ERASE %s (%sG) for %s? Type the device name to go on: ' "$dev" "$size_gb" "$host"
+read -r answer
+[ "$answer" = "$dev" ] || die "not confirmed; nothing written"
+
+mkfs.ext4 -q -F -L combustion "$dev"
+mnt=$(mktemp -d)
+mount "$dev" "$mnt"
+trap 'umount "$mnt" 2>/dev/null; rmdir "$mnt" 2>/dev/null' EXIT
+
+# The reviewed files, as they are in this checkout. Everything goes under combustion/,
+# because Combustion copies that directory alone and runs the script from the copy.
+s=$mnt/combustion
+install -D -m 755 "$hostdir/combustion/script" "$s/script"
+install -D -m 644 "$repo/leap/firstboot.sh" "$s/leap/firstboot.sh"
+install -D -m 644 "$repo/leap/tailscale-repo.gpg" "$s/leap/tailscale-repo.gpg"
+install -D -m 644 "$hostdir/fstab.append" "$s/host/fstab.append"
+mkdir -p "$s/host/system"
+cp -p "$hostdir"/system/* "$s/host/system/"
+
+# The carry-over, root's only.
+umask 077
+c=$s/carry
+mkdir -p "$c/ssh" "$c/shadow" "$c/gavin" "$c/cloudflared" "$c/env" "$c/volumes"
+cp -p /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub "$c/ssh/"
+printf '%s\n' "$root_hash" > "$c/shadow/root"
+printf '%s\n' "$gavin_hash" > "$c/shadow/gavin"
+cp /home/gavin/.ssh/authorized_keys "$c/gavin/authorized_keys"
+cp "/etc/cloudflared/$host.json" "$c/cloudflared/$host.json"
+for link in "$repo/hosts/$host"/*; do
+	[ -L "$link" ] || continue
+	dep=$(basename "$link")
+	[ -f "$repo/deployments/$dep/.env" ] && cp "$repo/deployments/$dep/.env" "$c/env/$dep.env"
+done
+# Each deployment's own secrets directory (its tunnel credentials, and whatever else its
+# play keeps beside them), as server-create-deployment-tunnel.yml writes it.
+for d in /home/gavin/.*-secrets; do
+	[ -d "$d" ] || continue
+	mkdir -p "$c/home"
+	cp -a "$d" "$c/home/"
+done
+# Named volumes live in Docker's store, which the new system does not take over
+# (plans/microos-cutover.md), so each one the host lists travels as a tar file.
+if [ -f "$hostdir/volumes" ]; then
+	grep -v '^#' "$hostdir/volumes" | while read -r vol; do
+		[ -n "$vol" ] || continue
+		src=/var/lib/docker/volumes/$vol/_data
+		[ -d "$src" ] || die "no volume $vol at $src"
+		tar -C "$src" -cf "$c/volumes/$vol.tar" .
+	done
+fi
+chmod -R go-rwx "$c"
+
+sync
+echo "make-stick: $dev holds $host's first boot. Names only, no contents:"
+(cd "$mnt" && find . -type f | sort)
+echo "make-stick: erase it with blkdiscard once $host is proven."

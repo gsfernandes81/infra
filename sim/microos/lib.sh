@@ -54,7 +54,8 @@ make_config_drive() {
 # Starts the VM in the background with the system disk, the config drive, a USB 3
 # controller for the simulated USB disks, and a QMP socket for hot-plugging them. Extra
 # qemu arguments follow. The system disk carries bootindex=0, so an extra disk added by a
-# caller is never tried first.
+# caller is never tried first. A caller may set sim_netdev to replace the user network,
+# as run-host.sh does to give the guest a host's own subnet.
 boot_vm() {
 	rm -f qmp.sock
 	qemu-system-x86_64 \
@@ -63,7 +64,7 @@ boot_vm() {
 		-device virtio-blk-pci,drive=sys,bootindex=0 \
 		-drive file="$PWD/combustion.img",if=virtio,format=raw \
 		-device qemu-xhci,id=xhci \
-		-netdev user,id=n0,hostfwd=tcp:127.0.0.1:${ssh_port}-:22 \
+		-netdev "${sim_netdev:-user,id=n0,hostfwd=tcp:127.0.0.1:${ssh_port}-:22}" \
 		-device virtio-net-pci,netdev=n0 \
 		-qmp "unix:$PWD/qmp.sock,server=on,wait=off" \
 		-display none -monitor none -serial "file:$PWD/serial.log" \
