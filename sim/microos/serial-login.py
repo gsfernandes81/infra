@@ -67,7 +67,8 @@ if read_until("Password:", timeout=30) is None:
     sys.exit(1)
 seen = ""
 send(password + "\r\n")
-if read_until("# ", "Login incorrect", timeout=60) != "# ":
+# Leap's root prompt is coloured, so "# " never appears as such; ":~ #" does.
+if read_until(":~ #", "Login incorrect", timeout=60) != ":~ #":
     print("serial: root's password was refused")
     sys.exit(1)
 print("serial: root logged in on the console")
