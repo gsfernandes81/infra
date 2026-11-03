@@ -531,8 +531,12 @@ ones that answer the question this document started from.
 **Filed 2026-11-03, no phase number: `one` runs two things the repo does not record.**
 (a) `/etc/periodic/15min/disk-watch`, run by root's cron every 15 minutes, is a wrapper
 that runs `/home/gavin/disk-watch.sh`, a script in gavin's home that is in no repo, so root
-runs a file gavin can edit. Leap has no `/etc/periodic`, so it moves to a tracked script and
-a systemd timer in `one`'s first boot, once its contents are read. (b) `zram-init` is in
+runs a file gavin can edit. **Settled the same day: it does not move to Leap.** It was the
+August diagnostic for the Sabrent dropping off the bus while the failing SP900 sat in bay 0;
+its `--report` on 2026-11-03 counted 9 episodes in 92 days, the last on 2026-08-23, the day
+before the SP900 was pulled, and none in the 71 days since. Its SMART sampling names only
+`sdb`, which no longer exists. The script and its log stay on the Alpine card; removing the
+cron wrapper there is the owner's call. (b) `zram-init` is in
 `one`'s default runlevel with the package's own `/etc/init.d/zram-init` and
 `/etc/conf.d/zram-init` (768 MB zstd swap at priority 16383; its `/tmp` device unused).
 `docs/host-setup.md` says Alpine's package ships neither, so `rc-update add zram-init` fails:
