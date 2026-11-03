@@ -124,8 +124,11 @@ a restore from a snapshot there.
 
 `three` also runs Syncthing, in a container, for devices in Asia, separate from the
 backup. It is deferred if memory proves a problem: Syncthing 2.1.5 to 2.1.7 can run out of
-memory on a small box (#10913, open), so `three` pins a 2.0.x release as `one` does today,
-with zram swap, and the owner watches its memory during the UK seeding. Its identity lives
+memory on a small box (#10913, open), so `three` runs the known-good release, the owner's
+call of 2026-11-03: Syncthing 2.0.14, at the digest `deployments/torrents/compose.yaml`
+pins for `one` today, which has run it on this same 1 GB board. It has zram swap, and the
+owner watches its memory during the UK seeding. A newer release waits until #10913 is
+fixed. Its identity lives
 inside the encrypted volume, as above.
 
 ## The drives
