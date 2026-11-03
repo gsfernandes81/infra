@@ -178,6 +178,18 @@ test and the visit's own checks do that.
   open /boot/grub2/grubenv: Read-only file system`). GRUB uses that flag to fall back
   after a boot that never reached userspace, a kernel panic for one, so that fallback may
   not work. The Pi boots differently; slice 1's bench test checks it there.
+- **A data mount that fails outright strands a box, through stock health-checker alone.**
+  The health-mounts simulation (2026-11-03) added an fstab entry with `nofail` and a
+  `subvol=` that did not exist, on a snapshot that had booted fine. The mount failed at
+  5.6 s, health-checker's own `btrfs-subvolumes-mounted` plugin failed at 6.6 s and
+  rebooted the box, and the second boot went to the emergency shell, which stops sshd.
+  `nofail` does not help. The plugin selects only entries carrying `subvol=`: one with
+  `subvolid=` alone, or with no subvolume option, was never looked at. A disk that is
+  missing or late never trips it either, because its mount ends inactive, not failed, and
+  health-checker had already passed at about 7 s. So on an openSUSE host a data mount
+  names its subvolume by `subvolid=`, as `zero`'s fstab already does; `one`'s calibre and
+  Docker entries use `subvol=` and change at the move. This leans on how the plugin's
+  `findmnt` matches today, so the simulation stays in CI to catch a change.
 - **With root locked, the console is dead in emergency mode.** `sulogin` refuses a locked
   root, which is why each host gets a root password (`decisions.md`).
 
