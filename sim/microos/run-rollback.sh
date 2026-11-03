@@ -31,42 +31,6 @@ default_snapshot() {
 }
 active() { [ "$(ssh_vm "systemctl is-active $1" 2>/dev/null || true)" = active ]; }
 
-# Waits for the guest to answer on a boot other than <boot id>, through however many
-# reboots health-checker makes on the way, then for it to settle. The hold is longer than
-# the plugin's own wait (30 tries, 2 s apart), so a broken snapshot is never taken for a
-# settled one in the minute before health-checker rolls it back.
-wait_for_new_boot() {
-	local before=$1 now
-	for _ in $(seq 1 90); do
-		sleep 5
-		now=$(ssh_vm cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)
-		if [ -n "$now" ] && [ "$now" != "$before" ]; then
-			sleep 100
-			if [ "$(ssh_vm cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)" = "$now" ]; then
-				ssh_vm 'systemctl is-system-running --wait' >/dev/null 2>&1 || true
-				return 0
-			fi
-			before=$now
-		fi
-	done
-	echo "the guest did not settle on a new boot" | tee -a report.txt >&2
-	tail -n 60 serial.log >&2
-	return 1
-}
-
-# What the screen shows, for a guest that stops answering: GRUB and the early boot write to
-# the display, not to the serial log. Saves screen-<n>.png and qemu's run state.
-screenshots() {
-	local n
-	for n in 1 2 3; do
-		python3 -I "$here/qmp.py" qmp.sock "screendump $PWD/screen-$n.ppm" "info status" \
-			| tee -a report.txt || true
-		python3 -I "$here/ppm2png.py" "screen-$n.ppm" "screen-$n.png" \
-			|| echo "screen-$n: could not convert; the .ppm is kept" | tee -a report.txt
-		sleep 120
-	done
-}
-
 # Reboots and waits for the guest to settle, through any reboots health-checker adds.
 reboot_and_settle() {
 	local before

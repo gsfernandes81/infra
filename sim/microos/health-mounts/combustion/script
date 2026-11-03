@@ -1,0 +1,35 @@
+#!/bin/bash
+# combustion: network
+#
+# First-boot script for the health-mounts simulation VM only (sim/microos/README.md); not
+# a host's. Installs stock health-checker with no plugin of ours, as an openSUSE host
+# would carry it, and makes the data mountpoints the stages use.
+set -euxo pipefail
+
+# A root password, as every openSUSE host will have (docs/decisions.md), so a screen in
+# emergency mode shows the login a host would offer. This one guards a throwaway VM.
+echo 'root:sim-root-password-not-a-secret' | chpasswd
+
+install -d -m 700 /root/.ssh
+install -m 600 authorized_keys /root/.ssh/authorized_keys
+systemctl enable sshd
+
+zypper --non-interactive install health-checker btrfsprogs
+systemctl enable health-checker.service
+
+mkdir -p /etc/rebootmgr
+printf '[rebootmgr]\nstrategy=off\n' > /etc/rebootmgr/rebootmgr.conf
+printf 'REBOOT_METHOD=none\n' > /etc/transactional-update.conf
+systemctl disable transactional-update.timer
+
+# One mountpoint per fstab shape setup.sh writes, made in the snapshot as a host's
+# first-boot script would.
+mkdir -p /media/sv /media/svid /media/whole /media/bad
+
+# The journal's warnings and errors also go to the serial console, so a boot that never
+# reaches ssh still says why in the serial log CI keeps.
+mkdir -p /etc/systemd/journald.conf.d
+printf '%s\n' '[Journal]' 'ForwardToConsole=yes' 'TTYPath=/dev/ttyS0' 'MaxLevelConsole=warning' \
+	> /etc/systemd/journald.conf.d/sim-console.conf
+
+echo "combustion-health-mounts: done" > /dev/console

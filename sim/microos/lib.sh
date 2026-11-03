@@ -101,3 +101,42 @@ reboot_vm() {
 	done
 	wait_for_ssh
 }
+
+# Waits for the guest to answer on a boot other than <boot id>, through however many
+# reboots health-checker makes on the way, then for it to settle. Each new boot is held for
+# 100 s before it counts, longer than health-checker takes to decide, so a snapshot about
+# to be rolled back is never taken for a settled one. Used by run-rollback.sh and
+# run-health-mounts.sh, which append to report.txt.
+wait_for_new_boot() {
+	local before=$1 now
+	for _ in $(seq 1 90); do
+		sleep 5
+		now=$(ssh_vm cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)
+		if [ -n "$now" ] && [ "$now" != "$before" ]; then
+			sleep 100
+			if [ "$(ssh_vm cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)" = "$now" ]; then
+				ssh_vm 'systemctl is-system-running --wait' >/dev/null 2>&1 || true
+				return 0
+			fi
+			before=$now
+		fi
+	done
+	echo "the guest did not settle on a new boot" | tee -a report.txt >&2
+	tail -n 60 serial.log >&2
+	return 1
+}
+
+# What the screen shows, for a guest that stops answering: GRUB and the early boot write to
+# the display, not to the serial log. Saves screen-<n>.png and qemu's run state. Needs
+# $here, the caller's sim/microos directory, for the two helpers.
+# shellcheck disable=SC2154  # $here is the caller's, as the comment above says
+screenshots() {
+	local n
+	for n in 1 2 3; do
+		python3 -I "$here/qmp.py" qmp.sock "screendump $PWD/screen-$n.ppm" "info status" \
+			| tee -a report.txt || true
+		python3 -I "$here/ppm2png.py" "screen-$n.ppm" "screen-$n.png" \
+			|| echo "screen-$n: could not convert; the .ppm is kept" | tee -a report.txt
+		sleep 120
+	done
+}

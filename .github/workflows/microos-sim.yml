@@ -224,3 +224,46 @@ jobs:
           name: microos-aarch64-packages
           path: packages.txt
           if-no-files-found: warn
+
+  health-mounts:
+    # What stock health-checker does about data mounts: which fstab entries its mount plugin
+    # selects, and whether a data disk missing at boot, or a mount that fails at once, rolls
+    # a box back or strands it. Reports ANSWER lines; fails only when the harness does.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Give the runner user /dev/kvm
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install qemu
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils
+
+      - name: Boot with and without the data disk, and watch health-checker
+        run: sim/microos/run-health-mounts.sh "$RUNNER_TEMP/health"
+
+      - name: Put the report in the job summary
+        if: always()
+        run: |
+          {
+            echo '```'
+            cat "$RUNNER_TEMP/health/report.txt" 2>/dev/null || echo 'no report'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: microos-health-mounts
+          path: |
+            ${{ runner.temp }}/health/report.txt
+            ${{ runner.temp }}/health/serial.log
+            ${{ runner.temp }}/health/screen-*
+          if-no-files-found: warn
