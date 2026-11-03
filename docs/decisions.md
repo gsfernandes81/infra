@@ -2000,6 +2000,23 @@ keeps its console. health-checker sends a failed boot to emergency mode, not res
 upstream request for a configurable target is outward-facing, so the owner decides who
 files it.
 
+## The Pi's boot firmware is locked on every Leap host
+
+**Decided 2026-11-03**, the owner's call. Each host's first boot runs `zypper addlock
+'u-boot-rpi*' 'raspberrypi-firmware*' 'raspberrypi-eeprom*'`: U-Boot, the GPU firmware with
+`config.txt` and the device trees, and the Pi 4's bootloader image.
+
+- **Why:** they live on the FAT boot partition, outside every snapshot, so neither a
+  rollback nor health-checker can undo a bad update to them, and updates to them broke
+  Pi 4 boot four times between 2020 and 2025. The kernel and its `dtb-broadcom` stay
+  unlocked, inside the snapshot, where a rollback covers them.
+- **They change only on purpose,** with someone at the console: in one
+  `transactional-update shell`, `zypper removelock` the patterns, update those packages,
+  `zypper addlock` them again, then reboot and watch it come up. Never on a box that is
+  away.
+- **A monthly update that will not resolve because of a lock** says so and changes
+  nothing; the owner then decides, rather than the solver.
+
 ## Leap hosts carry upstream's Compose until openSUSE's reaches the deploy play's floor
 
 **Decided 2026-11-03**, the owner's call, for every Leap host. Leap 16.1 ships Compose

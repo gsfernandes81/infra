@@ -543,8 +543,8 @@ runs a file gavin can edit. **Settled the same day: it does not move to Leap.** 
 August diagnostic for the Sabrent dropping off the bus while the failing SP900 sat in bay 0;
 its `--report` on 2026-11-03 counted 9 episodes in 92 days, the last on 2026-08-23, the day
 before the SP900 was pulled, and none in the 71 days since. Its SMART sampling names only
-`sdb`, which no longer exists. The script and its log stay on the Alpine card; removing the
-cron wrapper there is the owner's call. (b) `zram-init` is in
+`sdb`, which no longer exists. The script and its log stay on the Alpine card; the owner
+removed the cron wrapper there the same day. (b) `zram-init` is in
 `one`'s default runlevel with the package's own `/etc/init.d/zram-init` and
 `/etc/conf.d/zram-init` (768 MB zstd swap at priority 16383; its `/tmp` device unused).
 `docs/host-setup.md` says Alpine's package ships neither, so `rc-update add zram-init` fails:

@@ -240,11 +240,6 @@ test and the visit's own checks do that.
 Still open:
 
 - **The GRUB fallback on a Pi**, which slice 1 checks.
-- **Locking the Pi's boot firmware** on an openSUSE host (`zypper addlock u-boot-rpiarm64
-  'raspberrypi-firmware*'`). U-Boot and the firmware live on the FAT boot partition,
-  outside every snapshot, so a rollback cannot undo them, and updates to them broke Pi 4
-  boot four times between 2020 and 2025. Locked, they change only when the owner unlocks
-  them deliberately.
 
 ## Decided, 2026-11-02
 
@@ -280,6 +275,8 @@ The owner settled the open calls on 2026-11-02.
    emergency way in (`decisions.md`).
 7. **Leap hosts carry Docker's own Compose binary until Leap's repositories offer a
    Compose at or above the deploy play's 5.5.0 floor** (`decisions.md`).
+8. **The Pi's boot firmware is locked** by each first boot, U-Boot, firmware and EEPROM
+   image alike, and changes only with someone at the console (`decisions.md`).
 
 ## Docs this changes
 

@@ -118,6 +118,11 @@ check "tailscaled runs, signed by Tailscale's key" sh -c '
 show sh -c 'firewall-cmd --list-all 2>&1 | head -n 10'
 
 echo "-- reboots and updates are the owner's"
+check "the Pi's boot firmware is locked" sh -c '
+	l=$(zypper --non-interactive locks); echo "$l"
+	for p in "u-boot-rpi\*" "raspberrypi-firmware\*" "raspberrypi-eeprom\*"; do
+		echo "$l" | grep -q "$p" || exit 1
+	done'
 check "the update timer is masked" sh -c '
 	s=$(systemctl is-enabled transactional-update.timer); echo "$s"; [ "$s" = masked ]'
 check "rebootmgr's strategy is off" sh -c 'rebootmgrctl get-strategy | tee /dev/stderr | grep -q off'

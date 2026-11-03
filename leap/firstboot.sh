@@ -144,6 +144,11 @@ install_packages() {
 	install_tracked "$stick/host/system/tailscale.repo"
 	rpm --import "$stick/leap/tailscale-repo.gpg"
 	zypper --non-interactive addlock docker-compose
+	# The Pi's boot chain, which lives on the FAT boot partition outside every snapshot, so a
+	# rollback cannot undo a bad update to it (docs/decisions.md § The Pi's boot firmware is
+	# locked). Locked by name, so the lock holds on an image that ships none of them, as the
+	# simulation's x86 one does.
+	zypper --non-interactive addlock 'u-boot-rpi*' 'raspberrypi-firmware*' 'raspberrypi-eeprom*'
 	zypper --non-interactive refresh
 	zypper --non-interactive install "${common_packages[@]}" "$@"
 }
