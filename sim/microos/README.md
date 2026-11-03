@@ -85,6 +85,36 @@ This simulation also once proved a way to keep sshd and the network up in emerge
 The owner dropped that design; `docs/decisions.md` § *Emergency mode on a MicroOS host
 keeps a way in* records what it took, and git history keeps the code.
 
+## Data mounts and health-checker
+
+`run-health-mounts.sh` asks what stock `health-checker`, with no plugin of ours, does
+about the fleet's data mounts. Its `btrfs-subvolumes-mounted` plugin fails the boot when
+an fstab entry with a `subvol` option has a failed mount unit, and it ignores `nofail`. A
+failure on an update's first boot rolls the update back; on a snapshot that has booted
+fine, health-checker reboots once and then enters emergency mode, which stops sshd.
+
+The VM carries one data disk with a btrfs subvolume, mounted three ways as the fleet's
+fstabs do: `subvol=`, `subvolid=`, and neither. Each entry has `nofail` and the 180 s device
+timeout the hosts will carry. The run reports, as ANSWER lines:
+
+- which of the three entries the plugin's own `findmnt` selects;
+- what a boot without the disk does on a good snapshot, and on an update's first boot;
+- what a mount that fails at once (a subvolume that does not exist) does on a good
+  snapshot, with the screens if the box stops answering.
+
+Each answer carries its evidence: when health-checker gave its verdict, each mount's state
+and result, and what the plugin says after the device timeout. A late disk's mount ends
+inactive, not failed, and the verdict comes seconds into the boot, so a missing disk can
+pass for a reason that says nothing about a disk that arrives and then fails to mount.
+
+It reports and does not judge: the job fails only when the VM does not boot or answer ssh
+before the stages begin. The MicroOS image's `health-checker` stands in for Leap 16.1's;
+the report prints its version and which of its two boot paths the image takes (legacy
+GRUB or BLS), since they decide differently.
+
+Not tested: a mount failing at once on an update's first boot, and a disk that arrives
+during boot, inside the device timeout, which is the fleet's usual case.
+
 ## What a green run does not show
 
 The simulations run on x86_64 under KVM, not on a Pi; the USB disks are qemu's. It does
@@ -93,8 +123,8 @@ Those come in later simulations or on the bench at the visit.
 
 ## Running it elsewhere
 
-`run-probe.sh`, `run-late-disks.sh` (with a variant) and `run-docker-store.sh`, each given
-a work directory, run on any Linux machine with KVM, `qemu-system-x86_64`, `qemu-img`,
-`mke2fs` and an ssh client; `run-docker-store.sh` also needs Docker, btrfs-progs and sudo
+`run-probe.sh`, `run-late-disks.sh` (with a variant), `run-docker-store.sh`,
+`run-rollback.sh` and `run-health-mounts.sh`, each given a work directory, run on any Linux
+machine with KVM, `qemu-system-x86_64`, `qemu-img`, `mke2fs` and an ssh client; `run-docker-store.sh` also needs Docker, btrfs-progs and sudo
 for one loop mount. Each writes only inside its work directory. Do not run it in the
 `infra` container: that container is on `zero`, has no KVM, and would compete with Immich.
