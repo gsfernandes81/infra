@@ -40,8 +40,9 @@ check "nothing requires import-pubring-from-rpmdb or is bound to it" sh -c '
 check "its keyring holds every key in the rpm database" sh -c '
 	k=$(gpg --no-options --homedir "$(mktemp -d)" --no-default-keyring \
 		--keyring /etc/systemd/import-pubring.gpg --list-keys --with-colons 2>/dev/null | grep -c "^pub")
-	r=$(rpm -q gpg-pubkey | wc -l); echo "keyring $k, rpm database $r"; [ "$k" -eq "$r" ]
-	gpgconf --kill gpg-agent 2>/dev/null; true'
+	r=$(rpm -q gpg-pubkey | wc -l); echo "keyring $k, rpm database $r"
+	gpgconf --kill gpg-agent 2>/dev/null
+	[ "$k" -gt 0 ] && [ "$k" -eq "$r" ]'
 show sh -c 'rpm -q systemd-container; command -v machinectl || echo "no machinectl"'
 check "systemd reached running, nothing failed" sh -c '
 	s=$(systemctl is-system-running --wait); f=$(systemctl --failed --no-legend --plain)
