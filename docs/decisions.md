@@ -1897,6 +1897,9 @@ alike.
 - **One command per host.** A play updates the host, reboots it, and reports done only
   once the box answers over each of its ways in. On `three`, the owner then unlocks the
   array (*`three` is the off-site backup*, below).
+- **Not yet true of `cloudflared` on Alpine.** Row 2h's staggered autoupdate is still live
+  on all three hosts; retiring it is filed in
+  [`management-plane.md`](management-plane.md)'s phase table.
 - **`one` carries live agent sessions**, which its reboot ends, so the owner checks for
   live slots first. A hub feature that warns live agents before a reboot is a request for
   `claude-sessions`, not yet filed.

@@ -528,6 +528,15 @@ ones that answer the question this document started from.
 | 8 | ~~`two` as the scheduled read-only control node~~ | `two` | ~~6, 7~~ — none since 2026-10-25 | **Dropped 2026-10-25**, the owner's call: no control node inside the fleet. It needed Ansible on a Pi and a key on `two` reaching `zero` and `one`, which this repo refuses, and its one unique benefit, alerting with nobody at the phone, goes to the proposed Cloudflare Worker monitor (see 2h's notes), which needs no key on the fleet. The number is kept. |
 | 9 | **The 8 GB Pi 4 becomes `one`; the old `one` board becomes `three`, the off-site backup; a new OS on `one` and `three`, `zero` on Alpine until it is proven on a Pi 5** | all four, edge | the November 2026 visit | **Planned 2026-11-02, revised 2026-11-03**: [`plans/three.md`](../plans/three.md) for the end state, [`plans/microos-cutover.md`](../plans/microos-cutover.md) for the visit. The new OS keeps Docker; Phase 7 follows over ssh ([`decisions.md`](decisions.md)). Which OS is open |
 
+**Filed 2026-11-03, no phase number: every host's `cloudflared` still updates itself,
+against *Updates are by hand on every host* ([`decisions.md`](decisions.md)).** Row 2h's
+staggered `--autoupdate-freq` is live on all three (`hosts/*/system/cloudflared`: `one` 6 h,
+`two` 72 h, `zero` 240 h). Retiring it means each host's tracked init script carrying
+`--no-autoupdate` instead, installed by the two-phase procedure, since the tunnel is the
+way in. After that, `server-update-cloudflared.yml`, which already refuses a connector
+running with `--autoupdate-freq`, becomes the monthly update. Found by the 2026-11-03 OS
+research; the owner drives it.
+
 **Filed 2026-11-02, no phase number: `zero`'s `sdb` is SMR and worn, and both of its hard
 disks are past their load-cycle rating.** `sdb` (WD10SPZX) is SMR, as WD's own list says,
 and read 6 reported-uncorrectable reads, 8 command timeouts and 1.22 million load cycles.
