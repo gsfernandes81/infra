@@ -1786,6 +1786,16 @@ build on all three*, above).
 
 ## Emergency mode on a MicroOS host keeps a way in
 
+**⚠︎SUPERSEDED 2026-11-03**, the owner's call: no MicroOS host carries these drop-ins. The
+design below works in the rollback simulation, but only after four surprises, each found
+by a failing run, and it rewrites the dependencies of core units on every normal boot as
+well, which a rolling distribution can break with any update. The guarded plugin (*MicroOS
+hosts take openSUSE's cloudflared*, above) already keeps the cloudflared check from
+sending a good box to emergency mode; the root password keeps the console. Keeping a way
+in through `rescue.target` instead, where `systemctl add-wants` is enough because rescue
+mode keeps `sysinit.target`, is to be raised with the owner later. What follows is the
+record of what was tried and found.
+
 **Decided 2026-11-02**, the owner's call, after the rollback simulation lost a VM to
 emergency mode for good. Whatever sends a MicroOS host to emergency mode (a health-checker
 plugin, a failed mount, MicroOS's own checks), sshd, the network and the tunnel stay up.

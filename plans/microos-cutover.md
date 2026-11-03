@@ -47,8 +47,6 @@ slice, because the infra container moves with it. Podman comes later still.
    - makes the host's `/media/*` mountpoints and appends its fstab fragment;
    - installs the `cloudflared` unit and the guarded health-check plugin in
      `/usr/libexec/health-checker/`;
-   - gives the kept units their emergency drop-ins, and clears `systemd-user-sessions`'
-     `ExecStop=`;
    - disables `transactional-update.timer` and sets the two reboot files, because nothing
      on this fleet restarts without the owner's say.
 
@@ -150,14 +148,13 @@ test and the visit's own checks do that.
   gluetun's, came up: the port answered from the host, a service reached another by name,
   and the namespace-sharing one reached it on `127.0.0.1`.
 
-- **A bad update rolls itself back, a good box is never stranded, and emergency mode keeps
-  a way in.** The rollback simulation broke a stand-in for `cloudflared` inside an update:
-  the box booted the new snapshot once, the plugin failed, and health-checker returned it
-  to the previous one. A good update stayed. With the plugin's guard, a check failing on a
-  snapshot that had already passed left the box up. Forced into emergency mode with a root
-  password set, the box answered ssh and offered a console login, with the stacks stopped
-  ([`decisions.md`](../docs/decisions.md) § *Emergency mode on a MicroOS host keeps a way
-  in*, with the four things that took finding). Every stage asserts its outcome.
+- **A bad update rolls itself back, and a good box is never stranded.** The rollback
+  simulation broke a stand-in for `cloudflared` inside an update: the box booted the new
+  snapshot once, the plugin failed, and health-checker returned it to the previous one. A
+  good update stayed. With the plugin's guard, a check failing on a snapshot that had
+  already passed left the box up. Every stage asserts its outcome. Keeping a way in
+  through emergency mode was also proven, and dropped (`decisions.md` § *Emergency mode on
+  a MicroOS host keeps a way in*).
 - **openSUSE's `cloudflared` package ships no systemd unit,** prints an empty version, and
   cannot update itself (`read-only file system`), which is the safe failure. Each host's
   unit is its own tracked file, and its config sets `no-autoupdate: true`. `cloudflared

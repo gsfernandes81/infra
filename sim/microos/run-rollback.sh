@@ -2,9 +2,8 @@
 # pass and fail always succeed, so `A && pass || fail` can never run both.
 # shellcheck disable=SC2015
 # Whether health-checker rolls a MicroOS box back from an update that breaks the service
-# its plugin checks, keeps one that does not, leaves a good snapshot alone when the check
-# fails there, and, forced into emergency mode, keeps the box reachable with its stacks
-# stopped. Every stage asserts its outcome; any FAIL fails the job. CI runs it
+# its plugin checks, keeps one that does not, and leaves a good snapshot alone when the
+# check fails there. Every stage asserts its outcome; any FAIL fails the job. CI runs it
 # (.github/workflows/microos-sim.yml).
 #
 # Usage: sim/microos/run-rollback.sh <workdir>. It writes only inside <workdir>.
@@ -99,17 +98,17 @@ good=$(default_snapshot)
 ssh_vm 'grep -q "^LAST_WORKING_BTRFS_ID=" /var/lib/misc/health-check.state' \
 	&& pass "health-checker recorded a working snapshot ($good)" \
 	|| fail "health-check.state has no LAST_WORKING_BTRFS_ID, so the guard has nothing to read"
-# A normal boot must stay clean with the kept units' new ordering: no cycle, which systemd
-# breaks by dropping a job (one such took D-Bus and the network down), and no unit that
-# found the bus missing.
+# A normal boot must stay clean: no ordering cycle, which systemd breaks by dropping a job,
+# and no unit that found the bus missing. Both caught mistakes in the emergency-mode
+# drop-ins this simulation once carried (docs/decisions.md), and stay as cheap guards.
 if ssh_vm 'journalctl -b --no-pager | grep -qi "ordering cycle"'; then
-	fail "a normal boot found an ordering cycle with the kept units' drop-ins"
+	fail "a normal boot found an ordering cycle"
 	ssh_vm 'journalctl -b --no-pager | grep -i -A2 "ordering cycle" | head -n 12' | tee -a report.txt
 else
 	pass "a normal boot found no ordering cycle"
 fi
 if ssh_vm 'journalctl -b --no-pager | grep -q "Failed to connect to bus"'; then
-	fail "a normal boot logged 'Failed to connect to bus' with the kept units' ordering"
+	fail "a normal boot logged 'Failed to connect to bus'"
 else
 	pass "a normal boot logged no D-Bus connection failure"
 fi
@@ -154,59 +153,6 @@ else
 	screenshots
 fi
 
-stage "forced into emergency mode on a good snapshot (/etc/sim-fail-hard): is there a way in?"
-# The guard cannot help here by design: the check fails whatever the snapshot. health-
-# checker reboots once and starts emergency.target. With root's password set, sulogin
-# waits at the console and emergency mode holds. ssh must answer, the kept units must be
-# active, and the stack stand-in must have stopped. The forced failure clears itself after
-# the emergency boot (the plugin), so a hard reset ends the stage.
-ssh_vm 'rm -f /var/lib/misc/health-check.rebooted; echo 0 > /etc/sim-fail-hard'
-serial_before=$(wc -c < serial.log)
-ssh_vm 'systemctl reboot' || true
-# First watch without touching: sulogin's prompt goes to the console, which is the serial
-# log. An ssh login starts the user's systemd manager, which requires sysinit.target, which
-# conflicts with emergency mode, so polling over ssh could itself end the emergency mode it
-# was looking for; earlier runs that did only that never saw the emergency shell.
-prompt=no
-for _ in $(seq 1 60); do
-	sleep 10
-	if tail -c +"$serial_before" serial.log | grep -aq "root password for system maintenance"; then
-		prompt=yes
-		break
-	fi
-done
-python3 -I "$here/qmp.py" qmp.sock "screendump $PWD/emergency.ppm" >/dev/null || true
-python3 -I "$here/ppm2png.py" emergency.ppm emergency.png || true
-# Recorded, not asserted: the emergency shell lasts only until something pulls
-# sysinit.target back, so the console login rests on the kept gettys instead (below).
-if [ "$prompt" = yes ]; then
-	echo "NOTE: sulogin asked for root's password on the serial console" | tee -a report.txt
-else
-	echo "NOTE: no sulogin prompt on the serial console; the screenshot shows the screen" | tee -a report.txt
-fi
-# Then the way in: ssh, the kept units, the stacks stopped. What the login does to
-# emergency mode is recorded, not asserted.
-if ssh_vm 'journalctl -b --no-pager | grep -q "starting emergency shell"' 2>/dev/null; then
-	sleep 20
-	# shellcheck disable=SC2016  # runs in the guest, so its expansions happen there
-	ssh_vm 'for u in emergency.target emergency.service sshd NetworkManager \
-			NetworkManager-dispatcher dbus-broker sim-tunnel getty@tty1 serial-getty@ttyS0 \
-			systemd-user-sessions sim-stack; do echo "$u: $(systemctl is-active $u)"; done
-		echo "sulogin after an ssh login: $(pgrep -x sulogin >/dev/null && echo running || echo gone)"
-		ls -la /run/nologin 2>&1
-		journalctl -b -o short-precise --no-pager | grep -iE "emergency|sulogin" | tail -n 8' \
-		2>&1 | tee -a report.txt
-	pass "ssh answered on the boot health-checker sent to emergency mode"
-	for u in sshd NetworkManager dbus-broker sim-tunnel getty@tty1 serial-getty@ttyS0; do
-		active "$u" && pass "$u is up in emergency mode" || fail "$u is not up in emergency mode"
-	done
-	active sim-stack && fail "the stack stand-in is still running in emergency mode" \
-		|| pass "the stack stand-in stopped"
-	ssh_vm 'test ! -e /run/nologin' && pass "no /run/nologin" || fail "/run/nologin exists"
-else
-	fail "no ssh on the boot health-checker sent to emergency mode"
-	screenshots
-fi
 python3 -I "$here/qmp.py" qmp.sock "system_reset" >/dev/null || true
 
 echo

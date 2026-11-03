@@ -6,9 +6,8 @@
 # hosts' cloudflared plugin will be, and openSUSE's cloudflared for its commands.
 set -euxo pipefail
 
-# A root password, as every MicroOS host will have (docs/decisions.md): with root locked,
-# sulogin fails in emergency mode and the boot partly resumes, which is not the case to test.
-# This one is the simulation's own and guards a throwaway VM.
+# A root password, as every MicroOS host will have (docs/decisions.md). This one is the
+# simulation's own and guards a throwaway VM.
 echo 'root:sim-root-password-not-a-secret' | chpasswd
 
 install -d -m 700 /root/.ssh
@@ -35,19 +34,6 @@ chmod 755 /usr/bin/sim-tunnel
 mkdir -p /etc/systemd/journald.conf.d
 printf '%s\n' '[Journal]' 'ForwardToConsole=yes' 'TTYPath=/dev/ttyS0' 'MaxLevelConsole=warning' \
 	> /etc/systemd/journald.conf.d/sim-console.conf
-
-# A stand-in for a stack: an ordinary service, which emergency mode must stop.
-cat > /etc/systemd/system/sim-stack.service <<'UNIT'
-[Unit]
-Description=Stand-in for a stack, which emergency mode must stop
-
-[Service]
-ExecStart=/bin/sleep infinity
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-systemctl enable sim-stack.service
 
 cat > /etc/systemd/system/sim-tunnel.service <<'UNIT'
 [Unit]
@@ -83,21 +69,6 @@ cat > /usr/libexec/health-checker/sim-tunnel.sh <<'PLUGIN'
 #!/bin/sh
 case "$1" in
 check)
-	# /etc/sim-fail-hard fails even a known-good snapshot, to drive the box into
-	# emergency.target on purpose and see whether the way in survives it.
-	# It fails twice, the boot health-checker reboots and the one it sends to emergency mode,
-	# and then removes itself, so a hard reset brings the box back to show the dark boot's
-	# journal.
-	if [ -e /etc/sim-fail-hard ]; then
-		n=$(cat /etc/sim-fail-hard 2>/dev/null)
-		if [ "${n:-0}" -ge 2 ]; then
-			rm -f /etc/sim-fail-hard
-		else
-			echo $(( ${n:-0} + 1 )) > /etc/sim-fail-hard
-			echo "sim-tunnel: /etc/sim-fail-hard, failure $(( ${n:-0} + 1 ))"
-			exit 1
-		fi
-	fi
 	# With a BLS boot (grub2-bls, systemd-boot) health-checker deletes the state file the
 	# guard reads on every pass, so the guard could not tell a good snapshot from a new one
 	# and every boot would be checked. Refuse to check at all there, and say so.
@@ -123,68 +94,5 @@ stop) exit 0 ;;
 esac
 PLUGIN
 chmod 755 /usr/libexec/health-checker/sim-tunnel.sh
-
-# Emergency mode keeps the ways in: sshd, the network, D-Bus and the tunnel's stand-in stay
-# up, and the stack stand-in stops, which is what emergency mode is for. health-checker
-# enters it with `systemctl start emergency.target`, and sysinit.target conflicts with
-# emergency mode, so entering it stops sysinit.target and every unit that Requires it (the
-# diagnostic run's unit dump). Default dependencies are that requirement plus some
-# ordering. Each kept unit drops them and keeps the ordering it needs: a service after
-# sysinit, a socket after sysinit and before sockets.target. IgnoreOnIsolate covers the
-# other way in, an isolate such as a typed `systemctl emergency`; health-checker's start
-# does not need it. A unit this image lacks is skipped.
-#
-# systemd-user-sessions is not kept. It writes /run/nologin when it stops, which turns away
-# every login but root's, and root may not log in over ssh, so gavin would be locked out.
-# Kept up instead, it stopped the emergency shell from starting at all (every run since it
-# was added). So it stops as before, and its stop no longer writes /run/nologin.
-mkdir -p /etc/systemd/system/systemd-user-sessions.service.d
-printf '%s\n' '[Service]' 'ExecStop=' \
-	> /etc/systemd/system/systemd-user-sessions.service.d/no-nologin-on-stop.conf
-
-#
-# NetworkManager-dispatcher and the console gettys join them. NetworkManager, kept up,
-# activates its dispatcher over D-Bus; with default dependencies the dispatcher pulled
-# sysinit.target back, which brought the console password watcher, which conflicts with
-# emergency.service and cancelled the emergency shell before it started (the screenshot
-# of that run). And because emergency mode lasts only until something like that happens,
-# the console login does not rest on it: the gettys on tty1 and the serial port stay up,
-# and take root's password as sulogin would.
-for unit in sshd.service NetworkManager.service NetworkManager-dispatcher.service \
-	wicked.service sim-tunnel.service dbus.socket dbus.service dbus-broker.service \
-	getty@tty1.service serial-getty@ttyS0.service; do
-	# A template instance (getty@tty1) exists if its template does.
-	file=$unit
-	case "$unit" in *@*) file="${unit%%@*}@.service" ;; esac
-	[ -e "/usr/lib/systemd/system/$file" ] || [ -e "/etc/systemd/system/$file" ] || continue
-	mkdir -p "/etc/systemd/system/$unit.d"
-	# D-Bus ships without default dependencies and must run before basic.target, so it
-	# already survives emergency mode and its own ordering is deliberate. Ordering it after
-	# basic.target made a cycle, which systemd broke by deleting D-Bus's start job, and the
-	# network never came up on a normal boot (the serial log of that run). So it gets
-	# IgnoreOnIsolate alone. Named, not detected: an earlier grep for its
-	# DefaultDependencies line missed it through the dbus.service alias.
-	case "$unit" in
-	dbus.service | dbus-broker.service)
-		printf '%s\n' '[Unit]' 'IgnoreOnIsolate=yes' > "/etc/systemd/system/$unit.d/keep-in-emergency.conf"
-		systemctl add-wants emergency.target "$unit"
-		continue
-		;;
-	esac
-	case "$unit" in
-	*.socket) order='After=sysinit.target
-Before=sockets.target' ;;
-	# Services keep After=sysinit.target alone. Ordered after basic.target as well, which
-	# their default dependencies would add, emergency mode was never reached: entering it
-	# stops basic.target in the same transaction, and two runs ended with the stacks stopped
-	# and no emergency shell. Every run with this ordering reached emergency mode, and every
-	# normal boot with it passed the cycle and bus checks.
-	*) order='After=sysinit.target' ;;
-	esac
-	printf '%s\n' '[Unit]' 'DefaultDependencies=no' "$order" \
-		'Conflicts=shutdown.target' 'Before=shutdown.target' 'IgnoreOnIsolate=yes' \
-		> "/etc/systemd/system/$unit.d/keep-in-emergency.conf"
-	systemctl add-wants emergency.target "$unit"
-done
 
 echo "combustion-rollback: done" > /dev/console
