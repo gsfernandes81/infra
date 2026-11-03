@@ -61,8 +61,9 @@ Singapore at a date the owner picks.
      pins, with its unit, and Tailscale from its repo;
    - installs Docker's Compose binary the same way, pinned by version and SHA-256, in
      `/usr/local/lib/docker/cli-plugins/`, and not openSUSE's `docker-compose`;
-   - masks `transactional-update.timer` (a disable is undone by the first boot's presets) and sets the two reboot files, because nothing
-     on this fleet restarts without the owner's say;
+   - masks `transactional-update.timer`, since the first boot's presets undo a disable,
+     and sets the two reboot files, because nothing on this fleet restarts without the
+     owner's say;
    - keeps sshd, the network, `cloudflared`, `tailscaled` and logins up in rescue mode.
 
 A simulation boots each script before the visit, and checks among other things that an ssh
