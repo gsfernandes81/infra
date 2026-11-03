@@ -39,7 +39,8 @@ install -D -m 644 "$repo/leap/tailscale-repo.gpg" "$s/leap/tailscale-repo.gpg"
 install -D -m 644 "$repo/hosts/$host/leap/fstab.append" "$s/host/fstab.append"
 mkdir -p "$s/host/system" && cp -p "$repo/hosts/$host/leap/system/"* "$s/host/system/"
 for token in "${!standin[@]}"; do
-	grep -rl -- "$token" stick | xargs -r sed -i "s|$token|${standin[$token]}|g"
+	# Not every placeholder is on the stick (a host's volumes list is read by make-stick).
+	{ grep -rl -- "$token" stick || true; } | xargs -r sed -i "s|$token|${standin[$token]}|g"
 done
 if grep -rn 'FILL-FROM-' stick; then
 	echo "FAIL a placeholder above has no stand-in in sim/microos/host/$host.sh" | report
