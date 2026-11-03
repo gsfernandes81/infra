@@ -133,10 +133,12 @@ services:
     command: cat /built
 YAML
 run docker compose -f /root/buildstack/compose.yaml build
-run docker compose -f /root/buildstack/compose.yaml run --rm built
+# -T and /dev/null, because this script arrives on ssh's stdin and an attached `run` read the
+# rest of it, so the first try ended here.
+run docker compose -f /root/buildstack/compose.yaml run --rm -T built < /dev/null
 run docker compose -f /root/buildstack/compose.yaml down --rmi local
 echo "-- a new snapshot, so the reboot below shows whether /usr/local carries over:"
-run transactional-update --non-interactive run true
+run transactional-update --non-interactive run true < /dev/null
 
 section "automatic updates and reboots"
 run cat /root/rebootmgr.vendor.conf
