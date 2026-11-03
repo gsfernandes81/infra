@@ -2,23 +2,30 @@
 # Shared by the simulations in this directory; sourced, never run. Every function works in
 # the current directory, which the caller has made its own work directory.
 
-image_url=https://download.opensuse.org/tumbleweed/appliances/openSUSE-MicroOS.x86_64-kvm-and-xen.qcow2
+# The image under test: Leap 16.1 in its Immutable mode, the fleet's chosen OS
+# (docs/decisions.md), by default. SIM_OS=microos runs Tumbleweed's MicroOS instead, the
+# image these simulations were first written against, for comparison.
+case "${SIM_OS:-leap}" in
+leap) image_url=https://download.opensuse.org/distribution/leap/16.1/appliances/Leap-16.1-Immutable.x86_64-Base-qcow.qcow2 ;;
+microos) image_url=https://download.opensuse.org/tumbleweed/appliances/openSUSE-MicroOS.x86_64-kvm-and-xen.qcow2 ;;
+*) echo "unknown SIM_OS ${SIM_OS}: leap or microos" >&2; exit 1 ;;
+esac
 ssh_port=2222
 
-# Downloads Tumbleweed's current MicroOS image, checks it against the published checksum,
-# and prints which build it is, because the image changes daily.
+# Downloads the image, checks it against the published checksum, and prints which build it
+# is, because both change: MicroOS daily, Leap with each maintenance update.
 fetch_image() {
 	local want have
-	curl -fsSL -o microos.qcow2 "$image_url"
-	curl -fsSL -o microos.qcow2.sha256 "$image_url.sha256"
-	want=$(awk '{print $1; exit}' microos.qcow2.sha256)
-	have=$(sha256sum microos.qcow2 | awk '{print $1}')
+	curl -fsSL -o base.qcow2 "$image_url"
+	curl -fsSL -o base.qcow2.sha256 "$image_url.sha256"
+	want=$(awk '{print $1; exit}' base.qcow2.sha256)
+	have=$(sha256sum base.qcow2 | awk '{print $1}')
 	if [ "$want" != "$have" ]; then
 		echo "image checksum mismatch: want $want, have $have" >&2
 		return 1
 	fi
-	echo "image: $(awk '{print $2; exit}' microos.qcow2.sha256) sha256 $have"
-	qemu-img create -q -f qcow2 -F qcow2 -b microos.qcow2 disk.qcow2 30G
+	echo "image: $(awk '{print $2; exit}' base.qcow2.sha256) sha256 $have"
+	qemu-img create -q -f qcow2 -F qcow2 -b base.qcow2 disk.qcow2 30G
 }
 
 # Builds the Combustion config drive from <dir>/combustion/script, with a throwaway ssh

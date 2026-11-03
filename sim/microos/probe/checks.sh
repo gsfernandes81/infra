@@ -143,3 +143,17 @@ for p in cloudflared bcache-tools smartmontools btrfsprogs docker docker-compose
 	zram-generator syncthing fish htop nano curl jq git; do
 	run zypper --non-interactive --quiet search --match-exact "$p"
 done
+
+section "Leap's own defaults: the first-boot wizard, the firewall, the boot path, sshd, health-checker"
+# What Combustion found before masking jeos-firstboot: its unit and whether it was enabled.
+run cat /root/jeos-firstboot.unit
+run systemctl is-active firewalld
+run sh -c 'firewall-cmd --list-all 2>&1 | head -n 12'
+run sh -c 'test -d /boot/efi/loader/entries && echo "BLS boot entries" || echo "no BLS entries: legacy GRUB"'
+run sh -c 'grep -E "^GRUB_(TERMINAL|SERIAL|CMDLINE_LINUX_DEFAULT)" /etc/default/grub'
+run sh -c 'sshd -T 2>/dev/null | grep -E "^(permitrootlogin|passwordauthentication|kbdinteractiveauthentication) "'
+run sh -c 'rpm -qa | grep -iE "rootlogin|openssh" | sort'
+run systemctl is-enabled health-checker.service
+run sh -c 'ls /usr/libexec/health-checker/'
+run sh -c 'cat /etc/tukit.conf /usr/etc/tukit.conf 2>/dev/null; ls /etc/tukit.conf.d /usr/etc/tukit.conf.d 2>&1'
+run sh -c 'free -m; systemctl list-units --type=service --state=running --no-legend | wc -l'

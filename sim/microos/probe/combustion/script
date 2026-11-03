@@ -8,6 +8,13 @@
 # directory of the config drive, and boots straight into the snapshot it leaves.
 set -euxo pipefail
 
+# Leap's first-boot wizard waits at the console for answers and powers the box off if it
+# fails. Its unit is recorded before it is masked, so the probe can say whether Combustion
+# alone would have kept it from running.
+systemctl cat jeos-firstboot.service > /root/jeos-firstboot.unit 2>&1 || true
+systemctl is-enabled jeos-firstboot.service >> /root/jeos-firstboot.unit 2>&1 || true
+systemctl mask jeos-firstboot.service || true
+
 # The run's throwaway key, written beside this script by run-probe.sh.
 install -d -m 700 /root/.ssh
 install -m 600 authorized_keys /root/.ssh/authorized_keys

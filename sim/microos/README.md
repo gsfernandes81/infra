@@ -1,17 +1,20 @@
-# MicroOS simulation
+# Leap 16.1 simulation
 
 This directory holds the CI simulations behind
 [`plans/microos-cutover.md`](../../plans/microos-cutover.md). They answer, before the
-November 2026 visit, the questions the plan cannot settle from documentation. Nothing here
+November 2026 visit, the questions the plan cannot settle from documentation. They run
+openSUSE Leap 16.1 in its Immutable mode, the fleet's chosen OS. They were written for
+MicroOS, which shares its tooling, and still run it with `SIM_OS=microos` set; the
+directory keeps its first name. Nothing here
 runs on the fleet or reaches it, and nothing here is a host's first-boot script.
 
 ## The probe
 
 `.github/workflows/microos-sim.yml` runs `run-probe.sh` on a GitHub runner with KVM. The
-script downloads Tumbleweed's current MicroOS image for x86_64 and checks it against the
+script downloads Leap 16.1's Immutable VM image for x86_64 and checks it against the
 published checksum. It boots the image with a Combustion config drive built from
 `probe/combustion/`, and runs `probe/checks.sh` over ssh. It then reboots the VM once and
-checks again. The report records which image it tested, because the image changes daily.
+checks again. The report records which image it tested, because the image changes.
 
 The probe answers:
 
@@ -20,13 +23,19 @@ The probe answers:
 - whether the read-only root refuses writes to a bare `/media` mountpoint, which would
   make it the mount guard `chattr +i` is on Alpine;
 - which Docker and compose plugin openSUSE ships, and whether they start;
-- what reboot policy MicroOS ships, and whether a first-boot setting of `strategy=off`
+- what reboot policy the image ships, and whether a first-boot setting of `strategy=off`
   survives a reboot;
 - whether bcache-tools brings a udev rule that registers devices by itself;
-- which of the packages a host needs exist.
+- which of the packages a host needs exist;
+- what Leap adds of its own: whether its first-boot wizard (`jeos-firstboot`) would have
+  run, whether firewalld is on, which boot path health-checker sees, what sshd allows,
+  and how much memory the image leaves.
 
-A second job asks the aarch64 package repositories the same package question, because
-MicroOS on a Pi installs from them.
+Every first-boot script here masks `jeos-firstboot`, which waits at a console nobody
+watches, after recording its unit for the probe.
+
+A second job asks Leap 16.1's aarch64 repositories the same package question, because
+Leap on a Pi installs from them.
 
 The run's ssh key is made fresh in the runner and dies with it. The job fails only when
 the VM does not boot or answer ssh; every answer is in the job summary and in the
@@ -108,8 +117,7 @@ inactive, not failed, and the verdict comes seconds into the boot, so a missing 
 pass for a reason that says nothing about a disk that arrives and then fails to mount.
 
 It reports and does not judge: the job fails only when the VM does not boot or answer ssh
-before the stages begin. The MicroOS image's `health-checker` stands in for Leap 16.1's;
-the report prints its version and which of its two boot paths the image takes (legacy
+before the stages begin. The report prints `health-checker`'s version and which of its two boot paths the image takes (legacy
 GRUB or BLS), since they decide differently.
 
 Not tested: a mount failing at once on an update's first boot, and a disk that arrives
