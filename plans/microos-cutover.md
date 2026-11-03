@@ -1,9 +1,10 @@
 # MicroOS at the November 2026 visit
 
 A proposal from 2026-11-02, revised 2026-11-03. It moves `one` and `three` to a new OS at
-the visit and carries out [`three.md`](three.md); `zero` stays on Alpine. The OS is not
-chosen yet: openSUSE MicroOS, Leap 16.1 in its immutable mode, or Fedora IoT. This file
-says MicroOS, the OS the simulations ran, until the owner picks. When the visit has done
+the visit and carries out [`three.md`](three.md); `zero` stays on Alpine. The OS is
+openSUSE Leap 16.1, decided 2026-11-03 (`decisions.md`), with `two` on Alpine; whether
+in its Immutable or standard mode is open. This file still says MicroOS where the
+simulations ran MicroOS. When the visit has done
 it, the reasoning moves to [`docs/decisions.md`](../docs/decisions.md) and this file is
 deleted.
 
@@ -196,8 +197,7 @@ test and the visit's own checks do that.
 
 Still open:
 
-- **The OS**, between MicroOS, Leap 16.1's immutable mode and Fedora IoT; research on the
-  end state of each is running.
+- **Leap's mode, Immutable or standard.**
 - **The GRUB fallback on a Pi**, which slice 1 checks.
 - **Locking the Pi's boot firmware** on an openSUSE host (`zypper addlock u-boot-rpiarm64
   'raspberrypi-firmware*'`). U-Boot and the firmware live on the FAT boot partition,

@@ -42,9 +42,10 @@ rootful.
 ## 3. openSUSE MicroOS — the target
 
 **Scheduled for the November 2026 visit**: `one` and `three`, on Docker at first; `zero`
-stays on Alpine until the new OS is proven on a Pi 5. Which immutable OS (MicroOS, Leap
-16.1's immutable mode or Fedora IoT) is open
-([`plans/microos-cutover.md`](../plans/microos-cutover.md)).
+stays on Alpine until the new OS is proven on a Pi 5. **The OS is openSUSE Leap 16.1**,
+decided 2026-11-03, with `two` staying on Alpine; its Immutable or standard mode is open
+([`plans/microos-cutover.md`](../plans/microos-cutover.md), `decisions.md`). The text
+below was written for MicroOS and holds for Leap's Immutable mode.
 
 **Decided — and gated on being ashore, not on anything technical.** Reconfirmed by the
 owner 2026-08-29: it is waiting for physical presence, and it is **not set in stone** —

@@ -1959,6 +1959,23 @@ depends on Docker or podman, and each is current within a monthly update of upst
   above). In an emergency the owner gives the slot to Tailscale; the owner judged that
   acceptable. Tailscale also carries `zero`'s backup to `three`.
 
+## Two OSes in the end state: Leap 16.1 on the Pis that can run it, Alpine on `two`
+
+**Decided 2026-11-03**, the owner's call. `zero`, `one` and `three` move to openSUSE Leap
+16.1; `two` stays on Alpine. Whether Leap runs in its Immutable mode or its standard mode
+is still open (*plans/microos-cutover.md*).
+
+- **No third OS, ever.** `two` is a Pi 1 B+, an ARMv6 board no other candidate builds for,
+  so Alpine stays in the fleet regardless. Fedora IoT and AlmaLinux, ranked second and
+  fourth by the 2026-11-03 research, would each have made a third, and are out.
+- **The fallback is to stay on Alpine.** If Leap fails the bench test at the visit, or a
+  host's move goes wrong, that host keeps or returns to its Alpine card. A fleet on one
+  OS everywhere would earn its own points, so the owner may replace `two` with a 64-bit
+  board Leap supports (a Pi 3, Pi Zero 2 W, Pi 4 or Pi 5) when a cheap one turns up.
+- **Leap over MicroOS** for the reasons the research gave: it changes in one supervised
+  step every year or so instead of continuously, and it is supported to 2028 with minor
+  releases to 2031. 16.1 was scheduled to reach GA on 2026-11-03, ahead of the visit.
+
 ## The lesson worth keeping
 
 
