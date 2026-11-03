@@ -227,6 +227,31 @@ jobs:
             ${{ runner.temp }}/health/screen-*
           if-no-files-found: warn
 
+  arm-kvm:
+    # TEMPORARY, removed before this branch merges: does GitHub's arm64 runner give a VM
+    # hardware virtualisation? GitHub's docs do not say, and two runner-images issues
+    # disagree (actions/runner-images#14062, #14549). The answer decides whether booting the
+    # Raspberry Pi image under qemu is quick or slow.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+      - name: Look for /dev/kvm and try it
+        run: |
+          {
+            echo '```'
+            uname -a
+            ls -l /dev/kvm 2>&1 || true
+            sudo dmesg 2>/dev/null | grep -iE 'kvm|hyp|el2' | head -n 10 || true
+            sudo apt-get update -q >/dev/null && sudo apt-get install -y -q --no-install-recommends qemu-system-arm >/dev/null
+            sudo chmod 666 /dev/kvm 2>/dev/null || true
+            timeout 20 qemu-system-aarch64 -M virt -accel kvm -cpu host -m 256 -display none \
+              -monitor none -serial none -no-reboot -S -daemonize -pidfile q.pid 2>&1 \
+              && echo "KVM: qemu started a guest with -accel kvm" \
+              || echo "KVM: qemu could not use -accel kvm"
+            kill "$(cat q.pid 2>/dev/null)" 2>/dev/null || true
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
   host:
     # Each Leap host's real first-boot script (hosts/<host>/leap/combustion/script), booted
     # from a stick laid out as leap/make-stick lays it out, with stand-ins for the carry-over
