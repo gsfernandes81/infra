@@ -212,7 +212,7 @@ jobs:
           docker run --rm registry.opensuse.org/opensuse/leap:16.1 sh -c '
             zypper --non-interactive --quiet refresh >/dev/null
             uname -m
-            for p in docker docker-compose cloudflared tailscale bcache-tools smartmontools \
+            for p in docker docker-compose docker-buildx cloudflared tailscale bcache-tools smartmontools \
                 btrfsprogs zram-generator syncthing health-checker cryptsetup rsync; do
               echo "== $p"
               zypper --non-interactive --quiet search --match-exact --details "$p" || echo "NOT FOUND: $p"

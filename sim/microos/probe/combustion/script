@@ -21,7 +21,10 @@ install -m 600 authorized_keys /root/.ssh/authorized_keys
 systemctl enable sshd
 
 # What a fleet host would carry, so the probe can say whether it installs and starts.
-zypper --non-interactive install docker docker-compose bcache-tools smartmontools btrfsprogs
+# docker-buildx is named because Compose 5 builds through it. openSUSE's docker-compose stays
+# so the probe can show that upstream's Compose in /usr/local is the one Docker runs.
+zypper --non-interactive install docker docker-buildx docker-compose bcache-tools \
+	smartmontools btrfsprogs
 systemctl enable docker
 
 # The root filesystem is read-only outside a transactional-update shell, /media included, so

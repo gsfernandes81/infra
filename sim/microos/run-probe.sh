@@ -28,15 +28,18 @@ ssh_vm 'systemctl is-system-running --wait' || true
 	ssh_vm 'bash -s' < "$here/probe/checks.sh"
 } | tee report.txt
 
-# A reboot proves the snapshot Combustion left is the one that boots, and that Docker and
-# the reboot policy survive it.
+# checks.sh ends by making a new snapshot, so the reboot boots it and shows whether Docker,
+# the reboot policy and /usr/local's Compose survive a change of snapshot.
 reboot_vm
 ssh_vm 'systemctl is-system-running --wait' || true
 {
 	echo
 	echo "##### after one reboot"
 	ssh_vm 'snapper list --columns number,date,description | tail -n 5; getenforce;
-		systemctl is-active docker; rebootmgrctl get-strategy'
+		systemctl is-active docker; rebootmgrctl get-strategy;
+		echo "-- Compose after booting the new snapshot (from /usr/local, if it carried over):";
+		findmnt -T /usr/local -o TARGET,SOURCE;
+		docker info --format "{{range .ClientInfo.Plugins}}{{.Name}} {{.Version}} {{.Path}}{{println}}{{end}}"'
 } | tee -a report.txt
 
 kill "$(cat qemu.pid)" 2>/dev/null || true

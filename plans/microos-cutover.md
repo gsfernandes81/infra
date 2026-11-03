@@ -117,8 +117,13 @@ read-only root, the reboot files and the packages. What only Leap showed:
   outbound tunnels are unaffected; Tailscale under it is a bench check.
 - **sshd allows passwords by default** (`passwordauthentication yes`); the hosts'
   `sshd-infra.conf` turns that off, and the first-boot simulation is to prove it.
-- **Docker 29.4 and Compose 2.33.1**, older than MicroOS's 29.7 and 5.6. The fleet's
-  compose files want a `docker compose config` check under 2.33 before the visit.
+- **Docker 29.4 and Compose 2.33.1**, older than MicroOS's 29.7 and 5.6. The deploy play
+  refuses Compose before 5.5.0, so it would refuse every Leap host. Upstream's Compose
+  binary works in its place: installed at `/usr/local/lib/docker/cli-plugins/` after its
+  SHA-256 is checked, it is the plugin Docker runs ahead of openSUSE's, a non-root user
+  reads its version, and it ran the fleet-shaped stack and a build through Leap's buildx
+  0.33 (`zero` has 0.38). `/usr/local` is a subvolume of its own, writable without a
+  transactional-update shell, and the binary was still in use after a new snapshot booted.
 - **About 650 MB in use** with Docker running, which matters on `three`'s 1 GB.
 
 **On MicroOS, 2026-11-02:**
@@ -223,6 +228,14 @@ test and the visit's own checks do that.
 
 Still open:
 
+- **Where a Leap host's Compose comes from.** Proposed, 2026-11-03: upstream's binary,
+  pinned by version and SHA-256 per architecture in the first-boot script, as
+  `cloudflared` is, and moved by the same monthly play, which keeps the previous binary;
+  openSUSE's `docker-compose` is not installed. It sits outside every snapshot, so a
+  rollback leaves it as it is. Set aside: openSUSE's `Virtualization:containers` repository,
+  which has Compose 5.6.1 for Leap 16.1 but is a development project that also carries a
+  newer Docker, containerd and runc than Leap's; and Docker's own repository, which has
+  nothing for openSUSE.
 - **The GRUB fallback on a Pi**, which slice 1 checks.
 - **Locking the Pi's boot firmware** on an openSUSE host (`zypper addlock u-boot-rpiarm64
   'raspberrypi-firmware*'`). U-Boot and the firmware live on the FAT boot partition,

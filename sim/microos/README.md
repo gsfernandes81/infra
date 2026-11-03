@@ -23,6 +23,8 @@ The probe answers:
 - whether the read-only root refuses writes to a bare `/media` mountpoint, which would
   make it the mount guard `chattr +i` is on Alpine;
 - which Docker and compose plugin openSUSE ships, and whether they start;
+- whether upstream's Compose binary, pinned and installed in `/usr/local`, is the one Docker
+  runs, builds through openSUSE's buildx, and is still there after a new snapshot boots;
 - what reboot policy the image ships, and whether a first-boot setting of `strategy=off`
   survives a reboot;
 - whether bcache-tools brings a udev rule that registers devices by itself;

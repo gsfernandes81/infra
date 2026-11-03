@@ -94,6 +94,52 @@ run docker compose -f /root/stack/compose.yaml ps -a
 run docker compose -f /root/stack/compose.yaml down
 run rpm -q iptables nftables
 
+section "upstream's Compose in /usr/local, as a host would carry it"
+# Leap 16.1 ships Compose 2.33.1, below the 5.5.0 the deploy play requires
+# (ansible/playbooks/_deploy-compose-one.yml). A host would carry upstream's static binary
+# instead, pinned by version and SHA-256 as cloudflared is, in /usr/local, which takes writes
+# outside a transactional-update shell only if it is a subvolume of its own. Docker's CLI
+# looks in /usr/local/lib/docker/cli-plugins before openSUSE's /usr/lib/docker/cli-plugins.
+# The pin is the version the deploy play was last run against. URL and SHA-256 both name the
+# x86_64 binary this VM runs; a host pins each architecture's own hash.
+compose_ver=5.6.1
+compose_sha=47737f4236e6d3ccea7291995203f8f018058783b4c3a9469119811a0b5db8c0
+plugins=/usr/local/lib/docker/cli-plugins
+run findmnt -T /usr/local -o TARGET,SOURCE,FSTYPE,OPTIONS
+run curl -fsSL -o /var/tmp/docker-compose \
+	"https://github.com/docker/compose/releases/download/v$compose_ver/docker-compose-linux-x86_64"
+# The install happens only if the hash matches, as a host's would.
+run sh -c "echo '$compose_sha  /var/tmp/docker-compose' | sha256sum -c - &&
+	install -D -m 755 /var/tmp/docker-compose '$plugins/docker-compose'"
+run ls -lZ "$plugins/docker-compose"
+run docker compose version
+run sh -c "docker info --format '{{range .ClientInfo.Plugins}}{{.Name}} {{.Version}} {{.Path}}{{println}}{{end}}'"
+echo "-- as a user who is not root, as the deploy play reads the version:"
+run runuser -u nobody -- docker compose version --short
+run rpm -q docker-buildx
+echo "-- the fleet-shaped stack again, under upstream's Compose:"
+run docker compose -f /root/stack/compose.yaml up -d
+sleep 10
+run sh -c 'curl -fsS http://127.0.0.1:18080/ | grep -o "Welcome to nginx"'
+run docker compose -f /root/stack/compose.yaml ps -a
+run docker compose -f /root/stack/compose.yaml down
+echo "-- a build, which Compose 5 hands to buildx:"
+mkdir -p /root/buildstack
+printf 'FROM docker.io/library/alpine:3.20\nRUN echo built > /built\n' > /root/buildstack/Dockerfile
+cat > /root/buildstack/compose.yaml <<'YAML'
+name: simbuild
+services:
+  built:
+    build: .
+    image: simbuild:1
+    command: cat /built
+YAML
+run docker compose -f /root/buildstack/compose.yaml build
+# -T and /dev/null, because this script arrives on ssh's stdin and an attached `run` read the
+# rest of it, so the first try ended here.
+run docker compose -f /root/buildstack/compose.yaml run --rm -T built < /dev/null
+run docker compose -f /root/buildstack/compose.yaml down --rmi local
+
 section "automatic updates and reboots"
 run cat /root/rebootmgr.vendor.conf
 run cat /etc/rebootmgr.conf
@@ -139,7 +185,7 @@ run sh -c 'ls /etc/sudoers.d /usr/etc/sudoers.d 2>&1; cat /etc/sudoers.d/* /usr/
 run sh -c 'getent group wheel; grep -E "^(UID_MIN|GID_MIN)" /etc/login.defs /usr/etc/login.defs 2>/dev/null'
 
 section "packages a host needs"
-for p in cloudflared bcache-tools smartmontools btrfsprogs docker docker-compose \
+for p in cloudflared bcache-tools smartmontools btrfsprogs docker docker-compose docker-buildx \
 	zram-generator syncthing fish htop nano curl jq git; do
 	run zypper --non-interactive --quiet search --match-exact "$p"
 done
@@ -160,3 +206,9 @@ run systemctl is-enabled health-checker.service
 run sh -c 'ls /usr/libexec/health-checker/'
 run sh -c 'cat /etc/tukit.conf /usr/etc/tukit.conf 2>/dev/null; ls /etc/tukit.conf.d /usr/etc/tukit.conf.d 2>&1'
 run sh -c 'free -m; systemctl list-units --type=service --state=running --no-legend | wc -l'
+
+section "a new snapshot for the reboot"
+# Last, so no later transactional-update call changes which snapshot boots: the reboot in
+# run-probe.sh then boots this one, and shows whether /usr/local carries over into it.
+run transactional-update --non-interactive run true < /dev/null
+run sh -c 'snapper list --columns number,description | tail -n 3'
