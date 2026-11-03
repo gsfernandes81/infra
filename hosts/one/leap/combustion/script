@@ -11,9 +11,12 @@ set -euo pipefail
 # one's own profile goes in there, so the first boot's network, which Combustion needs for
 # the packages, already runs on 192.168.86.101 instead of the initramfs's default DHCP; the
 # same profile is installed into the system below, so the system carries straight on.
+# The initramfs carries few tools (no `install`), so this uses mkdir and cp, with a umask
+# that gives the 0600 NetworkManager requires of a profile.
 if [ "${1-}" = --prepare ]; then
-	install -D -m 600 host/system/wired.nmconnection \
-		/etc/NetworkManager/system-connections/wired.nmconnection
+	umask 077
+	mkdir -p /etc/NetworkManager/system-connections
+	cp host/system/wired.nmconnection /etc/NetworkManager/system-connections/wired.nmconnection
 	exit 0
 fi
 

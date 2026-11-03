@@ -116,7 +116,8 @@ ausearch --input-logs -m avc -ts boot < /dev/null 2>&1 | tail -n 20
 ip -br addr; nmcli -f NAME,DEVICE,FILENAME connection show
 journalctl -b --no-pager -u combustion | tail -n 40
 DIAG
-)" || tail -n 80 serial.log
+)" "journalctl --no-pager -b | grep -iE 'combustion|prepare|NetworkManager|nm-initrd' | tail -n 60" ||
+		tail -n 80 serial.log
 	return 1
 }
 # Runs a script on the guest as root through gavin's sudo, which reads his password first.

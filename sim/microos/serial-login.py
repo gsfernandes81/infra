@@ -1,8 +1,10 @@
 """Logs in as root on the guest's serial console and runs one shell command, printing what
 it prints. run-host.sh uses it when ssh fails, to see inside the box, and to prove the
-console takes root's password, which is what the password is for.
+console takes root's password, which is what the password is for. A box stopped in the
+initramfs's emergency shell needs no login: the command runs there, with its own, which
+is then the initramfs's journal.
 
-    python3 -I serial-login.py <serial socket> <root password> <command>
+    python3 -I serial-login.py <serial socket> <root password> <command> [<initramfs command>]
 
 Exits 0 once the command's output is read, 1 if the console never offers a login or a
 prompt within the time allowed.
@@ -41,10 +43,23 @@ def send(text):
     s.sendall(text.encode())
 
 
+initramfs_command = sys.argv[4] if len(sys.argv) > 4 else command
+
 send("\r\n")
-if read_until("login:", timeout=90) is None:
+got = read_until("login:", "dracut:/", "system maintenance", timeout=90)
+if got is None:
     print("serial: no login prompt")
     sys.exit(1)
+if got != "login:":
+    print("serial: the box is in the initramfs's emergency shell")
+    if got == "system maintenance":
+        send("\r\n")
+        read_until("dracut:/", timeout=30)
+    seen = ""
+    send(initramfs_command + "; echo " + marker + "-$((1+1))\r\n")
+    read_until(marker + "-2", timeout=120)
+    print(seen.split(marker + "-2")[0])
+    sys.exit(0)
 seen = ""
 send("root\r\n")
 if read_until("Password:", timeout=30) is None:
