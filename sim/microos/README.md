@@ -102,9 +102,18 @@ timeout the hosts will carry. The run reports, as ANSWER lines:
 - what a mount that fails at once (a subvolume that does not exist) does on a good
   snapshot, with the screens if the box stops answering.
 
+Each answer carries its evidence: when health-checker gave its verdict, each mount's state
+and result, and what the plugin says after the device timeout. A late disk's mount ends
+inactive, not failed, and the verdict comes seconds into the boot, so a missing disk can
+pass for a reason that says nothing about a disk that arrives and then fails to mount.
+
 It reports and does not judge: the job fails only when the VM does not boot or answer ssh
 before the stages begin. The MicroOS image's `health-checker` stands in for Leap 16.1's;
-the report prints its version.
+the report prints its version and which of its two boot paths the image takes (legacy
+GRUB or BLS), since they decide differently.
+
+Not tested: a mount failing at once on an update's first boot, and a disk that arrives
+during boot, inside the device timeout, which is the fleet's usual case.
 
 ## What a green run does not show
 

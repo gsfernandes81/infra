@@ -114,7 +114,10 @@ wait_for_new_boot() {
 		now=$(ssh_vm cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)
 		if [ -n "$now" ] && [ "$now" != "$before" ]; then
 			sleep 100
-			if [ "$(ssh_vm cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)" = "$now" ]; then
+			# A second look after a pause, so one dropped ssh connection is not read as a
+			# reboot.
+			if [ "$(ssh_vm cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)" = "$now" ] ||
+				{ sleep 10; [ "$(ssh_vm cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)" = "$now" ]; }; then
 				ssh_vm 'systemctl is-system-running --wait' >/dev/null 2>&1 || true
 				return 0
 			fi
