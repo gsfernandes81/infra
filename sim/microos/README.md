@@ -32,7 +32,8 @@ The probe answers:
   and how much memory the image leaves.
 
 Every first-boot script here masks `jeos-firstboot`, which waits at a console nobody
-watches, after recording its unit for the probe.
+watches and powers the box off if it fails. A successful Combustion run already keeps it
+away, by removing the file it waits for; the probe shows whether that happened.
 
 A second job asks Leap 16.1's aarch64 repositories the same package question, because
 Leap on a Pi installs from them.

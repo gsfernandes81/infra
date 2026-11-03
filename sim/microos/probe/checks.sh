@@ -145,8 +145,11 @@ for p in cloudflared bcache-tools smartmontools btrfsprogs docker docker-compose
 done
 
 section "Leap's own defaults: the first-boot wizard, the firewall, the boot path, sshd, health-checker"
-# What Combustion found before masking jeos-firstboot: its unit and whether it was enabled.
+# jeos-firstboot runs only while reconfig_system exists, which Combustion removes when its
+# script succeeds: "No such file" here means Combustion alone would have kept it away.
 run cat /root/jeos-firstboot.unit
+run ls -la /var/lib/YaST2/reconfig_system
+run systemctl is-enabled jeos-firstboot.service
 run systemctl is-active firewalld
 run sh -c 'firewall-cmd --list-all 2>&1 | head -n 12'
 run sh -c 'test -d /boot/efi/loader/entries && echo "BLS boot entries" || echo "no BLS entries: legacy GRUB"'

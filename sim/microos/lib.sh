@@ -24,8 +24,18 @@ fetch_image() {
 		echo "image checksum mismatch: want $want, have $have" >&2
 		return 1
 	fi
-	echo "image: $(awk '{print $2; exit}' base.qcow2.sha256) sha256 $have"
-	qemu-img create -q -f qcow2 -F qcow2 -b base.qcow2 disk.qcow2 30G
+	echo "image: $(awk '{print $2; exit}' base.qcow2.sha256) sha256 $have," \
+		"$(curl -fsSI "$image_url" | sed -n 's/^last-modified: //Ip' | tr -d '\r' | tail -n 1)"
+	# The overlay must be at least the image's own size: a smaller one cuts the root
+	# partition off the end of the disk, and the guest finds no root. Leap's image is 32 GiB
+	# and MicroOS's 20, so 40G suits both; the overlay is sparse and costs nothing.
+	local base_size
+	base_size=$(qemu-img info --output=json base.qcow2 | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["virtual-size"])')
+	if [ "$base_size" -gt $((40 * 1024 * 1024 * 1024)) ]; then
+		echo "the image is $base_size bytes, larger than the 40G overlay; raise it" >&2
+		return 1
+	fi
+	qemu-img create -q -f qcow2 -F qcow2 -b base.qcow2 disk.qcow2 40G
 }
 
 # Builds the Combustion config drive from <dir>/combustion/script, with a throwaway ssh
