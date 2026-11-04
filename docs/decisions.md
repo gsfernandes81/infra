@@ -2098,6 +2098,9 @@ writing `hosts/three/leap/` and are proven by the `host` job's `three` run.
   stopped with SIGINT, the only signal on which `btrfs scrub start -B` cancels its scrub.
 - **The unlock is two starts**, the LUKS unit and then the mount, so the mount's wait for
   its device begins only once the passphrase is in.
+- **The deploy play orders `three`'s deployments after `one`'s and before `zero`'s**, so
+  `zero`, the box whose failure costs most, stays last. The order names each host, and the
+  first simulated plan showed a host left out of it is dropped without a word.
 - **Docker's store stays on the SD card.** Only Syncthing's data and identity need the
   encryption, and Docker runs only once the array is unlocked.
 - **The newest 90 daily snapshots are kept**, a default the owner can change in

@@ -76,7 +76,10 @@ Two starts, so the mount's 5-minute wait for the device begins only once the pas
 in, however long finding it takes. The mount starts Docker, which brings Syncthing up
 under its restart policy, and the snapshot and scrub timers. Until then, Docker is skipped
 by its condition, and `docker` answers that it cannot connect. A hand `mount /media/mirror`
-starts none of them: only `systemctl start` does. A backup run against a locked `three`
+starts none of them: only `systemctl start` does. For a few seconds while Docker first
+starts, a new ssh connection can be refused; the simulation saw one attempt fail between
+two that answered. Try again. The cause is not yet known (`docs/management-plane.md`,
+phase 9). A backup run against a locked `three`
 fails and the next one retries.
 
 To lock it again without a reboot (Docker, a running snapshot and a running scrub stop
