@@ -94,10 +94,10 @@ echo "-- Docker"
 check "Docker runs, on the store on the SSD" sh -c '
 	systemctl is-active docker && findmnt -no SOURCE /var/lib/docker | tee /dev/stderr | grep -q "/var-lib-docker-leap"'
 check "a container runs from a fresh pull into that store" \
-	docker run --rm docker.io/library/alpine:3.20 true
+	docker run --rm docker.io/library/alpine:3.22 true
 check "a container reads the data through the context= mount" sh -c '
 	f=$(find /media -maxdepth 2 -name marker | head -n1); [ -n "$f" ] || exit 1
-	docker run --rm -v "$(dirname "$f"):/d:ro" docker.io/library/alpine:3.20 cat /d/marker'
+	docker run --rm -v "$(dirname "$f"):/d:ro" docker.io/library/alpine:3.22 cat /d/marker'
 check "Compose is upstream's, from /usr/local" sh -c "
 	docker info --format '{{range .ClientInfo.Plugins}}{{.Name}} {{.Version}} {{.Path}}{{println}}{{end}}' |
 	tee /dev/stderr | grep -q '^compose .* /usr/local/lib/docker/cli-plugins/docker-compose$'"
@@ -136,10 +136,17 @@ check "each .env is in place at 0600" sh -c '
 	done; [ "$n" -gt 0 ]'
 check "each secrets directory is gavin's" sh -c '
 	ls -d /home/gavin/.*-secrets && [ -z "$(find /home/gavin/.*-secrets ! -user gavin)" ]'
-# Until the runbook restores them (leap/README.md), which removes each tar.
+# By name, from the host's own list: a tar waiting in /root/volumes, or, once the runbook has
+# restored it (leap/README.md), the volume itself. A Compose label alone would also pass a
+# volume Compose made empty, the failure the tar is carried to prevent.
 check "each carried volume waits in /root/volumes, or is restored" sh -c '
-	ls -l /root/volumes/*.tar 2>/dev/null ||
-	docker volume ls --filter label=com.docker.compose.volume --format "restored: {{.Name}}" | grep .'
+	n=0
+	for vol in $(grep -vE "^\s*(#|$)" /home/gavin/infra/hosts/$(hostname)/leap/volumes); do
+		n=$((n+1))
+		if [ -f "/root/volumes/$vol.tar" ]; then echo "waiting: $vol"
+		elif docker volume inspect "$vol" >/dev/null 2>&1; then echo "restored: $vol"
+		else echo "missing: $vol"; exit 1; fi
+	done; [ "$n" -gt 0 ]'
 check "the tunnel credentials are there, and root's alone" sh -c '
 	ls /etc/cloudflared/*.json >/dev/null 2>&1 &&
 	! stat -c "%a %U %n" /etc/cloudflared/*.json | tee /dev/stderr | grep -v "^600 root"'

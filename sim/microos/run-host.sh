@@ -247,14 +247,15 @@ STEP
 		if { printf '%s\n' "$password"; cat <<RESTORE; } | ssh_as gavin@127.0.0.1 "sudo -S -p '' bash -s" > "restore-$vol.log" 2>&1; then
 set -e
 docker volume create --label com.docker.compose.project=${vol%%_*} --label com.docker.compose.volume=${vol#*_} $vol >/dev/null
-tar -C "\$(docker volume inspect -f '{{.Mountpoint}}' $vol)" -xpf /root/volumes/$vol.tar
-rm /root/volumes/$vol.tar
+tar --numeric-owner -C "\$(docker volume inspect -f '{{.Mountpoint}}' $vol)" -xpf /root/volumes/$vol.tar
 docker volume inspect -f '{{index .Labels "com.docker.compose.project"}}/{{index .Labels "com.docker.compose.volume"}}' $vol
-docker run --rm -v $vol:/v:ro docker.io/library/alpine:3.20 cat /v/marker
+docker run --rm -v $vol:/v:ro docker.io/library/alpine:3.22 cat /v/marker
+rm /root/volumes/$vol.tar
 RESTORE
 			tail -n 2 "restore-$vol.log" | sed 's/^/    /'
 			if [ "$(tail -n 1 "restore-$vol.log")" = "$vol" ] &&
-				[ "$(tail -n 2 "restore-$vol.log" | head -n 1)" = "${vol%%_*}/${vol#*_}" ]; then
+				[ "$(tail -n 2 "restore-$vol.log" | head -n 1)" = "${vol%%_*}/${vol#*_}" ] &&
+				printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 "sudo -S -p '' test ! -e /root/volumes/$vol.tar"; then
 				echo "PASS $vol is restored under Compose's labels and reads back"
 			else
 				echo "FAIL $vol did not read back as restored"
