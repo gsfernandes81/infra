@@ -41,8 +41,12 @@ standin_env() {
 sim_before_deploy() {
 	local url sha
 	read -r url sha < <(grep -vE '^\s*(#|$)' "$repo/deployments/garmin-mcp/SOURCE" | head -n 1)
-	ssh_as gavin@127.0.0.1 "mkdir -p ~/src && git clone -q '$url' ~/src/garmin-mcp &&
-		git -C ~/src/garmin-mcp checkout -q '$sha'" || echo "FAIL could not check out garmin-mcp's source"
+	ssh_as gavin@127.0.0.1 bash -s <<STEP 2>&1 || echo "FAIL could not check out garmin-mcp's source"
+set -e
+mkdir -p ~/src
+git clone -q '$url' ~/src/garmin-mcp
+git -C ~/src/garmin-mcp checkout -q '$sha'
+STEP
 }
 deployments=(calibre-web garmin-mcp send2ereader torrents)
 volumes=(garmin-mcp_garmin-tokens)

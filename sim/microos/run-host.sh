@@ -202,10 +202,19 @@ deploy_plans() {
 	# host, so it follows the branch this commit was pushed to.
 	ref=${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}
 	sha=$(git -C "$repo" rev-parse HEAD)
-	guest=$(ssh_as gavin@127.0.0.1 "cd ~/infra && git fetch -q origin '$ref' &&
-		git checkout -q -B '$ref' --track 'origin/$ref' && git rev-parse HEAD" 2>&1 | tail -n 1)
-	if [ "$guest" != "$sha" ]; then
-		echo "SKIP the box cannot fetch the commit under test ($sha); its branch $ref is at $guest"
+	# gavin's login shell is fish, so each step on the box goes to bash on stdin, and a
+	# failed one is printed rather than ending the run under set -e.
+	guest=$(ssh_as gavin@127.0.0.1 bash -s <<STEP 2>&1 || true
+set -e
+cd ~/infra
+git fetch -q origin '$ref'
+git checkout -q -B '$ref' --track 'origin/$ref'
+git rev-parse HEAD
+STEP
+)
+	if [ "$(printf '%s\n' "$guest" | tail -n 1)" != "$sha" ]; then
+		echo "SKIP the box cannot be put on the commit under test, $sha on $ref:"
+		printf '%s\n' "$guest" | sed 's/^/    /'
 		return 0
 	fi
 	sim_before_deploy
