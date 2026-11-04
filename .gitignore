@@ -40,3 +40,7 @@ __pycache__/
 .vault_pass
 .vault-pass
 vault_pass.txt
+
+# The inventory sim/microos/run-host.sh writes beside ansible.cfg for its deploy stage, so
+# group_vars and host_vars load; removed when the stage ends, ignored in case a run dies.
+ansible/inventory.sim-host

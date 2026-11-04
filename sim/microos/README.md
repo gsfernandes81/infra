@@ -129,7 +129,11 @@ The run then checks, each as PASS or FAIL, and any FAIL fails the job:
   `--check`: a real `up` needs each cloudflared sidecar's tunnel to connect, which a
   stand-in cannot. Each deployment's images are pulled on the box first, so the plan
   reaches Compose's dry run; a built image, or one that will not pull on this x86 VM,
-  stops that deployment's plan before it, and the report says which;
+  stops that deployment's plan before it, and the report says which. The plans cover
+  what a deployment's `compose.yaml` and `.env` names say, not what an `env_file:` holds:
+  torrents' stand-in has none of gluetun's VPN settings, which only `up` reads. The box's
+  checkout is put on exactly the commit under test, a pull request's merge commit
+  included, and in CI a stage that cannot run fails;
 - in rescue mode (`host/rescue.sh`), entered with `systemctl isolate`: gavin logs in, and
   sshd, the network, `cloudflared`, `tailscaled` and logins are up while Docker is down;
 - after a reboot, proved by a new boot id, the box checks again on its static address.
