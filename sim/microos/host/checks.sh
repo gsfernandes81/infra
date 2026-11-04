@@ -22,6 +22,11 @@ show sh -c '. /etc/os-release; echo "$PRETTY_NAME"; uname -r; hostname'
 # One openSUSE unit is known to fail on a first boot whose rpm database has new keys, ours
 # included: import-pubring-from-rpmdb imports them all, then leaves a gpg-agent that
 # systemd times out stopping. It is reported as KNOWN, not failed; a second boot is clean.
+# Its start job ends only then, so on such a boot multi-user.target, which is ordered after
+# it, is reached about 90 s late; sshd, Docker and the tunnels are not ordered after that
+# target and start on time.
+# The unit fails only when its 90 s stop times out, so wait for the boot to settle first.
+systemctl is-system-running --wait >/dev/null 2>&1 || true
 f=$(systemctl --failed --no-legend --plain | awk '{print $1}')
 if echo "$f" | grep -qx import-pubring-from-rpmdb.service &&
 	journalctl -b --no-pager -u import-pubring-from-rpmdb | grep -q "stop-sigterm' timed out"; then
