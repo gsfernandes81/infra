@@ -69,10 +69,13 @@ manual updates: the owner reboots, then unlocks.
 
 - `crypttab` marks the volume `noauto`, so boot never waits for a passphrase on a console
   nobody watches. The data mount is `noauto` as well.
-- Every unit that needs the data declares `RequiresMountsFor=` and is `WantedBy=` the
-  mount, so it starts the moment the owner unlocks, as the late-disks simulation proved.
+- Every unit that needs the data is wanted by the mount, so it starts the moment the owner
+  unlocks, and carries a condition on the mountpoint rather than `RequiresMountsFor=`,
+  which would pull the unlock in at boot (`decisions.md`). Written in
+  `hosts/three/leap/`.
 - To unlock, the owner runs one documented command over ssh, which starts
-  `systemd-cryptsetup@` for the volume (it asks for the passphrase) and then the mount.
+  `systemd-cryptsetup@` for the volume (it asks for the passphrase) and then the mount
+  ([`hosts/three/leap/README.md`](../hosts/three/leap/README.md)).
 - Syncthing's identity (its config and keys) lives inside the encrypted volume. A copy on
   the SD card would let a thief clone `three`'s device ID, and `zero` would send it
   everything.

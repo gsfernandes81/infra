@@ -40,11 +40,12 @@ mount_subvolumes
 echo "$host" > /etc/hostname
 # cryptsetup for make-mirror; the unlock itself is systemd's, in the udev package every
 # image has. Wi-Fi in case Singapore has no Ethernet for it: wpa_supplicant, which
-# NetworkManager drives, and on the Pi its radio's firmware. No Wi-Fi profile: its
-# password is added on the box before shipping (hosts/three/leap/README.md).
-extra=(cryptsetup wpa_supplicant)
-[ "$(uname -m)" = aarch64 ] && extra+=(bcm43xx-firmware)
-install_packages "${extra[@]}"
+# NetworkManager drives, and the Pi radio's own files (noarch, so the simulation installs
+# them too). The radio's driver firmware, kernel-firmware-brcm, is left to the Pi image,
+# and is a bench check (`rpm -q kernel-firmware-brcm`): installing it here could clash with
+# an image that carries all firmware in one package. No Wi-Fi profile: its password is
+# added on the box before shipping (hosts/three/leap/README.md).
+install_packages cryptsetup wpa_supplicant bcm43xx-firmware
 install_binaries
 set_root_password
 make_gavin "$gavin_uid" "$gavin_gid"

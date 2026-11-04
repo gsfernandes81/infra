@@ -51,6 +51,20 @@ sim_unlock() {
 		echo "FAIL the README's command did not unlock the array:"
 		tail -n 15 unlock.log | sed 's/^/    /'
 	fi
+	# The mount starts Docker, and the first run saw the next new ssh connection fail as it
+	# did (exit 255). So ssh is waited for, how long it was away is reported, and if it never
+	# returns the console shows the firewall and Docker's start.
+	if ! wait_gavin static; then
+		echo "the console's view of the firewall and Docker after the unlock:"
+		python3 -I "$here/serial-login.py" serial.sock "$root_password" "$(cat <<'DIAG'
+firewall-cmd --state; firewall-cmd --get-active-zones; firewall-cmd --list-all
+nft list ruleset | head -n 120
+journalctl -b --no-pager -u docker -u firewalld | tail -n 60
+ss -tlnp | head -n 20; systemctl --no-pager status sshd | head -n 12
+DIAG
+)" || tail -n 60 serial.log
+		return 1
+	fi
 }
 
 sim_after_firstboot() {

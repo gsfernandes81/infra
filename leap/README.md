@@ -7,7 +7,7 @@ made on the host's old Alpine system, that the new system reads once at its firs
 | File | What it is |
 |---|---|
 | `firstboot.sh` | The first-boot steps every Leap host shares, and the pins for the binaries a package would get wrong (`cloudflared`, Compose). Sourced by each host's script. |
-| `make-stick` | Builds a host's stick. Run as root on the host's old system. |
+| `make-stick` | Builds a host's stick. Run as root on the host's old system, or with `--new` for a host that has none. |
 | `tailscale-repo.gpg` | Tailscale's repository signing key, fingerprint `2596 A99E AAB3 3821 893C 0A79 458C A832 957F 5868`. The first boot trusts the repository through this reviewed copy. |
 
 Each host's own part is in `hosts/<host>/leap/`:
@@ -34,6 +34,18 @@ host directory with a `FILL-FROM-` placeholder left in it, and a carry-over with
 missing, among them a root password, which the console needs. It asks for the device name
 before it erases anything.
 
+### A new host
+
+A host with no old system, `three` first, gets its stick from `make-stick --new <host>
+<device>`, run on any Alpine host of the fleet. It makes the new host's ssh host key on the
+stick and prints its fingerprint, asks for the new host's root password, and takes gavin's
+password hash and `authorized_keys` from the box it runs on. It carries no tunnel
+credentials, `.env`, secrets directory or volume, and refuses a host whose directory has a
+tunnel config or a volume list, since such a host has an old system to build on. The new
+host's tunnel is made after its first boot, by `server-create-host-tunnel.yml`; until its
+config is installed, the host's `cloudflared` unit is skipped by a condition.
+[`hosts/three/leap/README.md`](../hosts/three/leap/README.md) has `three`'s steps.
+
 The stick holds an ext4 filesystem labelled `combustion`. Everything is under
 `combustion/`, because Combustion copies that directory alone and runs the script from the
 copy:
@@ -45,6 +57,7 @@ combustion/host/             the host's system/ files and fstab.append
 combustion/carry/            the carry-over: ssh host keys, root's and gavin's password
                              hashes, gavin's authorized_keys, the tunnel credentials, each
                              deployment's .env and ~gavin/.<deployment>-secrets, the volumes
+                             (a new host's: its new host key, the hashes and the keys only)
 ```
 
 **The stick then holds live secrets.** Keep it with the other secret-bearing media, and

@@ -2051,6 +2051,48 @@ host whose Compose is older than 5.5.0*, above), so it would refuse every Leap h
   containerd and runc than Leap's, so adding it would put the whole container stack on it;
   and Docker's own repository, which has nothing for openSUSE.
 
+## `three`'s first boot: a stick made elsewhere, and an array nothing pulls in
+
+**Decided 2026-11-04.** The first three points are the owner's calls; the rest came out of
+writing `hosts/three/leap/` and are proven by the `host` job's `three` run.
+
+- **`make-stick --new` builds a new host's stick on another Alpine host**, the owner's
+  call. `three` has no old system: its board is `one`'s today. The stick gets a host key
+  made there (fingerprint printed, so the first ssh is checked rather than trusted), a
+  root password typed there, and gavin's hash and keys from the box it runs on. The tunnel
+  is made after the first boot, by `server-create-host-tunnel.yml`, which already writes
+  the credentials onto the host itself. So `three`'s `cloudflared` unit carries
+  `ConditionPathExists=` on its config and is skipped, not restarting, until then. Set
+  aside: changing the play to save the credentials on the phone for the stick. That would
+  give a tunnel from the first boot, at the cost of a changed play and a credentials file
+  travelling phone to stick.
+- **`three` is `192.168.86.103` and joins the LAN mesh**, the owner's call: every host's
+  `sshd-infra.conf` gains it in `PermitOpen`, keeping the copies byte-identical.
+- **Singapore: Wi-Fi-capable, Ethernet preferred**, the owner's call. The first boot
+  installs `wpa_supplicant` and, on the Pi, its radio's firmware, but carries no Wi-Fi
+  secret. In the UK a static profile gives `.103`. A static profile connects on any
+  network, so before shipping one command turns its autoconnect off, and a DHCP profile
+  below it takes over. That command, and adding the Wi-Fi password, are in
+  `hosts/three/leap/README.md`. Set aside: DHCP everywhere with a router reservation for
+  `.103`, which needs nothing before shipping but puts the UK address in the router.
+- **crypttab names the array by its LUKS label, not its UUID.** The UUID exists only once
+  the drive is formatted at the visit, after the first boot has written crypttab. A label
+  is known now. `make-mirror` writes it and refuses to write a second one.
+- **Units that need the array use a condition, never `RequiresMountsFor=`.** That option
+  pulls in its mount even when the entry is `noauto` (systemd.unit(5)), and the mount pulls
+  in the LUKS unlock. So Docker, wanted at boot, would start the unlock and wait at a
+  passphrase prompt nobody sees. Docker and the snapshot and scrub services carry
+  `ConditionPathIsMountPoint=/media/mirror`, which starts nothing, and the mount's own
+  drop-in wants Docker and both timers. So everything starts the moment the owner unlocks.
+  This refines `plans/three.md`, which said `RequiresMountsFor=`.
+- **The timers start with the mount, not at boot.** Both are `Persistent=`, so a run missed
+  while the box was off or locked fires as soon as its timer starts. Started at boot, it
+  would fire on a locked array and be spent on a skipped run.
+- **Docker's store stays on the SD card.** Only Syncthing's data and identity need the
+  encryption, and Docker runs only once the array is unlocked.
+- **The newest 90 daily snapshots are kept**, a default the owner can change in
+  `mirror-snapshot`: three months to notice a bad overwrite from `zero`.
+
 ## The lesson worth keeping
 
 
