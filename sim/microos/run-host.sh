@@ -62,7 +62,8 @@ printf '{"AccountTag":"sim","TunnelSecret":"c2lt","TunnelID":"%s"}\n' "$tunnel_i
 for dep in "${deployments[@]}"; do
 	# Every name compose.yaml requires (`${NAME:?}`), as the deploy play checks, each with
 	# the stand-in host/<host>.sh gives it.
-	for name in $(grep -oE '\$\{[A-Z_]+:\?' "$repo/deployments/$dep/compose.yaml" | tr -d '${:?' | sort -u); do
+	# The same pattern as the play's own check (_deploy-compose-one.yml).
+	for name in $(grep -oE '\$\{[A-Za-z0-9_]+:\?' "$repo/deployments/$dep/compose.yaml" | tr -d '${:?' | sort -u); do
 		printf '%s=%s\n' "$name" "$(standin_env "$dep" "$name")"
 	done > "$c/env/$dep.env"
 	printf 'SIM_STANDIN=1\n' >> "$c/env/$dep.env"
@@ -192,34 +193,54 @@ wait_gavin | report
 # Needs ansible-playbook and the collections in ansible/requirements.yml; without them the
 # section says so and is skipped.
 deploy_plans() {
-	local ref sha guest inv vars dep rc
+	local sha guest dep rc line
+	local inv=$repo/ansible/inventory.sim-host vars=$PWD/become.yml
+	# Removed however the stage ends: the vars file holds the sudo password, and a stale
+	# inventory in ansible/ would be read by the next local run.
+	trap 'rm -f "$inv" "$vars"' EXIT
 	echo "===== the deploy play, --check, for each of $host's deployments"
 	if ! command -v ansible-playbook >/dev/null; then
-		echo "SKIP no ansible-playbook here"
+		skip "no ansible-playbook here"
 		return 0
 	fi
-	# The box's checkout must be on the commit this run tests, as the play requires of a
-	# host, so it follows the branch this commit was pushed to.
-	ref=${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}
+	# The box's checkout must be on exactly the commit this run tests, as the play requires
+	# of a host. It is fetched by its sha, or for a pull request by the ref GitHub tests,
+	# whose merge commit is on no branch, onto a local branch that tracks itself, so the
+	# play's own `git pull --ff-only` has an upstream and finds nothing newer: a branch that
+	# moved on since this run was queued cannot pull the box past the commit under test.
 	sha=$(git -C "$repo" rev-parse HEAD)
 	# gavin's login shell is fish, so each step on the box goes to bash on stdin, and a
 	# failed one is printed rather than ending the run under set -e.
 	guest=$(ssh_as gavin@127.0.0.1 bash -s <<STEP 2>&1 || true
 set -e
 cd ~/infra
-git fetch -q origin '$ref'
-git checkout -q -B '$ref' --track 'origin/$ref'
+git fetch -q origin '$sha' 2>/dev/null || git fetch -q origin '${GITHUB_REF:-refs/heads/main}'
+git checkout -q -B sim-under-test FETCH_HEAD
+git config branch.sim-under-test.remote .
+git config branch.sim-under-test.merge refs/heads/sim-under-test
 git rev-parse HEAD
 STEP
 )
 	if [ "$(printf '%s\n' "$guest" | tail -n 1)" != "$sha" ]; then
-		echo "SKIP the box cannot be put on the commit under test, $sha on $ref:"
+		skip "the box cannot be put on the commit under test, $sha:"
 		printf '%s\n' "$guest" | sed 's/^/    /'
 		return 0
 	fi
 	sim_before_deploy
-	inv=$repo/ansible/inventory.sim-host
-	vars=$PWD/become.yml
+	# The images first, as a deploy's own pull would leave them, so the plan reaches
+	# Compose's dry run: the play stops short of it while any image is missing. A pull that
+	# fails is noted, not failed (an arm64-only image cannot be pulled on this x86 VM), and
+	# built images are left out, as the play leaves them to `up`.
+	for dep in "${deployments[@]}"; do
+		if printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 \
+			"sudo -S -p '' docker compose --project-directory ~/infra/deployments/$dep pull --quiet --ignore-buildable" \
+			> "pull-$dep.log" 2>&1; then
+			echo "pulled $dep's images"
+		else
+			echo "NOTE could not pull every image of $dep; its plan stops before the dry run:"
+			tail -n 5 "pull-$dep.log" | sed 's/^/    /'
+		fi
+	done
 	cat > "$inv" <<INV
 [fleet]
 $host ansible_host=127.0.0.1 ansible_port=$static_port ansible_user=gavin ansible_ssh_private_key_file=$PWD/key ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
@@ -242,8 +263,15 @@ INV
 		fi
 		tail -n 30 "deploy-$dep.log" | sed 's/^/    | /'
 		[ "$rc" = 0 ] && echo "PASS the deploy play plans $dep" || echo "FAIL the deploy play could not plan $dep"
+		# How far the plan got, in the play's own sentence, which prints whether or not it
+		# reached Compose's dry run (the repo's callback hides a skipped task altogether).
+		line=$(grep -m1 -oE "$dep on $host: (would change|nothing to change)[^|]*" "deploy-$dep.log" || true)
+		echo "    plan: ${line:-no plan sentence in the log}"
 	done
-	rm -f "$inv" "$vars"
+}
+# A stage that cannot run is a FAIL in CI, where it always should, and a SKIP elsewhere.
+skip() {
+	if [ -n "${GITHUB_ACTIONS:-}" ]; then echo "FAIL $*"; else echo "SKIP $*"; fi
 }
 deploy_plans 2>&1 | report
 
