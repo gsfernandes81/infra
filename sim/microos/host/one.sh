@@ -17,6 +17,37 @@ sim_address=192.168.86.101
 sim_dhcp_address=192.168.86.15
 
 tunnel_id=1e7fde2e-ac2f-4a5e-8ad4-591208c1e2a6
+
+# A stand-in value for each name a deployment's compose.yaml requires, for its .env: the
+# paths are the ones one's real .env files name, so the deploy play's plan reads real
+# mountpoints; secrets are made up for the run.
+standin_env() {
+	local dep=$1 name=$2
+	case "$name" in
+	TUNNEL_CREDENTIALS) echo "/home/gavin/.$dep-secrets/tunnel.json" ;;
+	TUNNEL_ID) echo "00000000-0000-4000-8000-$(printf '%012d' "${#dep}")" ;;
+	CALIBRE_CONFIG) echo /media/calibre/config ;;
+	CALIBRE_LIBRARY) echo /media/calibre/library ;;
+	PUID | PGID) echo 1000 ;;
+	TZ) echo Europe/London ;;
+	SRC_ROOT) echo /home/gavin/src ;;
+	PUBLIC_BASE_URL) echo "https://$dep.sim.invalid" ;;
+	*) openssl rand -hex 16 ;;
+	esac
+}
+
+# What a first real deploy creates before the play can plan, and --check never does:
+# garmin-mcp's upstream source, at SOURCE's sha, where its preflight hook would put it.
+sim_before_deploy() {
+	local url sha
+	read -r url sha < <(grep -vE '^\s*(#|$)' "$repo/deployments/garmin-mcp/SOURCE" | head -n 1)
+	ssh_as gavin@127.0.0.1 bash -s <<STEP 2>&1 || echo "FAIL could not check out garmin-mcp's source"
+set -e
+mkdir -p ~/src
+git clone -q '$url' ~/src/garmin-mcp
+git -C ~/src/garmin-mcp checkout -q '$sha'
+STEP
+}
 deployments=(calibre-web garmin-mcp send2ereader torrents)
 volumes=(garmin-mcp_garmin-tokens)
 

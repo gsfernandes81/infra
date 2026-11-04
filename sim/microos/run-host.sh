@@ -60,7 +60,12 @@ cp key.pub "$c/gavin/authorized_keys"
 printf '{"AccountTag":"sim","TunnelSecret":"c2lt","TunnelID":"%s"}\n' "$tunnel_id" \
 	> "$c/cloudflared/$host.json"
 for dep in "${deployments[@]}"; do
-	printf 'SIM_STANDIN=1\n' > "$c/env/$dep.env"
+	# Every name compose.yaml requires (`${NAME:?}`), as the deploy play checks, each with
+	# the stand-in host/<host>.sh gives it.
+	for name in $(grep -oE '\$\{[A-Z_]+:\?' "$repo/deployments/$dep/compose.yaml" | tr -d '${:?' | sort -u); do
+		printf '%s=%s\n' "$name" "$(standin_env "$dep" "$name")"
+	done > "$c/env/$dep.env"
+	printf 'SIM_STANDIN=1\n' >> "$c/env/$dep.env"
 	mkdir -p "$c/home/.$dep-secrets"
 	printf '{}\n' > "$c/home/.$dep-secrets/tunnel.json"
 done
@@ -177,6 +182,70 @@ wait_gavin | report
 } 2>&1 | report
 
 { echo "===== first boot"; as_root checks.sh; } 2>&1 | report
+
+# ── the deploy play plans each deployment ────────────────────────────────────
+# server-deploy-compose.yml, run from the runner as the control node, in --check: for each
+# of the host's deployments it pulls and checks the host's checkout, reads Compose's
+# version, runs the preflight hook, checks .env, reads the one-shots, asks the registries
+# for every image and has Compose plan `up`. Only --check, because a real `up` needs what a
+# stand-in cannot give: each cloudflared sidecar is healthy only once its tunnel connects.
+# Needs ansible-playbook and the collections in ansible/requirements.yml; without them the
+# section says so and is skipped.
+deploy_plans() {
+	local ref sha guest inv vars dep rc
+	echo "===== the deploy play, --check, for each of $host's deployments"
+	if ! command -v ansible-playbook >/dev/null; then
+		echo "SKIP no ansible-playbook here"
+		return 0
+	fi
+	# The box's checkout must be on the commit this run tests, as the play requires of a
+	# host, so it follows the branch this commit was pushed to.
+	ref=${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}
+	sha=$(git -C "$repo" rev-parse HEAD)
+	# gavin's login shell is fish, so each step on the box goes to bash on stdin, and a
+	# failed one is printed rather than ending the run under set -e.
+	guest=$(ssh_as gavin@127.0.0.1 bash -s <<STEP 2>&1 || true
+set -e
+cd ~/infra
+git fetch -q origin '$ref'
+git checkout -q -B '$ref' --track 'origin/$ref'
+git rev-parse HEAD
+STEP
+)
+	if [ "$(printf '%s\n' "$guest" | tail -n 1)" != "$sha" ]; then
+		echo "SKIP the box cannot be put on the commit under test, $sha on $ref:"
+		printf '%s\n' "$guest" | sed 's/^/    /'
+		return 0
+	fi
+	sim_before_deploy
+	inv=$repo/ansible/inventory.sim-host
+	vars=$PWD/become.yml
+	cat > "$inv" <<INV
+[fleet]
+$host ansible_host=127.0.0.1 ansible_port=$static_port ansible_user=gavin ansible_ssh_private_key_file=$PWD/key ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+[containerized]
+$host
+[control]
+localhost
+INV
+	( umask 077; printf 'ansible_become_password: "%s"\n' "$password" > "$vars" )
+	# ansible.cfg keeps ssh's shared connections there, as the control node has it.
+	install -d -m 700 "$HOME/.ssh/cp"
+	for dep in "${deployments[@]}"; do
+		rc=0
+		( cd "$repo/ansible" && ANSIBLE_CONFIG=$repo/ansible/ansible.cfg ansible-playbook \
+			-i "$inv" playbooks/server-deploy-compose.yml -e "deployment=$dep" -e "@$vars" --check \
+			) > "deploy-$dep.log" 2>&1 || rc=$?
+		if grep -qF "$password" "deploy-$dep.log"; then
+			echo "FAIL the sudo password appeared in $dep's play output"
+			sed -i "s/$password/<password>/g" "deploy-$dep.log"
+		fi
+		tail -n 30 "deploy-$dep.log" | sed 's/^/    | /'
+		[ "$rc" = 0 ] && echo "PASS the deploy play plans $dep" || echo "FAIL the deploy play could not plan $dep"
+	done
+	rm -f "$inv" "$vars"
+}
+deploy_plans 2>&1 | report
 
 # ── rescue mode keeps a way in ───────────────────────────────────────────────
 {

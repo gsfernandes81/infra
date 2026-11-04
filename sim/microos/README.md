@@ -122,6 +122,12 @@ The run then checks, each as PASS or FAIL, and any FAIL fails the job:
   the `context=` mount, upstream's Compose, the pinned `cloudflared` and its ingress,
   `tailscaled` from Tailscale's repository, the update timer, the reboot strategy, the
   checkout, and the carry-over's files and modes;
+- the deploy play: `server-deploy-compose.yml --check` for each of the host's deployments,
+  from the runner as the control node, logged in as gavin with his sudo password, after the
+  box's checkout is put on the commit under test. Each must plan, and no log may hold the
+  password. The stand-in `.env` files carry every name each `compose.yaml` requires. Only
+  `--check`: a real `up` needs each cloudflared sidecar's tunnel to connect, which a
+  stand-in cannot, and on an empty Docker store the plan stops before Compose's dry run;
 - in rescue mode (`host/rescue.sh`), entered with `systemctl isolate`: gavin logs in, and
   sshd, the network, `cloudflared`, `tailscaled` and logins are up while Docker is down;
 - after a reboot, proved by a new boot id, the box checks again on its static address.
@@ -145,6 +151,7 @@ Those come in later simulations or on the bench at the visit.
 `run-health-mounts.sh` and `run-host.sh` (with a host), each given a work directory, run
 on any Linux machine with KVM, `qemu-system-x86_64`, `qemu-img`, `mke2fs` and an ssh
 client. `run-docker-store.sh` also needs Docker, btrfs-progs and sudo for one loop mount,
-and `run-host.sh` needs btrfs-progs, openssl and sudo for one loop mount. Each writes only
+and `run-host.sh` needs btrfs-progs, openssl and sudo for one loop mount, and
+`ansible-playbook` with `ansible/requirements.yml`'s collections for its deploy stage. Each writes only
 inside its work directory. Do not run them in the `infra` container: that container is on
 `zero`, has no KVM, and would compete with Immich.

@@ -84,10 +84,12 @@ login as root is refused with a valid key in place.
 4. **Ansible for MicroOS.** Packages go through `transactional-update` and take effect at
    a reboot. One play per OS runs the owner's update on one host: it updates, reboots, and
    reports done only once the box answers over each of its ways in
-   ([`decisions.md`](../docs/decisions.md) § *Updates are by hand on every host*). It moves
-   the Compose pin, keeping the previous binary, and reports the Compose Leap's own
-   repositories offer; the deploy play's Compose check, which names Alpine's `apk` command
-   today, names this play on a Leap host. systemd units replace the OpenRC pieces:
+   ([`decisions.md`](../docs/decisions.md) § *Updates are by hand on every host*). The
+   deploy play already plans each of `one`'s deployments on a simulated Leap box
+   (`sim/microos/run-host.sh`), unchanged. The update play moves the Compose pin, keeping
+   the previous binary, and reports the Compose Leap's own repositories offer; the deploy
+   play's Compose check, which names Alpine's `apk` command today, names this play on a
+   Leap host. systemd units replace the OpenRC pieces:
    `cloudflared`, `zram-swap`, `devpool` (a systemd slice), and the fstab entries with
    `nofail` and `RequiresMountsFor=`.
 5. **A CI simulation on GitHub Actions.** The repo is public, so the runners are free. An
