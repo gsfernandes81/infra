@@ -136,7 +136,10 @@ check "each .env is in place at 0600" sh -c '
 	done; [ "$n" -gt 0 ]'
 check "each secrets directory is gavin's" sh -c '
 	ls -d /home/gavin/.*-secrets && [ -z "$(find /home/gavin/.*-secrets ! -user gavin)" ]'
-check "the volume tars wait in /root/volumes" sh -c 'ls -l /root/volumes/*.tar'
+# Until the runbook restores them (leap/README.md), which removes each tar.
+check "each carried volume waits in /root/volumes, or is restored" sh -c '
+	ls -l /root/volumes/*.tar 2>/dev/null ||
+	docker volume ls --filter label=com.docker.compose.volume --format "restored: {{.Name}}" | grep .'
 check "the tunnel credentials are there, and root's alone" sh -c '
 	ls /etc/cloudflared/*.json >/dev/null 2>&1 &&
 	! stat -c "%a %U %n" /etc/cloudflared/*.json | tee /dev/stderr | grep -v "^600 root"'
