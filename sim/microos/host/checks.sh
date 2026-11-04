@@ -22,6 +22,11 @@ show sh -c '. /etc/os-release; echo "$PRETTY_NAME"; uname -r; hostname'
 # One openSUSE unit is known to fail on a first boot whose rpm database has new keys, ours
 # included: import-pubring-from-rpmdb imports them all, then leaves a gpg-agent that
 # systemd times out stopping. It is reported as KNOWN, not failed; a second boot is clean.
+# Its start job ends only then, so on such a boot multi-user.target, which is ordered after
+# it, is reached about 90 s late; sshd, Docker and the tunnels are not ordered after that
+# target and start on time.
+# The unit fails only when its 90 s stop times out, so wait for the boot to settle first.
+systemctl is-system-running --wait >/dev/null 2>&1 || true
 f=$(systemctl --failed --no-legend --plain | awk '{print $1}')
 if echo "$f" | grep -qx import-pubring-from-rpmdb.service &&
 	journalctl -b --no-pager -u import-pubring-from-rpmdb | grep -q "stop-sigterm' timed out"; then
@@ -94,10 +99,10 @@ echo "-- Docker"
 check "Docker runs, on the store on the SSD" sh -c '
 	systemctl is-active docker && findmnt -no SOURCE /var/lib/docker | tee /dev/stderr | grep -q "/var-lib-docker-leap"'
 check "a container runs from a fresh pull into that store" \
-	docker run --rm docker.io/library/alpine:3.20 true
+	docker run --rm docker.io/library/alpine:3.22 true
 check "a container reads the data through the context= mount" sh -c '
 	f=$(find /media -maxdepth 2 -name marker | head -n1); [ -n "$f" ] || exit 1
-	docker run --rm -v "$(dirname "$f"):/d:ro" docker.io/library/alpine:3.20 cat /d/marker'
+	docker run --rm -v "$(dirname "$f"):/d:ro" docker.io/library/alpine:3.22 cat /d/marker'
 check "Compose is upstream's, from /usr/local" sh -c "
 	docker info --format '{{range .ClientInfo.Plugins}}{{.Name}} {{.Version}} {{.Path}}{{println}}{{end}}' |
 	tee /dev/stderr | grep -q '^compose .* /usr/local/lib/docker/cli-plugins/docker-compose$'"
@@ -136,7 +141,17 @@ check "each .env is in place at 0600" sh -c '
 	done; [ "$n" -gt 0 ]'
 check "each secrets directory is gavin's" sh -c '
 	ls -d /home/gavin/.*-secrets && [ -z "$(find /home/gavin/.*-secrets ! -user gavin)" ]'
-check "the volume tars wait in /root/volumes" sh -c 'ls -l /root/volumes/*.tar'
+# By name, from the host's own list: a tar waiting in /root/volumes, or, once the runbook has
+# restored it (leap/README.md), the volume itself. A Compose label alone would also pass a
+# volume Compose made empty, the failure the tar is carried to prevent.
+check "each carried volume waits in /root/volumes, or is restored" sh -c '
+	n=0
+	for vol in $(grep -vE "^\s*(#|$)" /home/gavin/infra/hosts/$(hostname)/leap/volumes); do
+		n=$((n+1))
+		if [ -f "/root/volumes/$vol.tar" ]; then echo "waiting: $vol"
+		elif docker volume inspect "$vol" >/dev/null 2>&1; then echo "restored: $vol"
+		else echo "missing: $vol"; exit 1; fi
+	done; [ "$n" -gt 0 ]'
 check "the tunnel credentials are there, and root's alone" sh -c '
 	ls /etc/cloudflared/*.json >/dev/null 2>&1 &&
 	! stat -c "%a %U %n" /etc/cloudflared/*.json | tee /dev/stderr | grep -v "^600 root"'

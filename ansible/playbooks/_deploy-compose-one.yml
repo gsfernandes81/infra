@@ -46,8 +46,9 @@
     fail_msg: >-
       {{ dep.host }} has Compose {{ dep_compose_version.stdout | trim }}, which fails the plan once
       a rebuild has dropped a running container's image (docker/compose#14014, fixed in 5.5.0).
-      Upgrade the plugin alone, which restarts nothing: ssh {{ dep.host }}, then
-      `sudo apk add -u docker-cli-compose`. Nothing was built or touched.
+      Upgrade the plugin alone, which restarts nothing: ssh {{ dep.host }}, then on Alpine
+      `sudo apk add -u docker-cli-compose`; on Leap, move the pinned binary as leap/README.md
+      § Moving a pin by hand says. Nothing was built or touched.
     success_msg: "Compose {{ dep_compose_version.stdout | trim }}"
 
 # The preflight hook runs before the .env check, because a hook may be what fills .env in:
