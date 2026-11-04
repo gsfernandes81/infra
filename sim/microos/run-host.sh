@@ -218,6 +218,20 @@ STEP
 		return 0
 	fi
 	sim_before_deploy
+	# The images first, as a deploy's own pull would leave them, so the plan reaches
+	# Compose's dry run: the play stops short of it while any image is missing. A pull that
+	# fails is noted, not failed (an arm64-only image cannot be pulled on this x86 VM), and
+	# built images are left out, as the play leaves them to `up`.
+	for dep in "${deployments[@]}"; do
+		if printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 \
+			"sudo -S -p '' docker compose --project-directory ~/infra/deployments/$dep pull --quiet --ignore-buildable" \
+			> "pull-$dep.log" 2>&1; then
+			echo "pulled $dep's images"
+		else
+			echo "NOTE could not pull every image of $dep; its plan stops before the dry run:"
+			tail -n 5 "pull-$dep.log" | sed 's/^/    /'
+		fi
+	done
 	inv=$repo/ansible/inventory.sim-host
 	vars=$PWD/become.yml
 	cat > "$inv" <<INV
@@ -242,6 +256,9 @@ INV
 		fi
 		tail -n 30 "deploy-$dep.log" | sed 's/^/    | /'
 		[ "$rc" = 0 ] && echo "PASS the deploy play plans $dep" || echo "FAIL the deploy play could not plan $dep"
+		# The play's own line says whether the plan reached Compose's dry run (DONE) or
+		# stopped before it at a missing image (skipped).
+		grep -E 'If no image is missing: plan' "deploy-$dep.log" | head -n 1 | sed 's/^/    dry run: /'
 	done
 	rm -f "$inv" "$vars"
 }

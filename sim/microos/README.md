@@ -127,7 +127,9 @@ The run then checks, each as PASS or FAIL, and any FAIL fails the job:
   box's checkout is put on the commit under test. Each must plan, and no log may hold the
   password. The stand-in `.env` files carry every name each `compose.yaml` requires. Only
   `--check`: a real `up` needs each cloudflared sidecar's tunnel to connect, which a
-  stand-in cannot, and on an empty Docker store the plan stops before Compose's dry run;
+  stand-in cannot. Each deployment's images are pulled on the box first, so the plan
+  reaches Compose's dry run; a built image, or one that will not pull on this x86 VM,
+  stops that deployment's plan before it, and the report says which;
 - in rescue mode (`host/rescue.sh`), entered with `systemctl isolate`: gavin logs in, and
   sshd, the network, `cloudflared`, `tailscaled` and logins are up while Docker is down;
 - after a reboot, proved by a new boot id, the box checks again on its static address.
