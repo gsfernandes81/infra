@@ -1,0 +1,31 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /etc/NetworkManager/system-connections
+# infra-name: wired.nmconnection
+# infra-mode: 0600
+#
+# three's UK address, set on the host as on the rest of the fleet: sshd's PermitOpen names
+# 192.168.86.103 on every host, so three is in the LAN mesh while it sits in the UK. The
+# gateway and resolvers are one's (hosts/one/leap/system/wired.nmconnection). No interface
+# name, so it holds on whatever Leap calls the Pi's port. NetworkManager reads only a
+# root-owned file at mode 0600.
+#
+# A STATIC PROFILE CONNECTS ON ANY NETWORK, Singapore's included, where it would leave the
+# box with no route out. So before three ships, its owner turns this profile's autoconnect
+# off, and wired-dhcp.nmconnection, below this one in priority, takes over at the next boot
+# (hosts/three/leap/README.md § Before three ships). nmcli then rewrites this file without
+# its header: the tracked copy describes three in the UK.
+[connection]
+id=wired
+type=ethernet
+autoconnect=true
+autoconnect-priority=100
+
+[ipv4]
+method=manual
+address1=192.168.86.103/24,192.168.86.1
+dns=1.1.1.1;8.8.8.8;
+dns-search=lan;
+
+[ipv6]
+method=auto

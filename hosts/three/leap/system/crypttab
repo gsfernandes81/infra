@@ -1,0 +1,15 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /etc
+# infra-name: crypttab
+# infra-mode: 0644
+#
+# three's backup array, LUKS2 with Adiantum (plans/three.md § Encryption). noauto, so no
+# boot ever waits for a passphrase at a console nobody watches; the owner unlocks it over
+# ssh after each boot (hosts/three/leap/README.md § Unlocking). No key file: a key on the
+# box protects nothing once the box is taken.
+#
+# Named by its LUKS label, which hosts/three/leap/make-mirror writes, not by UUID: the UUID
+# exists only once the drive is formatted at the visit, after this file is on the box.
+# make-mirror refuses to write a second volume with the same label.
+mirror	LABEL=mirror-luks	none	luks,noauto

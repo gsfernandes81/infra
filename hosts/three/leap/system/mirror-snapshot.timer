@@ -1,0 +1,16 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /etc/systemd/system
+# infra-name: mirror-snapshot.timer
+# infra-mode: 0644
+#
+# Twice a day, in UTC, well away from zero's nightly push; the snapshot itself is at most
+# one a day, so the second turn retries one skipped for a running rsync. Started by the
+# array's mount (mirror-mount.conf), not at boot, and stopped with it.
+[Unit]
+Description=Snapshot the backup twice a day
+PartOf=media-mirror.mount
+
+[Timer]
+OnCalendar=*-*-* 06,18:00:00 UTC
+Persistent=true

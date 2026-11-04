@@ -20,6 +20,10 @@ cd "$work"
 . "$here/lib.sh"
 # shellcheck source=sim/microos/host/one.sh
 . "$here/host/$host.sh"
+# A host with no tunnel config yet is new: its stick is make-stick --new's, which carries
+# no tunnel credentials, .env, secrets directory or volume (leap/README.md).
+new_host=no
+[ -e "$repo/hosts/$host/leap/system/cloudflared-config.yml" ] || new_host=yes
 
 report() { tee -a report.txt; }
 : > report.txt
@@ -57,9 +61,10 @@ root_password=$(openssl rand -hex 12)
 openssl passwd -6 "$root_password" > "$c/shadow/root"
 openssl passwd -6 "$password" > "$c/shadow/gavin"
 cp key.pub "$c/gavin/authorized_keys"
-printf '{"AccountTag":"sim","TunnelSecret":"c2lt","TunnelID":"%s"}\n' "$tunnel_id" \
-	> "$c/cloudflared/$host.json"
+[ "$new_host" = yes ] || printf '{"AccountTag":"sim","TunnelSecret":"c2lt","TunnelID":"%s"}\n' \
+	"$tunnel_id" > "$c/cloudflared/$host.json"
 for dep in "${deployments[@]}"; do
+	[ "$new_host" = no ] || break
 	# Every name compose.yaml requires (`${NAME:?}`), as the deploy play checks, each with
 	# the stand-in host/<host>.sh gives it.
 	# The same pattern as the play's own check (_deploy-compose-one.yml).
@@ -126,11 +131,16 @@ DIAG
 		tail -n 80 serial.log
 	return 1
 }
-# Runs a script on the guest as root through gavin's sudo, which reads his password first.
+# Runs a script on the guest as root through gavin's sudo, which reads his password first,
+# with any arguments after its name. host/<script>-<host>.sh, if there is one, is appended
+# to it: checks.sh's host part, checks-one.sh or checks-three.sh.
 as_root() {
-	ssh_as gavin@127.0.0.1 "cat > /tmp/sim-$1" < "$here/host/$1"
+	local script=$1 extra=$here/host/${1%.sh}-$host.sh
+	shift
+	cat "$here/host/$script" "$([ -e "$extra" ] && echo "$extra" || echo /dev/null)" |
+		ssh_as gavin@127.0.0.1 "cat > /tmp/sim-$script"
 	printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 \
-		"sudo -S -p '' env EXPECT_UID=$expect_uid EXPECT_GID=$expect_gid EXPECT_CLOUDFLARED=$expect_cloudflared bash /tmp/sim-$1"
+		"sudo -S -p '' env EXPECT_UID=$expect_uid EXPECT_GID=$expect_gid EXPECT_CLOUDFLARED=$expect_cloudflared EXPECT_NEW_HOST=$new_host bash /tmp/sim-$script $*"
 }
 
 # What checks.sh compares against, read from the files the box was made from.
@@ -184,6 +194,12 @@ wait_gavin | report
 
 { echo "===== first boot"; as_root checks.sh; } 2>&1 | report
 
+# What the visit does next on this host, if host/<host>.sh says: on three, its tunnel and
+# its array.
+if declare -F sim_after_firstboot >/dev/null; then
+	sim_after_firstboot 2>&1 | report
+fi
+
 # ── the deploy play plans each deployment ────────────────────────────────────
 # server-deploy-compose.yml, run from the runner as the control node, in --check: for each
 # of the host's deployments it pulls and checks the host's checkout, reads Compose's
@@ -226,7 +242,7 @@ STEP
 		printf '%s\n' "$guest" | sed 's/^/    /'
 		return 0
 	fi
-	sim_before_deploy
+	if declare -F sim_before_deploy >/dev/null; then sim_before_deploy; fi
 	# The images first, as a deploy's own pull would leave them, so the plan reaches
 	# Compose's dry run: the play stops short of it while any image is missing. A pull that
 	# fails is noted, not failed (an arm64-only image cannot be pulled on this x86 VM), and
@@ -327,6 +343,7 @@ deploy_plans 2>&1 | report
 	after=$(ssh_as gavin@127.0.0.1 cat /proc/sys/kernel/random/boot_id)
 	[ "$before" != "$after" ] && echo "PASS the box rebooted" || echo "FAIL the box did not reboot"
 	as_root checks.sh
+	if declare -F sim_after_reboot >/dev/null; then sim_after_reboot; fi
 } 2>&1 | report
 
 kill "$(cat qemu.pid)" 2>/dev/null || true

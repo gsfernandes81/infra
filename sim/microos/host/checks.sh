@@ -2,7 +2,9 @@
 # shellcheck disable=SC2016  # the checks are shell code for sh -c, quoted on purpose
 # Runs on the simulated host as root (run-host.sh sends it through gavin's sudo) and prints
 # PASS or FAIL per check, reading what to expect from the box's own files, so it serves
-# every host. Detail follows a FAIL, indented.
+# every host. Detail follows a FAIL, indented. What only one host has (its disks, and
+# Docker, which on three waits for the array) is in checks-<host>.sh, which run-host.sh
+# appends to this file, so it can call docker_checks below.
 set -u
 
 check() {
@@ -16,6 +18,21 @@ check() {
 	fi
 }
 show() { printf '$ %s\n' "$*"; "$@" 2>&1 | sed 's/^/  /'; }
+
+# Docker's checks once it runs, called by checks-<host>.sh: a fresh pull, a read of the
+# host's data through its context= mount (the first file named marker below /media), and
+# the Compose binary.
+docker_checks() {
+	check "a container runs from a fresh pull into that store" \
+		docker run --rm docker.io/library/alpine:3.22 true
+	check "a container reads the data through the context= mount" sh -c '
+		f=$(find /media -maxdepth 2 -name marker | head -n1); [ -n "$f" ] || exit 1
+		docker run --rm -v "$(dirname "$f"):/d:ro" docker.io/library/alpine:3.22 cat /d/marker'
+	check "Compose is upstream's, from /usr/local" sh -c "
+		docker info --format '{{range .ClientInfo.Plugins}}{{.Name}} {{.Version}} {{.Path}}{{println}}{{end}}' |
+		tee /dev/stderr | grep -q '^compose .* /usr/local/lib/docker/cli-plugins/docker-compose$'"
+	check "openSUSE's docker-compose is not installed" sh -c '! rpm -q docker-compose'
+}
 
 echo "-- the box"
 show sh -c '. /etc/os-release; echo "$PRETTY_NAME"; uname -r; hostname'
@@ -76,14 +93,17 @@ check "sshd refuses root, passwords and keyboard-interactive" sh -c '
 	echo "$t" | grep -qx "kbdinteractiveauthentication no"'
 
 echo "-- data mounts, one per fstab entry below /media and for Docker's store"
-awk '$2 ~ "^/media/" || $2 == "/var/lib/docker" { print $2 }' /etc/fstab | while read -r m; do
+# Not a noauto entry, which no boot mounts: three's array waits for its passphrase.
+awk '($2 ~ "^/media/" || $2 == "/var/lib/docker") && $4 !~ /(^|,)noauto(,|$)/ { print $2 }' /etc/fstab | while read -r m; do
 	check "$m is mounted, by subvolid" sh -c "findmnt -no SOURCE,OPTIONS '$m' | tee /dev/stderr | grep -q subvolid="
 done
 # Data entries only: the image's own root entries use subvol= and are always mounted.
 check "no data entry names a subvol=, which health-checker's plugin would act on" sh -c '
 	! awk '\''$2 ~ "^/media/" || $2 == "/var/lib/docker" || $2 == "/mnt"'\'' /etc/fstab |
 		grep -E "[[:space:],]subvol="'
-check "swap on the SSD is on" sh -c 'swapon --show --noheadings | tee /dev/stderr | grep -q "^/dev/sd"'
+if awk '$3 == "swap"' /etc/fstab | grep -q .; then
+	check "swap on the SSD is on" sh -c 'swapon --show --noheadings | tee /dev/stderr | grep -q "^/dev/sd"'
+fi
 if [ -e /etc/systemd/zram-generator.conf ]; then
 	check "zram swap is on, ahead of the SSD's" sh -c '
 		swapon --show=NAME,PRIO --noheadings | tee /dev/stderr | grep -qE "^/dev/zram0 +100$"'
@@ -95,25 +115,19 @@ check "no mount was refused for differing SELinux options on one superblock" \
 	sh -c '! journalctl -k -b --no-pager | grep -i "same superblock"'
 show stat -c '%C %n' /var/lib/docker /var/lib/docker/containerd
 
-echo "-- Docker"
-check "Docker runs, on the store on the SSD" sh -c '
-	systemctl is-active docker && findmnt -no SOURCE /var/lib/docker | tee /dev/stderr | grep -q "/var-lib-docker-leap"'
-check "a container runs from a fresh pull into that store" \
-	docker run --rm docker.io/library/alpine:3.22 true
-check "a container reads the data through the context= mount" sh -c '
-	f=$(find /media -maxdepth 2 -name marker | head -n1); [ -n "$f" ] || exit 1
-	docker run --rm -v "$(dirname "$f"):/d:ro" docker.io/library/alpine:3.22 cat /d/marker'
-check "Compose is upstream's, from /usr/local" sh -c "
-	docker info --format '{{range .ClientInfo.Plugins}}{{.Name}} {{.Version}} {{.Path}}{{println}}{{end}}' |
-	tee /dev/stderr | grep -q '^compose .* /usr/local/lib/docker/cli-plugins/docker-compose$'"
-check "openSUSE's docker-compose is not installed" sh -c '! rpm -q docker-compose'
-
 echo "-- the two ways in"
 check "cloudflared is the pinned binary, enabled" sh -c '
 	/usr/local/bin/cloudflared --version | tee /dev/stderr | grep -q "version ${EXPECT_CLOUDFLARED:?} " &&
 	systemctl is-enabled cloudflared'
-check "the tunnel's ingress validates" \
-	/usr/local/bin/cloudflared tunnel --config /etc/cloudflared/config.yml ingress validate
+# A new host's tunnel is made after its first boot, so until its config is installed the
+# unit is skipped by its condition, not failed (hosts/three/leap/system/cloudflared.service).
+if [ -e /etc/cloudflared/config.yml ] || [ "${EXPECT_NEW_HOST:-}" != yes ]; then
+	check "the tunnel's ingress validates" \
+		/usr/local/bin/cloudflared tunnel --config /etc/cloudflared/config.yml ingress validate
+else
+	check "a new host's cloudflared waits for its config, skipped and not failed" sh -c '
+		r=$(systemctl show -p ConditionResult --value cloudflared); echo "condition: $r"; [ "$r" = no ]'
+fi
 show systemctl status cloudflared --no-pager --lines 3
 # Tailscale's packages carry no vendor, so the signing key is what tells them from
 # openSUSE's: Tailscale's is 458CA832957F5868 (leap/README.md).
@@ -135,23 +149,33 @@ check "jeos-firstboot is masked" sh -c '[ "$(systemctl is-enabled jeos-firstboot
 
 echo "-- the checkout and the carry-over"
 check "the checkout is gavin's" sh -c '[ "$(stat -c %U /home/gavin/infra)" = gavin ] && git -C /home/gavin/infra log --oneline -1'
-check "each .env is in place at 0600" sh -c '
-	n=0; for f in /home/gavin/infra/deployments/*/.env; do
-		[ -e "$f" ] || continue; n=$((n+1)); stat -c "%a %U %n" "$f"; [ "$(stat -c %a "$f")" = 600 ] || exit 1
-	done; [ "$n" -gt 0 ]'
-check "each secrets directory is gavin's" sh -c '
-	ls -d /home/gavin/.*-secrets && [ -z "$(find /home/gavin/.*-secrets ! -user gavin)" ]'
+if [ "${EXPECT_NEW_HOST:-}" = yes ]; then
+	# make-stick --new carries none of these: they belong to the box it ran on.
+	check "a new host carries no .env and no secrets directory" sh -c '
+		! ls /home/gavin/infra/deployments/*/.env /home/gavin/.*-secrets 2>/dev/null'
+else
+	check "each .env is in place at 0600" sh -c '
+		n=0; for f in /home/gavin/infra/deployments/*/.env; do
+			[ -e "$f" ] || continue; n=$((n+1)); stat -c "%a %U %n" "$f"; [ "$(stat -c %a "$f")" = 600 ] || exit 1
+		done; [ "$n" -gt 0 ]'
+	check "each secrets directory is gavin's" sh -c '
+		ls -d /home/gavin/.*-secrets && [ -z "$(find /home/gavin/.*-secrets ! -user gavin)" ]'
+fi
 # By name, from the host's own list: a tar waiting in /root/volumes, or, once the runbook has
 # restored it (leap/README.md), the volume itself. A Compose label alone would also pass a
 # volume Compose made empty, the failure the tar is carried to prevent.
-check "each carried volume waits in /root/volumes, or is restored" sh -c '
-	n=0
-	for vol in $(grep -vE "^\s*(#|$)" /home/gavin/infra/hosts/$(hostname)/leap/volumes); do
-		n=$((n+1))
-		if [ -f "/root/volumes/$vol.tar" ]; then echo "waiting: $vol"
-		elif docker volume inspect "$vol" >/dev/null 2>&1; then echo "restored: $vol"
-		else echo "missing: $vol"; exit 1; fi
-	done; [ "$n" -gt 0 ]'
-check "the tunnel credentials are there, and root's alone" sh -c '
-	ls /etc/cloudflared/*.json >/dev/null 2>&1 &&
-	! stat -c "%a %U %n" /etc/cloudflared/*.json | tee /dev/stderr | grep -v "^600 root"'
+if [ -f "/home/gavin/infra/hosts/$(hostname)/leap/volumes" ]; then
+	check "each carried volume waits in /root/volumes, or is restored" sh -c '
+		n=0
+		for vol in $(grep -vE "^\s*(#|$)" /home/gavin/infra/hosts/$(hostname)/leap/volumes); do
+			n=$((n+1))
+			if [ -f "/root/volumes/$vol.tar" ]; then echo "waiting: $vol"
+			elif docker volume inspect "$vol" >/dev/null 2>&1; then echo "restored: $vol"
+			else echo "missing: $vol"; exit 1; fi
+		done; [ "$n" -gt 0 ]'
+fi
+if [ -e /etc/cloudflared/config.yml ] || [ "${EXPECT_NEW_HOST:-}" != yes ]; then
+	check "the tunnel credentials are there, and root's alone" sh -c '
+		ls /etc/cloudflared/*.json >/dev/null 2>&1 &&
+		! stat -c "%a %U %n" /etc/cloudflared/*.json | tee /dev/stderr | grep -v "^600 root"'
+fi

@@ -1,0 +1,17 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /etc/systemd/system
+# infra-name: mirror-snapshot.service
+# infra-mode: 0644
+#
+# Today's snapshot of the backup (/usr/local/sbin/mirror-snapshot). Skipped while the
+# array is locked; a condition, never RequiresMountsFor=, which would start the unlock and
+# wait at a passphrase prompt (docker-mirror.conf says why).
+[Unit]
+Description=Snapshot the backup in /media/mirror/incoming
+After=media-mirror.mount
+ConditionPathIsMountPoint=/media/mirror
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mirror-snapshot

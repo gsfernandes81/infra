@@ -1,0 +1,1 @@
+/dev/mapper/mirror	/media/mirror	btrfs	noauto,nofail,x-systemd.device-timeout=5min,context=system_u:object_r:container_file_t:s0,noatime 0 0
