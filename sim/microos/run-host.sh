@@ -229,6 +229,8 @@ $host
 localhost
 INV
 	( umask 077; printf 'ansible_become_password: "%s"\n' "$password" > "$vars" )
+	# ansible.cfg keeps ssh's shared connections there, as the control node has it.
+	install -d -m 700 "$HOME/.ssh/cp"
 	for dep in "${deployments[@]}"; do
 		rc=0
 		( cd "$repo/ansible" && ANSIBLE_CONFIG=$repo/ansible/ansible.cfg ansible-playbook \
