@@ -13,9 +13,17 @@ name: microos-sim
 
 on:
   push:
-    paths: ['sim/microos/**', '.github/workflows/microos-sim.yml', 'leap/**', 'hosts/*/leap/**']
+    paths: ['sim/microos/**', '.github/workflows/microos-sim.yml', 'leap/**', 'hosts/*/leap/**',
+      'ansible/playbooks/server-deploy-compose.yml', 'ansible/playbooks/_deploy-compose-one.yml',
+      'ansible/playbooks/_sync-host-checkout.yml', 'ansible/playbooks/_review-anchor.yml',
+      'ansible/deploy-hooks/**', 'deployments/calibre-web/**', 'deployments/garmin-mcp/**',
+      'deployments/send2ereader/**', 'deployments/torrents/**']
   pull_request:
-    paths: ['sim/microos/**', '.github/workflows/microos-sim.yml', 'leap/**', 'hosts/*/leap/**']
+    paths: ['sim/microos/**', '.github/workflows/microos-sim.yml', 'leap/**', 'hosts/*/leap/**',
+      'ansible/playbooks/server-deploy-compose.yml', 'ansible/playbooks/_deploy-compose-one.yml',
+      'ansible/playbooks/_sync-host-checkout.yml', 'ansible/playbooks/_review-anchor.yml',
+      'ansible/deploy-hooks/**', 'deployments/calibre-web/**', 'deployments/garmin-mcp/**',
+      'deployments/send2ereader/**', 'deployments/torrents/**']
   workflow_dispatch:
 
 permissions:
@@ -252,6 +260,12 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils btrfs-progs
+
+      - name: Install ansible-core and the collections the deploy play uses
+        run: |
+          pipx install ansible-core
+          ansible-galaxy collection install -r ansible/requirements.yml
+          ansible --version
 
       - name: Boot ${{ matrix.host }}'s first-boot script and check the box it makes
         run: sim/microos/run-host.sh "$RUNNER_TEMP/host" "${{ matrix.host }}"
