@@ -230,10 +230,10 @@ localhost
 INV
 	( umask 077; printf 'ansible_become_password: "%s"\n' "$password" > "$vars" )
 	for dep in "${deployments[@]}"; do
+		rc=0
 		( cd "$repo/ansible" && ANSIBLE_CONFIG=$repo/ansible/ansible.cfg ansible-playbook \
 			-i "$inv" playbooks/server-deploy-compose.yml -e "deployment=$dep" -e "@$vars" --check \
-			) > "deploy-$dep.log" 2>&1
-		rc=$?
+			) > "deploy-$dep.log" 2>&1 || rc=$?
 		if grep -qF "$password" "deploy-$dep.log"; then
 			echo "FAIL the sudo password appeared in $dep's play output"
 			sed -i "s/$password/<password>/g" "deploy-$dep.log"
