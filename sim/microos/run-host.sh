@@ -241,6 +241,29 @@ STEP
 			tail -n 5 "pull-$dep.log" | sed 's/^/    /'
 		fi
 	done
+	# Each carried volume restored as leap/README.md § the named volumes says, before any
+	# deploy, then read back through a container. The stand-in tar holds a marker naming it.
+	for vol in "${volumes[@]}"; do
+		if { printf '%s\n' "$password"; cat <<RESTORE; } | ssh_as gavin@127.0.0.1 "sudo -S -p '' bash -s" > "restore-$vol.log" 2>&1; then
+set -e
+docker volume create --label com.docker.compose.project=${vol%%_*} --label com.docker.compose.volume=${vol#*_} $vol >/dev/null
+tar -C "\$(docker volume inspect -f '{{.Mountpoint}}' $vol)" -xpf /root/volumes/$vol.tar
+rm /root/volumes/$vol.tar
+docker volume inspect -f '{{index .Labels "com.docker.compose.project"}}/{{index .Labels "com.docker.compose.volume"}}' $vol
+docker run --rm -v $vol:/v:ro docker.io/library/alpine:3.20 cat /v/marker
+RESTORE
+			tail -n 2 "restore-$vol.log" | sed 's/^/    /'
+			if [ "$(tail -n 1 "restore-$vol.log")" = "$vol" ] &&
+				[ "$(tail -n 2 "restore-$vol.log" | head -n 1)" = "${vol%%_*}/${vol#*_}" ]; then
+				echo "PASS $vol is restored under Compose's labels and reads back"
+			else
+				echo "FAIL $vol did not read back as restored"
+			fi
+		else
+			echo "FAIL could not restore $vol:"
+			tail -n 5 "restore-$vol.log" | sed 's/^/    /'
+		fi
+	done
 	cat > "$inv" <<INV
 [fleet]
 $host ansible_host=127.0.0.1 ansible_port=$static_port ansible_user=gavin ansible_ssh_private_key_file=$PWD/key ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'

@@ -74,6 +74,44 @@ than half-configured.
 It does not join the tailnet, which needs the owner's login (`sudo tailscale up`), and it
 does not start a deployment: those are the visit's runbook, after the box answers.
 
+## After the first boot: the named volumes
+
+A named volume lives in Docker's store, which the new system starts empty, so each one the
+host lists in `volumes` came across as a tar file and waits in `/root/volumes`. Restore it
+before the deployment's first `up`, under the name and labels Compose gives its own, so
+Compose adopts it rather than warning that it did not create it. For `one`, after `ssh one`:
+
+```fish
+# restore garmin-mcp's token volume, before garmin-mcp's first deploy
+sudo docker volume create --label com.docker.compose.project=garmin-mcp --label com.docker.compose.volume=garmin-tokens garmin-mcp_garmin-tokens
+sudo tar -C (sudo docker volume inspect -f '{{.Mountpoint}}' garmin-mcp_garmin-tokens) -xpf /root/volumes/garmin-mcp_garmin-tokens.tar
+sudo rm /root/volumes/garmin-mcp_garmin-tokens.tar
+```
+
+The project and volume labels are the deployment's `name:` and the volume's key in its
+`compose.yaml`; the volume's name is the two joined by `_`. The simulation runs the same
+commands, in bash, and reads the volume back through a container.
+
+## Moving a pin by hand
+
+`cloudflared` and Compose are pinned binaries in `/usr/local`, outside every snapshot, until
+the Leap update play moves them. By hand, on the box, with the version and the SHA-256 from
+the project's own release page (for Compose, the release's `.sha256` asset):
+
+```fish
+# move Compose to a new release, keeping the old one beside, not in, the plugin directory
+set v 5.7.0; set sum <the release's sha256 for docker-compose-linux-aarch64>
+curl -fsSL -o /tmp/docker-compose https://github.com/docker/compose/releases/download/v$v/docker-compose-linux-aarch64
+echo "$sum  /tmp/docker-compose" | sha256sum -c -; and sudo cp -p /usr/local/lib/docker/cli-plugins/docker-compose /usr/local/lib/docker/docker-compose.previous; and sudo install -m 755 /tmp/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
+docker compose version
+```
+
+The previous binary is kept in `/usr/local/lib/docker/`, not in `cli-plugins/`, where Docker
+would read any `docker-*` file as a plugin. Going back is the same `install` from there.
+`cloudflared` moves the same way, at `/usr/local/bin/cloudflared`, followed by `sudo
+systemctl restart cloudflared`, which is the tunnel: do it over Tailscale, not through the
+tunnel itself (CLAUDE.md § Changing the thing you are connected through).
+
 ## How it is tested
 
 `sim/microos/run-host.sh` boots each host's real script in a Leap VM, from a stick laid out
