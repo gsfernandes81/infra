@@ -39,7 +39,12 @@ def this_host():
 
 
 def system_dir(host):
-    return REPO / "hosts" / host / "system"
+    """hosts/<host>/system, or, for a host that has only ever run Leap and so has no
+    Alpine copies (three), hosts/<host>/leap/system. A host with both is still on Alpine
+    until it moves, and its system/ copies are the ones that describe it."""
+    alpine = REPO / "hosts" / host / "system"
+    leap = REPO / "hosts" / host / "leap" / "system"
+    return leap if not alpine.is_dir() and leap.is_dir() else alpine
 
 
 def parse_header(path):

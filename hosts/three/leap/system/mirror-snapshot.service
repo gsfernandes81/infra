@@ -10,6 +10,7 @@
 [Unit]
 Description=Snapshot the backup in /media/mirror/incoming
 After=media-mirror.mount
+PartOf=media-mirror.mount
 ConditionPathIsMountPoint=/media/mirror
 
 [Service]

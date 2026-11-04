@@ -30,14 +30,21 @@ volume, because `three` has none yet.
 ## After the first boot: the tunnel
 
 The first boot leaves `cloudflared` installed and enabled, and skipped until its config
-exists. On the LAN, from the phone, with `three` in the inventory's `[fleet]` group:
+exists. On the LAN, from the phone:
 
-1. `server-create-host-tunnel.yml -e target=three -K` writes `/etc/cloudflared/three.json`
+1. The infra agent adds `three` to `ansible/inventory`'s `[fleet]` and `[containerized]`
+   groups, which it joins only once it answers, since every fleet-wide play would
+   otherwise stop on it.
+2. `server-create-host-tunnel.yml -e target=three -K` writes `/etc/cloudflared/three.json`
    and prints the tunnel id.
-2. The infra agent commits `system/cloudflared-config.yml` with that id, in the shape of
-   every host's.
-3. On `three`: `git pull`, `sudo bin/install-system-file` the config, then
-   `sudo systemctl start cloudflared`.
+3. The infra agent commits `system/cloudflared-config.yml` with that id, in the shape of
+   every host's: `ssh-three` to port 22, and `syncthing-three` to `http://127.0.0.1:8384`,
+   Syncthing's GUI, which nothing else reaches (sshd's `PermitOpen` allows port 22 only).
+4. On `three`, in `~/infra`: `git pull`, then
+   `sudo bin/install-system-file cloudflared-config.yml --commit --allow-content-change --new`,
+   then `sudo systemctl start cloudflared`. The tools read `leap/system/` for a host with
+   no Alpine copies.
+5. `server-create-fleet-ssh-access.yml -e host=three` gates the hostnames behind Access.
 
 ## The array
 
@@ -62,15 +69,18 @@ Every boot leaves the array locked, and nothing waits for it. From the phone:
 
 ```fish
 # unlock three's array; sudo asks for gavin's password, then systemd for the passphrase
-ssh -t three sudo systemctl start systemd-cryptsetup@mirror.service media-mirror.mount
+ssh -t three 'sudo systemctl start systemd-cryptsetup@mirror.service; and sudo systemctl start media-mirror.mount'
 ```
 
-The mount starts Docker, which brings Syncthing up under its restart policy, and the
-snapshot and scrub timers. Until then, Docker is skipped by its condition, and `docker`
-answers that it cannot connect. The fstab entry gives the mount 5 minutes for the
-passphrase. A backup run against a locked `three` fails and the next one retries.
+Two starts, so the mount's 5-minute wait for the device begins only once the passphrase is
+in, however long finding it takes. The mount starts Docker, which brings Syncthing up
+under its restart policy, and the snapshot and scrub timers. Until then, Docker is skipped
+by its condition, and `docker` answers that it cannot connect. A hand `mount /media/mirror`
+starts none of them: only `systemctl start` does. A backup run against a locked `three`
+fails and the next one retries.
 
-To lock it again without a reboot:
+To lock it again without a reboot (Docker, a running snapshot and a running scrub stop
+with the mount):
 
 ```fish
 # lock three's array: Docker first, then the mount, then the LUKS volume
@@ -92,9 +102,9 @@ no route out. So the last thing before the shipping power-off, after `ssh three`
 ```fish
 # Singapore: the static UK profile stops connecting, so the DHCP one takes over next boot
 sudo nmcli connection modify wired connection.autoconnect no
-# Wi-Fi only if Singapore has no Ethernet for it; the password is asked for, so it never
-# lands in history or scrollback, and NetworkManager keeps it in a root-only file
-read -s -P 'Wi-Fi password: ' psk; and sudo nmcli connection add type wifi con-name wifi ssid 'THE-SSID' wifi-sec.key-mgmt wpa-psk wifi-sec.psk $psk; set -e psk
+# Wi-Fi only if Singapore has no Ethernet for it. The password is asked for and reaches the
+# root-only profile on stdin, never on a command line, which sudo would log to the journal
+read -s -P 'Wi-Fi password: ' psk; and printf '[connection]\nid=wifi\ntype=wifi\n\n[wifi]\nssid=%s\n\n[wifi-security]\nkey-mgmt=wpa-psk\npsk=%s\n\n[ipv4]\nmethod=auto\n\n[ipv6]\nmethod=auto\n' 'THE-SSID' $psk | sudo sh -c 'umask 077; cat > /etc/NetworkManager/system-connections/wifi.nmconnection'; and sudo nmcli connection reload; set -e psk
 sudo systemctl poweroff
 ```
 

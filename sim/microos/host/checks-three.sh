@@ -25,7 +25,11 @@ check "the mount starts Docker and both timers" sh -c '
 	for u in docker.service mirror-snapshot.timer mirror-scrub.timer; do echo "$w" | grep -qw "$u" || exit 1; done'
 check "the timers wait for the mount, not started at boot" sh -c '
 	! systemctl is-active --quiet mirror-snapshot.timer && ! systemctl is-active --quiet mirror-scrub.timer'
-show sh -c 'systemctl cat docker.socket 2>&1 | head -n 12; systemctl is-enabled docker.socket 2>&1'
+# Leap's docker.socket is BindsTo=docker.service; enabled, a client's connection would start
+# Docker by another road, so a preset that enables it should show here.
+check "docker.socket is disabled and idle" sh -c '
+	e=$(systemctl is-enabled docker.socket); a=$(systemctl is-active docker.socket); echo "$e, $a"
+	[ "$e" = disabled ] && [ "$a" = inactive ]'
 
 echo "-- the backup user"
 check "backup has a shell for its forced command, and no password" sh -c '

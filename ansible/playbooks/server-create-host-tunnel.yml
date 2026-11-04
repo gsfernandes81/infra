@@ -90,17 +90,20 @@
       # A host with a tracked cloudflared-config.yml already has its tunnel, and this play
       # is for one that has none: run against zero, one or two it would converge on their
       # live credentials only because they happen to sit at the same path. Refuse instead.
+      # Both places a host keeps one: system/ on Alpine, leap/system/ on Leap, where a new
+      # host such as three keeps its only copy.
       ansible.builtin.stat:
-        path: "{{ playbook_dir }}/../../hosts/{{ inventory_hostname }}/system/cloudflared-config.yml"
+        path: "{{ playbook_dir }}/../../hosts/{{ inventory_hostname }}/{{ item }}/cloudflared-config.yml"
+      loop: [system, leap/system]
       register: host_tunnel_config
       delegate_to: localhost
 
     - name: Check {{ inventory_hostname }} has no tunnel yet
       ansible.builtin.assert:
-        that: not host_tunnel_config.stat.exists
+        that: host_tunnel_config.results | selectattr('stat.exists') | list | length == 0
         fail_msg: >-
-          hosts/{{ inventory_hostname }}/system/cloudflared-config.yml exists, so
-          {{ inventory_hostname }} already has a tunnel. This play makes a host's first one;
+          hosts/{{ inventory_hostname }} has a cloudflared-config.yml under system/ or
+          leap/system/, so {{ inventory_hostname }} already has a tunnel. This play makes a host's first one;
           server-create-tunnel.yml is 2g's play for a second. Nothing has been created.
         success_msg: "{{ inventory_hostname }} has no tracked tunnel config"
 
@@ -132,9 +135,10 @@
         msg: |
           {{ inventory_hostname }}'s tunnel is {{ cf_tunnel_id | default(cf_unknown_id, true) }}.
           Next:
-            1. Commit hosts/{{ inventory_hostname }}/system/cloudflared-config.yml naming that
-               tunnel, with ssh-{{ inventory_hostname }}.{{ dns_zone }} -> ssh://127.0.0.1:22.
-            2. Install it with bin/install-system-file on {{ inventory_hostname }}, and start
-               cloudflared there.
+            1. Commit hosts/{{ inventory_hostname }}/system/cloudflared-config.yml (leap/system/
+               for a host that has only run Leap) naming that tunnel, with
+               ssh-{{ inventory_hostname }}.{{ dns_zone }} -> ssh://127.0.0.1:22.
+            2. Install it with bin/install-system-file cloudflared-config.yml --commit
+               --allow-content-change --new on {{ inventory_hostname }}, and start cloudflared there.
             3. Gate the hostname: server-create-fleet-ssh-access.yml -e host={{ inventory_hostname }}.
       changed_when: true

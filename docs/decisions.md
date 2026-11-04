@@ -2088,6 +2088,16 @@ writing `hosts/three/leap/` and are proven by the `host` job's `three` run.
 - **The timers start with the mount, not at boot.** Both are `Persistent=`, so a run missed
   while the box was off or locked fires as soon as its timer starts. Started at boot, it
   would fire on a locked array and be spent on a skipped run.
+- **The backup user's shell is bash, not nologin.** sshd runs a key's forced command
+  through the user's shell, so nologin would refuse the push itself. The key's
+  `restrict` and forced command are what keep the user from a shell, and its home and
+  `.ssh` are root's, so it cannot add a key.
+- **What uses the array stops with it.** Docker and the snapshot and scrub services are
+  `PartOf=` the mount, which propagates a stop and never starts anything, so locking the
+  array, or a shutdown, stops them first instead of failing on a busy mount. The scrub is
+  stopped with SIGINT, the only signal on which `btrfs scrub start -B` cancels its scrub.
+- **The unlock is two starts**, the LUKS unit and then the mount, so the mount's wait for
+  its device begins only once the passphrase is in.
 - **Docker's store stays on the SD card.** Only Syncthing's data and identity need the
   encryption, and Docker runs only once the array is unlocked.
 - **The newest 90 daily snapshots are kept**, a default the owner can change in

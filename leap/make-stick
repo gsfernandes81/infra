@@ -79,24 +79,28 @@ if [ -z "$new" ] && [ -f "$hostdir/volumes" ]; then
 fi
 
 # The carry-over must be complete before anything is erased.
-root_hash=$(awk -F: '$1 == "root" { print $2 }' /etc/shadow)
 gavin_hash=$(awk -F: '$1 == "gavin" { print $2 }' /etc/shadow)
-case "$root_hash" in \$*) ;; *) die "root has no password; set one with passwd first (the console needs it)" ;; esac
 case "$gavin_hash" in \$*) ;; *) die "gavin has no password hash" ;; esac
 [ -s /home/gavin/.ssh/authorized_keys ] || die "no /home/gavin/.ssh/authorized_keys"
 if [ -z "$new" ]; then
+	root_hash=$(awk -F: '$1 == "root" { print $2 }' /etc/shadow)
+	case "$root_hash" in \$*) ;; *) die "root has no password; set one with passwd first (the console needs it)" ;; esac
 	[ -s "/etc/cloudflared/$host.json" ] || die "no /etc/cloudflared/$host.json"
 	[ -s /etc/ssh/ssh_host_ed25519_key ] || die "no ed25519 host key"
 else
 	# The new host's root password, typed twice and kept only as its hash. openssl where
 	# it is installed, else BusyBox's mkpasswd, which Alpine has; both read it on stdin,
-	# never from the command line.
+	# never from the command line. Echo comes back however the prompt ends: a refusal, an
+	# EOF under set -e, or Ctrl-C would otherwise leave the owner's terminal blind.
+	trap 'stty echo 2>/dev/null' EXIT
+	trap 'stty echo 2>/dev/null; exit 1' INT TERM
 	stty -echo
 	printf 'Root password for %s (the console needs it): ' "$host"
 	read -r pw1
 	printf '\nThe same again: '
 	read -r pw2
 	stty echo
+	trap - INT TERM
 	echo
 	[ -n "$pw1" ] || die "an empty root password"
 	[ "$pw1" = "$pw2" ] || die "the two root passwords differ"

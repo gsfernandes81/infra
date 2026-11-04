@@ -15,7 +15,7 @@ Each host's own part is in `hosts/<host>/leap/`:
 | Path | What it is |
 |---|---|
 | `combustion/script` | The host's first-boot script: its values, then the shared steps in order. |
-| `system/` | Every `/etc` file the host gets, each with the `infra-` header that names where it installs ([`hosts/zero/system/README.md`](../hosts/zero/system/README.md)). When the host has moved, these replace `hosts/<host>/system/`, whose copies describe the Alpine system until then. |
+| `system/` | Every `/etc` file the host gets, each with the `infra-` header that names where it installs ([`hosts/zero/system/README.md`](../hosts/zero/system/README.md)). When the host has moved, these replace `hosts/<host>/system/`, whose copies describe the Alpine system until then. A host with no Alpine copies, such as `three`, has only these, and `bin/install-system-file` and `bin/check-system-drift` read them there. |
 | `fstab.append` | The data entries, appended to the image's own fstab. Each names its subvolume by `subvolid=`, never `subvol=`, so stock health-checker cannot strand the box ([`plans/microos-cutover.md`](../plans/microos-cutover.md)). Every entry on one filesystem carries the same `context=`, Docker's store included: the subvolumes share one superblock, and SELinux refuses a second mount of it whose options differ from the first, so mixed options would make which mounts fail depend on which mounted first. |
 | `volumes` | The named Docker volumes the stick carries as tar files. |
 

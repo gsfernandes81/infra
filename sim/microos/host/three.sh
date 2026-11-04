@@ -45,15 +45,20 @@ sim_unlock() {
 	if SIM_SUDO_PW=$password SIM_LUKS_PW=$luks_password python3 -I "$here/host/unlock.py" \
 		-i key -p "$(cat port)" -o StrictHostKeyChecking=no -o UserKnownHostsFile=known \
 		-o BatchMode=yes gavin@127.0.0.1 \
-		-- sudo systemctl start systemd-cryptsetup@mirror.service media-mirror.mount > unlock.log 2>&1; then
+		-- 'sudo systemctl start systemd-cryptsetup@mirror.service; and sudo systemctl start media-mirror.mount' \
+		> unlock.log 2>&1; then
 		echo "PASS the README's command unlocks and mounts the array"
 	else
 		echo "FAIL the README's command did not unlock the array:"
 		tail -n 15 unlock.log | sed 's/^/    /'
 	fi
 	# The mount starts Docker, and the first run saw the next new ssh connection fail as it
-	# did (exit 255). So ssh is waited for, how long it was away is reported, and if it never
-	# returns the console shows the firewall and Docker's start.
+	# did (exit 255). So the first attempt's own words are kept, ssh is waited for and how
+	# long it was away reported, and if it never returns the console shows the firewall and
+	# Docker's start.
+	echo "the first ssh after the unlock: $(ssh -i key -p "$(cat port)" -o StrictHostKeyChecking=no \
+		-o UserKnownHostsFile=known -o BatchMode=yes -o ConnectTimeout=5 gavin@127.0.0.1 true 2>&1 &&
+		echo answered || true)"
 	if ! wait_gavin static; then
 		echo "the console's view of the firewall and Docker after the unlock:"
 		python3 -I "$here/serial-login.py" serial.sock "$root_password" "$(cat <<'DIAG'
@@ -72,7 +77,7 @@ sim_after_firstboot() {
 	echo "===== three's tunnel, as server-create-host-tunnel.yml and install-system-file leave it"
 	# Stand-in credentials, and a config in the shape of every host's, then the start the
 	# README gives once the config is in place.
-	{ printf '%s\n' "$password"; cat <<TUNNEL; } | ssh_as gavin@127.0.0.1 "sudo -S -p '' bash -s" 2>&1 | sed 's/^/    /'
+	if ! { printf '%s\n' "$password"; cat <<TUNNEL; } | ssh_as gavin@127.0.0.1 "sudo -S -p '' bash -s" 2>&1 | sed 's/^/    /'; then
 set -e
 install -d -m 755 /etc/cloudflared
 ( umask 077; printf '{"AccountTag":"sim","TunnelSecret":"c2lt","TunnelID":"$tunnel_id"}\n' > /etc/cloudflared/three.json )
@@ -81,6 +86,8 @@ printf '%s\n' 'tunnel: $tunnel_id' 'credentials-file: /etc/cloudflared/three.jso
 	'    service: ssh://127.0.0.1:22' '  - service: http_status:404' > /etc/cloudflared/config.yml
 systemctl start --no-block cloudflared
 TUNNEL
+		echo "FAIL could not put the stand-in tunnel in place"
+	fi
 	sleep 5
 	if printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 \
 		"sudo -S -p '' systemctl show -p ActiveState --value cloudflared" | grep -qE '^(active|activating)$'; then
@@ -90,10 +97,11 @@ TUNNEL
 	fi
 
 	echo "===== the array, made by make-mirror and unlocked as the README says"
-	dev=$(ssh_as gavin@127.0.0.1 "lsblk -dnbro NAME,SIZE" | awk -v s="$mirror_bytes" '$2 == s { print "/dev/" $1 }')
+	dev=$(ssh_as gavin@127.0.0.1 "lsblk -dnbro NAME,SIZE" | awk -v s="$mirror_bytes" '$2 == s { print "/dev/" $1 }' || true)
 	echo "the blank drive is ${dev:-not found}"
 	# The script under test, not the box's checkout, which is main's until the deploy stage.
-	ssh_as gavin@127.0.0.1 "cat > /tmp/make-mirror" < "$repo/hosts/three/leap/make-mirror"
+	ssh_as gavin@127.0.0.1 "cat > /tmp/make-mirror" < "$repo/hosts/three/leap/make-mirror" ||
+		echo "FAIL could not copy make-mirror to the box"
 	if { printf '%s\n' "$password" "$dev" "$luks_password" "$luks_password"; } |
 		ssh_as gavin@127.0.0.1 "sudo -S -p '' bash /tmp/make-mirror $dev" > make-mirror.log 2>&1; then
 		echo "PASS make-mirror made the array"
@@ -109,12 +117,13 @@ TUNNEL
 	else
 		echo "FAIL make-mirror refused for another reason: $(tail -n 1 make-mirror-again.log)"
 	fi
-	sim_unlock
+	# A FAIL is already printed; returning keeps the run from dying silently under set -e.
+	sim_unlock || return 0
 	as_root three-unlocked.sh first
 }
 
 sim_after_reboot() {
 	echo "===== the array after the reboot, unlocked again"
-	sim_unlock
+	sim_unlock || return 0
 	as_root three-unlocked.sh again
 }

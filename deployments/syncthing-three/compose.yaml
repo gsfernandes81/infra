@@ -21,7 +21,8 @@ services:
       - PUID=1000
       - PGID=1000
       # The image listens on every address by default; with the host's network that would
-      # put the GUI on the LAN. Reached with `ssh -L 8384:127.0.0.1:8384 three`.
+      # put the GUI on the LAN. Reached through three's tunnel, gated by Access, as
+      # torrents' is; `ssh -L` cannot, since sshd's PermitOpen allows port 22 only.
       - STGUIADDRESS=127.0.0.1:8384
     volumes:
       - /media/mirror/syncthing:/var/syncthing
