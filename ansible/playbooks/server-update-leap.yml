@@ -194,6 +194,9 @@
       check_mode: false
       become: true
 
+    # A two-minute timeout and three tries: get_url's own 10 s ended a simulated run when
+    # GitHub was slow to answer, and a Pi's line can be slower. Not under --check, which
+    # touches no network and reports the move it would make.
     - name: "If cloudflared is off its pin: download it"
       ansible.builtin.get_url:
         url: "https://github.com/cloudflare/cloudflared/releases/download/{{ pins.cloudflared_version }}/cloudflared-linux-{{ upd_asset.cloudflared }}"
@@ -201,7 +204,12 @@
         checksum: "sha256:{{ pins['cloudflared_sha256_' ~ upd_was.arch] }}"
         mode: "0755"
         force: true
-      when: upd_cfd_moves | bool
+        timeout: 120
+      register: upd_cfd_get
+      until: upd_cfd_get is succeeded
+      retries: 3
+      delay: 15
+      when: upd_cfd_moves | bool and not ansible_check_mode
       become: true
 
     - name: "If cloudflared moves: keep the current as previous"
@@ -229,7 +237,12 @@
         checksum: "sha256:{{ pins['compose_sha256_' ~ upd_was.arch] }}"
         mode: "0755"
         force: true
-      when: upd_compose_moves | bool
+        timeout: 120
+      register: upd_compose_get
+      until: upd_compose_get is succeeded
+      retries: 3
+      delay: 15
+      when: upd_compose_moves | bool and not ansible_check_mode
       become: true
 
     - name: "If Compose moves: keep the current as previous"
