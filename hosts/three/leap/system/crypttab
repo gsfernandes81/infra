@@ -13,8 +13,8 @@
 # exists only once the drive is formatted at the visit, after this file is on the box.
 # make-mirror refuses to write a second volume with the same label.
 #
-# password-cache=no: systemd otherwise keeps a typed passphrase in root's keyring for 2.5
-# minutes, and a lock in that time is undone by the next start with no prompt, which the
-# simulation met. A lock is meant to need the passphrase again. A second drive's line can
+# password-cache=no: systemd otherwise keeps a typed passphrase in the kernel keyring for a
+# few minutes (crypttab(5)), and a lock in that time is undone by the next start with no
+# prompt. A lock is meant to need the passphrase again. A second drive's line can
 # turn caching back on, so one typing unlocks both.
 mirror	LABEL=mirror-luks	none	luks,noauto,password-cache=no

@@ -9,6 +9,9 @@ check "crypttab names the array by its label, noauto" \
 	grep -qE '^mirror[[:space:]]+LABEL=mirror-luks[[:space:]]+none[[:space:]]+luks,noauto,password-cache=no$' /etc/crypttab
 check "fstab mounts it noauto, with the container context" sh -c '
 	awk "\$2 == \"/media/mirror\"" /etc/fstab | tee /dev/stderr | grep -E "(^|[[:space:],])noauto," | grep -q context='
+# So one stop of both, or a shutdown, unmounts before it closes the LUKS volume.
+check "the mount is ordered after the LUKS unit" sh -c '
+	systemctl show -p After media-mirror.mount | tee /dev/stderr | grep -qw "systemd-cryptsetup@mirror.service"'
 check "the boot left it locked and unmounted" sh -c '
 	systemctl show -p ActiveState systemd-cryptsetup@mirror.service media-mirror.mount
 	! systemctl is-active --quiet systemd-cryptsetup@mirror.service && ! findmnt /media/mirror && ! test -e /dev/mapper/mirror'

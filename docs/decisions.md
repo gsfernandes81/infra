@@ -2138,10 +2138,14 @@ second is the owner's call; the `host` job's `three` run proves both.
   A push cut off halfway leaves rsync's `.~tmp~` staging directories, which its own
   `--delete` never removes, so `three`'s snapshot script clears them, while no push runs,
   before it snapshots.
-- **A lock really locks: crypttab sets `password-cache=no`.** systemd otherwise keeps a typed
-  passphrase in root's keyring for 2.5 minutes, and the simulation's lock-then-unlock
-  opened the array with no prompt. A second drive's line can turn caching back on, so one
-  typing unlocks both.
+- **A lock really locks.** The array's fstab entry is ordered after its LUKS unit
+  (`x-systemd.after=`): without it, one `systemctl stop` of both, and a shutdown, closed
+  the LUKS volume first, which failed because the array was still mounted and left it open,
+  as the simulation showed ("Device mirror is still in use"). And crypttab sets
+  `password-cache=no`, because systemd otherwise keeps a typed passphrase in the kernel
+  keyring for a few minutes, so a start soon after a lock would open it with no prompt. A
+  second drive's line can turn caching back on, so one typing unlocks both. The README's
+  lock command prints `locked` only once the volume is closed.
 - **Syncthing's own config is left out of the push.** It holds `zero`'s device key, which
   has no business on a box abroad; a restore re-pairs the devices.
 - **The age alert reads its ntfy URL from root's file on `zero`**, because anyone who knows a
