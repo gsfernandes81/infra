@@ -146,6 +146,7 @@ check "the update timer is masked" sh -c '
 	s=$(systemctl is-enabled transactional-update.timer); echo "$s"; [ "$s" = masked ]'
 check "rebootmgr's strategy is off" sh -c 'rebootmgrctl get-strategy | tee /dev/stderr | grep -q off'
 check "jeos-firstboot is masked" sh -c '[ "$(systemctl is-enabled jeos-firstboot.service)" = masked ]'
+check "the update recipes are there for every login" grep -q 'Updates on this box are by hand' /etc/motd.d/50-infra-updates
 
 echo "-- the checkout and the carry-over"
 check "the checkout is gavin's" sh -c '[ "$(stat -c %U /home/gavin/infra)" = gavin ] && git -C /home/gavin/infra log --oneline -1'

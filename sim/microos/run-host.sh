@@ -39,6 +39,8 @@ ssh-keygen -q -t ed25519 -N '' -f key
 s=stick/combustion
 install -D -m 755 "$repo/hosts/$host/leap/combustion/script" "$s/script"
 install -D -m 644 "$repo/leap/firstboot.sh" "$s/leap/firstboot.sh"
+install -D -m 644 "$repo/leap/pins" "$s/leap/pins"
+install -D -m 644 "$repo/leap/motd" "$s/leap/motd"
 install -D -m 644 "$repo/leap/tailscale-repo.gpg" "$s/leap/tailscale-repo.gpg"
 install -D -m 644 "$repo/hosts/$host/leap/fstab.append" "$s/host/fstab.append"
 mkdir -p "$s/host/system" && cp -p "$repo/hosts/$host/leap/system/"* "$s/host/system/"
@@ -140,13 +142,14 @@ as_root() {
 	cat "$here/host/$script" "$([ -e "$extra" ] && echo "$extra" || echo /dev/null)" |
 		ssh_as gavin@127.0.0.1 "cat > /tmp/sim-$script"
 	printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 \
-		"sudo -S -p '' env EXPECT_UID=$expect_uid EXPECT_GID=$expect_gid EXPECT_CLOUDFLARED=$expect_cloudflared EXPECT_NEW_HOST=$new_host bash /tmp/sim-$script $*"
+		"sudo -S -p '' env EXPECT_UID=$expect_uid EXPECT_GID=$expect_gid EXPECT_CLOUDFLARED=$expect_cloudflared EXPECT_COMPOSE=$expect_compose EXPECT_NEW_HOST=$new_host bash /tmp/sim-$script $*"
 }
 
 # What checks.sh compares against, read from the files the box was made from.
 expect_uid=$(sed -n 's/^gavin_uid=//p' "$repo/hosts/$host/leap/combustion/script")
 expect_gid=$(sed -n 's/^gavin_gid=//p' "$repo/hosts/$host/leap/combustion/script")
-expect_cloudflared=$(sed -n 's/^cloudflared_version=//p' "$repo/leap/firstboot.sh")
+expect_cloudflared=$(sed -n 's/^cloudflared_version=//p' "$repo/leap/pins")
+expect_compose=$(sed -n 's/^compose_version=//p' "$repo/leap/pins")
 
 rm -f known
 sim_netdev="user,id=n0,net=$sim_net,host=$sim_gateway,dns=$sim_dns"
@@ -345,6 +348,69 @@ deploy_plans 2>&1 | report
 	as_root checks.sh
 	if declare -F sim_after_reboot >/dev/null; then sim_after_reboot; fi
 } 2>&1 | report
+
+# ── the update play ──────────────────────────────────────────────────────────
+# server-update-leap.yml, for real, from the runner as the control node. Both pinned
+# binaries are first swapped for stand-ins that report version 0.0.0-sim, so the play has
+# something to move and the previous it keeps can be told from the pin. -e confirm=yes
+# answers its question, and -e ways_in_check=false skips the two checks a simulation cannot
+# pass: a stand-in tunnel never connects, and there is no tailnet.
+update_play() {
+	local inv=$repo/ansible/inventory.sim-host vars=$PWD/become.yml rc before after
+	trap 'rm -f "$inv" "$vars"' EXIT
+	echo "===== the update play"
+	if ! command -v ansible-playbook >/dev/null; then
+		skip "no ansible-playbook here"
+		return 0
+	fi
+	{ printf '%s\n' "$password"; cat <<'STUBS'; } | ssh_as gavin@127.0.0.1 "sudo -S -p '' bash -s" 2>&1 | sed 's/^/    /' || true
+set -e
+printf '#!/bin/sh\necho "cloudflared version 0.0.0-sim (stand-in)"\n' > /usr/local/bin/cloudflared
+printf '#!/bin/sh\necho 0.0.0-sim\n' > /usr/local/lib/docker/cli-plugins/docker-compose
+chmod 755 /usr/local/bin/cloudflared /usr/local/lib/docker/cli-plugins/docker-compose
+STUBS
+	cat > "$inv" <<INV
+[fleet]
+$host ansible_host=127.0.0.1 ansible_port=$static_port ansible_user=gavin ansible_ssh_private_key_file=$PWD/key ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+[containerized]
+$host
+[control]
+localhost
+INV
+	( umask 077; printf 'ansible_become_password: "%s"\n' "$password" > "$vars" )
+	install -d -m 700 "$HOME/.ssh/cp"
+	before=$(ssh_as gavin@127.0.0.1 cat /proc/sys/kernel/random/boot_id)
+	rc=0
+	( cd "$repo/ansible" && ANSIBLE_CONFIG=$repo/ansible/ansible.cfg ansible-playbook \
+		-i "$inv" playbooks/server-update-leap.yml -e "target=$host" -e confirm=yes \
+		-e ways_in_check=false -e "@$vars" ) > update.log 2>&1 || rc=$?
+	if grep -qF "$password" update.log; then
+		echo "FAIL the sudo password appeared in the update play's output"
+		sed -i "s/$password/<password>/g" update.log
+	fi
+	tail -n 40 update.log | sed 's/^/    | /'
+	[ "$rc" = 0 ] && echo "PASS the update play updated and rebooted $host" ||
+		echo "FAIL the update play failed (exit $rc)"
+	wait_gavin static
+	after=$(ssh_as gavin@127.0.0.1 cat /proc/sys/kernel/random/boot_id)
+	[ "$before" != "$after" ] && echo "PASS the play rebooted the box" || echo "FAIL the box did not reboot"
+	grep -q 'NOT CHECKED (-e ways_in_check=false)' update.log &&
+		echo "PASS the play's report says the ways in were not checked" ||
+		echo "FAIL the play's report does not say the ways in were skipped"
+	if [ "$host" = three ]; then
+		grep -q 'The array is locked: ssh -t three' update.log &&
+			echo "PASS the play ends with the unlock command" ||
+			echo "FAIL the play does not end with the unlock command"
+	fi
+	if ssh -tt -i key -p "$(cat port)" -o StrictHostKeyChecking=no -o UserKnownHostsFile=known \
+		-o BatchMode=yes gavin@127.0.0.1 true 2>&1 < /dev/null | grep -q 'Updates on this box are by hand'; then
+		echo "PASS a login shows the update recipes"
+	else
+		echo "FAIL a login does not show the update recipes"
+	fi
+	as_root update-checks.sh
+}
+update_play 2>&1 | report
 
 kill "$(cat qemu.pid)" 2>/dev/null || true
 

@@ -1,0 +1,19 @@
+
+  Updates on this box are by hand, from the control node, one host at a time:
+
+    cd ~/infra/ansible
+    ansible-playbook playbooks/server-update-leap.yml -e target=HOST -K
+
+  It updates, moves the cloudflared and Compose pins, reboots, and reports done
+  once the box answers again.
+
+  The Pi's boot firmware is locked and changes only with someone at the console.
+  On the box, in one shell, then watch it come back:
+
+    sudo transactional-update shell
+      zypper removelock 'u-boot-rpi*' 'raspberrypi-firmware*' 'raspberrypi-eeprom*'
+      zypper update 'u-boot-rpi*' 'raspberrypi-firmware*' 'raspberrypi-eeprom*'
+      zypper addlock 'u-boot-rpi*' 'raspberrypi-firmware*' 'raspberrypi-eeprom*'
+      exit
+    sudo systemctl reboot
+

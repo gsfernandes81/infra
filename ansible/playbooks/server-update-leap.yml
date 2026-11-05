@@ -1,0 +1,326 @@
+---
+# UPDATE ONE LEAP HOST, by hand, as every update on this fleet is (docs/decisions.md §
+# Updates are by hand on every host). From the control node, one host at a time:
+#
+#     cd ansible
+#     ansible-playbook playbooks/server-update-leap.yml -e target=one -K
+#
+# WHAT IT DOES, in order, and a failure at any step stops it before the reboot:
+#   1. Refuses a host that is not openSUSE Leap. Alpine hosts update with apk.
+#   2. Shows what is running there, and asks before going on: the reboot ends every
+#      container and every live session (one carries the dev hub's agents).
+#   3. `transactional-update up`, which builds the update into a new snapshot and touches
+#      nothing running. It reports any package a lock held back, as the Pi's boot
+#      firmware is locked (decisions.md § The Pi's boot firmware is locked).
+#   4. Reports the Compose openSUSE's repositories offer: at 5.5.0 or newer, the host can
+#      go back to the package (decisions.md § Leap hosts carry upstream's Compose).
+#   5. Moves cloudflared and Compose to leap/pins, downloading each from its release and
+#      installing it only on a SHA-256 match, and keeps the binary it replaces:
+#      /usr/local/lib/cloudflared.previous and /usr/local/lib/docker/docker-compose.previous.
+#      cloudflared is NOT restarted: this play's own connection may run through it. The
+#      reboot starts the new one.
+#   6. Installs leap/motd, the update recipes every login shows.
+#   7. Reboots, and waits for the box to answer this play again.
+#   8. Reports done only once both ways in answer: the tunnel serving (cloudflared's
+#      ready connections) and the tailnet reaching another fleet host (tailscale ping),
+#      nothing failed but openSUSE's known first-boot unit, and both pins in place. On a
+#      host with a locked array, the last line is the unlock command.
+#
+# -K IS REQUIRED: every step past the first runs as root.
+#
+# MOVING A PIN is a commit to leap/pins (both architectures' SHA-256), then this play.
+# Going back is the same install from the .previous file, by hand (leap/README.md).
+#
+# Under --check it reads, reports what it would move, and changes nothing: no update, no
+# download, no reboot. The simulation (sim/microos/run-host.sh) runs it for real, with
+# -e confirm=yes, which answers the question in step 2 for a run nobody types into, and
+# -e ways_in_check=false, since its stand-in tunnel cannot connect and it has no tailnet;
+# the play says so in its report.
+
+- name: Check the inventory is loaded
+  ansible.builtin.import_playbook: _assert-inventory.yml
+  vars:
+    required_group: fleet
+
+- name: Check a target was named
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check -e target names a host in the inventory
+      # Without it the play below matches no host and exits 0 having done nothing
+      # (_assert-inventory.yml, the same trap).
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target in groups['fleet']
+        fail_msg: Name the host, -e target=<host>, one in the inventory's fleet group.
+        success_msg: "target: {{ target | default('?') }}"
+
+- name: Update a Leap host and reboot it
+  hosts: "{{ target }}"
+  gather_facts: false
+
+  vars:
+    pins_file: "{{ control_checkout }}/leap/pins"
+    # KEY=value lines, comments and blanks left out; a shell sources the same file.
+    pins: >-
+      {{ dict(lookup('file', pins_file).splitlines()
+         | reject('match', '^\s*(#|$)') | map('split', '=')) }}
+    cloudflared_bin: /usr/local/bin/cloudflared
+    cloudflared_previous: /usr/local/lib/cloudflared.previous
+    compose_bin: /usr/local/lib/docker/cli-plugins/docker-compose
+    # Beside the plugin directory, not in it: Docker reads every docker-* file there as a
+    # plugin (leap/README.md § Moving a pin by hand).
+    compose_previous: /usr/local/lib/docker/docker-compose.previous
+    # The fleet host the tailnet must reach after the reboot.
+    tailnet_peer: zero
+    ways_in_check: true
+    confirm: ""
+
+  tasks:
+    - name: Read {{ inventory_hostname }}'s OS
+      ansible.builtin.slurp:
+        src: /etc/os-release
+      register: upd_os
+
+    - name: Check {{ inventory_hostname }} runs openSUSE Leap
+      ansible.builtin.assert:
+        that: (upd_os.content | b64decode) is search('^ID="?opensuse-leap"?$', multiline=True)
+        fail_msg: >-
+          {{ inventory_hostname }} is not openSUSE Leap, and this play updates only Leap
+          hosts. Nothing has been touched.
+        success_msg: "{{ (upd_os.content | b64decode) | regex_search('PRETTY_NAME=\"?([^\"\\n]*)', '\\1') | first }}"
+
+    - name: Read the architecture, kernel and pinned versions
+      ansible.builtin.shell: |
+        uname -m
+        uname -r
+        {{ cloudflared_bin }} --version 2>/dev/null | sed -n 's/.*version \([^ ]*\).*/\1/p' | head -n 1
+        {{ compose_bin }} version --short 2>/dev/null | sed 's/^v//' | head -n 1
+      register: upd_before
+      changed_when: false
+      failed_when: upd_before.stdout_lines | length < 2
+
+    - name: Note the pins and what is installed
+      ansible.builtin.set_fact:
+        upd_arch: "{{ upd_before.stdout_lines[0] }}"
+        upd_kernel_before: "{{ upd_before.stdout_lines[1] }}"
+        upd_cloudflared_before: "{{ upd_before.stdout_lines[2] | default('') }}"
+        upd_compose_before: "{{ upd_before.stdout_lines[3] | default('') }}"
+        upd_asset: >-
+          {{ {'aarch64': {'cloudflared': 'arm64', 'compose': 'aarch64'},
+              'x86_64': {'cloudflared': 'amd64', 'compose': 'x86_64'}}[upd_before.stdout_lines[0]] }}
+
+    - name: Check leap/pins has both pins for this architecture
+      ansible.builtin.assert:
+        that:
+          - pins.cloudflared_version is defined
+          - pins['cloudflared_sha256_' ~ upd_arch] | default('') | length == 64
+          - pins.compose_version is defined
+          - pins['compose_sha256_' ~ upd_arch] | default('') | length == 64
+        fail_msg: "{{ pins_file }} lacks a version or a {{ upd_arch }} SHA-256. Nothing has been touched."
+        success_msg: >-
+          cloudflared {{ upd_cloudflared_before or 'missing' }} -> {{ pins.cloudflared_version }},
+          Compose {{ upd_compose_before or 'missing' }} -> {{ pins.compose_version }}
+
+    - name: Read the containers running there
+      ansible.builtin.command: docker ps --format '{{ "{{" }}.Names{{ "}}" }}'
+      register: upd_containers
+      changed_when: false
+      failed_when: false
+      become: true
+
+    - name: Ask before updating and rebooting
+      ansible.builtin.pause:
+        prompt: |
+          {{ inventory_hostname }} will be updated and REBOOTED. Running there now:
+            {{ upd_containers.stdout_lines | join(', ') if upd_containers.stdout_lines else 'no containers' }}
+          The reboot ends all of them, and every live session. Go on? [y/N]
+      register: upd_answer
+      when: confirm != 'yes' and not ansible_check_mode
+
+    - name: Check the answer was yes
+      ansible.builtin.assert:
+        that: confirm == 'yes' or ansible_check_mode or (upd_answer.user_input | default('') | lower) in ['y', 'yes']
+        fail_msg: Not confirmed. Nothing has been touched.
+        success_msg: going on
+
+    - name: Update into a new snapshot (transactional-update)
+      ansible.builtin.command: transactional-update --non-interactive up
+      register: upd_tu
+      changed_when: "'New default snapshot' in upd_tu.stdout"
+      become: true
+
+    - name: Note the updates a lock held back
+      ansible.builtin.set_fact:
+        upd_held: "{{ upd_tu.stdout | default('') | regex_findall('will NOT be installed:\\s*\\n\\s*(.+)') }}"
+
+    - name: Read the Compose openSUSE offers
+      ansible.builtin.shell: >-
+        zypper --non-interactive --no-refresh info docker-compose |
+        sed -n 's/^Version *: *//p' | head -n 1
+      register: upd_leap_compose
+      changed_when: false
+      failed_when: false
+      become: true
+
+    - name: "If cloudflared is off its pin: download it"
+      ansible.builtin.get_url:
+        url: "https://github.com/cloudflare/cloudflared/releases/download/{{ pins.cloudflared_version }}/cloudflared-linux-{{ upd_asset.cloudflared }}"
+        dest: /var/tmp/infra-cloudflared
+        checksum: "sha256:{{ pins['cloudflared_sha256_' ~ upd_arch] }}"
+        mode: "0755"
+        force: true
+      register: upd_cfd_dl
+      when: upd_cloudflared_before != pins.cloudflared_version
+      become: true
+
+    - name: "If cloudflared moves: keep the current as previous"
+      ansible.builtin.copy:
+        src: "{{ cloudflared_bin }}"
+        dest: "{{ cloudflared_previous }}"
+        remote_src: true
+        mode: "0755"
+      when: upd_cloudflared_before != pins.cloudflared_version and upd_cloudflared_before != ''
+      become: true
+
+    - name: "If cloudflared moves: install the pinned binary"
+      ansible.builtin.copy:
+        src: /var/tmp/infra-cloudflared
+        dest: "{{ cloudflared_bin }}"
+        remote_src: true
+        mode: "0755"
+      when: upd_cloudflared_before != pins.cloudflared_version and not ansible_check_mode
+      become: true
+
+    - name: "If Compose is off its pin: download it"
+      ansible.builtin.get_url:
+        url: "https://github.com/docker/compose/releases/download/v{{ pins.compose_version }}/docker-compose-linux-{{ upd_asset.compose }}"
+        dest: /var/tmp/infra-docker-compose
+        checksum: "sha256:{{ pins['compose_sha256_' ~ upd_arch] }}"
+        mode: "0755"
+        force: true
+      register: upd_compose_dl
+      when: upd_compose_before != pins.compose_version
+      become: true
+
+    - name: "If Compose moves: keep the current as previous"
+      ansible.builtin.copy:
+        src: "{{ compose_bin }}"
+        dest: "{{ compose_previous }}"
+        remote_src: true
+        mode: "0755"
+      when: upd_compose_before != pins.compose_version and upd_compose_before != ''
+      become: true
+
+    - name: "If Compose moves: install the pinned binary"
+      ansible.builtin.copy:
+        src: /var/tmp/infra-docker-compose
+        dest: "{{ compose_bin }}"
+        remote_src: true
+        mode: "0755"
+      when: upd_compose_before != pins.compose_version and not ansible_check_mode
+      become: true
+
+    - name: Remove the downloads
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: [/var/tmp/infra-cloudflared, /var/tmp/infra-docker-compose]
+      become: true
+
+    - name: Install the update recipes every login shows
+      ansible.builtin.copy:
+        src: "{{ control_checkout }}/leap/motd"
+        dest: /etc/motd.d/50-infra-updates
+        mode: "0644"
+      become: true
+
+    - name: Reboot {{ inventory_hostname }} into the new snapshot
+      ansible.builtin.reboot:
+        msg: server-update-leap.yml is rebooting this box into its updated snapshot
+        reboot_timeout: 900
+      become: true
+
+    # ── after the reboot ─────────────────────────────────────────────────────
+    - name: "Ways in: wait for the tunnel's ready connections"
+      ansible.builtin.command: curl -fsS -m 5 http://127.0.0.1:20241/ready
+      register: upd_ready
+      until: upd_ready.rc == 0 and (upd_ready.stdout | from_json).readyConnections | default(0) > 0
+      retries: 18
+      delay: 10
+      changed_when: false
+      when: ways_in_check | bool and not ansible_check_mode
+
+    - name: "Ways in: check Tailscale reaches {{ tailnet_peer }}"
+      ansible.builtin.command: tailscale ping -c 3 {{ tailnet_peer }}
+      register: upd_tailnet
+      changed_when: false
+      until: upd_tailnet.rc == 0
+      retries: 6
+      delay: 10
+      when: ways_in_check | bool and not ansible_check_mode
+
+    - name: Read the units that failed this boot
+      ansible.builtin.shell: |
+        systemctl is-system-running --wait >/dev/null 2>&1 || true
+        systemctl --failed --no-legend --plain | awk '{print $1}'
+      register: upd_failed
+      changed_when: false
+      become: true
+      when: not ansible_check_mode
+
+    # openSUSE's import-pubring-from-rpmdb (bsc#1245786) can fail on a boot whose rpm
+    # database has new keys, after importing every one; harmless, and fixed upstream
+    # (sim/microos/host/checks.sh). Any other failed unit stops the play here.
+    - name: Check nothing failed but openSUSE's known unit
+      ansible.builtin.assert:
+        that: upd_failed.stdout_lines | reject('equalto', 'import-pubring-from-rpmdb.service') | list | length == 0
+        fail_msg: >-
+          Failed after the reboot: {{ upd_failed.stdout_lines | join(', ') }}. The update
+          is in place; `systemctl status <unit>` on {{ inventory_hostname }} says why, and
+          `sudo transactional-update rollback` then a reboot goes back to the snapshot before.
+        success_msg: "{{ 'nothing failed' if not upd_failed.stdout_lines else 'only the known openSUSE unit failed' }}"
+      when: not ansible_check_mode
+
+    - name: Read the kernel and pinned versions after
+      ansible.builtin.shell: |
+        uname -r
+        {{ cloudflared_bin }} --version 2>/dev/null | sed -n 's/.*version \([^ ]*\).*/\1/p' | head -n 1
+        {{ compose_bin }} version --short 2>/dev/null | sed 's/^v//' | head -n 1
+        grep -qE '^[^#].*noauto' /etc/crypttab 2>/dev/null && echo locked-array || echo no-array
+      register: upd_after
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Check both pins are in place
+      ansible.builtin.assert:
+        that:
+          - upd_after.stdout_lines[1] == pins.cloudflared_version
+          - upd_after.stdout_lines[2] == pins.compose_version
+        fail_msg: >-
+          After the reboot, cloudflared is {{ upd_after.stdout_lines[1] | default('?') }} and
+          Compose {{ upd_after.stdout_lines[2] | default('?') }}, where leap/pins says
+          {{ pins.cloudflared_version }} and {{ pins.compose_version }}.
+        success_msg: both pins in place
+      when: not ansible_check_mode
+
+    - name: Print what changed, and what is next
+      # changed_when: true, or display_ok_hosts = False in ansible.cfg hides the report this
+      # play exists to give (ansible.cfg, beside the setting).
+      ansible.builtin.debug:
+        msg: >-
+          {{ (['DRY RUN: nothing was updated, downloaded or rebooted.'] if ansible_check_mode else [
+                inventory_hostname ~ ' updated and rebooted: kernel ' ~ upd_kernel_before ~ ' -> ' ~ upd_after.stdout_lines[0] ~ '.']) +
+             ['cloudflared ' ~ (upd_cloudflared_before or 'missing') ~ ' -> ' ~ pins.cloudflared_version ~
+                (', the previous kept at ' ~ cloudflared_previous if upd_cloudflared_before not in ['', pins.cloudflared_version] else '') ~ '.',
+              'Compose ' ~ (upd_compose_before or 'missing') ~ ' -> ' ~ pins.compose_version ~
+                (', the previous kept at ' ~ compose_previous if upd_compose_before not in ['', pins.compose_version] else '') ~ '.',
+              'openSUSE offers Compose ' ~ (upd_leap_compose.stdout | default('') | trim or 'unknown') ~
+                '; at 5.5.0 or newer the host can go back to the package (decisions.md).',
+              ('Held back by a lock: ' ~ (upd_held | join('; ')) ~ '.') if upd_held else 'No update was held back by a lock.',
+              ('Ways in: the tunnel serving and the tailnet reaching ' ~ tailnet_peer ~ '.') if ways_in_check | bool
+                else 'Ways in: NOT CHECKED (-e ways_in_check=false).'] +
+             (['The array is locked: ssh -t ' ~ inventory_hostname ~ " 'sudo systemctl start systemd-cryptsetup@mirror.service; and sudo systemctl start media-mirror.mount'"]
+                if not ansible_check_mode and upd_after.stdout_lines[3] | default('') == 'locked-array' else []) }}
+      changed_when: true
