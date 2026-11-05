@@ -1,0 +1,35 @@
+#!/bin/sh
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /etc/periodic/daily
+# infra-name: mirror-backup-age
+# infra-mode: 0755
+#
+# Tells the owner, through ntfy, when zero's last good backup to three is more than three
+# days old: a three that is off, unreachable or left locked after a reboot, or a backup that
+# fails every night (plans/three.md § Backups). Run by root's cron right after
+# mirror-backup, which run-parts starts first and waits for.
+#
+# The ntfy topic's URL is a secret, since anyone who knows it can read and post to it, so
+# it is in root's /var/lib/mirror-backup/ntfy-url, mode 600, never in git. Without it the
+# check still runs and says so on its own output.
+set -eu
+
+state=/var/lib/mirror-backup
+max_age=$((3 * 24 * 3600))
+
+last=$(cat "$state/last-success" 2>/dev/null || echo 0)
+age=$(( $(date +%s) - last ))
+[ "$age" -gt "$max_age" ] || exit 0
+
+if [ "$last" = 0 ]; then
+	msg="zero's backup to three has never succeeded"
+else
+	msg="zero's backup to three last succeeded $(date -d "@$last" '+%Y-%m-%d %H:%M'), $((age / 86400)) days ago; /var/lib/mirror-backup/last.log on zero says why"
+fi
+if [ -r "$state/ntfy-url" ]; then
+	curl -fsS -m 30 -H 'Title: zero backup' -d "$msg" "$(cat "$state/ntfy-url")" >/dev/null
+else
+	echo "mirror-backup-age: $msg; no $state/ntfy-url to tell the owner" >&2
+	exit 1
+fi

@@ -1,0 +1,63 @@
+#!/bin/sh
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /etc/periodic/daily
+# infra-name: mirror-backup
+# infra-mode: 0755
+#
+# Pushes zero's backup to three, nightly, by root's cron (run-parts /etc/periodic/daily,
+# 02:00), over the tailnet (plans/three.md § Backups). What goes: Immich's library, upload,
+# backups (its nightly database dumps) and profile, and zero's Syncthing share. Never the
+# live Postgres directory, which a copy mid-write leaves inconsistent, nor thumbs and
+# encoded-video, which Immich regenerates, nor Syncthing's own config, which holds zero's
+# device key and has no business on a box abroad.
+#
+# The key, /root/.ssh/mirror-backup, can do one thing on three: write into its incoming
+# directory, through the rsync daemon its authorized_keys line starts. Files appear in place
+# only at the end of a run (--delay-updates), deletions mirror (--delete-delay), and three's
+# snapshots keep what a run overwrites or deletes. Owners and modes travel as numbers and
+# are kept on three in an xattr, since its receiving user is not root.
+#
+# A run against a locked three fails, and the next night retries; mirror-backup-age tells
+# the owner when the last good run is too old. Each run's output is in
+# /var/lib/mirror-backup/last.log; a good run writes its time to last-success.
+set -eu
+
+# three's tailnet address, `tailscale ip -4` on three once it has joined.
+three=FILL-FROM-THREE-TAILNET-ADDRESS
+key=/root/.ssh/mirror-backup
+state=/var/lib/mirror-backup
+# Read by sim/microos/host/three.sh, which pushes with exactly these.
+rsync_opts="-aHAX --numeric-ids --delete --delete-delay --delay-updates"
+
+case "$three" in FILL-FROM-*)
+	echo "mirror-backup: three's address is not filled in" >&2
+	exit 1
+	;;
+esac
+[ -r "$key" ] || { echo "mirror-backup: no key at $key" >&2; exit 1; }
+install -d -m 700 "$state"
+exec 9> "$state/lock"
+flock -n 9 || { echo "mirror-backup: a run is still going" >&2; exit 0; }
+exec > "$state/last.log" 2>&1
+date
+
+# three's host key is learned at the first run and pinned from then on. The first run goes
+# over the tailnet, whose addresses WireGuard ties to each node's own key, so the answer
+# cannot come from another box.
+rsh="ssh -i $key -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$state/known_hosts"
+
+# rsync's exit 24 is "some files vanished before they could be sent", which Immich's
+# uploads in progress cause; the next run takes them.
+push() {
+	rc=0
+	# shellcheck disable=SC2086  # rsync_opts is a list of options
+	rsync $rsync_opts -e "$rsh" "$@" || rc=$?
+	[ "$rc" = 0 ] || [ "$rc" = 24 ]
+}
+push /media/immich-data/library /media/immich-data/upload /media/immich-data/backups \
+	/media/immich-data/profile "backup@$three::incoming/immich/"
+push --exclude=/config/ /media/syncthing/ "backup@$three::incoming/syncthing/"
+
+date +%s > "$state/last-success"
+echo "mirror-backup: done"
