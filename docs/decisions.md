@@ -1917,7 +1917,7 @@ alike.
 
 - **An exception to *no box holds a key to another* (above), granted by the owner.**
   `zero` holds one key to `three`, and it can do one thing: write into one directory,
-  through `rrsync -wo`, from `zero`'s tailnet address, with no shell, forwarding or
+  through `rrsync -wo` (rsync's own write-only daemon since 2026-11-04, below), from `zero`'s tailnet address, with no shell, forwarding or
   terminal. The rule exists so a compromised box cannot reach the rest of the fleet. This
   key reaches a directory whose history `three`'s root snapshots out of the key's reach,
   so a compromised `zero` can at worst spoil the newest copy.
@@ -2105,6 +2105,37 @@ writing `hosts/three/leap/` and are proven by the `host` job's `three` run.
   encryption, and Docker runs only once the array is unlocked.
 - **The newest 90 daily snapshots are kept**, a default the owner can change in
   `mirror-snapshot`: three months to notice a bad overwrite from `zero`.
+
+## `zero`'s backup to `three`: rsync's own daemon behind the key, owners in an xattr
+
+**Decided 2026-11-04.** The first point was left to the infra agent by the owner, the
+second is the owner's call; the `host` job's `three` run proves both.
+
+- **The key starts rsync's own daemon, not `rrsync`.** openSUSE's `rsync` package does not
+  install `rrsync`; it leaves a copy among its docs, which the image does not carry. The
+  key's forced command is `rsync --server --daemon --config=/etc/rsync-backup.conf .`, a
+  tracked file serving one module with `write only`, `list = no` and munged symlinks, as
+  the backup user. It needs nothing but the rsync package, and the sim shows the key runs
+  no command of its own, reads nothing back, lists nothing, forwards nothing, and cannot
+  write to `/tmp` through a `..` name or a symlink, though the backup user can. Set
+  aside: a pinned copy of `rrsync`, which would be the repo carrying a script openSUSE
+  does not ship.
+- **Owners travel in an xattr (`fake super`).** The backup user cannot chown, so the
+  daemon keeps each file's owner, group and mode in `user.rsync.%stat`, and a restore with
+  `--fake-super` on the reading side puts them back; the sim restores a file and reads its
+  owner back. Set aside: letting every file arrive as the backup user's and resetting
+  owners by hand after a restore.
+- **The key line waits for zero's values, and the stick waits for the key line.** Its
+  `from=` and key are placeholders until zero is on the tailnet and has made its key, and
+  `make-stick` refuses a stick with a placeholder in it, so `three` never boots with a
+  line that names nothing.
+- **zero learns `three`'s host key at the first push and pins it**
+  (`StrictHostKeyChecking=accept-new`): that push goes over the tailnet, whose addresses
+  WireGuard ties to each node's own key.
+- **Syncthing's own config is left out of the push.** It holds `zero`'s device key, which
+  has no business on a box abroad; a restore re-pairs the devices.
+- **The age alert reads its ntfy URL from root's file on `zero`**, because anyone who knows a
+  topic can read and post to it.
 
 ## The lesson worth keeping
 

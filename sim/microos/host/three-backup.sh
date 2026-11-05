@@ -53,5 +53,12 @@ locked)
 	;;
 after-lock)
 	check "the push after the unlock arrived" sh -c "ls $lib; [ \"\$(cat $lib/d.jpg)\" = four ]"
+	# The restore in hosts/three/leap/README.md: --fake-super reads the kept owners from the
+	# source, and -M--super writes them for real at the destination.
+	check "a restore puts back a.jpg's real owner and mode" sh -c "
+		rm -rf /var/tmp/sim-restore
+		rsync -aHAX --numeric-ids --fake-super -M--super $lib/ /var/tmp/sim-restore/
+		s=\$(stat -c '%u:%g %a' /var/tmp/sim-restore/a.jpg); echo \"\$s\"; rm -rf /var/tmp/sim-restore
+		[ \"\$s\" = '1000:1000 640' ]"
 	;;
 esac

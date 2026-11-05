@@ -95,8 +95,10 @@ another ([`decisions.md`](../docs/decisions.md)). The key is made nearly powerle
 - A `backup` user on `three` with no sudo and no password, whose shell runs only its key's
   forced command (sshd runs that command through the user's shell, so it is a real one;
   `decisions.md`). Its one `authorized_keys` line is
-  `restrict,from="<zero's tailnet address>",command="rrsync -wo /media/mirror/incoming"`:
-  write-only, one directory, no forwarding, no terminal, only from `zero`.
+  `restrict,from="<zero's tailnet address>",command="rsync --server --daemon
+  --config=/etc/rsync-backup.conf ."`: write-only, one directory, no forwarding, no
+  terminal, only from `zero` (`rrsync` was the first plan; openSUSE does not ship it,
+  `decisions.md`). Owners and modes are kept in an xattr, since the user cannot chown.
 - `three` takes its own daily snapshots of that directory, as root, read-only. The backup
   user cannot touch them. A compromised `zero` could at worst overwrite the current copy;
   every earlier snapshot survives.
