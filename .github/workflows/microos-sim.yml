@@ -14,24 +14,24 @@ name: microos-sim
 on:
   push:
     paths: ['sim/microos/**', '.github/workflows/microos-sim.yml', 'leap/**', 'hosts/*/leap/**',
-      'hosts/one/*', 'ansible/playbooks/server-deploy-compose.yml',
+      'hosts/one/*', 'hosts/three/*', 'ansible/playbooks/server-deploy-compose.yml',
       'ansible/playbooks/_deploy-compose-one.yml', 'ansible/playbooks/_sync-host-checkout.yml',
       'ansible/playbooks/_review-anchor.yml', 'ansible/playbooks/_assert-inventory.yml',
       'ansible/playbooks/files/compose-oneshots.py', 'ansible/callback_plugins/**',
       'ansible/ansible.cfg', 'ansible/group_vars/**', 'ansible/host_vars/**',
       'ansible/requirements.yml', 'ansible/deploy-hooks/**', 'deployments/calibre-web/**',
       'deployments/garmin-mcp/**', 'deployments/send2ereader/**', 'deployments/torrents/**',
-      '!deployments/*/README.md']
+      'deployments/syncthing-three/**', '!deployments/*/README.md']
   pull_request:
     paths: ['sim/microos/**', '.github/workflows/microos-sim.yml', 'leap/**', 'hosts/*/leap/**',
-      'hosts/one/*', 'ansible/playbooks/server-deploy-compose.yml',
+      'hosts/one/*', 'hosts/three/*', 'ansible/playbooks/server-deploy-compose.yml',
       'ansible/playbooks/_deploy-compose-one.yml', 'ansible/playbooks/_sync-host-checkout.yml',
       'ansible/playbooks/_review-anchor.yml', 'ansible/playbooks/_assert-inventory.yml',
       'ansible/playbooks/files/compose-oneshots.py', 'ansible/callback_plugins/**',
       'ansible/ansible.cfg', 'ansible/group_vars/**', 'ansible/host_vars/**',
       'ansible/requirements.yml', 'ansible/deploy-hooks/**', 'deployments/calibre-web/**',
       'deployments/garmin-mcp/**', 'deployments/send2ereader/**', 'deployments/torrents/**',
-      '!deployments/*/README.md']
+      'deployments/syncthing-three/**', '!deployments/*/README.md']
   workflow_dispatch:
 
 permissions:
@@ -187,7 +187,8 @@ jobs:
             zypper --non-interactive --quiet refresh >/dev/null
             uname -m
             for p in docker docker-compose docker-buildx cloudflared tailscale bcache-tools smartmontools \
-                btrfsprogs zram-generator syncthing health-checker cryptsetup rsync; do
+                btrfsprogs zram-generator syncthing health-checker cryptsetup rsync \
+                wpa_supplicant bcm43xx-firmware kernel-firmware-brcm NetworkManager-wifi; do
               echo "== $p"
               zypper --non-interactive --quiet search --match-exact --details "$p" || echo "NOT FOUND: $p"
             done' | tee packages.txt
@@ -251,7 +252,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        host: [one]
+        host: [one, three]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:

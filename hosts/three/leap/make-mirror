@@ -1,0 +1,80 @@
+#!/bin/bash
+# Makes three's backup array on a new, empty drive, once, at the visit, as root on three:
+#
+#   sudo ~/infra/hosts/three/leap/make-mirror /dev/sdX
+#
+# It ERASES <device>. It writes LUKS2 with Adiantum (plans/three.md § Encryption: a Pi 4
+# has no AES instructions), labelled mirror-luks, the label /etc/crypttab names; inside it a
+# btrfs labelled mirror holding the subvolume `incoming` (the backup user's, the one place
+# zero's rsync may write), the subvolume `syncthing` (gavin's, Syncthing's data and its
+# identity) and the directory `snapshots` (root's). It asks for the passphrase twice and
+# stores it nowhere. It leaves the array locked: unlocking is hosts/three/leap/README.md.
+#
+# It refuses a device that is not a whole disk, one that is mounted or holds anything a
+# signature scan finds (a drive in use is never new), and a box that already has a volume
+# labelled mirror-luks. It asks for the device name before it erases anything.
+set -euo pipefail
+
+die() { echo "make-mirror: $*" >&2; exit 1; }
+
+[ $# -eq 1 ] || die "usage: make-mirror <device>"
+dev=$1
+[ "$(id -u)" -eq 0 ] || die "run as root"
+[ "$(hostname)" = three ] || die "this is $(hostname), not three"
+case "$dev" in /dev/sd[a-z]) ;; *) die "$dev is not a whole /dev/sdX disk" ;; esac
+[ -b "$dev" ] || die "no block device $dev"
+id backup >/dev/null 2>&1 || die "no backup user; this box was not made by three's first boot"
+
+# Nothing on it, nothing using it. lsblk lists the disk and any partition; wipefs -n lists
+# every signature it would erase, and erases none.
+[ "$(lsblk -rno NAME "$dev" | wc -l)" -eq 1 ] || die "$dev has partitions: $(lsblk -rno NAME "$dev" | tr '\n' ' ')"
+[ -z "$(wipefs -n "$dev")" ] || die "$dev holds a signature, so it is not new: $(wipefs -n "$dev")"
+grep -q "^$dev" /proc/mounts && die "$dev is mounted"
+grep -q "^$dev" /proc/swaps && die "$dev is in use as swap"
+# The label is how crypttab finds the array, so two would make the unlock pick one at
+# random. A second drive is a second label and a second crypttab line (README).
+[ -z "$(blkid -L mirror-luks || true)" ] || die "a volume labelled mirror-luks exists: $(blkid -L mirror-luks)"
+
+lsblk -o NAME,SIZE,MODEL,SERIAL,TRAN "$dev"
+read -r -p "ERASE $dev for three's backup array? Type the device name to go on: " answer
+[ "$answer" = "$dev" ] || die "not confirmed; nothing written"
+read -r -s -p "Passphrase for the array: " pass1
+echo
+read -r -s -p "The same again: " pass2
+echo
+[ -n "$pass1" ] || die "an empty passphrase; nothing written"
+[ "$pass1" = "$pass2" ] || die "the two passphrases differ; nothing written"
+
+mnt=$(mktemp -d)
+cleanup() {
+	umount "$mnt" 2>/dev/null || true
+	rmdir "$mnt" 2>/dev/null || true
+	cryptsetup close mirror-make 2>/dev/null || true
+}
+trap cleanup EXIT
+
+# The passphrase reaches cryptsetup on stdin with no newline, as systemd's prompt passes it
+# when the owner types it at the unlock, so the two read the same key.
+printf '%s' "$pass1" | cryptsetup luksFormat --batch-mode --type luks2 \
+	--cipher xchacha12,aes-adiantum-plain64 --key-size 256 --label mirror-luks \
+	--key-file=- "$dev"
+printf '%s' "$pass1" | cryptsetup open --key-file=- "$dev" mirror-make
+unset pass1 pass2
+
+mkfs.btrfs -q -L mirror /dev/mapper/mirror-make
+mount /dev/mapper/mirror-make "$mnt"
+btrfs subvolume create "$mnt/incoming" >/dev/null
+chown backup:backup "$mnt/incoming"
+chmod 700 "$mnt/incoming"
+btrfs subvolume create "$mnt/syncthing" >/dev/null
+chown gavin:gavin "$mnt/syncthing"
+install -d -m 700 "$mnt/snapshots"
+ls -la "$mnt"
+cleanup
+trap - EXIT
+
+# Proved by reading the header back, not by cryptsetup's exit status.
+cryptsetup luksDump "$dev" | grep -E '^(Version|Label):|^[[:space:]]+cipher:'
+udevadm settle
+blkid -L mirror-luks >/dev/null || die "$dev does not answer to LABEL=mirror-luks"
+echo "make-mirror: $dev is three's backup array, locked. Unlock it as hosts/three/leap/README.md says."

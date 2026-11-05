@@ -37,7 +37,7 @@
 #      plan asks about; anything else that exits is a failure.
 #
 # `deployment=all` runs that for every deployment this play may touch, ONE AT A TIME, `one`
-# before `zero`, each
+# and `three` before `zero`, each
 # with its own plan and its own question. It stops at the first failure and does not go on
 # to the next, so a broken deployment is never followed by a second change. A "no" skips
 # only that deployment. `-e assume_yes=true` skips the question for ONE named deployment and
@@ -166,11 +166,14 @@
         label: "{{ item.item.host }}/{{ item.item.name }}"
       when: item.item not in (deploy_keep | default([]))
 
-    - name: Order them, one before zero and then by name
-      # Written out, so a new container host has to be added here.
+    - name: Order them, one and three before zero, by name
+      # Written out, so a new container host has to be added here: one left out is dropped
+      # without a word, as three's Syncthing was in its first simulated plan. zero is last,
+      # being the box whose failure costs most.
       ansible.builtin.set_fact:
         deploy_targets: >-
           {{ ((deploy_keep | default([])) | selectattr('host', 'eq', 'one') | sort(attribute='name') | list)
+             + ((deploy_keep | default([])) | selectattr('host', 'eq', 'three') | sort(attribute='name') | list)
              + ((deploy_keep | default([])) | selectattr('host', 'eq', 'zero') | sort(attribute='name') | list) }}
 
     - name: Pick what this run covers

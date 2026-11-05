@@ -51,7 +51,9 @@ Singapore at a date the owner picks.
 1. **One first-boot script per host,** at `hosts/<host>/leap/combustion/script`, with the
    steps every host shares in `leap/firstboot.sh` ([`leap/README.md`](../leap/README.md)).
    **`one`'s is written** and booted in CI (`sim/microos/run-host.sh`), with its own values
-   (uid, subvolume ids, address) read off the box on 2026-11-03; `three`'s follows. Leap runs it
+   (uid, subvolume ids, address) read off the box on 2026-11-03. **`three`'s is written**
+   too, booted in the same job with its array formatted and unlocked; its stick comes from
+   `make-stick --new` (`decisions.md`). Leap runs it
    once, at first boot. It is reviewed like any boot-path file and not
    generated, and carries no secret. It:
    - sets users, `gavin`'s sudo drop-in, ssh keys (none for root), hostname, the root
@@ -79,7 +81,9 @@ login as root is refused with a valid key in place.
    secrets: the owner keeps it with the other secret-bearing media and erases it with
    `blkdiscard` after the host is proven, not with a file delete, which flash keeps. One
    stick serves one host at a time.
-3. **`three`'s tunnel and ssh alias, created over the phone before the visit.** Its
+3. **`three`'s tunnel and ssh alias, created over the phone after its first boot**, on the
+   LAN, because `server-create-host-tunnel.yml` writes the credentials onto the host
+   (`decisions.md`, [`hosts/three/leap/README.md`](../hosts/three/leap/README.md)). Its
    hostname is `three.<dns_zone>`, derived as every alias is.
 4. **Ansible for MicroOS.** Packages go through `transactional-update` and take effect at
    a reboot. One play per OS runs the owner's update on one host: it updates, reboots, and

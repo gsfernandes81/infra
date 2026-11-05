@@ -1,0 +1,117 @@
+# three on Leap
+
+`three` is the off-site backup in the Argon EON ([`plans/three.md`](../../../plans/three.md)).
+It is a new host: the 1 GB Pi 4 that runs `one` today, on a new SD card. This directory is
+its first boot, in `one`'s shape ([`leap/README.md`](../../../leap/README.md)), plus what only
+`three` has: the backup array behind a passphrase.
+
+| Path | What it is |
+|---|---|
+| `combustion/script` | The first-boot script. |
+| `system/` | Every file the first boot installs, each at the path its `infra-` header names. |
+| `fstab.append` | The array's entry, `noauto`. |
+| `make-mirror` | Formats the backup drive, once, at the visit. |
+
+## The stick
+
+`three` has no old system to carry anything from, so its stick is built on `one`'s Alpine
+system, the board that becomes `three`:
+
+```fish
+cd ~/infra; and git pull
+sudo leap/make-stick --new three /dev/sdX
+```
+
+It makes `three`'s ssh host key on the stick and prints its fingerprint: check it at the
+first `ssh three`. It asks for `three`'s root password, which the console needs. It takes
+gavin's password hash and keys from `one`. It carries no tunnel credentials, `.env` or
+volume, because `three` has none yet.
+
+## After the first boot: the tunnel
+
+The first boot leaves `cloudflared` installed and enabled, and skipped until its config
+exists. On the LAN, from the phone:
+
+1. The infra agent adds `three` to `ansible/inventory`'s `[fleet]` and `[containerized]`
+   groups, which it joins only once it answers, since every fleet-wide play would
+   otherwise stop on it.
+2. `server-create-host-tunnel.yml -e target=three -K` writes `/etc/cloudflared/three.json`
+   and prints the tunnel id.
+3. The infra agent commits `system/cloudflared-config.yml` with that id, in the shape of
+   every host's: `ssh-three` to port 22, and `syncthing-three` to `http://127.0.0.1:8384`,
+   Syncthing's GUI, which nothing else reaches (sshd's `PermitOpen` allows port 22 only).
+4. On `three`, in `~/infra`: `git pull`, then
+   `sudo bin/install-system-file cloudflared-config.yml --commit --allow-content-change --new`,
+   then `sudo systemctl start cloudflared`. The tools read `leap/system/` for a host with
+   no Alpine copies.
+5. `server-create-fleet-ssh-access.yml -e host=three` gates the hostnames behind Access.
+
+## The array
+
+The drive is formatted once, after the first boot, with the drive in the Argon's middle bay
+and nothing on it. After `ssh three`:
+
+```fish
+# find the new drive: the WD Red, about 3.6T, with no partitions
+lsblk -o NAME,SIZE,MODEL,SERIAL,TRAN
+# format it; it asks for the device name, then the passphrase twice, and leaves it locked
+sudo ~/infra/hosts/three/leap/make-mirror /dev/sdX
+```
+
+`make-mirror` refuses a drive with partitions or any signature on it, so it never formats a
+drive in use. It writes LUKS2 with Adiantum, labelled `mirror-luks`, which
+`/etc/crypttab` names. Inside is a btrfs holding `incoming` (where zero's backup lands),
+`syncthing` and `snapshots`.
+
+### Unlocking, after every boot
+
+Every boot leaves the array locked, and nothing waits for it. From the phone:
+
+```fish
+# unlock three's array; sudo asks for gavin's password, then systemd for the passphrase
+ssh -t three 'sudo systemctl start systemd-cryptsetup@mirror.service; and sudo systemctl start media-mirror.mount'
+```
+
+Two starts, so the mount's 5-minute wait for the device begins only once the passphrase is
+in, however long finding it takes. The mount starts Docker, which brings Syncthing up
+under its restart policy, and the snapshot and scrub timers. Until then, Docker is skipped
+by its condition, and `docker` answers that it cannot connect. A hand `mount /media/mirror`
+starts none of them: only `systemctl start` does. For a few seconds while Docker first
+starts, a new ssh connection can be refused; the simulation saw one attempt fail between
+two that answered. Try again. The cause is not yet known (`docs/management-plane.md`,
+phase 9). A backup run against a locked `three`
+fails and the next one retries.
+
+To lock it again without a reboot (Docker, a running snapshot and a running scrub stop
+with the mount):
+
+```fish
+# lock three's array: Docker first, then the mount, then the LUKS volume
+ssh -t three sudo systemctl stop docker.service media-mirror.mount systemd-cryptsetup@mirror.service
+```
+
+### Snapshots and scrubs
+
+Twice a day, `mirror-snapshot` makes at most one read-only snapshot of `incoming`, named for
+the day in UTC, and keeps the newest 90. It skips a turn while the backup user has a
+process. The scrub runs monthly. A turn missed while the box was off or locked runs once
+the array is unlocked. `btrfs scrub status /media/mirror` shows the last result.
+
+## Before three ships
+
+In the UK, `three` uses the static `.103`, which would also connect in Singapore and leave
+no route out. So the last thing before the shipping power-off, after `ssh three`:
+
+```fish
+# Singapore: the static UK profile stops connecting, so the DHCP one takes over next boot
+sudo nmcli connection modify wired connection.autoconnect no
+# Wi-Fi only if Singapore has no Ethernet for it. The password is asked for and reaches the
+# root-only profile on stdin, never on a command line, which sudo would log to the journal
+read -s -P 'Wi-Fi password: ' psk; and printf '[connection]\nid=wifi\ntype=wifi\n\n[wifi]\nssid=%s\n\n[wifi-security]\nkey-mgmt=wpa-psk\npsk=%s\n\n[ipv4]\nmethod=auto\n\n[ipv6]\nmethod=auto\n' 'THE-SSID' $psk | sudo sh -c 'umask 077; cat > /etc/NetworkManager/system-connections/wifi.nmconnection'; and sudo nmcli connection reload; set -e psk
+sudo systemctl poweroff
+```
+
+Put Singapore's network name in place of `THE-SSID`. The Wi-Fi lines are untested until
+then, because the simulation has no radio.
+The tracked `wired.nmconnection` then describes `three` as it was in the UK. Back in the UK,
+`sudo nmcli connection modify wired connection.autoconnect yes` undoes the flip.

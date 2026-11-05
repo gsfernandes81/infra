@@ -1,0 +1,84 @@
+#!/bin/bash
+# combustion: prepare network
+#
+# three's first-boot script for Leap 16.1 Immutable, run once by Combustion from the stick
+# `leap/make-stick --new three` builds (leap/README.md). Reviewed like any boot-path file;
+# it carries no secret, and reads the carry-over from the stick. The steps it shares with
+# every Leap host are in leap/firstboot.sh; what follows is three's own: the off-site
+# backup in the Argon EON (plans/three.md).
+#
+# three is a NEW host, so unlike one it starts with no tunnel (its unit waits for a config,
+# made after this boot), no deployment .env and no volumes. Its backup array is not
+# touched here: the drive is formatted at the visit by hosts/three/leap/make-mirror, and
+# unlocked by hand after every boot (hosts/three/leap/README.md).
+set -euo pipefail
+
+# Combustion runs this first with --prepare, in the initramfs, before any network is up.
+# three's UK profile goes in there, so the first boot's network, which Combustion needs for
+# the packages, already runs on 192.168.86.103; the same profile is installed into the
+# system below. The initramfs carries few tools (no `install`), so this uses mkdir and cp,
+# with a umask that gives the 0600 NetworkManager requires of a profile.
+if [ "${1-}" = --prepare ]; then
+	umask 077
+	mkdir -p /etc/NetworkManager/system-connections
+	cp host/system/wired.nmconnection /etc/NetworkManager/system-connections/wired.nmconnection
+	exit 0
+fi
+
+host=three
+# gavin's uid and gid, the fleet's usual, which Syncthing's PUID and PGID name.
+gavin_uid=1000
+gavin_gid=1000
+
+# shellcheck source=leap/firstboot.sh
+. ./leap/firstboot.sh
+
+say "starting $host"
+check_carry "$host"
+mount_subvolumes
+
+echo "$host" > /etc/hostname
+# cryptsetup for make-mirror; the unlock itself is systemd's, in the udev package every
+# image has. Wi-Fi in case Singapore has no Ethernet for it: wpa_supplicant, which
+# NetworkManager drives, and the Pi radio's own files (noarch, so the simulation installs
+# them too). The radio's driver firmware, kernel-firmware-brcm, is left to the Pi image,
+# and is a bench check (`rpm -q kernel-firmware-brcm`): installing it here could clash with
+# an image that carries all firmware in one package. No Wi-Fi profile: its password is
+# added on the box before shipping (hosts/three/leap/README.md).
+install_packages cryptsetup wpa_supplicant bcm43xx-firmware
+install_binaries
+set_root_password
+make_gavin "$gavin_uid" "$gavin_gid"
+install_host_keys
+
+# zero's backup arrives as this user, by one authorized_keys line that allows only an rsync
+# writing into /media/mirror/incoming (plans/three.md § Backups); the line itself comes
+# with zero's key. A real shell, because sshd runs a key's forced command through the
+# user's shell, so nologin would refuse the push too; the key's restrictions are what keep
+# it from being used as one. No password. Its home and .ssh are root's, so the user cannot
+# change the keys that let it in.
+id backup >/dev/null 2>&1 && die "a backup user exists already in this image"
+useradd --system --user-group --no-create-home --home-dir /home/backup --shell /bin/bash \
+	--comment "zero's backup push" backup
+install -d -m 755 /home/backup /home/backup/.ssh
+
+# Every tracked file for this host, each at the path its header names. Notes kept beside
+# them (*.md, *.toml) are not installed, as bin/_infra.py skips them.
+for f in "$stick"/host/system/*; do
+	case "$f" in *.md | *.toml) continue ;; esac
+	install_tracked "$f"
+done
+
+# The array's mountpoint exists only if this snapshot makes it, and while the array is
+# locked the read-only root refuses every write to it. Then its entry, noauto.
+mkdir -p /media/mirror
+cat "$stick/host/fstab.append" >> /etc/fstab
+
+enable_units
+# Syncthing's sync and discovery ports, for devices on the same network as three; its GUI
+# stays on 127.0.0.1. firewalld is on in Leap and allows only ssh and DHCPv6 otherwise.
+firewall-offline-cmd --add-service=syncthing >/dev/null
+clone_infra
+label_subvolumes
+
+say "done; $host boots into its configured snapshot next"

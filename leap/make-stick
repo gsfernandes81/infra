@@ -3,6 +3,15 @@
 #
 #   sudo leap/make-stick <host> <device>      e.g. sudo leap/make-stick one /dev/sdb
 #
+# or, for a NEW host, which has no old system to read, on any Alpine host of the fleet:
+#
+#   sudo leap/make-stick --new <host> <device>  e.g. sudo leap/make-stick --new three /dev/sdb
+#
+# --new makes the new host's ssh host key on the stick and prints its fingerprint, asks for
+# its root password, and takes gavin's password hash and authorized_keys from the box it
+# runs on. It carries no tunnel credentials, .env, secrets directory or volume: a new host
+# has none until its first boot is done (server-create-host-tunnel.yml makes its tunnel).
+#
 # It ERASES <device>. It writes an ext4 filesystem labelled `combustion`, which Combustion
 # finds at the new system's first boot, holding the host's reviewed first-boot files from
 # this checkout and the carry-over read from this live system: ssh host keys, password
@@ -19,7 +28,12 @@ set -eu
 
 die() { echo "make-stick: $*" >&2; exit 1; }
 
-[ $# -eq 2 ] || die "usage: make-stick <host> <device>"
+new=
+if [ "${1-}" = --new ]; then
+	new=1
+	shift
+fi
+[ $# -eq 2 ] || die "usage: make-stick [--new] <host> <device>"
 host=$1
 dev=$2
 repo=$(cd "$(dirname "$0")/.." && pwd)
@@ -27,9 +41,17 @@ hostdir=$repo/hosts/$host/leap
 
 [ "$(id -u)" -eq 0 ] || die "run as root: the carry-over is root's to read"
 [ -d "$hostdir" ] || die "no $hostdir"
-# The carry-over is this box's own, so building one host's stick on another would carry
-# the wrong keys and credentials.
-[ "$(hostname)" = "$host" ] || die "this is $(hostname), not $host"
+if [ -z "$new" ]; then
+	# The carry-over is this box's own, so building one host's stick on another would carry
+	# the wrong keys and credentials.
+	[ "$(hostname)" = "$host" ] || die "this is $(hostname), not $host"
+else
+	# A new host's stick takes nothing of this box's but gavin's, and a host with a tunnel
+	# or volumes to carry has an old system to build its stick on.
+	[ "$(hostname)" != "$host" ] || die "this is $host itself; leave out --new"
+	[ ! -e "$hostdir/system/cloudflared-config.yml" ] || die "$host has a tunnel config, so it is not new"
+	[ ! -e "$hostdir/volumes" ] || die "$host lists volumes to carry, so it is not new"
+fi
 if grep -rl 'FILL-FROM-' "$hostdir" >/dev/null 2>&1; then
 	die "a placeholder is left in: $(grep -rl 'FILL-FROM-' "$hostdir" | tr '\n' ' ')"
 fi
@@ -48,7 +70,7 @@ size_gb=$(( $(cat "/sys/block/$name/size") / 2 / 1024 / 1024 ))
 [ "$size_gb" -le 256 ] || die "$dev is ${size_gb}G, too large to be a stick"
 
 # A named volume copied while its container writes to it may be torn, so each must be idle.
-if [ -f "$hostdir/volumes" ]; then
+if [ -z "$new" ] && [ -f "$hostdir/volumes" ]; then
 	for vol in $(grep -v '^#' "$hostdir/volumes"); do
 		if [ -n "$(docker ps -q --filter "volume=$vol")" ]; then
 			die "a running container uses $vol; stop its deployment first"
@@ -57,13 +79,39 @@ if [ -f "$hostdir/volumes" ]; then
 fi
 
 # The carry-over must be complete before anything is erased.
-root_hash=$(awk -F: '$1 == "root" { print $2 }' /etc/shadow)
 gavin_hash=$(awk -F: '$1 == "gavin" { print $2 }' /etc/shadow)
-case "$root_hash" in \$*) ;; *) die "root has no password; set one with passwd first (the console needs it)" ;; esac
 case "$gavin_hash" in \$*) ;; *) die "gavin has no password hash" ;; esac
 [ -s /home/gavin/.ssh/authorized_keys ] || die "no /home/gavin/.ssh/authorized_keys"
-[ -s "/etc/cloudflared/$host.json" ] || die "no /etc/cloudflared/$host.json"
-[ -s /etc/ssh/ssh_host_ed25519_key ] || die "no ed25519 host key"
+if [ -z "$new" ]; then
+	root_hash=$(awk -F: '$1 == "root" { print $2 }' /etc/shadow)
+	case "$root_hash" in \$*) ;; *) die "root has no password; set one with passwd first (the console needs it)" ;; esac
+	[ -s "/etc/cloudflared/$host.json" ] || die "no /etc/cloudflared/$host.json"
+	[ -s /etc/ssh/ssh_host_ed25519_key ] || die "no ed25519 host key"
+else
+	# The new host's root password, typed twice and kept only as its hash. openssl where
+	# it is installed, else BusyBox's mkpasswd, which Alpine has; both read it on stdin,
+	# never from the command line. Echo comes back however the prompt ends: a refusal, an
+	# EOF under set -e, or Ctrl-C would otherwise leave the owner's terminal blind.
+	trap 'stty echo 2>/dev/null' EXIT
+	trap 'stty echo 2>/dev/null; exit 1' INT TERM
+	stty -echo
+	printf 'Root password for %s (the console needs it): ' "$host"
+	read -r pw1
+	printf '\nThe same again: '
+	read -r pw2
+	stty echo
+	trap - INT TERM
+	echo
+	[ -n "$pw1" ] || die "an empty root password"
+	[ "$pw1" = "$pw2" ] || die "the two root passwords differ"
+	if command -v openssl >/dev/null; then
+		root_hash=$(printf '%s\n' "$pw1" | openssl passwd -6 -stdin)
+	else
+		root_hash=$(printf '%s\n' "$pw1" | mkpasswd -m sha512)
+	fi
+	unset pw1 pw2
+	case "$root_hash" in \$6\$*) ;; *) die "could not hash the root password" ;; esac
+fi
 
 lsblk -o NAME,SIZE,MODEL,TRAN "$dev" 2>/dev/null || true
 printf 'ERASE %s (%sG) for %s? Type the device name to go on: ' "$dev" "$size_gb" "$host"
@@ -93,23 +141,29 @@ cp -p "$hostdir"/system/* "$s/host/system/"
 umask 077
 c=$s/carry
 mkdir -p "$c/ssh" "$c/shadow" "$c/gavin" "$c/cloudflared" "$c/env" "$c/volumes"
-cp -p /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub "$c/ssh/"
 printf '%s\n' "$root_hash" > "$c/shadow/root"
 printf '%s\n' "$gavin_hash" > "$c/shadow/gavin"
 cp /home/gavin/.ssh/authorized_keys "$c/gavin/authorized_keys"
-cp "/etc/cloudflared/$host.json" "$c/cloudflared/$host.json"
-for link in "$repo/hosts/$host"/*; do
-	[ -L "$link" ] || continue
-	dep=$(basename "$link")
-	[ -f "$repo/deployments/$dep/.env" ] && cp "$repo/deployments/$dep/.env" "$c/env/$dep.env"
-done
-# Each deployment's own secrets directory (its tunnel credentials, and whatever else its
-# play keeps beside them), as server-create-deployment-tunnel.yml writes it.
-for d in /home/gavin/.*-secrets; do
-	[ -d "$d" ] || continue
-	mkdir -p "$c/home"
-	cp -a "$d" "$c/home/"
-done
+if [ -n "$new" ]; then
+	# The new host's own key, made here and nowhere else. Its fingerprint is printed at the
+	# end, so the first `ssh` to the host can be checked against it, not taken on trust.
+	ssh-keygen -q -t ed25519 -N '' -C "root@$host" -f "$c/ssh/ssh_host_ed25519_key"
+else
+	cp -p /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub "$c/ssh/"
+	cp "/etc/cloudflared/$host.json" "$c/cloudflared/$host.json"
+	for link in "$repo/hosts/$host"/*; do
+		[ -L "$link" ] || continue
+		dep=$(basename "$link")
+		[ -f "$repo/deployments/$dep/.env" ] && cp "$repo/deployments/$dep/.env" "$c/env/$dep.env"
+	done
+	# Each deployment's own secrets directory (its tunnel credentials, and whatever else its
+	# play keeps beside them), as server-create-deployment-tunnel.yml writes it.
+	for d in /home/gavin/.*-secrets; do
+		[ -d "$d" ] || continue
+		mkdir -p "$c/home"
+		cp -a "$d" "$c/home/"
+	done
+fi
 # Named volumes live in Docker's store, which the new system does not take over
 # (plans/microos-cutover.md), so each one the host lists travels as a tar file.
 if [ -f "$hostdir/volumes" ]; then
@@ -127,4 +181,8 @@ sync
 blkid "$dev" | grep -q 'LABEL="combustion"' || die "$dev does not answer to LABEL=combustion"
 echo "make-stick: $dev holds $host's first boot. Names only, no contents:"
 (cd "$mnt" && find . -type f | sort)
+if [ -n "$new" ]; then
+	echo "make-stick: $host's host key, to check at the first ssh to it:"
+	ssh-keygen -l -f "$c/ssh/ssh_host_ed25519_key.pub"
+fi
 echo "make-stick: erase it with blkdiscard once $host is proven."

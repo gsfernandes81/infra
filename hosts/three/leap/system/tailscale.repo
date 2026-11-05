@@ -1,0 +1,23 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /etc/zypp/repos.d
+# infra-name: tailscale-stable.repo
+# infra-mode: 0644
+#
+# Tailscale's own signed repository, which keeps old versions so a bad release can be
+# downgraded (docs/decisions.md § Every box has two ways in). Leap 16.1 has no path of its
+# own there yet, so this is 16.0's. The first-boot script imports the signing key from
+# leap/tailscale-repo.gpg, the reviewed copy, before zypper first reads this.
+#
+# Priority 90, ahead of the distribution's 99, because Leap 16.1 ships a tailscale of its
+# own and zypper took that one in the first simulated boot. A repository with the higher
+# priority wins whatever the version, now and at every update.
+[tailscale-stable]
+name=Tailscale stable
+baseurl=https://pkgs.tailscale.com/stable/opensuse/leap/16.0/$basearch
+enabled=1
+type=rpm
+priority=90
+repo_gpgcheck=1
+gpgcheck=1
+gpgkey=https://pkgs.tailscale.com/stable/opensuse/leap/16.0/repo.gpg

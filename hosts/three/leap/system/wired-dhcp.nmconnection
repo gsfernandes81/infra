@@ -1,0 +1,22 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /etc/NetworkManager/system-connections
+# infra-name: wired-dhcp.nmconnection
+# infra-mode: 0600
+#
+# three's Ethernet anywhere but the UK: an address from whatever network it is plugged
+# into, for Singapore. Below wired.nmconnection in priority, and a static profile never
+# fails to connect, so in the UK this one never runs; it takes over once the owner turns
+# the static profile's autoconnect off before shipping (hosts/three/leap/README.md).
+# Reached then through the tunnel and Tailscale, which need no fixed address.
+[connection]
+id=wired-dhcp
+type=ethernet
+autoconnect=true
+autoconnect-priority=50
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=auto

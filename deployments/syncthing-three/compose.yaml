@@ -1,0 +1,42 @@
+# three's Syncthing, for devices in Asia, separate from the backup (plans/three.md §
+# Syncthing on three). Its data and its identity (config and keys, under
+# /var/syncthing/config) live on the encrypted array, so a thief with the box cannot clone
+# three's device ID, and Docker on three starts only once the array is unlocked
+# (hosts/three/leap/system/docker-mirror.conf).
+#
+# 2.0.14 AT THE DIGEST deployments/torrents/compose.yaml PINS, the owner's call of
+# 2026-11-03: it has run on this same 1 GB board as one, and 2.1.5 to 2.1.7 can run out of
+# memory on a small box (#10913). Move it with torrents', once #10913 is fixed.
+#
+# Deferred if three's memory proves short during the UK seeding: the owner deploys it at
+# slice 5 (plans/microos-cutover.md), not before.
+name: syncthing-three
+
+services:
+  syncthing:
+    image: syncthing/syncthing:2.0.14@sha256:6d2ab058383b533e045cf2c32fc4c6bbe87c612c92bc2aca9f552fb099b2e123
+    container_name: syncthing
+    hostname: syncthing-three
+    environment:
+      - PUID=1000
+      - PGID=1000
+      # The image listens on every address by default; with the host's network that would
+      # put the GUI on the LAN. Reached through three's tunnel, gated by Access, as
+      # torrents' is; `ssh -L` cannot, since sshd's PermitOpen allows port 22 only.
+      - STGUIADDRESS=127.0.0.1:8384
+    volumes:
+      - /media/mirror/syncthing:/var/syncthing
+    # The host's network, as zero's Syncthing runs, so local discovery finds devices on
+    # three's own network; firewalld opens Syncthing's ports and not the GUI's.
+    network_mode: host
+    restart: unless-stopped
+    healthcheck:
+      test: curl -fkLsS -m 2 127.0.0.1:8384/rest/noauth/health | grep -o --color=never OK || exit 1
+      interval: 1m
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: '256M'

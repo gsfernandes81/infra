@@ -108,18 +108,20 @@ fresh ssh host key, password hashes for a password only the run knows, the run's
 gavin's, stand-in tunnel credentials, `.env` files and volumes. `host/<host>.sh` gives a
 stand-in for each `FILL-FROM-` placeholder still in the host's files, and makes the host's
 disks: for `one`, a btrfs SSD with one's filesystem UUID and its subvolumes in the order
-that gives the fstab's ids, and a swap disk with its UUID, both on USB. The VM sits on
-one's own subnet, so its static address answers.
+that gives the fstab's ids, and a swap disk with its UUID, both on USB; for `three`, a
+blank drive. The VM sits on the host's own subnet, so its static address answers. A host
+with no tunnel config yet is new, and its stick is `make-stick --new`'s: no tunnel
+credentials, `.env`, secrets or volumes.
 
 The run then checks, each as PASS or FAIL, and any FAIL fails the job:
 
 - from outside: the host key is the carried one, sshd offers public keys only, root is
   refused over ssh even with a valid key in its `authorized_keys`, by `PermitRootLogin` as
   sshd's own log says, and root logs in on the serial console with its password;
-- on the box (`host/checks.sh`): the static address, SELinux, gavin's uid, shell and sudo,
+- on the box (`host/checks.sh`, with `host/checks-<host>.sh` appended): the static address, SELinux, gavin's uid, shell and sudo,
   root's password, sshd's settings, every data mount by `subvolid=`, swap, the read-only
-  bare `/media`, Docker on its new store on the SSD with a fresh pull and a read through
-  the `context=` mount, upstream's Compose, the pinned `cloudflared` and its ingress,
+  bare `/media`, on `one` Docker on its new store on the SSD with a fresh pull and a read
+  through the `context=` mount, upstream's Compose, the pinned `cloudflared` and its ingress,
   `tailscaled` from Tailscale's repository, the update timer, the reboot strategy, the
   checkout, and the carry-over's files and modes;
 - the deploy play: `server-deploy-compose.yml --check` for each of the host's deployments,
@@ -134,6 +136,18 @@ The run then checks, each as PASS or FAIL, and any FAIL fails the job:
   torrents' stand-in has none of gluetun's VPN settings, which only `up` reads. The box's
   checkout is put on exactly the commit under test, a pull request's merge commit
   included, and in CI a stage that cannot run fails;
+- on `three`, after that first look: the array locked as every boot leaves it, with nothing
+  waiting at a passphrase prompt and Docker skipped by its condition; then the visit's next
+  steps, as `host/three.sh` gives them. A stand-in tunnel goes in as
+  `server-create-host-tunnel.yml` and `install-system-file` would leave it, and
+  `cloudflared` starts. `make-mirror`, the copy under test, formats the blank drive and
+  refuses it a second time. The README's unlock command runs over `ssh -tt`, and
+  `host/unlock.py` answers sudo's prompt and systemd's passphrase prompt as the owner
+  would. `host/three-unlocked.sh` then checks the array is LUKS2 with Adiantum and mounted
+  with the container context, that the mount started Docker and both timers, that a
+  container reads and writes it, the snapshot script's three paths (a snapshot, a skipped
+  turn, the pruning to 90), and a scrub. After the reboot, the array is locked again, and
+  the same command brings it back;
 - in rescue mode (`host/rescue.sh`), entered with `systemctl isolate`: gavin logs in, and
   sshd, the network, `cloudflared`, `tailscaled` and logins are up while Docker is down;
 - after a reboot, proved by a new boot id, the box checks again on its static address.

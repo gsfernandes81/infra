@@ -102,10 +102,15 @@ install_pinned() {
 # forgotten file stops the first boot instead of leaving a box nobody can log in to.
 check_carry() {
 	local host=$1 f
-	for f in shadow/root shadow/gavin gavin/authorized_keys "cloudflared/$host.json" \
+	for f in shadow/root shadow/gavin gavin/authorized_keys \
 		ssh/ssh_host_ed25519_key ssh/ssh_host_ed25519_key.pub; do
 		[ -s "$stick/carry/$f" ] || die "carry/$f is missing or empty"
 	done
+	# A host with a tunnel config must carry the tunnel's credentials. A new host has
+	# neither: its tunnel is made after its first boot (make-stick --new).
+	if [ -e "$stick/host/system/cloudflared-config.yml" ]; then
+		[ -s "$stick/carry/cloudflared/$host.json" ] || die "carry/cloudflared/$host.json is missing or empty"
+	fi
 	for f in shadow/root shadow/gavin; do
 		grep -q '^\$' "$stick/carry/$f" || die "carry/$f is not a password hash"
 	done
