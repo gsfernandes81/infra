@@ -374,7 +374,7 @@
               ['Ways in: NOT CHECKED (-e ways_in_check=false).' if not ways_in_check | bool else
                'Ways in: the tunnel ' ~ ('serving' if upd_tunnel_ok | bool else 'NOT SERVING') ~ ', the tailnet ' ~
                 ('reaching ' if upd_tailnet_ok | bool else 'NOT REACHING ') ~ tailnet_peer ~ '.',
-               ('Failed units: ' ~ upd_bad_units | join(', ') ~ '.') if upd_bad_units else 'No unit failed but any known one.']) +
+               ('Failed units: ' ~ upd_bad_units | join(', ') ~ '.') if upd_bad_units else "No unit failed, beyond openSUSE's known one."]) +
              (['The array is locked; unlock it as hosts/three/leap/README.md § Unlocking says.']
                 if not ansible_check_mode and upd_now.array | default('') == 'locked' else []) }}
       changed_when: true
