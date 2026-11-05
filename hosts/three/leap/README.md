@@ -102,8 +102,9 @@ To lock it again without a reboot (Docker, a running snapshot and a running scru
 with the mount). The passphrase is not cached, so the next unlock asks for it again:
 
 ```fish
-# lock three's array: Docker first, then the mount, then the LUKS volume
-ssh -t three sudo systemctl stop docker.service media-mirror.mount systemd-cryptsetup@mirror.service
+# lock three's array: Docker first, then the mount, then the LUKS volume; it prints
+# "locked" only once the volume is really closed
+ssh -t three 'sudo systemctl stop docker.service media-mirror.mount systemd-cryptsetup@mirror.service; and test ! -e /dev/mapper/mirror; and echo locked'
 ```
 
 ### Snapshots and scrubs

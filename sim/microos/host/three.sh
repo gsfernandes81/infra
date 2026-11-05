@@ -212,7 +212,7 @@ sim_backup() {
 
 	echo "-- against the locked array, then unlocked"
 	printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 \
-		"sudo -S -p '' systemctl stop docker.service media-mirror.mount systemd-cryptsetup@mirror.service" ||
+		"sudo -S -p '' systemctl stop docker.service media-mirror.mount systemd-cryptsetup@mirror.service; and test ! -e /dev/mapper/mirror; and echo locked" ||
 		echo "FAIL the README's lock command failed"
 	# shellcheck disable=SC2086,SC2024
 	if sudo rsync $opts -e "$rsh" push/library "backup@127.0.0.1::incoming/immich/" > push.log 2>&1; then

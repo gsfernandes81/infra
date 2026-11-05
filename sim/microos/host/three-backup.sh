@@ -33,7 +33,7 @@ mirrored)
 		ls $lib; [ ! -e $lib/b.jpg ] && [ -e $lib/c.jpg ] && [ -e $lib/a.jpg ]"
 	# What a push cut off halfway leaves, which rsync's own --delete never removes.
 	check "the snapshot script clears what an interrupted push left" sh -c "
-		mkdir -p $lib/.~tmp~ && echo half > $lib/.~tmp~/stale
+		install -d -o backup -g backup $lib/.~tmp~ && echo half > $lib/.~tmp~/stale && chown backup:backup $lib/.~tmp~/stale
 		/usr/local/sbin/mirror-snapshot && [ ! -e $lib/.~tmp~ ]"
 	;;
 confined)
@@ -52,6 +52,18 @@ confined)
 	rm -rf /media/mirror/incoming/link /media/mirror/incoming/tmp /media/mirror/incoming/escape*
 	;;
 locked)
+	# If the LUKS volume stays open, say what still holds it: a unit's state, the device's
+	# open count, and any process whose mount namespace still has the array.
+	if test -e /dev/mapper/mirror; then
+		echo "the LUKS volume is still open after the lock:"
+		systemctl show -p ActiveState -p Result media-mirror.mount systemd-cryptsetup@mirror.service | sed 's/^/    /'
+		journalctl -b --no-pager -u systemd-cryptsetup@mirror.service -u media-mirror.mount | tail -n 12 | sed 's/^/    /'
+		dmsetup info mirror 2>&1 | grep -iE 'open|state' | sed 's/^/    /'
+		for p in $(grep -l mapper/mirror /proc/[0-9]*/mountinfo 2>/dev/null | cut -d/ -f3 | sort -un); do
+			echo "    pid $p: $(tr '\0' ' ' < /proc/$p/cmdline | cut -c1-100) [$(readlink /proc/$p/ns/mnt)]"
+		done | head -n 20
+		echo "    the root mount namespace: $(readlink /proc/1/ns/mnt)"
+	fi
 	check "the array is locked, its LUKS volume closed, and incoming not there to write to" sh -c '
 		! findmnt /media/mirror && ! test -e /dev/mapper/mirror && ! test -e /media/mirror/incoming'
 	;;

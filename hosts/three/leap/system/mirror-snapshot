@@ -9,8 +9,10 @@
 # and keeps the newest 90 (plans/three.md § Backups). Run as root by mirror-snapshot.timer,
 # twice a day; it makes at most one a day, so a turn it skips is taken twelve hours later.
 #
-# It skips its turn while the backup user has any process, which is zero's rsync: a
-# snapshot mid-run would keep half a run. Then it clears what an earlier push cut off
+# It skips its turn while the backup user runs rsync, which is zero's push: a snapshot
+# mid-run would keep half a run. rsync by name, not any process of the user's: an ssh login
+# also starts the user's systemd manager, which lingers a few seconds after the push, and
+# the simulation saw a turn skipped for it. Then it clears what an earlier push cut off
 # halfway left behind. The backup user cannot reach the snapshots, so a
 # compromised zero can at worst overwrite the current copy.
 set -eu
@@ -19,7 +21,7 @@ src=/media/mirror/incoming
 dst=/media/mirror/snapshots
 keep=90
 
-if pgrep -u backup >/dev/null; then
+if pgrep -u backup -x rsync >/dev/null; then
 	echo "mirror-snapshot: the backup user's rsync is running; skipping this turn"
 	exit 0
 fi
