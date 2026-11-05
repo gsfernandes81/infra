@@ -2184,6 +2184,27 @@ job, which runs the play for real on both simulated hosts.
   no `infra-` header, which a login would print; the first boot installs it and every run
   of the play installs it afresh.
 
+## The visit runbook's two choices: the bench test, and Tailscale on `zero`
+
+**Decided 2026-11-05**, the owner's calls; [`plans/visit-runbook.md`](../plans/visit-runbook.md)
+carries them out.
+
+- **Slice 1's bench test runs with the old `one` powered off, and what passes stays.**
+  `one`'s new card carries `one`'s address and tunnel credentials, so it cannot boot
+  beside the live `one` without two boxes claiming both, and `one`'s SSD sits in the live
+  `one`. So the old `one` goes off, its SSD and Sabrent move to the 8 GB board, and a pass
+  is the move: the plan's slices 1 and 3 are one. The old board and the Alpine card stay
+  the way back. Set aside: benching with `three`'s card, which clashes with nothing but
+  needed `three`'s stick before the visit; and a phone hotspot, which still joins `one`'s
+  tunnel.
+- **`zero` runs Tailscale's own static arm64 build**, pinned by version and SHA-256 and
+  moved by hand, with a tracked OpenRC service. Tailscale's repo, which the other hosts
+  use, has nothing for Alpine, and Alpine's package lacked the TS-2026-013 fix on
+  2026-11-03. Set aside: Alpine's package, simplest but behind on a security fix.
+- **SD cards are written on an Alpine host with a USB card reader**, likely `two`, whose
+  ports are free; the image is openSUSE's Pi image, build 3.13, the build the simulation
+  boots, checked against its published SHA-256.
+
 ## The lesson worth keeping
 
 
