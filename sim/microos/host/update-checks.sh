@@ -16,9 +16,18 @@ check() {
 	fi
 }
 
-check "cloudflared is the pinned ${EXPECT_CLOUDFLARED:?}, and running" sh -c '
+check "cloudflared is the pinned ${EXPECT_CLOUDFLARED:?}, and enabled" sh -c '
 	/usr/local/bin/cloudflared --version | tee /dev/stderr | grep -q "version $EXPECT_CLOUDFLARED " &&
-	systemctl show -p ExecMainStatus -p ActiveState cloudflared && systemctl is-enabled cloudflared'
+	systemctl is-enabled cloudflared'
+# systemd could exec what the play installed (203 is EXEC, SELinux's refusal among its
+# causes), and the binary has spoken since the boot. A crash loop under Restart=always
+# never shows in systemctl --failed, so this asks the unit and its journal directly.
+if [ -e /etc/cloudflared/config.yml ]; then
+	check "systemd runs the installed cloudflared" sh -c '
+		systemctl show -p ExecMainStatus -p ActiveState cloudflared
+		[ "$(systemctl show -p ExecMainStatus --value cloudflared)" != 203 ] &&
+		journalctl -b --no-pager -o cat -u cloudflared | grep -m1 -iE "starting tunnel|version"'
+fi
 check "the cloudflared it replaced is kept as the previous" \
 	grep -q 0.0.0-sim /usr/local/lib/cloudflared.previous
 check "Compose is the pinned ${EXPECT_COMPOSE:?}" sh -c '
@@ -26,6 +35,6 @@ check "Compose is the pinned ${EXPECT_COMPOSE:?}" sh -c '
 check "the Compose it replaced is kept beside, not in, the plugin directory" sh -c '
 	grep -q 0.0.0-sim /usr/local/lib/docker/docker-compose.previous &&
 	[ "$(ls /usr/local/lib/docker/cli-plugins)" = docker-compose ]'
-check "the update recipes are installed for logins" \
+check "the play replaced the stale update recipes" \
 	grep -q 'Updates on this box are by hand' /etc/motd.d/50-infra-updates
 check "the downloads are gone" sh -c '! ls /var/tmp/infra-* 2>/dev/null'

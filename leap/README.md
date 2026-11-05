@@ -148,7 +148,8 @@ The previous binary is kept in `/usr/local/lib/docker/`, not in `cli-plugins/`, 
 would read any `docker-*` file as a plugin. Going back is the same `install` from there.
 `cloudflared` moves the same way, at `/usr/local/bin/cloudflared`, its previous kept at
 `/usr/local/lib/cloudflared.previous`, followed by `sudo systemctl restart cloudflared`, which is the tunnel: do it over Tailscale, not through the
-tunnel itself (CLAUDE.md § Changing the thing you are connected through).
+tunnel itself (CLAUDE.md § Changing the thing you are connected through): from a device on
+the tailnet, or at the console, since the phone's one VPN slot is taken.
 
 ## How it is tested
 

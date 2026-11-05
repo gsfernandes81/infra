@@ -2165,9 +2165,15 @@ job, which runs the play for real on both simulated hosts.
   after the reboot, and `cloudflared` must report ready connections. It proves the tailnet
   from the box: `tailscale ping` to `zero` must answer. Set aside: connecting over both
   from a control node, which needs one on the tailnet.
-- **`cloudflared` is replaced but not restarted;** the reboot starts it. The play's own
-  connection may run through that tunnel, which CLAUDE.md § Changing the thing you are
-  connected through forbids restarting from inside.
+- **`cloudflared` is replaced but not restarted, and proved before the reboot that starts
+  it.** The play's own connection may run through that tunnel, which CLAUDE.md § Changing
+  the thing you are connected through forbids restarting from inside, and the phone has no
+  second way in. So before the reboot the new binary must run, report its pin and validate
+  the box's tunnel config; if not, the previous goes back and the play stops short of the
+  reboot. Found in review.
+- **After the reboot it reads everything, reports, then judges,** so a failed check never
+  hides the report, nor `three`'s reminder to unlock. A relayed tailnet path counts as a
+  way in (`--until-direct=false`), since `zero` is remote.
 - **Every run reboots**, update or not: the owner runs it monthly, and one path is easier
   to trust than two.
 - **The previous binaries are kept outside the plugin directory and off `PATH`**:

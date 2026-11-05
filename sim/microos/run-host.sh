@@ -368,6 +368,8 @@ set -e
 printf '#!/bin/sh\necho "cloudflared version 0.0.0-sim (stand-in)"\n' > /usr/local/bin/cloudflared
 printf '#!/bin/sh\necho 0.0.0-sim\n' > /usr/local/lib/docker/cli-plugins/docker-compose
 chmod 755 /usr/local/bin/cloudflared /usr/local/lib/docker/cli-plugins/docker-compose
+# A stale copy of the update recipes, so only the play's own install can make it current.
+echo stale > /etc/motd.d/50-infra-updates
 STUBS
 	cat > "$inv" <<INV
 [fleet]
@@ -380,6 +382,20 @@ INV
 	( umask 077; printf 'ansible_become_password: "%s"\n' "$password" > "$vars" )
 	install -d -m 700 "$HOME/.ssh/cp"
 	before=$(ssh_as gavin@127.0.0.1 cat /proc/sys/kernel/random/boot_id)
+	# --check first: it must read and report, and change nothing.
+	rc=0
+	( cd "$repo/ansible" && ANSIBLE_CONFIG=$repo/ansible/ansible.cfg ansible-playbook \
+		-i "$inv" playbooks/server-update-leap.yml -e "target=$host" -e "@$vars" --check \
+		) > update-check.log 2>&1 || rc=$?
+	sed -i "s/$password/<password>/g" update-check.log
+	if [ "$rc" = 0 ] && grep -q 'DRY RUN' update-check.log &&
+		[ "$(ssh_as gavin@127.0.0.1 cat /proc/sys/kernel/random/boot_id)" = "$before" ] &&
+		ssh_as gavin@127.0.0.1 /usr/local/bin/cloudflared --version | grep -q 0.0.0-sim; then
+		echo "PASS --check reports and changes nothing"
+	else
+		echo "FAIL --check failed or changed something (exit $rc):"
+		tail -n 20 update-check.log | sed 's/^/    | /'
+	fi
 	rc=0
 	( cd "$repo/ansible" && ANSIBLE_CONFIG=$repo/ansible/ansible.cfg ansible-playbook \
 		-i "$inv" playbooks/server-update-leap.yml -e "target=$host" -e confirm=yes \
@@ -398,12 +414,13 @@ INV
 		echo "PASS the play's report says the ways in were not checked" ||
 		echo "FAIL the play's report does not say the ways in were skipped"
 	if [ "$host" = three ]; then
-		grep -q 'The array is locked: ssh -t three' update.log &&
+		grep -q 'The array is locked; unlock it as hosts/three/leap/README.md' update.log &&
 			echo "PASS the play ends with the unlock command" ||
 			echo "FAIL the play does not end with the unlock command"
 	fi
-	if ssh -tt -i key -p "$(cat port)" -o StrictHostKeyChecking=no -o UserKnownHostsFile=known \
-		-o BatchMode=yes gavin@127.0.0.1 true 2>&1 < /dev/null | grep -q 'Updates on this box are by hand'; then
+	# An interactive login, with no command: given one, sshd shows no motd at all.
+	if printf 'exit\n' | ssh -tt -i key -p "$(cat port)" -o StrictHostKeyChecking=no -o UserKnownHostsFile=known \
+		-o BatchMode=yes gavin@127.0.0.1 2>&1 | grep -q 'Updates on this box are by hand'; then
 		echo "PASS a login shows the update recipes"
 	else
 		echo "FAIL a login does not show the update recipes"
