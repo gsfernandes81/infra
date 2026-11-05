@@ -51,6 +51,38 @@
   hosts: localhost
   gather_facts: false
   tasks:
+    - name: Check -e target names a host in the inventory
+      # Without it the play below matches no host and exits 0 having done nothing
+      # (_assert-inventory.yml, the same trap).
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target in groups['fleet']
+        fail_msg: Name the host, -e target=<host>, one in the inventory's fleet group.
+        success_msg: "target: {{ target | default('?') }}"
+
+- name: Update a Leap host and reboot it
+  hosts: "{{ target }}"
+  gather_facts: false
+
+  vars:
+    pins_file: "{{ control_checkout }}/leap/pins"
+    # KEY=value lines, comments and blanks left out; a shell sources the same file.
+    pins: >-
+      {{ dict(lookup('file', pins_file).splitlines()
+         | reject('match', '^\s*(#|$)') | map('split', '=')) }}
+    cloudflared_bin: /usr/local/bin/cloudflared
+    cloudflared_previous: /usr/local/lib/cloudflared.previous
+    compose_bin: /usr/local/lib/docker/cli-plugins/docker-compose
+    # Beside the plugin directory, not in it: Docker reads every docker-* file there as a
+    # plugin (leap/README.md § Moving a pin by hand).
+    compose_previous: /usr/local/lib/docker/docker-compose.previous
+    # The fleet host the tailnet must reach after the reboot.
+    tailnet_peer: zero
+    ways_in_check: true
+    confirm: ""
+
+  tasks:
     - name: Read {{ inventory_hostname }}'s OS
       ansible.builtin.slurp:
         src: /etc/os-release
