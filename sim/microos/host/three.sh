@@ -8,8 +8,15 @@
 # tunnel in place as server-create-host-tunnel.yml and install-system-file would, format
 # the drive with make-mirror, and unlock it with the README's own command.
 
-# No FILL-FROM-THREE placeholder is left in three's files.
-declare -A standin=()
+# zero's two values in the backup user's authorized_keys: the run's own backup key, which
+# the runner pushes with as zero would, and the address the runner's connections arrive
+# from, which is qemu's host address on this network.
+rm -f backup-key backup-key.pub
+ssh-keygen -q -t ed25519 -N '' -C 'sim zero mirror-backup' -f backup-key
+declare -A standin=(
+	[FILL-FROM-ZERO-BACKUP-KEY]="$(cat backup-key.pub)"
+	[FILL-FROM-ZERO-TAILNET-ADDRESS]=192.168.86.1
+)
 
 # qemu's user network on the UK subnet, so three's static address answers.
 sim_net=192.168.86.0/24
@@ -120,6 +127,110 @@ TUNNEL
 	# A FAIL is already printed; returning keeps the run from dying silently under set -e.
 	sim_unlock || return 0
 	as_root three-unlocked.sh first
+	sim_backup
+}
+
+# zero's push, from the runner standing in for zero: the options are read out of zero's own
+# script, and the key is the one three's authorized_keys names. Then what the key must not
+# do, and a push against the locked array.
+sim_backup() {
+	local opts rsh rc
+	echo "===== zero's backup, pushed as hosts/zero/system/mirror-backup pushes it"
+	opts=$(sed -n 's/^rsync_opts="\(.*\)"$/\1/p' "$repo/hosts/zero/system/mirror-backup")
+	echo "rsync options from zero's script: $opts"
+	rsh="ssh -i $PWD/backup-key -p $(cat port) -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=$PWD/known"
+	# A file as Immich leaves one, owned by gavin's uid and not world-readable, pushed by root
+	# as zero's cron pushes, so owner and mode go across as numbers.
+	sudo rm -rf push && mkdir -p push/library
+	echo one > push/library/a.jpg && echo two > push/library/b.jpg
+	chmod 640 push/library/a.jpg && sudo chown 1000:1000 push/library/a.jpg
+	# shellcheck disable=SC2086,SC2024  # opts is a list of options; the log is the runner's
+	if sudo rsync $opts -e "$rsh" push/library "backup@127.0.0.1::incoming/immich/" > push.log 2>&1; then
+		echo "PASS a push lands in incoming"
+	else
+		echo "FAIL the push was refused:"
+		sed 's/^/    /' push.log
+		printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 "sudo -S -p '' journalctl -b --no-pager -u sshd" | tail -n 8 | sed 's/^/    /'
+	fi
+	as_root three-backup.sh pushed
+	sudo rm push/library/b.jpg && echo three > push/library/c.jpg
+	# shellcheck disable=SC2086,SC2024
+	sudo rsync $opts -e "$rsh" push/library "backup@127.0.0.1::incoming/immich/" > push.log 2>&1 || true
+	as_root three-backup.sh mirrored
+
+	echo "-- what the key must not do"
+	if ssh -i backup-key -p "$(cat port)" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=no \
+		-o UserKnownHostsFile=known backup@127.0.0.1 'echo SIM-SHELL-OPENED' 2>&1 < /dev/null | grep -q SIM-SHELL-OPENED; then
+		echo "FAIL the key ran a command of its own"
+	else
+		echo "PASS the key runs no command of its own"
+	fi
+	rm -rf pulled
+	# Refused for the module's own reason, not for any error at all.
+	if rsync -e "$rsh" "backup@127.0.0.1::incoming/immich/library/a.jpg" pulled > pull.log 2>&1 || [ -e pulled ]; then
+		echo "FAIL a file was read back through the key"
+	elif grep -q 'module is write only' pull.log; then
+		echo "PASS no file can be read back: $(grep -m1 'write only' pull.log)"
+	else
+		echo "FAIL the read was refused, but not as write-only: $(tail -n 2 pull.log | tr '\n' ' ')"
+	fi
+	if rsync -e "$rsh" "backup@127.0.0.1::" 2>&1 | grep -q incoming; then
+		echo "FAIL the module is listed to the key"
+	else
+		echo "PASS the module is not even listed"
+	fi
+	# Writes aimed at /tmp, which the backup user may write to (three-backup.sh shows it
+	# first), so only the module's confinement can stop them: a name climbing out with ..,
+	# and symlinks to /tmp, absolute and relative, written through.
+	echo escape > escape
+	rsync -e "$rsh" escape "backup@127.0.0.1::incoming/../../../../tmp/escape-dots" > /dev/null 2>&1 || true
+	sudo rm -rf link && mkdir -p link && ln -s /tmp link/abs && ln -s ../../../../../../tmp link/rel
+	rsync -a -e "$rsh" link/ "backup@127.0.0.1::incoming/link/" > /dev/null 2>&1 || true
+	rsync -e "$rsh" escape "backup@127.0.0.1::incoming/link/abs/escape-abs" > /dev/null 2>&1 || true
+	rsync -e "$rsh" escape "backup@127.0.0.1::incoming/link/rel/escape-rel" > /dev/null 2>&1 || true
+	as_root three-backup.sh confined
+	# Forwarding is asked for only when a connection comes through, so one is made, to
+	# three's own sshd at an address PermitOpen allows; gavin's key, which may forward
+	# there, shows the test can see a forward that works.
+	local who k banner fpid
+	for who in gavin backup; do
+		k=key; [ "$who" = backup ] && k=backup-key
+		ssh -i "$k" -p "$(cat port)" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=no \
+			-o UserKnownHostsFile=known -N -L 127.0.0.1:2299:192.168.86.103:22 "$who@127.0.0.1" > fwd.log 2>&1 &
+		fpid=$!
+		sleep 5
+		banner=$(timeout 10 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2299; head -c 7 <&3' 2>/dev/null || true)
+		kill "$fpid" 2>/dev/null || true
+		wait "$fpid" 2>/dev/null || true
+		case "$who:$banner" in
+		gavin:SSH-2.0) echo "PASS a forward that is allowed is seen, through gavin's key" ;;
+		gavin:*) echo "FAIL the forwarding test cannot see even gavin's allowed forward: $(tail -n 1 fwd.log)" ;;
+		backup:SSH-2.0) echo "FAIL the backup key forwarded a connection" ;;
+		backup:*) echo "PASS the backup key forwards nothing: $(grep -m1 -i 'open failed\|prohibited' fwd.log || echo refused)" ;;
+		esac
+	done
+
+	echo "-- against the locked array, then unlocked"
+	printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 \
+		"sudo -S -p '' systemctl stop docker.service media-mirror.mount systemd-cryptsetup@mirror.service; and test ! -e /dev/mapper/mirror; and echo locked" ||
+		echo "FAIL the README's lock command failed"
+	# shellcheck disable=SC2086,SC2024
+	if sudo rsync $opts -e "$rsh" push/library "backup@127.0.0.1::incoming/immich/" > push.log 2>&1; then
+		echo "FAIL a push succeeded against the locked array"
+	else
+		echo "PASS a push against the locked array fails: $(grep -m1 -iE 'error|failed' push.log)"
+	fi
+	as_root three-backup.sh locked
+	sim_unlock || return 0
+	echo four > push/library/d.jpg
+	# shellcheck disable=SC2086,SC2024
+	if sudo rsync $opts -e "$rsh" push/library "backup@127.0.0.1::incoming/immich/" > push.log 2>&1; then
+		echo "PASS the next push, once unlocked, succeeds"
+	else
+		echo "FAIL the push after the unlock was refused:"
+		sed 's/^/    /' push.log
+	fi
+	as_root three-backup.sh after-lock
 }
 
 sim_after_reboot() {

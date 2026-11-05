@@ -12,6 +12,22 @@ its first boot, in `one`'s shape ([`leap/README.md`](../../../leap/README.md)), 
 | `fstab.append` | The array's entry, `noauto`. |
 | `make-mirror` | Formats the backup drive, once, at the visit. |
 
+## Before the stick
+
+`system/backup-authorized-keys` carries two of zero's values as placeholders, and
+`make-stick` refuses a stick while they are there. Both exist once zero is on the tailnet.
+After `ssh zero`:
+
+```fish
+# make zero's backup key, root's alone, and print the two values for the infra agent
+sudo install -d -m 700 /root/.ssh
+sudo ssh-keygen -t ed25519 -N '' -C 'zero mirror-backup' -f /root/.ssh/mirror-backup
+sudo cat /root/.ssh/mirror-backup.pub
+tailscale ip -4
+```
+
+The infra agent commits them in place of the placeholders, and the stick can be built.
+
 ## The stick
 
 `three` has no old system to carry anything from, so its stick is built on `one`'s Alpine
@@ -83,11 +99,12 @@ phase 9). A backup run against a locked `three`
 fails and the next one retries.
 
 To lock it again without a reboot (Docker, a running snapshot and a running scrub stop
-with the mount):
+with the mount). The passphrase is not cached, so the next unlock asks for it again:
 
 ```fish
-# lock three's array: Docker first, then the mount, then the LUKS volume
-ssh -t three sudo systemctl stop docker.service media-mirror.mount systemd-cryptsetup@mirror.service
+# lock three's array: Docker first, then the mount, then the LUKS volume; it prints
+# "locked" only once the volume is really closed
+ssh -t three 'sudo systemctl stop docker.service media-mirror.mount systemd-cryptsetup@mirror.service; and test ! -e /dev/mapper/mirror; and echo locked'
 ```
 
 ### Snapshots and scrubs
@@ -96,6 +113,27 @@ Twice a day, `mirror-snapshot` makes at most one read-only snapshot of `incoming
 the day in UTC, and keeps the newest 90. It skips a turn while the backup user has a
 process. The scrub runs monthly. A turn missed while the box was off or locked runs once
 the array is unlocked. `btrfs scrub status /media/mirror` shows the last result.
+
+## The backup
+
+zero pushes it nightly at 04:00 (`hosts/zero/system/mirror-backup`) into `incoming`, over
+the tailnet, with a key that starts only the rsync daemon of `system/rsync-backup.conf`. That
+daemon runs as the backup user and can only write into `incoming`: it serves no file back,
+lists nothing, and confines every name and symlink to that directory. The backup user is not
+root, so each file's real owner and mode travel in an xattr (`--fake-super`), and a restore
+puts them back.
+
+A restore from a snapshot on `three`, into a directory that is not on the array's
+`incoming`, with owners and modes as zero had them. After `ssh three`:
+
+```fish
+# restore Immich's library from a snapshot; --fake-super reads the kept owners, -M--super writes them
+sudo ls /media/mirror/snapshots
+sudo rsync -aHAX --numeric-ids --fake-super -M--super --mkpath /media/mirror/snapshots/2026-11-20/immich/library/ /media/mirror/restore/library/
+```
+
+Use a date the listing shows in place of `2026-11-20`. Getting a restore back onto zero is
+the visit runbook's.
 
 ## Before three ships
 

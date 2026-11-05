@@ -1,0 +1,16 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /home/backup/.ssh
+# infra-name: authorized_keys
+# infra-mode: 0644
+#
+# zero's backup key, the one key that lets the backup user in (plans/three.md § Backups).
+# Root's file in root's directory, so the backup user cannot add another. The key opens no
+# shell, terminal or forwarding (restrict), comes only from zero's tailnet address (from=),
+# and whatever the client asks for, sshd runs the rsync daemon of rsync-backup.conf, which
+# can only write into /media/mirror/incoming.
+#
+# TWO PLACEHOLDERS, filled from zero once it is on the tailnet and its key is made
+# (hosts/three/leap/README.md § Before the stick): `tailscale ip -4` on zero, and
+# /root/.ssh/mirror-backup.pub. make-stick refuses a stick while either is left.
+restrict,from="FILL-FROM-ZERO-TAILNET-ADDRESS",command="rsync --server --daemon --config=/etc/rsync-backup.conf ." FILL-FROM-ZERO-BACKUP-KEY

@@ -103,10 +103,11 @@ login as root is refused with a valid key in place.
    secrets, and reboots through `transactional-update`. Disks hot-added after boot test
    `nofail`, `RequiresMountsFor=` and the mount guards against late USB disks. bcache
    under btrfs RAID1 on virtual disks tests `zero`'s assembly.
-6. **The backup's pieces, as tracked files:** `three`'s `backup` user and its one
-   `authorized_keys` line, the snapshot timer that skips a running rsync, the LUKS unlock
-   command, and `zero`'s cron job and backup-age check ([`three.md`](three.md)). The
-   simulation checks that the key cannot open a shell, read a file, or write outside
+6. **The backup's pieces, as tracked files, written 2026-11-04** (`hosts/three/leap/`,
+   `hosts/zero/system/mirror-backup*`), and proved by the `host` job's `three` run:
+   `three`'s `backup` user and its one `authorized_keys` line, the snapshot timer that
+   skips a running rsync, the LUKS unlock command, and `zero`'s cron job and backup-age
+   check ([`three.md`](three.md)). The simulation checks that the key cannot open a shell, read a file, or write outside
    `incoming`, and that a run against a locked volume fails cleanly and the next succeeds.
 7. **A runbook for the visit**, one section per slice, each with its checks and its
    rollback.

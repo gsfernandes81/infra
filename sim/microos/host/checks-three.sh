@@ -6,9 +6,12 @@
 
 echo "-- the array, locked as every boot leaves it"
 check "crypttab names the array by its label, noauto" \
-	grep -qE '^mirror[[:space:]]+LABEL=mirror-luks[[:space:]]+none[[:space:]]+luks,noauto$' /etc/crypttab
+	grep -qE '^mirror[[:space:]]+LABEL=mirror-luks[[:space:]]+none[[:space:]]+luks,noauto,password-cache=no$' /etc/crypttab
 check "fstab mounts it noauto, with the container context" sh -c '
 	awk "\$2 == \"/media/mirror\"" /etc/fstab | tee /dev/stderr | grep -E "(^|[[:space:],])noauto," | grep -q context='
+# So one stop of both, or a shutdown, unmounts before it closes the LUKS volume.
+check "the mount is ordered after the LUKS unit" sh -c '
+	systemctl show -p After media-mirror.mount | tee /dev/stderr | grep -qw "systemd-cryptsetup@mirror.service"'
 check "the boot left it locked and unmounted" sh -c '
 	systemctl show -p ActiveState systemd-cryptsetup@mirror.service media-mirror.mount
 	! systemctl is-active --quiet systemd-cryptsetup@mirror.service && ! findmnt /media/mirror && ! test -e /dev/mapper/mirror'
@@ -37,9 +40,10 @@ check "backup has a shell for its forced command, and no password" sh -c '
 	passwd -S backup | tee /dev/stderr | grep -qE "^backup L"'
 check "its home and .ssh are root's, so it cannot change its keys" sh -c '
 	stat -c "%U %a %n" /home/backup /home/backup/.ssh | tee /dev/stderr | grep -v "^root 755 " | grep -q . && exit 1 || exit 0'
-# Item 2 of the handoff decides how the push is confined; openSUSE's rsync package does not
-# install rrsync, so what is there is shown.
-show sh -c 'command -v rrsync || echo "no rrsync on PATH"; ls -l /usr/share/doc/packages/rsync/support/rrsync 2>&1; rsync --version | head -n 1'
+check "its one key is root's, restricted, and starts only the write-only daemon" sh -c '
+	f=/home/backup/.ssh/authorized_keys; stat -c "%U %a" "$f"; grep -v "^#" "$f" | cut -c1-140
+	[ "$(stat -c "%U %a" "$f")" = "root 644" ] && [ "$(grep -vc "^#" "$f")" = 1 ] &&
+	grep -v "^#" "$f" | grep -q "^restrict,from=\"[^\"]*\",command=\"rsync --server --daemon --config=/etc/rsync-backup.conf \.\" "'
 
 echo "-- networks"
 check "the DHCP profile for Singapore waits below the static one" sh -c '

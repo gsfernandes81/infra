@@ -52,11 +52,14 @@ check "a snapshot run makes today's, read-only" sh -c '
 check "a second run the same day keeps the one it made" sh -c '
 	systemctl start mirror-snapshot.service
 	journalctl -b --no-pager -u mirror-snapshot.service | tail -n 5 | tee /dev/stderr | grep -q " exists"'
-check "a turn while the backup user has a process is skipped" sh -c '
-	runuser -u backup -- sleep 60 &
+# A process the kernel names rsync, run as the backup user, as zero's push is: sleep under
+# that name, since only the name and the user are what the script looks at.
+check "a turn while the backup user runs rsync is skipped" sh -c '
+	install -m 755 /usr/bin/sleep /var/tmp/rsync
+	runuser -u backup -- /var/tmp/rsync 60 &
 	sleep 1
 	out=$(/usr/local/sbin/mirror-snapshot); echo "$out"
-	pkill -u backup
+	pkill -u backup -x rsync; rm -f /var/tmp/rsync
 	echo "$out" | grep -q "skipping this turn"'
 check "only the newest 90 snapshots are kept, oldest deleted first" sh -c '
 	for i in $(seq 1 91); do

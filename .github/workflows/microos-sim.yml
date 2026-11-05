@@ -14,7 +14,8 @@ name: microos-sim
 on:
   push:
     paths: ['sim/microos/**', '.github/workflows/microos-sim.yml', 'leap/**', 'hosts/*/leap/**',
-      'hosts/one/*', 'hosts/three/*', 'ansible/playbooks/server-deploy-compose.yml',
+      'hosts/one/*', 'hosts/three/*', 'hosts/zero/system/mirror-backup',
+      'ansible/playbooks/server-deploy-compose.yml',
       'ansible/playbooks/_deploy-compose-one.yml', 'ansible/playbooks/_sync-host-checkout.yml',
       'ansible/playbooks/_review-anchor.yml', 'ansible/playbooks/_assert-inventory.yml',
       'ansible/playbooks/files/compose-oneshots.py', 'ansible/callback_plugins/**',
@@ -24,7 +25,8 @@ on:
       'deployments/syncthing-three/**', '!deployments/*/README.md']
   pull_request:
     paths: ['sim/microos/**', '.github/workflows/microos-sim.yml', 'leap/**', 'hosts/*/leap/**',
-      'hosts/one/*', 'hosts/three/*', 'ansible/playbooks/server-deploy-compose.yml',
+      'hosts/one/*', 'hosts/three/*', 'hosts/zero/system/mirror-backup',
+      'ansible/playbooks/server-deploy-compose.yml',
       'ansible/playbooks/_deploy-compose-one.yml', 'ansible/playbooks/_sync-host-checkout.yml',
       'ansible/playbooks/_review-anchor.yml', 'ansible/playbooks/_assert-inventory.yml',
       'ansible/playbooks/files/compose-oneshots.py', 'ansible/callback_plugins/**',

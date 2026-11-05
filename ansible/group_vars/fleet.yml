@@ -62,6 +62,8 @@ base_packages:
                       # trap in CLAUDE.md that broke rootless podman days after a cleanup
   - lsblk
   - python3
+  - rsync             # zero pushes three's backup with it (plans/three.md); a tool on the
+                      # others, and on every Leap host already (leap/firstboot.sh)
   - smartmontools
   - sudo
   - usbutils          # lsusb -t — absent on one, where BusyBox answers -t with a flat list
