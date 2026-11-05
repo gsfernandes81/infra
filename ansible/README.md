@@ -56,6 +56,7 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 | move a Pi onto a new tunnel — **a deliberate outage** | `server-cutover-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | delete a Pi's tunnel — **irreversible** | `server-delete-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | retire the dev containers' old tunnels (infra-dev, dd-dev, ds-dev whole; or3-dev's tunnel only) — **irreversible**, a plan and y/N first | `server-retire-dev-tunnels.yml` · `--check` stops at the plan | the API token |
+| update a Leap host: `transactional-update`, the `cloudflared` and Compose pins from `leap/pins` (keeping the previous), the update recipes for logins, a reboot, then done only once the tunnel serves and the tailnet reaches `zero`; asks before the reboot, reports what a lock held back and the Compose openSUSE offers | `server-update-leap.yml -e target=<host> -K` · `--check` reads and changes nothing | sudo; refuses a host that is not Leap |
 | update cloudflared on a Pi, deliberately | `server-update-cloudflared.yml -e target=<host> -e version=… -e sha256=… -K` | sudo; refuses while that host autoupdates, which today is all of them |
 
 **Three ways a play picks its host, each on purpose.** A play that changes one host at a time

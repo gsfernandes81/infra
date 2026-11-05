@@ -6,7 +6,9 @@ made on the host's old Alpine system, that the new system reads once at its firs
 
 | File | What it is |
 |---|---|
-| `firstboot.sh` | The first-boot steps every Leap host shares, and the pins for the binaries a package would get wrong (`cloudflared`, Compose). Sourced by each host's script. |
+| `firstboot.sh` | The first-boot steps every Leap host shares. Sourced by each host's script. |
+| `pins` | The versions and SHA-256s of the binaries a package would get wrong (`cloudflared`, Compose): what a new host's first boot installs, and what `ansible/playbooks/server-update-leap.yml` moves a running host to. |
+| `motd` | The update recipes every login shows, at `/etc/motd.d/50-infra-updates`: the normal update, and the locked boot firmware's. A plain file, with no `infra-` header for logins to show. |
 | `make-stick` | Builds a host's stick. Run as root on the host's old system, or with `--new` for a host that has none. |
 | `tailscale-repo.gpg` | Tailscale's repository signing key, fingerprint `2596 A99E AAB3 3821 893C 0A79 458C A832 957F 5868`. The first boot trusts the repository through this reviewed copy. |
 
@@ -109,11 +111,29 @@ The project and volume labels are the deployment's `name:` and the volume's key 
 commands, in bash under `set -e`, which stops at a failed step as the chain does, and reads
 the volume back through a container.
 
-## Moving a pin by hand
+## Updating a host, and moving a pin
 
-`cloudflared` and Compose are pinned binaries in `/usr/local`, outside every snapshot, until
-the Leap update play moves them. By hand, on the box, with the version and the SHA-256 from
-the project's own release page (for Compose, the release's `.sha256` asset):
+Every update is by hand, one host at a time, from the control node:
+
+```fish
+# update one Leap host: transactional-update, the pins, the reboot, and the checks after
+cd ~/infra/ansible
+ansible-playbook playbooks/server-update-leap.yml -e target=one -K
+```
+
+It asks before it reboots, reports any update a lock held back and the Compose openSUSE
+offers, and is done only once the box answers over the tunnel and the tailnet. Its header
+says each step. `--check` reads and reports and changes nothing.
+
+`cloudflared` and Compose are pinned binaries in `/usr/local`, outside every snapshot. A pin
+moves by a commit to `pins`, with the version and both architectures' SHA-256 from the
+project's own release page, then that play. The play keeps the binary it replaces:
+`/usr/local/lib/cloudflared.previous` and `/usr/local/lib/docker/docker-compose.previous`.
+
+### By hand
+
+When the play cannot run, on the box, with the version and the SHA-256 from the project's
+own release page (for Compose, the release's `.sha256` asset):
 
 ```fish
 # move Compose to a new release, keeping the old one beside, not in, the plugin directory;
@@ -126,8 +146,8 @@ docker compose version
 
 The previous binary is kept in `/usr/local/lib/docker/`, not in `cli-plugins/`, where Docker
 would read any `docker-*` file as a plugin. Going back is the same `install` from there.
-`cloudflared` moves the same way, at `/usr/local/bin/cloudflared`, followed by `sudo
-systemctl restart cloudflared`, which is the tunnel: do it over Tailscale, not through the
+`cloudflared` moves the same way, at `/usr/local/bin/cloudflared`, its previous kept at
+`/usr/local/lib/cloudflared.previous`, followed by `sudo systemctl restart cloudflared`, which is the tunnel: do it over Tailscale, not through the
 tunnel itself (CLAUDE.md § Changing the thing you are connected through).
 
 ## How it is tested
