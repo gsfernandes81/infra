@@ -63,8 +63,9 @@ combustion/carry/            the carry-over: ssh host keys, root's and gavin's p
 ```
 
 **The stick then holds live secrets.** Keep it with the other secret-bearing media, and
-once the new system is proven, erase it with `blkdiscard`, never by deleting files, which
-flash keeps.
+once the new system is proven, erase it whole, never by deleting files, which flash keeps:
+`blkdiscard`, or `blkdiscard -z`, which writes zeros, on the many sticks that cannot
+discard (`plans/visit-runbook.md` § Writing a card, and erasing a stick).
 
 ## What the first boot does
 
@@ -86,8 +87,9 @@ than half-configured.
 
 ## What it does not do
 
-It does not join the tailnet, which needs the owner's login (`sudo tailscale up`), and it
-does not start a deployment: those are the visit's runbook, after the box answers.
+It does not join the tailnet, which needs the owner's login (`sudo tailscale up
+--advertise-tags=tag:fleet --accept-dns=false`), and it does not start a deployment: those
+are the visit's runbook, after the box answers.
 
 ## After the first boot: the named volumes
 

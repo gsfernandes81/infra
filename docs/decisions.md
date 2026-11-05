@@ -1959,7 +1959,8 @@ depends on Docker or podman, and each is current within a monthly update of upst
   2026-11-03). A tailnet's key expiry is at most 180 days, and a box months away cannot be
   logged in again by hand; a tagged device has expiry off by default and belongs to the
   tailnet, not to the owner's account. The policy's `tagOwners` names `tag:fleet` before the
-  first Pi joins, and each joins with `sudo tailscale up --advertise-tags=tag:fleet`. Tags
+  first Pi joins, and each joins with `sudo tailscale up --advertise-tags=tag:fleet` (and
+  `--accept-dns=false` since 2026-11-05, *The visit runbook's choices*, below). Tags
   also let the policy limit what each box reaches, `zero` to `three` for the backup first.
   The cost is a key that outlives a theft, so the theft plan's first step stays removing
   the node in the admin console ([`plans/three.md`](../plans/three.md)). Phones and laptops
@@ -2183,6 +2184,34 @@ job, which runs the play for real on both simulated hosts.
   `/etc/motd.d/`), the owner's request: the normal update and the boot firmware's. It has
   no `infra-` header, which a login would print; the first boot installs it and every run
   of the play installs it afresh.
+
+## The visit runbook's choices: the bench test, Tailscale on `zero`, and the cards
+
+**Decided 2026-11-05**, the owner's calls; [`plans/visit-runbook.md`](../plans/visit-runbook.md)
+carries them out.
+
+- **Slice 1's bench test runs with the old `one` powered off, and what passes stays.**
+  `one`'s new card carries `one`'s address and tunnel credentials, so it cannot boot
+  beside the live `one` without two boxes claiming both, and `one`'s SSD sits in the live
+  `one`. So the old `one` goes off, its SSD and Sabrent move to the 8 GB board, and a pass
+  is the move: the plan's slices 1 and 3 are one. The old board and the Alpine card stay
+  the way back. Set aside: benching with `three`'s card, which clashes with nothing but
+  needed `three`'s stick before the visit; and a phone hotspot, which still joins `one`'s
+  tunnel.
+- **`zero` runs Tailscale's own static arm64 build**, pinned by version and SHA-256 and
+  moved by hand, with a tracked OpenRC service. Tailscale's repo, which the other hosts
+  use, has nothing for Alpine, and Alpine's package lacked the TS-2026-013 fix on
+  2026-11-03. Set aside: Alpine's package, simplest but behind on a security fix.
+- **SD cards are written on `two`, with a USB card reader,** because `zero`'s and `one`'s
+  ports are taken and every other USB disk on `zero` is Immich's array, which a wrong
+  `dd` would destroy. The image is openSUSE's Pi image, build 3.13, the same build number
+  as the x86 image the simulation ran on 2026-11-03, downloaded and checked before the
+  visit, because openSUSE's directory keeps only the newest build.
+- **Every Pi joins the tailnet with `--accept-dns=false`.** By default `tailscale up` points a
+  box's resolver at `tailscaled`, and on `zero` that would put every lookup, the tunnel's
+  included, behind `tailscaled`: a broken `tailscaled` would then cost both ways in at
+  once. Nothing here needs Tailscale's DNS; the backup names `three` by address. Found in
+  review.
 
 ## The lesson worth keeping
 

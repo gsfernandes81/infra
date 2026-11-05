@@ -1,0 +1,57 @@
+#!/sbin/openrc-run
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /etc/init.d
+# infra-name: tailscaled
+# infra-mode: 0755
+#
+# Tailscale's node agent: zero's second way in, and the path zero's backup takes to three
+# (docs/decisions.md § Every box has two ways in). Tailscale's repo has nothing for Alpine,
+# and on 2026-11-03 Alpine's package lacked the fix for TS-2026-013, so the binaries are
+# Tailscale's own static arm64 build, in /usr/local, pinned by version and SHA-256 and
+# installed and moved by hand (hosts/zero/system/README.md § Tailscale). Its flags are
+# upstream's systemd unit's, as the tarball ships it.
+#
+# It never gives up restarting (respawn_max=0): a way in that stopped retrying is a box
+# nobody can reach. `tailscaled --cleanup` after a stop removes its routes and firewall
+# rules, as upstream's unit does.
+
+name="tailscaled"
+description="Tailscale node agent"
+supervisor=supervise-daemon
+command="/usr/local/sbin/tailscaled"
+command_args="--state=/var/lib/tailscale/tailscaled.state --socket=/run/tailscale/tailscaled.sock --port=41641"
+command_user="root"
+pidfile="/run/$RC_SVCNAME.pid"
+respawn_delay=10
+respawn_max=0
+
+# Logged as cloudflared's is, through log_proxy, rotated.
+TS_LOGFILE="${TS_LOGFILE:-/var/log/${RC_SVCNAME}.log}"
+LOGPROXY_OPTS="$LOGPROXY_OPTS -m"
+export \
+	LOGPROXY_CHMOD="${LOGPROXY_CHMOD:-0640}" \
+	LOGPROXY_LOG_DIRECTORY="${LOGPROXY_LOG_DIRECTORY:-/var/log}" \
+	LOGPROXY_ROTATION_SIZE="${LOGPROXY_ROTATION_SIZE:-104857600}" \
+	LOGPROXY_ROTATION_TIME="${LOGPROXY_ROTATION_TIME:-86400}" \
+	LOGPROXY_ROTATION_SUFFIX="${LOGPROXY_ROTATION_SUFFIX:-.%Y%m%d%H%M%S}" \
+	LOGPROXY_ROTATED_FILES="${LOGPROXY_ROTATED_FILES:-5}"
+output_logger="log_proxy $LOGPROXY_OPTS $TS_LOGFILE"
+error_logger="log_proxy $LOGPROXY_OPTS $TS_LOGFILE"
+
+depend() {
+	need net
+	after firewall
+}
+
+start_pre() {
+	checkpath -d -m 0700 /var/lib/tailscale
+	checkpath -d -m 0755 /run/tailscale
+	modprobe tun 2>/dev/null || true
+}
+
+# Never failing the stop: a cleanup that finds nothing to undo must not leave the service
+# marked started.
+stop_post() {
+	/usr/local/sbin/tailscaled --cleanup || true
+}

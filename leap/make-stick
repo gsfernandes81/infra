@@ -20,8 +20,8 @@
 # leap/README.md says what each part is.
 #
 # THE STICK THEN HOLDS LIVE SECRETS. Keep it with the other secret-bearing media, and once
-# the new system is proven, erase it with `blkdiscard`, which flash honours, not by deleting
-# files, which flash keeps.
+# the new system is proven, erase it whole with `blkdiscard`, or `blkdiscard -z` on a stick
+# that cannot discard, never by deleting files, which flash keeps.
 #
 # POSIX sh, because it runs on Alpine. It reads; the only thing it writes is the stick.
 set -eu
@@ -187,4 +187,4 @@ if [ -n "$new" ]; then
 	echo "make-stick: $host's host key, to check at the first ssh to it:"
 	ssh-keygen -l -f "$c/ssh/ssh_host_ed25519_key.pub"
 fi
-echo "make-stick: erase it with blkdiscard once $host is proven."
+echo "make-stick: erase it whole once $host is proven: blkdiscard, or blkdiscard -z."

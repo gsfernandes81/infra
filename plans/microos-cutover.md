@@ -38,6 +38,10 @@ that is `one` today becomes `three`.
 Slice 3's rollback is the old board with the Alpine card, so slice 4 waits until slice 3
 has run for a day. The disk swap and `one`'s move never share a day.
 
+**Revised 2026-11-05: slices 1 and 3 are one,** since `one`'s card cannot boot beside the
+live `one` (`decisions.md`). [`visit-runbook.md`](visit-runbook.md) is the order and the
+steps the visit follows.
+
 **`zero` stays on Alpine this visit**, the owner's call of 2026-11-03. The disk swap is
 its only change. It moves to the new OS only once that OS has been proven on a Pi 5,
 because it is the box whose failure costs most, and slice 1 proves a Pi 4.
@@ -112,7 +116,7 @@ login as root is refused with a valid key in place.
    check ([`three.md`](three.md)). The simulation checks that the key cannot open a shell, read a file, or write outside
    `incoming`, and that a run against a locked volume fails cleanly and the next succeeds.
 7. **A runbook for the visit**, one section per slice, each with its checks and its
-   rollback.
+   rollback: **written**, [`visit-runbook.md`](visit-runbook.md).
 
 ## What the simulation has answered
 
