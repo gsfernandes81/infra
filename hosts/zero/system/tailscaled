@@ -9,7 +9,7 @@
 # (docs/decisions.md § Every box has two ways in). Tailscale's repo has nothing for Alpine,
 # and on 2026-11-03 Alpine's package lacked the fix for TS-2026-013, so the binaries are
 # Tailscale's own static arm64 build, in /usr/local, pinned by version and SHA-256 and
-# installed and moved by hand (plans/visit-runbook.md § Before the visit). Its flags are
+# installed and moved by hand (hosts/zero/system/README.md § Tailscale). Its flags are
 # upstream's systemd unit's, as the tarball ships it.
 #
 # It never gives up restarting (respawn_max=0): a way in that stopped retrying is a box
@@ -50,6 +50,8 @@ start_pre() {
 	modprobe tun 2>/dev/null || true
 }
 
+# Never failing the stop: a cleanup that finds nothing to undo must not leave the service
+# marked started.
 stop_post() {
-	/usr/local/sbin/tailscaled --cleanup
+	/usr/local/sbin/tailscaled --cleanup || true
 }

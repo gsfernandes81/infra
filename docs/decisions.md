@@ -1959,7 +1959,8 @@ depends on Docker or podman, and each is current within a monthly update of upst
   2026-11-03). A tailnet's key expiry is at most 180 days, and a box months away cannot be
   logged in again by hand; a tagged device has expiry off by default and belongs to the
   tailnet, not to the owner's account. The policy's `tagOwners` names `tag:fleet` before the
-  first Pi joins, and each joins with `sudo tailscale up --advertise-tags=tag:fleet`. Tags
+  first Pi joins, and each joins with `sudo tailscale up --advertise-tags=tag:fleet` (and
+  `--accept-dns=false` since 2026-11-05, *The visit runbook's choices*, below). Tags
   also let the policy limit what each box reaches, `zero` to `three` for the backup first.
   The cost is a key that outlives a theft, so the theft plan's first step stays removing
   the node in the admin console ([`plans/three.md`](../plans/three.md)). Phones and laptops
@@ -2184,7 +2185,7 @@ job, which runs the play for real on both simulated hosts.
   no `infra-` header, which a login would print; the first boot installs it and every run
   of the play installs it afresh.
 
-## The visit runbook's two choices: the bench test, and Tailscale on `zero`
+## The visit runbook's choices: the bench test, Tailscale on `zero`, and the cards
 
 **Decided 2026-11-05**, the owner's calls; [`plans/visit-runbook.md`](../plans/visit-runbook.md)
 carries them out.
@@ -2201,9 +2202,16 @@ carries them out.
   moved by hand, with a tracked OpenRC service. Tailscale's repo, which the other hosts
   use, has nothing for Alpine, and Alpine's package lacked the TS-2026-013 fix on
   2026-11-03. Set aside: Alpine's package, simplest but behind on a security fix.
-- **SD cards are written on an Alpine host with a USB card reader**, likely `two`, whose
-  ports are free; the image is openSUSE's Pi image, build 3.13, the build the simulation
-  boots, checked against its published SHA-256.
+- **SD cards are written on `two`, with a USB card reader,** because `zero`'s and `one`'s
+  ports are taken and every other USB disk on `zero` is Immich's array, which a wrong
+  `dd` would destroy. The image is openSUSE's Pi image, build 3.13, the same build number
+  as the x86 image the simulation ran on 2026-11-03, downloaded and checked before the
+  visit, because openSUSE's directory keeps only the newest build.
+- **Every Pi joins the tailnet with `--accept-dns=false`.** By default `tailscale up` points a
+  box's resolver at `tailscaled`, and on `zero` that would put every lookup, the tunnel's
+  included, behind `tailscaled`: a broken `tailscaled` would then cost both ways in at
+  once. Nothing here needs Tailscale's DNS; the backup names `three` by address. Found in
+  review.
 
 ## The lesson worth keeping
 

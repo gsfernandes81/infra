@@ -30,17 +30,20 @@ The infra agent commits them in place of the placeholders, and the stick can be 
 
 ## The stick
 
-`three` has no old system to carry anything from, so its stick is built on `one`'s Alpine
-system, the board that becomes `three`:
+`three` has no old system to carry anything from, so its stick is built with `--new` on
+`zero` or `two`. Never on the old `one`'s Alpine card while Leap `one` runs: both would
+claim `one`'s address and tunnel.
 
 ```fish
+# on zero or two: build three's first-boot stick; put the stick's device in place of /dev/sdX
 cd ~/infra; and git pull
 sudo leap/make-stick --new three /dev/sdX
 ```
 
 It makes `three`'s ssh host key on the stick and prints its fingerprint: check it at the
 first `ssh three`. It asks for `three`'s root password, which the console needs. It takes
-gavin's password hash and keys from `one`. It carries no tunnel credentials, `.env` or
+gavin's password hash and keys from the box it runs on, so `three`'s sudo password is that
+box's. It carries no tunnel credentials, `.env` or
 volume, because `three` has none yet.
 
 ## After the first boot: the tunnel

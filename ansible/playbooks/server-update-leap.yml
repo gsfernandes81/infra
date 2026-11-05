@@ -194,7 +194,7 @@
       check_mode: false
       become: true
 
-    # A two-minute timeout and three tries: get_url's own 10 s ended a simulated run when
+    # A two-minute timeout and up to four tries: get_url's own 10 s ended a simulated run when
     # GitHub was slow to answer, and a Pi's line can be slower. Not under --check, which
     # touches no network and reports the move it would make.
     - name: "If cloudflared is off its pin: download it"
