@@ -5,7 +5,7 @@ name: syncthing
 
 services:
   syncthing:
-    image: syncthing/syncthing:2.1.1@sha256:775c4aac486263ca8653055bba7d3061799281974b706695e17bc798da3f4e92
+    image: syncthing/syncthing:2.1.7@sha256:2b71da7c0d0a91a6ae5285ad079226fecc0a365d08b27720e1f7037b018f7546
     container_name: syncthing
     hostname: syncthing.gsrpi.uk
     environment:
