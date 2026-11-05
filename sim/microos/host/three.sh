@@ -166,10 +166,13 @@ sim_backup() {
 		echo "PASS the key runs no command of its own"
 	fi
 	rm -rf pulled
+	# Refused for the module's own reason, not for any error at all.
 	if rsync -e "$rsh" "backup@127.0.0.1::incoming/immich/library/a.jpg" pulled > pull.log 2>&1 || [ -e pulled ]; then
 		echo "FAIL a file was read back through the key"
+	elif grep -q 'module is write only' pull.log; then
+		echo "PASS no file can be read back: $(grep -m1 'write only' pull.log)"
 	else
-		echo "PASS no file can be read back: $(tail -n 1 pull.log)"
+		echo "FAIL the read was refused, but not as write-only: $(tail -n 2 pull.log | tr '\n' ' ')"
 	fi
 	if rsync -e "$rsh" "backup@127.0.0.1::" 2>&1 | grep -q incoming; then
 		echo "FAIL the module is listed to the key"

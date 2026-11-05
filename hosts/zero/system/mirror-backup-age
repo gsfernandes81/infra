@@ -7,8 +7,8 @@
 #
 # Tells the owner, through ntfy, when zero's last good backup to three is more than three
 # days old: a three that is off, unreachable or left locked after a reboot, or a backup that
-# fails every night (plans/three.md § Backups). Run by root's cron right after
-# mirror-backup, which run-parts starts first and waits for.
+# fails every night (plans/three.md § Backups). Run daily by root's cron at 02:00, two
+# hours before the night's push; three days is long enough that the order does not matter.
 #
 # The ntfy topic's URL is a secret, since anyone who knows it can read and post to it, so
 # it is in root's /var/lib/mirror-backup/ntfy-url, mode 600, never in git. Without it the

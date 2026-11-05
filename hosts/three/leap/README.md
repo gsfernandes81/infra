@@ -20,6 +20,7 @@ After `ssh zero`:
 
 ```fish
 # make zero's backup key, root's alone, and print the two values for the infra agent
+sudo install -d -m 700 /root/.ssh
 sudo ssh-keygen -t ed25519 -N '' -C 'zero mirror-backup' -f /root/.ssh/mirror-backup
 sudo cat /root/.ssh/mirror-backup.pub
 tailscale ip -4
@@ -98,7 +99,7 @@ phase 9). A backup run against a locked `three`
 fails and the next one retries.
 
 To lock it again without a reboot (Docker, a running snapshot and a running scrub stop
-with the mount):
+with the mount). The passphrase is not cached, so the next unlock asks for it again:
 
 ```fish
 # lock three's array: Docker first, then the mount, then the LUKS volume
@@ -114,8 +115,8 @@ the array is unlocked. `btrfs scrub status /media/mirror` shows the last result.
 
 ## The backup
 
-zero pushes it nightly (`hosts/zero/system/mirror-backup`) into `incoming`, over the
-tailnet, with a key that starts only the rsync daemon of `system/rsync-backup.conf`. That
+zero pushes it nightly at 04:00 (`hosts/zero/system/mirror-backup`) into `incoming`, over
+the tailnet, with a key that starts only the rsync daemon of `system/rsync-backup.conf`. That
 daemon runs as the backup user and can only write into `incoming`: it serves no file back,
 lists nothing, and confines every name and symlink to that directory. The backup user is not
 root, so each file's real owner and mode travel in an xattr (`--fake-super`), and a restore
@@ -127,7 +128,7 @@ A restore from a snapshot on `three`, into a directory that is not on the array'
 ```fish
 # restore Immich's library from a snapshot; --fake-super reads the kept owners, -M--super writes them
 sudo ls /media/mirror/snapshots
-sudo rsync -aHAX --numeric-ids --fake-super -M--super /media/mirror/snapshots/2026-11-20/immich/library/ /media/mirror/restore/library/
+sudo rsync -aHAX --numeric-ids --fake-super -M--super --mkpath /media/mirror/snapshots/2026-11-20/immich/library/ /media/mirror/restore/library/
 ```
 
 Use a date the listing shows in place of `2026-11-20`. Getting a restore back onto zero is

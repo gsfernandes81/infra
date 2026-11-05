@@ -2132,6 +2132,16 @@ second is the owner's call; the `host` job's `three` run proves both.
 - **zero learns `three`'s host key at the first push and pins it**
   (`StrictHostKeyChecking=accept-new`): that push goes over the tailnet, whose addresses
   WireGuard ties to each node's own key.
+- **The push runs at 04:00, from `/etc/periodic/hourly`**, acting only in that hour: the
+  daily slot, 02:00, is when Immich writes its nightly dump, and a push then could copy it
+  half-written. This keeps it a tracked file rather than a line edited into root's crontab.
+  A push cut off halfway leaves rsync's `.~tmp~` staging directories, which its own
+  `--delete` never removes, so `three`'s snapshot script clears them, while no push runs,
+  before it snapshots.
+- **A lock really locks: crypttab sets `password-cache=no`.** systemd otherwise keeps a typed
+  passphrase in root's keyring for 2.5 minutes, and the simulation's lock-then-unlock
+  opened the array with no prompt. A second drive's line can turn caching back on, so one
+  typing unlocks both.
 - **Syncthing's own config is left out of the push.** It holds `zero`'s device key, which
   has no business on a box abroad; a restore re-pairs the devices.
 - **The age alert reads its ntfy URL from root's file on `zero`**, because anyone who knows a

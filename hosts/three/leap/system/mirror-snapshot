@@ -10,7 +10,8 @@
 # twice a day; it makes at most one a day, so a turn it skips is taken twelve hours later.
 #
 # It skips its turn while the backup user has any process, which is zero's rsync: a
-# snapshot mid-run would keep half a run. The backup user cannot reach the snapshots, so a
+# snapshot mid-run would keep half a run. Then it clears what an earlier push cut off
+# halfway left behind. The backup user cannot reach the snapshots, so a
 # compromised zero can at worst overwrite the current copy.
 set -eu
 
@@ -22,6 +23,10 @@ if pgrep -u backup >/dev/null; then
 	echo "mirror-snapshot: the backup user's rsync is running; skipping this turn"
 	exit 0
 fi
+# What a push cut off halfway leaves: --delay-updates stages each changed file in a .~tmp~
+# directory beside it and moves it into place at the end, and rsync's own --delete never
+# removes one. Cleared here, while no push runs, so a half-file is never snapshotted.
+find "$src" -name '.~tmp~' -type d -prune -exec rm -rf {} +
 today=$(date -u +%F)
 if [ -e "$dst/$today" ]; then
 	echo "mirror-snapshot: $today exists"

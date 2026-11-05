@@ -31,6 +31,10 @@ pushed)
 mirrored)
 	check "a deletion on zero is mirrored, and a new file arrives" sh -c "
 		ls $lib; [ ! -e $lib/b.jpg ] && [ -e $lib/c.jpg ] && [ -e $lib/a.jpg ]"
+	# What a push cut off halfway leaves, which rsync's own --delete never removes.
+	check "the snapshot script clears what an interrupted push left" sh -c "
+		mkdir -p $lib/.~tmp~ && echo half > $lib/.~tmp~/stale
+		/usr/local/sbin/mirror-snapshot && [ ! -e $lib/.~tmp~ ]"
 	;;
 confined)
 	# Calibration: the backup user can write to /tmp, so only the module stops the writes.
@@ -45,11 +49,11 @@ confined)
 		done'
 	check "the snapshots hold only dated snapshots" sh -c '
 		ls /media/mirror/snapshots; ! ls /media/mirror/snapshots | grep -vE "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"'
-	rm -rf /media/mirror/incoming/link /media/mirror/incoming/escape*
+	rm -rf /media/mirror/incoming/link /media/mirror/incoming/tmp /media/mirror/incoming/escape*
 	;;
 locked)
-	check "the array is locked, and incoming is not there to write to" sh -c '
-		! findmnt /media/mirror && ! test -e /media/mirror/incoming'
+	check "the array is locked, its LUKS volume closed, and incoming not there to write to" sh -c '
+		! findmnt /media/mirror && ! test -e /dev/mapper/mirror && ! test -e /media/mirror/incoming'
 	;;
 after-lock)
 	check "the push after the unlock arrived" sh -c "ls $lib; [ \"\$(cat $lib/d.jpg)\" = four ]"
@@ -57,8 +61,8 @@ after-lock)
 	# source, and -M--super writes them for real at the destination.
 	check "a restore puts back a.jpg's real owner and mode" sh -c "
 		rm -rf /var/tmp/sim-restore
-		rsync -aHAX --numeric-ids --fake-super -M--super $lib/ /var/tmp/sim-restore/
-		s=\$(stat -c '%u:%g %a' /var/tmp/sim-restore/a.jpg); echo \"\$s\"; rm -rf /var/tmp/sim-restore
+		rsync -aHAX --numeric-ids --fake-super -M--super --mkpath $lib/ /var/tmp/sim-restore/library/
+		s=\$(stat -c '%u:%g %a' /var/tmp/sim-restore/library/a.jpg); echo \"\$s\"; rm -rf /var/tmp/sim-restore
 		[ \"\$s\" = '1000:1000 640' ]"
 	;;
 esac

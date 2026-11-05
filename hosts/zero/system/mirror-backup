@@ -1,12 +1,16 @@
 #!/bin/sh
 # infra-os:   alpine
 # infra-init: openrc
-# infra-path: /etc/periodic/daily
+# infra-path: /etc/periodic/hourly
 # infra-name: mirror-backup
 # infra-mode: 0755
 #
-# Pushes zero's backup to three, nightly, by root's cron (run-parts /etc/periodic/daily,
-# 02:00), over the tailnet (plans/three.md § Backups). What goes: Immich's library, upload,
+# Pushes zero's backup to three, nightly at 04:00, over the tailnet (plans/three.md §
+# Backups). Root's cron runs /etc/periodic/hourly every hour and this acts only in the 04
+# hour, because the daily slot, 02:00, is when Immich writes its nightly database dump, and
+# a push then could copy a dump half-written. 04 local stays clear of an 02:00 UTC dump in
+# summer time too. `sudo /etc/periodic/hourly/mirror-backup now` runs it at once, as the
+# first push at the visit does. What goes: Immich's library, upload,
 # backups (its nightly database dumps) and profile, and zero's Syncthing share. Never the
 # live Postgres directory, which a copy mid-write leaves inconsistent, nor thumbs and
 # encoded-video, which Immich regenerates, nor Syncthing's own config, which holds zero's
@@ -28,8 +32,11 @@ three=FILL-FROM-THREE-TAILNET-ADDRESS
 key=/root/.ssh/mirror-backup
 state=/var/lib/mirror-backup
 # Read by sim/microos/host/three.sh, which pushes with exactly these.
-rsync_opts="-aHAX --numeric-ids --delete --delete-delay --delay-updates"
+# --timeout, so a path that dies without a reset ends the run in 15 minutes rather than
+# hours, as three's daemon does on its side.
+rsync_opts="-aHAX --numeric-ids --delete --delete-delay --delay-updates --timeout=900"
 
+[ "${1-}" = now ] || [ "$(date +%H)" = 04 ] || exit 0
 case "$three" in FILL-FROM-*)
 	echo "mirror-backup: three's address is not filled in" >&2
 	exit 1
