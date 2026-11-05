@@ -75,6 +75,7 @@ mkdir -p /media/mirror
 cat "$stick/host/fstab.append" >> /etc/fstab
 
 enable_units
+install_motd
 # Syncthing's sync and discovery ports, for devices on the same network as three; its GUI
 # stays on 127.0.0.1. firewalld is on in Leap and allows only ssh and DHCPv6 otherwise.
 firewall-offline-cmd --add-service=syncthing >/dev/null

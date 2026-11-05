@@ -21,25 +21,24 @@
 # Nothing here is generated: each file it installs is a reviewed file from the repo,
 # installed at the path its own infra- header names, or a carry-over file copied verbatim.
 
-# The pins for binaries a distro package would get wrong (docs/decisions.md § Every box has
-# two ways in, § Leap hosts carry upstream's Compose). After first boot the monthly update
-# play moves them on the host; these are only what a new host starts on. aarch64 is the
-# Pi's; x86_64 exists for the simulation (sim/microos/run-host.sh), which boots this script
-# in a VM.
-cloudflared_version=2026.10.7
-compose_version=5.6.1
+# The pins for binaries a distro package would get wrong, in leap/pins, which the update
+# play reads too (server-update-leap.yml): what a new host starts on, and what the play
+# moves a running one to. aarch64 is the Pi's; x86_64 exists for the simulation
+# (sim/microos/run-host.sh), which boots this script in a VM.
+# shellcheck source=leap/pins
+. ./leap/pins
 case "$(uname -m)" in
 aarch64)
 	cloudflared_asset=cloudflared-linux-arm64
-	cloudflared_sha256=3df43aedc9ff291d1735b5cb576cb97e0b157488796db2e32b28aecabb445775
+	cloudflared_sha256=$cloudflared_sha256_aarch64
 	compose_asset=docker-compose-linux-aarch64
-	compose_sha256=42cfa75f51ad0ccf290bad37899e0038a8c10a0069e85233ecc1d53e3ff1347d
+	compose_sha256=$compose_sha256_aarch64
 	;;
 x86_64)
 	cloudflared_asset=cloudflared-linux-amd64
-	cloudflared_sha256=1f99fb518b83dec2ba8d870a7cc991d82a77e6196295a3d2754ba17ab9f91872
+	cloudflared_sha256=$cloudflared_sha256_x86_64
 	compose_asset=docker-compose-linux-x86_64
-	compose_sha256=47737f4236e6d3ccea7291995203f8f018058783b4c3a9469119811a0b5db8c0
+	compose_sha256=$compose_sha256_x86_64
 	;;
 *)
 	echo "firstboot: no pins for $(uname -m)" >&2
@@ -181,6 +180,13 @@ enable_units() {
 	# Leap's first-boot wizard waits at a console nobody watches and powers the box off if
 	# it fails. A successful Combustion run already keeps it away; the mask is in case.
 	systemctl mask jeos-firstboot.service
+}
+
+# The update recipes, at every login (leap/motd): the normal update, and the boot firmware's,
+# which is locked. A plain file, so it carries no infra- header for logins to show; the
+# update play installs it afresh at every run.
+install_motd() {
+	install -D -m 644 "$stick/leap/motd" /etc/motd.d/50-infra-updates
 }
 
 # The repo's checkout, as on every host, and each deployment's .env and secrets directory

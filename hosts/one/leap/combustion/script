@@ -56,6 +56,7 @@ mkdir -p /media/ionic-mysql /media/torrents /media/torrents-config /media/syncth
 cat "$stick/host/fstab.append" >> /etc/fstab
 
 enable_units
+install_motd
 clone_infra
 keep_volume_tars
 label_subvolumes

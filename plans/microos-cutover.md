@@ -85,7 +85,9 @@ login as root is refused with a valid key in place.
    LAN, because `server-create-host-tunnel.yml` writes the credentials onto the host
    (`decisions.md`, [`hosts/three/leap/README.md`](../hosts/three/leap/README.md)). Its
    hostname is `three.<dns_zone>`, derived as every alias is.
-4. **Ansible for MicroOS.** Packages go through `transactional-update` and take effect at
+4. **Ansible for MicroOS.** The Leap update play is **written** (2026-11-05,
+   `ansible/playbooks/server-update-leap.yml`, run for real in the `host` job). Packages go
+   through `transactional-update` and take effect at
    a reboot. One play per OS runs the owner's update on one host: it updates, reboots, and
    reports done only once the box answers over each of its ways in
    ([`decisions.md`](../docs/decisions.md) § *Updates are by hand on every host*). The

@@ -2151,6 +2151,39 @@ second is the owner's call; the `host` job's `three` run proves both.
 - **The age alert reads its ntfy URL from root's file on `zero`**, because anyone who knows a
   topic can read and post to it.
 
+## The Leap update play: pins in one file, both ways in proved after the reboot
+
+**Decided 2026-11-05**, the owner's calls on the first two points; proven by the `host`
+job, which runs the play for real on both simulated hosts.
+
+- **The pins live in `leap/pins`**, read by a new host's first boot and by
+  `server-update-leap.yml`, so a pin moves by one commit and new and running hosts agree.
+  Set aside: version and hash on the command line, as `server-update-cloudflared.yml`
+  takes them, which leaves the first-boot pins to drift from the hosts.
+- **Both ways in are proved without the phone on the tailnet.** Android allows one VPN and
+  the phone's slot is taken, so the play proves the tunnel from where it runs: it reconnects
+  after the reboot, and `cloudflared` must report ready connections. It proves the tailnet
+  from the box: `tailscale ping` to `zero` must answer. Set aside: connecting over both
+  from a control node, which needs one on the tailnet.
+- **`cloudflared` is replaced but not restarted, and proved before the reboot that starts
+  it.** The play's own connection may run through that tunnel, which CLAUDE.md § Changing
+  the thing you are connected through forbids restarting from inside, and the phone has no
+  second way in. So before the reboot the new binary must run, report its pin and validate
+  the box's tunnel config; if not, the previous goes back and the play stops short of the
+  reboot. Found in review.
+- **After the reboot it reads everything, reports, then judges,** so a failed check never
+  hides the report, nor `three`'s reminder to unlock. A relayed tailnet path counts as a
+  way in (`--until-direct=false`), since `zero` is remote.
+- **Every run reboots**, update or not: the owner runs it monthly, and one path is easier
+  to trust than two.
+- **The previous binaries are kept outside the plugin directory and off `PATH`**:
+  `/usr/local/lib/cloudflared.previous` and `/usr/local/lib/docker/docker-compose.previous`,
+  since Docker reads any `docker-*` file in its plugin directory as a plugin.
+- **The update recipes are a plain file every login shows** (`leap/motd`, at
+  `/etc/motd.d/`), the owner's request: the normal update and the boot firmware's. It has
+  no `infra-` header, which a login would print; the first boot installs it and every run
+  of the play installs it afresh.
+
 ## The lesson worth keeping
 
 

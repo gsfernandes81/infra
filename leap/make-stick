@@ -132,6 +132,8 @@ trap 'umount "$mnt" 2>/dev/null; rmdir "$mnt" 2>/dev/null' EXIT
 s=$mnt/combustion
 install -D -m 755 "$hostdir/combustion/script" "$s/script"
 install -D -m 644 "$repo/leap/firstboot.sh" "$s/leap/firstboot.sh"
+install -D -m 644 "$repo/leap/pins" "$s/leap/pins"
+install -D -m 644 "$repo/leap/motd" "$s/leap/motd"
 install -D -m 644 "$repo/leap/tailscale-repo.gpg" "$s/leap/tailscale-repo.gpg"
 install -D -m 644 "$hostdir/fstab.append" "$s/host/fstab.append"
 mkdir -p "$s/host/system"

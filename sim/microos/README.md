@@ -150,7 +150,13 @@ The run then checks, each as PASS or FAIL, and any FAIL fails the job:
   the same command brings it back;
 - in rescue mode (`host/rescue.sh`), entered with `systemctl isolate`: gavin logs in, and
   sshd, the network, `cloudflared`, `tailscaled` and logins are up while Docker is down;
-- after a reboot, proved by a new boot id, the box checks again on its static address.
+- after a reboot, proved by a new boot id, the box checks again on its static address;
+- the update play, `server-update-leap.yml`, run for real: both pinned binaries are first
+  swapped for stand-ins, so the run shows each moved to its pin with the stand-in kept as
+  the previous (`host/update-checks.sh`); the box rebooted; a login shows the update
+  recipes; and, on `three`, the play ends with the unlock command. `-e ways_in_check=false`
+  skips the two checks a simulation cannot pass, the tunnel's ready connections and the
+  tailnet, and the report says so.
 
 When gavin cannot log in, the run logs in as root on the serial console
 (`serial-login.py`), or uses the initramfs's emergency shell if the boot stopped there,
