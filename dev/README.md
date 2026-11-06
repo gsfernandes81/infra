@@ -997,6 +997,10 @@ slot. How it works is claude-sessions' `docs/remote-view.md`.
   (`claude-sessions remote btw`), over the same `ssh -T` path from the hub. claude-sessions
   refuses it when the container's cgroup has no room for another claude, so the container's
   `mem_limit` sets that limit. A refused side question is that limit, not a bug.
+  Since 0.17.2 the holder starts `claude` with `CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES=1`, so the
+  view can say each step in Claude's own words. Claude Code 2.1.311 makes each summary a separate
+  model request (`tool_use_summary_generation`, routed like compaction's), so every step of a
+  remote session costs one more small request on the shared login. A terminal slot does not.
 - **The door.** The hub's door already runs a forwarded command as given, before any tty test,
   so `relay` reaches the binary instead of the menu. `make verify` and `make status C=hub`
   have a `relay` line that runs the door with that command set, as sshd would. The smoke test
