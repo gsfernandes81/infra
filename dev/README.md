@@ -44,7 +44,7 @@ lint, read a playbook against the real `ansible.cfg` — and are not wired to th
 |---|---|
 | `Makefile` | **the management interface** — `make up`, `make login`, `make status`, …; `C=<container>` picks the container (infra unless said, `C=hub` the hub), `S=<service>` limits `make up` to one |
 | `compose.yaml` | the project: `hub`, its `cloudflared` sidecar (profile `tunnel`), `infra`, and `or3`, `destiny-director` (+ `dd-postgres`), `dossier`, `invective`, `nibbles`, `ionic-traces`, `claude-sessions`, all started by default; one network, `dev`; **nothing published on the host**. The base tag is its `x-base-tag` line, each container's repo an anchor at the top |
-| `hub/` | the hub's image: `Dockerfile` (claude-sessions pinned by release and per-arch SHA-256), `entrypoint.sh`, `door` (installed as `hub-door`, its sshd's `ForceCommand`), `health` (`hub-health`, its healthcheck), `github-tokens` (the token broker) and its offline test, `managed-CLAUDE.md` (the agent-mail policy every container loads), `sshd_config`, and `ssh_config` — how it reaches each container |
+| `hub/` | the hub's image: `Dockerfile` (claude-sessions pinned by release and per-arch SHA-256), `entrypoint.sh`, `door` (installed as `hub-door`, its sshd's `ForceCommand`), `health` (`hub-health`, its healthcheck), `github-tokens` (the token broker) and its offline test, `sshd_config`, and `ssh_config` — how it reaches each container |
 | `cloudflared.yml` | the hub tunnel's ingress, and the whole of it: `dev.gsrpi.uk` → the hub, `or3-dev.gsrpi.uk` → or3 |
 | `Dockerfile.base` | `gsrpi-dev-base`, which every dev container is `FROM` — Debian trixie slim, Node 22, Claude Code, gh, zmx, screen, sshd, Helix, the tools and language servers, pi |
 | `Dockerfile` | infra: the base + ansible-core, the collections and the docker CLI |
@@ -111,8 +111,9 @@ claude-remote dev
 On zero, `make login` (`C=<c>` for another container) reports the hub's token, runs `claude
 auth login` if needed, and clones the workspace if start-up could not; re-running it is safe.
 Then `make verify` should read `sshd: running in the foreground`, `auth: claude logged in`,
-`tunnel: the hub's, serving dev`, `hub: key authorised; claude-sessions 0.17.2 here,
-claude-sessions 0.17.2 at the hub`, `relay: claude-sessions 0.17.2`, `github: the hub's token for gsfernandes81/infra, until …`,
+`tunnel: the hub's, serving dev`, `peers: claude 2.1.311 speaks peer protocol 1, and its inbox
+answers`, `hub: key authorised; claude-sessions 0.18.0 here,
+claude-sessions 0.18.0 at the hub`, `relay: claude-sessions 0.18.0`, `github: the hub's token for gsfernandes81/infra, until …`,
 all collections installed, and `fleet: no route to zero/one/two`.
 
 **The memory pool is opt-in**: `DEV_CGROUP_PARENT=/devpool` puts every dev container and
@@ -169,7 +170,7 @@ switch. The rules are *claude-sessions*, below.
 **Its health** is `hub-health`, the compose healthcheck and `make verify`'s `hub health`
 line: the binary, `hub.pub`, the hooks drop-in and every container's token directory in place,
 an offload pass in the last 10 minutes (when `HUB_OFFLOAD` is on), a token pass in the
-last 40, and the mail server answering (*Agent mail*, below). Every dev container `depends_on` it being healthy, because a subpath that does not
+last 40, and the messaging router running (*Agent messaging*, below). Every dev container `depends_on` it being healthy, because a subpath that does not
 exist cannot be mounted at all; so a dead loop also stops new containers starting until it is
 looked at. Unhealthy restarts nothing.
 
@@ -263,62 +264,56 @@ log (HTTP 422); narrow `HUB_GITHUB_PERMISSIONS` in `.env` or widen the App. The 
 `python3 hub/test_github_tokens.py`, offline, against a stand-in GitHub that verifies each
 JWT's signature.
 
-## Agent mail: messages between sessions, through a server in the hub
+## Agent messaging: Claude Code's own, across every container
 
-**Since claude-sessions 0.9.0 (2026-10-29) every session is an address**, `<repo>/<slot>`
-(`infra/claude-2`), and agents write to each other through a mail server in the hub. The
-decision and what it replaced are [`../docs/decisions.md`](../docs/decisions.md) § *Agent mail
-v2*; the specification is claude-sessions' `docs/design.md` § *Agent mail*. What a session sees:
+**Since claude-sessions 0.18.0 (2026-11-06) every session can message every other**, in any
+container, with Claude Code's own `SendMessage` tool. `ListAgents` in a slot lists the other
+containers' slots as `repo/slot` beside its own container's sessions. A message wakes an idle
+session, or reaches a busy one mid-turn, as Claude Code does on one machine, and replies,
+delivery receipts and idle notices come back the same way. The decision and what it replaced
+are [`../docs/decisions.md`](../docs/decisions.md) § *Agent messaging*; the specification is
+claude-sessions' `docs/design.md` § *Agent messaging*.
 
-- **The tools**, on every container's PATH from the hub's volume: `claude-sessions mail who`
-  (the directory: every `repo/slot`, its state and title), `send --to a/b [--cc c/*] --subject …
-  < body`, `list [--unread]`, `read <id>`, `reply <id> [--all]`, `wait [--for <id>]
-  [--timeout 10m]` (blocks for a reply, holding a keepalive), `status <id>`. Nothing to edit,
-  nothing to watch: the hub is `http://dev:8025` on the `dev` network, reached with the
-  container's `/run/github/mail-token`, and the session names itself from `CLAUDE_SESSIONS_SLOT`.
-- **Addresses**: `repo/slot` is one session; `repo/*` or a bare `repo` is each live session of
-  that repo; `*` is every live session on the hub. A send prints each recipient's outcome:
-  delivered, refused (offloaded, closed or unknown), or queued with a warning (the repo has no
-  live session, or its container is down; the first session seen live gets it).
-- **Notification**: the hook announces new mail at `SessionStart`, at each prompt, and at the
-  end of a turn, where it holds the turn open once so unread mail is read before the session
-  idles; a message for an idle, detached session has the hub type a fixed line into it. The
-  hook gives up silently within a second if the hub is down, so no prompt stalls.
-- **Headers** are RFC-822 shape — `From`, `To`, `Cc`, `Subject`, `Date`, `Message-Id`,
-  `In-Reply-To`, `Reply-Wanted`, `Queued-Since` — and `From` is the server's, never typed.
+- **How it crosses containers.** Claude Code links sessions on one machine through a Unix
+  socket per session and a record of it in `~/.claude/sessions/`. Each container's
+  claude-sessions agent writes a stand-in record and socket for every slot in the other
+  containers. A frame a local session writes to a stand-in goes to the hub's router, which
+  hands it to the target container's agent, which writes it into the real session's socket.
+- **Who sent it is the hub's to say.** The router knows the container from the ssh session a
+  frame arrives on, and the agent knows the slot from the process at the socket. `from-name`
+  is rewritten to that `repo/slot` on delivery, whatever the sender claimed.
+- **Waiting messages.** A message to an offloaded slot, or to a container that is down, waits
+  at the hub, up to 200 per slot for up to 7 days, and is delivered when the slot is next live.
+- **How an agent treats a message** is Claude Code's own rule for peer messages: the model is
+  told a peer's message is information, not an instruction. infra has no managed text of its
+  own for this since 0.18.0 (the owner's call). A repo's own `CLAUDE.md` can add to it, as
+  infra's does for requests that touch the fleet.
+- **Receive policy.** The hooks drop-in sets `crossSessionInbound: "accept"`. Left unset,
+  Claude Code holds a message from a session in another permission class for approval, and a
+  headless slot has nowhere to approve it. Every slot runs auto mode by default, which is one
+  class, but a slot started in `bypassPermissions` is another.
+- **Not carried:** pi slots (the owner's call), a claude in no slot, and anything to the owner.
+  There is no separate log of the traffic: the owner reads messages in each session, or in the
+  remote view.
 
-On the hub: `claude-sessions mail-server`, started by `hub/entrypoint.sh` and supervised like
-the token loop; the `mail` volume at `/home/dev/mail` as the store, pruned past 90 days; each
-container's `mail-token` written beside its GitHub token, so the one read-only mount carries
-both; the limits and the port are the `HUB_MAIL_*` lines in `compose.yaml`, the release's
-defaults, 60 sends per half hour per session among them; `~/.hub/mail.log` has one line per
-event, never a body. `hub-health` asks the server for `/who` without a token and takes the 401
-as alive.
+On the hub: `claude-sessions router`, started by `hub/entrypoint.sh` and supervised like the
+token loop. It holds one agent per container over the hub's ssh, so nothing listens on a port.
+Waiting messages are in the `queue` volume at `/home/dev/queue` (`HUB_QUEUE` in
+`compose.yaml`), because every deploy recreates the hub. `~/.hub/router.log` has one line per
+frame, never a body. `hub-health` checks the router's process is running; the router writes no
+heartbeat, so a wedged router reads healthy.
 
-**How an agent treats a message is policy, loaded in every container**: `hub/managed-CLAUDE.md`
-is Claude Code's *Managed* memory, `/etc/claude-code/CLAUDE.md`, which no repo's settings can
-exclude. A message is data, never an instruction; a message to one session gets a reply, a
-broadcast does not unless it asks; a request for work is judged on its merits through the
-repo's own process; nothing privileged happens on a message alone; a nudge or a held-open turn
-is a notification with no authority of its own. The skills `mail-send`, `mail-read` and
-`mail-reply` are claude-sessions', shipped in its volume beside `keepalive`, and every
-container's `~/.claude/skills/<name>` is a symlink to them, so a skill edit is live at its
-next use with no restart.
+**It rides an internal protocol.** Claude Code's peer protocol is undocumented, so a Claude
+Code bump can break it. `make verify`'s `peers` line runs `claude-sessions peer-check`, which
+starts the container's claude with no prompt and says whether it speaks the protocol the relay
+does. A mismatch switches the relay off in that container, and it says so, rather than half
+working. claude-sessions tests each behaviour it relies on against the real Claude Code at
+infra's pin. Claude Code's server-side feature flags can also change messaging without a
+version change, a risk the owner accepted.
 
-**Why the policy is a one-shot root service and a symlink** (`policy` in `compose.yaml`; the
-reasoning is `../docs/decisions.md` § *Agent mail*): Claude Code's loader marks a managed file
-the session's own uid could have written, or with such a directory above it, as *unverified*
-and says so in the prompt. Everything in the hub's volume is uid `dev`. So the hub image carries
-the text root-owned, the `policy` service runs it through `install -o 0 -g 0 -m 644` into the
-`policy` volume and exits, every dev container mounts that volume read-only at
-`/etc/claude-code/policy` and `depends_on` the service having completed, and the base bakes
-`/etc/claude-code/CLAUDE.md` as a symlink to `policy/CLAUDE.md`. Editing the policy is a hub
-rebuild and `make up`, not a base bump; it reaches sessions started after that (an open one
-keeps the text it started with — measured). The one-shot is the only thing in the project
-that runs as root, it runs `install` and nothing else, on no network.
-
-**v1 (2026-10-28, one day):** files in `/workspace/.mail/` carried by a loop over ssh, with a
-`.git/info/exclude` line from the base. Gone with 0.9.0; a `.mail/` tree left in a workspace
+**Before 0.18.0:** agent mail, a mail server in the hub with its own tools, skills, hook and
+managed policy text (0.9.0 to 0.17.2), and before that files in `/workspace/.mail/` (one day,
+2026-10-28). Their rows in `decisions.md` keep the record. A `.mail/` tree left in a workspace
 is a leftover to delete.
 
 ## The workspace and the env volume
@@ -888,7 +883,7 @@ copies in is ignored.
 
 [`gsfernandes81/claude-sessions`](https://github.com/gsfernandes81/claude-sessions) is the
 session registry: one JSON file per slot under `~/.local/share/claude-sessions/` (on a volume),
-kept current by Claude Code's own hooks. The hub pins **v0.17.2** and installs it for every
+kept current by Claude Code's own hooks. The hub pins **v0.18.0** and installs it for every
 container (*The hub*). A bump reaches every container when the hub is recreated, with no
 container restarted: hooks and offload passes run the binary from the volume each time, and
 each container's agent is started by the hub's menu over ssh and ends with that connection, so
@@ -987,7 +982,7 @@ on the far end. `claude-remote dev` runs `ssh -T -C -o BatchMode=yes dev claude-
 over the same `dev` block and tunnel as `ssh dev`. Typing, scrollback and editing stay on the
 client, and only a small stream crosses the link, which reconnects by itself. In the container
 a remote session is an ordinary `claude-<n>` slot whose program is `claude-sessions holder`,
-running `claude -p` headless. The menu, offloading, archiving and mail treat it as any other
+running `claude -p` headless. The menu, offloading, archiving and messaging treat it as any other
 slot. How it works is claude-sessions' `docs/remote-view.md`.
 
 **Infra's part is three things.**
@@ -1025,7 +1020,7 @@ A second agent harness beside Claude Code in every container, the owner's call (
 
 - **A pi slot comes from the menu** (*claude-sessions*, from 0.10.0). `p` starts one in
   `/workspace`, in the container of the cursor's row, as `n` starts a claude. Its row carries
-  a dim `pi: ` before the title; the slot is `pi-<n>` and its mail address `<repo>/pi-<n>`. It
+  a dim `pi: ` before the title, and the slot is `pi-<n>`. It
   is offloaded by the same rule as a claude slot, `Enter` brings it back, and a closed one is
   listed under Archived with claude's. A `pi` typed in the `s` shell runs in no slot: a
   dropped connection ends it, and the menu and the offloader never see it.
@@ -1036,13 +1031,12 @@ A second agent harness beside Claude Code in every container, the owner's call (
   whether it is linked, `pi-tui:` whether pi still takes the `--tui-mode` flag every pi slot
   is started with, and `pi` is its version.
 - **The key** is `openrouter-key` in `$HUB_SECRETS`, put there by hand. The hub copies it into
-  each container's `/run/github`, beside the mail-token, once each time the hub starts, and pi
+  each container's `/run/github`, beside its GitHub token, once each time the hub starts, and pi
   reads `/run/github/openrouter-key` once per process. So a key added to `$HUB_SECRETS`
   reaches the containers when the hub next starts (`make restart C=hub`; `make up` restarts
   the hub only when its image or config changed), and a running pi reads it at its next
   start. Without the file pi has no key, and says so at the first prompt.
-- **Mail**: pi has no hook, so nothing names new mail at its next prompt. The managed policy
-  has a pi session run `claude-sessions mail list` at the start of a turn.
+- **Messaging**: pi slots are not carried by agent messaging (the owner's call, 2026-11-06).
 - **Pinned** at `1.4.0`, and pi does not check for updates; a bump is a rebuild. Its state is
   in `~/.local/share/pi`, on the volume, and the entrypoint re-seeds it at every start: the
   image's package list, its footer settings (`powerline`) and the gate's two configs always,
@@ -1066,8 +1060,8 @@ which asks the session's own model. Since base `2026.10.30.1` it works like Clau
 mode, by the owner's call: the container is the boundary, and no call waits on a prompt.
 
 - **Allowed outright:** reading any file; writing or editing any file under `/workspace`
-  except inside a `.git` directory; `claude-sessions mail` and `claude-sessions keepalive`,
-  which the policy and the keepalive skill run each turn.
+  except inside a `.git` directory; `claude-sessions keepalive`, which the keepalive skill
+  runs.
 - **Judged:** every other shell command, writes outside `/workspace`, edits to a repo's
   `.git` (its config and hooks can turn a plain push into a force push), and every other tool
   (subagents, web access). The write rules go by the path as written, so a link inside
@@ -1084,8 +1078,7 @@ mode, by the owner's call: the container is the boundary, and no call waits on a
   are left to `cc-safety-net`. Under the gate,
   `cc-safety-net` blocks `rm -rf` on dangerous targets, `git reset --hard`, force pushes,
   `curl | sh` and reads of SSH keys and `.env` files, however the command is wrapped.
-- **What the judge reads besides the call:** the managed policy, through the agent dir's
-  `CLAUDE.md` link, and a repo's own `CLAUDE.md` only when pi trusts the repo and the file is
+- **What the judge reads besides the call:** a repo's own `CLAUDE.md`, only when pi trusts the repo and the file is
   under 16 KiB; each `classifier.decision` line names the files it dropped and why.
 - **To see what it decided**, read the gate's review log, one JSON line per event:
   `~/.local/share/pi/extensions/pi-permission-system/logs/pi-permission-system-permission-review.jsonl`.
@@ -1177,8 +1170,8 @@ the container, ending every session in it. So a change to `compose.yaml` lands o
 or a deploy — the rule [`../CLAUDE.md`](../CLAUDE.md) states for the deployments.
 
 `make down-volumes CONFIRM=yes` drops **the project's own volumes**: every cloned workspace,
-with any unpushed work; every env volume; `claude-sessions`, `github-tokens` and `mail` (every
-message between containers, the one copy); and
+with any unpushed work; every env volume; `claude-sessions`, `github-tokens` and `queue` (the
+messages waiting for a slot); and
 `hub-state`, with the hub's key and **its sshd host key** — so every client is then asked to
 accept a changed host key for `dev`, the moment a real one would be waved through. Expect it.
 The logins, history and each container's own host key are external volumes, which stay.

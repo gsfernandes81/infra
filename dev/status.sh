@@ -309,6 +309,13 @@ if [ -z "$pin" ]; then echo "NO requiredMaximumVersion in managed settings — a
 elif [ "$v" = "$pin" ]; then echo "$v, the pin"
 else echo "NOT THE PIN — claude on PATH answers ${v:-nothing}, managed settings pin $pin"; fi' 2>/dev/null \
         || echo 'could not ask the container')"
+    # AGENT MESSAGING (claude-sessions 0.18.0) rides Claude Code's own peer protocol, which is
+    # internal to Claude Code. `peer-check` starts this claude with no prompt (no request is
+    # made) and says whether it speaks the protocol the relay does and its inbox answers. A
+    # mismatch switches the relay off in this container, so messages stop crossing to and from
+    # it; check this before moving the Claude Code pin.
+    printf 'peers     : %s\n' "$(d exec "$CONTAINER" sh -c 'timeout 60 claude-sessions peer-check 2>&1 | tail -1' 2>/dev/null \
+        || echo 'could not ask the container')"
     # Updates off, from `claude doctor`'s `Auto-updates:` field. Before the pin this line
     # deliberately ignored that field, which says `enabled` on an install that cannot update
     # (measured on 2.1.278). For OFF it is the right field: it names the switch that turned
@@ -431,6 +438,7 @@ try:
     f = json.load(open(p))
     h = f.get("hooks") or {}
     s = (f.get("statusLine") or {}).get("command")
+    x = f.get("crossSessionInbound")
 except FileNotFoundError:
     sys.exit("NO " + p + " — this image predates it (rebuild: make up)")
 except ValueError as e:
@@ -438,7 +446,8 @@ except ValueError as e:
 except OSError as e:
     sys.exit("UNREADABLE as dev, so sessions start with no hooks — %s" % e)
 print((" ".join(sorted(h)) if h else "PRESENT BUT EMPTY — no hooks in it")
-      + ("; status line: " + s if s else ""))
+      + ("; status line: " + s if s else "")
+      + ("; crossSessionInbound: " + x if x else ""))
 ' 2>&1)"
     printf 'hooks     : %s\n' "${hooks_file:-could not ask the container — see the container line above}"
     # The keep-alive skill (claude-sessions v0.4.7): the only thing that tells claude to hold

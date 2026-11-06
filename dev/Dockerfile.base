@@ -466,10 +466,9 @@ RUN set -eux; \
     rm -rf /tmp/pi-build-home; \
     chmod -R a+rX /opt/pi
 COPY pi-models.json /opt/pi/seed/models.json
-# The gate's config allows `claude-sessions mail` and `claude-sessions keepalive` outright, after
-# the bash catch-all so last-match-wins keeps them allowed: the managed policy has a pi session run
-# `mail list` every turn and the keepalive skill runs `keepalive`, and a judge and a prompt on
-# each would make both unusable. The file's schema takes no comment field, so the reason is here.
+# The gate's config allows `claude-sessions keepalive` outright, after the bash catch-all so
+# last-match-wins keeps it allowed: the keepalive skill runs it, and a judge and a prompt on each
+# run would make it unusable. The file's schema takes no comment field, so the reason is here.
 COPY pi-permission-system.json /opt/pi/seed/extensions/pi-permission-system/config.json
 COPY pi-permission-classifier.json /opt/pi/seed/extensions/pi-permission-classifier/config.json
 # Parsed here, as the managed settings are, because each is hand-edited and none of them says
@@ -640,18 +639,6 @@ RUN chmod 0755 /usr/local/bin/in-workspace
 # set another default, but Shift+Tab still changes mode inside a session and
 # `claude --permission-mode default` starts one that asks (both checked on 2.1.311).
 COPY claude-managed-settings.json /etc/claude-code/managed-settings.json
-# THE MANAGED POLICY — how an agent treats mail from another container (decisions.md § Agent
-# mail). Claude Code loads /etc/claude-code/CLAUDE.md as its *Managed* memory, which no repo's
-# claudeMdExcludes can drop. The TEXT is not baked: it is infra's dev/hub/managed-CLAUDE.md,
-# carried in the hub image and installed root-owned into the `policy` volume by the one-shot
-# `policy` service in dev/compose.yaml, which every dev container mounts read-only at the
-# directory made here. So an edit to the policy is a hub rebuild and `make up`, not a base
-# bump. Root-owned all the way down, on purpose: the loader marks a managed file the session's
-# own uid could have written (or with such a directory above it) as unverified and says so in
-# the prompt — read from 2.1.311 and not seen to fire there, but the design costs nothing and
-# the gate may turn on (docs/handoff/2026-10-28-agent-mail.md item 2). A dangling link, in a
-# container run without the volume, reads as no file: proved in a sandbox, 2026-10-28.
-RUN mkdir -p /etc/claude-code/policy && ln -s policy/CLAUDE.md /etc/claude-code/CLAUDE.md
 # CLAUDE CODE'S CODE INTELLIGENCE: a local plugin marketplace, read in place from /opt (no
 # network, no auto-update), whose one plugin points Claude Code's LSP client at `ty server` for
 # .py files, enabled for every container by the managed settings above. One server per

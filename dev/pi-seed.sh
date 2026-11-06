@@ -8,7 +8,7 @@
 # a volume hides whatever the image put at that path. So the image bakes its config into
 # /opt/pi/seed (root-owned, read-only to dev: Dockerfile.base says why) and these restore it.
 # What pi writes to is COPIED, never linked, because a link would point a write at a
-# read-only file. What pi only reads (the package tree, the policy, the hub's skills and
+# read-only file. What pi only reads (the package tree, the hub's skills and
 # extension) is LINKED, so a new image or a new hub release is live at the next start.
 #
 # Every link is made with `rm` first, never `ln -f` onto whatever is there: a real directory

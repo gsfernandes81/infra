@@ -74,7 +74,7 @@
 
 - name: Read the one-shot containers of {{ dep.name }}
   # A service another service waits on with `condition: service_completed_successfully` is
-  # meant to run once and exit 0 (dev's `policy`, which installs the managed CLAUDE.md as root),
+  # meant to run once and exit 0 (dev's `policy` was one until 2026-11-06),
   # so after `up` it reads `Exited (0)`, and every `up` starts it again by design. The plan and
   # the all-up check below allow exactly that for exactly these, and nothing else: a dev
   # container also has `restart: "no"`, and one of those exiting is the failure the check is

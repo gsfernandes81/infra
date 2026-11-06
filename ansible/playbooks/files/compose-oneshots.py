@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # Print the container name of every ONE-SHOT in the compose project of the current directory,
 # one per line: a service some other service waits on with
-# `depends_on: <svc>: condition: service_completed_successfully` (dev's `policy`, which installs
-# the managed CLAUDE.md as root and exits). Such a service reads `Exited (0)` when it has done its
+# `depends_on: <svc>: condition: service_completed_successfully` (dev's `policy` was one until
+# 2026-11-06: it installed a file as root and exited). Such a service reads `Exited (0)` when it has done its
 # job, and `up` runs it again every time, so the deploy and stop/start plays treat it apart from
 # every other container, which they require to be Up.
 #

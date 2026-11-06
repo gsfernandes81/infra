@@ -67,9 +67,9 @@ def repos(env):
         if not REPO.fullmatch(value):
             raise SystemExit(f"github-tokens: {key}={value!r} is not owner/repo")
         if name == "hub":
-            # The mail loop's reserved sender: its refusals arrive "from hub", so no container
-            # may be one (decisions.md § Agent mail).
-            raise SystemExit(f"github-tokens: {key}: `hub` is the mail loop's reserved name, not a container")
+            # `hub` is the hub's own name on the `dev` network, so a container called that would
+            # have the menu, the offloader and the router ssh into the hub itself.
+            raise SystemExit(f"github-tokens: {key}: `hub` is the hub's own name, not a container")
         out[name] = value
     return out
 

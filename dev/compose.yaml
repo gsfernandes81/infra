@@ -33,7 +33,7 @@ name: dev
 # THE BASE IMAGE TAG, stated once (gsrpi-dev-base, built from Dockerfile.base). Every build
 # below takes it as BASE_TAG; dev/Makefile and .github/workflows/dev-base.yml read this line,
 # so keep its shape: `x-base-tag: &base-tag <tag>`. Bumping it is what publishes a new base.
-x-base-tag: &base-tag 2026.11.01
+x-base-tag: &base-tag 2026.11.06
 
 # THE CLAUDE LOGIN, ONE SWITCH: CLAUDE_UNDOCUMENTED_SHARED_LOGINS, SET BELOW, true OR false (owner,
 # 2026-10-27). Its value is the default written into the line, `:-true` or `:-false`, and only that:
@@ -89,11 +89,6 @@ x-dev: &dev
   depends_on:
     hub:
       condition: service_healthy
-    # The managed policy, installed root-owned by the one-shot below before any agent reads it.
-    # A failed install starts no dev container — the right failure, visible in `compose ps`,
-    # against an agent running with no policy and nothing saying so.
-    policy:
-      condition: service_completed_successfully
   # ONE MEMORY POOL for every dev container (plans/dev-pool.md): a parent cgroup whose limit
   # the boot file in hosts/zero/system/ writes. Empty — the default until that file is
   # installed and proved — leaves each container under Docker's own parent, exactly as today;
@@ -130,19 +125,6 @@ x-managed: &managed
   volume:
     subpath: managed-settings.d
     nocopy: true
-# THE MANAGED POLICY (decisions.md § Agent mail): /etc/claude-code/CLAUDE.md in every container
-# is a symlink the base bakes into this directory, and the directory is the `policy` volume,
-# which the one-shot `policy` service below fills as root. Root-owned from / to the file, so
-# Claude Code's loader never reads it as something the session's own uid could have written.
-# Read-only, and nocopy as the hub's volumes: the base's mountpoint is empty and root's anyway.
-x-policy: &policy
-  type: volume
-  source: policy
-  target: /etc/claude-code/policy
-  read_only: true
-  volume:
-    nocopy: true
-
 x-claude-login: &claude-login
   type: volume
   source: claude-login
@@ -196,20 +178,10 @@ services:
       HUB_REPO_NIBBLES: *repo-nibbles
       HUB_REPO_IONIC_TRACES: *repo-ionic
       HUB_REPO_CLAUDE_SESSIONS: *repo-claude-sessions
-      # AGENT MAIL (decisions.md § Agent mail v2; hub/entrypoint.sh § agent mail): the server's
-      # port, the volume it keeps every message in, where it writes each container's mail-token
-      # (THE SAME directory as the GitHub tokens, so each container's read-only subpath mount at
-      # /run/github carries both — set the two together), and its limits — the release's
-      # defaults, one line each, so a change is visible here. `:-`, because absence IS the
-      # default, not a missing setting. Nothing is published on the host: the port is reachable
-      # on the `dev` network only, and every request needs a container's token.
-      HUB_MAIL_LISTEN: 0.0.0.0:${HUB_MAIL_PORT:-8025}
-      HUB_MAIL: /home/dev/mail
-      HUB_MAIL_TOKENS: /home/dev/tokens
-      HUB_MAIL_MAX_BYTES: ${HUB_MAIL_MAX_BYTES:-16384}
-      HUB_MAIL_MAX_QUEUE: ${HUB_MAIL_MAX_QUEUE:-200}
-      HUB_MAIL_RETAIN_DAYS: ${HUB_MAIL_RETAIN_DAYS:-90}
-      HUB_MAIL_RATE: ${HUB_MAIL_RATE:-60}
+      # AGENT MESSAGING (decisions.md § Agent messaging; hub/entrypoint.sh § agent messaging):
+      # where the router keeps messages waiting for an offloaded slot or a down container. The
+      # `queue` volume below, because every deploy recreates the hub.
+      HUB_QUEUE: /home/dev/queue
       # Where claude-sessions reads the pool's memory (the home's header, the door's load line).
       # Uncomment with the pool's mount below, once the pool exists; neither works alone.
       # CLAUDE_SESSIONS_POOL: /run/devpool
@@ -219,9 +191,8 @@ services:
       - hub-state:/home/dev/.hub
       # Every container's token, one directory each; each container mounts only its own.
       - github-tokens:/home/dev/tokens
-      # Every message between sessions, the mail server's store and the one record. Mounted into
-      # no container: sessions read and send over HTTP with their container's token.
-      - mail:/home/dev/mail
+      # Messages waiting for a slot (HUB_QUEUE above). Mounted into no container.
+      - queue:/home/dev/queue
       # The shared Claude login (x-claude-login above). Mounted here only so the volume is made
       # from the hub's dev-owned mountpoint: the dev images lack the directory, and a volume made
       # from a missing mountpoint is root's. The hub itself runs no claude and never reads it.
@@ -247,28 +218,6 @@ services:
       retries: 30
       start_period: 5s
     mem_limit: 128m
-
-  # ── the managed policy: one shot, as root, then exit ───────────────────────────
-  # Installs infra's dev/hub/managed-CLAUDE.md (carried in the hub image) into the `policy`
-  # volume, owned by root at 644, and exits; every dev container depends on it having
-  # completed and mounts the volume read-only at /etc/claude-code/policy (x-policy above). The
-  # ONLY thing on this project that runs as root, for the one reason the x-policy comment
-  # gives, and it runs `install`, nothing else: no network, no entrypoint of the hub's, no
-  # shell. Re-run on every `up`, so an edited policy lands with the hub rebuild that carries
-  # it. `image:` and never `build:`, so the hub image is built once; pull_policy never, because
-  # that image exists only here (a fresh host runs `make build` first, as `make up` does).
-  policy:
-    image: dev-hub
-    pull_policy: never
-    container_name: dev-policy
-    user: "0:0"
-    network_mode: none
-    restart: "no"
-    entrypoint: ["install", "-o", "0", "-g", "0", "-m", "644",
-                 "/usr/local/share/dev-hub/CLAUDE.md", "/policy/CLAUDE.md"]
-    volumes:
-      - policy:/policy
-    mem_limit: 16m
 
   # ── the tunnel ────────────────────────────────────────────────────────────────
   # A sidecar, as Phase 3 settled for deployments (decisions.md § "Sidecar, not baked-in"),
@@ -334,7 +283,6 @@ services:
     volumes:
       - *opt
       - *managed
-      - *policy
       - *claude-login
       # THE WORKSPACE IS A VOLUME, cloned into, and no longer zero's own checkout. zero's
       # ~gavin/infra is now only what the box runs; the container's tree is its own, so a
@@ -396,7 +344,6 @@ services:
     volumes:
       - *opt
       - *managed
-      - *policy
       - *claude-login
       # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
       # no other container's (hub/github-tokens). Empty until the hub's first mint.
@@ -446,14 +393,11 @@ services:
     depends_on:
       hub:
         condition: service_healthy
-      policy:
-        condition: service_completed_successfully
       dd-postgres:
         condition: service_healthy
     volumes:
       - *opt
       - *managed
-      - *policy
       - *claude-login
       # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
       # no other container's (hub/github-tokens). Empty until the hub's first mint.
@@ -518,7 +462,6 @@ services:
     volumes:
       - *opt
       - *managed
-      - *policy
       - *claude-login
       # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
       # no other container's (hub/github-tokens). Empty until the hub's first mint.
@@ -563,7 +506,6 @@ services:
     volumes:
       - *opt
       - *managed
-      - *policy
       - *claude-login
       - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: invective, nocopy: true } }
       - invective-workspace:/workspace
@@ -597,7 +539,6 @@ services:
     volumes:
       - *opt
       - *managed
-      - *policy
       - *claude-login
       - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: nibbles, nocopy: true } }
       - nibbles-workspace:/workspace
@@ -631,7 +572,6 @@ services:
     volumes:
       - *opt
       - *managed
-      - *policy
       - *claude-login
       - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: ionic-traces, nocopy: true } }
       - ionic-workspace:/workspace
@@ -683,7 +623,6 @@ services:
     volumes:
       - *opt
       - *managed
-      - *policy
       - *claude-login
       - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: claude-sessions, nocopy: true } }
       - claude-sessions-workspace:/workspace
@@ -702,8 +641,7 @@ volumes:
   claude-sessions:
   hub-state:
   github-tokens:
-  mail:
-  policy:
+  queue:
   claude-login:
   infra-workspace:
   infra-env:

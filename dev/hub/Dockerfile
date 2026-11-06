@@ -31,9 +31,9 @@
 # A BUMP is the version and both hashes together, from the new release's SHA256SUMS asset
 # (also in its notes). A wrong hash fails this build at `sha256sum -c`, loudly, by design.
 FROM python:3.13-slim-trixie@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c AS fetch
-ARG CLAUDE_SESSIONS_VERSION=0.17.2
-ARG CLAUDE_SESSIONS_SHA256_arm64=f2003b21d193196ca12a332b3fe0bb7b85fbccdd56ad9abc01121fc0294c3573
-ARG CLAUDE_SESSIONS_SHA256_amd64=fe080deb19a75557f9de8814796fce62ca6a1e84b063dc9fed29e14d2c7b3a90
+ARG CLAUDE_SESSIONS_VERSION=0.18.0
+ARG CLAUDE_SESSIONS_SHA256_arm64=8cb370af5000e82e33de49ed6a394984efc00be8cd3cff8fc7f73b206188d92b
+ARG CLAUDE_SESSIONS_SHA256_amd64=d33d65b2c978d6a23238a4988dfaddd0f5ca2b60a34a378dfc7a77bcd6e72cbb
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 RUN set -eux; \
@@ -63,7 +63,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # `--version` IS FATAL and compared exactly: a static musl binary has no excuse, and it is
 # also what proves a binary the smoke test put in place is the version this file pins.
-ARG CLAUDE_SESSIONS_VERSION=0.17.2
+ARG CLAUDE_SESSIONS_VERSION=0.18.0
 # The binary sits off PATH; what PATH finds is hub/claude-sessions, which hands it the container
 # list (that file says why). `install` copies the running binary, so the containers get this one.
 COPY --from=fetch /out/claude-sessions /usr/local/libexec/claude-sessions
@@ -79,12 +79,6 @@ COPY door /usr/local/bin/hub-door
 COPY github-tokens /usr/local/bin/github-tokens
 # The healthcheck, and `make status`'s word on the hub (health says why).
 COPY health /usr/local/bin/hub-health
-# AGENT MAIL'S POLICY, infra's (decisions.md § Agent mail): the managed text every container
-# loads, installed root-owned into the `policy` volume by the one-shot `policy` service in
-# dev/compose.yaml (this image, as root, `install` and exit). Root-owned here so the one-shot's
-# source is too. The mail SKILLS are claude-sessions' since 0.9.0: `install` writes them into
-# the shared volume beside keepalive, and the base symlinks them in.
-COPY managed-CLAUDE.md /usr/local/share/dev-hub/CLAUDE.md
 RUN chmod 0755 /usr/local/bin/hub-door /usr/local/bin/github-tokens /usr/local/bin/hub-health
 
 # The dev user, at the uid that owns the checkout — the same uid as every dev container's
@@ -105,8 +99,8 @@ WORKDIR /home/dev
 # Every volume's mountpoint, as `dev`: a new named volume takes the owner of the directory it
 # mounts over, and one the image lacks is root's. ~/tokens was missing until the smoke test's
 # first run (2026-10-27): the broker could not make a container's directory, and the hub never
-# reported healthy. ~/mail is the agent-mail volume (entrypoint.sh § agent mail), same rule.
-RUN mkdir -p /home/dev/.hub /home/dev/.ssh/cm /home/dev/tokens /home/dev/.claude-login /home/dev/mail \
+# reported healthy. ~/queue is the router's (entrypoint.sh § agent messaging), same rule.
+RUN mkdir -p /home/dev/.hub /home/dev/.ssh/cm /home/dev/tokens /home/dev/.claude-login /home/dev/queue \
     && chmod 700 /home/dev/.hub /home/dev/.ssh /home/dev/.ssh/cm /home/dev/.claude-login
 
 COPY --chown=${USER_UID}:${USER_GID} sshd_config /home/dev/sshd_config

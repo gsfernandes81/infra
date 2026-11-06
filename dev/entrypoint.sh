@@ -280,9 +280,7 @@ PY
 # image points into the ~/.local/share volume; the volume hides what the image baked there,
 # so the image keeps its copy in /opt/pi/seed and pi-seed.sh restores it. The functions and
 # their reasoning are in that file, beside this one, so its test can call them without
-# running this. The managed policy is linked from /etc, where Claude reads it; if it were ever
-# missing, the dangling link reads to pi as no file, as the missing file does to Claude. The
-# skills and the extension are linked further down, with Claude's skills.
+# running this. The skills and the extension are linked further down, with Claude's skills.
 PI_DIR="${PI_CODING_AGENT_DIR:-$HOME/.local/share/pi}"
 PI_SEED_SH="$(dirname "${BASH_SOURCE[0]}")/pi-seed.sh"
 # shellcheck source-path=SCRIPTDIR source=pi-seed.sh
@@ -290,12 +288,8 @@ if ! . "$PI_SEED_SH"; then
     say "pi: could not load $PI_SEED_SH — its agent dir is not seeded or linked"
 elif [ ! -d /opt/pi/seed ]; then
     say "pi: no /opt/pi/seed in this image — its agent dir is not seeded"
-elif pi_seed /opt/pi/seed "$PI_DIR"; then
-    if pi_link /etc/claude-code/CLAUDE.md "$PI_DIR/CLAUDE.md"; then
-        say "pi policy: $PI_DIR/CLAUDE.md -> /etc/claude-code/CLAUDE.md"
-    else
-        say "pi policy: could not link $PI_DIR/CLAUDE.md — pi starts without the managed policy"
-    fi
+else
+    pi_seed /opt/pi/seed "$PI_DIR"
 fi
 
 # ── the workspace ───────────────────────────────────────────────────────────
@@ -516,13 +510,12 @@ fi
 # Removed when the hub's volume has none (a rollback past v0.4.7 has no `keepalive` either): a
 # stale file would tell every claude to run a command that does not exist. A failure is said and does not stop the door; the cost is a
 # claude that does not know to ask, so a quiet wait in a detached slot can be offloaded.
-# SINCE BASE 2026.10.29 EVERY SKILL THE HUB SHIPS IS A SYMLINK, not a copy: keepalive and the
-# three mail skills (claude-sessions' since 0.9.0) live in the volume, and a link means an edit
-# there is live at the skill's next invocation with no container restart. The list is fixed so a
-# skill the hub stops shipping is removed, and nothing else under $CFG/skills — a person's own
+# SINCE BASE 2026.10.29 EVERY SKILL THE HUB SHIPS IS A SYMLINK, not a copy: keepalive lives in
+# the volume, and a link means an edit there is live at the skill's next invocation with no
+# container restart. The list is fixed, so nothing else under $CFG/skills — a person's own
 # skills — is touched. A real directory where the link should be is the copy an earlier base
 # made, and goes first; `rm -rf` on a symlink removes the link, never what it points at.
-for skill in keepalive mail-send mail-read mail-reply; do
+for skill in keepalive; do
     link="$CFG/skills/$skill"
     src="/opt/claude-sessions/skills/$skill"
     if [ -s "$src/SKILL.md" ]; then
@@ -535,10 +528,23 @@ for skill in keepalive mail-send mail-read mail-reply; do
         rm -rf "$link"
         say "skill $skill NOT in the hub's volume — removed here"
     fi
-    # pi reads the same four, from its agent dir (pi-seed.sh § pi_link_skill).
+    # pi reads the same skills, from its agent dir (pi-seed.sh § pi_link_skill).
     if declare -F pi_link_skill >/dev/null; then
         pi_link_skill /opt/claude-sessions "$PI_DIR" "$skill"
     fi
+done
+
+# A link into the hub's volume whose skill the volume no longer ships is removed, here and in
+# pi's dir: the three mail skills went in claude-sessions 0.18.0, and the list above no longer
+# names them. Only a dangling link INTO the volume goes, so a person's own skills, and links
+# that resolve, are never touched.
+for link in "$CFG"/skills/* "$PI_DIR"/skills/*; do
+    [ -L "$link" ] && [ ! -e "$link" ] || continue
+    case "$(readlink "$link")" in
+        /opt/claude-sessions/skills/*)
+            rm -f "$link"
+            say "skill link $link: the hub's volume no longer ships it — removed" ;;
+    esac
 done
 
 # pi's hook into claude-sessions, linked like a skill (pi-seed.sh § pi_link_extension).

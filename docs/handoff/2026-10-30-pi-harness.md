@@ -79,6 +79,8 @@ Findings, not started:
     its `install`); its agent was asked on 2026-10-30 to quote the two descriptions for
     0.10.1. Nothing to change in infra; the pin bump of item 7 brings the fix. v0.10.1's notes
     say the two descriptions are quoted; open until a pi slot on zero starts without the error.
+    **Closed 2026-11-06:** claude-sessions 0.18.0 removes the mail skills, and pi slots are
+    outside agent messaging (the owner's call).
 
 This note is deleted when all ten are closed. Its reasoning is already in the pi row, so
 nothing needs moving first.

@@ -5,10 +5,10 @@
 # Healthy means: what every dev container mounts is in place (the binary, the hooks drop-in,
 # the hub's public key, every container's token directory), AND the hub's two loops are alive —
 # an offload pass in the last 10 minutes (passes are every 3) when the offloader is on, a token
-# pass in the last 40 (passes are every 30) when the broker is on, and the mail server answering
-# GET /who — any HTTP status, 401 without a token being the expected one. Each loop touches its beat
-# file when it starts and after every pass, so a hub that has only just started is not held
-# unhealthy, and a loop that has died or wedged is.
+# pass in the last 40 (passes are every 30) when the broker is on, and the messaging router
+# running. Each loop touches its beat file when it starts and after every pass, so a hub that
+# has only just started is not held unhealthy, and a loop that has died or wedged is. The router
+# has no beat file, so its check is weaker: it finds a dead router, not a wedged one.
 #
 # Unhealthy is a report, not a restart: Docker restarts nothing for it. Every dev container
 # waits for healthy before it starts, so a dead loop also stops new containers starting until
@@ -17,7 +17,6 @@ set -u
 shared=/opt/claude-sessions
 state=/home/dev/.hub
 tokens=${HUB_GITHUB_TOKENS:-/home/dev/tokens}
-mail_listen=${HUB_MAIL_LISTEN:-0.0.0.0:8025}
 
 fail() { echo "unhealthy: $*"; exit 1; }
 fresh() { [ -n "$(find "$1" -mmin "-$2" 2>/dev/null)" ]; }
@@ -32,15 +31,18 @@ fi
 if [ -n "${HUB_GITHUB_APP_ID:-}" ]; then
     fresh "$state/tokens.beat" 40 || fail "no GitHub token pass in 40 minutes (~/.hub/github-tokens.log)"
 fi
-# The address, not the name (CLAUDE.md § Landmines): the server binds every interface, and a
-# refusal here must mean the server, not a resolver. python3 is this image's base; curl is not in it.
-python3 - "127.0.0.1:${mail_listen##*:}" <<'PY' || fail "the mail server does not answer GET /who (~/.hub/mail.log)"
-import sys, urllib.request, urllib.error
-try:
-    urllib.request.urlopen(f"http://{sys.argv[1]}/who", timeout=3)
-except urllib.error.HTTPError:
-    pass            # 401 without a token: the server is up and refusing, as it should
-except Exception as e:
-    sys.exit(f"no answer: {e}")
+# The router's process, found by its own argv: the binary, then `router`. Not `pgrep -f`, which
+# also matches the supervising shell, whose argv carries the same words and which outlives a
+# router that has died (CLAUDE.md § Shell traps, the pkill entry).
+python3 - <<'PY' || fail "the messaging router is not running (~/.hub/router.log)"
+import os, sys
+for pid in filter(str.isdigit, os.listdir("/proc")):
+    try:
+        argv = open(f"/proc/{pid}/cmdline", "rb").read().split(b"\0")
+    except OSError:
+        continue
+    if len(argv) > 1 and os.path.basename(argv[0]) == b"claude-sessions" and argv[1] == b"router":
+        sys.exit(0)
+sys.exit(1)
 PY
 echo healthy

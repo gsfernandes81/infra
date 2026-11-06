@@ -169,7 +169,7 @@ class Broker(unittest.TestCase):
     def test_a_container_named_hub_stops_it(self):
         out, _ = self.run_broker({"HUB": "o/r"}, verb="dirs")
         self.assertEqual(out.returncode, 1)
-        self.assertIn("reserved name", out.stderr)
+        self.assertIn("the hub's own name", out.stderr)
 
     def test_a_malformed_repo_stops_it(self):
         out, _ = self.run_broker({"Y": "a b/c"}, verb="dirs")
