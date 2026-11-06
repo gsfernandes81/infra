@@ -32,7 +32,7 @@
 #      Then the container ids are compared with the ids from before, so what was recreated
 #      is read, not assumed (CLAUDE.md § Verifying changes), and the play waits for
 #      healthchecks and fails naming any container that is not up. A ONE-SHOT, a service
-#      another waits on with `condition: service_completed_successfully` (dev's `policy`),
+#      another waits on with `condition: service_completed_successfully`,
 #      is up when it reads `Exited (0)`, and its restart on every `up` is not a change the
 #      plan asks about; anything else that exits is a failure.
 #
