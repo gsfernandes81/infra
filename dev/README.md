@@ -112,8 +112,8 @@ On zero, `make login` (`C=<c>` for another container) reports the hub's token, r
 auth login` if needed, and clones the workspace if start-up could not; re-running it is safe.
 Then `make verify` should read `sshd: running in the foreground`, `auth: claude logged in`,
 `tunnel: the hub's, serving dev`, `peers: claude 2.1.311 speaks peer protocol 1, and its inbox
-answers`, `hub: key authorised; claude-sessions 0.18.2 here,
-claude-sessions 0.18.2 at the hub`, `relay: claude-sessions 0.18.2`, `github: the hub's token for gsfernandes81/infra, until …`,
+answers`, `hub: key authorised; claude-sessions 0.18.3 here,
+claude-sessions 0.18.3 at the hub`, `relay: claude-sessions 0.18.3`, `github: the hub's token for gsfernandes81/infra, until …`,
 all collections installed, and `fleet: no route to zero/one/two`.
 
 **The memory pool is opt-in**: `DEV_CGROUP_PARENT=/devpool` puts every dev container and
@@ -289,9 +289,12 @@ claude-sessions' `docs/design.md` § *Agent messaging*.
   memory has room for one more session (about 250 MB). The sender gets a notice from
   `hub/router`: woken, with the cost, or not woken and why, or the container is down. An
   offloaded slot shows no status in `ListAgents`, since Claude Code drops statuses it does
-  not know, and every session is told so at start by the `peer-context` hook. The room check
-  reads the container's cgroup, not zero's: until the dev pool is installed, nothing totals
-  the wakes across containers (phase table, phase 5, finding (k)).
+  not know, and every session is told so at start by the `peer-context` hook. **From 0.18.3
+  the router checks zero first**: its available memory (`MemAvailable` in the hub's
+  `/proc/meminfo`, which inside a container describes the host) must cover the session plus
+  512 MB, and so must the dev pool's headroom once `CLAUDE_SESSIONS_POOL` names it. Wakes run
+  one at a time across the fleet, so each reads what the last one left. The container's own
+  check still runs after these. A refusal reaches the sender with the figures.
 - **How an agent treats a message** is Claude Code's own rule for peer messages: the model is
   told a peer's message is information, not an instruction. infra has no managed text of its
   own for this since 0.18.0 (the owner's call). A repo's own `CLAUDE.md` can add to it, as
@@ -893,7 +896,7 @@ copies in is ignored.
 
 [`gsfernandes81/claude-sessions`](https://github.com/gsfernandes81/claude-sessions) is the
 session registry: one JSON file per slot under `~/.local/share/claude-sessions/` (on a volume),
-kept current by Claude Code's own hooks. The hub pins **v0.18.2** and installs it for every
+kept current by Claude Code's own hooks. The hub pins **v0.18.3** and installs it for every
 container (*The hub*). A bump reaches every container when the hub is recreated, with no
 container restarted: hooks and offload passes run the binary from the volume each time, and
 each container's agent is started by the hub's menu over ssh and ends with that connection, so

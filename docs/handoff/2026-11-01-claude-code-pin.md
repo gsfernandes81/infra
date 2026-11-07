@@ -1,11 +1,11 @@
-# Handoff 2026-11-01: Claude Code pinned at 2.1.311, claude-sessions 0.18.2 (the remote view, agent messaging) — 0.18.1 on zero since 2026-11-07, 0.18.2 on main
+# Handoff 2026-11-01: Claude Code pinned at 2.1.311, claude-sessions 0.18.3 (the remote view, agent messaging) — 0.18.1 on zero since 2026-11-07, 0.18.3 on main
 
 **First orders for the next session: read this, say where things stand, and stop.** Items 2
 and 3 run on zero and are the owner's to start. Item 4 is the remote view, on each client.
 
 ## Where it stands
 
-On `main`: the hub pins claude-sessions 0.18.2 (waking, and the `peer-context` hook), which reaches zero at the owner's next deploy; and base `2026.11.06` installs Claude Code
+On `main`: the hub pins claude-sessions 0.18.3 (waking with a check of zero's memory, and the `peer-context` hook), which reaches zero at the owner's next deploy; and base `2026.11.06` installs Claude Code
 2.1.311 with updates off and a version ceiling (dev-base and dev-smoke green on `f08d6b1`, and
 again on `ec1fd7e` with 0.11.0 and on `e1af926` with 0.13.1, where the smoke test ran `relay` through the hub's sshd, and on `a4ead3e` with 0.13.2), both in `dev/claude-managed-settings.json`. The reasons are the pin row in
 [`decisions.md`](../decisions.md). How it is read is in [`dev/README.md`](../../dev/README.md)
@@ -34,7 +34,7 @@ again on `ec1fd7e` with 0.11.0 and on `e1af926` with 0.13.1, where the smoke tes
    back. The owner removed the `dev-policy` container, the `mail-token` files and the
    `dev_mail` and `dev_policy` volumes.
 
-6. **Deploy 0.18.2.** Only the hub needs rebuilding: the base is unchanged, and Compose does
+6. **Deploy 0.18.3** (0.18.2 was never deployed). Only the hub needs rebuilding: the base is unchanged, and Compose does
    not restart the dev containers when the hub is recreated. Connections through the hub
    (`ssh dev`, the remote view) and every container's agent drop once, so a message in flight
    waits until the new router reconnects. Rebuild the hub alone, from zero:

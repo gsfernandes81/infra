@@ -1742,9 +1742,12 @@ is claude-sessions' `docs/design.md` § *Agent messaging*; this is infra's why.
 - **Waking, from 0.18.2 (the owner's call):** a message to an offloaded slot resumes it under
   the holder when the container's cgroup has room for one more session, and the sender is told
   the outcome and the cost. Every session learns at start, from the drop-in's `peer-context`
-  hook, that no status in `ListAgents` means offloaded and that waking costs RAM. The room is
-  the container's, not zero's; until the dev pool is installed, wakes in several containers
-  at once are not totalled anywhere (phase 5, finding (k)).
+  hook, that no status in `ListAgents` means offloaded and that waking costs RAM. **From
+  0.18.3 the router checks the host as well** (infra's finding (k), fixed upstream as infra
+  suggested): zero's `MemAvailable` must cover the session plus a 512 MB margin, and so must
+  the dev pool's headroom once `CLAUDE_SESSIONS_POOL` is set; wakes run one at a time across
+  the fleet. A container's 2048m is a ceiling, not a reservation, and together they exceed
+  zero's RAM, so the container's own check alone could pass several wakes at once.
 - **hub-health checks the router's process and its heartbeat.** The router has no port to
   probe. Its process is found by its own argv in `/proc`, and from 0.18.1 it rewrites
   `$HUB_QUEUE/.beat` every 60 s once it holds its locks, read as stale after 3 minutes (infra's
