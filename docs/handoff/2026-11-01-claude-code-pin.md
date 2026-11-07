@@ -28,21 +28,16 @@ again on `ec1fd7e` with 0.11.0 and on `e1af926` with 0.13.1, where the smoke tes
    route, but it may refuse under DISABLE_UPDATES, and it would put a binary first on PATH
    that then has to be removed. Once seen, drop "not yet seen on a box" from the pin row,
    the README, Dockerfile.base and status.sh.
-4. **The remote view (claude-sessions 0.18.1).** Pinned in the hub on `main`, with a `relay`
-   line in `make verify` and a smoke check through the hub's sshd. After the deploy:
-   `make verify` should read `relay: claude-sessions 0.18.1`. Then, on the phone (and in WSL),
-   `cd ~/infra/ansible; ansible-playbook playbooks/client-home-claude-remote.yml`, then
-   `claude-remote dev`. It has never run on Termux, so the first run proves a static musl
-   binary starts on Android: the play asserts `claude-remote --version` reads the pin. Run the
-   play only after the deploy. The play checks the client against the checkout's pin, not
-   against zero's relay. So a client installed first is a 0.18.1 client on an older relay, and
-   `/tasks` and the agent views then show nothing or refuse, with no error that names the version. In a
-   new session there, `/rc` should show a claude.ai/code link with no consent prompt, and
-   `/rc` again turns it off (the Remote Control row in `decisions.md`). That is also the first
-   real Remote Control session on the shared login, open in the dev-hub handoff's item 1; the
-   container should appear in the Claude app as a machine named for its hostname. Still
-   open upstream: claude-sessions is to measure cloudflared's idle timeout from Termux, which
-   may move the client's `ServerAliveInterval` from 30 to 60, and that is the owner's call.
+4. **The remote view (claude-sessions 0.18.1).** The phone's client is on the pin: the owner ran
+   `client-home-claude-remote.yml` there after the deploy, on 2026-11-07. Left: the same play
+   in WSL (`cd ~/infra/ansible; ansible-playbook playbooks/client-home-claude-remote.yml`),
+   and `/rc` once in a remote-view session, which should show a claude.ai/code link with no
+   consent prompt, while `/rc` again turns it off (the Remote Control row in `decisions.md`).
+   That is also the first real Remote Control session on the shared login, open in the
+   dev-hub handoff's item 1; the container should appear in the Claude app as a machine named
+   for its hostname. Still open upstream: claude-sessions is to measure cloudflared's idle
+   timeout from Termux, which may move the client's `ServerAliveInterval` from 30 to 60, and
+   that is the owner's call.
 
 5. **Agent messaging. Closed 2026-11-07:** the first fleet run listed the other containers'
    slots in `ListAgents`, and a message from claude-sessions crossed to infra and the reply went
