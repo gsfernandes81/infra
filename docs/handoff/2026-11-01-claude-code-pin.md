@@ -15,10 +15,8 @@ again on `ec1fd7e` with 0.11.0 and on `e1af926` with 0.13.1, where the smoke tes
 
 1. **The deploy. Closed 2026-11-07:** 0.18.1 on base `2026.11.06`, by the recreate play. This
    also closes the pi-harness handoff's items 2, 3, 7 and 10 once their checks read right.
-2. **`make verify` on zero** (`ssh -t zero 'cd ~/infra/dev && make verify'`). Expected:
-   `claudepin : 2.1.311, the pin`, `autoupdate: off by DISABLE_UPDATES — …`, and
-   claude-sessions `0.18.1` at the hub and in each container, and `peers: claude 2.1.311 speaks
-   peer protocol 1, and its inbox answers`.
+2. **`make verify` on zero. Skipped 2026-11-07, the owner's call:** the deploy came up and
+   messaging worked, and CI's smoke run reads the same lines.
 3. **The ceiling, proved once.** `requiredMaximumVersion` was read from the binary and never
    seen to refuse a start (writing the managed file needs root). The test that touches
    nothing on PATH, untested as written: in one rebuilt container, `npm pack
@@ -31,11 +29,8 @@ again on `ec1fd7e` with 0.11.0 and on `e1af926` with 0.13.1, where the smoke tes
 4. **The remote view (claude-sessions 0.18.1).** The phone's client is on the pin: the owner ran
    `client-home-claude-remote.yml` there after the deploy, on 2026-11-07. Left: the same play
    in WSL (`cd ~/infra/ansible; ansible-playbook playbooks/client-home-claude-remote.yml`),
-   and `/rc` once in a remote-view session, which should show a claude.ai/code link with no
-   consent prompt, while `/rc` again turns it off (the Remote Control row in `decisions.md`).
-   That is also the first real Remote Control session on the shared login, open in the
-   dev-hub handoff's item 1; the container should appear in the Claude app as a machine named
-   for its hostname. Still open upstream: claude-sessions is to measure cloudflared's idle
+   and nothing else here: `/rc` in a remote-view session worked on an earlier build (owner,
+   2026-11-07). Still open upstream: claude-sessions is to measure cloudflared's idle
    timeout from Termux, which may move the client's `ServerAliveInterval` from 30 to 60, and
    that is the owner's call.
 
