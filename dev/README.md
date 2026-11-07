@@ -112,8 +112,8 @@ On zero, `make login` (`C=<c>` for another container) reports the hub's token, r
 auth login` if needed, and clones the workspace if start-up could not; re-running it is safe.
 Then `make verify` should read `sshd: running in the foreground`, `auth: claude logged in`,
 `tunnel: the hub's, serving dev`, `peers: claude 2.1.311 speaks peer protocol 1, and its inbox
-answers`, `hub: key authorised; claude-sessions 0.18.1 here,
-claude-sessions 0.18.1 at the hub`, `relay: claude-sessions 0.18.1`, `github: the hub's token for gsfernandes81/infra, until …`,
+answers`, `hub: key authorised; claude-sessions 0.18.2 here,
+claude-sessions 0.18.2 at the hub`, `relay: claude-sessions 0.18.2`, `github: the hub's token for gsfernandes81/infra, until …`,
 all collections installed, and `fleet: no route to zero/one/two`.
 
 **The memory pool is opt-in**: `DEV_CGROUP_PARENT=/devpool` puts every dev container and
@@ -284,6 +284,14 @@ claude-sessions' `docs/design.md` § *Agent messaging*.
   is rewritten to that `repo/slot` on delivery, whatever the sender claimed.
 - **Waiting messages.** A message to an offloaded slot, or to a container that is down, waits
   at the hub, up to 200 per slot for up to 7 days, and is delivered when the slot is next live.
+- **Waking (0.18.2).** A message to an offloaded slot also asks its container's agent to
+  resume it headless under the holder, as the remote view opens one, if the container's own
+  memory has room for one more session (about 250 MB). The sender gets a notice from
+  `hub/router`: woken, with the cost, or not woken and why, or the container is down. An
+  offloaded slot shows no status in `ListAgents`, since Claude Code drops statuses it does
+  not know, and every session is told so at start by the `peer-context` hook. The room check
+  reads the container's cgroup, not zero's: until the dev pool is installed, nothing totals
+  the wakes across containers (phase table, phase 5, finding (k)).
 - **How an agent treats a message** is Claude Code's own rule for peer messages: the model is
   told a peer's message is information, not an instruction. infra has no managed text of its
   own for this since 0.18.0 (the owner's call). A repo's own `CLAUDE.md` can add to it, as
@@ -885,7 +893,7 @@ copies in is ignored.
 
 [`gsfernandes81/claude-sessions`](https://github.com/gsfernandes81/claude-sessions) is the
 session registry: one JSON file per slot under `~/.local/share/claude-sessions/` (on a volume),
-kept current by Claude Code's own hooks. The hub pins **v0.18.1** and installs it for every
+kept current by Claude Code's own hooks. The hub pins **v0.18.2** and installs it for every
 container (*The hub*). A bump reaches every container when the hub is recreated, with no
 container restarted: hooks and offload passes run the binary from the volume each time, and
 each container's agent is started by the hub's menu over ssh and ends with that connection, so
@@ -916,7 +924,7 @@ a rename, and an issue for claude-sessions.
 
 | Piece | Where | What it does |
 |---|---|---|
-| the hooks | `/etc/claude-code/managed-settings.d/claude-sessions.json` — the hub volume's `managed-settings.d`, mounted read-only | `SessionStart`, `UserPromptSubmit`, `Stop`, `Notification` and `SessionEnd`, which feed the **menu only** (titles, who is busy); no offload rule reads them. Each calls `claude-sessions hook`, which always exits 0 and prints nothing. All but `SessionStart` (30 s timeout) and `SessionEnd` (1 s) run **async**, so no hook of ours can hold a prompt |
+| the hooks | `/etc/claude-code/managed-settings.d/claude-sessions.json` — the hub volume's `managed-settings.d`, mounted read-only | `SessionStart`, `UserPromptSubmit`, `Stop`, `Notification` and `SessionEnd`, which feed the **menu only** (titles, who is busy); no offload rule reads them. Each calls `claude-sessions hook`, which always exits 0 and prints nothing. From 0.18.2 `SessionStart` has a second handler, `claude-sessions peer-context` (synchronous, 5 s), the only one that speaks: it adds four lines to the session's context on how to message other containers (no status in `ListAgents` means offloaded, and waking one costs RAM), built from constants with no registry or network, and stays silent to a subagent. It also always exits 0. All but `SessionStart` (30 s timeout) and `SessionEnd` (1 s) run **async**, so no hook of ours can hold a prompt |
 | the keep-alive skill | `~/.claude/skills/keepalive/SKILL.md`, copied by the entrypoint at every start from the hub's volume | when to run `claude-sessions keepalive`, and for how short. A failed copy says so in the boot log and removes any old one, which would name a command that might not exist |
 | the status line | the same file's `statusLine` | the container's RAM and load, yellow then red as they rise, and its name. Managed settings outrank a user `statusLine`, so Claude Code's `/statusline` writes one that never shows here |
 | `reconcile` | the entrypoint, before sshd | marks slots whose process died with the last container |
