@@ -1,8 +1,7 @@
-# Handoff 2026-11-01: Claude Code pinned at 2.1.311, claude-sessions 0.18.1 (the remote view, agent messaging) — on main, not yet on zero
+# Handoff 2026-11-01: Claude Code pinned at 2.1.311, claude-sessions 0.18.1 (the remote view, agent messaging) — on zero since 2026-11-07
 
-**First orders for the next session: read this, say where things stand, and stop.** Items 1 to
-3 change zero and are the owner's to start. Item 4 is the remote view, on zero and then on each client. Item 5 is
-agent messaging, which replaces agent mail; its first step comes before the deploy.
+**First orders for the next session: read this, say where things stand, and stop.** Items 2
+and 3 run on zero and are the owner's to start. Item 4 is the remote view, on each client.
 
 ## Where it stands
 
@@ -14,11 +13,8 @@ again on `ec1fd7e` with 0.11.0 and on `e1af926` with 0.13.1, where the smoke tes
 
 ## Open
 
-1. **The deploy**, from the phone: the recreate play, as in the pi-harness handoff's item 2.
-   Do item 5's first step before it. It rebuilds the hub with 0.18.1 and recreates every
-   container on `2026.11.06`, and every
-   session ends. That also closes that handoff's items 2, 3, 7 and 10 once their checks read
-   right.
+1. **The deploy. Closed 2026-11-07:** 0.18.1 on base `2026.11.06`, by the recreate play. This
+   also closes the pi-harness handoff's items 2, 3, 7 and 10 once their checks read right.
 2. **`make verify` on zero** (`ssh -t zero 'cd ~/infra/dev && make verify'`). Expected:
    `claudepin : 2.1.311, the pin`, `autoupdate: off by DISABLE_UPDATES — …`, and
    claude-sessions `0.18.1` at the hub and in each container, and `peers: claude 2.1.311 speaks
@@ -48,30 +44,10 @@ again on `ec1fd7e` with 0.11.0 and on `e1af926` with 0.13.1, where the smoke tes
    open upstream: claude-sessions is to measure cloudflared's idle timeout from Termux, which
    may move the client's `ServerAliveInterval` from 30 to 60, and that is the owner's call.
 
-5. **Agent messaging (claude-sessions 0.18.0, pinned at 0.18.1) replaces agent mail.** Mail stops working at this
-   deploy, and messages cross through Claude Code's own `SendMessage` from then on. The why is
-   [`decisions.md`](../decisions.md) § *Agent messaging*.
-   - **Before the deploy**, remove the exited `policy` one-shot, which this compose file no
-     longer has. The deploy play's all-up check reads `docker compose ps -a`, which lists an
-     orphaned container too, so a leftover `dev-policy` would read as a container not up and
-     fail a deploy that worked. `ssh zero`, then:
-     ```fish
-     # item 5, before the deploy: the policy one-shot leaves the project
-     sudo docker rm dev-policy
-     ```
-   - **After the deploy**, the first fleet run is the real test, since CI has no live
-     session: in a slot in one container, `ListAgents` should list another container's slots
-     as `repo/slot`, and a `SendMessage` there should arrive and its reply come back.
-     `~/.hub/router.log` in the hub has one line per frame.
-   - **Then the leftovers**, once messaging works. Each container's tokens directory still
-     holds the `mail-token` the mail server wrote, and the `dev_mail` and `dev_policy` volumes
-     outlive the compose file. `dev_mail` is every mail message since 2026-10-29, the only
-     copy, so deleting it is the owner's call. `ssh zero`, then:
-     ```fish
-     # item 5, after the deploy: the mail tokens and the two volumes mail left
-     sudo docker exec dev-hub sh -c 'rm -f /home/dev/tokens/*/mail-token'
-     sudo docker volume rm dev_policy dev_mail
-     ```
+5. **Agent messaging. Closed 2026-11-07:** the first fleet run listed the other containers'
+   slots in `ListAgents`, and a message from claude-sessions crossed to infra and the reply went
+   back. The owner removed the `dev-policy` container, the `mail-token` files and the
+   `dev_mail` and `dev_policy` volumes.
 
 This note is deleted when all five are closed. Its reasoning is already in the pin row and
 the *Agent messaging* section.
