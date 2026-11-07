@@ -299,9 +299,8 @@ verify() {
     # (Dockerfile.base says how). This line compares what `claude` on PATH runs with
     # requiredMaximumVersion in the managed settings, the ceiling the build holds to the pin.
     # Anything but "the pin" is a claude that got here some other way, a native install in
-    # ~/.local/bin or an `npm i -g`. A newer one should refuse to start (not yet seen on a
-    # box). If `--version` is gated too, this reads "answers nothing" and the `claude` line
-    # above is empty.
+    # ~/.local/bin or an `npm i -g`. A newer one refuses to start, but its `--version` still
+    # answers (both seen on 2026-11-07 with 2.1.316), so this line names it.
     printf 'claudepin : %s\n' "$(d exec "$CONTAINER" sh -c '
 pin=$(python3 -c "import json; print(json.load(open(\"/etc/claude-code/managed-settings.json\")).get(\"requiredMaximumVersion\") or \"\")" 2>/dev/null)
 v=$(claude --version 2>/dev/null | cut -d" " -f1)

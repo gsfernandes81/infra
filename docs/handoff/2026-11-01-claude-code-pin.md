@@ -17,15 +17,10 @@ again on `ec1fd7e` with 0.11.0 and on `e1af926` with 0.13.1, where the smoke tes
    also closes the pi-harness handoff's items 2, 3, 7 and 10 once their checks read right.
 2. **`make verify` on zero. Skipped 2026-11-07, the owner's call:** the deploy came up and
    messaging worked, and CI's smoke run reads the same lines.
-3. **The ceiling, proved once.** `requiredMaximumVersion` was read from the binary and never
-   seen to refuse a start (writing the managed file needs root). The test that touches
-   nothing on PATH, untested as written: in one rebuilt container, `npm pack
-   @anthropic-ai/claude-code-linux-arm64@2.1.316` into a temp directory, unpack it, and run
-   the `claude` binary inside it with a prompt (`-p hi`). Expected: it exits at start with a
-   message naming the organization's requiredMaximumVersion. `claude install` is the other
-   route, but it may refuse under DISABLE_UPDATES, and it would put a binary first on PATH
-   that then has to be removed. Once seen, drop "not yet seen on a box" from the pin row,
-   the README, Dockerfile.base and status.sh.
+3. **The ceiling. Closed 2026-11-07:** 2.1.316, run with no login in `infra`, refused to start
+   naming the organization's maximum (2.1.311); the pin row, the README and status.sh say so.
+   `dev/Dockerfile.base` still calls it "not yet seen on a box" in a comment, left for the
+   next base bump, since editing the base alone would force one.
 4. **The remote view (claude-sessions 0.18.1).** The phone's client is on the pin: the owner ran
    `client-home-claude-remote.yml` there after the deploy, on 2026-11-07. Left: the same play
    in WSL (`cd ~/infra/ansible; ansible-playbook playbooks/client-home-claude-remote.yml`),
