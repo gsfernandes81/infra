@@ -34,12 +34,18 @@ again on `ec1fd7e` with 0.11.0 and on `e1af926` with 0.13.1, where the smoke tes
    back. The owner removed the `dev-policy` container, the `mail-token` files and the
    `dev_mail` and `dev_policy` volumes.
 
-6. **Deploy 0.18.2.** A hub rebuild only: the base is unchanged, so no dev container is
-   recreated and no session ends, though connections through the hub (`ssh dev`, the remote
-   view) drop once. The deploy play WITHOUT `-e recreate=true`, which would recreate every
-   container and end every session (`ansible-playbook playbooks/server-deploy-compose.yml -e
-   deployment=dev -K`), or `make up` on zero. Then a message to an
-   offloaded slot should wake it, and the sender should get a `hub/router` notice saying so.
+6. **Deploy 0.18.2.** Only the hub needs rebuilding: the base is unchanged, and Compose does
+   not restart the dev containers when the hub is recreated. Connections through the hub
+   (`ssh dev`, the remote view) and every container's agent drop once, so a message in flight
+   waits until the new router reconnects. Rebuild the hub alone, from zero:
+   ```fish
+   # item 6: rebuild and recreate the hub only; the dev containers keep their sessions
+   ssh -t zero 'cd ~/infra && git pull --ff-only && cd dev && make up S=hub'
+   ```
+   The deploy play and a bare `make up` rebuild every image, each child from its repo's
+   `main`, so any child whose image comes out different is recreated too and its sessions
+   end. With the play, answer y only if its plan names `dev-hub` alone. Afterwards, a message
+   to an offloaded slot should wake it, and the sender should get a `hub/router` notice.
 
 This note is deleted when all six are closed. Its reasoning is already in the pin row and
 the *Agent messaging* section.
