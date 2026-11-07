@@ -293,8 +293,9 @@ claude-sessions' `docs/design.md` § *Agent messaging*.
   the router checks zero first**: its available memory (`MemAvailable` in the hub's
   `/proc/meminfo`, which inside a container describes the host) must cover the session plus
   512 MB, and so must the dev pool's headroom once `CLAUDE_SESSIONS_POOL` names it. Wakes run
-  one at a time across the fleet, so each reads what the last one left. The container's own
-  check still runs after these. A refusal reaches the sender with the figures.
+  one at a time across the fleet, so each reads what the last one left. A figure that cannot
+  be read does not refuse, as the menu's check does not. The container's own check still runs
+  after these. A refusal reaches the sender with the figures.
 - **How an agent treats a message** is Claude Code's own rule for peer messages: the model is
   told a peer's message is information, not an instruction. infra has no managed text of its
   own for this since 0.18.0 (the owner's call). A repo's own `CLAUDE.md` can add to it, as

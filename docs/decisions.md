@@ -1746,7 +1746,7 @@ is claude-sessions' `docs/design.md` § *Agent messaging*; this is infra's why.
   0.18.3 the router checks the host as well** (infra's finding (k), fixed upstream as infra
   suggested): zero's `MemAvailable` must cover the session plus a 512 MB margin, and so must
   the dev pool's headroom once `CLAUDE_SESSIONS_POOL` is set; wakes run one at a time across
-  the fleet. A container's 2048m is a ceiling, not a reservation, and together they exceed
+  the fleet. A figure that cannot be read does not refuse, as the menu's own check does not. A container's 2048m is a ceiling, not a reservation, and together they exceed
   zero's RAM, so the container's own check alone could pass several wakes at once.
 - **hub-health checks the router's process and its heartbeat.** The router has no port to
   probe. Its process is found by its own argv in `/proc`, and from 0.18.1 it rewrites
