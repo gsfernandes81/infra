@@ -210,8 +210,8 @@ services:
       #   read_only: true
       #   bind: { create_host_path: false }
     healthcheck:
-      # hub/health: what every container mounts is in place, and the offload and token loops
-      # have beaten recently. Its header says what each part means.
+      # hub/health: what every container mounts is in place, and the offload and token loops,
+      # and the messaging router, have beaten recently. Its header says what each part means.
       test: ["CMD", "hub-health"]
       interval: 10s
       timeout: 5s
