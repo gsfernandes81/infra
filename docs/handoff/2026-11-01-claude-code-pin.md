@@ -25,9 +25,10 @@ again on `ec1fd7e` with 0.11.0 and on `e1af926` with 0.13.1, where the smoke tes
    which): the owner ran
    `client-home-claude-remote.yml` there after the deploy, on 2026-11-07. 0.18.4 changes
    only that client (`/mode` in place of `/auto`, Left twice on an empty prompt to go home).
-   After item 6, so the client matches the hub's relay, `git pull` and re-run the play on the
-   phone and in WSL
-   (`cd ~/infra/ansible; ansible-playbook playbooks/client-home-claude-remote.yml`). Nothing
+   `git pull` and re-run the play on the phone and in WSL, before or after item 6
+   (`cd ~/infra/ansible; ansible-playbook playbooks/client-home-claude-remote.yml`). The
+   client works against zero's 0.18.1 relay (claude-sessions' agent, 2026-11-07): until item 6,
+   `/model` and `/effort` may open on the resolved model and on `auto`. Nothing
    else here: `/rc` in a remote-view session worked on an earlier build (owner,
    2026-11-07). Still open upstream: claude-sessions is to measure cloudflared's idle
    timeout from Termux, which may move the client's `ServerAliveInterval` from 30 to 60, and
