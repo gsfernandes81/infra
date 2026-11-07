@@ -311,9 +311,8 @@ else echo "NOT THE PIN — claude on PATH answers ${v:-nothing}, managed setting
         || echo 'could not ask the container')"
     # AGENT MESSAGING (claude-sessions 0.18.0) rides Claude Code's own peer protocol, which is
     # internal to Claude Code. `peer-check` starts this claude with no prompt (no request is
-    # made) and says whether it speaks the protocol the relay does and its inbox answers. It
-    # kills that claude, so each run leaves a dead session record in ~/.claude/sessions, as an
-    # ended claude does; Claude Code lists none whose pid is gone (filed upstream). A
+    # made) and says whether it speaks the protocol the relay does and its inbox answers. From
+    # 0.18.1 it runs in a scratch config and leaves nothing in HOME or TMPDIR. A
     # mismatch switches the relay off in this container, so messages stop crossing to and from
     # it; check this before moving the Claude Code pin.
     printf 'peers     : %s\n' "$(d exec "$CONTAINER" sh -c 'timeout 60 claude-sessions peer-check 2>&1 | tail -1' 2>/dev/null \

@@ -1,4 +1,4 @@
-# Handoff 2026-11-01: Claude Code pinned at 2.1.311, claude-sessions 0.18.0 (the remote view, agent messaging) — on main, not yet on zero
+# Handoff 2026-11-01: Claude Code pinned at 2.1.311, claude-sessions 0.18.1 (the remote view, agent messaging) — on main, not yet on zero
 
 **First orders for the next session: read this, say where things stand, and stop.** Items 1 to
 3 change zero and are the owner's to start. Item 4 is the remote view, on zero and then on each client. Item 5 is
@@ -6,7 +6,7 @@ agent messaging, which replaces agent mail; its first step comes before the depl
 
 ## Where it stands
 
-On `main`: the hub pins claude-sessions 0.18.0, and base `2026.11.06` installs Claude Code
+On `main`: the hub pins claude-sessions 0.18.1, and base `2026.11.06` installs Claude Code
 2.1.311 with updates off and a version ceiling (dev-base and dev-smoke green on `f08d6b1`, and
 again on `ec1fd7e` with 0.11.0 and on `e1af926` with 0.13.1, where the smoke test ran `relay` through the hub's sshd, and on `a4ead3e` with 0.13.2), both in `dev/claude-managed-settings.json`. The reasons are the pin row in
 [`decisions.md`](../decisions.md). How it is read is in [`dev/README.md`](../../dev/README.md)
@@ -15,13 +15,13 @@ again on `ec1fd7e` with 0.11.0 and on `e1af926` with 0.13.1, where the smoke tes
 ## Open
 
 1. **The deploy**, from the phone: the recreate play, as in the pi-harness handoff's item 2.
-   Do item 5's first step before it. It rebuilds the hub with 0.18.0 and recreates every
+   Do item 5's first step before it. It rebuilds the hub with 0.18.1 and recreates every
    container on `2026.11.06`, and every
    session ends. That also closes that handoff's items 2, 3, 7 and 10 once their checks read
    right.
 2. **`make verify` on zero** (`ssh -t zero 'cd ~/infra/dev && make verify'`). Expected:
    `claudepin : 2.1.311, the pin`, `autoupdate: off by DISABLE_UPDATES — …`, and
-   claude-sessions `0.18.0` at the hub and in each container, and `peers: claude 2.1.311 speaks
+   claude-sessions `0.18.1` at the hub and in each container, and `peers: claude 2.1.311 speaks
    peer protocol 1, and its inbox answers`.
 3. **The ceiling, proved once.** `requiredMaximumVersion` was read from the binary and never
    seen to refuse a start (writing the managed file needs root). The test that touches
@@ -32,14 +32,14 @@ again on `ec1fd7e` with 0.11.0 and on `e1af926` with 0.13.1, where the smoke tes
    route, but it may refuse under DISABLE_UPDATES, and it would put a binary first on PATH
    that then has to be removed. Once seen, drop "not yet seen on a box" from the pin row,
    the README, Dockerfile.base and status.sh.
-4. **The remote view (claude-sessions 0.18.0).** Pinned in the hub on `main`, with a `relay`
+4. **The remote view (claude-sessions 0.18.1).** Pinned in the hub on `main`, with a `relay`
    line in `make verify` and a smoke check through the hub's sshd. After the deploy:
-   `make verify` should read `relay: claude-sessions 0.18.0`. Then, on the phone (and in WSL),
+   `make verify` should read `relay: claude-sessions 0.18.1`. Then, on the phone (and in WSL),
    `cd ~/infra/ansible; ansible-playbook playbooks/client-home-claude-remote.yml`, then
    `claude-remote dev`. It has never run on Termux, so the first run proves a static musl
    binary starts on Android: the play asserts `claude-remote --version` reads the pin. Run the
    play only after the deploy. The play checks the client against the checkout's pin, not
-   against zero's relay. So a client installed first is a 0.18.0 client on an older relay, and
+   against zero's relay. So a client installed first is a 0.18.1 client on an older relay, and
    `/tasks` and the agent views then show nothing or refuse, with no error that names the version. In a
    new session there, `/rc` should show a claude.ai/code link with no consent prompt, and
    `/rc` again turns it off (the Remote Control row in `decisions.md`). That is also the first
@@ -48,7 +48,7 @@ again on `ec1fd7e` with 0.11.0 and on `e1af926` with 0.13.1, where the smoke tes
    open upstream: claude-sessions is to measure cloudflared's idle timeout from Termux, which
    may move the client's `ServerAliveInterval` from 30 to 60, and that is the owner's call.
 
-5. **Agent messaging (claude-sessions 0.18.0) replaces agent mail.** Mail stops working at this
+5. **Agent messaging (claude-sessions 0.18.0, pinned at 0.18.1) replaces agent mail.** Mail stops working at this
    deploy, and messages cross through Claude Code's own `SendMessage` from then on. The why is
    [`decisions.md`](../decisions.md) § *Agent messaging*.
    - **Before the deploy**, remove the exited `policy` one-shot, which this compose file no

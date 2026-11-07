@@ -1697,7 +1697,9 @@ the why. Supersedes the two struck bullets in *Agent mail* above; the rest of th
 ## Agent messaging: Claude Code's own, relayed between containers by the hub
 
 **Decided 2026-11-06** by the owner, designed by claude-sessions' agent with infra's agent by
-mail; **built in claude-sessions 0.18.0 and pinned the same day, not yet on zero.** The design
+mail; **built in claude-sessions 0.18.0 and pinned the same day; 0.18.1 (2026-11-07) adds the
+router's heartbeat and a `peer-check` that leaves nothing behind, and is the pin; not yet on
+zero.** The design
 is claude-sessions' `docs/design.md` § *Agent messaging*; this is infra's why.
 
 - **Claude Code's own messaging replaces agent mail.** Claude Code 2.1.311 already links the
@@ -1736,8 +1738,11 @@ is claude-sessions' `docs/design.md` § *Agent messaging*; this is infra's why.
   cannot half-deliver them. claude-sessions tests each behaviour it relies on against the real
   Claude Code at infra's pin. Claude Code's server-side flags can change messaging without a
   version change: a risk the owner accepted.
-- **hub-health checks the router's process**, by its own argv in `/proc`, because the router
-  has no port and no heartbeat. Weaker than mail's probe: a wedged router reads healthy.
+- **hub-health checks the router's process and its heartbeat.** The router has no port to
+  probe. Its process is found by its own argv in `/proc`, and from 0.18.1 it rewrites
+  `$HUB_QUEUE/.beat` every 60 s once it holds its locks, read as stale after 3 minutes (infra's
+  ask, so a wedged router reads unhealthy). Both, because the beat is on the volume and a
+  recreated hub would read the old router's beat as fresh for up to 3 minutes.
 
 ## Pearl wallet on `zero`: Oyster alone, on the light client
 

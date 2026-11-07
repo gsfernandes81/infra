@@ -8,7 +8,8 @@
 # pass in the last 40 (passes are every 30) when the broker is on, and the messaging router
 # running. Each loop touches its beat file when it starts and after every pass, so a hub that
 # has only just started is not held unhealthy, and a loop that has died or wedged is. The router
-# has no beat file, so its check is weaker: it finds a dead router, not a wedged one.
+# (claude-sessions 0.18.1) rewrites $HUB_QUEUE/.beat every 60 s once it holds its locks; that
+# file is on a volume and outlives a recreate, so its process is checked as well.
 #
 # Unhealthy is a report, not a restart: Docker restarts nothing for it. Every dev container
 # waits for healthy before it starts, so a dead loop also stops new containers starting until
@@ -17,6 +18,7 @@ set -u
 shared=/opt/claude-sessions
 state=/home/dev/.hub
 tokens=${HUB_GITHUB_TOKENS:-/home/dev/tokens}
+queue=${HUB_QUEUE:-/home/dev/queue}
 
 fail() { echo "unhealthy: $*"; exit 1; }
 fresh() { [ -n "$(find "$1" -mmin "-$2" 2>/dev/null)" ]; }
@@ -45,4 +47,5 @@ for pid in filter(str.isdigit, os.listdir("/proc")):
         sys.exit(0)
 sys.exit(1)
 PY
+fresh "$queue/.beat" 3 || fail "the messaging router has not beaten in 3 minutes (~/.hub/router.log)"
 echo healthy

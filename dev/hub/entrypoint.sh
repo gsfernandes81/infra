@@ -132,7 +132,7 @@ chmod 600 "$HOME/.ssh/environment"
 # A message for a slot that is offloaded, or a container that is down, waits in $HUB_QUEUE, the
 # `queue` volume, since every deploy recreates the hub. SUPERVISED like the token loop: an exit
 # is said in the log and the router starts again a minute later. One line per frame in
-# ~/.hub/router.log, never a body. hub-health checks the process is running.
+# ~/.hub/router.log, never a body. hub-health checks the process and $HUB_QUEUE/.beat.
 # AFTER the container list above, which the router takes from CLAUDE_SESSIONS_HOSTS.
 HUB_QUEUE="${HUB_QUEUE:-$HOME/queue}"
 export HUB_QUEUE

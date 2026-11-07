@@ -112,8 +112,8 @@ On zero, `make login` (`C=<c>` for another container) reports the hub's token, r
 auth login` if needed, and clones the workspace if start-up could not; re-running it is safe.
 Then `make verify` should read `sshd: running in the foreground`, `auth: claude logged in`,
 `tunnel: the hub's, serving dev`, `peers: claude 2.1.311 speaks peer protocol 1, and its inbox
-answers`, `hub: key authorised; claude-sessions 0.18.0 here,
-claude-sessions 0.18.0 at the hub`, `relay: claude-sessions 0.18.0`, `github: the hub's token for gsfernandes81/infra, until …`,
+answers`, `hub: key authorised; claude-sessions 0.18.1 here,
+claude-sessions 0.18.1 at the hub`, `relay: claude-sessions 0.18.1`, `github: the hub's token for gsfernandes81/infra, until …`,
 all collections installed, and `fleet: no route to zero/one/two`.
 
 **The memory pool is opt-in**: `DEV_CGROUP_PARENT=/devpool` puts every dev container and
@@ -300,8 +300,9 @@ On the hub: `claude-sessions router`, started by `hub/entrypoint.sh` and supervi
 token loop. It holds one agent per container over the hub's ssh, so nothing listens on a port.
 Waiting messages are in the `queue` volume at `/home/dev/queue` (`HUB_QUEUE` in
 `compose.yaml`), because every deploy recreates the hub. `~/.hub/router.log` has one line per
-frame, never a body. `hub-health` checks the router's process is running; the router writes no
-heartbeat, so a wedged router reads healthy.
+frame, never a body. `hub-health` checks the router's process is running and that it has
+rewritten `$HUB_QUEUE/.beat` in the last 3 minutes (it does every 60 s, from 0.18.1). The
+process check stays because the beat file is on the volume and outlives a recreate.
 
 **It rides an internal protocol.** Claude Code's peer protocol is undocumented, so a Claude
 Code bump can break it. `make verify`'s `peers` line runs `claude-sessions peer-check`, which
@@ -883,7 +884,7 @@ copies in is ignored.
 
 [`gsfernandes81/claude-sessions`](https://github.com/gsfernandes81/claude-sessions) is the
 session registry: one JSON file per slot under `~/.local/share/claude-sessions/` (on a volume),
-kept current by Claude Code's own hooks. The hub pins **v0.18.0** and installs it for every
+kept current by Claude Code's own hooks. The hub pins **v0.18.1** and installs it for every
 container (*The hub*). A bump reaches every container when the hub is recreated, with no
 container restarted: hooks and offload passes run the binary from the volume each time, and
 each container's agent is started by the hub's menu over ssh and ends with that connection, so
