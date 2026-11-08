@@ -864,8 +864,10 @@ cache, which that service's `cache_from` names. zero still builds every image it
 step CI already ran is a cache hit and a layer pull. A miss is the build zero always did,
 and is still correct. `.github/workflows/dev-cache.yml` does this for the hub and infra
 after every `dev-base` run that passes, then dispatches each child repo's `dev-image.yml`
-with the base tag, through a GitHub App that can only run workflows. The contract a child
-keeps, and which children have one yet, are in
+with the base tag, through a GitHub App that can only run workflows. Every cache is a public
+package, so zero reads it with no credential; a private repo, as or3 is, caches only a
+`toolchain` stage holding none of its own files. The contract a child keeps, and which
+children have one yet, are in
 [`plans/dev-image-caches.md`](../plans/dev-image-caches.md).
 
 So after a base bump, wait for the children's `dev-image` runs as well as `dev-base`

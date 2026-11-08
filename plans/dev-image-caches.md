@@ -56,7 +56,7 @@ same files in the context. So each child's workflow:
 | Repo | `dev-image.yml` | On infra's base | Cache in `compose.yaml` | State |
 |---|---|---|---|---|
 | claude-sessions | yes, amd64 + arm64, `base_tag` input | yes, since claude-sessions cf00afc | yes, its own two | **done 2026-11-01**: infra's first dispatch ran claude-sessions run 41313446768 on base `2026.11.01`, arm64 in 19s from its cache |
-| or3 | to be confirmed by or3 | to be confirmed | no | mailed 2026-11-01: the owner believes it is cached; or3 checks and says how zero reads a private package |
+| or3 | yes, arm64, `target: toolchain` | yes | yes | **done 2026-11-08**: or3 is private, so only the `toolchain` stage (base plus public installs, no repo files) is cached, in a public package read anonymously (owner's call); or3 run 42489052275 built it. Proof still to come: the next or3 build on zero showing CACHED on the toolchain steps |
 | destiny-director | no | — | yes (ref not built yet) | mailed 2026-11-01 |
 | dossier | no | — | yes (ref not built yet) | mailed 2026-11-01 |
 | invective | yes | yes (dispatched with `base_tag`) | yes | **done**: infra's dispatch of 2026-11-08 ran invective run 42486673851, passed |

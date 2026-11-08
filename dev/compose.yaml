@@ -326,6 +326,11 @@ services:
         - default=${OR3_SECRETS:?set OR3_SECRETS in dev/.env}/id_ed25519_or3_deploy
       args:
         BASE_TAG: *base-tag
+      # or3 is private, so its CI caches only the Dockerfile's `toolchain` stage (the base plus
+      # public installs, nothing read from the repo), in a public package zero reads with no
+      # credential. The final stage's COPYs of or3's own files are built here, in seconds.
+      cache_from:
+        - type=registry,ref=ghcr.io/gsfernandes81/or3-dev:buildcache-arm64
     image: or3
     container_name: or3
     hostname: or3
