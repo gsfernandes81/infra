@@ -37,8 +37,8 @@ again on `ec1fd7e` with 0.11.0 and on `e1af926` with 0.13.1, where the smoke tes
    item 6, `/model` marks the resolved model, `/effort` opens on its first stop with no effort
    in the bottom bar, and swap reads `?`. A 0.19.2 client's "Yes, and use auto mode" approves
    a plan for manual edits instead, and a kept draft for a resumed conversation not yet
-   prompted returns only after its next prompt (the release notes: the first of a relay before 0.19.2,
-   the second of a 0.19.1 relay, assumed the same of 0.18.1). Nothing
+   prompted returns only after its next prompt (claude-sessions' agent, from v0.18.1's source,
+   2026-11-08; "Tell Claude what to change" works on it). Nothing
    else here: `/rc` in a remote-view session worked on an earlier build (owner,
    2026-11-07). Still open upstream: claude-sessions is to measure cloudflared's idle
    timeout from Termux, which may move the client's `ServerAliveInterval` from 30 to 60, and
