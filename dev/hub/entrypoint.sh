@@ -126,9 +126,10 @@ chmod 600 "$HOME/.ssh/environment"
 # ── agent messaging: the router between containers ─────────────────────────────
 # `claude-sessions router` (0.18.0; claude-sessions' docs/design.md § Agent messaging, infra's
 # decisions.md § Agent messaging) carries Claude Code's own cross-session messages between
-# containers. It holds one agent per container over the hub's ssh, as the menu does; each agent
-# keeps a stand-in for every slot in the other containers, so `ListAgents` in any slot lists the
-# fleet and `SendMessage` reaches it. Nothing listens: the agents are the router's ssh sessions.
+# containers, and from 0.19.0 within one. It holds one agent per container over the hub's ssh,
+# as the menu does; each agent keeps a stand-in for every slot in the other containers and its
+# own offloaded ones, and fronts its live sessions' sockets, so `ListAgents` in any slot lists
+# the fleet and `SendMessage` reaches it. Nothing listens: the agents are the router's ssh sessions.
 # A message for a slot that is offloaded, or a container that is down, waits in $HUB_QUEUE, the
 # `queue` volume, since every deploy recreates the hub. SUPERVISED like the token loop: an exit
 # is said in the log and the router starts again a minute later. One line per frame in

@@ -281,7 +281,7 @@ claude-sessions' `docs/design.md` § *Agent messaging*.
 - **How it crosses containers.** Claude Code links sessions on one machine through a Unix
   socket per session and a record of it in `~/.claude/sessions/`. Each container's
   claude-sessions agent writes a stand-in record and socket for every slot in the other
-  containers. A frame a local session writes to a stand-in goes to the hub's router, which
+  containers and, from 0.19.0, for its own offloaded ones. A frame a local session writes to a stand-in goes to the hub's router, which
   hands it to the target container's agent, which writes it into the real session's socket.
 - **Who sent it is the hub's to say.** The router knows the container from the ssh session a
   frame arrives on, and the agent knows the slot from the process at the socket. `from-name`
@@ -941,7 +941,7 @@ a rename, and an issue for claude-sessions.
 
 | Piece | Where | What it does |
 |---|---|---|
-| the hooks | `/etc/claude-code/managed-settings.d/claude-sessions.json` — the hub volume's `managed-settings.d`, mounted read-only | `SessionStart`, `UserPromptSubmit`, `Stop`, `Notification` and `SessionEnd`, which feed the **menu only** (titles, who is busy); no offload rule reads them. Each calls `claude-sessions hook`, which always exits 0 and prints nothing. From 0.18.2 `SessionStart` has a second handler, `claude-sessions peer-context` (synchronous, 5 s), the only one that speaks: it adds four lines to the session's context on how to message other containers (no status in `ListAgents` means offloaded, and waking one costs RAM), built from constants with no registry or network, and stays silent to a subagent. It also always exits 0. All but `SessionStart` (30 s timeout) and `SessionEnd` (1 s) run **async**, so no hook of ours can hold a prompt |
+| the hooks | `/etc/claude-code/managed-settings.d/claude-sessions.json` — the hub volume's `managed-settings.d`, mounted read-only | `SessionStart`, `UserPromptSubmit`, `Stop`, `Notification` and `SessionEnd`, which feed the **menu only** (titles, who is busy); no offload rule reads them. Each calls `claude-sessions hook`, which always exits 0 and prints nothing. From 0.18.2 `SessionStart` has a second handler, `claude-sessions peer-context` (synchronous, 5 s), the only one that speaks: it adds four lines to the session's context on how to message other sessions, local and in other containers (a name is `repo/slot` and title, so list again when one is not found; no status in `ListAgents` means offloaded, and waking one costs RAM), built from constants with no registry or network, and stays silent to a subagent. It also always exits 0. All but `SessionStart` (30 s timeout) and `SessionEnd` (1 s) run **async**, so no hook of ours can hold a prompt |
 | the keep-alive skill | `~/.claude/skills/keepalive/SKILL.md`, copied by the entrypoint at every start from the hub's volume | when to run `claude-sessions keepalive`, and for how short. A failed copy says so in the boot log and removes any old one, which would name a command that might not exist |
 | the status line | the same file's `statusLine` | the container's RAM, swap and load, yellow then red as they rise, and its name. Managed settings outrank a user `statusLine`, so Claude Code's `/statusline` writes one that never shows here |
 | `reconcile` | the entrypoint, before sshd | marks slots whose process died with the last container |

@@ -52,7 +52,10 @@ again on `ec1fd7e` with 0.11.0 and on `e1af926` with 0.13.1, where the smoke tes
    The deploy play and a bare `make up` rebuild every image, each child from its repo's
    `main`, so any child whose image comes out different is recreated too and its sessions
    end. With the play, answer y only if its plan names `dev-hub` alone. Afterwards, a message
-   to an offloaded slot should wake it, and the sender should get a `hub/router` notice.
+   to an offloaded slot should wake it, and the sender should get a `hub/router` notice. And,
+   new in 0.19.0 and never yet run on zero: `ListAgents` in a slot lists the slots of its own
+   container by `repo/slot` and title, and a message between two of them arrives with that
+   name as `from-name`.
 
 This note is deleted when all six are closed. Its reasoning is already in the pin row and
 the *Agent messaging* section.
