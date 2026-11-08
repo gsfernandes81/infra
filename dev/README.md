@@ -112,8 +112,8 @@ On zero, `make login` (`C=<c>` for another container) reports the hub's token, r
 auth login` if needed, and clones the workspace if start-up could not; re-running it is safe.
 Then `make verify` should read `sshd: running in the foreground`, `auth: claude logged in`,
 `tunnel: the hub's, serving dev`, `peers: claude 2.1.311 speaks peer protocol 1, and its inbox
-answers`, `hub: key authorised; claude-sessions 0.18.4 here,
-claude-sessions 0.18.4 at the hub`, `relay: claude-sessions 0.18.4`, `github: the hub's token for gsfernandes81/infra, until …`,
+answers`, `hub: key authorised; claude-sessions 0.19.0 here,
+claude-sessions 0.19.0 at the hub`, `relay: claude-sessions 0.19.0`, `github: the hub's token for gsfernandes81/infra, until …`,
 all collections installed, and `fleet: no route to zero/one/two`.
 
 **The memory pool is opt-in**: `DEV_CGROUP_PARENT=/devpool` puts every dev container and
@@ -267,8 +267,12 @@ JWT's signature.
 ## Agent messaging: Claude Code's own, across every container
 
 **Since claude-sessions 0.18.0 (2026-11-06) every session can message every other**, in any
-container, with Claude Code's own `SendMessage` tool. `ListAgents` in a slot lists the other
-containers' slots as `repo/slot` beside its own container's sessions. A message wakes an idle
+container, with Claude Code's own `SendMessage` tool. `ListAgents` in a slot lists every other
+slot, in its own container and the others, as `repo/slot` and its conversation's title
+(since 0.18.5), so the list says what each session is working on. That whole name is the
+`SendMessage` address, matched ignoring case and with a space and a hyphen alike. It changes
+when the title does, and the old name stops resolving, though `ListAgents` shows `says it was …`
+for ten minutes. A message wakes an idle
 session, or reaches a busy one mid-turn, as Claude Code does on one machine, and replies,
 delivery receipts and idle notices come back the same way. The decision and what it replaced
 are [`../docs/decisions.md`](../docs/decisions.md) § *Agent messaging*; the specification is
@@ -281,7 +285,15 @@ claude-sessions' `docs/design.md` § *Agent messaging*.
   hands it to the target container's agent, which writes it into the real session's socket.
 - **Who sent it is the hub's to say.** The router knows the container from the ssh session a
   frame arrives on, and the agent knows the slot from the process at the socket. `from-name`
-  is rewritten to that `repo/slot` on delivery, whatever the sender claimed.
+  is rewritten to that slot's listed name on delivery, whatever the sender claimed.
+- **Within a container too (0.19.0).** A message between two sessions of one container also
+  goes through the hub, so its `from-name` is verified as well, and a container's own offloaded
+  slots can be messaged and woken. The agent fronts each live claude: it renames the claude's
+  socket in `cc-socks` to `.real-<name>` beside it and listens at the original path. When the
+  agent stops, or the hub is down and it exits, it puts the sockets back and local sessions
+  reach each other directly, unverified, as before 0.19.0. An agent killed outright cannot:
+  its container's live sessions drop out of listings until the next agent starts and puts the
+  sockets back.
 - **Waiting messages.** A message to an offloaded slot, or to a container that is down, waits
   at the hub, up to 200 per slot for up to 7 days, and is delivered when the slot is next live.
 - **Waking (0.18.2).** A message to an offloaded slot also asks its container's agent to
@@ -304,7 +316,8 @@ claude-sessions' `docs/design.md` § *Agent messaging*.
   Claude Code holds a message from a session in another permission class for approval, and a
   headless slot has nowhere to approve it. Every slot runs auto mode by default, which is one
   class, but a slot started in `bypassPermissions` is another.
-- **Not carried:** pi slots (the owner's call), a claude in no slot, and anything to the owner.
+- **Not carried:** pi slots (the owner's call), a claude in no slot (from 0.19.0, not even to
+  slots in its own container), and anything to the owner.
   There is no separate log of the traffic: the owner reads messages in each session, or in the
   remote view.
 
@@ -897,13 +910,13 @@ copies in is ignored.
 
 [`gsfernandes81/claude-sessions`](https://github.com/gsfernandes81/claude-sessions) is the
 session registry: one JSON file per slot under `~/.local/share/claude-sessions/` (on a volume),
-kept current by Claude Code's own hooks. The hub pins **v0.18.4** and installs it for every
+kept current by Claude Code's own hooks. The hub pins **v0.19.0** and installs it for every
 container (*The hub*). A bump reaches every container when the hub is recreated, with no
 container restarted: hooks and offload passes run the binary from the volume each time, and
 each container's agent is started by the hub's menu over ssh and ends with that connection, so
 the old hub's agents go with it. From 0.7.0 the foot of the menu shows every container's RAM
-and the machines' load; each session's status line shows its own container's RAM and the
-host's load, and the pool's RAM once the pool is mounted into the containers
+and the machines' load; each session's status line shows its own container's RAM, its swap (since
+0.18.5) and the host's load, and the pool's RAM and swap once the pool is mounted into the containers
 (`plans/dev-pool.md`); its design and screens are that repo's
 `docs/design.md` and `docs/mockups.md`.
 
@@ -930,7 +943,7 @@ a rename, and an issue for claude-sessions.
 |---|---|---|
 | the hooks | `/etc/claude-code/managed-settings.d/claude-sessions.json` — the hub volume's `managed-settings.d`, mounted read-only | `SessionStart`, `UserPromptSubmit`, `Stop`, `Notification` and `SessionEnd`, which feed the **menu only** (titles, who is busy); no offload rule reads them. Each calls `claude-sessions hook`, which always exits 0 and prints nothing. From 0.18.2 `SessionStart` has a second handler, `claude-sessions peer-context` (synchronous, 5 s), the only one that speaks: it adds four lines to the session's context on how to message other containers (no status in `ListAgents` means offloaded, and waking one costs RAM), built from constants with no registry or network, and stays silent to a subagent. It also always exits 0. All but `SessionStart` (30 s timeout) and `SessionEnd` (1 s) run **async**, so no hook of ours can hold a prompt |
 | the keep-alive skill | `~/.claude/skills/keepalive/SKILL.md`, copied by the entrypoint at every start from the hub's volume | when to run `claude-sessions keepalive`, and for how short. A failed copy says so in the boot log and removes any old one, which would name a command that might not exist |
-| the status line | the same file's `statusLine` | the container's RAM and load, yellow then red as they rise, and its name. Managed settings outrank a user `statusLine`, so Claude Code's `/statusline` writes one that never shows here |
+| the status line | the same file's `statusLine` | the container's RAM, swap and load, yellow then red as they rise, and its name. Managed settings outrank a user `statusLine`, so Claude Code's `/statusline` writes one that never shows here |
 | `reconcile` | the entrypoint, before sshd | marks slots whose process died with the last container |
 | `offload` | run in each container by the hub's `offload-all`, every 3 minutes | stops a detached slot measured quiet for 10 minutes, and runs the orphan sweep. Each pass's verdicts go to the hub's `~/.hub/passes.log`, prefixed by container; stops and sweep lines also go to the container's `offload.log` |
 

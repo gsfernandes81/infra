@@ -497,7 +497,7 @@ jobs:
           fails=0
           sed 's/\x1b\[[0-9;?]*[A-Za-z]//g' "$out" | grep -q infra && echo "PASS  the menu lists the containers" || { echo "FAIL  the menu lists the containers"; fails=1; }
           idle=$(head -c "$b" "$out" | tail -c +"$((a + 1))" | sed 's/\x1b\[[0-9;?]*[A-Za-z]//g; s/\x1b[78]//g' | tr -d '\r\n')
-          rest=$(printf '%s' "$idle" | sed -E 's/RAM: [^,]*, Load: [^,]*, dev//g' | tr -d ' ')
+          rest=$(printf '%s' "$idle" | sed -E 's/RAM: [^,]*, (Swap: [^,]*, )?Load: [^,]*, dev//g' | tr -d ' ')
           if [ "$a" -gt 0 ] && [ -z "$rest" ]; then echo "PASS  an idle menu sent only its load line for 25s ($((b - a)) bytes)"
           else echo "FAIL  an idle menu sent more than its load line in 25s: [$rest]"; fails=1; fi
           [ "$fails" = 0 ]

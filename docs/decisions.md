@@ -1748,6 +1748,15 @@ is claude-sessions' `docs/design.md` § *Agent messaging*; this is infra's why.
   the dev pool's headroom once `CLAUDE_SESSIONS_POOL` is set; wakes run one at a time across
   the fleet. A figure that cannot be read does not refuse, as the menu's own check does not. A container's 2048m is a ceiling, not a reservation, and together they exceed
   zero's RAM, so the container's own check alone could pass several wakes at once.
+- **Within a container too, from 0.19.0** (pinned on the owner's word, 2026-11-08, straight
+  over 0.18.5): a message between two sessions of one container also goes through the hub, so
+  `from-name` is verified everywhere, not only across containers, and a container's own
+  offloaded slots can be messaged and woken. The cost is that local messaging now depends on
+  the hub. With the hub down, each agent exits and puts its container's sockets back, so local
+  sessions fall back to Claude Code's direct delivery, unverified, as before. An agent killed
+  outright cannot put them back, and its container's live sessions drop out of listings until
+  the next agent starts. A claude in no slot can no longer message the slots in its own
+  container.
 - **hub-health checks the router's process and its heartbeat.** The router has no port to
   probe. Its process is found by its own argv in `/proc`, and from 0.18.1 it rewrites
   `$HUB_QUEUE/.beat` every 60 s once it holds its locks, read as stale after 3 minutes (infra's
