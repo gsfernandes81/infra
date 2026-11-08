@@ -1700,8 +1700,9 @@ the why. Supersedes the two struck bullets in *Agent mail* above; the rest of th
 mail; **built in claude-sessions 0.18.0 and pinned the same day; 0.18.1 (2026-11-07) adds the
 router's heartbeat and a `peer-check` that leaves nothing behind, and is on zero since
 2026-11-07, where the first fleet run carried a message and its reply between containers.
-0.19.0 was pinned on 2026-11-08 (*Within a container too*, below), and 0.19.1 (the door's
-memory figures) is the pin, not yet deployed.** The design
+0.19.0 was pinned on 2026-11-08 (*Within a container too*, below), 0.19.1 (the door's
+memory figures) on the same day, and 0.19.2 (the remote view's plan dialog and kept
+drafts, j and k in the menu) is the pin, not yet deployed.** The design
 is claude-sessions' `docs/design.md` § *Agent messaging*; this is infra's why.
 
 - **Claude Code's own messaging replaces agent mail.** Claude Code 2.1.311 already links the
