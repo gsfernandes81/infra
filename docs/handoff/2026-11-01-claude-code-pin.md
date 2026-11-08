@@ -1,4 +1,4 @@
-# Handoff 2026-11-01: Claude Code pinned at 2.1.311, claude-sessions 0.19.1 (the remote view, agent messaging) — 0.18.1 on zero since 2026-11-07, 0.19.0 on main
+# Handoff 2026-11-01: Claude Code pinned at 2.1.311, claude-sessions 0.19.1 (the remote view, agent messaging) — 0.18.1 on zero since 2026-11-07, 0.19.1 on main
 
 **First orders for the next session: read this, say where things stand, and stop.** Items 2
 and 3 run on zero and are the owner's to start. Item 4 is the remote view, on each client.
