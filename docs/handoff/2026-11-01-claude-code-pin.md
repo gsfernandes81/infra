@@ -28,7 +28,8 @@ again on `ec1fd7e` with 0.11.0 and on `e1af926` with 0.13.1, where the smoke tes
    go home, Right and Left into and out of the homes, a key redials a dropped link), and
    0.19.2 changes it again: a plan to approve shows the whole plan with Claude Code's own
    options, several questions get a tab row, an unsent prompt is kept on the client, a
-   second paste expands the first, and `j` and `k` move the cursor.
+   second paste expands the first, and `j` and `k` move the cursor on its homes (at the door
+   too, after item 6).
    `git pull` and re-run the play on the phone and in WSL, before or after item 6
    (`cd ~/infra/ansible; ansible-playbook playbooks/client-home-claude-remote.yml`). The
    0.19 client works against zero's 0.18.1 relay (claude-sessions' agent, 2026-11-08, of
@@ -36,8 +37,8 @@ again on `ec1fd7e` with 0.11.0 and on `e1af926` with 0.13.1, where the smoke tes
    item 6, `/model` marks the resolved model, `/effort` opens on its first stop with no effort
    in the bottom bar, and swap reads `?`. A 0.19.2 client's "Yes, and use auto mode" approves
    a plan for manual edits instead, and a kept draft for a resumed conversation not yet
-   prompted returns only after its next prompt (claude-sessions' release notes, of a relay older than
-   0.19.2). Nothing
+   prompted returns only after its next prompt (the release notes: the first of a relay before 0.19.2,
+   the second of a 0.19.1 relay, assumed the same of 0.18.1). Nothing
    else here: `/rc` in a remote-view session worked on an earlier build (owner,
    2026-11-07). Still open upstream: claude-sessions is to measure cloudflared's idle
    timeout from Termux, which may move the client's `ServerAliveInterval` from 30 to 60, and
@@ -62,7 +63,8 @@ again on `ec1fd7e` with 0.11.0 and on `e1af926` with 0.13.1, where the smoke tes
    to an offloaded slot should wake it, and the sender should get a `hub/router` notice. And,
    new in 0.19.0 and never yet run on zero: `ListAgents` in a slot lists the slots of its own
    container by `repo/slot` and title, and a message between two of them arrives with that
-   name as `from-name`.
+   name as `from-name`. New in 0.19.2: "Yes, and use auto mode" on a plan from a 0.19.2
+   client switches the mode line to auto, which closes item 4's fallback.
 
 This note is deleted when all six are closed. Its reasoning is already in the pin row and
 the *Agent messaging* section.
