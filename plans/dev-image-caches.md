@@ -59,7 +59,7 @@ same files in the context. So each child's workflow:
 | or3 | to be confirmed by or3 | to be confirmed | no | mailed 2026-11-01: the owner believes it is cached; or3 checks and says how zero reads a private package |
 | destiny-director | no | — | yes (ref not built yet) | mailed 2026-11-01 |
 | dossier | no | — | yes (ref not built yet) | mailed 2026-11-01 |
-| invective | no | — | yes (ref not built yet) | mailed 2026-11-01 |
+| invective | yes | yes (dispatched with `base_tag`) | yes | **done**: infra's dispatch of 2026-11-08 ran invective run 42486673851, passed |
 | nibbles | no | — | yes (ref not built yet) | mailed 2026-11-01 |
 | ionic-traces | no | — | yes (ref not built yet) | mailed 2026-11-01 |
 
