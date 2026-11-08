@@ -25,7 +25,7 @@ repo when it moves.
   `x-base-tag`. The children are read from `dev/compose.yaml`'s contexts, so a new child
   is asked once it is in `compose.yaml`.
 - Each child's service in `dev/compose.yaml` names `<repo>-dev:buildcache-arm64` in
-  `cache_from`. or3's has none yet; it gets one once or3 confirms its ref.
+  `cache_from`.
 
 ## The contract a child's `dev-image.yml` keeps
 
@@ -49,7 +49,10 @@ same files in the context. So each child's workflow:
    Pushing an image as well is the repo's choice; zero reads only the cache.
 7. **Keeps the package anonymously readable**, since zero pulls with no credential. A
    package first pushed from a public repo takes its visibility. A private repo's package
-   is private, which zero cannot read.
+   starts private, so a private repo caches only a stage with no COPY or ADD from the repo
+   (`target:` that stage in its workflow), and the owner makes the package public once.
+   or3 does this with its `toolchain` stage ([`../docs/decisions.md`](../docs/decisions.md),
+   the cache row).
 
 ## Rollout
 
