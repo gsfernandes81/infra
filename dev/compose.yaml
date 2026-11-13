@@ -224,7 +224,7 @@ services:
   # pinned identically to theirs. Two hostnames: the hub's, and or3's for the phone's
   # reverse forward to the vessel (cloudflared.yml says why).
   cloudflared:
-    image: cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39
+    image: cloudflare/cloudflared:2026.11.0@sha256:b94b96edf2c9c4360f8879c8580cfaa99077f19c849ec595ca2f711b27d4f344
     container_name: dev-cloudflared
     restart: unless-stopped
     networks: [dev]
