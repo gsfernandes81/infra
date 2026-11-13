@@ -88,11 +88,11 @@ jobs:
           cfd=https://github.com/cloudflare/cloudflared/releases/download/$cloudflared_version
           cmp=https://github.com/docker/compose/releases/download/v$compose_version
           check() {
-            curl -fsSL --retry 3 -o bin "$1" || { echo "FAIL: download failed: $1"; return; }
-            have=$(sha256sum bin | awk '{print $1}')
+            curl -fsSL --retry 3 -o "$RUNNER_TEMP/pinned" "$1" || { echo "FAIL: download failed: $1"; return; }
+            have=$(sha256sum "$RUNNER_TEMP/pinned" | awk '{print $1}')
             if [ "$have" = "$2" ]; then echo "OK: ${1##*/} $have"
             else echo "FAIL: ${1##*/} is $have, leap/pins says $2"; fi
-            rm -f bin
+            rm -f "$RUNNER_TEMP/pinned"
           }
           {
             check "$cfd/cloudflared-linux-arm64" "$cloudflared_sha256_aarch64"

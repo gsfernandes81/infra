@@ -197,9 +197,13 @@ fi
 
 section "Initrds"
 initrds=()
+# Only where a boot loader looks: the root's /boot, and anywhere on a FAT partition. The
+# root's /usr holds dracut's own initrd-* units, which are not initrds.
 for d in "$mnt"/*; do
-	[ "$d" = "$mnt/overlay" ] && continue
-	while IFS= read -r f; do initrds+=("$f"); done < <(find "$d" -xdev \( -iname 'initrd*' -o -iname '*.initrd' \) -type f 2>/dev/null)
+	[ "$d" = "$mnt/overlay" ] || [ "$d" = "$mnt/top" ] && continue
+	w=$d
+	[ "$d" = "$root" ] && w=$d/boot
+	while IFS= read -r f; do initrds+=("$f"); done < <(find "$w" -xdev \( -iname 'initrd*' -o -iname '*.initrd' \) -type f 2>/dev/null)
 done
 [ ${#initrds[@]} -eq 0 ] && answer "initrd: none found on any partition"
 n=0
@@ -243,7 +247,12 @@ for d in "$mnt"/*; do
 		show head -n 60 "$f"
 	done < <(find "$d" \( -iname 'grub.cfg' -o -path '*/loader/*.conf' \) -type f 2>/dev/null)
 	while IFS= read -r f; do
-		kind=$(strings "$f" | grep -m 1 -oE 'GNU GRUB|systemd-boot|shim|U-Boot [0-9][^ ]*' || true)
+		# GRUB and systemd-boot embed shim's name too, so they are asked for first.
+		kind=
+		for k in 'GNU GRUB' 'systemd-boot' 'U-Boot [0-9][^ ]*' 'shim'; do
+			kind=$(strings "$f" | grep -m 1 -oE "$k")
+			[ -n "$kind" ] && break
+		done
 		answer "boot binary ${f#"$mnt"/}: ${kind:-unrecognised}"
 	done < <(find "$d" \( -iname '*.efi' -o -iname 'u-boot*.bin' \) -type f 2>/dev/null)
 	answer "fat ${d##*/}: config.txt $([ -f "$d/config.txt" ] && echo yes || echo no); u-boot $(ls "$d" | grep -qi '^u-boot' && echo yes || echo no); EFI $([ -d "$d/EFI" ] && echo yes || echo no)"
@@ -254,13 +263,26 @@ section "GRUB and health-checker in the root"
 if [ -n "$root" ]; then
 	show cat "$root/etc/sysconfig/bootloader"
 	show ls -la "$root/boot" "$root/boot/grub2" "$root/boot/loader/entries"
-	for f in "$root/boot/grub2/grubenv" "$root/boot/grub2/grub.cfg"; do
-		[ -f "$f" ] && say "--- ${f#"$root"}" && show head -n 60 "$f"
-	done
-	show ls "$root/usr/lib/health-checker"
+	# grubenv is padded with #; only its settings are worth printing.
+	say "--- /boot/grub2/grubenv settings"
+	show grep -av '^#' "$root/boot/grub2/grubenv"
+	say "--- /boot/grub2/grub.cfg: menu entries, and lines naming the env block, writable or health"
+	show grep -nE "^menuentry|^submenu|env_block|writable|health" "$root/boot/grub2/grub.cfg"
+	# /boot/writable is a subvolume of its own, so it is read from the top level.
+	top=$mnt/top
+	mkdir -p "$top"
+	mount -o ro,subvolid=5 "$(findmnt -n -o SOURCE --target "$root" | sed 's/\[.*//')" "$top"
+	say "--- @/boot/writable"
+	show find "$top/@/boot/writable" -maxdepth 2 -printf '%10s %P\n'
+	say "--- health-checker's files"
+	[ -n "$ch" ] && show inroot rpm -ql health-checker
+	hc=$( [ -n "$ch" ] && inroot rpm -ql health-checker 2>/dev/null | grep -E '/plugins/' | sed 's|.*/||' | tr '\n' ' ')
+	hcg=$( [ -n "$ch" ] && inroot rpm -ql health-checker 2>/dev/null | xargs -r -I{} grep -l -E 'grub2-editenv|grubenv|env_block' "$ch{}" 2>/dev/null | sed "s|^$ch||" | tr '\n' ' ')
 	answer "bootloader setting: $(grep -E '^LOADER_TYPE=' "$root/etc/sysconfig/bootloader" 2>/dev/null || echo none)"
-	answer "grub in root: grub.cfg $([ -f "$root/boot/grub2/grub.cfg" ] && echo yes || echo no), grubenv $([ -f "$root/boot/grub2/grubenv" ] && echo yes || echo no), BLS entries $(ls "$root/boot/loader/entries" 2>/dev/null | wc -l)"
-	answer "health-checker plugins: $(ls "$root/usr/lib/health-checker" 2>/dev/null | tr '\n' ' ')"
+	answer "grub in root: grub.cfg $([ -f "$root/boot/grub2/grub.cfg" ] && echo yes || echo no), grubenv $([ -f "$root/boot/grub2/grubenv" ] && echo yes || echo no), settings in grubenv: $(grep -avc '^#' "$root/boot/grub2/grubenv"), BLS entries $(find "$root/boot/loader/entries" -type f 2>/dev/null | wc -l)"
+	answer "grub.cfg names env_block: $(grep -c env_block "$root/boot/grub2/grub.cfg") lines; /boot/writable: $(find "$top/@/boot/writable" -mindepth 1 2>/dev/null | wc -l) entries"
+	answer "health-checker plugins: ${hc:-none found}"
+	answer "health-checker files that touch the GRUB env: ${hcg:-none}"
 fi
 
 exit 0
