@@ -52,6 +52,7 @@
     ip_zero: "192.168.86.100"
     ip_one: "192.168.86.101"
     ip_two: "192.168.86.102"
+    ip_three: "192.168.86.103"
 
     # The laptop, as WSL sees it. Set EITHER of these to "" to skip the Windows half
     # entirely. From WSL these are directly writable, so the block is MANAGED there rather

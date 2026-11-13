@@ -4,15 +4,16 @@
 # The fleet. GENERATED: edit ansible/templates/ssh-fleet-block.j2 and re-run
 # playbooks/client-home-ssh-config.yml, not this. Reasoning: docs/ssh-clients.md
 #
-#   <host>                    via that box's own cloudflared tunnel
-#   <host>-local              direct on the LAN
-#   <host>-zero|-one|-two     through another box, over the LAN
+#   <host>                        via that box's own cloudflared tunnel
+#   <host>-local                  direct on the LAN
+#   <host>-zero|-one|-two|-three  through another box, over the LAN
 {% if adb_jump %}
-#   <host>-s24                through the phone, over USB - for when only it has a network
+#   <host>-s24                    through the phone, over USB - for when only it has a network
 {% endif %}
 #
-# Every box is reachable through both of the others. That mesh exists because on
+# Every box is reachable through each of the others. That mesh exists because on
 # 2026-08-23 `two`'s tunnel was stopped while it was the only configured route to it.
+# `three`'s LAN paths work only while it is on this LAN; off-site, its tunnel is the way.
 #
 # ORDERING: ssh takes the FIRST value it obtains for each keyword, so this block sits
 # ABOVE `Host *`. The playbook inserts it there rather than appending.
@@ -27,20 +28,26 @@ Host one-local
 Host two-local
   HostName {{ ip_two }}
 
+Host three-local
+  HostName {{ ip_three }}
+
 # -- through another box, over the LAN -----------------------------------------
 # HostName is resolved ON the jump host, so these are LAN addresses as it sees them.
-Host zero-one zero-two
+Host zero-one zero-two zero-three
   HostName {{ ip_zero }}
 
-Host one-zero one-two
+Host one-zero one-two one-three
   HostName {{ ip_one }}
 
-Host two-zero two-one
+Host two-zero two-one two-three
   HostName {{ ip_two }}
+
+Host three-zero three-one three-two
+  HostName {{ ip_three }}
 
 # -- the jump rules ------------------------------------------------------------
 # THESE DEPEND ON hosts/*/system/sshd-infra.conf, which sets AllowTcpForwarding yes with
-# PermitOpen scoped to these three addresses on port 22. If it is ever removed, ProxyJump
+# PermitOpen scoped to these addresses on port 22. If it is ever removed, ProxyJump
 # fails with "administratively prohibited" - revert to the form these had until
 # 2026-08-23, which needs no server-side change at all:
 #
@@ -56,15 +63,22 @@ Host *-one
 Host *-two
   ProxyJump two
 
+Host *-three
+  ProxyJump three
+
 # -- through each box's own cloudflared tunnel ---------------------------------
+# ssh-<host>.<dns_zone>, the ssh rule in each box's tracked cloudflared-config.yml.
 Host zero
-  HostName ssh-zero.gsrpi.uk
+  HostName ssh-zero.{{ dns_zone }}
 
 Host one
-  HostName ssh-one.gsrpi.uk
+  HostName ssh-one.{{ dns_zone }}
 
 Host two
-  HostName ssh-two.gsrpi.uk
+  HostName ssh-two.{{ dns_zone }}
+
+Host three
+  HostName ssh-three.{{ dns_zone }}
 
 # Listed explicitly, not `zero*`: that would also catch zero-local and zero-two, which
 # must NOT go through the edge. Each box's ssh hostname sits behind an Access application
@@ -72,7 +86,7 @@ Host two
 # ProxyCommand is a script that loads this client's fleet token, when it has one, into the
 # one cloudflared it runs. Without one it warns and connects anyway: that works on a host
 # not yet gated, and on a gated one the warning names the fix.
-Host zero one two
+Host zero one two three
 {% if windows %}
   ProxyCommand {{ win_fleet_wrapper }} %h
 {% else %}
@@ -106,13 +120,16 @@ Match host s24 exec "adb forward tcp:8022 tcp:8022"
   ConnectTimeout 10
 
 Host zero-s24
-  HostName ssh-zero.gsrpi.uk
+  HostName ssh-zero.{{ dns_zone }}
 
 Host one-s24
-  HostName ssh-one.gsrpi.uk
+  HostName ssh-one.{{ dns_zone }}
 
 Host two-s24
-  HostName ssh-two.gsrpi.uk
+  HostName ssh-two.{{ dns_zone }}
+
+Host three-s24
+  HostName ssh-three.{{ dns_zone }}
 
 # The phone runs its own copy of the fleet script, so the phone's token is the one the
 # gate sees. The phone has to have run the client play first, or this has no script to run.
@@ -132,21 +149,24 @@ Host s24
 # -- one host key per BOX, not per path ----------------------------------------
 # Else a rarely-used route has no stored key and prompts you to accept whatever it is
 # handed, mid-rescue. To clear one: ssh-keygen -R zero
-Host zero zero-local zero-one zero-two zero-s24
+Host zero zero-local zero-one zero-two zero-three zero-s24
   HostKeyAlias zero
 
-Host one one-local one-zero one-two one-s24
+Host one one-local one-zero one-two one-three one-s24
   HostKeyAlias one
+
+Host three three-local three-zero three-one three-two three-s24
+  HostKeyAlias three
 
 # ChaCha20 first: `two` is an ARM1176 with no AES acceleration, where software AES is both
 # slower AND exposed to cache-timing side channels. Ordered, not pinned, so this rescue
 # path cannot fail closed.
-Host two two-local two-zero two-one two-s24
+Host two two-local two-zero two-one two-three two-s24
   HostKeyAlias two
   Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
 
 # -- shared: the account, and multiplexing -------------------------------------
-Host zero* one* two*
+Host zero* one* two* three*
   User gavin
 {% if multiplex %}
   # Keyed by ALIAS (%n): %C and %r@%h:%p hash the RESOLVED address, so zero-one and

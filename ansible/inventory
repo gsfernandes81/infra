@@ -14,6 +14,9 @@
 zero
 one
 two
+# Reached at three-local, its LAN alias, until `ssh three` answers through its tunnel; then
+# plain `three` like the others, since three-local stops working once it is off-site.
+three ansible_host=three-local
 
 # Hosts that run containers, and are therefore worth auditing for them. `two` is absent
 # on purpose: its one deployment is leaving (see docs/management-plane.md), its podman is
@@ -22,6 +25,7 @@ two
 [containerized]
 zero
 one
+three
 
 # Declared so host_vars/localhost.yml is loaded for the delegated report task. Termux
 # needs both an interpreter and a tmp path that Ansible's defaults get wrong there.

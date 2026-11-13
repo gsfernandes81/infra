@@ -27,7 +27,7 @@ Three blocks land in `~/.ssh/config`, each edited in place on re-runs:
 
 | Marker | Written by | Holds |
 |---|---|---|
-| `# BEGIN infra-fleet` | `client-home-ssh-config.yml` (its fleet half) → `templates/ssh-fleet-block.j2` | the three Pis, three ways each; their ProxyCommand is `~/.config/fleet/access-ssh` |
+| `# BEGIN infra-fleet` | `client-home-ssh-config.yml` (its fleet half) → `templates/ssh-fleet-block.j2` | the four Pis, three ways each; their ProxyCommand is `~/.config/fleet/access-ssh` |
 | `# BEGIN <alias>` | `client-home-ssh-config.yml` (its dev half, once per alias) → `templates/ssh-dev-block.j2` | `dev`, the hub; `or3-dev`, for the phone's vessel tunnel; and the others' old blocks until they are retired after the cutover |
 | `# BEGIN infra-laptop` | `client-home-ssh-config.yml` (its laptop half) → `templates/ssh-laptop-block.j2` | `g14`, the tunnel to the laptop's llama-server, first in the file; not written on WSL |
 
@@ -158,18 +158,23 @@ and `make shell` above are the whole of it.
 ## The fleet: three named paths to each Pi
 
 ```
-<host>                    via that box's own cloudflared tunnel
-<host>-local              direct on the LAN
-<host>-zero|-one|-two     through another box, over the LAN
+<host>                        via that box's own cloudflared tunnel
+<host>-local                  direct on the LAN
+<host>-zero|-one|-two|-three  through another box, over the LAN
 ```
 
 **Why the mesh exists.** On 2026-08-23 `two`'s tunnel was stopped while it was the only
 configured route to it. There was no `two-zero` to fall back to and no key on zero or one
 that reaches it, so the box was unreachable until a ProxyCommand was assembled by hand
-under pressure. Every box is now reachable through both of the others.
+under pressure. Every box is now reachable through each of the others.
 
-`HostName` on the `-zero|-one|-two` aliases is resolved **on the jump host**, so those are
-LAN addresses as it sees them.
+`three` joined the mesh at the November 2026 visit. It is the off-site backup, so its LAN
+paths, and the paths through it, work only while it is on this LAN; away from it,
+`ssh three` through its tunnel is the one way in. The paths into it through the others need each one's
+`PermitOpen` to name `.103`.
+
+`HostName` on the `-zero|-one|-two|-three` aliases is resolved **on the jump host**, so
+those are LAN addresses as it sees them.
 
 ## The fleet's gate: one token per client, never expiring
 
@@ -178,7 +183,7 @@ three link one reusable policy, `fleet ssh service tokens`, which admits each cl
 `fleet-<client>` service token. All three were gated on 2026-10-25, one host per run of
 `server-create-fleet-ssh-access.yml`; `-e host=<host> -e remove=true` opens one again.
 
-**The `zero`, `one` and `two` aliases run `~/.config/fleet/access-ssh`.** That script
+**Each box's tunnel alias runs `~/.config/fleet/access-ssh`.** That script
 loads `~/.config/fleet/token` into the one `cloudflared` it starts, as the dev containers'
 ProxyCommand does. Without a whole token it prints a warning naming the fix and connects
 without one. That works on a host not yet gated, and on a gated host Cloudflare refuses
@@ -201,10 +206,11 @@ in the same run and every gated host admits it at once.
 
 ### The jump rules, and what they depend on
 
-`ProxyJump` since 2026-08-23: all three hosts set `AllowTcpForwarding yes` with
-`PermitOpen` scoped to exactly the three LAN addresses on port 22
-(`hosts/*/system/sshd-infra.conf`). Verified live in both directions on all three, and
-with a negative test that a destination outside the list is refused.
+`ProxyJump` since 2026-08-23: every host sets `AllowTcpForwarding yes` with
+`PermitOpen` scoped to exactly the fleet's LAN addresses on port 22
+(`hosts/*/system/sshd-infra.conf`, and `three`'s under `hosts/three/leap/system/`).
+Verified live in both directions on `zero`, `one` and `two`, and with a negative test that
+a destination outside the list is refused.
 
 **If that drop-in is ever removed**, `ProxyJump` fails with *administratively prohibited*
 and these revert to `ProxyCommand ssh <host> nc %h %p`, which uses a session channel the
