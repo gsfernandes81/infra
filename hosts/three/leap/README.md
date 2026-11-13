@@ -63,7 +63,17 @@ exists. On the LAN, from the phone:
    `sudo bin/install-system-file cloudflared-config.yml --commit --allow-content-change --new`,
    then `sudo systemctl start cloudflared`. The tools read `leap/system/` for a host with
    no Alpine copies.
-5. `server-create-fleet-ssh-access.yml -e host=three` gates the hostnames behind Access.
+5. `server-create-fleet-ssh-access.yml -e host=three` gates `ssh-three` behind Access,
+   admitting each client's fleet token, as it does every box's ssh hostname. It reads the
+   routing from `leap/system/`, and refuses unless this client's ssh config already sends
+   `three` through `~/.config/fleet/access-ssh`, which the fleet ssh block does once the
+   infra agent has added `three` to it.
+
+The play leaves `syncthing-three` alone, since a browser needs a login, not a service
+token. That hostname also has no DNS record, because the tunnel play makes `ssh-three`'s
+only. It needs an Access application with a login, as `one`'s Syncthing GUI has, and then
+a CNAME to `three`'s tunnel, in that order so the GUI is never open. No play makes either
+for a host's own tunnel yet, so until both exist the GUI cannot be reached from outside.
 
 ## The array
 

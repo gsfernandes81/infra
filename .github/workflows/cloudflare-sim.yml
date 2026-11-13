@@ -1,20 +1,27 @@
 name: cloudflare-sim
 
-# Runs ansible/playbooks/server-create-host-tunnel.yml end to end against a stand-in for
-# Cloudflare's API (sim/cloudflare/), with the runner as the host, so the play is tested with
-# no Cloudflare account: a dry run, a real run, a re-run, and the adverse cases. Every check
-# is named PASS or FAIL in the log, and any FAIL fails the job.
+# Runs two plays end to end against a stand-in for Cloudflare's API (sim/cloudflare/), so
+# each is tested with no Cloudflare account. Every check is named PASS or FAIL in the log,
+# and any FAIL fails the job.
+#
+#   host-tunnel        server-create-host-tunnel.yml, with the runner as the host: a dry
+#                      run, a real run, a re-run, and the adverse cases.
+#   fleet-ssh-access   server-create-fleet-ssh-access.yml for `three`, whose tunnel config is
+#                      under leap/system/: the refusals, a dry run, a real run, a re-run,
+#                      the undo, and a gate that never takes.
 #
 # WHAT IT CANNOT CHECK, so nobody reads a green run as more: Cloudflare's real API (the
-# stand-in answers in its envelope, with the fields the shared tasks read, and no more), the
-# real edge (no connector runs), Access (this play makes none), and a real host over ssh (the
-# runner is the host, through a local connection).
+# stand-in answers in its envelope, with the fields the plays read, and no more), the real
+# edge (no connector runs, and the stand-in answers the Access probes), ssh through a gate
+# (the ssh probe is `true`), the yes at the Access play's prompt (an extra var), and a real
+# host over ssh (the runner is the host, through a local connection).
 
 on:
   push:
     paths:
       - 'sim/cloudflare/**'
       - 'ansible/playbooks/server-create-host-tunnel.yml'
+      - 'ansible/playbooks/server-create-fleet-ssh-access.yml'
       - 'ansible/playbooks/_cf-api-token.yml'
       - 'ansible/playbooks/_cf-tunnel.yml'
       - '.github/workflows/cloudflare-sim.yml'
@@ -22,6 +29,7 @@ on:
     paths:
       - 'sim/cloudflare/**'
       - 'ansible/playbooks/server-create-host-tunnel.yml'
+      - 'ansible/playbooks/server-create-fleet-ssh-access.yml'
       - 'ansible/playbooks/_cf-api-token.yml'
       - 'ansible/playbooks/_cf-tunnel.yml'
       - '.github/workflows/cloudflare-sim.yml'
@@ -48,3 +56,17 @@ jobs:
 
       - name: Run the play against the stand-in
         run: sim/cloudflare/run-host-tunnel.sh
+
+  fleet-ssh-access:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ansible-core
+        run: |
+          pipx install ansible-core
+          ansible --version
+
+      - name: Run the play against the stand-in
+        run: sim/cloudflare/run-fleet-ssh-access.sh

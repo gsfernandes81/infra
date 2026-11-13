@@ -20,23 +20,33 @@
 #   - One reusable policy, `fleet ssh service tokens`, and one application per host,
 #     `fleet ssh <host>`, created already linked to it. An application never exists
 #     admitting nobody, and undoing a host is deleting its application, which leaves the
-#     other two as they were.
+#     others as they were.
 #   - It proves the result from here with probes that cannot pass for the wrong reason:
-#     the same ssh probe is first run against the OPEN host, so a probe that cannot pass
-#     from this client stops the run before anything is written; then it waits until the
-#     hostname refuses an unauthenticated request, because Access changes take time to
-#     reach the edge; only then does it run the ssh probe again, with -S none so an open
-#     multiplexed connection cannot answer for Cloudflare.
+#     an unauthenticated probe must first read the dev hub's hostname as gated and this
+#     host as it is; the same ssh probe is first run against the OPEN host, so a probe
+#     that cannot pass from this client stops the run before anything is written; then it
+#     waits until the hostname refuses an unauthenticated request, because Access changes
+#     take time to reach the edge; only then does it run the ssh probe again, with -S none
+#     so an open multiplexed connection cannot answer for Cloudflare.
 #   - Any failure after the application is created deletes it again, so a run ends either
 #     gated and working or open as before.
 #
 # It can prove only THIS machine's token. After each host, check the laptop (the summary
 # prints how) before gating the next.
 #
-# Refuses, rather than guesses: a host not in the fleet; a hostname that is not that
-# host's tracked ssh rule; an application on the hostname it did not make (the ones from
-# August may still exist, set to bypass, and removing Access in front of something is the
-# owner's call); a fleet token that expires; no token for this client.
+# It gates ssh-<host> and nothing else in the host's ingress. A browser hostname on the same
+# tunnel, such as a Syncthing GUI, wants a login rather than a service token, and is not
+# this play's.
+#
+# The tracked routing is hosts/<host>/system/cloudflared-config.yml, or, for a host that has
+# only ever run Leap and so has no system/ (three), hosts/<host>/leap/system/: the rule
+# bin/_infra.py's system_dir() keeps. A host with both is still on Alpine, and system/ wins.
+#
+# Refuses, rather than guesses: a host not in the fleet; a host with no tracked tunnel
+# config; a hostname that is not that host's tracked ssh rule; an application on the
+# hostname it did not make (the ones from August may still exist, set to bypass, and
+# removing Access in front of something is the owner's call); a fleet token that expires;
+# no token for this client.
 #
 # The reasoning, and the review that shaped it: docs/decisions.md § "The fleet's ssh
 # hostnames are gated by per-client service tokens".
@@ -59,7 +69,17 @@
     cf_api: https://api.cloudflare.com/client/v4
     # The probes. URLs are variables so a test can point them at a stand-in.
     fleet_url: "https://{{ fleet_hostname }}/"
-    control_url: "https://infra-dev.{{ dns_zone }}/"
+    # The known-gated control: the dev hub's hostname, behind its own Access application,
+    # which refuses an unauthenticated request as the gate here must. It was infra-dev's
+    # until that hostname was deleted on 2026-10-27, after which the probe reached nothing.
+    control_hostname: "dev.{{ dns_zone }}"
+    control_url: "https://{{ control_hostname }}/"
+    # The tracked routing, by system_dir()'s rule (the header): leap/system/ only when
+    # system/ is absent and leap/system/ exists. Repo-relative, for the messages.
+    fleet_host_dir: "{{ control_checkout }}/hosts/{{ fleet_host }}"
+    fleet_config: >-
+      hosts/{{ fleet_host }}/{{ 'leap/system' if (fleet_host_dir ~ '/system') is not directory
+      and (fleet_host_dir ~ '/leap/system') is directory else 'system' }}/cloudflared-config.yml
     # About 90 seconds for a new application to reach the edge.
     gate_retries: 18
     gate_delay: 5
@@ -78,12 +98,21 @@
     - name: Check -e host names a box in the fleet
       ansible.builtin.assert:
         that: fleet_host in groups['fleet']
-        fail_msg: "Say which box: -e host=one (then two, then zero). Got '{{ fleet_host }}'."
+        fail_msg: "Say which box in [fleet]: -e host=one. Got '{{ fleet_host }}'."
         success_msg: "{{ fleet_hostname }}"
+
+    - name: Check {{ fleet_host }} has a tracked tunnel config
+      ansible.builtin.assert:
+        that: (control_checkout ~ '/' ~ fleet_config) is file
+        fail_msg: >-
+          {{ fleet_config }} does not exist, so there is no tracked routing to check
+          {{ fleet_hostname }} against. Commit {{ fleet_host }}'s tunnel config first, as
+          server-create-host-tunnel.yml's last message says. Nothing done.
+        success_msg: "{{ fleet_config }}"
 
     - name: Read {{ fleet_host }}'s tracked tunnel routing
       ansible.builtin.set_fact:
-        fleet_ingress: "{{ lookup('file', control_checkout ~ '/hosts/' ~ fleet_host ~ '/system/cloudflared-config.yml') | from_yaml }}"
+        fleet_ingress: "{{ lookup('file', control_checkout ~ '/' ~ fleet_config) | from_yaml }}"
 
     - name: Check {{ fleet_hostname }} is {{ fleet_host }}'s ssh rule
       # The hostname is derived, so this is what keeps the derivation and the routing the
@@ -94,8 +123,8 @@
           | selectattr('hostname', 'eq', fleet_hostname)
           | selectattr('service', 'eq', 'ssh://127.0.0.1:22') | list | length == 1
         fail_msg: >-
-          hosts/{{ fleet_host }}/system/cloudflared-config.yml has no rule sending
-          {{ fleet_hostname }} to ssh://127.0.0.1:22. Nothing done.
+          {{ fleet_config }} has no rule sending {{ fleet_hostname }} to
+          ssh://127.0.0.1:22. Nothing done.
         success_msg: "{{ fleet_hostname }} -> ssh://127.0.0.1:22 on {{ fleet_host }}'s tunnel"
 
     # ── this client: the probe has to be able to run from here ───────────────
@@ -226,7 +255,7 @@
       when: fleet_remove
 
     # ── calibrate the probes against known states ────────────────────────────
-    - name: Probe infra-dev, the known-gated control
+    - name: Probe {{ control_hostname }}, the known-gated control
       ansible.builtin.uri:
         url: "{{ control_url }}"
         follow_redirects: none
@@ -367,7 +396,8 @@
       ansible.builtin.debug:
         msg: >-
           --check: would {{ 'create' if not fleet_app else 'keep' }} {{ fleet_app_name }} on
-          {{ fleet_hostname }}, linked to "{{ fleet_policy_name }}" admitting
+          {{ fleet_hostname }}, which {{ fleet_config }} routes, linked to
+          "{{ fleet_policy_name }}" admitting
           {{ fleet_tokens | map(attribute='name') | list }}, then wait for the hostname to
           refuse an unauthenticated request and ssh {{ fleet_host }} through it.
           Nothing was written.
@@ -588,6 +618,5 @@
           - "{{ fleet_hostname }} is gated by {{ fleet_app_name }}, admitting {{ fleet_tokens | map(attribute='name') | join(', ') }}."
           - "Now check the laptop before the next host: in WSL `ssh -S none {{ fleet_host }} true`, and from Windows `ssh {{ fleet_host }}`."
           - "Undo: -e host={{ fleet_host }} -e remove=true, or delete {{ fleet_app_name }} in Zero Trust -> Access -> Applications."
-          - "{{ {'one': 'Next: -e host=two.', 'two': 'Next: -e host=zero, the critical box, last.', 'zero': 'If one and two are gated too, all three are done: close infra#12.'}[fleet_host] }}"
       changed_when: true
       when: not ansible_check_mode
