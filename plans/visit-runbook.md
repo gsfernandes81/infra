@@ -96,7 +96,8 @@ Over ssh, from the phone, any day before. Each is a step a slice would otherwise
    is a dry run: with no `--commit` it writes nothing, and `--allow-content-change` lets
    it reach its `sshd -t` checks instead of refusing after the diff. Its diff is the
    `PermitOpen` line, a new comment above it, and two reworded comments, and it ends
-   `pre-checks on the repo copy: ok` and `DRY RUN`. If it shows anything else, stop.
+   `pre-checks on the repo copy: ok` and `DRY RUN`. If it shows anything else, stop. It
+   asks for your sudo password even so, for its `sshd -t` checks.
 
    ```fish
    # on two: pull, then a dry run of the new sshd drop-in, which shows the diff and writes nothing
@@ -104,7 +105,7 @@ Over ssh, from the phone, any day before. Each is a step a slice would otherwise
    ```
 
    ```fish
-   # on two: install the sshd drop-in, reload sshd, and print the PermitOpen a new session gets
+   # on two: install the sshd drop-in, reload sshd, and print the PermitOpen now on disk
    cd ~/infra; and sudo bin/install-system-file sshd-infra.conf --commit --allow-content-change; and sudo rc-service sshd reload; and sudo sshd -T | grep -i permitopen
    ```
 
@@ -114,7 +115,7 @@ Over ssh, from the phone, any day before. Each is a step a slice would otherwise
    ```
 
    ```fish
-   # on one: install the sshd drop-in, reload sshd, and print the PermitOpen a new session gets
+   # on one: install the sshd drop-in, reload sshd, and print the PermitOpen now on disk
    cd ~/infra; and sudo bin/install-system-file sshd-infra.conf --commit --allow-content-change; and sudo rc-service sshd reload; and sudo sshd -T | grep -i permitopen
    ```
 
@@ -124,11 +125,12 @@ Over ssh, from the phone, any day before. Each is a step a slice would otherwise
    ```
 
    ```fish
-   # on zero: install the sshd drop-in, reload sshd, and print the PermitOpen a new session gets
+   # on zero: install the sshd drop-in, reload sshd, and print the PermitOpen now on disk
    cd ~/infra; and sudo bin/install-system-file sshd-infra.conf --commit --allow-content-change; and sudo rc-service sshd reload; and sudo sshd -T | grep -i permitopen
    ```
 
-   The last line ends `192.168.86.103:22`. This is safe over the tunnel.
+   The last line ends `192.168.86.103:22`; it reads the file on disk, and the second
+   session below is what proves the running sshd answers. This is safe over the tunnel.
    `install-system-file` runs `sshd -t` on the file and on the whole config before it
    writes, runs it again after, and puts the old file back if that fails. A reload keeps
    every open session, and the tunnel is not touched. Before you close the session the
@@ -268,10 +270,15 @@ visit, step 4); `one`'s old board free; a card written and labelled `three`.
    /dev/sdX` read (`three.md` § The Argon EON), then the array made and unlocked, as
    [`hosts/three/leap/README.md`](../hosts/three/leap/README.md) § The array says.
 4. **The two ways in.** `sudo tailscale up --advertise-tags=tag:fleet --accept-dns=false`
-   on `three`; then the tunnel, as that README's § After the first boot says, with the
-   infra agent adding `three` to the inventory and to the phone's ssh config, which the
-   owner then installs with `ansible-playbook playbooks/client-home-ssh-config.yml`.
-   From then on `ssh three` works.
+   on `three`. Then, before the tunnel play, the infra agent merges the branch
+   `three-joins-fleet`, which puts `three` in the inventory, reached at `three-local` until
+   its tunnel answers, and gives the phone `three` and its mesh aliases. Run
+   `ansible-playbook playbooks/client-home-ssh-config.yml` on the phone, then `ssh
+   three-local true` once, checking the fingerprint against step 1's: Ansible refuses an
+   unknown host key, and step 2's `ssh gavin@192.168.86.103` stored it under the address.
+   Then the tunnel and its Access gate, as that README's § After the first boot says. Once
+   `ssh three` answers through the tunnel, the infra agent drops `ansible_host` from the
+   inventory.
 5. **Erase the stick,** once `ssh three` answers through the tunnel.
 6. **The backup.** Send the infra agent `three`'s address from `tailscale ip -4`; it fills
    it into `mirror-backup` and writes the install for `zero` of `mirror-backup` and
@@ -303,7 +310,9 @@ next morning, `sudo cat /var/lib/mirror-backup/last-success` on `zero` is recent
    owner and mode. Then `sudo rm -rf /media/mirror/restore`.
 2. **Syncthing on `three`,** if `free -m` showed room through the seeding:
    `ansible-playbook playbooks/server-deploy-compose.yml -e deployment=syncthing-three -K`,
-   then its GUI through `three`'s tunnel. Watch `free -m` for a day.
+   then its GUI through `three`'s tunnel, once it has a DNS record and an Access login
+   application, which no play makes yet (`docs/management-plane.md`, phase 9). Watch
+   `free -m` for a day.
 3. **A lock and an unlock,** to see both commands work on the real drive: the lock prints
    `locked`, and the unlock asks for the passphrase again.
 
