@@ -11,9 +11,14 @@
 # It fails only when the download or the checksum fails; every other finding is an ANSWER
 # line in <workdir>/report.txt. A pinned build openSUSE has withdrawn is a finding, not a
 # failure: the pin records the copy the owner keeps on two (plans/visit-runbook.md), and
-# the current leg still inspects the newest build. Nothing is written to the image: the loop device is
-# read-only, and the image's own rpm and lsinitrd run in a chroot whose writes land in a
-# tmpfs overlay. Run it only on a throwaway runner: it mounts, chroots and loops as root.
+# the current leg still inspects the newest build. Nothing is written to the image: the
+# loop device is read-only, and the image's own rpm and lsinitrd run in a chroot whose
+# writes land in a tmpfs overlay. Run it only on a throwaway runner: it mounts, chroots,
+# loops and runs the image's own binaries as root.
+#
+# The current leg trusts openSUSE's server: it checks the image against the .sha256 file
+# beside it and not against the signed .sha256.asc. Its report is evidence about openSUSE's
+# newest build, never a pin.
 
 set -euo pipefail
 
@@ -22,6 +27,7 @@ which=${2:?usage: inspect.sh <workdir> pinned|current}
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 # shellcheck source=leap/pins
 . "$repo/leap/pins"
+: "${pi_image_url:?leap/pins has no pi_image_url}" "${pi_image_sha256:?leap/pins has no pi_image_sha256}"
 
 mkdir -p "$work"
 report=$work/report.txt
@@ -37,7 +43,8 @@ show() { "$@" 2>&1 | tee -a "$report" || true; }
 base=${pi_image_url%/*}
 stem=${pi_image_url##*/}
 stem=${stem%-Build*}
-current_name=$(curl -fsSL --retry 3 "$base/" |
+listing=$(curl -fsSL --retry 3 "$base/" || true)
+current_name=$(printf '%s\n' "$listing" |
 	grep -oE "${stem//./\\.}-Build[0-9.]+\\.raw\\.xz" | sort -uV | tail -n 1 || true)
 current_sha=
 [ -n "$current_name" ] &&
@@ -66,10 +73,13 @@ section "Image ($which)"
 say "url: $url"
 say "expected sha256: $sha"
 answer "pinned build: ${pi_image_url##*/}"
-answer "current build on openSUSE: ${current_name:-unknown} sha256 ${current_sha:-unknown}"
-if [ "$current_sha" = "$pi_image_sha256" ]; then
+if [ -z "$listing" ] || [ -z "$current_sha" ]; then
+	answer "current build on openSUSE: unknown (openSUSE's directory did not answer)"
+elif [ "$current_sha" = "$pi_image_sha256" ]; then
+	answer "current build on openSUSE: $current_name sha256 $current_sha"
 	answer "the pinned build is still the current one: yes"
 else
+	answer "current build on openSUSE: $current_name sha256 $current_sha"
 	answer "the pinned build is still the current one: no"
 fi
 if [ "$which" = current ] && [ "$current_sha" = "$pi_image_sha256" ]; then
@@ -97,9 +107,14 @@ if [ "$have" != "$sha" ]; then
 fi
 answer "download and sha256: OK ($(stat -c %s "$img.xz") bytes)"
 
+if ! xz -T0 -dc "$img.xz" >"$img"; then
+	answer "FAIL: the image did not decompress"
+	exit 1
+fi
+rm -f "$img.xz"
+
 # From here on nothing stops the run: each finding is reported, found or not.
 set +e
-xz -T0 -dc "$img.xz" >"$img" && rm -f "$img.xz"
 
 mnt=$work/mnt
 loop=
@@ -187,10 +202,14 @@ fi
 
 section "Wi-Fi firmware (the Pi 4's radio is a BCM43455)"
 if [ -n "$root" ]; then
-	fw=$(cd "$root" && find usr/lib/firmware lib/firmware -path '*brcm*' -name 'brcmfmac43455*' 2>/dev/null | sort -u)
+	# usr/lib only: lib is a link to it on a merged /usr, and would count each file twice.
+	fw=$(cd "$root" && find usr/lib/firmware -path '*brcm*' -name 'brcmfmac43455*' 2>/dev/null | sort -u)
 	show printf '%s\n' "${fw:-none}"
 	if [ -n "$fw" ]; then
-		owners=$(for f in $fw; do inroot rpm -qf --qf '%{NAME}\n' "/$f" 2>/dev/null; done | sort -u | tr '\n' ' ')
+		# Some names hold spaces, so one path per line.
+		owners=$(printf '%s\n' "$fw" | while IFS= read -r f; do
+			inroot rpm -qf --qf '%{NAME}\n' "/$f" 2>/dev/null
+		done | sort -u | tr '\n' ' ')
 		answer "brcmfmac43455 firmware: $(echo "$fw" | wc -l) files, owned by: ${owners:-unknown}"
 	else
 		answer "brcmfmac43455 firmware: none in the image"
@@ -237,9 +256,23 @@ for f in "${initrds[@]}"; do
 	# lsinitrd prints dracut's module list before the files.
 	show sed -n '/dracut modules:/,/^==/p' "$list"
 	show grep -iE 'combustion|ignition' "$list"
-	c=$(grep -ciE 'combustion' "$list")
-	i=$(grep -ciE 'ignition' "$list")
-	answer "initrd ${f#"$mnt"/}: combustion: $([ "$c" -gt 0 ] && echo "yes, $c lines" || echo no); ignition: $([ "$i" -gt 0 ] && echo "yes, $i lines" || echo no)"
+	# Yes means dracut built the module in and its program is there. lsinitramfs prints
+	# no module list, so a listing made by it can answer only the second half.
+	mods=$(sed -n '/^dracut modules:/,/^==/p' "$list")
+	for m in combustion ignition; do
+		if [ -z "$mods" ]; then
+			inmod="no module list"
+		elif printf '%s\n' "$mods" | grep -qx "$m"; then
+			inmod=yes
+		else
+			inmod=no
+		fi
+		bin=no
+		grep -qE "(^|[ /])usr/bin/$m\$" "$list" && bin=yes
+		verdict=no
+		[ "$inmod" = yes ] && [ "$bin" = yes ] && verdict=yes
+		answer "initrd ${f#"$mnt"/}: $m: $verdict (dracut module: $inmod; usr/bin/$m: $bin)"
+	done
 	answer "initrd ${f#"$mnt"/}: combustion service or script: $(grep -oE '[^ ]*(combustion\.service|usr/bin/combustion|combustion-prepare[^ ]*)$' "$list" | sort -u | tr '\n' ' ' || true)"
 done
 
@@ -284,7 +317,9 @@ if [ -n "$root" ]; then
 	# /boot/writable is a subvolume of its own, so it is read from the top level.
 	top=$mnt/top
 	mkdir -p "$top"
-	mount -o ro,subvolid=5 "$(findmnt -n -o SOURCE --target "$root" | sed 's/\[.*//')" "$top"
+	rootdev=$(findmnt -n -o SOURCE --target "$root" | sed 's/\[.*//')
+	mount -o ro,subvolid=5 "$rootdev" "$top" ||
+		mount -o ro,subvolid=5,rescue=nologreplay "$rootdev" "$top"
 	say "--- @/boot/writable"
 	show find "$top/@/boot/writable" -maxdepth 2 -printf '%10s %P\n'
 	say "--- health-checker's files"

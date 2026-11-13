@@ -38,8 +38,9 @@ watches and powers the box off if it fails. A successful Combustion run already 
 away, by removing the file it waits for; the probe shows whether that happened.
 
 A second job asks Leap 16.1's aarch64 repositories the same package question, because
-Leap on a Pi installs from them. The Pi image itself, and the aarch64 pins, are checked by
-`.github/workflows/pi-image.yml` ([`leap/README.md`](../../leap/README.md) § How it is
+Leap on a Pi installs from them. The Pi image itself is inspected by
+`.github/workflows/pi-image.yml`, and the aarch64 pins are checked by
+`.github/workflows/leap-pins.yml` ([`leap/README.md`](../../leap/README.md) § How it is
 tested).
 
 The run's ssh key is made fresh in the runner and dies with it. The job fails only when

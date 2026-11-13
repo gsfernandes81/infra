@@ -1,7 +1,7 @@
 name: pi-image
 
-# What the Leap simulation cannot see, because it boots openSUSE's x86_64 image and downloads
-# only the x86_64 binaries: the Pi image the cards are written from, and the aarch64 pins.
+# What the Leap simulation cannot see, because it boots openSUSE's x86_64 image: the Pi
+# image the cards are written from. leap-pins.yml checks the binaries' pins and the runbook.
 #
 # image: downloads the Pi image leap/pins names, checks its SHA-256, and inspects it
 # read-only (sim/pi-image/inspect.sh): Combustion in the initrd, the Wi-Fi firmware, the
@@ -12,13 +12,13 @@ name: pi-image
 # fails only when its download or checksum fails. A pinned build openSUSE has withdrawn is
 # reported, not failed, since the pin records the copy kept on two.
 #
-# pins: downloads every binary leap/pins pins, both architectures, and FAILS when one does
-# not match its SHA-256, or when plans/visit-runbook.md quotes another image.
+# The current leg trusts openSUSE's server: it checks the image against the .sha256 file
+# beside it, not the signed .sha256.asc. Both legs run the image's own binaries as root, in
+# a chroot, which is fine on a throwaway runner and nowhere else.
 
 on:
   push:
-    paths: ['.github/workflows/pi-image.yml', 'sim/pi-image/**', 'leap/pins',
-      'plans/visit-runbook.md']
+    paths: ['.github/workflows/pi-image.yml', 'sim/pi-image/**', 'leap/pins']
   workflow_dispatch:
 
 permissions:
@@ -39,6 +39,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install btrfs-progs and the initrd tools
         run: |
@@ -75,36 +77,3 @@ jobs:
             ${{ runner.temp }}/pi/packages.txt
             ${{ runner.temp }}/pi/initrd-*.txt
           if-no-files-found: warn
-
-  pins:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check each pinned binary against its SHA-256
-        run: |
-          # The URLs as leap/firstboot.sh and server-update-leap.yml build them.
-          . leap/pins
-          cfd=https://github.com/cloudflare/cloudflared/releases/download/$cloudflared_version
-          cmp=https://github.com/docker/compose/releases/download/v$compose_version
-          check() {
-            curl -fsSL --retry 3 -o "$RUNNER_TEMP/pinned" "$1" || { echo "FAIL: download failed: $1"; return; }
-            have=$(sha256sum "$RUNNER_TEMP/pinned" | awk '{print $1}')
-            if [ "$have" = "$2" ]; then echo "OK: ${1##*/} $have"
-            else echo "FAIL: ${1##*/} is $have, leap/pins says $2"; fi
-            rm -f "$RUNNER_TEMP/pinned"
-          }
-          {
-            check "$cfd/cloudflared-linux-arm64" "$cloudflared_sha256_aarch64"
-            check "$cfd/cloudflared-linux-amd64" "$cloudflared_sha256_x86_64"
-            check "$cmp/docker-compose-linux-aarch64" "$compose_sha256_aarch64"
-            check "$cmp/docker-compose-linux-x86_64" "$compose_sha256_x86_64"
-            # The runbook downloads the image by its own quoted URL and SHA-256.
-            for v in "$pi_image_url" "$pi_image_sha256"; do
-              if grep -qF "$v" plans/visit-runbook.md; then echo "OK: plans/visit-runbook.md quotes $v"
-              else echo "FAIL: plans/visit-runbook.md does not quote $v"; fi
-            done
-          } | tee pins.txt
-          { echo '```'; cat pins.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          ! grep -q '^FAIL' pins.txt

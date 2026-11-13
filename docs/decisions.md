@@ -2103,6 +2103,10 @@ files it.
   away.
 - **A monthly update that will not resolve because of a lock** says so and changes
   nothing; the owner then decides, rather than the solver.
+- **Note, 2026-11-13: the image does not install `raspberrypi-eeprom`** (`pi-image.yml`,
+  builds 3.14 and 3.16). The EEPROM is not managed by the OS on these images, so that
+  pattern of the lock matches nothing, and each board keeps the bootloader its own EEPROM
+  holds.
 
 ## Leap hosts carry upstream's Compose until openSUSE's reaches the deploy play's floor
 
@@ -2294,9 +2298,10 @@ carries them out.
 - **The Pi image is pinned in `leap/pins`, by URL and SHA-256, and CI inspects it.** The
   simulation boots openSUSE's x86 image and downloads only x86 binaries, so neither the
   card's image nor the aarch64 pins had been checked by a machine. `pi-image.yml` reads the
-  pair from `leap/pins`, as it reads the binaries' pins, and fails when the runbook quotes
-  another: the runbook's download is the copy a person runs, and the two cannot drift. No
-  host reads the pair. Set aside: a file of its own, one more place for the runbook's quote
+  pair from `leap/pins` and inspects the image. `leap-pins.yml` checks every binary pin
+  against its release, and fails when the runbook quotes another image or names another
+  build anywhere: the runbook's blocks are what a person runs, and they cannot drift from
+  the pin. No host reads the pair. Set aside: a file of its own, one more place for the runbook's quote
   to disagree with.
 - **Every Pi joins the tailnet with `--accept-dns=false`.** By default `tailscale up` points a
   box's resolver at `tailscaled`, and on `zero` that would put every lookup, the tunnel's

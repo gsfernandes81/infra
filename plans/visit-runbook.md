@@ -55,8 +55,9 @@ Over ssh, from the phone, any day before. Each is a step a slice would otherwise
    `Leap-16.1-Immutable.aarch64-RaspberryPi-Build*.raw.xz` from
    [the directory](https://download.opensuse.org/distribution/leap/16.1/appliances/),
    download it and its `.sha256` the same way, check it with the first `sha256sum` line,
-   and move the pin to it: its URL and SHA-256 in `leap/pins` and in this block, in one
-   commit. CI fails when the two disagree (`.github/workflows/pi-image.yml`).
+   and move the pin to it, in one commit, in all three places that carry the build:
+   `leap/pins` (URL and SHA-256), this block, and the card-write block in *Writing a card,
+   and erasing a stick*. CI fails when they disagree (`.github/workflows/leap-pins.yml`).
 2. **The tailnet's settings,** in its admin console: auto-update off, and a `tagOwners`
    entry for `tag:fleet` in the policy (`decisions.md`).
 3. **`zero` on the tailnet.** Tailscale's repo has nothing for Alpine, so `zero` runs

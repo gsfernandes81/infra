@@ -1,0 +1,60 @@
+name: leap-pins
+
+# Checks leap/pins against the world, since the Leap simulation downloads only the x86_64
+# binaries and never the Pi image. FAILS when a pinned cloudflared or Compose binary, either
+# architecture, does not match its SHA-256, or when plans/visit-runbook.md downloads or
+# writes a Pi image other than the pinned one. Its own workflow, apart from pi-image.yml,
+# so a runbook edit costs one small job and not two image downloads.
+
+on:
+  push:
+    paths: ['.github/workflows/leap-pins.yml', 'leap/pins', 'plans/visit-runbook.md']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pins:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check each pin against its release and the runbook
+        run: |
+          . leap/pins
+          : "${cloudflared_version:?}" "${cloudflared_sha256_aarch64:?}" "${cloudflared_sha256_x86_64:?}"
+          : "${compose_version:?}" "${compose_sha256_aarch64:?}" "${compose_sha256_x86_64:?}"
+          : "${pi_image_url:?}" "${pi_image_sha256:?}"
+          # The URLs as leap/firstboot.sh and server-update-leap.yml build them.
+          cfd=https://github.com/cloudflare/cloudflared/releases/download/$cloudflared_version
+          cmp=https://github.com/docker/compose/releases/download/v$compose_version
+          check() {
+            curl -fsSL --retry 3 -o "$RUNNER_TEMP/pinned" "$1" || { echo "FAIL: download failed: $1"; return; }
+            have=$(sha256sum "$RUNNER_TEMP/pinned" | awk '{print $1}')
+            if [ "$have" = "$2" ]; then echo "OK: ${1##*/} $have"
+            else echo "FAIL: ${1##*/} is $have, leap/pins says $2"; fi
+            rm -f "$RUNNER_TEMP/pinned"
+          }
+          {
+            check "$cfd/cloudflared-linux-arm64" "$cloudflared_sha256_aarch64"
+            check "$cfd/cloudflared-linux-amd64" "$cloudflared_sha256_x86_64"
+            check "$cmp/docker-compose-linux-aarch64" "$compose_sha256_aarch64"
+            check "$cmp/docker-compose-linux-x86_64" "$compose_sha256_x86_64"
+            # The runbook downloads the image by its own quoted URL and SHA-256, and writes
+            # the card from a file it names again, so every build it names must be the pin's.
+            for v in "$pi_image_url" "$pi_image_sha256"; do
+              if grep -qF "$v" plans/visit-runbook.md; then echo "OK: plans/visit-runbook.md quotes $v"
+              else echo "FAIL: plans/visit-runbook.md does not quote $v"; fi
+            done
+            pinned=${pi_image_url##*/}
+            grep -oE 'RaspberryPi-Build[0-9.]+\.raw\.xz' plans/visit-runbook.md | sort -u | while IFS= read -r b; do
+              if [ "${pinned%%"$b"}" != "$pinned" ]; then echo "OK: plans/visit-runbook.md names $b, the pin"
+              else echo "FAIL: plans/visit-runbook.md names $b, not the pinned $pinned"; fi
+            done
+          } | tee pins.txt
+          { echo '```'; cat pins.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          ! grep -q '^FAIL' pins.txt

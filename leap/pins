@@ -9,11 +9,11 @@
 # The last two keys pin the Pi image every Leap host's card is written from, by its URL and
 # openSUSE's SHA-256: the copy the owner downloaded to two, which openSUSE may since have
 # replaced. plans/visit-runbook.md quotes the same pair, and no host reads them.
-# .github/workflows/pi-image.yml inspects that image, and fails when the runbook quotes
-# another SHA-256 or when a binary's SHA-256 here is not its release's.
+# .github/workflows/pi-image.yml inspects that image. .github/workflows/leap-pins.yml fails
+# when a binary's SHA-256 here is not its release's, or when the runbook names another image.
 #
 # KEY=value lines only, no spaces and no quotes: a shell sources this file and a play
-# splits each line at its "=".
+# splits each line at its first "=".
 cloudflared_version=2026.10.7
 cloudflared_sha256_aarch64=3df43aedc9ff291d1735b5cb576cb97e0b157488796db2e32b28aecabb445775
 cloudflared_sha256_x86_64=1f99fb518b83dec2ba8d870a7cc991d82a77e6196295a3d2754ba17ab9f91872

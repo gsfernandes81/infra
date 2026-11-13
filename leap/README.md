@@ -166,6 +166,9 @@ job downloads the Pi image `pins` names, checks its SHA-256 and inspects it read
 packages the image has, what is on its FAT partition and its partition table. It does the
 same for the newest build openSUSE publishes, once that is not the pinned one. It reports
 ANSWER lines and fails only when a download or checksum fails; a pinned build openSUSE has
-since withdrawn is reported, since the pin records the copy kept on `two`. Its `pins` job downloads
-both architectures' `cloudflared` and Compose and fails when one differs from its SHA-256
-in `pins`, or when the runbook quotes another image.
+since withdrawn is reported, since the pin records the copy kept on `two`. It runs when
+`pins`, the script or the workflow changes.
+
+`.github/workflows/leap-pins.yml` downloads both architectures' `cloudflared` and Compose
+and fails when one differs from its SHA-256 in `pins`, or when `plans/visit-runbook.md`
+quotes another image or names another build. It runs when `pins` or the runbook changes.
