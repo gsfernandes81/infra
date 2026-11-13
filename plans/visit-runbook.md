@@ -90,10 +90,53 @@ Over ssh, from the phone, any day before. Each is a step a slice would otherwise
    `make-stick` refuses `three`'s stick.
 5. **`rsync` on the Alpine hosts:** `ansible-playbook playbooks/server-install-packages.yml
    --check --diff -K` to read what it would install, then without `--check`.
-6. **The new `PermitOpen`** (it adds `three`'s `.103`) on `zero`, `one` and `two`, from the
-   infra agent's handover. `install-system-file` checks the new configuration with `sshd -t`
-   before it writes, and a reload keeps every session open; open a new session before
-   closing the one the reload ran in.
+6. **The new `PermitOpen`** (it adds `three`'s `.103`) on `two`, then `one`, then `zero`,
+   with the same two blocks on each, after `ssh <host>`. `one` needs it even though the
+   8 GB board replaces it, because its Alpine card is slice 1's way back. The first block
+   is a dry run: with no `--commit` it writes nothing, and `--allow-content-change` lets
+   it reach its `sshd -t` checks instead of refusing after the diff. Its diff is the
+   `PermitOpen` line, a new comment above it, and two reworded comments, and it ends
+   `pre-checks on the repo copy: ok` and `DRY RUN`. If it shows anything else, stop.
+
+   ```fish
+   # on two: pull, then a dry run of the new sshd drop-in, which shows the diff and writes nothing
+   cd ~/infra; and git pull --ff-only; and bin/install-system-file sshd-infra.conf --allow-content-change
+   ```
+
+   ```fish
+   # on two: install the sshd drop-in, reload sshd, and print the PermitOpen a new session gets
+   cd ~/infra; and sudo bin/install-system-file sshd-infra.conf --commit --allow-content-change; and sudo rc-service sshd reload; and sudo sshd -T | grep -i permitopen
+   ```
+
+   ```fish
+   # on one: pull, then a dry run of the new sshd drop-in, which shows the diff and writes nothing
+   cd ~/infra; and git pull --ff-only; and bin/install-system-file sshd-infra.conf --allow-content-change
+   ```
+
+   ```fish
+   # on one: install the sshd drop-in, reload sshd, and print the PermitOpen a new session gets
+   cd ~/infra; and sudo bin/install-system-file sshd-infra.conf --commit --allow-content-change; and sudo rc-service sshd reload; and sudo sshd -T | grep -i permitopen
+   ```
+
+   ```fish
+   # on zero: pull, then a dry run of the new sshd drop-in, which shows the diff and writes nothing
+   cd ~/infra; and git pull --ff-only; and bin/install-system-file sshd-infra.conf --allow-content-change
+   ```
+
+   ```fish
+   # on zero: install the sshd drop-in, reload sshd, and print the PermitOpen a new session gets
+   cd ~/infra; and sudo bin/install-system-file sshd-infra.conf --commit --allow-content-change; and sudo rc-service sshd reload; and sudo sshd -T | grep -i permitopen
+   ```
+
+   The last line ends `192.168.86.103:22`. This is safe over the tunnel.
+   `install-system-file` runs `sshd -t` on the file and on the whole config before it
+   writes, runs it again after, and puts the old file back if that fails. A reload keeps
+   every open session, and the tunnel is not touched. Before you close the session the
+   reload ran in, open a second `ssh <host>` and wait for it to answer.
+
+   **Way back:** in the session that is still open, copy back the backup the install named
+   after `backed up`: `sudo cp -a <that path> /etc/ssh/sshd_config.d/10-infra.conf; and
+   sudo rc-service sshd reload`.
 7. **The ntfy topic** for the backup's age alert. Its URL is asked for, never typed on a
    command line:
 
