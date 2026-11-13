@@ -9,7 +9,8 @@ name: pi-image
 # build, so the pinned image disappears at the next rebuild; the `current` leg inspects the
 # newest build as well, so a run still answers once the pin is gone and shows what a rebuild
 # changed; while the pin is the newest build, that leg says so and stops. Report-only: a leg
-# fails only when its download or checksum fails.
+# fails only when its download or checksum fails. A pinned build openSUSE has withdrawn is
+# reported, not failed, since the pin records the copy kept on two.
 #
 # pins: downloads every binary leap/pins pins, both architectures, and FAILS when one does
 # not match its SHA-256, or when plans/visit-runbook.md quotes another image.

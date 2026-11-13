@@ -163,7 +163,9 @@ itself reads a live Alpine host, so CI does not run it.
 That VM is x86_64, so `.github/workflows/pi-image.yml` covers what it cannot. Its `image`
 job downloads the Pi image `pins` names, checks its SHA-256 and inspects it read-only with
 `sim/pi-image/inspect.sh`: whether the initrd carries Combustion, which Wi-Fi firmware and
-packages the image has, what is on its FAT partition and its partition table. It reports
-ANSWER lines and fails only when the download or checksum fails. Its `pins` job downloads
+packages the image has, what is on its FAT partition and its partition table. It does the
+same for the newest build openSUSE publishes, once that is not the pinned one. It reports
+ANSWER lines and fails only when a download or checksum fails; a pinned build openSUSE has
+since withdrawn is reported, since the pin records the copy kept on `two`. Its `pins` job downloads
 both architectures' `cloudflared` and Compose and fails when one differs from its SHA-256
 in `pins`, or when the runbook quotes another image.

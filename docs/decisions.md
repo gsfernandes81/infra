@@ -2284,8 +2284,13 @@ carries them out.
   `dd` would destroy. The image is openSUSE's Pi image, downloaded and checked before the
   visit, because openSUSE's directory keeps only the newest build. It was build 3.13, the
   build the simulation ran on 2026-11-03. **Moved to build 3.14 on 2026-11-13**, because
-  openSUSE withdrew 3.13 before the owner had downloaded it; the simulation's x86 image is
-  unversioned and so became 3.14 too.
+  openSUSE withdrew 3.13 before the owner had downloaded it, **and to build 3.16 the same
+  day**, because 3.14 was replaced while it downloaded and the copy failed its checksum.
+  The simulation's x86 image is unversioned, and was build 3.14 when the `host` job last
+  proved both first boots on 2026-11-13. Since builds turn over within days, the pin
+  records the copy the owner downloaded to `two`, not a file openSUSE must still serve: the
+  runbook checks the download against openSUSE's `.sha256` file and then against the pin,
+  and moves the pin when the build named there is gone.
 - **The Pi image is pinned in `leap/pins`, by URL and SHA-256, and CI inspects it.** The
   simulation boots openSUSE's x86 image and downloads only x86 binaries, so neither the
   card's image nor the aarch64 pins had been checked by a machine. `pi-image.yml` reads the

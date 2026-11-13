@@ -9,7 +9,9 @@
 #   sudo sim/pi-image/inspect.sh <workdir> current   the newest build openSUSE publishes
 #
 # It fails only when the download or the checksum fails; every other finding is an ANSWER
-# line in <workdir>/report.txt. Nothing is written to the image: the loop device is
+# line in <workdir>/report.txt. A pinned build openSUSE has withdrawn is a finding, not a
+# failure: the pin records the copy the owner keeps on two (plans/visit-runbook.md), and
+# the current leg still inspects the newest build. Nothing is written to the image: the loop device is
 # read-only, and the image's own rpm and lsinitrd run in a chroot whose writes land in a
 # tmpfs overlay. Run it only on a throwaway runner: it mounts, chroots and loops as root.
 
@@ -72,6 +74,13 @@ else
 fi
 if [ "$which" = current ] && [ "$current_sha" = "$pi_image_sha256" ]; then
 	answer "current: the pinned leg inspects this build"
+	exit 0
+fi
+
+# openSUSE answers 404 for a build it has replaced; any other failure is the download's.
+if [ "$which" = pinned ] &&
+	[ "$(curl -sIL --retry 3 -o /dev/null -w '%{http_code}' "$url")" = 404 ]; then
+	answer "the pinned build is withdrawn from openSUSE (404): only the copy on two remains, and the current leg inspects ${current_name:-the newest build}"
 	exit 0
 fi
 
