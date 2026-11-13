@@ -37,17 +37,27 @@ too (`decisions.md`).
 Over ssh, from the phone, any day before. Each is a step a slice would otherwise wait on.
 
 1. **The Pi image, downloaded and checked on `two`,** and kept there: openSUSE's
-   directory holds only the newest build, so a rebuild before the visit would take this
-   one away.
+   directory holds only the newest build, and builds have turned over within days, so
+   the copy on `two` is the one the cards are written from. The pin in `leap/pins` records
+   that copy.
 
    ```fish
-   # on two: download Leap 16.1's Pi image, build 3.13, and check it against openSUSE's published SHA-256
+   # on two: download Leap 16.1's Pi image, build 3.16, with openSUSE's .sha256 file, and check the image against that file and then against the pin
    df -h ~
-   cd ~; curl -fLO https://download.opensuse.org/distribution/leap/16.1/appliances/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.13.raw.xz
-   echo 'db929eaa51c6f20e37214349609a3d65bb305ccbf59abdea086596116cb5592b  Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.13.raw.xz' | sha256sum -c -
+   cd ~; curl -fLO https://download.opensuse.org/distribution/leap/16.1/appliances/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.16.raw.xz.sha256; and curl -fLO https://download.opensuse.org/distribution/leap/16.1/appliances/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.16.raw.xz
+   sha256sum -c Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.16.raw.xz.sha256
+   echo '6b224592371168a6991b540bc8e2755383004d6b153f9898a309c2a15d395551  Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.16.raw.xz' | sha256sum -c -
    ```
 
-   It needs about 1.3 GB free, and `sha256sum` must print `OK`.
+   It needs about 1.3 GB free, and both `sha256sum` lines must print `OK`: the first
+   against openSUSE's file, the second against the pin. If a `curl` answers 404, openSUSE
+   has replaced the build. Then take the newest
+   `Leap-16.1-Immutable.aarch64-RaspberryPi-Build*.raw.xz` from
+   [the directory](https://download.opensuse.org/distribution/leap/16.1/appliances/),
+   download it and its `.sha256` the same way, check it with the first `sha256sum` line,
+   and move the pin to it, in one commit, in all three places that carry the build:
+   `leap/pins` (URL and SHA-256), this block, and the card-write block in *Writing a card,
+   and erasing a stick*. CI fails when they disagree (`.github/workflows/leap-pins.yml`).
 2. **The tailnet's settings,** in its admin console: auto-update off, and a `tagOwners`
    entry for `tag:fleet` in the policy (`decisions.md`).
 3. **`zero` on the tailnet.** Tailscale's repo has nothing for Alpine, so `zero` runs
@@ -161,7 +171,7 @@ lsblk -o NAME,SIZE,MODEL,TRAN
 
 ```fish
 # on two: write the image to the card, detached from this session, only if the device is a USB disk nothing has mounted; put the card's device in place of sdX
-set d sdX; readlink -f /sys/block/$d | grep -q usb; and not grep -q "^/dev/$d" /proc/mounts; and sudo sh -c "setsid nohup sh -c 'xzcat /home/gavin/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.13.raw.xz | dd of=/dev/$d bs=4M conv=fsync && sync && echo written' </dev/null >/var/log/card-write.log 2>&1 &"
+set d sdX; readlink -f /sys/block/$d | grep -q usb; and not grep -q "^/dev/$d" /proc/mounts; and sudo sh -c "setsid nohup sh -c 'xzcat /home/gavin/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.16.raw.xz | dd of=/dev/$d bs=4M conv=fsync && sync && echo written' </dev/null >/var/log/card-write.log 2>&1 &"
 ```
 
 `sudo cat /var/log/card-write.log` ends with `written` when it is done. Label the card with

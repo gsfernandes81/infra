@@ -1,0 +1,79 @@
+name: pi-image
+
+# What the Leap simulation cannot see, because it boots openSUSE's x86_64 image: the Pi
+# image the cards are written from. leap-pins.yml checks the binaries' pins and the runbook.
+#
+# image: downloads the Pi image leap/pins names, checks its SHA-256, and inspects it
+# read-only (sim/pi-image/inspect.sh): Combustion in the initrd, the Wi-Fi firmware, the
+# packages, the boot path, the partition table. openSUSE's directory keeps only the newest
+# build, so the pinned image disappears at the next rebuild; the `current` leg inspects the
+# newest build as well, so a run still answers once the pin is gone and shows what a rebuild
+# changed; while the pin is the newest build, that leg says so and stops. Report-only: a leg
+# fails only when its download or checksum fails. A pinned build openSUSE has withdrawn is
+# reported, not failed, since the pin records the copy kept on two.
+#
+# The current leg trusts openSUSE's server: it checks the image against the .sha256 file
+# beside it, not the signed .sha256.asc. Both legs run the image's own binaries as root, in
+# a chroot, which is fine on a throwaway runner and nowhere else.
+
+on:
+  push:
+    paths: ['.github/workflows/pi-image.yml', 'sim/pi-image/**', 'leap/pins']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pi-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [pinned, current]
+    # arm64, so the image's own rpm and lsinitrd run in a chroot.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install btrfs-progs and the initrd tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends btrfs-progs xz-utils zstd cpio \
+            initramfs-tools-core binutils
+
+      - name: Inspect the ${{ matrix.build }} Pi image
+        run: sudo sim/pi-image/inspect.sh "$RUNNER_TEMP/pi" "${{ matrix.build }}"
+
+      - name: Put the answers in the job summary
+        if: always()
+        run: |
+          {
+            echo '### ${{ matrix.build }}'
+            echo '```'
+            grep '^ANSWER' "$RUNNER_TEMP/pi/report.txt" 2>/dev/null || echo 'no report'
+            echo '```'
+            echo '<details><summary>Full report</summary>'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/pi/report.txt" 2>/dev/null
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+          sudo chmod -R a+r "$RUNNER_TEMP/pi" 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pi-image-${{ matrix.build }}
+          path: |
+            ${{ runner.temp }}/pi/report.txt
+            ${{ runner.temp }}/pi/packages.txt
+            ${{ runner.temp }}/pi/initrd-*.txt
+          if-no-files-found: warn

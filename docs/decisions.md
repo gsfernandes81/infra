@@ -2103,6 +2103,10 @@ files it.
   away.
 - **A monthly update that will not resolve because of a lock** says so and changes
   nothing; the owner then decides, rather than the solver.
+- **Note, 2026-11-13: the image does not install `raspberrypi-eeprom`** (`pi-image.yml`,
+  builds 3.14 and 3.16). The EEPROM is not managed by the OS on these images, so that
+  pattern of the lock matches nothing, and each board keeps the bootloader its own EEPROM
+  holds.
 
 ## Leap hosts carry upstream's Compose until openSUSE's reaches the deploy play's floor
 
@@ -2281,9 +2285,24 @@ carries them out.
   2026-11-03. Set aside: Alpine's package, simplest but behind on a security fix.
 - **SD cards are written on `two`, with a USB card reader,** because `zero`'s and `one`'s
   ports are taken and every other USB disk on `zero` is Immich's array, which a wrong
-  `dd` would destroy. The image is openSUSE's Pi image, build 3.13, the same build number
-  as the x86 image the simulation ran on 2026-11-03, downloaded and checked before the
-  visit, because openSUSE's directory keeps only the newest build.
+  `dd` would destroy. The image is openSUSE's Pi image, downloaded and checked before the
+  visit, because openSUSE's directory keeps only the newest build. It was build 3.13, the
+  build the simulation ran on 2026-11-03. **Moved to build 3.14 on 2026-11-13**, because
+  openSUSE withdrew 3.13 before the owner had downloaded it, **and to build 3.16 the same
+  day**, because 3.14 was replaced while it downloaded and the copy failed its checksum.
+  The simulation's x86 image is unversioned, and was build 3.14 when the `host` job last
+  proved both first boots on 2026-11-13. Since builds turn over within days, the pin
+  records the copy the owner downloaded to `two`, not a file openSUSE must still serve: the
+  runbook checks the download against openSUSE's `.sha256` file and then against the pin,
+  and moves the pin when the build named there is gone.
+- **The Pi image is pinned in `leap/pins`, by URL and SHA-256, and CI inspects it.** The
+  simulation boots openSUSE's x86 image and downloads only x86 binaries, so neither the
+  card's image nor the aarch64 pins had been checked by a machine. `pi-image.yml` reads the
+  pair from `leap/pins` and inspects the image. `leap-pins.yml` checks every binary pin
+  against its release, and fails when the runbook quotes another image or names another
+  build anywhere: the runbook's blocks are what a person runs, and they cannot drift from
+  the pin. No host reads the pair. Set aside: a file of its own, one more place for the runbook's quote
+  to disagree with.
 - **Every Pi joins the tailnet with `--accept-dns=false`.** By default `tailscale up` points a
   box's resolver at `tailscaled`, and on `zero` that would put every lookup, the tunnel's
   included, behind `tailscaled`: a broken `tailscaled` would then cost both ways in at

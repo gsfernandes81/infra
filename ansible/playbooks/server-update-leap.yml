@@ -67,10 +67,11 @@
 
   vars:
     pins_file: "{{ control_checkout }}/leap/pins"
-    # KEY=value lines, comments and blanks left out; a shell sources the same file.
+    # KEY=value lines, comments and blanks left out, split at the first "=" only; a shell
+    # sources the same file.
     pins: >-
       {{ dict(lookup('file', pins_file).splitlines()
-         | reject('match', '^\s*(#|$)') | map('split', '=')) }}
+         | reject('match', '^\s*(#|$)') | map('split', '=', 1)) }}
     cloudflared_bin: /usr/local/bin/cloudflared
     cloudflared_previous: /usr/local/lib/cloudflared.previous
     compose_bin: /usr/local/lib/docker/cli-plugins/docker-compose
