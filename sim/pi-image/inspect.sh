@@ -268,6 +268,10 @@ if [ -n "$root" ]; then
 	show grep -av '^#' "$root/boot/grub2/grubenv"
 	say "--- /boot/grub2/grub.cfg: menu entries, and lines naming the env block, writable or health"
 	show grep -nE "^menuentry|^submenu|env_block|writable|health" "$root/boot/grub2/grub.cfg"
+	say "--- /boot/grub2/grub.cfg: the block that mounts /boot/writable"
+	show sed -n '/boot_rw_subvol=/,/^fi/p' "$root/boot/grub2/grub.cfg"
+	say "--- /usr/sbin/health-checker: lines naming the GRUB env"
+	show grep -nE 'grub2-editenv|grubenv|env_block|writable' "$root/usr/sbin/health-checker"
 	# /boot/writable is a subvolume of its own, so it is read from the top level.
 	top=$mnt/top
 	mkdir -p "$top"
@@ -276,7 +280,7 @@ if [ -n "$root" ]; then
 	show find "$top/@/boot/writable" -maxdepth 2 -printf '%10s %P\n'
 	say "--- health-checker's files"
 	[ -n "$ch" ] && show inroot rpm -ql health-checker
-	hc=$( [ -n "$ch" ] && inroot rpm -ql health-checker 2>/dev/null | grep -E '/plugins/' | sed 's|.*/||' | tr '\n' ' ')
+	hc=$( [ -n "$ch" ] && inroot rpm -ql health-checker 2>/dev/null | grep -E '/libexec/health-checker/|/plugins/' | sed 's|.*/||' | tr '\n' ' ')
 	hcg=$( [ -n "$ch" ] && inroot rpm -ql health-checker 2>/dev/null | xargs -r -I{} grep -l -E 'grub2-editenv|grubenv|env_block' "$ch{}" 2>/dev/null | sed "s|^$ch||" | tr '\n' ' ')
 	answer "bootloader setting: $(grep -E '^LOADER_TYPE=' "$root/etc/sysconfig/bootloader" 2>/dev/null || echo none)"
 	answer "grub in root: grub.cfg $([ -f "$root/boot/grub2/grub.cfg" ] && echo yes || echo no), grubenv $([ -f "$root/boot/grub2/grubenv" ] && echo yes || echo no), settings in grubenv: $(grep -avc '^#' "$root/boot/grub2/grubenv"), BLS entries $(find "$root/boot/loader/entries" -type f 2>/dev/null | wc -l)"
