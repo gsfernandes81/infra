@@ -7,7 +7,7 @@ made on the host's old Alpine system, that the new system reads once at its firs
 | File | What it is |
 |---|---|
 | `firstboot.sh` | The first-boot steps every Leap host shares. Sourced by each host's script. |
-| `pins` | The versions and SHA-256s of the binaries a package would get wrong (`cloudflared`, Compose): what a new host's first boot installs, and what `ansible/playbooks/server-update-leap.yml` moves a running host to. |
+| `pins` | The versions and SHA-256s of the binaries a package would get wrong (`cloudflared`, Compose): what a new host's first boot installs, and what `ansible/playbooks/server-update-leap.yml` moves a running host to. Also the Pi image's URL and SHA-256, which `plans/visit-runbook.md` must quote and no host reads. |
 | `motd` | The update recipes every login shows, at `/etc/motd.d/50-infra-updates`: the normal update, and the locked boot firmware's. A plain file, with no `infra-` header for logins to show. |
 | `make-stick` | Builds a host's stick. Run as root on the host's old system, or with `--new` for a host that has none. |
 | `tailscale-repo.gpg` | Tailscale's repository signing key, fingerprint `2596 A99E AAB3 3821 893C 0A79 458C A832 957F 5868`. The first boot trusts the repository through this reviewed copy. |
@@ -159,3 +159,11 @@ the tailnet, or at the console, since the phone's one VPN slot is taken.
 as `make-stick` lays it out, with stand-ins for the carry-over and the host's disks, and
 checks the box it makes ([`sim/microos/README.md`](../sim/microos/README.md)). `make-stick`
 itself reads a live Alpine host, so CI does not run it.
+
+That VM is x86_64, so `.github/workflows/pi-image.yml` covers what it cannot. Its `image`
+job downloads the Pi image `pins` names, checks its SHA-256 and inspects it read-only with
+`sim/pi-image/inspect.sh`: whether the initrd carries Combustion, which Wi-Fi firmware and
+packages the image has, what is on its FAT partition and its partition table. It reports
+ANSWER lines and fails only when the download or checksum fails. Its `pins` job downloads
+both architectures' `cloudflared` and Compose and fails when one differs from its SHA-256
+in `pins`, or when the runbook quotes another image.

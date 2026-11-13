@@ -6,6 +6,11 @@
 # the release's own SHA-256 for both architectures, aarch64 for the Pis and x86_64 for the
 # simulation (sim/microos/run-host.sh).
 #
+# The last two keys pin the Pi image every Leap host's card is written from, by its URL and
+# openSUSE's SHA-256. plans/visit-runbook.md quotes the same pair, and no host reads them.
+# .github/workflows/pi-image.yml inspects that image, and fails when the runbook quotes
+# another SHA-256 or when a binary's SHA-256 here is not its release's.
+#
 # KEY=value lines only, no spaces and no quotes: a shell sources this file and a play
 # splits each line at its "=".
 cloudflared_version=2026.10.7
@@ -14,3 +19,5 @@ cloudflared_sha256_x86_64=1f99fb518b83dec2ba8d870a7cc991d82a77e6196295a3d2754ba1
 compose_version=5.6.1
 compose_sha256_aarch64=42cfa75f51ad0ccf290bad37899e0038a8c10a0069e85233ecc1d53e3ff1347d
 compose_sha256_x86_64=47737f4236e6d3ccea7291995203f8f018058783b4c3a9469119811a0b5db8c0
+pi_image_url=https://download.opensuse.org/distribution/leap/16.1/appliances/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.14.raw.xz
+pi_image_sha256=dcb69b6d2802d9d9d8dfbb78aaef58e234b80636be87f31bbf18ed1174f16985

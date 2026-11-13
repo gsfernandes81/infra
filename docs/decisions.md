@@ -2281,9 +2281,18 @@ carries them out.
   2026-11-03. Set aside: Alpine's package, simplest but behind on a security fix.
 - **SD cards are written on `two`, with a USB card reader,** because `zero`'s and `one`'s
   ports are taken and every other USB disk on `zero` is Immich's array, which a wrong
-  `dd` would destroy. The image is openSUSE's Pi image, build 3.13, the same build number
-  as the x86 image the simulation ran on 2026-11-03, downloaded and checked before the
-  visit, because openSUSE's directory keeps only the newest build.
+  `dd` would destroy. The image is openSUSE's Pi image, downloaded and checked before the
+  visit, because openSUSE's directory keeps only the newest build. It was build 3.13, the
+  build the simulation ran on 2026-11-03. **Moved to build 3.14 on 2026-11-13**, because
+  openSUSE withdrew 3.13 before the owner had downloaded it; the simulation's x86 image is
+  unversioned and so became 3.14 too.
+- **The Pi image is pinned in `leap/pins`, by URL and SHA-256, and CI inspects it.** The
+  simulation boots openSUSE's x86 image and downloads only x86 binaries, so neither the
+  card's image nor the aarch64 pins had been checked by a machine. `pi-image.yml` reads the
+  pair from `leap/pins`, as it reads the binaries' pins, and fails when the runbook quotes
+  another: the runbook's download is the copy a person runs, and the two cannot drift. No
+  host reads the pair. Set aside: a file of its own, one more place for the runbook's quote
+  to disagree with.
 - **Every Pi joins the tailnet with `--accept-dns=false`.** By default `tailscale up` points a
   box's resolver at `tailscaled`, and on `zero` that would put every lookup, the tunnel's
   included, behind `tailscaled`: a broken `tailscaled` would then cost both ways in at

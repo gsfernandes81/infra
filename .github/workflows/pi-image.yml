@@ -1,0 +1,109 @@
+name: pi-image
+
+# What the Leap simulation cannot see, because it boots openSUSE's x86_64 image and downloads
+# only the x86_64 binaries: the Pi image the cards are written from, and the aarch64 pins.
+#
+# image: downloads the Pi image leap/pins names, checks its SHA-256, and inspects it
+# read-only (sim/pi-image/inspect.sh): Combustion in the initrd, the Wi-Fi firmware, the
+# packages, the boot path, the partition table. openSUSE's directory keeps only the newest
+# build, so the pinned image disappears at the next rebuild; the `current` leg inspects the
+# newest build as well, so a run still answers once the pin is gone and shows what a rebuild
+# changed; while the pin is the newest build, that leg says so and stops. Report-only: a leg
+# fails only when its download or checksum fails.
+#
+# pins: downloads every binary leap/pins pins, both architectures, and FAILS when one does
+# not match its SHA-256, or when plans/visit-runbook.md quotes another image.
+
+on:
+  push:
+    paths: ['.github/workflows/pi-image.yml', 'sim/pi-image/**', 'leap/pins',
+      'plans/visit-runbook.md']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pi-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [pinned, current]
+    # arm64, so the image's own rpm and lsinitrd run in a chroot.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install btrfs-progs and the initrd tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends btrfs-progs xz-utils zstd cpio \
+            initramfs-tools-core binutils
+
+      - name: Inspect the ${{ matrix.build }} Pi image
+        run: sudo sim/pi-image/inspect.sh "$RUNNER_TEMP/pi" "${{ matrix.build }}"
+
+      - name: Put the answers in the job summary
+        if: always()
+        run: |
+          {
+            echo '### ${{ matrix.build }}'
+            echo '```'
+            grep '^ANSWER' "$RUNNER_TEMP/pi/report.txt" 2>/dev/null || echo 'no report'
+            echo '```'
+            echo '<details><summary>Full report</summary>'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/pi/report.txt" 2>/dev/null
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+          sudo chmod -R a+r "$RUNNER_TEMP/pi" 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pi-image-${{ matrix.build }}
+          path: |
+            ${{ runner.temp }}/pi/report.txt
+            ${{ runner.temp }}/pi/packages.txt
+            ${{ runner.temp }}/pi/initrd-*.txt
+          if-no-files-found: warn
+
+  pins:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check each pinned binary against its SHA-256
+        run: |
+          # The URLs as leap/firstboot.sh and server-update-leap.yml build them.
+          . leap/pins
+          cfd=https://github.com/cloudflare/cloudflared/releases/download/$cloudflared_version
+          cmp=https://github.com/docker/compose/releases/download/v$compose_version
+          check() {
+            curl -fsSL --retry 3 -o bin "$1" || { echo "FAIL: download failed: $1"; return; }
+            have=$(sha256sum bin | awk '{print $1}')
+            if [ "$have" = "$2" ]; then echo "OK: ${1##*/} $have"
+            else echo "FAIL: ${1##*/} is $have, leap/pins says $2"; fi
+            rm -f bin
+          }
+          {
+            check "$cfd/cloudflared-linux-arm64" "$cloudflared_sha256_aarch64"
+            check "$cfd/cloudflared-linux-amd64" "$cloudflared_sha256_x86_64"
+            check "$cmp/docker-compose-linux-aarch64" "$compose_sha256_aarch64"
+            check "$cmp/docker-compose-linux-x86_64" "$compose_sha256_x86_64"
+            # The runbook downloads the image by its own quoted URL and SHA-256.
+            for v in "$pi_image_url" "$pi_image_sha256"; do
+              if grep -qF "$v" plans/visit-runbook.md; then echo "OK: plans/visit-runbook.md quotes $v"
+              else echo "FAIL: plans/visit-runbook.md does not quote $v"; fi
+            done
+          } | tee pins.txt
+          { echo '```'; cat pins.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          ! grep -q '^FAIL' pins.txt
