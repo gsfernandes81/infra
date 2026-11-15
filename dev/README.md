@@ -112,8 +112,8 @@ On zero, `make login` (`C=<c>` for another container) reports the hub's token, r
 auth login` if needed, and clones the workspace if start-up could not; re-running it is safe.
 Then `make verify` should read `sshd: running in the foreground`, `auth: claude logged in`,
 `tunnel: the hub's, serving dev`, `peers: claude 2.1.311 speaks peer protocol 1, and its inbox
-answers`, `hub: key authorised; claude-sessions 0.19.2 here,
-claude-sessions 0.19.2 at the hub`, `relay: claude-sessions 0.19.2`, `github: the hub's token for gsfernandes81/infra, until …`,
+answers`, `hub: key authorised; claude-sessions 0.19.3 here,
+claude-sessions 0.19.3 at the hub`, `relay: claude-sessions 0.19.3`, `github: the hub's token for gsfernandes81/infra, until …`,
 all collections installed, and `fleet: no route to zero/one/two`.
 
 **The memory pool is opt-in**: `DEV_CGROUP_PARENT=/devpool` puts every dev container and
@@ -916,7 +916,7 @@ copies in is ignored.
 
 [`gsfernandes81/claude-sessions`](https://github.com/gsfernandes81/claude-sessions) is the
 session registry: one JSON file per slot under `~/.local/share/claude-sessions/` (on a volume),
-kept current by Claude Code's own hooks. The hub pins **v0.19.2** and installs it for every
+kept current by Claude Code's own hooks. The hub pins **v0.19.3** and installs it for every
 container (*The hub*). A bump reaches every container when the hub is recreated, with no
 container restarted: hooks and offload passes run the binary from the volume each time, and
 each container's agent is started by the hub's menu over ssh and ends with that connection, so
@@ -1031,6 +1031,11 @@ slot. How it works is claude-sessions' `docs/remote-view.md`.
   view can say each step in Claude's own words. Claude Code 2.1.311 makes each summary a separate
   model request (`tool_use_summary_generation`, routed like compaction's), so every step of a
   remote session costs one more small request on the shared login. A terminal slot does not.
+  Since 0.19.3 the holder runs the view's `!` commands itself, as the slot's user in the slot's
+  working tree, which is the same trust as Claude Code's own `!` with no permission prompt. It
+  writes `<slot>.bang.out`, `.err` and `.cwd` beside the slot's log in the registry and removes
+  them after each command. A holder started before 0.19.3 passes the command to claude instead,
+  which runs it without adding it to the conversation.
 - **The door.** The hub's door already runs a forwarded command as given, before any tty test,
   so `relay` reaches the binary instead of the menu. `make verify` and `make status C=hub`
   have a `relay` line that runs the door with that command set, as sshd would. The smoke test
