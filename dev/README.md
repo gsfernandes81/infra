@@ -373,6 +373,16 @@ across mounts. Rules the entrypoint keeps:
 - **Only plain paths.** An entry that is absolute or contains `..` is refused with a
   warning.
 
+**Putting a file in from the host:** write it as `dev`, so it lands owned by `dev` at 600.
+
+```fish
+sudo docker exec -i -u dev <c> sh -c 'umask 077; cat > /home/dev/.env.d/.env' < <file>
+```
+
+No restart is needed when the link already exists, and the entrypoint makes it on the
+container's first start. Do not use `docker cp`: without `-a` it creates the file as root,
+which `dev` cannot write through the link, or cannot read at all if the source was 600.
+
 **`make down-volumes` drops both kinds** — every cloned workspace, with any unpushed work in
 it, and every env volume — along with the hub's key (*The targets*). It never touches a host
 clone: nothing reads one, and each child image builds from its repo on GitHub.
@@ -495,16 +505,10 @@ reconnects by itself.
    (`COMPOSE_PROFILES`), waits for them, compares container ids, and probes that the hub
    reaches each one. dd-dev and ds-dev stay stopped, as they were. `make login C=<c>` on zero
    afterwards walks any login a container still lacks.
-6. **dd's `.env`, into its env volume** — the first time dd-dev is wanted:
-
-   ```fish
-   make up S=dd-dev
-   sudo docker cp ~/destiny-director/.env dd-dev:/home/dev/.env.d/.env
-   make restart C=dd-dev
-   ```
-
-   The restart links it into `/workspace/.env`. `docker cp` keeps the file's owner, which is
-   the checkout's — the container's `dev` uid.
+6. **dd's `.env`, into its env volume** — the first time dd-dev is wanted. Done on
+   2026-11-15, as *Putting a file in from the host* above describes, from
+   `~/destiny-director/.env`. This step first said `docker cp` and claimed that keeps the
+   owner. It does not.
 7. **From the control node: the vessel tunnel's hostname onto the hub's tunnel.**
 
    ```fish

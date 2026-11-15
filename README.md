@@ -165,7 +165,7 @@ None are in git. `.gitignore` covers `.env`, `*.key`, `qBittorrent.conf`, `*.sql
 | Immich Postgres password | `deployments/immich/.env` |
 | qBittorrent `Password_PBKDF2` | `/media/torrents-config/` — data volume, never here |
 | Cloudflare tunnel credentials file | `/etc/cloudflared/<host>.json` — 0600 root, all three hosts. ~~`/etc/init.d/cloudflared`, plaintext and world-readable~~: no host has passed `--token` since 2026-08-29, and the disclosed values were voided by deleting their tunnels |
-| Discord tokens, Bungie + Sheets keys | `~/destiny-director/.env` on `zero` — app repo, not here |
+| Discord tokens, Bungie + Sheets keys | the `destiny-director` dev container's env volume on `zero` (`dd-env`, at `/home/dev/.env.d/.env`) — app repo, not here |
 | **Test** Discord tokens, Postgres password, Bungie keys | `deployments/destiny-director/.env` on `two` |
 | `two` deploy key (private half) | wherever you deploy from. It reaches an unprivileged account with a normal shell, so it does **not** belong in the Claude Code cloud environment block, whose values are not masked. Public half in `~claude/.ssh/authorized_keys` on `two`. See [`hosts/two/system/README.md`](hosts/two/system/README.md) |
 
