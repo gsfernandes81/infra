@@ -29,7 +29,7 @@ again on `ec1fd7e` with 0.11.0 and on `e1af926` with 0.13.1, where the smoke tes
    0.19.2 changes it again: a plan to approve shows the whole plan with Claude Code's own
    options, several questions get a tab row, an unsent prompt is kept on the client, a
    second paste expands the first, and `j` and `k` move the cursor on its homes (at the door
-   too, after item 6). 0.19.3 adds `!` commands, run in the container as Claude Code runs
+   too, after item 6). 0.19.3 adds `!` commands (after item 6), run in the container as Claude Code runs
    them, with a `cd` carried to the next one; a dialog's text field takes the prompt's
    editing keys.
    `git pull` and re-run the play on the phone and in WSL, before or after item 6
