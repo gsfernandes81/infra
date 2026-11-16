@@ -23,8 +23,9 @@ version)
 	;;
 status)
 	if [ "${2-}" = --json ]; then
-		printf '{\n  "BackendState": "%s",\n  "Self": {"HostName": "%s", "DNSName": "%s.tail-sim.ts.net.", "TailscaleIPs": ["%s"]}\n}\n' \
-			"$state" "$host" "$host" "$ip"
+		# Version is the running daemon's, which fake/tailscaled writes as it starts.
+		printf '{\n  "Version": "%s",\n  "BackendState": "%s",\n  "Self": {"HostName": "%s", "DNSName": "%s.tail-sim.ts.net.", "TailscaleIPs": ["%s"]}\n}\n' \
+			"$(cat /run/fake-tailscaled.version 2>/dev/null)" "$state" "$host" "$host" "$ip"
 	elif [ "$state" = Running ]; then
 		echo "$ip  $host  tagged-devices  linux  -"
 	else

@@ -8,6 +8,8 @@ case "${1-}" in
 --cleanup) exit 0 ;;
 esac
 echo "fake tailscaled $version: $*"
+# The running version, which fake/tailscale's status --json reports as the daemon's.
+echo "$version-tsim" > /run/fake-tailscaled.version
 child=
 trap '[ -n "$child" ] && kill "$child" 2>/dev/null; exit 0' TERM INT
 while :; do

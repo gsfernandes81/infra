@@ -36,6 +36,7 @@ mkdir -p "$work/pkgs" "$HOME/.ssh/cp"
 cleanup() {
 	[ -n "${srv_pid-}" ] && kill "$srv_pid" 2>/dev/null
 	docker rm -f "$box" >/dev/null 2>&1
+	docker network rm infra-sim-tailnet >/dev/null 2>&1
 	rm -f "$repo/ansible/inventory.sim" "$repo/ansible/play.log" "$repo/ansible/play-verbose.log"
 }
 trap cleanup EXIT
@@ -72,7 +73,7 @@ fake() {
 }
 sum1=$(fake 9.9.1)
 sum2=$(fake 9.9.2)
-fake 9.9.3 >/dev/null
+sum3=$(fake 9.9.3)
 
 python3 -I "$here/serve.py" "$port" "$work/pkgs" &
 srv_pid=$!
@@ -206,13 +207,14 @@ fi
 on 'cat /etc/init.d/tailscaled' | cmp -s - "$repo/hosts/zero/system/tailscaled" && pass "the service is the tracked file" || fail "the service differs from the tracked file"
 on 'test -L /etc/runlevels/default/tailscaled' && pass "tailscaled is in the default runlevel" || fail "tailscaled is not in the default runlevel"
 on 'rc-service tailscaled status' | grep -q started && pass "tailscaled started" || fail "tailscaled is not started"
-on 'ls /run/infra-tailscale-key.* 2>/dev/null' | grep -q . && fail "the auth key file was left in /run" || pass "the auth key file is gone after a failed join"
+on 'test -e /run/infra-tailscale-key' && fail "the auth key file was left in /run" || pass "the auth key file is gone after a failed join"
 on 'test ! -e /var/tmp/infra-tailscale.tgz && test ! -e /var/tmp/infra-tailscale' && pass "the download is removed" || fail "the download was left"
 resolv_same && pass "resolv.conf unchanged" || fail "resolv.conf changed"
 
 echo "== --check at the pin"
 if ts --check -e tailscale_auth_key=; then pass "dry run exits 0"; else fail "dry run failed"; fi
 says 'already at the pin' && pass "reports the binaries at the pin" || fail "did not report the binaries at the pin"
+says "running $pin_version" && pass "read the real daemon's running version, $pin_version" || fail "did not read the real daemon's running version"
 
 echo "== a stand-in 9.9.1, joining (a -vv transcript, searched for secrets)"
 pid0=$(svpid)
@@ -225,7 +227,7 @@ if play_verbose server-install-tailscale.yml -e target=zero $(fakepin 9.9.1 "$su
 [ "$(uplines)" = 1 ] && pass "tailscale up ran once" || fail "tailscale up ran $(uplines) times"
 up=$(on 'cat /var/lib/fake-tailscale/up.log')
 case "$up" in *--advertise-tags=tag:fleet*--accept-dns=false*) pass "up had --advertise-tags=tag:fleet --accept-dns=false" ;; *) fail "up's flags: $up" ;; esac
-case "$up" in *"--auth-key=file:/run/infra-tailscale-key."*) pass "the key went by file, in /run" ;; *) fail "the key did not go by a file in /run: $up" ;; esac
+case "$up" in *"--auth-key=file:/run/infra-tailscale-key "*) pass "the key went by file, in /run" ;; *) fail "the key did not go by a file in /run: $up" ;; esac
 case "$up" in *"$good_key"*) fail "the key was in up's argv" ;; *) pass "the key was not in up's argv" ;; esac
 [ "$(on 'cat /var/lib/fake-tailscale/keyfile-mode')" = "root 600" ] && pass "the key file was root 0600" || fail "the key file was $(on 'cat /var/lib/fake-tailscale/keyfile-mode')"
 on 'test ! -e "$(cat /var/lib/fake-tailscale/keyfile-path)"' && pass "the key file is gone" || fail "the key file was left"
@@ -233,13 +235,15 @@ grep -q 'joined now' play.log && grep -q '100.101.102.103' play.log && grep -q '
 	&& pass "printed joined, the address and the name" || fail "did not print the join, address and name"
 resolv_same && pass "resolv.conf unchanged" || fail "resolv.conf changed"
 
-echo "== a re-run at 9.9.1"
+echo "== a re-run at 9.9.1, with a key file a killed run left"
+on 'echo leftover > /run/infra-tailscale-key'
 pid1=$(svpid)
 # shellcheck disable=SC2046
 if ts $(fakepin 9.9.1 "$sum1") -e tailscale_auth_key=; then pass "exits 0"; else fail "failed"; fi
 [ "$(svpid)" = "$pid1" ] && pass "tailscaled was not restarted" || fail "tailscaled restarted with nothing moved"
 [ "$(uplines)" = 1 ] && pass "no second join" || fail "joined again"
 says 'already at the pin' && says 'already joined' && pass "reports nothing to do" || fail "re-run report wrong"
+on 'test ! -e /run/infra-tailscale-key' && pass "swept the leftover key file" || fail "left the leftover key file"
 
 echo "== the pin moved to 9.9.2"
 # shellcheck disable=SC2046
@@ -249,10 +253,41 @@ if ts $(fakepin 9.9.2 "$sum2") -e tailscale_auth_key=; then pass "exits 0"; else
 [ "$(svpid)" != "$pid1" ] && pass "tailscaled restarted" || fail "tailscaled was not restarted"
 [ "$(uplines)" = 1 ] && pass "no second join" || fail "joined again"
 
+echo "== the binaries at the pin, the daemon still running the previous"
+# As a run that died between install and restart leaves it: 9.9.1 running, 9.9.2 on disk.
+# Renamed into place, never copied over, since the running daemon is a script sh reads.
+on 'cd /usr/local && cp -p sbin/tailscaled /tmp/td && cp -p bin/tailscale /tmp/t && cp -p sbin/tailscaled.previous sbin/td.new && mv -f sbin/td.new sbin/tailscaled && cp -p bin/tailscale.previous bin/t.new && mv -f bin/t.new bin/tailscale && rc-service tailscaled restart >/dev/null 2>&1 && mv -f /tmp/td sbin/tailscaled && mv -f /tmp/t bin/tailscale'
+[ "$(on 'cat /run/fake-tailscaled.version')" = 9.9.1-tsim ] && [ "$(ver '/usr/local/bin/tailscale version')" = 9.9.2 ] \
+	&& pass "set up: 9.9.1 running, 9.9.2 on disk" || fail "could not set up a stale daemon"
+pids=$(svpid)
+# shellcheck disable=SC2046
+if ts $(fakepin 9.9.2 "$sum2") -e tailscale_auth_key=; then pass "exits 0"; else fail "failed"; fi
+says 'running 9.9.1' && [ "$(svpid)" != "$pids" ] && [ "$(on 'cat /run/fake-tailscaled.version')" = 9.9.2-tsim ] \
+	&& pass "restarted the stale daemon onto the pin" || fail "did not restart the stale daemon"
+[ "$(ver '/usr/local/bin/tailscale.previous version')" = 9.9.1 ] && pass ".previous untouched, nothing downloaded" || fail ".previous changed"
+
+echo "== a restart wanted, over the tailnet"
+# A second network in the tailnet's range: the runner reaches the box from 100.64.77.1,
+# which the play must read as a connection over the tailnet.
+if docker network create --subnet 100.64.77.0/24 infra-sim-tailnet >/dev/null && docker network connect --ip 100.64.77.2 infra-sim-tailnet "$box"; then
+	pidt=$(svpid)
+	# shellcheck disable=SC2046
+	if ts $(fakepin 9.9.3 "$sum3") -e tailscale_auth_key= -e ansible_host=100.64.77.2 -e ansible_port=22; then fail "restarted over the tailnet"; else
+		says 'over the tailnet (100.64.77.1)' && pass "refused to restart over the tailnet" || fail "failed, but not by the tailnet check"
+	fi
+	[ "$(ver '/usr/local/bin/tailscale version')" = 9.9.2 ] && [ "$(svpid)" = "$pidt" ] && pass "binaries and tailscaled untouched" || fail "the box changed"
+	docker network disconnect infra-sim-tailnet "$box"
+else
+	fail "could not make a network in the tailnet's range"
+fi
+
 echo "== a pin whose SHA-256 is wrong"
 pid2=$(svpid)
+t0=$(date +%s)
 # shellcheck disable=SC2046
 if ts $(fakepin 9.9.3 "$sum2") -e tailscale_auth_key=; then fail "installed a tarball that fails its checksum"; else pass "stopped"; fi
+# Retries are 15 s apart, so a run that retried a mismatch takes 45 s more.
+[ $(($(date +%s) - t0)) -lt 40 ] && says 'checksum' && pass "stopped at the first mismatch, without retrying" || fail "took $(($(date +%s) - t0)) s: it retried the mismatch, or failed otherwise"
 [ "$(ver '/usr/local/bin/tailscale version')" = 9.9.2 ] && [ "$(svpid)" = "$pid2" ] && pass "binaries and tailscaled untouched" || fail "the box changed"
 on 'test ! -e /var/tmp/infra-tailscale.tgz' && pass "no download left" || fail "the bad download was left"
 

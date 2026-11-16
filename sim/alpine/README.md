@@ -21,15 +21,19 @@ The Tailscale play:
   check, confirmed from that check's message, with nothing installed;
 - a dry run on a bare box, which must install and enable nothing;
 - the real pin: the tarball downloaded and checked against `group_vars/fleet.yml`, both
-  binaries installed and reporting the pin, the service byte-identical to the tracked file,
-  in the default runlevel and started, and the real `tailscale up` reading a made-up key
+  binaries installed and reporting the pin, the service byte-identical to the tracked
+  file, in the default runlevel and started, and the real `tailscale up` reading a made-up key
   from its file and Tailscale refusing it, with the file gone afterwards. The real
   `tailscale debug prefs` must carry the two settings the play checks after a join;
-- a stand-in tarball at 9.9.1, served by `serve.py`: the real binaries kept as `.previous`,
-  `tailscaled` restarted, and the join run once, with `--advertise-tags=tag:fleet`,
+- a stand-in tarball at 9.9.1, served by `serve.py`: the real binaries kept as
+  `.previous`, `tailscaled` restarted, and the join run once, with `--advertise-tags=tag:fleet`,
   `--accept-dns=false` and the key from a root 0600 file in `/run`, never in argv;
-- a re-run, which must not restart or join; the pin moved to 9.9.2, which must restart
-  and not join; a pin whose SHA-256 is wrong, which must change nothing;
+- a re-run, which must not restart or join and must sweep a key file a killed run
+  left; the pin moved to 9.9.2, which must restart and not join; 9.9.2 on disk with 9.9.1
+  still running, which must restart; a restart wanted over a connection from
+  `100.64.77.1`, a second Docker network in the tailnet's range, which must be refused
+  with nothing touched; and a pin whose SHA-256 is wrong, which must stop at the first
+  mismatch, without retrying, and change nothing;
 - a box off the tailnet with no key, which must stop at the key check; with a key, which
   must join; and a join that rewrites `/etc/resolv.conf`, which must fail the play.
 
@@ -53,8 +57,8 @@ because the repo's own callback prints no successful result and would hide a mis
 A real join: no auth key exists in CI, so the real `tailscale up` is shown only refusing a
 made-up key, and the stand-in's `up` stands for the rest. A Pi's kernel, and OpenRC as it
 boots on bare metal rather than in a container. ntfy itself: `serve.py` answers the test
-message. And a connection over the tailnet, which the Tailscale play refuses to restart
-through and which the runner has no way to make.
+message. And a real tailnet: the refusal to restart over it is shown only from an
+address in its range.
 
 ## Running it elsewhere
 

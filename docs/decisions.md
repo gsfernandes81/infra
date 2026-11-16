@@ -2337,19 +2337,24 @@ out of writing them and is proven by `alpine-sim.yml`.
   `leap/pins`, which every Leap host reads while no Leap host runs this build; and the
   command line, as `server-update-cloudflared.yml` takes its pin, which leaves no record
   of what a host should run.
-- **The auth key reaches the box only as a root-only file in `/run`**, passed as
-  `--auth-key=file:<path>` and removed in an `always:` whether the join worked or not. A
-  command line is readable by every user in `/proc` and lands in logs. The key travels as
-  a module argument, which under pipelining goes over the ssh session's stdin, and `/run`
-  is memory.
+- **The auth key reaches the box only as a root-only file, `/run/infra-tailscale-key`**,
+  passed as `--auth-key=file:<path>`. A command line is readable by every user in `/proc`
+  and lands in logs. The key travels as a module argument, which under pipelining goes
+  over the ssh session's stdin, and `/run` is memory. The file is removed when the join
+  ends, however it ends, but a run that dies (Ctrl-C, a dropped connection) never reaches
+  that step, so the path is fixed and every run removes it before anything else; a boot
+  empties `/run` too. Set aside: a tempfile per run, which a killed run leaves under a
+  name the next run cannot know.
 - **The auth key and the ntfy URL are typed at a prompt, not read from a file.** This is
   the exception to "nothing is ever prompted for" beside the Cloudflare token in
   `group_vars/all.yml`. The auth key is single-use and expires within a day, so a file on
   the phone would hold nothing worth keeping. The URL is typed once per box, and a file on
   the phone would be a second copy of a secret whose home is `zero`. The repo's callback
   now closes the running step before a prompt, so its timer never draws over one.
-- **The Tailscale play restarts `tailscaled` only when the binary moved**, and refuses to
-  when its own connection came in over the tailnet (CLAUDE.md § Changing the thing you
+- **The Tailscale play restarts `tailscaled` only when the binary moved or the running
+  daemon reports a version other than the pin** (`tailscale status --json`, after a run
+  that died before its restart or a hand copy of `.previous`), and refuses to when its own
+  connection came in over the tailnet (CLAUDE.md § Changing the thing you
   are connected through). Over the tunnel, which is how the phone reaches every box, a
   restart cannot cut the play off. A changed service file waits for the next restart, and
   the play says so.
@@ -2359,9 +2364,10 @@ out of writing them and is proven by `alpine-sim.yml`.
 - **CI runs all three against an Alpine container with OpenRC as init, reached over ssh**,
   on an arm64 runner (`sim/alpine/`). The real pinned tarball is downloaded, checked,
   installed and started, and the real `tailscale up` must refuse a made-up key; stand-in
-  tarballs whose `tailscale` answers `up` cover the join, a moved pin, the restarts and
-  the refusals. Its first run found that a minimal Alpine has no `/usr/local/sbin`, which
-  the hand block's `install -D` had hidden.
+  tarballs whose `tailscale` answers `up` cover the join, a moved pin, a stale daemon,
+  the restarts and the refusals, the tailnet one through a second network in the
+  tailnet's range. Its first run found that a minimal Alpine has no `/usr/local/sbin`,
+  which the hand block's `install -D` had hidden.
 
 ## The lesson worth keeping
 

@@ -22,8 +22,9 @@
 #      /usr/local/bin/tailscale.previous.
 #   5. Installs /etc/init.d/tailscaled through bin/install-system-file, adds it to the
 #      default runlevel, and starts it. It RESTARTS tailscaled only when step 4 moved the
-#      binary. That is safe over the tunnel, which is how this play reaches the box, and it
-#      refuses to restart over the tailnet it would be restarting.
+#      binary or the running daemon is not the pin (a run that died before its restart, or
+#      a hand copy of .previous). That is safe over the tunnel, which is how this play
+#      reaches the box, and it refuses to restart over the tailnet it would be restarting.
 #   6. If the box is not on the tailnet: `tailscale up --advertise-tags=tag:fleet
 #      --accept-dns=false`, with the auth key asked for at the start.
 #   7. Reports the box's tailnet address and name, then checks it is on the tailnet with the
@@ -32,9 +33,11 @@
 # THE AUTH KEY: generated in the admin console (Settings, Keys), tagged tag:fleet, not
 # reusable, with a short expiry. The play asks for it without echoing it. Press Enter alone
 # when the box is already on the tailnet; the play then never needs it. On the box it
-# exists only in a root-only file in /run for the length of `tailscale up`, passed as
-# `--auth-key=file:<path>`, so it is never in a process list or in this play's output, and
-# the file is removed whether the join worked or not.
+# exists only in a root-only file, /run/infra-tailscale-key, for the length of `tailscale
+# up`, passed as `--auth-key=file:<path>`, so it is never in a process list or in this
+# play's output. The file is removed when the join ends, however it ends, unless the run
+# itself dies (Ctrl-C, a dropped connection); then the next run removes it before anything
+# else, and /run, being memory, empties at the next boot.
 #
 # -K IS REQUIRED, under --check too: the dry run of the service file runs as root, as in
 # server-install-system-files.yml.
@@ -84,6 +87,9 @@
     tailscaled_bin: /usr/local/sbin/tailscaled
     tailscale_bin: /usr/local/bin/tailscale
     download: /var/tmp/infra-tailscale.tgz
+    # A fixed path, not a tempfile: a run that dies leaves at most this one file, and the
+    # next run's sweep knows its name.
+    key_file: /run/infra-tailscale-key
     unpacked: /var/tmp/infra-tailscale
     # Tailscale's name for each `uname -m`.
     tarball_arch:
@@ -139,6 +145,15 @@
           `sudo rc-service tailscale stop; sudo apk del tailscale`. Nothing has been touched.
         success_msg: absent
 
+    # A run killed during the join (Ctrl-C, a dropped connection) never reaches its
+    # always:, so any key it left is removed here, before anything else is done.
+    - name: Remove an auth key file a killed run left
+      ansible.builtin.file:
+        path: "{{ key_file }}"
+        state: absent
+      when: not ansible_check_mode
+      become: true
+
     # ── what is there ────────────────────────────────────────────────────────
     # key=value lines, each printed even when empty. check_mode: false on every read that
     # changes nothing, or --check would skip it and have nothing to report.
@@ -187,6 +202,11 @@
         ts_state_before: >-
           {{ (ts_status_before.stdout | from_json).BackendState | default('unknown')
              if ts_status_before.rc == 0 and ts_status_before.stdout is match('\s*\{') else 'not answering' }}
+        # The running daemon's own version, which differs from the binary on disk after a
+        # run that died between install and restart, or a hand copy of .previous.
+        ts_running: >-
+          {{ ((ts_status_before.stdout | from_json).Version | default('') | regex_search('^[0-9]+\.[0-9]+\.[0-9]+') or '')
+             if ts_status_before.rc == 0 and ts_status_before.stdout is match('\s*\{') else '' }}
         # The tailnet's ranges: CGNAT for IPv4, Tailscale's ULA for IPv6.
         ts_via_tailnet: >-
           {{ ts_conn.stdout is match('^100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.')
@@ -197,6 +217,7 @@
         ts_pin_sha: "{{ lookup('vars', 'tailscale_static_sha256_' ~ ts_was.arch, default='') }}"
         ts_tarball: "tailscale_{{ tailscale_static_version }}_{{ tarball_arch[ts_was.arch] | default('none') }}"
         ts_moves: "{{ ts_was.tailscaled != tailscale_static_version or ts_was.tailscale != tailscale_static_version }}"
+        ts_stale: "{{ ts_running | length > 0 and ts_running != tailscale_static_version }}"
 
     - name: Check group_vars has a pin for this architecture
       ansible.builtin.assert:
@@ -224,9 +245,10 @@
     # CLAUDE.md § Changing the thing you are connected through.
     - name: "If it restarts: check this is not over the tailnet"
       ansible.builtin.assert:
-        that: not (ts_moves | bool and ts_was.service == 'started' and ts_via_tailnet | bool)
+        that: not ((ts_moves | bool or ts_stale | bool) and ts_was.service == 'started' and ts_via_tailnet | bool)
         fail_msg: >-
-          This run moves tailscaled, which restarts it, and this play reached
+          This run restarts tailscaled ({{ 'the binary moves' if ts_moves | bool else
+          'it runs ' ~ ts_running ~ ', not the pin' }}), and this play reached
           {{ inventory_hostname }} over the tailnet ({{ ts_conn.stdout }}). Run it over the
           tunnel instead. Nothing has been touched.
         success_msg: ok
@@ -262,7 +284,9 @@
             force: true
             timeout: 120
           register: ts_get
-          until: ts_get is succeeded
+          # A checksum mismatch is the pin or the tarball being wrong, and stops at once;
+          # only a failed transfer is worth another try.
+          until: ts_get is succeeded or 'checksum' in (ts_get.msg | default('') | lower)
           retries: 3
           delay: 15
 
@@ -366,12 +390,13 @@
       when: ts_was.runlevel != 'yes' and not ansible_check_mode
       become: true
 
-    # Restart only for a moved binary; start whatever is not running. A crashed service
-    # is restarted, since OpenRC will not start one it still counts as started.
+    # Restart only for a moved binary or a daemon running something other than the pin;
+    # start whatever is not running. A crashed service is restarted, since OpenRC will not
+    # start one it still counts as started.
     - name: Note how tailscaled is brought up
       ansible.builtin.set_fact:
         ts_action: >-
-          {{ 'restart' if (ts_moves | bool and ts_was.service == 'started') or ts_was.service == 'crashed'
+          {{ 'restart' if ((ts_moves | bool or ts_stale | bool) and ts_was.service == 'started') or ts_was.service == 'crashed'
              else ('start' if ts_was.service != 'started' else 'none') }}
 
     - name: "If needed: {{ ts_action }} tailscaled"
@@ -421,30 +446,41 @@
               the prompt. tailscaled is installed and running.
             success_msg: key given
 
-        - name: Create a root-only file for the auth key
-          ansible.builtin.tempfile:
-            path: /run
-            prefix: infra-tailscale-key.
-          register: ts_keyfile
-          become: true
-
         # stdin, not content: copy would stage the key in a file on both machines first.
         # Under pipelining the module's arguments travel on the ssh session's stdin, so
-        # the key reaches no argv and no disk but /run, which is memory.
-        - name: Write the auth key to it
+        # the key reaches no argv and no disk but /run, which is memory. rm -f first, so
+        # the write never follows something put at that path. no_log because the key is in
+        # the arguments; failed_when: false so a refusal is not censored with it, and the
+        # task after prints the shell's own message, which cannot hold the key (it arrives
+        # on stdin).
+        - name: Write the auth key to a root-only file
           ansible.builtin.command:
-            argv: [sh, -c, 'umask 077; cat > "$1"', sh, "{{ ts_keyfile.path }}"]
+            argv: [sh, -c, 'umask 077; rm -f "$1"; cat > "$1"', sh, "{{ key_file }}"]
             stdin: "{{ tailscale_auth_key }}"
             stdin_add_newline: false
+          register: ts_keywrite
           no_log: true
+          failed_when: false
           become: true
+
+        - name: "If the write failed: print why"
+          ansible.builtin.debug:
+            msg: "Writing {{ key_file }} failed, rc {{ ts_keywrite.rc }}: {{ ts_keywrite.stderr | default('') | trim }}"
+          changed_when: true
+          when: ts_keywrite.rc | default(1) != 0
+
+        - name: Check the auth key file was written
+          ansible.builtin.assert:
+            that: ts_keywrite.rc | default(1) == 0
+            fail_msg: The auth key could not be written; the reason is above. Nothing joined.
+            success_msg: written
 
         - name: Join the tailnet as tag:fleet, keeping DNS
           ansible.builtin.command:
             argv:
               - "{{ tailscale_bin }}"
               - up
-              - --auth-key=file:{{ ts_keyfile.path }}
+              - --auth-key=file:{{ key_file }}
               - --advertise-tags=tag:fleet
               - --accept-dns=false
               - --timeout=120s
@@ -454,9 +490,8 @@
       always:
         - name: Remove the auth key file
           ansible.builtin.file:
-            path: "{{ ts_keyfile.path }}"
+            path: "{{ key_file }}"
             state: absent
-          when: ts_keyfile.path is defined
           become: true
 
     # ── after: read, report, then judge ──────────────────────────────────────
@@ -507,7 +542,7 @@
                  if 'Nothing to do' not in ts_svc_dry.stdout and ts_action == 'none' else '.'),
               'Runlevel: ' ~ ('in default' if ts_was.runlevel == 'yes' else
                 ('would add to default' if ansible_check_mode else 'added to default')) ~ '.',
-              'tailscaled was ' ~ ts_was.service ~ ('' if ts_action == 'none' else
+              'tailscaled was ' ~ ts_was.service ~ (', running ' ~ ts_running if ts_running else '') ~ ('' if ts_action == 'none' else
                 ('; would ' if ansible_check_mode else '; ') ~ ts_action ~ ('' if ansible_check_mode else 'ed')) ~ '.',
               'Tailnet: ' ~ ('joined now' if ts_up is defined and ts_up is changed else
                 ('already joined' if ts_state_now == 'Running' else

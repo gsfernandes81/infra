@@ -7,8 +7,9 @@ name: alpine-sim
 #
 # WHAT IT CANNOT CHECK, so nobody reads a green run as more: a real join (no auth key exists
 # here; the real tailscale is shown refusing a made-up key, and a stand-in answers `up`), a
-# Pi's kernel, ntfy itself (a stand-in answers the test message), and a connection over the
-# tailnet, which the Tailscale play refuses to restart through. sim/alpine/README.md says more.
+# Pi's kernel, ntfy itself (a stand-in answers the test message), and a real tailnet (the
+# refusal to restart over one is shown from an address in its range). sim/alpine/README.md
+# says more.
 
 on:
   push:
