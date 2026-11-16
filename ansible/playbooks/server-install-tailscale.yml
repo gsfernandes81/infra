@@ -40,7 +40,7 @@
 # server-install-system-files.yml.
 #
 # Under --check it reads and reports what it would do: no download, no install, no start,
-# no join. sim/alpine/run-tailscale.sh runs it for real against an Alpine container with
+# no join. sim/alpine/run-setup-plays.sh runs it for real against an Alpine container with
 # OpenRC: the real pinned tarball, then stand-in tarballs whose `tailscale` answers `up`.
 
 - name: Check the inventory is loaded

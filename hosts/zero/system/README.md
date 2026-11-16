@@ -41,9 +41,9 @@ exemption, which is a real cost on a 512 MB armv6 box running diskless.
 | `zram-swap` | `/etc/init.d/zram-swap` | Compressed swap in RAM ahead of the SSD swap partition, 2 GiB zstd at priority 100. **Installed 2026-10-26**: `/proc/swaps` lists `/dev/zram0` at 2 GiB, priority 100, `[zstd]`; in the default runlevel, owner-reported; [`docs/decisions.md`](../../../docs/decisions.md) § *Zram swap on `zero`* says why. Not boot-critical: a failed start leaves the SSD swap as it was. |
 | `devpool` | `/etc/init.d/devpool` | The dev containers' one memory limit: cgroup v2 group `/sys/fs/cgroup/devpool`, 2048M soft and 2560M hard RAM, 6G swap (the owner's, 2026-10-27: reclaim early, kill only at the hard line, and let zram and the SSD swap both be used), named by `dev/compose.yaml` as each dev container's `cgroup_parent` once `DEV_CGROUP_PARENT=/devpool`. **Written 2026-10-27, not installed**: install and proof below. Not boot-critical. |
 | `cloudflared-config.yml` | `/etc/cloudflared/config.yml` | The tunnel's ingress, moved off Cloudflare on 2026-08-23. Eight hostnames, and **the order is behaviour** — cloudflared matches first-rule-wins. This file is now the authoritative record of what zero serves; the dashboard's copy is ignored. See [`../../../docs/cloudflare.md`](../../../docs/cloudflare.md). |
-| `tailscaled` | `/etc/init.d/tailscaled` | zero's second way in, and the backup's path to `three`: Tailscale's static arm64 build in `/usr/local`, since Tailscale's repo has nothing for Alpine and Alpine's package lacked the TS-2026-013 fix on 2026-11-03. Installed and moved by hand, version and SHA-256 checked (§ Tailscale, below). **Not installed yet.** |
-| `mirror-backup` | `/etc/periodic/hourly/mirror-backup` | The nightly push of Immich's library, uploads, dumps and profile and of the Syncthing share to `three`, at 04:00, clear of Immich's 02:00 database dump, over the tailnet, with the root-only key `/root/.ssh/mirror-backup`, which can only write into `three`'s `incoming` ([`plans/three.md`](../../../plans/three.md)). **Not installed**: it waits for `three`, and its address is a placeholder it refuses to run with. |
-| `mirror-backup-age` | `/etc/periodic/daily/mirror-backup-age` | Tells the owner through ntfy when the last good push is more than three days old. The topic's URL is a secret, in root's `/var/lib/mirror-backup/ntfy-url`. **Not installed**, with `mirror-backup`. |
+| `tailscaled` | `/etc/init.d/tailscaled` | zero's second way in, and the backup's path to `three`: Tailscale's static arm64 build in `/usr/local`, since Tailscale's repo has nothing for Alpine and Alpine's package lacked the TS-2026-013 fix on 2026-11-03. Installed and moved by `server-install-tailscale.yml`, with the binaries at the pin in `ansible/group_vars/fleet.yml` (§ Tailscale, below). **Not installed yet.** |
+| `mirror-backup` | `/etc/periodic/hourly/mirror-backup` | The nightly push of Immich's library, uploads, dumps and profile and of the Syncthing share to `three`, at 04:00, clear of Immich's 02:00 database dump, over the tailnet, with the root-only key `/root/.ssh/mirror-backup`, made by `server-create-backup-key.yml`, which can only write into `three`'s `incoming` ([`plans/three.md`](../../../plans/three.md)). **Not installed**: it waits for `three`, and its address is a placeholder it refuses to run with. |
+| `mirror-backup-age` | `/etc/periodic/daily/mirror-backup-age` | Tells the owner through ntfy when the last good push is more than three days old. The topic's URL is a secret, in root's `/var/lib/mirror-backup/ntfy-url`, written by `server-store-backup-ntfy-url.yml`. **Not installed**, with `mirror-backup`. |
 
 **The mountpoints are `chattr +i`.** That is the actual protection against a failed
 mount silently destroying the Immich library, and it is not visible in any file here.
@@ -95,25 +95,31 @@ the container, or the limit did not take), not the pool: stop there. Once it pas
 zero's second way in, Tailscale's own static arm64 build: `tailscaled` in
 `/usr/local/sbin`, `tailscale` in `/usr/local/bin`, run by the tracked service
 `tailscaled`. It joins with `--accept-dns=false`, so zero keeps its own resolver
-(`docs/decisions.md`). **Installed at 1.104.5**, SHA-256
-`e900b0e6e25023a1e504b2c237ce2a32ea0535e006f8c1a1097a490886493b6c` for
-`tailscale_1.104.5_arm64.tgz`; the first install is
+(`docs/decisions.md`). **The pin, the version and its SHA-256, is `tailscale_static_*` in
+[`ansible/group_vars/fleet.yml`](../../../ansible/group_vars/fleet.yml)**, and nowhere
+else. `ansible/playbooks/server-install-tailscale.yml` installs it, this service and the
+join; **not installed yet**, the first run is
 [`plans/visit-runbook.md`](../../../plans/visit-runbook.md) § Before the visit, step 3.
 
-Moving it, at the monthly update and sooner for a security fix in a Tailscale bulletin:
-the new version and its `.sha256` from `https://pkgs.tailscale.com/stable/`, the previous
-binaries kept, and the restart done over the tunnel, not over the tailnet it restarts.
-After `ssh zero`, with the version and the SHA-256 in place of the placeholders:
+Moving it, at the monthly update and sooner for a security fix in a Tailscale bulletin,
+is a commit to that file, the version and the SHA-256 from the `.sha256` beside the
+tarball on `https://pkgs.tailscale.com/stable/`, then the same play from the phone:
 
 ```fish
-# on zero: move Tailscale to a new static build, keeping the previous binaries beside, then restart it
-set v VERSION; set sum PASTE_SHA256_HERE
-cd /tmp; curl -fLO https://pkgs.tailscale.com/stable/tailscale_{$v}_arm64.tgz
-echo "$sum  tailscale_"$v"_arm64.tgz" | sha256sum -c -; and tar -xzf tailscale_{$v}_arm64.tgz; and sudo cp -p /usr/local/sbin/tailscaled /usr/local/sbin/tailscaled.previous; and sudo cp -p /usr/local/bin/tailscale /usr/local/bin/tailscale.previous; and sudo install -m 755 tailscale_{$v}_arm64/tailscaled /usr/local/sbin/tailscaled; and sudo install -m 755 tailscale_{$v}_arm64/tailscale /usr/local/bin/tailscale; and sudo rc-service tailscaled restart
-tailscale version; rm -rf /tmp/tailscale_{$v}_arm64 /tmp/tailscale_{$v}_arm64.tgz
+# on the phone: move zero to the Tailscale pin in group_vars, keeping the previous binaries, and restart tailscaled
+cd ~/infra/ansible; and ansible-playbook playbooks/server-install-tailscale.yml -e target=zero -K
 ```
 
-Going back is the same `install` from the `.previous` files.
+It keeps the binaries it replaces as `tailscaled.previous` and `tailscale.previous` beside
+them, and restarts `tailscaled` only when the binary moved. It reaches zero through the
+tunnel, never the tailnet it restarts, and refuses to restart when it came in over the
+tailnet. Going back is the previous binaries by hand, then the pin moved back in a commit,
+or the next run moves forward again:
+
+```fish
+# on zero: go back to the previous Tailscale binaries and start tailscaled on them
+sudo rc-service tailscaled stop; and sudo cp -p /usr/local/sbin/tailscaled.previous /usr/local/sbin/tailscaled; and sudo cp -p /usr/local/bin/tailscale.previous /usr/local/bin/tailscale; and sudo rc-service tailscaled start; and tailscale version
+```
 
 ## When `crypttab` lands here
 

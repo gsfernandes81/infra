@@ -190,7 +190,16 @@ nothing_installed && on 'test ! -e /etc/runlevels/default/tailscaled' && pass "d
 echo "== the real pin, with a key Tailscale refuses"
 if ts -e "tailscale_auth_key=$bad_key"; then fail "joined with a key that is not real"; else pass "stopped at the join"; fi
 says 'Join the tailnet as tag:fleet, keeping DNS' && pass "the failure is the join" || fail "it failed before the join"
-grep -iE 'invalid|key|error' play.log | grep -v 'auth key file' | head -n 3 | sed 's/^/    tailscale said: /'
+# A flag Tailscale did not know, or a key file it could not read, would fail differently:
+# this is its control server refusing the key it read from the file.
+says 'backend error: invalid key' && pass "the real tailscale read the key file and Tailscale refused the key" || fail "the real tailscale did not get as far as refusing the key"
+# The two settings the play checks after a join, by the names it reads them by.
+prefs=$(on '/usr/local/bin/tailscale debug prefs')
+if printf '%s' "$prefs" | python3 -I -c 'import json,sys; p=json.load(sys.stdin); print("    CorpDNS", p["CorpDNS"], "AdvertiseTags", p["AdvertiseTags"])'; then
+	pass "the real tailscale's prefs carry CorpDNS and AdvertiseTags"
+else
+	fail "the real tailscale's prefs lack CorpDNS or AdvertiseTags"
+fi
 [ "$(ver '/usr/local/bin/tailscale version')" = "$pin_version" ] && pass "tailscale is $pin_version" || fail "tailscale is '$(ver '/usr/local/bin/tailscale version')'"
 [ "$(ver '/usr/local/sbin/tailscaled --version')" = "$pin_version" ] && pass "tailscaled reports $pin_version" || fail "tailscaled reports '$(ver '/usr/local/sbin/tailscaled --version')'"
 [ "$(on 'stat -c "%U %a" /usr/local/sbin/tailscaled /usr/local/bin/tailscale' | sort -u)" = "root 755" ] && pass "both binaries root 0755" || fail "binary modes wrong"

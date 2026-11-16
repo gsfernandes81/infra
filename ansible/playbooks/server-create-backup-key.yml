@@ -22,6 +22,7 @@
 #
 # The private key never leaves the box and never reaches this play's output; only the
 # public half is read. Under --check it reads and says whether it would make the key.
+# sim/alpine/run-setup-plays.sh runs it in CI against an Alpine container.
 #
 # -K IS REQUIRED: /root/.ssh is root's.
 

@@ -15,6 +15,7 @@
 #
 # Re-running it with the same URL changes nothing; with another, it replaces the file.
 # Under --check it says whether it would write, and sends nothing.
+# sim/alpine/run-setup-plays.sh runs it in CI against an Alpine container.
 #
 # -K IS REQUIRED: the directory is root's.
 
