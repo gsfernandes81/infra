@@ -48,7 +48,9 @@ echo "== the pin, $pin_version, against Tailscale's tarball"
 real="tailscale_${pin_version}_arm64"
 if curl -fsSL --retry 3 -o "$work/$real.tgz" "https://pkgs.tailscale.com/stable/$real.tgz"; then
 	[ "$(sha256sum "$work/$real.tgz" | awk '{print $1}')" = "$pin_sha" ] && pass "group_vars' SHA-256 is the tarball's" || fail "the tarball's SHA-256 is not group_vars'"
-	tar -tzf "$work/$real.tgz" | grep -qx "$real/tailscaled" && tar -tzf "$work/$real.tgz" | grep -qx "$real/tailscale" \
+	# A listing in a file: grep -q ends the pipe early, and pipefail counts tar's SIGPIPE.
+	tar -tzf "$work/$real.tgz" > "$work/listing"
+	grep -qx "$real/tailscaled" "$work/listing" && grep -qx "$real/tailscale" "$work/listing" \
 		&& pass "the tarball holds $real/tailscaled and tailscale" || fail "the tarball's layout is not $real/{tailscaled,tailscale}"
 else
 	fail "could not download $real.tgz"
@@ -76,7 +78,7 @@ python3 -I "$here/serve.py" "$port" "$work/pkgs" &
 srv_pid=$!
 for _ in $(seq 1 20); do curl -fsS "http://127.0.0.1:$port/__state" >/dev/null 2>&1 && break; sleep 0.5; done
 curl -fsS "http://127.0.0.1:$port/__state" >/dev/null || { echo "the stand-in server did not start" >&2; exit 1; }
-posts() { curl -fsS "http://127.0.0.1:$port/__state" | python3 -I -c "import json,sys; print($1)"; }
+posts() { curl -fsS "http://127.0.0.1:$port/__state" | python3 -I -c "import json,sys; s=json.load(sys.stdin); print($1)"; }
 
 # ── the box ────────────────────────────────────────────────────────────────
 docker build -q -t infra-alpine-sim "$here/host" >/dev/null || { echo "image build failed" >&2; exit 1; }

@@ -249,73 +249,78 @@
     # ── the binaries ─────────────────────────────────────────────────────────
     # Not under --check, which touches no network. A two-minute timeout and four tries, as
     # server-update-leap.yml's downloads have.
-    - name: "If off the pin: download the static tarball"
-      ansible.builtin.get_url:
-        url: "{{ tailscale_pkgs }}/{{ ts_tarball }}.tgz"
-        dest: "{{ download }}"
-        checksum: "sha256:{{ ts_pin_sha }}"
-        mode: "0600"
-        force: true
-        timeout: 120
-      register: ts_get
-      until: ts_get is succeeded
-      retries: 3
-      delay: 15
+    - name: "If off the pin: move the binaries to it"
       when: ts_moves | bool and not ansible_check_mode
       become: true
+      block:
+        - name: Download the static tarball, checking its SHA-256
+          ansible.builtin.get_url:
+            url: "{{ tailscale_pkgs }}/{{ ts_tarball }}.tgz"
+            dest: "{{ download }}"
+            checksum: "sha256:{{ ts_pin_sha }}"
+            mode: "0600"
+            force: true
+            timeout: 120
+          register: ts_get
+          until: ts_get is succeeded
+          retries: 3
+          delay: 15
 
-    # tar, not unarchive: unarchive wants GNU tar, and Alpine's is BusyBox's.
-    - name: "If off the pin: unpack the tarball"
-      ansible.builtin.shell: |
-        set -e
-        rm -rf {{ unpacked }}
-        mkdir -m 700 {{ unpacked }}
-        tar -xzf {{ download }} -C {{ unpacked }}
-        test -x {{ unpacked }}/{{ ts_tarball }}/tailscaled
-        test -x {{ unpacked }}/{{ ts_tarball }}/tailscale
-      when: ts_moves | bool and not ansible_check_mode
-      become: true
+        # tar, not unarchive: unarchive wants GNU tar, and Alpine's is BusyBox's.
+        - name: Unpack the tarball
+          ansible.builtin.shell: |
+            set -e
+            rm -rf {{ unpacked }}
+            mkdir -m 700 {{ unpacked }}
+            tar -xzf {{ download }} -C {{ unpacked }}
+            test -x {{ unpacked }}/{{ ts_tarball }}/tailscaled
+            test -x {{ unpacked }}/{{ ts_tarball }}/tailscale
 
-    - name: "If tailscaled moves: keep it as previous"
-      ansible.builtin.copy:
-        src: "{{ tailscaled_bin }}"
-        dest: "{{ tailscaled_bin }}.previous"
-        remote_src: true
-        mode: "0755"
-      when: ts_moves | bool and ts_was.tailscaled != ''
-      become: true
+        - name: "If tailscaled is there: keep it as previous"
+          ansible.builtin.copy:
+            src: "{{ tailscaled_bin }}"
+            dest: "{{ tailscaled_bin }}.previous"
+            remote_src: true
+            mode: "0755"
+          when: ts_was.tailscaled != ''
 
-    - name: "If tailscale moves: keep it as previous"
-      ansible.builtin.copy:
-        src: "{{ tailscale_bin }}"
-        dest: "{{ tailscale_bin }}.previous"
-        remote_src: true
-        mode: "0755"
-      when: ts_moves | bool and ts_was.tailscale != ''
-      become: true
+        - name: "If tailscale is there: keep it as previous"
+          ansible.builtin.copy:
+            src: "{{ tailscale_bin }}"
+            dest: "{{ tailscale_bin }}.previous"
+            remote_src: true
+            mode: "0755"
+          when: ts_was.tailscale != ''
 
-    # copy, not install: it writes beside the target and renames, so a running tailscaled
-    # is replaced without a "text file busy".
-    - name: "If off the pin: install the pinned binaries"
-      ansible.builtin.copy:
-        src: "{{ unpacked }}/{{ ts_tarball }}/{{ item.name }}"
-        dest: "{{ item.dest }}"
-        remote_src: true
-        mode: "0755"
-      loop:
-        - {name: tailscaled, dest: "{{ tailscaled_bin }}"}
-        - {name: tailscale, dest: "{{ tailscale_bin }}"}
-      loop_control:
-        label: "{{ item.dest }}"
-      when: ts_moves | bool and not ansible_check_mode
-      become: true
+        # A minimal Alpine has no /usr/local/sbin until something puts a file there.
+        - name: Create /usr/local/sbin and /usr/local/bin
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            mode: "0755"
+          loop: ["{{ tailscaled_bin | dirname }}", "{{ tailscale_bin | dirname }}"]
 
-    - name: Remove the download
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: absent
-      loop: ["{{ download }}", "{{ unpacked }}"]
-      become: true
+        # copy, not install: it writes beside the target and renames, so a running
+        # tailscaled is replaced without a "text file busy".
+        - name: Install the pinned binaries
+          ansible.builtin.copy:
+            src: "{{ unpacked }}/{{ ts_tarball }}/{{ item.name }}"
+            dest: "{{ item.dest }}"
+            remote_src: true
+            mode: "0755"
+          loop:
+            - {name: tailscaled, dest: "{{ tailscaled_bin }}"}
+            - {name: tailscale, dest: "{{ tailscale_bin }}"}
+          loop_control:
+            label: "{{ item.dest }}"
+
+      # Whether the move worked or not, so a failed run leaves nothing in /var/tmp.
+      always:
+        - name: Remove the download
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: ["{{ download }}", "{{ unpacked }}"]
 
     # ── the service, through bin/install-system-file ─────────────────────────
     # The same two calls server-install-system-files.yml makes, for one file: a dry run
