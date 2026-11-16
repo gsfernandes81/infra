@@ -47,10 +47,12 @@
 #   piped     Plain text, no escape codes, nothing overwritten: a log or a pasted
 #             transcript. A step's line prints when it finishes.
 #
-# KNOWN LIMIT: vars_prompt and --step read input() without going through Display, so on a
-# terminal the timer would redraw over their prompt. This repo's plays do not prompt by
-# policy (secrets come from files); a play that ever does should be run with
-# ANSIBLE_STDOUT_CALLBACK=default.
+# PROMPTS: vars_prompt reads input() without going through Display, between plays, while
+# the previous play's last step is still the live line (a step is closed only when the next
+# one starts). So v2_playbook_on_vars_prompt, which Ansible sends just before it asks, closes
+# that step first: the timer stops and the prompt starts on a line of its own. The setup
+# plays prompt (server-install-tailscale.yml, server-store-backup-ntfy-url.yml). KNOWN
+# LIMIT: --step still reads input() with nothing sent first; use ANSIBLE_STDOUT_CALLBACK=default.
 #
 # Workers are FORKED. A fork taken while the timer thread holds this plugin's lock would
 # hand the child a lock nobody can release, and its first display call would hang the run
@@ -450,6 +452,10 @@ class CallbackModule(CallbackBase):
             for l in self._helix(f'PLAY [{name}]{mark}', 0, self._width()):
                 self._say(self._c(l, 'blue'))
             self._say('')
+
+    def v2_playbook_on_vars_prompt(self, *args, **kwargs):
+        with self._lock:
+            self._finish()
 
     def v2_playbook_on_task_start(self, task, is_conditional):
         self._begin(task.get_name().strip() or task.action)

@@ -1,0 +1,72 @@
+#!/bin/sh
+# A stand-in for Tailscale's CLI, packed into a tarball shaped like Tailscale's static one by
+# sim/alpine/run-setup-plays.sh, which writes its version over @VERSION@. It answers what
+# the setup plays ask, from a state file, and `up` joins only with the auth key the script
+# put in /etc/fake-tailscale/expect-key, read from a `--auth-key=file:` path. It records
+# each `up`'s argv and the key file's owner and mode, which the script checks: a key on the
+# command line is refused, as a play that leaked one should be.
+#
+# /etc/fake-tailscale/clobber-dns makes `up` overwrite /etc/resolv.conf, as `tailscale up`
+# without --accept-dns=false does on a real box.
+set -u
+version=@VERSION@
+st=/var/lib/fake-tailscale
+mkdir -p "$st"
+state=$(cat "$st/state" 2>/dev/null || echo NeedsLogin)
+ip=100.101.102.103
+host=$(hostname)
+
+case "${1-}" in
+version)
+	echo "$version"
+	echo "  fake: sim/alpine"
+	;;
+status)
+	if [ "${2-}" = --json ]; then
+		printf '{\n  "BackendState": "%s",\n  "Self": {"HostName": "%s", "DNSName": "%s.tail-sim.ts.net.", "TailscaleIPs": ["%s"]}\n}\n' \
+			"$state" "$host" "$host" "$ip"
+	elif [ "$state" = Running ]; then
+		echo "$ip  $host  tagged-devices  linux  -"
+	else
+		echo "Logged out."
+		exit 1
+	fi
+	;;
+ip)
+	[ "$state" = Running ] || { echo "no current Tailscale IPs; state: $state" >&2; exit 1; }
+	echo "$ip"
+	;;
+debug)
+	[ "${2-}" = prefs ] || exit 2
+	cat "$st/prefs" 2>/dev/null || echo '{"CorpDNS": true, "AdvertiseTags": null}'
+	;;
+up)
+	shift
+	echo "$*" >> "$st/up.log"
+	file='' tags='' dns=true
+	for a in "$@"; do
+		case "$a" in
+		--auth-key=file:*) file=${a#--auth-key=file:} ;;
+		--auth-key=* | --authkey=*) echo "fake tailscale: an auth key on the command line" >&2; exit 2 ;;
+		--advertise-tags=*) tags=${a#--advertise-tags=} ;;
+		--accept-dns=false) dns=false ;;
+		esac
+	done
+	[ -n "$file" ] || { echo "fake tailscale: no --auth-key=file:" >&2; exit 1; }
+	stat -c '%U %a' "$file" > "$st/keyfile-mode"
+	echo "$file" > "$st/keyfile-path"
+	if [ "$(cat "$file")" != "$(cat /etc/fake-tailscale/expect-key)" ]; then
+		echo "backend error: invalid key: the key file does not hold the expected key" >&2
+		exit 1
+	fi
+	printf '{"CorpDNS": %s, "AdvertiseTags": ["%s"]}\n' "$dns" "$tags" > "$st/prefs"
+	if [ -e /etc/fake-tailscale/clobber-dns ]; then
+		echo 'nameserver 100.100.100.100' > /etc/resolv.conf
+	fi
+	echo Running > "$st/state"
+	;;
+*)
+	echo "fake tailscale: unknown command: $*" >&2
+	exit 2
+	;;
+esac

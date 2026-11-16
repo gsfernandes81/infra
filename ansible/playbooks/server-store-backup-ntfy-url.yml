@@ -1,0 +1,179 @@
+---
+# STORE THE ntfy TOPIC'S URL that zero's backup-age alert posts to, root's alone, and
+# optionally send it one test message. From the control node:
+#
+#     cd ansible
+#     ansible-playbook playbooks/server-store-backup-ntfy-url.yml -e target=zero -K
+#
+# It asks for the URL without echoing it, since anyone who has it can read and post to the
+# topic, then asks whether to send a test message. It writes the URL to
+# /var/lib/mirror-backup/ntfy-url, root 0600, in a directory root's alone at 0700, where
+# hosts/<host>/system/mirror-backup-age reads it. The URL never reaches a command line, a
+# process list or this play's output: it travels as a module's stdin and arguments, and
+# every task that carries it is no_log. The test message is posted from the box, the way
+# the alert will be, and the play prints only the HTTP status it got.
+#
+# Re-running it with the same URL changes nothing; with another, it replaces the file.
+# Under --check it says whether it would write, and sends nothing.
+#
+# -K IS REQUIRED: the directory is root's.
+
+- name: Check the inventory is loaded
+  ansible.builtin.import_playbook: _assert-inventory.yml
+  vars:
+    required_group: fleet
+
+- name: Check a target was named
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check -e target names a host in the inventory
+      # Without it the play below matches no host and exits 0 having done nothing
+      # (_assert-inventory.yml, the same trap).
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target in groups['fleet']
+        fail_msg: Name the host, -e target=<host>, one in the inventory's fleet group.
+        success_msg: "target: {{ target | default('?') }}"
+
+- name: Store the backup alert's ntfy URL
+  hosts: "{{ target }}"
+  gather_facts: false
+  become: false
+
+  vars_prompt:
+    - name: ntfy_url
+      prompt: ntfy topic URL (not echoed)
+      private: true
+    - name: ntfy_test
+      prompt: Send one test message to it? [y/N]
+      private: false
+      default: "n"
+
+  vars:
+    state_dir: /var/lib/mirror-backup
+    url_file: /var/lib/mirror-backup/ntfy-url
+    # The file holds the URL and a newline, as a shell's `printf '%s\n'` writes it; the
+    # alert's $(cat …) drops the newline.
+    url_sha1: "{{ (ntfy_url ~ '\n') | hash('sha1') }}"
+
+  tasks:
+    - name: Read whether the backup alert is tracked here
+      ansible.builtin.stat:
+        path: "{{ control_checkout }}/hosts/{{ inventory_hostname }}/system/mirror-backup-age"
+      register: ntfy_tracked
+      delegate_to: localhost
+
+    # The messages name neither the URL nor any part of it.
+    - name: Check the alert is tracked and the URL looks like one
+      ansible.builtin.assert:
+        that:
+          - ntfy_tracked.stat.exists
+          - ntfy_url is match('^https?://[^\s/]+/\S+$')
+        fail_msg: >-
+          {{ 'hosts/' ~ inventory_hostname ~ '/system/mirror-backup-age is not in this checkout, so nothing on '
+             ~ inventory_hostname ~ ' reads the URL.' if not ntfy_tracked.stat.exists else
+             'What was typed is not a URL with a topic: http(s)://host/topic, no spaces.' }}
+          Nothing has been written.
+        success_msg: ok
+
+    - name: Create {{ state_dir }}, root's alone
+      ansible.builtin.file:
+        path: "{{ state_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      become: true
+
+    # sha1 of the file against sha1 of what was typed, so the URL is never read back.
+    - name: Read the stored URL's checksum
+      ansible.builtin.stat:
+        path: "{{ url_file }}"
+        checksum_algorithm: sha1
+      register: ntfy_before
+      become: true
+
+    - name: Note whether the URL changes
+      ansible.builtin.set_fact:
+        ntfy_writes: "{{ not ntfy_before.stat.exists or ntfy_before.stat.checksum | default('') != url_sha1 }}"
+
+    # stdin rather than copy's content, which stages the value in a temporary file on both
+    # machines. Written beside the file and renamed, so a failed write never leaves half a
+    # URL where the alert reads it. no_log because the URL is in the module's arguments;
+    # failed_when: false so a refusal is not censored with it, and the task after prints
+    # the shell's own message, which cannot contain the URL (it arrives on stdin).
+    - name: "If it changes: write the URL, root 0600"
+      ansible.builtin.command:
+        argv: [sh, -c, 'umask 077; cat > "$1.new" && chmod 600 "$1.new" && mv -f "$1.new" "$1"', sh, "{{ url_file }}"]
+        stdin: "{{ ntfy_url }}"
+      register: ntfy_write
+      no_log: true
+      failed_when: false
+      when: ntfy_writes | bool and not ansible_check_mode
+      become: true
+
+    - name: "If the write failed: print why"
+      ansible.builtin.debug:
+        msg: "The write failed, rc {{ ntfy_write.rc }}: {{ ntfy_write.stderr | default('') | trim }}"
+      changed_when: true
+      when: ntfy_write.rc | default(0) != 0
+
+    - name: Read the stored URL's checksum and mode
+      ansible.builtin.stat:
+        path: "{{ url_file }}"
+        checksum_algorithm: sha1
+      register: ntfy_after
+      when: not ansible_check_mode
+      become: true
+
+    - name: Check the file holds the URL, root 0600
+      ansible.builtin.assert:
+        that:
+          - ntfy_after.stat.exists
+          - ntfy_after.stat.checksum | default('') == url_sha1
+          - ntfy_after.stat.pw_name | default('') == 'root'
+          - ntfy_after.stat.mode | default('') == '0600'
+        fail_msg: >-
+          {{ url_file }} {{ 'does not hold what was typed' if ntfy_after.stat.checksum | default('') != url_sha1
+             else 'is ' ~ ntfy_after.stat.pw_name | default('?') ~ ' ' ~ ntfy_after.stat.mode | default('?') ~ ', not root 0600' }}.
+        success_msg: stored
+      when: not ansible_check_mode
+
+    # From the box, as the alert posts. Every status is accepted here and judged below, so
+    # a refusal prints its status instead of a censored failure.
+    - name: "If asked: send one test message"
+      ansible.builtin.uri:
+        url: "{{ ntfy_url }}"
+        method: POST
+        body: "Test from server-store-backup-ntfy-url.yml on {{ inventory_hostname }}: the backup alert reaches this topic."
+        headers:
+          Title: "{{ inventory_hostname }} backup"
+        status_code: [-1, 200, 201, 202, 204, 400, 401, 403, 404, 429, 500, 502, 503]
+        timeout: 30
+      register: ntfy_sent
+      no_log: true
+      failed_when: false
+      when: ntfy_test | lower in ['y', 'yes'] and not ansible_check_mode
+      become: true
+
+    - name: Print what was stored and sent
+      ansible.builtin.debug:
+        msg: >-
+          {{ (['DRY RUN: ' ~ url_file ~ (' would be written.' if ntfy_writes | bool else ' already holds this URL.')
+               ~ ' No message was sent.'] if ansible_check_mode else
+              [url_file ~ (' written' if ntfy_writes | bool else ' already held this URL, unchanged') ~ ', root 0600.',
+               ('Test message: ' ~ ('no answer (connection failed or timed out)' if ntfy_sent.status | default(-1) == -1
+                 else 'HTTP ' ~ ntfy_sent.status) ~ '.') if ntfy_sent is not skipped else 'No test message sent.']) }}
+      changed_when: true
+
+    - name: "If sent: check ntfy accepted it"
+      ansible.builtin.assert:
+        that: ntfy_sent.status | default(-1) in [200, 201, 202, 204]
+        fail_msg: >-
+          The URL is stored, but the test message was not accepted
+          ({{ 'no answer' if ntfy_sent.status | default(-1) == -1 else 'HTTP ' ~ ntfy_sent.status }}).
+          Check the topic and the URL, then re-run with the right one.
+        success_msg: accepted
+      when: ntfy_sent is not skipped

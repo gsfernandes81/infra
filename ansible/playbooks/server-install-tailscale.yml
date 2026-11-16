@@ -1,0 +1,536 @@
+---
+# TAILSCALE ON AN ALPINE HOST: install or move the static build, install the tracked
+# service, and join the tailnet if the box is not on it. `zero` first, `two` later. From the
+# control node, one host per run:
+#
+#     cd ansible
+#     ansible-playbook playbooks/server-install-tailscale.yml -e target=zero -K --check
+#     ansible-playbook playbooks/server-install-tailscale.yml -e target=zero -K
+#
+# WHAT IT DOES, in order, and a failure at any step stops it:
+#   1. Refuses a host that is not Alpine (a Leap host takes Tailscale from Tailscale's repo
+#      at its first boot), one whose own tailscaled is not tracked in hosts/<host>/system/,
+#      and one with Alpine's own `tailscale` apk installed, which would put two tailscaleds
+#      on the box.
+#   2. Reads what is there: the installed versions, the service's state, whether the box is
+#      on the tailnet, and /etc/resolv.conf.
+#   3. Pulls the host's checkout to this control node's commit, as
+#      server-install-system-files.yml does, because the service file comes from there.
+#   4. If the binaries are not at the pin (tailscale_static_* in group_vars/fleet.yml):
+#      downloads Tailscale's static tarball, installs it only on a SHA-256 match, and keeps
+#      the binaries it replaces as /usr/local/sbin/tailscaled.previous and
+#      /usr/local/bin/tailscale.previous.
+#   5. Installs /etc/init.d/tailscaled through bin/install-system-file, adds it to the
+#      default runlevel, and starts it. It RESTARTS tailscaled only when step 4 moved the
+#      binary. That is safe over the tunnel, which is how this play reaches the box, and it
+#      refuses to restart over the tailnet it would be restarting.
+#   6. If the box is not on the tailnet: `tailscale up --advertise-tags=tag:fleet
+#      --accept-dns=false`, with the auth key asked for at the start.
+#   7. Reports the box's tailnet address and name, then checks it is on the tailnet with the
+#      settings above, `tailscale status` lists it, and /etc/resolv.conf is as it was.
+#
+# THE AUTH KEY: generated in the admin console (Settings, Keys), tagged tag:fleet, not
+# reusable, with a short expiry. The play asks for it without echoing it. Press Enter alone
+# when the box is already on the tailnet; the play then never needs it. On the box it
+# exists only in a root-only file in /run for the length of `tailscale up`, passed as
+# `--auth-key=file:<path>`, so it is never in a process list or in this play's output, and
+# the file is removed whether the join worked or not.
+#
+# -K IS REQUIRED, under --check too: the dry run of the service file runs as root, as in
+# server-install-system-files.yml.
+#
+# Under --check it reads and reports what it would do: no download, no install, no start,
+# no join. sim/alpine/run-tailscale.sh runs it for real against an Alpine container with
+# OpenRC: the real pinned tarball, then stand-in tarballs whose `tailscale` answers `up`.
+
+- name: Check the inventory is loaded
+  ansible.builtin.import_playbook: _assert-inventory.yml
+  vars:
+    required_group: fleet
+
+- name: Check a target was named
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check -e target names a host in the inventory
+      # Without it the play below matches no host and exits 0 having done nothing
+      # (_assert-inventory.yml, the same trap).
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target in groups['fleet']
+        fail_msg: Name the host, -e target=<host>, one in the inventory's fleet group.
+        success_msg: "target: {{ target | default('?') }}"
+
+- name: Install Tailscale on an Alpine host
+  hosts: "{{ target }}"
+  gather_facts: false
+  become: false
+
+  # Asked once, before any task; Enter alone when the box is already on the tailnet.
+  # `private` keeps it off the screen, and it is never put in a module's arguments
+  # except the one no_log task that writes it to the key file.
+  vars_prompt:
+    - name: tailscale_auth_key
+      prompt: Tailscale auth key, tag:fleet (Enter if already joined)
+      private: true
+      default: ""
+
+  vars:
+    # The sim overrides this with its own server; nothing else should.
+    tailscale_pkgs: https://pkgs.tailscale.com/stable
+    tracked_service: "{{ control_checkout }}/hosts/{{ inventory_hostname }}/system/tailscaled"
+    tool: "{{ infra_checkout }}/bin/install-system-file"
+    tailscaled_bin: /usr/local/sbin/tailscaled
+    tailscale_bin: /usr/local/bin/tailscale
+    download: /var/tmp/infra-tailscale.tgz
+    unpacked: /var/tmp/infra-tailscale
+    # Tailscale's name for each `uname -m`.
+    tarball_arch:
+      aarch64: arm64
+      armv7l: arm
+      armv6l: arm
+      x86_64: amd64
+
+  tasks:
+    # ── refusals, before anything is read as root or changed ─────────────────
+    - name: Read {{ inventory_hostname }}'s OS
+      ansible.builtin.slurp:
+        src: /etc/os-release
+      register: ts_os
+
+    - name: Check {{ inventory_hostname }} runs Alpine
+      ansible.builtin.assert:
+        that: (ts_os.content | b64decode) is search('^ID="?alpine"?$', multiline=True)
+        fail_msg: >-
+          {{ inventory_hostname }} is not Alpine. A Leap host takes Tailscale from
+          Tailscale's repo at its first boot (leap/firstboot.sh), and this play installs the
+          static build only where no repo serves one. Nothing has been touched.
+        success_msg: "{{ (ts_os.content | b64decode) | regex_search('PRETTY_NAME=\"?([^\"\\n]*)', '\\1') | default(['Alpine'], true) | first }}"
+
+    - name: Read whether the tailscaled service is tracked
+      ansible.builtin.stat:
+        path: "{{ tracked_service }}"
+      register: ts_tracked
+      delegate_to: localhost
+
+    - name: Check hosts/{{ inventory_hostname }}/system has tailscaled
+      ansible.builtin.assert:
+        that: ts_tracked.stat.exists
+        fail_msg: >-
+          hosts/{{ inventory_hostname }}/system/tailscaled is not in this checkout, and
+          the service is installed from there. Track one first, as zero's is. Nothing has
+          been touched.
+        success_msg: tracked
+
+    - name: Read whether Alpine's own tailscale is installed
+      ansible.builtin.command: apk info -e tailscale
+      register: ts_apk
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Check Alpine's tailscale package is absent
+      ansible.builtin.assert:
+        that: ts_apk.rc != 0
+        fail_msg: >-
+          Alpine's own tailscale package is installed on {{ inventory_hostname }}, and its
+          tailscaled would run beside this one. Remove it by hand first, over the tunnel:
+          `sudo rc-service tailscale stop; sudo apk del tailscale`. Nothing has been touched.
+        success_msg: absent
+
+    # ── what is there ────────────────────────────────────────────────────────
+    # key=value lines, each printed even when empty. check_mode: false on every read that
+    # changes nothing, or --check would skip it and have nothing to report.
+    - name: Read the installed versions and service state
+      ansible.builtin.shell: |
+        v() { "$@" 2>/dev/null | head -n 1 | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' ; }
+        printf 'arch=%s\n' "$(uname -m)"
+        printf 'tailscaled=%s\n' "$(v {{ tailscaled_bin }} --version)"
+        printf 'tailscale=%s\n' "$(v {{ tailscale_bin }} version)"
+        printf 'runlevel=%s\n' "$([ -e /etc/runlevels/default/tailscaled ] && echo yes || echo no)"
+        if [ -e /etc/init.d/tailscaled ]; then
+          printf 'service=%s\n' "$(rc-service tailscaled status 2>/dev/null | sed -n 's/.*status: *//p' | head -n 1)"
+        else
+          echo service=absent
+        fi
+        printf 'log_proxy=%s\n' "$(command -v log_proxy >/dev/null && echo yes || echo no)"
+      register: ts_before
+      changed_when: false
+      check_mode: false
+      become: true
+
+    # Not under become: sudo resets the environment, and this is the ssh session's own
+    # SSH_CONNECTION, whose first field is the address this play came from.
+    - name: Read the address this connection comes from
+      ansible.builtin.shell: printf '%s' "${SSH_CONNECTION%% *}"
+      register: ts_conn
+      changed_when: false
+      check_mode: false
+
+    - name: Read whether {{ inventory_hostname }} is on the tailnet
+      ansible.builtin.command: "{{ tailscale_bin }} status --json"
+      register: ts_status_before
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      become: true
+
+    - name: Read /etc/resolv.conf before
+      ansible.builtin.slurp:
+        src: /etc/resolv.conf
+      register: ts_resolv_before
+
+    - name: Note the pin and what is installed
+      ansible.builtin.set_fact:
+        ts_was: "{{ dict(ts_before.stdout_lines | map('split', '=', 1)) }}"
+        ts_state_before: >-
+          {{ (ts_status_before.stdout | from_json).BackendState | default('unknown')
+             if ts_status_before.rc == 0 and ts_status_before.stdout is match('\s*\{') else 'not answering' }}
+        # The tailnet's ranges: CGNAT for IPv4, Tailscale's ULA for IPv6.
+        ts_via_tailnet: >-
+          {{ ts_conn.stdout is match('^100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.')
+             or ts_conn.stdout | lower is match('^fd7a:115c:a1e0:') }}
+
+    - name: Note what this run moves
+      ansible.builtin.set_fact:
+        ts_pin_sha: "{{ lookup('vars', 'tailscale_static_sha256_' ~ ts_was.arch, default='') }}"
+        ts_tarball: "tailscale_{{ tailscale_static_version }}_{{ tarball_arch[ts_was.arch] | default('none') }}"
+        ts_moves: "{{ ts_was.tailscaled != tailscale_static_version or ts_was.tailscale != tailscale_static_version }}"
+
+    - name: Check group_vars has a pin for this architecture
+      ansible.builtin.assert:
+        that:
+          - ts_was.arch in tarball_arch
+          - ts_pin_sha | length == 64
+        fail_msg: >-
+          group_vars/fleet.yml has no tailscale_static_sha256_{{ ts_was.arch }}, so there
+          is nothing to check a download against. Nothing has been touched.
+        success_msg: >-
+          tailscaled {{ ts_was.tailscaled or 'missing' }}, tailscale
+          {{ ts_was.tailscale or 'missing' }} -> {{ tailscale_static_version }}
+
+    # The tracked service logs through log_proxy, which arrived on zero with Docker; two's
+    # cloudflared logs without it, and two's tailscaled will be written the same way.
+    - name: Check log_proxy is there, if the service uses it
+      ansible.builtin.assert:
+        that: ts_was.log_proxy == 'yes' or 'log_proxy' not in lookup('file', tracked_service)
+        fail_msg: >-
+          hosts/{{ inventory_hostname }}/system/tailscaled logs through log_proxy, which
+          {{ inventory_hostname }} lacks: `sudo apk add log_proxy`, then re-run. Nothing has
+          been touched.
+        success_msg: ok
+
+    # CLAUDE.md § Changing the thing you are connected through.
+    - name: "If it restarts: check this is not over the tailnet"
+      ansible.builtin.assert:
+        that: not (ts_moves | bool and ts_was.service == 'started' and ts_via_tailnet | bool)
+        fail_msg: >-
+          This run moves tailscaled, which restarts it, and this play reached
+          {{ inventory_hostname }} over the tailnet ({{ ts_conn.stdout }}). Run it over the
+          tunnel instead. Nothing has been touched.
+        success_msg: ok
+
+    # ── the delivery vehicle: the host checkout, pinned to this one ──────────
+    - name: Check this checkout has no uncommitted hosts/ edits
+      ansible.builtin.import_tasks: _review-anchor.yml
+      vars:
+        anchor_paths: [hosts/]
+        anchor_untouched: Nothing was installed.
+
+    - name: Pull {{ inventory_hostname }}'s checkout to the reviewed commit
+      ansible.builtin.import_tasks: _sync-host-checkout.yml
+      vars:
+        sync_host: "{{ inventory_hostname }}"
+        sync_paths: [hosts/, bin/]
+        anchor_head: "{{ anchor_head_raw.stdout | trim }}"
+        sync_untouched: Nothing was installed.
+
+    # ── the binaries ─────────────────────────────────────────────────────────
+    # Not under --check, which touches no network. A two-minute timeout and four tries, as
+    # server-update-leap.yml's downloads have.
+    - name: "If off the pin: download the static tarball"
+      ansible.builtin.get_url:
+        url: "{{ tailscale_pkgs }}/{{ ts_tarball }}.tgz"
+        dest: "{{ download }}"
+        checksum: "sha256:{{ ts_pin_sha }}"
+        mode: "0600"
+        force: true
+        timeout: 120
+      register: ts_get
+      until: ts_get is succeeded
+      retries: 3
+      delay: 15
+      when: ts_moves | bool and not ansible_check_mode
+      become: true
+
+    # tar, not unarchive: unarchive wants GNU tar, and Alpine's is BusyBox's.
+    - name: "If off the pin: unpack the tarball"
+      ansible.builtin.shell: |
+        set -e
+        rm -rf {{ unpacked }}
+        mkdir -m 700 {{ unpacked }}
+        tar -xzf {{ download }} -C {{ unpacked }}
+        test -x {{ unpacked }}/{{ ts_tarball }}/tailscaled
+        test -x {{ unpacked }}/{{ ts_tarball }}/tailscale
+      when: ts_moves | bool and not ansible_check_mode
+      become: true
+
+    - name: "If tailscaled moves: keep it as previous"
+      ansible.builtin.copy:
+        src: "{{ tailscaled_bin }}"
+        dest: "{{ tailscaled_bin }}.previous"
+        remote_src: true
+        mode: "0755"
+      when: ts_moves | bool and ts_was.tailscaled != ''
+      become: true
+
+    - name: "If tailscale moves: keep it as previous"
+      ansible.builtin.copy:
+        src: "{{ tailscale_bin }}"
+        dest: "{{ tailscale_bin }}.previous"
+        remote_src: true
+        mode: "0755"
+      when: ts_moves | bool and ts_was.tailscale != ''
+      become: true
+
+    # copy, not install: it writes beside the target and renames, so a running tailscaled
+    # is replaced without a "text file busy".
+    - name: "If off the pin: install the pinned binaries"
+      ansible.builtin.copy:
+        src: "{{ unpacked }}/{{ ts_tarball }}/{{ item.name }}"
+        dest: "{{ item.dest }}"
+        remote_src: true
+        mode: "0755"
+      loop:
+        - {name: tailscaled, dest: "{{ tailscaled_bin }}"}
+        - {name: tailscale, dest: "{{ tailscale_bin }}"}
+      loop_control:
+        label: "{{ item.dest }}"
+      when: ts_moves | bool and not ansible_check_mode
+      become: true
+
+    - name: Remove the download
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: ["{{ download }}", "{{ unpacked }}"]
+      become: true
+
+    # ── the service, through bin/install-system-file ─────────────────────────
+    # The same two calls server-install-system-files.yml makes, for one file: a dry run
+    # always, which is what --check shows, then --commit only if it would change something.
+    # Its header says why the bytes come from the host's checkout and why
+    # --allow-content-change is passed.
+    - name: Read the dry-run diff of the tailscaled service
+      ansible.builtin.command:
+        cmd: "{{ tool }} tailscaled --new --allow-content-change"
+        chdir: "{{ infra_checkout }}"
+      register: ts_svc_dry
+      changed_when: "'Nothing to do' not in ts_svc_dry.stdout"
+      failed_when: false
+      become: true
+      check_mode: false
+
+    - name: Print the service diff, if it would change
+      ansible.builtin.debug:
+        msg: "{{ (ts_svc_dry.stdout_lines + (ts_svc_dry.stderr_lines | default([]))) | join('\n') }}"
+      changed_when: true
+      when: ts_svc_dry.rc != 0 or 'Nothing to do' not in ts_svc_dry.stdout
+
+    - name: Check install-system-file would install it
+      ansible.builtin.assert:
+        that: ts_svc_dry.rc == 0
+        fail_msg: >-
+          install-system-file refused the service file; its reason is above. The binaries
+          are {{ 'moved' if ts_moves | bool and not ansible_check_mode else 'as they were' }}
+          and nothing was started.
+        success_msg: ok
+
+    - name: "If it differs: install the tailscaled service"
+      ansible.builtin.command:
+        cmd: "{{ tool }} tailscaled --commit --new --allow-content-change"
+        chdir: "{{ infra_checkout }}"
+      register: ts_svc_inst
+      changed_when: true
+      when: not ansible_check_mode and 'Nothing to do' not in ts_svc_dry.stdout
+      become: true
+
+    - name: "If not in it: add tailscaled to the default runlevel"
+      ansible.builtin.command: rc-update add tailscaled default
+      when: ts_was.runlevel != 'yes' and not ansible_check_mode
+      become: true
+
+    # Restart only for a moved binary; start whatever is not running. A crashed service
+    # is restarted, since OpenRC will not start one it still counts as started.
+    - name: Note how tailscaled is brought up
+      ansible.builtin.set_fact:
+        ts_action: >-
+          {{ 'restart' if (ts_moves | bool and ts_was.service == 'started') or ts_was.service == 'crashed'
+             else ('start' if ts_was.service != 'started' else 'none') }}
+
+    - name: "If needed: {{ ts_action }} tailscaled"
+      ansible.builtin.command: rc-service tailscaled {{ ts_action }}
+      when: ts_action != 'none' and not ansible_check_mode
+      become: true
+
+    # tailscaled answers a few seconds after it starts.
+    - name: Wait for tailscaled to answer
+      ansible.builtin.command: "{{ tailscale_bin }} status --json"
+      register: ts_status_up
+      until: ts_status_up.rc == 0 and ts_status_up.stdout is match('\s*\{') and (ts_status_up.stdout | from_json).BackendState | default('') not in ['', 'NoState', 'Starting']
+      retries: 20
+      delay: 3
+      changed_when: false
+      failed_when: false
+      when: not ansible_check_mode
+      become: true
+
+    - name: Note whether {{ inventory_hostname }} must join
+      ansible.builtin.set_fact:
+        ts_state_now: >-
+          {{ ts_state_before if ansible_check_mode else
+             ((ts_status_up.stdout | from_json).BackendState | default('unknown')
+              if ts_status_up.rc | default(1) == 0 and ts_status_up.stdout | default('') is match('\s*\{') else 'not answering') }}
+
+    - name: Check tailscaled answers
+      ansible.builtin.assert:
+        that: ansible_check_mode or ts_state_now != 'not answering'
+        fail_msg: >-
+          tailscaled on {{ inventory_hostname }} did not answer within a minute:
+          {{ ts_status_up.stderr | default('') | trim }}. /var/log/tailscaled.log there says
+          why. The binaries and the service are in place.
+        success_msg: "{{ ts_state_now }}"
+
+    # ── the join ─────────────────────────────────────────────────────────────
+    - name: "If not on the tailnet: join it"
+      when: ts_state_now != 'Running' and not ansible_check_mode
+      block:
+        - name: Check an auth key was given
+          ansible.builtin.assert:
+            that: tailscale_auth_key | length > 0
+            fail_msg: >-
+              {{ inventory_hostname }} is not on the tailnet ({{ ts_state_now }}) and no
+              auth key was given. Generate one in the admin console (Settings, Keys):
+              tagged tag:fleet, not reusable, a short expiry. Then re-run and paste it at
+              the prompt. tailscaled is installed and running.
+            success_msg: key given
+
+        - name: Create a root-only file for the auth key
+          ansible.builtin.tempfile:
+            path: /run
+            prefix: infra-tailscale-key.
+          register: ts_keyfile
+          become: true
+
+        # stdin, not content: copy would stage the key in a file on both machines first.
+        # Under pipelining the module's arguments travel on the ssh session's stdin, so
+        # the key reaches no argv and no disk but /run, which is memory.
+        - name: Write the auth key to it
+          ansible.builtin.command:
+            argv: [sh, -c, 'umask 077; cat > "$1"', sh, "{{ ts_keyfile.path }}"]
+            stdin: "{{ tailscale_auth_key }}"
+            stdin_add_newline: false
+          no_log: true
+          become: true
+
+        - name: Join the tailnet as tag:fleet, keeping DNS
+          ansible.builtin.command:
+            argv:
+              - "{{ tailscale_bin }}"
+              - up
+              - --auth-key=file:{{ ts_keyfile.path }}
+              - --advertise-tags=tag:fleet
+              - --accept-dns=false
+              - --timeout=120s
+          register: ts_up
+          become: true
+
+      always:
+        - name: Remove the auth key file
+          ansible.builtin.file:
+            path: "{{ ts_keyfile.path }}"
+            state: absent
+          when: ts_keyfile.path is defined
+          become: true
+
+    # ── after: read, report, then judge ──────────────────────────────────────
+    - name: Read the tailnet state after
+      ansible.builtin.shell: |
+        printf '%s\n' "$({{ tailscale_bin }} ip -4 2>/dev/null | head -n 1)"
+        {{ tailscale_bin }} status --json 2>/dev/null || echo '{}'
+      register: ts_after
+      changed_when: false
+      when: not ansible_check_mode
+      become: true
+
+    - name: Read the node's settings and tailscale status
+      ansible.builtin.shell: |
+        {{ tailscale_bin }} debug prefs 2>/dev/null || echo '{}'
+        echo '-- status'
+        {{ tailscale_bin }} status 2>&1 || true
+      register: ts_prefs
+      changed_when: false
+      when: not ansible_check_mode
+      become: true
+
+    - name: Read /etc/resolv.conf after
+      ansible.builtin.slurp:
+        src: /etc/resolv.conf
+      register: ts_resolv_after
+      when: not ansible_check_mode
+
+    - name: Note what the reads after found
+      ansible.builtin.set_fact:
+        ts_ip: "{{ ts_after.stdout_lines[0] | default('') | trim }}"
+        ts_json: "{{ ts_after.stdout_lines[1:] | default([]) | join('\n') | from_json }}"
+        ts_prefs_json: "{{ (ts_prefs.stdout | default('{}')).split('-- status')[0] | trim | from_json }}"
+        ts_status_text: "{{ (ts_prefs.stdout | default('')).split('-- status')[1] | default('') | trim }}"
+      when: not ansible_check_mode
+
+    - name: Print what changed, and the node
+      ansible.builtin.debug:
+        msg: >-
+          {{ (['DRY RUN: nothing was downloaded, installed, started or joined.'] if ansible_check_mode else []) +
+             ['tailscaled ' ~ (ts_was.tailscaled or 'missing') ~ ' -> ' ~ tailscale_static_version ~
+                ((', the previous kept as ' ~ tailscaled_bin ~ '.previous') if ts_moves | bool and ts_was.tailscaled != '' else '') ~
+                ('' if ts_moves | bool else ', already at the pin') ~ '.',
+              'Service file: ' ~ ('refused' if ts_svc_dry.rc != 0 else
+                ('as tracked' if 'Nothing to do' in ts_svc_dry.stdout else
+                 ('would be installed' if ansible_check_mode else 'installed'))) ~
+                ('; it takes effect at the next restart, which this run did not need.'
+                 if 'Nothing to do' not in ts_svc_dry.stdout and ts_action == 'none' else '.'),
+              'Runlevel: ' ~ ('in default' if ts_was.runlevel == 'yes' else
+                ('would add to default' if ansible_check_mode else 'added to default')) ~ '.',
+              'tailscaled was ' ~ ts_was.service ~ ('' if ts_action == 'none' else
+                ('; would ' if ansible_check_mode else '; ') ~ ts_action ~ ('' if ansible_check_mode else 'ed')) ~ '.',
+              'Tailnet: ' ~ ('joined now' if ts_up is defined and ts_up is changed else
+                ('already joined' if ts_state_now == 'Running' else
+                 ('would join, with the key asked for' if ansible_check_mode else
+                  'NOT JOINED (' ~ ts_state_now ~ ')'))) ~ '.'] +
+             ([] if ansible_check_mode else
+              [inventory_hostname ~ ' is ' ~ (ts_ip or 'NO ADDRESS') ~ ', named ' ~
+                 (ts_json.Self.DNSName | default(ts_json.Self.HostName | default('?')) | regex_replace('\.$', '')) ~ '.']) }}
+      changed_when: true
+
+    - name: Check the tailnet, its settings and the resolver
+      ansible.builtin.assert:
+        that:
+          - ts_json.BackendState | default('') == 'Running'
+          - ts_ip | length > 0
+          - ts_ip in ts_status_text
+          - ts_prefs_json.CorpDNS | default(true) == false
+          - "'tag:fleet' in (ts_prefs_json.AdvertiseTags | default([], true))"
+          - ts_resolv_after.content == ts_resolv_before.content
+        fail_msg: >-
+          {{ inventory_hostname }} is not on the tailnet as it should be: state
+          {{ ts_json.BackendState | default('unknown') }}, address {{ ts_ip | default('') or 'none' }}
+          ({{ 'listed' if ts_ip | default('') | length > 0 and ts_ip | default('') in ts_status_text | default('') else 'not listed' }}
+          by tailscale status), accept-dns {{ ts_prefs_json.CorpDNS | default('unknown') }},
+          tags {{ ts_prefs_json.AdvertiseTags | default([], true) | join(',') or 'none' }},
+          /etc/resolv.conf {{ 'unchanged' if ts_resolv_after.content | default('') == ts_resolv_before.content else 'CHANGED' }}.
+          Each must read Running, an address, listed, false, tag:fleet and unchanged. A
+          changed resolv.conf puts every lookup, the tunnel's too, behind tailscaled:
+          `sudo tailscale set --accept-dns=false` puts it back.
+        success_msg: done
+      when: not ansible_check_mode
