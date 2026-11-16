@@ -205,11 +205,12 @@
         # The running daemon's own version, which differs from the binary on disk after a
         # run that died between install and restart, or a hand copy of .previous.
         ts_running: >-
-          {{ ((ts_status_before.stdout | from_json).Version | default('') | regex_search('^[0-9]+\.[0-9]+\.[0-9]+') or '')
+          {{ ((ts_status_before.stdout | from_json).Version | default('') | regex_search('^[0-9]+[.][0-9]+[.][0-9]+') or '')
              if ts_status_before.rc == 0 and ts_status_before.stdout is match('\s*\{') else '' }}
-        # The tailnet's ranges: CGNAT for IPv4, Tailscale's ULA for IPv6.
+        # The tailnet's ranges: CGNAT for IPv4, Tailscale's ULA for IPv6. [.] rather than
+        # an escaped dot: the escaped form matched nothing, which alpine-sim caught.
         ts_via_tailnet: >-
-          {{ ts_conn.stdout is match('^100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.')
+          {{ ts_conn.stdout is match('^100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.]')
              or ts_conn.stdout | lower is match('^fd7a:115c:a1e0:') }}
 
     - name: Note what this run moves
