@@ -243,6 +243,10 @@ if ts $(fakepin 9.9.1 "$sum1") -e tailscale_auth_key=; then pass "exits 0"; else
 [ "$(svpid)" = "$pid1" ] && pass "tailscaled was not restarted" || fail "tailscaled restarted with nothing moved"
 [ "$(uplines)" = 1 ] && pass "no second join" || fail "joined again"
 says 'already at the pin' && says 'already joined' && pass "reports nothing to do" || fail "re-run report wrong"
+# Calibration for the tailnet case below: a connection that is not over the tailnet must
+# be read, and read as not.
+grep -o 'This run came in from [^,]*' play.log | sed 's/^/    /'
+says 'This run came in from 172.' && says 'not over the tailnet' && pass "read this connection's address, not the tailnet's" || fail "did not read this connection's address"
 on 'test ! -e /run/infra-tailscale-key' && pass "swept the leftover key file" || fail "left the leftover key file"
 
 echo "== the pin moved to 9.9.2"
@@ -275,6 +279,7 @@ if docker network create --subnet 100.64.77.0/24 infra-sim-tailnet >/dev/null &&
 	if ts $(fakepin 9.9.3 "$sum3") -e tailscale_auth_key= -e ansible_host=100.64.77.2 -e ansible_port=22; then fail "restarted over the tailnet"; else
 		says 'over the tailnet (100.64.77.1)' && pass "refused to restart over the tailnet" || fail "failed, but not by the tailnet check"
 	fi
+	grep -o 'This run came in from [^,]*' play.log | sed 's/^/    /'
 	[ "$(ver '/usr/local/bin/tailscale version')" = 9.9.2 ] && [ "$(svpid)" = "$pidt" ] && pass "binaries and tailscaled untouched" || fail "the box changed"
 	docker network disconnect infra-sim-tailnet "$box"
 else

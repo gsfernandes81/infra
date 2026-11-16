@@ -547,7 +547,9 @@
               'Tailnet: ' ~ ('joined now' if ts_up is defined and ts_up is changed else
                 ('already joined' if ts_state_now == 'Running' else
                  ('would join, with the key asked for' if ansible_check_mode else
-                  'NOT JOINED (' ~ ts_state_now ~ ')'))) ~ '.'] +
+                  'NOT JOINED (' ~ ts_state_now ~ ')'))) ~ '.',
+              'This run came in from ' ~ (ts_conn.stdout or 'an address ssh did not give') ~
+                (', over the tailnet.' if ts_via_tailnet | bool else ', not over the tailnet.')] +
              ([] if ansible_check_mode else
               [inventory_hostname ~ ' is ' ~ (ts_ip or 'NO ADDRESS') ~ ', named ' ~
                  (ts_json.Self.DNSName | default(ts_json.Self.HostName | default('?')) | regex_replace('\.$', '')) ~ '.']) }}
