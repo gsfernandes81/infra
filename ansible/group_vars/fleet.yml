@@ -81,3 +81,15 @@ prune_keep_images:
 # differs sets `infra_checkout` in its host_vars file, which outranks this; a play must
 # not define it again, because play vars outrank host_vars and would hide that override.
 infra_checkout: /home/gavin/infra
+
+# ---------------------------------------------------------------- Tailscale on Alpine
+#
+# The static build server-install-tailscale.yml installs on an Alpine host, which has no
+# Tailscale repo to take it from (docs/decisions.md § The setup plays). THE ONE COPY of the
+# pin: hosts/zero/system/README.md § Tailscale points here and quotes neither value.
+# Moving it is a commit here, the version and the SHA-256 from the `.sha256` beside the
+# tarball on https://pkgs.tailscale.com/stable/, then the play, which keeps the binaries
+# it replaces as .previous. One SHA-256 per `uname -m`; an architecture with none is
+# refused. `two` (armv6l) gets its line when it joins.
+tailscale_static_version: "1.104.5"
+tailscale_static_sha256_aarch64: e900b0e6e25023a1e504b2c237ce2a32ea0535e006f8c1a1097a490886493b6c

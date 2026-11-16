@@ -45,7 +45,10 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 | bring the dev containers up, or change them: build, plan, y/N, compare ids, probe | `server-deploy-compose.yml -e deployment=dev -K` | sudo |
 | see what runs where, read-only, into `docs/fleet-inventory.md` — a full run that changed it commits it and asks before pushing | `server-generate-fleet-inventory.yml -K` · `-e push=true` / `push=false` / `commit=false` | sudo, and this checkout exactly at `origin/main` |
 | install the packages each Pi should have | `server-install-packages.yml -K` · `-l <host>` | sudo |
-| install the tracked `/etc` files, without restarting anything | `server-install-system-files.yml -K` · `-l <host>` · `-e only=<file>` | sudo |
+| install the tracked `/etc` files, without restarting anything | `server-install-system-files.yml -K` · `-l <host>` · `-e only=<file>`, a pattern matched against the whole name, so one file: `-l two -e only=sshd-infra.conf` | sudo |
+| put an Alpine Pi on the tailnet, or move it to the Tailscale pin in `group_vars/fleet.yml`: Tailscale's static build checked by SHA-256 (the replaced binaries kept as `.previous`), the tracked `tailscaled` service through `bin/install-system-file`, the default runlevel, a start (a restart only when the binary moved or the running daemon is not the pin, never over the tailnet), and the join as `tag:fleet` with `--accept-dns=false` if the box is not on it; then checks the box is on the tailnet, `tailscale status` lists it and `/etc/resolv.conf` is unchanged. Asks for an auth key without echoing it (Enter alone when already joined), which reaches the box only as the root-only `/run/infra-tailscale-key` for the length of `tailscale up`, swept at the start of every run in case a killed run left it. Refuses a host that is not Alpine and one with Alpine's own `tailscale`. Tested in CI against an Alpine container (`sim/alpine/`) | `server-install-tailscale.yml -e target=zero -K` · `--check` reads and reports | sudo, and for a join an auth key from the admin console: `tag:fleet`, not reusable, short expiry |
+| make zero's backup key, `/root/.ssh/mirror-backup`, only if absent, and print the public key, its fingerprint and `tailscale ip -4` for three's key line. Refuses a host off the tailnet | `server-create-backup-key.yml -e target=zero -K` | sudo; the box on the tailnet |
+| store the ntfy URL zero's backup alert posts to, root 0600, asked for without echoing it, and send one test message if you answer y, printing only its HTTP status | `server-store-backup-ntfy-url.yml -e target=zero -K` · `--check` writes and sends nothing | sudo, the topic's URL |
 | create a tunnel for a Pi (nothing serves through it yet) | `server-create-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | create a NEW host's first tunnel, credentials and `ssh-<host>` CNAME (`three`); tested in CI against a stand-in API (`sim/cloudflare/`) | `server-create-host-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | give a compose deployment its own tunnel, for a `cloudflared` sidecar — plus an Access login if its `edge.yml` asks | `server-create-deployment-tunnel.yml -e deployment=calibre-web -K` · **never `-l`**: the host comes from the deployment's symlink · pulls the host's checkout to your commit itself | sudo, the API token, and `~/.config/cloudflare/access-emails` for a login |
@@ -60,9 +63,10 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 | update cloudflared on a Pi, deliberately | `server-update-cloudflared.yml -e target=<host> -e version=… -e sha256=… -K` | sudo; refuses while that host autoupdates, which today is all of them |
 
 **Three ways a play picks its host, each on purpose.** A play that changes one host at a time
-(the tunnel plays and the cloudflared update) is aimed with `-e target=<host>`; its `hosts:` is
-that variable, so leaving it out falls back to `one` (or refuses, for the update) and can never
-widen to the whole fleet. A fleet-wide play (packages, system files, the inventory) runs on
+(the tunnel plays, the cloudflared and Leap updates, and the three setup plays) is aimed
+with `-e target=<host>`; its `hosts:` is that variable, so leaving it out falls back to
+`one` (or refuses, for the updates and the setup plays) and can never widen to the whole
+fleet. A fleet-wide play (packages, system files, the inventory) runs on
 `fleet` and is narrowed with `-l <host>`. A deployment play
 (`server-create-deployment-tunnel.yml` and the two `server-deploy-` plays) reads its host
 from the `hosts/<host>/<name>` symlink and takes no `-l` at all, because `-l` would skip
@@ -80,7 +84,8 @@ open.
 
 **Only `server-generate-fleet-inventory.yml` is read-only** on the hosts. On the control
 node it writes the report and commits it. Every other `server-` play changes something:
-packages, **boot-path `/etc` files**, the cloudflared binary, tunnels and DNS,
+packages, **boot-path `/etc` files**, the cloudflared and Tailscale binaries, the tailnet,
+zero's backup key and alert URL, tunnels and DNS,
 `authorized_keys` on `zero`, Access in front of the fleet's ssh hostnames. **The two
 `server-deploy-` plays are the ones that start a deployment**, Phase 3's "Ansible drives
 deployments": `garmin-mcp` first, then `send2ereader`. `server-stop-deployments.yml` stops
@@ -377,7 +382,7 @@ as above. A token that was ever on screen in a shared place is one to roll, not 
 | `ansible.cfg` | read from the **cwd**, so run from this directory |
 | `inventory` | deliberately thin — `~/.ssh/config` owns the transport |
 | `group_vars/all.yml` | the fleet inventory's path and `dns_zone`; applies to `localhost` too |
-| `group_vars/fleet.yml` | the container CLI |
+| `group_vars/fleet.yml` | the container CLI, the packages, and the Tailscale pin for Alpine hosts |
 | `host_vars/` | four files: the three hosts' container runtimes, plus `localhost.yml`'s Termux fixes — see below |
 | `playbooks/` | the ones above; `_assert-inventory.yml` is imported, never run |
 | `playbooks/client-home-ssh-config.yml` | the dev-container registry lives in its header |

@@ -6,10 +6,10 @@ must be true before it, its steps, the checks that say it worked, and its way ba
 the visit is done, what stays true moves to `docs/decisions.md` and the host READMEs, and
 this file is deleted.
 
-Every block is fish, and its first line names the box it runs on, after `ssh <host>`
-(`ssh host 'sudo …'` hangs, CLAUDE.md § Privileged commands). Plays run from the control
-node, in `~/infra/ansible`, where `ansible.cfg` is read. The infra agent is the session in
-the `infra` container; it commits the values the steps send it.
+Every block is fish, and its first line names where it runs: the phone, or a box, after
+`ssh <host>` (`ssh host 'sudo …'` hangs, CLAUDE.md § Privileged commands). Plays run from
+the control node, the phone, in `~/infra/ansible`, where `ansible.cfg` is read. The infra
+agent is the session in the `infra` container; it commits the values the steps send it.
 
 ## The slices
 
@@ -60,103 +60,145 @@ Over ssh, from the phone, any day before. Each is a step a slice would otherwise
    and erasing a stick*. CI fails when they disagree (`.github/workflows/leap-pins.yml`).
 2. **The tailnet's settings,** in its admin console: auto-update off, and a `tagOwners`
    entry for `tag:fleet` in the policy (`decisions.md`).
-3. **`zero` on the tailnet.** Tailscale's repo has nothing for Alpine, so `zero` runs
-   Tailscale's own static build with the tracked service `hosts/zero/system/tailscaled`
-   ([`hosts/zero/system/README.md`](../hosts/zero/system/README.md) § Tailscale). Keep the
-   first ssh session open until a second one has answered.
+3. **`zero` on the tailnet**, by `server-install-tailscale.yml`. Tailscale's repo has
+   nothing for Alpine, so `zero` runs Tailscale's own static build, at the pin in
+   `ansible/group_vars/fleet.yml`, with the tracked service `hosts/zero/system/tailscaled`
+   ([`hosts/zero/system/README.md`](../hosts/zero/system/README.md) § Tailscale). First an
+   auth key, in the admin console under Settings, Keys: tagged `tag:fleet`, not reusable,
+   expiring within a day. Then, from the phone:
 
    ```fish
-   # on zero: check Alpine's own tailscale is absent; go on only if this prints "absent"
+   # on the phone: read what the Tailscale play would do on zero; press Enter at the key prompt
+   cd ~/infra/ansible; and ansible-playbook playbooks/server-install-tailscale.yml -e target=zero -K --check
+   ```
+
+   ```fish
+   # on the phone: install Tailscale on zero, start it, and join the tailnet; paste the auth key at its prompt
+   cd ~/infra/ansible; and ansible-playbook playbooks/server-install-tailscale.yml -e target=zero -K
+   ```
+
+   Each asks for your sudo password, then the key, which it does not echo. The dry run
+   reports the versions it would install, the service file as a new file, and `would join`.
+   The real run ends by printing `zero`'s tailnet address and name, then checks that `zero`
+   is on the tailnet as `tag:fleet` with `--accept-dns=false`, that `tailscale status`
+   lists it, and that `/etc/resolv.conf` reads as it did before. It refuses if Alpine's own
+   `tailscale` package is installed. The play reaches `zero` through the tunnel and touches
+   neither sshd nor `cloudflared`.
+
+   **Checks:** a second `ssh zero` answers through the tunnel; `sudo docker ps` lists
+   everything that ran before; Immich and the dev hub answer.
+
+   **Way back:** `sudo tailscale down; and sudo rc-service tailscaled stop; and sudo
+   rc-update del tailscaled default`, and the node removed in the admin console.
+
+   **By hand, if the play cannot run**, after `ssh zero`, with the version and SHA-256 from
+   `ansible/group_vars/fleet.yml` in place of the placeholders. Go on past the first block
+   only if it prints `absent`, and open the URL the last line prints.
+
+   ```fish
+   # on zero, by hand: check Alpine's own tailscale is absent; go on only if this prints "absent"
    apk info -e tailscale; and echo 'STOP: Alpine tailscale is installed'; or echo absent
    ```
 
    ```fish
-   # on zero: install Tailscale 1.104.5's static arm64 build, checked against Tailscale's published SHA-256
-   cd /tmp; curl -fLO https://pkgs.tailscale.com/stable/tailscale_1.104.5_arm64.tgz
-   echo 'e900b0e6e25023a1e504b2c237ce2a32ea0535e006f8c1a1097a490886493b6c  tailscale_1.104.5_arm64.tgz' | sha256sum -c -; and tar -xzf tailscale_1.104.5_arm64.tgz
-   sudo install -D -m 755 tailscale_1.104.5_arm64/tailscaled /usr/local/sbin/tailscaled; and sudo install -D -m 755 tailscale_1.104.5_arm64/tailscale /usr/local/bin/tailscale
-   rm -rf /tmp/tailscale_1.104.5_arm64 /tmp/tailscale_1.104.5_arm64.tgz
+   # on zero, by hand: install the pinned static build and the tracked service, start it, and join keeping zero's resolver
+   set v VERSION; set sum PASTE_SHA256_HERE
+   cd /tmp; curl -fLO https://pkgs.tailscale.com/stable/tailscale_{$v}_arm64.tgz
+   echo "$sum  tailscale_"$v"_arm64.tgz" | sha256sum -c -; and tar -xzf tailscale_{$v}_arm64.tgz; and sudo install -D -m 755 tailscale_{$v}_arm64/tailscaled /usr/local/sbin/tailscaled; and sudo install -D -m 755 tailscale_{$v}_arm64/tailscale /usr/local/bin/tailscale
+   rm -rf /tmp/tailscale_{$v}_arm64 /tmp/tailscale_{$v}_arm64.tgz
+   cd ~/infra; and git pull --ff-only; and sudo bin/install-system-file tailscaled --commit --allow-content-change --new
+   sudo rc-update add tailscaled default; and sudo rc-service tailscaled start
+   cat /etc/resolv.conf; sudo tailscale up --advertise-tags=tag:fleet --accept-dns=false; cat /etc/resolv.conf
    ```
+
+4. **`zero`'s backup key**, by `server-create-backup-key.yml`, once step 3 has passed:
 
    ```fish
-   # on zero: install the tailscaled service from the repo, start it, and join the tailnet as a fleet node, keeping zero's own resolver
-   cat /etc/resolv.conf
-   cd ~/infra; and git pull; and sudo bin/install-system-file tailscaled --commit --allow-content-change --new
-   sudo rc-update add tailscaled default; and sudo rc-service tailscaled start
-   sudo tailscale up --advertise-tags=tag:fleet --accept-dns=false
+   # on the phone: make zero's backup key if it has none, and print the values three's key line needs
+   cd ~/infra/ansible; and ansible-playbook playbooks/server-create-backup-key.yml -e target=zero -K
    ```
 
-   Open the URL the last line prints on the phone.
-
-   **Checks:** a second `ssh zero` answers through the tunnel; `cat /etc/resolv.conf` reads
-   as it did before; `tailscale status` lists `zero`; `sudo docker ps` lists everything that
-   ran before; Immich and the dev hub answer.
-
-   **Way back:** `sudo tailscale down; and sudo rc-service tailscaled stop; and sudo
-   rc-update del tailscaled default`, and the node removed in the admin console.
-4. **`zero`'s backup key**, the three lines in
-   [`hosts/three/leap/README.md`](../hosts/three/leap/README.md) § Before the stick. Send
-   the infra agent the key and the address they print; until it commits them,
-   `make-stick` refuses `three`'s stick.
+   It refuses until `zero` is on the tailnet, and never replaces a key that exists. It
+   prints the public key, `zero`'s tailnet address and the key's fingerprint. Send the infra
+   agent all three: it commits the key and the address into
+   `hosts/three/leap/system/backup-authorized-keys`, and checks the key, which wraps on the
+   phone's screen, against the fingerprint. Until it has, `make-stick` refuses `three`'s
+   stick.
 5. **`rsync` on the Alpine hosts:** `ansible-playbook playbooks/server-install-packages.yml
    --check --diff -K` to read what it would install, then without `--check`.
 6. **The new `PermitOpen`** (it adds `three`'s `.103`) on `two`, then `one`, then `zero`,
-   with the same two blocks on each, after `ssh <host>`. `one` needs it even though the
-   8 GB board replaces it, because its Alpine card is slice 1's way back. The first block
-   is a dry run: with no `--commit` it writes nothing, and `--allow-content-change` lets
-   it reach its `sshd -t` checks instead of refusing after the diff. Its diff is the
+   by `server-install-system-files.yml` narrowed to the one file. `one` needs it even though
+   the 8 GB board replaces it, because its Alpine card is slice 1's way back. First a dry
+   run on all three, which writes nothing:
+
+   ```fish
+   # on the phone: the dry run of the new sshd drop-in on two, one and zero, which shows each diff and writes nothing
+   cd ~/infra/ansible; and ansible-playbook playbooks/server-install-system-files.yml -l two,one,zero -e only=sshd-infra.conf --check --diff -K
+   ```
+
+   It asks for your sudo password, for the `sshd -t` checks. Each host's diff is the
    `PermitOpen` line, a new comment above it, and two reworded comments, and it ends
-   `pre-checks on the repo copy: ok` and `DRY RUN`. If it shows anything else, stop. It
-   asks for your sudo password even so, for its `sshd -t` checks.
+   `pre-checks on the repo copy: ok` and `DRY RUN`. If it shows anything else, or a line
+   saying the dry run refused a file, stop. Then, for each host in turn, the install from
+   the phone, the reload on the host, and a second session:
 
    ```fish
-   # on two: pull, then a dry run of the new sshd drop-in, which shows the diff and writes nothing
-   cd ~/infra; and git pull --ff-only; and bin/install-system-file sshd-infra.conf --allow-content-change
+   # on the phone: install the sshd drop-in on two; nothing is reloaded
+   cd ~/infra/ansible; and ansible-playbook playbooks/server-install-system-files.yml -l two -e only=sshd-infra.conf -K
    ```
 
    ```fish
-   # on two: install the sshd drop-in, reload sshd, and print the PermitOpen now on disk
-   cd ~/infra; and sudo bin/install-system-file sshd-infra.conf --commit --allow-content-change; and sudo rc-service sshd reload; and sudo sshd -T | grep -i permitopen
+   # on two: reload sshd and print the PermitOpen now on disk
+   sudo rc-service sshd reload; and sudo sshd -T | grep -i permitopen
    ```
 
    ```fish
-   # on one: pull, then a dry run of the new sshd drop-in, which shows the diff and writes nothing
-   cd ~/infra; and git pull --ff-only; and bin/install-system-file sshd-infra.conf --allow-content-change
+   # on the phone: install the sshd drop-in on one; nothing is reloaded
+   cd ~/infra/ansible; and ansible-playbook playbooks/server-install-system-files.yml -l one -e only=sshd-infra.conf -K
    ```
 
    ```fish
-   # on one: install the sshd drop-in, reload sshd, and print the PermitOpen now on disk
-   cd ~/infra; and sudo bin/install-system-file sshd-infra.conf --commit --allow-content-change; and sudo rc-service sshd reload; and sudo sshd -T | grep -i permitopen
+   # on one: reload sshd and print the PermitOpen now on disk
+   sudo rc-service sshd reload; and sudo sshd -T | grep -i permitopen
    ```
 
    ```fish
-   # on zero: pull, then a dry run of the new sshd drop-in, which shows the diff and writes nothing
-   cd ~/infra; and git pull --ff-only; and bin/install-system-file sshd-infra.conf --allow-content-change
+   # on the phone: install the sshd drop-in on zero; nothing is reloaded
+   cd ~/infra/ansible; and ansible-playbook playbooks/server-install-system-files.yml -l zero -e only=sshd-infra.conf -K
    ```
 
    ```fish
-   # on zero: install the sshd drop-in, reload sshd, and print the PermitOpen now on disk
-   cd ~/infra; and sudo bin/install-system-file sshd-infra.conf --commit --allow-content-change; and sudo rc-service sshd reload; and sudo sshd -T | grep -i permitopen
+   # on zero: reload sshd and print the PermitOpen now on disk
+   sudo rc-service sshd reload; and sudo sshd -T | grep -i permitopen
    ```
 
-   The last line ends `192.168.86.103:22`; it reads the file on disk, and the second
-   session below is what proves the running sshd answers. This is safe over the tunnel.
-   `install-system-file` runs `sshd -t` on the file and on the whole config before it
-   writes, runs it again after, and puts the old file back if that fails. A reload keeps
-   every open session, and the tunnel is not touched. Before you close the session the
-   reload ran in, open a second `ssh <host>` and wait for it to answer.
+   The install ends naming `sshd-infra.conf` and saying nothing was restarted: the play
+   never restarts or reloads anything, by design. The reload's last line ends
+   `192.168.86.103:22`; it reads the file on disk, and the second session is what proves
+   the running sshd answers. This is safe over the tunnel. `install-system-file` runs
+   `sshd -t` on the file and on the whole config before it writes, runs it again after,
+   and puts the old file back if that fails. A reload keeps every open session, and the
+   tunnel is not touched. Before you close the session the reload ran in, open a second
+   `ssh <host>` and wait for it to answer.
 
-   **Way back:** in the session that is still open, copy back the backup the install named
-   after `backed up`: `sudo cp -a <that path> /etc/ssh/sshd_config.d/10-infra.conf; and
-   sudo rc-service sshd reload`.
-7. **The ntfy topic** for the backup's age alert. Its URL is asked for, never typed on a
-   command line:
+   **Way back:** in the session that is still open, the drop-in the install replaced, from
+   its backup, which the install keeps under `/root/.infra-backups/<host>/`:
 
    ```fish
-   # on zero: store the ntfy topic's URL for the backup's age alert, root's alone
-   sudo install -d -m 700 /var/lib/mirror-backup
-   read -s -P 'ntfy URL: ' u; and printf '%s\n' $u | sudo sh -c 'umask 077; cat > /var/lib/mirror-backup/ntfy-url'; set -e u
+   # on the host whose second session failed: put back the sshd drop-in from the newest backup, and reload
+   set b (sudo sh -c 'ls -d /root/.infra-backups/*/*/10-infra.conf' | tail -n 1); and echo $b; and sudo cp -a $b /etc/ssh/sshd_config.d/10-infra.conf; and sudo rc-service sshd reload
    ```
+7. **The ntfy topic** for the backup's age alert, by `server-store-backup-ntfy-url.yml`:
+
+   ```fish
+   # on the phone: store the ntfy topic's URL on zero, root's alone, and send it one test message
+   cd ~/infra/ansible; and ansible-playbook playbooks/server-store-backup-ntfy-url.yml -e target=zero -K
+   ```
+
+   It asks for the URL, without echoing it, then whether to send a test message: answer
+   `y`. It prints that the URL was written, root 0600, and `Test message: HTTP 200`, and the
+   message reaches the topic titled `zero backup`. Any other status stops the play with the
+   URL stored: check the topic, then run it again with the right URL.
 
 ## Writing a card, and erasing a stick
 

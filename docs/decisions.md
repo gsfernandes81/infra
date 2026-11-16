@@ -2281,7 +2281,9 @@ carries them out.
   needed `three`'s stick before the visit; and a phone hotspot, which still joins `one`'s
   tunnel.
 - **`zero` runs Tailscale's own static arm64 build**, pinned by version and SHA-256 and
-  moved by hand, with a tracked OpenRC service. Tailscale's repo, which the other hosts
+  moved by hand, with a tracked OpenRC service. **⚠︎ "By hand" SUPERSEDED on 2026-11-16:**
+  a play installs and moves it, from a pin in `group_vars/fleet.yml` (*The setup plays*,
+  below). Tailscale's repo, which the other hosts
   use, has nothing for Alpine, and Alpine's package lacked the TS-2026-013 fix on
   2026-11-03. Set aside: Alpine's package, simplest but behind on a security fix.
 - **SD cards are written on `two`, with a USB card reader,** because `zero`'s and `one`'s
@@ -2309,6 +2311,63 @@ carries them out.
   included, behind `tailscaled`: a broken `tailscaled` would then cost both ways in at
   once. Nothing here needs Tailscale's DNS; the backup names `three` by address. Found in
   review.
+
+## The setup plays: Tailscale on Alpine, zero's backup key and its alert URL
+
+**Decided 2026-11-16**, the owner's call: the hand-pasted steps 3, 4, 6 and 7 of the visit
+runbook's § Before the visit become plays, so setting up a new device and recovering one
+are repeatable, one command each, run from the phone over each box's tunnel. The rest came
+out of writing them and is proven by `alpine-sim.yml`.
+
+- **Three plays, and one existing play for `PermitOpen`.** `server-install-tailscale.yml`
+  installs or moves Tailscale's static build on an Alpine host, installs the tracked
+  service through `bin/install-system-file`, starts it and joins.
+  `server-create-backup-key.yml` makes zero's backup key and prints what `three`'s key
+  line needs. `server-store-backup-ntfy-url.yml` stores the alert's URL. Step 6 is
+  `server-install-system-files.yml -l <host> -e only=sshd-infra.conf`, with sshd reloaded
+  by hand, since that play never restarts anything.
+- **The backup key and the ntfy URL are two plays, not one.** They wait on different
+  things: the key on Tailscale, since it prints the tailnet address, and the URL on
+  nothing. They are redone apart: a leaked topic is replaced without touching the key, and
+  a new key also needs `three`'s line changed. Set aside: one play, which saves a command
+  once and asks for the URL whenever the key is remade.
+- **The Tailscale pin is `tailscale_static_*` in `ansible/group_vars/fleet.yml`**, the
+  version and one SHA-256 per `uname -m`. It is the one copy: zero's system README points
+  there and quotes neither value. Moving it is a commit there, then the play. Set aside:
+  `leap/pins`, which every Leap host reads while no Leap host runs this build; and the
+  command line, as `server-update-cloudflared.yml` takes its pin, which leaves no record
+  of what a host should run.
+- **The auth key reaches the box only as a root-only file, `/run/infra-tailscale-key`**,
+  passed as `--auth-key=file:<path>`. A command line is readable by every user in `/proc`
+  and lands in logs. The key travels as a module argument, which under pipelining goes
+  over the ssh session's stdin, and `/run` is memory. The file is removed when the join
+  ends, however it ends, but a run that dies (Ctrl-C, a dropped connection) never reaches
+  that step, so the path is fixed and every run removes it before anything else; a boot
+  empties `/run` too. Set aside: a tempfile per run, which a killed run leaves under a
+  name the next run cannot know.
+- **The auth key and the ntfy URL are typed at a prompt, not read from a file.** This is
+  the exception to "nothing is ever prompted for" beside the Cloudflare token in
+  `group_vars/all.yml`. The auth key is single-use and expires within a day, so a file on
+  the phone would hold nothing worth keeping. The URL is typed once per box, and a file on
+  the phone would be a second copy of a secret whose home is `zero`. The repo's callback
+  now closes the running step before a prompt, so its timer never draws over one.
+- **The Tailscale play restarts `tailscaled` only when the binary moved or the running
+  daemon reports a version other than the pin** (`tailscale status --json`, after a run
+  that died before its restart or a hand copy of `.previous`), and refuses to when its own
+  connection came in over the tailnet (CLAUDE.md § Changing the thing you
+  are connected through). Over the tunnel, which is how the phone reaches every box, a
+  restart cannot cut the play off. A changed service file waits for the next restart, and
+  the play says so.
+- **Before and after a join it compares `/etc/resolv.conf`**, and after it checks the
+  node's own settings: `--accept-dns=false` and `tag:fleet`. A box joined by hand without
+  the flag fails the check rather than passing it unnoticed.
+- **CI runs all three against an Alpine container with OpenRC as init, reached over ssh**,
+  on an arm64 runner (`sim/alpine/`). The real pinned tarball is downloaded, checked,
+  installed and started, and the real `tailscale up` must refuse a made-up key; stand-in
+  tarballs whose `tailscale` answers `up` cover the join, a moved pin, a stale daemon,
+  the restarts and the refusals, the tailnet one through a second network in the
+  tailnet's range. Its first run found that a minimal Alpine has no `/usr/local/sbin`,
+  which the hand block's `install -D` had hidden.
 
 ## The lesson worth keeping
 

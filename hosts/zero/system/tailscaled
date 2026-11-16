@@ -8,9 +8,10 @@
 # Tailscale's node agent: zero's second way in, and the path zero's backup takes to three
 # (docs/decisions.md § Every box has two ways in). Tailscale's repo has nothing for Alpine,
 # and on 2026-11-03 Alpine's package lacked the fix for TS-2026-013, so the binaries are
-# Tailscale's own static arm64 build, in /usr/local, pinned by version and SHA-256 and
-# installed and moved by hand (hosts/zero/system/README.md § Tailscale). Its flags are
-# upstream's systemd unit's, as the tarball ships it.
+# Tailscale's own static arm64 build, in /usr/local, pinned by version and SHA-256 in
+# ansible/group_vars/fleet.yml and installed and moved by
+# ansible/playbooks/server-install-tailscale.yml (hosts/zero/system/README.md § Tailscale).
+# Its flags are upstream's systemd unit's, as the tarball ships it.
 #
 # It never gives up restarting (respawn_max=0): a way in that stopped retrying is a box
 # nobody can reach. `tailscaled --cleanup` after a stop removes its routes and firewall

@@ -15,18 +15,19 @@ its first boot, in `one`'s shape ([`leap/README.md`](../../../leap/README.md)), 
 ## Before the stick
 
 `system/backup-authorized-keys` carries two of zero's values as placeholders, and
-`make-stick` refuses a stick while they are there. Both exist once zero is on the tailnet.
-After `ssh zero`:
+`make-stick` refuses a stick while they are there. Both exist once zero is on the tailnet
+(`server-install-tailscale.yml`). From the phone:
 
 ```fish
-# make zero's backup key, root's alone, and print the two values for the infra agent
-sudo install -d -m 700 /root/.ssh
-sudo ssh-keygen -t ed25519 -N '' -C 'zero mirror-backup' -f /root/.ssh/mirror-backup
-sudo cat /root/.ssh/mirror-backup.pub
-tailscale ip -4
+# on the phone: make zero's backup key if it has none, and print the values three's key line needs
+cd ~/infra/ansible; and ansible-playbook playbooks/server-create-backup-key.yml -e target=zero -K
 ```
 
-The infra agent commits them in place of the placeholders, and the stick can be built.
+It makes `/root/.ssh/mirror-backup` only if no key is there, and prints its public key,
+zero's tailnet address and the key's fingerprint. The infra agent commits the key and the
+address in place of the placeholders, checking the key against the fingerprint, and the
+stick can be built. [`plans/visit-runbook.md`](../../../plans/visit-runbook.md) § Before
+the visit, step 4, is the same step.
 
 ## The stick
 

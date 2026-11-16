@@ -1,0 +1,19 @@
+#!/bin/sh
+# A stand-in for tailscaled, packed with fake/tailscale (its header says how): it reports
+# its version, does nothing on --cleanup, and otherwise runs until it is stopped, which is
+# all the tracked OpenRC service needs from it.
+version=@VERSION@
+case "${1-}" in
+--version) echo "$version"; exit 0 ;;
+--cleanup) exit 0 ;;
+esac
+echo "fake tailscaled $version: $*"
+# The running version, which fake/tailscale's status --json reports as the daemon's.
+echo "$version-tsim" > /run/fake-tailscaled.version
+child=
+trap '[ -n "$child" ] && kill "$child" 2>/dev/null; exit 0' TERM INT
+while :; do
+	sleep 60 &
+	child=$!
+	wait "$child"
+done
