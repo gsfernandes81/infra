@@ -371,7 +371,7 @@
       ansible.builtin.pause:
         prompt: |
 
-          {{ 'Converge' if fleet_app else 'Gate' }} {{ fleet_hostname }}, admitting only these clients:
+          {{ 'Converge' if fleet_app else 'Gate' }} {{ fleet_hostname }}, admitting only these client tokens:
 
           {% for t in fleet_tokens %}
             {{ t.name }}
@@ -380,7 +380,7 @@
             Disabled, not admitted: {{ fleet_disabled | join(', ') }}
           {% endif %}
 
-          A client you use that is not in this list is shut out of {{ fleet_host }} through its
+          A client whose token is not in this list is shut out of {{ fleet_host }} through its
           tunnel until it runs client-home-ssh-config.yml. Type yes to go on
       register: fleet_confirm
       when: not ansible_check_mode
