@@ -8,14 +8,18 @@
 # tunnel in place as server-create-host-tunnel.yml and install-system-file would, format
 # the drive with make-mirror, and unlock it with the README's own command.
 
-# zero's two values in the backup user's authorized_keys: the run's own backup key, which
-# the runner pushes with as zero would, and the address the runner's connections arrive
-# from, which is qemu's host address on this network.
+# zero's two values in the backup user's authorized_keys, read from the tracked line and
+# swapped on the stick for the run's own: its backup key, which the runner pushes with as
+# zero would, and the address the runner's connections arrive from, qemu's host address on
+# this network. Everything else on the line is the tracked one, as the box will carry it.
 rm -f backup-key backup-key.pub
 ssh-keygen -q -t ed25519 -N '' -C 'sim zero mirror-backup' -f backup-key
+zero_line=$(grep -v '^#' "$repo/hosts/three/leap/system/backup-authorized-keys")
+zero_from=$(sed -n 's/.*from="\([^"]*\)".*/\1/p' <<<"$zero_line")
+zero_key=$(grep -oE 'ssh-ed25519 [A-Za-z0-9+/=]+ .*$' <<<"$zero_line")
 declare -A standin=(
-	[FILL-FROM-ZERO-BACKUP-KEY]="$(cat backup-key.pub)"
-	[FILL-FROM-ZERO-TAILNET-ADDRESS]=192.168.86.1
+	["$zero_key"]="$(cat backup-key.pub)"
+	["$zero_from"]=192.168.86.1
 )
 
 # qemu's user network on the UK subnet, so three's static address answers.

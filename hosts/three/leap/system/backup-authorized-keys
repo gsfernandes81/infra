@@ -10,7 +10,8 @@
 # and whatever the client asks for, sshd runs the rsync daemon of rsync-backup.conf, which
 # can only write into /media/mirror/incoming.
 #
-# TWO PLACEHOLDERS, filled from zero once it is on the tailnet and its key is made
-# (hosts/three/leap/README.md § Before the stick): `tailscale ip -4` on zero, and
-# /root/.ssh/mirror-backup.pub. make-stick refuses a stick while either is left.
-restrict,from="FILL-FROM-ZERO-TAILNET-ADDRESS",command="rsync --server --daemon --config=/etc/rsync-backup.conf ." FILL-FROM-ZERO-BACKUP-KEY
+# zero's two values, from server-create-backup-key.yml on 2026-11-18 (hosts/three/leap/README.md
+# § Before the stick): zero's tailnet address, and /root/.ssh/mirror-backup.pub, whose
+# fingerprint is SHA256:CjbPiNyKKzvTZb60xObBkwgjLWbpH6CSyq+rqXUCBI0. A new key or address
+# for zero means a new line here, then a new stick or an install-system-file on three.
+restrict,from="100.121.158.58",command="rsync --server --daemon --config=/etc/rsync-backup.conf ." ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIL+FViXrAAkhwUAvxcOInjLK0007iTUDtgZvckbhhIKa zero mirror-backup
