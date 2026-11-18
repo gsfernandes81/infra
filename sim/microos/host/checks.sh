@@ -164,12 +164,13 @@ else
 		done; [ "$n" -gt 0 ]'
 	# Each file a deployment's .env names as TUNNEL_CREDENTIALS is 65532's at 0600, the
 	# cloudflared image's user, or that deployment's sidecar cannot read it; everything else in
-	# a secrets directory is gavin's. At least one is required, so the check cannot pass on a
-	# host where no .env names one.
+	# a secrets directory is gavin's. One is required for each of the host's deployments whose
+	# compose.yaml asks for one, so the check cannot pass on a .env it failed to read.
 	check "each tunnel's credentials are 65532's at 0600, all else gavin's" sh -c '
 		ls -ld /home/gavin/.*-secrets || exit 1
 		creds=$(sed -nE "s/^TUNNEL_CREDENTIALS=//p" /home/gavin/infra/deployments/*/.env)
-		[ -n "$creds" ] || exit 1
+		want=$(grep -l TUNNEL_CREDENTIALS /home/gavin/infra/hosts/$(hostname)/*/compose.yaml | wc -l)
+		[ "$(echo "$creds" | grep -c .)" = "$want" ] || { echo "$want wanted, found: $creds"; exit 1; }
 		for c in $creds; do
 			stat -c "%u %g %a %n" "$c"
 			[ "$(stat -c "%u %g %a" "$c")" = "65532 65532 600" ] || exit 1

@@ -1,0 +1,33 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /etc/cloudflared
+# infra-name: config.yml
+# infra-mode: 0644
+#
+# three's tunnel routing, written by hand from the tunnel id
+# ansible/playbooks/server-create-host-tunnel.yml printed when it made the tunnel. This file
+# IS the routing: a hostname missing from it serves 404. The tunnel is locally managed,
+# with no remote configuration, so the rules below are in force.
+#
+# ssh-three is sshd, which server-create-fleet-ssh-access.yml gates behind Access.
+# syncthing-three is Syncthing's GUI, which only this tunnel reaches (sshd's PermitOpen
+# allows port 22 only). The GUI listens on 127.0.0.1 and refuses a request whose Host is
+# not a local name ("Host check error"), so the rule sends Host: localhost.
+# server-create-browser-login.yml puts it behind an Access login before it gets a DNS record.
+#
+# ORDER IS BEHAVIOUR: cloudflared matches first-rule-wins. Do not sort it.
+
+tunnel: c971c4e9-5bf9-452e-bc60-b25a22ea1b64
+credentials-file: /etc/cloudflared/three.json
+
+# Pinned, as on every host, so docs/recovery.md's probe has a fixed target.
+metrics: 127.0.0.1:20241
+
+ingress:
+  - hostname: ssh-three.gsrpi.uk
+    service: ssh://127.0.0.1:22
+  - hostname: syncthing-three.gsrpi.uk
+    service: http://127.0.0.1:8384
+    originRequest:
+      httpHostHeader: localhost
+  - service: http_status:404
