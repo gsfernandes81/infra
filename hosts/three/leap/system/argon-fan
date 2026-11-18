@@ -1,0 +1,134 @@
+#!/usr/bin/python3 -I
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /usr/local/sbin
+# infra-name: argon-fan
+# infra-mode: 0755
+#
+# Sets the Argon EON's fan from the CPU's temperature, every 30 s, run by argon-fan.service.
+# The fan's controller is a microcontroller on the Pi's own I2C bus, /dev/i2c-1, at 0x1a:
+# one byte, 0 to 100, is the fan's duty in percent, as Argon's own argononed writes it. With
+# nothing writing, it runs at full speed. The bus needs extraconfig.txt and i2c-dev.conf.
+#
+# The curve follows the CPU only, with a floor that keeps air moving over the WD Red in the
+# same case. Everything the drive is sent arrives through ssh and is written through LUKS,
+# both on this CPU, so a busy drive is a busy, warmer CPU, and the fan rises with it. The
+# drive's own sensor was set aside: drivetemp reads it with ATA commands through the USB
+# bridge, the kind of poll that stalled one's bridge, and smartctl is the same.
+#
+# Any failure leaves the fan fast, never slow: an unreadable temperature asks for 100 %, a
+# failed write is logged and tried again at the next turn, and a stop sets 100 % on the way
+# out. Python's standard library only, since a package is a reboot on this box.
+#
+# To change the curve, edit the numbers below in the repo, then install and restart
+# (hosts/three/leap/README.md § The fan).
+
+import fcntl
+import math
+import os
+import signal
+import sys
+import time
+
+BUS = "/dev/i2c-1"
+ADDRESS = 0x1A
+I2C_SLAVE = 0x0703  # linux/i2c-dev.h
+SENSOR = "/sys/class/thermal/thermal_zone0/temp"
+INTERVAL = 30  # seconds
+
+FLOOR = 20  # percent, at LOW and below
+LOW = 50.0  # degrees C
+HIGH = 70.0  # degrees C, and 100 % from here up
+HYSTERESIS = 4.0  # degrees C the CPU must cool below a speed's start before it drops
+STEP = 5  # percent; the duty is rounded up to a multiple of it
+
+
+def log(message):
+    print(message, flush=True)
+
+
+def duty_for(temp):
+    if temp <= LOW:
+        return FLOOR
+    if temp >= HIGH:
+        return 100
+    duty = FLOOR + (100 - FLOOR) * (temp - LOW) / (HIGH - LOW)
+    return min(100, math.ceil(duty / STEP) * STEP)
+
+
+def read_temp():
+    with open(SENSOR) as f:
+        return int(f.read().strip()) / 1000
+
+
+def write_duty(duty):
+    fd = os.open(BUS, os.O_RDWR)
+    try:
+        fcntl.ioctl(fd, I2C_SLAVE, ADDRESS)
+        if os.write(fd, bytes([duty])) != 1:
+            raise OSError("short write")
+    finally:
+        os.close(fd)
+
+
+def describe(exc):
+    if isinstance(exc, FileNotFoundError) and exc.filename == BUS:
+        return (f"no {BUS}: the Pi's I2C bus is off or i2c-dev is not loaded "
+                f"(extraconfig.txt in /boot/efi takes a reboot); trying again every "
+                f"{INTERVAL} s")
+    return f"cannot write the fan's speed to {ADDRESS:#04x} on {BUS}: {exc}; trying again every {INTERVAL} s"
+
+
+def stop(signum, frame):
+    sys.exit(0)
+
+
+def main():
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    duty = None  # what the controller was last set to
+    since = None  # the temperature the current duty was chosen at
+    failing = None  # the last write failure logged, so each is logged once
+    unread = None  # and the last failure to read the temperature
+    log(f"floor {FLOOR} % to {LOW:.0f} C, 100 % from {HIGH:.0f} C, "
+        f"{HYSTERESIS:.0f} C hysteresis, every {INTERVAL} s")
+    try:
+        while True:
+            try:
+                temp = read_temp()
+                want = duty_for(temp)
+                if duty is not None and want < duty and temp > since - HYSTERESIS:
+                    want = duty
+                reading = f"CPU {temp:.1f} C"
+            except (OSError, ValueError) as exc:
+                temp, want = HIGH, 100
+                reading = f"cannot read {SENSOR} ({exc})"
+                if reading != unread:
+                    log(f"{reading}; asking for 100 %")
+                unread = reading
+            else:
+                unread = None
+            try:
+                write_duty(want)
+            except OSError as exc:
+                message = describe(exc)
+                if message != failing:
+                    log(message)
+                    failing = message
+            else:
+                if want != duty or failing:
+                    log(f"{reading}, fan {want} %")
+                if want != duty:
+                    since = temp
+                duty, failing = want, None
+            time.sleep(INTERVAL)
+    finally:
+        try:
+            write_duty(100)
+            log("stopping: fan set to 100 %")
+        except OSError as exc:
+            log(f"stopping: could not set the fan to 100 %: {exc}")
+
+
+if __name__ == "__main__":
+    main()

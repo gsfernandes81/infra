@@ -1,0 +1,15 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /boot/efi
+# infra-name: extraconfig.txt
+# infra-mode: 0644
+#
+# The Pi firmware's settings of our own, on the FAT boot partition. openSUSE's config.txt
+# beside it is raspberrypi-firmware-config's, rewritten by every update of that package,
+# and ends with `include extraconfig.txt`, which no package owns. vfat keeps no modes, so
+# the tools neither set nor check the one above (bin/_infra.py, MODELESS_FSTYPES).
+# Read only at power-on: a change here takes a reboot.
+#
+# The Pi's own I2C bus, bus 1 on GPIO 2 and 3, which Leap's image leaves off. The Argon
+# EON's fan controller answers on it (argon-fan).
+dtparam=i2c_arm=on

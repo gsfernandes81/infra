@@ -81,6 +81,9 @@ mkdir -p /media/mirror
 cat "$stick/host/fstab.append" >> /etc/fstab
 
 enable_units
+# The Argon EON's fan, from the CPU's temperature. Without the bus extraconfig.txt turns on
+# at the next power-on, it waits and retries, running rather than failed.
+systemctl enable argon-fan.service
 install_motd
 # Syncthing's sync and discovery ports, for devices on the same network as three; its GUI
 # stays on 127.0.0.1. firewalld is on in Leap and allows only ssh and DHCPv6 otherwise.

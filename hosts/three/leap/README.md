@@ -168,6 +168,50 @@ sudo rsync -aHAX --numeric-ids --fake-super -M--super --mkpath /media/mirror/sna
 Use a date the listing shows in place of `2026-11-20`. Getting a restore back onto zero is
 the visit runbook's.
 
+## The fan
+
+The Argon EON's fan has a controller on the Pi's own I2C bus, bus 1 at `0x1a`, which takes
+one byte: the speed in percent. With nothing writing to it, the fan runs at full speed.
+Leap's image leaves that bus off, so three files work together:
+
+- `system/extraconfig.txt` turns the bus on, with `dtparam=i2c_arm=on`, on the FAT boot
+  partition at `/boot/efi`. openSUSE's `config.txt` there ends with `include
+  extraconfig.txt`; an update of the firmware package rewrites `config.txt` and leaves this
+  file alone. The firmware reads it only at power-on, so it takes a reboot.
+- `system/i2c-dev.conf` loads `i2c-dev`, which makes `/dev/i2c-1`.
+- `system/argon-fan`, run by `system/argon-fan.service`, sets the speed from the CPU's
+  temperature every 30 seconds: 20 % up to 50 °C, then rising to 100 % at 70 °C. It slows
+  only once the CPU has cooled 4 °C below where the speed last rose. A stop sets the fan to
+  full, and so does a temperature it cannot read. Without the bus, it logs that and tries
+  again every 30 seconds.
+
+The curve follows the CPU only. The script's header says why that also covers the drive.
+
+To change the curve, edit the numbers at the top of `system/argon-fan` and commit. Then, on
+`three`:
+
+```fish
+# install the changed fan script and restart its unit: the stop sets full speed, the start the curve
+cd ~/infra; and git pull; and sudo bin/install-system-file argon-fan --commit --allow-content-change
+sudo systemctl restart argon-fan.service
+```
+
+To check it:
+
+```fish
+# the fan's unit, then its log: a line at each change of speed, with the CPU's temperature
+systemctl status argon-fan.service
+journalctl -b -u argon-fan.service
+```
+
+If the unit misbehaves, stop it, which sets full speed, and set a speed by hand, 40 % here:
+
+```fish
+# stop the fan's unit, then write one byte, the speed in percent, to the controller
+sudo systemctl stop argon-fan.service
+sudo python3 -c 'import fcntl, os; f = os.open("/dev/i2c-1", os.O_RDWR); fcntl.ioctl(f, 0x0703, 0x1a); os.write(f, bytes([40]))'
+```
+
 ## Before three ships
 
 In the UK, `three` uses the static `.103`, which would also connect in Singapore and leave

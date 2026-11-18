@@ -43,7 +43,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _infra import (  # noqa: E402
-    host_init_system, live_path, parse_header, strip_header, system_dir, this_host,
+    fs_type, host_init_system, live_path, mode_is_settable, parse_header, strip_header,
+    system_dir, this_host,
 )
 
 BACKUP_ROOT = Path.home() / ".infra-backups"
@@ -62,6 +63,23 @@ def read_bytes(path):
         if out.returncode != 0:
             raise
         return out.stdout
+
+
+def write_modeless(data, live):
+    """Write `live` on a filesystem with no Unix modes (vfat): dd into a new file beside
+    it, then rename over it. `install -o -g -m` and `cp -a` both chmod, which FAT refuses
+    with EPERM unless the mode asked for is the one the mount already gives, so they fail
+    on a mount whose fmask they do not match. dd only creates and writes, and the rename
+    keeps the old file whole until the new one is complete. The temporary name is not
+    one the Pi's firmware reads."""
+    tmp = live.with_name(f".{live.name}.infra-new")
+    out = subprocess.run(["sudo", "dd", f"of={tmp}", "status=none", "conv=fsync"],
+                         input=data, capture_output=True)
+    if out.returncode == 0:
+        out = subprocess.run(["sudo", "mv", "-f", str(tmp), str(live)], capture_output=True)
+    if out.returncode != 0:
+        run(["sudo", "rm", "-f", str(tmp)])
+    return out.returncode == 0, out.stderr.decode(errors="replace").strip()
 
 
 def validate_openrc_script(path):
@@ -259,13 +277,22 @@ def main():
 
     print(f"host:    {host}")
     print(f"source:  {entry}")
-    print(f"target:  {live}  (mode {want_mode:04o})")
+    # Calibrated on every mount of a running box against `findmnt --target`, and on a Pi's
+    # mount table, where /boot/efi is vfat and /usr/local and /etc are btrfs.
+    modeless = not mode_is_settable(live)
+    if modeless:
+        print(f"target:  {live}  (on {fs_type(live)}: the mount decides its mode, "
+              f"which is neither set nor checked)")
+    else:
+        print(f"target:  {live}  (mode {want_mode:04o})")
 
     if exists:
         # Show a mode CHANGE before it happens, not after. `install -m` applies the
         # header's mode unconditionally, so a header written for another host -- or
         # guessed -- silently re-permissions a live file, and a plain diff cannot see it.
         current_mode = stat.S_IMODE(live.stat().st_mode)
+        if modeless:
+            current_mode = want_mode  # the mount's fmask, not the file's: never a change
         if current_mode != want_mode:
             print(
                 f"mode:    {current_mode:04o} -> {want_mode:04o}  "
@@ -337,10 +364,14 @@ def main():
             return 1
         print(f"\nbacked up {live} -> {backup}")
 
-    out = run(["sudo", "install", "-o", "root", "-g", "root",
-               "-m", meta["mode"], str(entry), str(live)])
-    if out.returncode != 0:
-        print(f"install failed: {out.stderr.strip()}", file=sys.stderr)
+    if modeless:
+        ok, err = write_modeless(repo_bytes, live)
+    else:
+        out = run(["sudo", "install", "-o", "root", "-g", "root",
+                   "-m", meta["mode"], str(entry), str(live)])
+        ok, err = out.returncode == 0, out.stderr.strip()
+    if not ok:
+        print(f"install failed: {err}", file=sys.stderr)
         return 1
     print(f"installed {live}")
 
@@ -349,7 +380,7 @@ def main():
     if read_bytes(live) != repo_bytes:
         problems.append(f"{live} does not match the repo copy after install")
     live_mode = stat.S_IMODE(live.stat().st_mode)
-    if live_mode != want_mode:
+    if live_mode != want_mode and not modeless:
         problems.append(f"{live} is mode {live_mode:04o}, header says {want_mode:04o}")
     for check in validators_for(live):
         problems.extend(check(live))
@@ -365,8 +396,11 @@ def main():
             return 1
 
         print("rolling back...", file=sys.stderr)
-        out = run(["sudo", "cp", "-a", str(backup), str(live)])
-        restored = out.returncode == 0 and read_bytes(live) == read_bytes(backup)
+        if modeless:
+            ok, _ = write_modeless(read_bytes(backup), live)
+        else:
+            ok = run(["sudo", "cp", "-a", str(backup), str(live)]).returncode == 0
+        restored = ok and read_bytes(live) == read_bytes(backup)
         if restored:
             print(f"ROLLED BACK: {live} restored from {backup}. The box is as it was; "
                   f"the failure above is the thing to fix.", file=sys.stderr)

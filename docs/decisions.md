@@ -2466,6 +2466,43 @@ and never started a sidecar, so it could not meet either cause.
   secrets directory is gavin's. The simulation's check requires both, and at least one
   such file.
 
+## `three`'s fan: the Pi's I2C bus on, and a unit that follows the CPU
+
+**Decided 2026-11-18**, the evening after the visit, with the Argon EON's fan at full speed
+in a bedroom: its controller answers on the Pi's own I2C bus, which Leap's image leaves off
+(`hosts/three/leap/README.md` § The fan).
+
+- **The bus is turned on in `extraconfig.txt` on the FAT boot partition**, a tracked file
+  with an `infra-` header like every other, installing at `/boot/efi`. openSUSE's
+  `config.txt` beside it belongs to `raspberrypi-firmware-config`, whose `%post` copies it
+  over the live one at every update, and it ends with `include extraconfig.txt`, which no
+  package owns. Verified from the package's spec in openSUSE:Factory (same version as Leap
+  16.1's, 2026.02.11) and from the `config.txt` the `pi-image` job read off build 3.17's FAT
+  partition, which carries no `extraconfig.txt`. Set aside: editing `config.txt`, which the
+  next firmware update would undo, and bit-banging the bus on other pins, which needs a
+  firmware overlay all the same.
+- **The tools learn that FAT keeps no modes.** On vfat every file's mode is the mount's,
+  and a chmod to any other fails, so `install -m` would fail there. `install-system-file`
+  writes such a file with `dd` and a rename, and neither it nor `check-system-drift` checks
+  `infra-mode` on one; the first boot writes it with `cat` after mounting `/boot/efi`, and
+  goes on without it where there is no FAT partition, as in the simulation's VM. The
+  filesystem is read from `/proc/self/mountinfo`, calibrated against `findmnt --target` on
+  every mount of a running box and against a Pi's mount table. Set aside: an exception for
+  the one file, which a second file would have to repeat.
+- **A Python script with the standard library, not Argon's `argononed` or `i2c-tools`**:
+  either is a package, and a package on this box is a transactional update and a reboot.
+  It writes the one byte through `/dev/i2c-1` with the `I2C_SLAVE` ioctl, as `argononed`
+  does with smbus.
+- **The curve follows the CPU only, with a 20 % floor.** Every byte the WD Red is sent
+  arrives by ssh and is written through LUKS, both on this CPU, so a busy drive warms the
+  CPU and the fan rises with it, and the floor keeps air over the drive at idle. The
+  drive's own temperature was set aside: `drivetemp` and `smartctl` both read it with ATA
+  commands through the USB bridge, the kind of poll that stalled `one`'s bridge
+  (CLAUDE.md § Landmines, `smartd`).
+- **Every failure leaves the fan fast.** A temperature it cannot read asks for 100 %, a stop
+  sets 100 %, and a missing bus or a failed write is logged once and retried every 30 s,
+  with the unit running rather than failed, so a box without the bus still boots clean.
+
 ## The lesson worth keeping
 
 

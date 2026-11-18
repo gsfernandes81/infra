@@ -105,12 +105,35 @@ install_tracked() {
 	name=$(sed -n 's/^# infra-name:[[:space:]]*//p' "$file")
 	mode=$(sed -n 's/^# infra-mode:[[:space:]]*//p' "$file")
 	[ -n "$path" ] && [ -n "$name" ] && [ -n "$mode" ] || die "$file has no full infra- header"
+	if [ "$path" = /boot/efi ]; then
+		install_boot_file "$file" "$name"
+		return 0
+	fi
 	install -D -m "$mode" "$file" "$path/$name"
 	# sudo refuses to run at all over one bad file in sudoers.d, which would leave only the
 	# console to elevate on.
 	if [ "$path" = /etc/sudoers.d ]; then
 		visudo -cf "$path/$name" >/dev/null || die "$file is not valid sudoers"
 	fi
+}
+
+# A file for the Pi's FAT boot partition, which the image's fstab mounts at /boot/efi and
+# this shell may not have mounted, so it is mounted first, as mount_subvolumes does /home.
+# FAT keeps no modes and refuses a chmod to any but the one its mount gives, so the file is
+# written, not installed with its header's mode, as bin/install-system-file does on vfat.
+# A box with no FAT partition there is told so and goes on, since a firmware setting is not
+# worth an unconfigured box: the simulation's VM, and a Pi whose fstab changed, where the
+# first-boot log says so. three's fan then stays at full speed and its unit logs why.
+install_boot_file() {
+	local file=$1 name=$2
+	findmnt -n /boot/efi >/dev/null || mount /boot/efi 2>/dev/null || true
+	if [ "$(findmnt -n -o FSTYPE /boot/efi 2>/dev/null)" != vfat ]; then
+		say "no FAT partition mounted at /boot/efi; $name is not installed"
+		return 0
+	fi
+	cat "$file" > "/boot/efi/$name"
+	sync "/boot/efi/$name"
+	say "wrote /boot/efi/$name"
 }
 
 # Downloads a pinned binary and installs it only if its SHA-256 matches.

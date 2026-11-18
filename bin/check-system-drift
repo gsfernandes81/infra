@@ -30,7 +30,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _infra import (  # noqa: E402
-    host_init_system, live_path, parse_header, system_dir, this_host, tracked_files,
+    host_init_system, live_path, mode_is_settable, parse_header, system_dir, this_host,
+    tracked_files,
 )
 
 
@@ -99,7 +100,8 @@ def main():
 
         try:
             live_mode = stat.S_IMODE(live.stat().st_mode)
-            if live_mode != want_mode:
+            # On vfat the mount's fmask decides every file's mode (_infra.MODELESS_FSTYPES).
+            if live_mode != want_mode and mode_is_settable(live):
                 problems.append(
                     f"mode {live_mode:04o} on {live}, header says {want_mode:04o}"
                 )

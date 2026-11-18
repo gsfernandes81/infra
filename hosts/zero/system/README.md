@@ -22,6 +22,11 @@ byte-identical means `md5sum <tracked> <live>` stays a valid check:
 # infra-mode: 0755            catches a wrong-mode install, which a diff cannot see
 ```
 
+On a filesystem that keeps no Unix modes, such as the Pi's FAT boot partition at
+`/boot/efi` on Leap (`three`'s `extraconfig.txt`), the mount decides every file's mode:
+`infra-mode` is then neither set nor checked, and `install-system-file` writes the file
+without a chmod, which FAT refuses.
+
 The table below is a summary for humans. **The header is what the checker reads** — a
 missing or malformed one is a hard failure, never a guess at the path. The previous
 checker inferred `/etc/<filename>`, so it looked for `/etc/bcache-register` and

@@ -52,3 +52,13 @@ check "NetworkManager can drive Wi-Fi" sh -c '
 	rpm -q wpa_supplicant && ls /usr/lib*/NetworkManager/*/libnm-device-plugin-wifi.so'
 check "firewalld lets Syncthing in, and not its GUI" sh -c '
 	s=$(firewall-cmd --list-services); echo "$s"; echo "$s" | grep -qw syncthing && ! echo "$s" | grep -qw syncthing-gui'
+
+echo "-- the fan"
+# A VM has no Argon controller and no Pi I2C bus, so the unit is checked for waiting on its
+# bus without failing the boot; the curve and the writes are the box's to show.
+check "argon-fan is enabled and runs, waiting for its bus" sh -c '
+	systemctl is-enabled argon-fan.service && systemctl is-active argon-fan.service'
+check "i2c-dev is loaded at boot" test -d /sys/module/i2c_dev
+show sh -c 'journalctl -b --no-pager -u argon-fan | tail -n 4'
+show sh -c 'findmnt -no FSTYPE,OPTIONS /boot/efi || echo "nothing mounted at /boot/efi"
+	tail -n 1 /boot/efi/extraconfig.txt 2>&1; grep "extraconfig\|boot/efi" /var/log/infra-firstboot.log'

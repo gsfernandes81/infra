@@ -1,0 +1,21 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /etc/systemd/system
+# infra-name: argon-fan.service
+# infra-mode: 0644
+#
+# The Argon EON's fan, from the CPU's temperature (/usr/local/sbin/argon-fan). With no bus
+# yet it logs and retries every 30 s, running rather than failed, so a box without one (the
+# simulation's VM) boots clean. Its stop sets the fan to full.
+[Unit]
+Description=Set the Argon EON's fan from the CPU's temperature
+After=systemd-modules-load.service
+
+[Service]
+ExecStart=/usr/local/sbin/argon-fan
+Restart=on-failure
+RestartSec=30
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target
