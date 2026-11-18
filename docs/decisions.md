@@ -2369,6 +2369,16 @@ out of writing them and is proven by `alpine-sim.yml`.
   tailnet's range. Its first run found that a minimal Alpine has no `/usr/local/sbin`,
   which the hand block's `install -D` had hidden.
 
+## `three` flies to Singapore on 21 November
+
+**Decided 2026-11-18**, the owner's call. It sets the visit's order
+([`plans/visit-runbook.md`](../plans/visit-runbook.md) § The slices): `one`'s move first, `three`'s
+first boot and first push straight after, so the push finishes in the UK, and a restore
+from one of its snapshots before it leaves, as [`plans/three.md`](../plans/three.md) asks.
+`zero`'s disk swap waits if time is short, since `three` does not need it. The Wi-Fi
+password for Singapore goes on before the shipping power-off, with the static UK profile
+turned off (`hosts/three/leap/README.md` § Before three ships).
+
 ## The lesson worth keeping
 
 

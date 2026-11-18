@@ -28,6 +28,14 @@ Slice 2 and slice 1 never share a day. Slice 3 waits a day after slice 1, becaus
 board is slice 1's way back until then, unless the Alpine card has booted on the 8 GB board
 (slice 1, step 2), which makes the 8 GB board its own way back.
 
+**`three` flies to Singapore on 21 November** (the owner, 2026-11-18), so the order is
+set by that day. Slice 1 first, with its step 2, so slice 3 need not wait a day. Slice 3
+the same day or the next, so the first push, which runs for hours, finishes in the UK.
+Slice 4 once that push has finished and a snapshot exists, before the 21st. Then
+[`hosts/three/leap/README.md`](../hosts/three/leap/README.md) § Before three ships, the
+last thing before its power-off. Slice 2 is not needed for `three` and never shares a day
+with slice 1, so it goes on a day left over, or after the 21st.
+
 **Every Pi joins the tailnet with `--accept-dns=false`**, and the tailnet approves each new
 machine by hand: a `tailscale up` that prints a login URL also needs the machine approved
 under Machines in the admin console. With `--accept-dns=false` Tailscale never takes over a

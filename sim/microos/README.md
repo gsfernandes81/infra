@@ -168,6 +168,41 @@ and prints what the box knows about why.
 The stand-in tunnel credentials cannot connect, so the run shows `cloudflared` installed,
 enabled and retrying, not serving.
 
+## Traps the simulation found, each handled in the code
+
+Kept here for whoever changes a first boot or the harness next.
+
+- Combustion copies only the stick's `combustion/` directory and runs the script from the
+  copy; the stick is unmounted by then.
+- The script runs inside `transactional-update shell`, which binds `/root` and some of
+  `/var`, not `/home` or `/usr/local`: `leap/firstboot.sh` mounts them and labels what it
+  wrote (`setfiles`), since SELinux's policy is not loaded yet.
+- The `--prepare` stage runs in the initramfs, with no `install`; it puts the host's network
+  profile in place so the first boot already has the static address.
+- systemd applies presets on a first boot, so a `disable` is undone: mask instead.
+- Leap's sshd uses PAM: `KbdInteractiveAuthentication no` as well as `PasswordAuthentication
+  no`. Leap ships its own `tailscale`: Tailscale's repo has priority 90 and is added before
+  any package installs.
+- The SSD's subvolumes share one superblock, so every mount of it carries the same
+  `context=`, Docker's store included; mixed options are refused at random.
+- `gavin`'s login shell is fish: anything the harness sends over ssh goes to `bash -s` on
+  stdin. The harness runs under `set -euo pipefail`; a bare `rc=$?` after a failing command,
+  or a `grep` with no match inside `$(…)` or a pipeline, ends the run silently.
+- The repo's Ansible callback hides skipped tasks entirely; read the play's own sentences.
+- openSUSE's `import-pubring-from-rpmdb.service` (microos-tools, bsc#1245786, fixed upstream,
+  not yet in Leap 16.1) sometimes fails on a first boot that brings a new rpm key, after
+  importing every key: it is harmless, delays `multi-user.target` about 90 s, and the sim
+  reports it as KNOWN.
+
+## Working with CI
+
+`.github/workflows/microos-sim.yml` runs on a push touching `sim/microos/`, `leap/`,
+`hosts/*/leap/` or what the deploy play reads. The `host` job takes about 30 minutes; its
+report is the job summary and the `leap-host-<host>` artifact. Runs queue per branch and the
+hub's token cannot cancel one, so iterate on a branch and merge when green. When the guest
+cannot be reached, the harness logs in as root on the serial console and prints why. Use
+`claude-sessions keepalive` while waiting. A Fable review comes before every merge.
+
 ## What a green run does not show
 
 The simulations run on x86_64 under KVM, not on a Pi; the USB disks are qemu's. It does

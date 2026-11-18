@@ -30,7 +30,8 @@ more than a Pi 5's speed. Its apps need no bulk storage, and they stay on its Sa
 
 `three` is the off-site copy. A backup target needs disks more than memory, and a box that
 serves nobody critical loses little by sitting where `two`'s serial console would not
-reach. It ships to Singapore after the November visit, at a date the owner picks. It is
+reach. It ships to Singapore on 21 November 2026, the last day of the visit (the owner,
+2026-11-18). It is
 the only new host, so it is the one `server-create-host-tunnel.yml` makes a tunnel for.
 
 ## The Argon EON
