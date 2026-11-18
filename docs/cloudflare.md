@@ -150,6 +150,21 @@ whole of it done on 2026-10-25.
 `ionic-traces.gsrpi.uk` was retired 2026-08-23. Its DNS record still exists and points at
 a deleted tunnel, so it resolves and fails; delete the record if you want the name gone.
 
+## Three's hostnames
+
+None exist yet: `three`'s tunnel, its tracked config and both records are made at the
+November visit ([`hosts/three/leap/README.md`](../hosts/three/leap/README.md) § *After the
+first boot*). What they will be, and which play makes each:
+
+| Hostname | Origin | |
+|---|---|---|
+| `ssh-three.gsrpi.uk` | `ssh://127.0.0.1:22` | **behind Access**, per-client service tokens; record from `server-create-host-tunnel.yml`, gate from `server-create-fleet-ssh-access.yml` |
+| `syncthing-three.gsrpi.uk` | `http://127.0.0.1:8384`, `Host: localhost` | **behind Access**, a login for the addresses in `~/.config/cloudflare/access-emails`; application `syncthing-three`, then the record, from `server-create-browser-login.yml` |
+| *(catch-all)* | `http_status:404` | |
+
+The `Host: localhost` is the rule's `httpHostHeader`: `three`'s Syncthing GUI listens on
+`127.0.0.1` only, and Syncthing refuses a loopback GUI request under any other name.
+
 ## A tunnel is more objects than the dashboard's front page shows
 
 This cost the most and was found by accident. Deleting zero's old tunnel returned

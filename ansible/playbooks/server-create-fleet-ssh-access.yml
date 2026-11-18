@@ -35,8 +35,8 @@
 # prints how) before gating the next.
 #
 # It gates ssh-<host> and nothing else in the host's ingress. A browser hostname on the same
-# tunnel, such as a Syncthing GUI, wants a login rather than a service token, and is not
-# this play's.
+# tunnel, such as a Syncthing GUI, wants a login rather than a service token, and is
+# server-create-browser-login.yml's.
 #
 # The tracked routing is hosts/<host>/system/cloudflared-config.yml, or, for a host that has
 # only ever run Leap and so has no system/ (three), hosts/<host>/leap/system/: the rule

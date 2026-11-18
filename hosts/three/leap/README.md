@@ -60,6 +60,10 @@ exists. On the LAN, from the phone:
 3. The infra agent commits `system/cloudflared-config.yml` with that id, in the shape of
    every host's: `ssh-three` to port 22, and `syncthing-three` to `http://127.0.0.1:8384`,
    Syncthing's GUI, which nothing else reaches (sshd's `PermitOpen` allows port 22 only).
+   The `syncthing-three` rule carries `originRequest: {httpHostHeader: localhost}`: a
+   Syncthing GUI bound to `127.0.0.1` refuses a request whose `Host` is not a local name,
+   with "Host check error", and through the tunnel the `Host` is `syncthing-three`'s. `zero`'s
+   and `torrents`' GUIs listen on every address, where Syncthing makes no such check.
 4. On `three`, in `~/infra`: `git pull`, then
    `sudo bin/install-system-file cloudflared-config.yml --commit --allow-content-change --new`,
    then `sudo systemctl start cloudflared`. The tools read `leap/system/` for a host with
@@ -69,12 +73,22 @@ exists. On the LAN, from the phone:
    routing from `leap/system/`, and refuses unless this client's ssh config already sends
    `three` through `~/.config/fleet/access-ssh`, which the fleet ssh block does once the
    infra agent has added `three` to it.
+6. Once Syncthing is deployed (`plans/visit-runbook.md`, slice 4), from the phone:
+   `server-create-browser-login.yml -e host=three -e subdomain=syncthing-three` puts the
+   GUI behind an Access login and then gives it its DNS record. The fleet ssh play leaves
+   `syncthing-three` alone, since a browser needs a login, not a service token, and the
+   tunnel play makes `ssh-three`'s record only.
 
-The play leaves `syncthing-three` alone, since a browser needs a login, not a service
-token. That hostname also has no DNS record, because the tunnel play makes `ssh-three`'s
-only. It needs an Access application with a login, as `one`'s Syncthing GUI has, and then
-a CNAME to `three`'s tunnel, in that order so the GUI is never open. No play makes either
-for a host's own tunnel yet, so until both exist the GUI cannot be reached from outside.
+   It makes an Access application, `syncthing-three`, admitting the addresses in
+   `~/.config/cloudflare/access-emails` on the phone by the account's login methods, as
+   `calibre-web`'s login does; only once it has read that back does it write the CNAME to
+   `three`'s tunnel, so the GUI is never open. It refuses a hostname that is not an http
+   rule in the tracked config above, and a `tunnel:` that `ssh-three`'s record does not
+   point at. It then proves from the phone that the hostname redirects an unauthenticated
+   request to the Access login, and deletes the record again if the hostname answers
+   anything else. It needs no `-K`, since it touches only Cloudflare. Until it has run,
+   the GUI cannot be reached from outside; after, it is `https://syncthing-three.gsrpi.uk/`.
+   A "Host check error" after the login means step 3's `httpHostHeader` is missing.
 
 ## The array
 

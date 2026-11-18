@@ -5,6 +5,11 @@
 #   _dev-container-tunnel.yml       a dev container on zero; then adds its Access application
 #   server-create-deployment-tunnel.yml  a compose deployment's sidecar connector; Access
 #                                        only if the deployment's edge.yml asks for it
+#   server-create-host-tunnel.yml   a new host's first tunnel
+#
+# Section 2, the CNAME, has been its own file since 2026-11-18, _cf-dns.yml, imported at
+# the end of this one, so a second hostname on an existing tunnel gets its record by the
+# same code (server-create-browser-login.yml).
 #
 # What is here is sections 0–2 of what used to be _dev-container-tunnel.yml alone, lifted
 # out word for word on 2026-10-24 so a deployment's sidecar gets the same tunnel by the
@@ -261,83 +266,6 @@
   no_log: true
 
 # ── 2  the DNS record ───────────────────────────────────────────────────
-- name: Read the CNAME record for {{ cf_hostname }}
-  # &type=CNAME, not name alone. Cloudflare's name filter returns every record type at
-  # that name, so a stale A or AAAA left over from something else would come back
-  # first and the PUT below would rewrite THAT record's id into a CNAME — converting
-  # an unrelated record instead of managing ours.
-  ansible.builtin.uri:
-    url: "{{ cf_api }}/zones/{{ cf_zone_id }}/dns_records?type=CNAME&name={{ cf_hostname }}"
-    headers: { Authorization: "Bearer {{ cf_token }}" }
-  register: cf_dns_q
-  delegate_to: localhost
-  check_mode: false
-  changed_when: false
-  no_log: true
-
-- name: Note whether the CNAME already points at the tunnel
-  # So a converged run reports changed=0. That matters more here than tidiness: this
-  # repo reads the recap to tell a no-op from a real one, and a play that always says
-  # "changed" is a play whose recap nobody reads.
-  #
-  # `proxied` is compared too, not just the target. An unproxied record resolves to
-  # the tunnel's address and Cloudflare never sees the request, so Access is not in
-  # front of it at all — the same reachability with the protection quietly gone.
-  ansible.builtin.set_fact:
-    cf_dns_ok: >-
-      {{ (cf_dns_q.json.result | length) > 0
-         and cf_dns_q.json.result[0].content == ((cf_tunnel_id | default('', true)) ~ '.cfargotunnel.com')
-         and (cf_dns_q.json.result[0].proxied | default(false) | bool) }}
-
-- name: "If correct: print that the CNAME is left as it is"
-  ansible.builtin.debug:
-    msg: "{{ cf_hostname }} already CNAMEs to this tunnel, proxied — leaving it"
-  changed_when: true
-  when: cf_dns_ok
-
-- name: "If wrong or missing: write the tunnel's CNAME"
-  # PUT when it exists rather than skipping. A record left pointing at a PREVIOUS
-  # tunnel resolves perfectly and reaches nothing — the same failure as above, wearing
-  # the same disguise. Making it match costs one call; assuming it matches is the bug.
-  ansible.builtin.uri:
-    url: >-
-      {{ cf_api }}/zones/{{ cf_zone_id }}/dns_records{{
-         '/' ~ cf_dns_q.json.result[0].id if (cf_dns_q.json.result | length) > 0 else '' }}
-    method: "{{ 'PUT' if (cf_dns_q.json.result | length) > 0 else 'POST' }}"
-    status_code: [200, 201]
-    headers: { Authorization: "Bearer {{ cf_token }}" }
-    body_format: json
-    body:
-      type: CNAME
-      name: "{{ cf_hostname }}"
-      content: "{{ cf_tunnel_id | default(cf_unknown_id, true) }}.cfargotunnel.com"
-      proxied: true
-      comment: "{{ cf_dns_comment }}"
-  register: cf_dns_w
-  delegate_to: localhost
-  when: not cf_dns_ok
-  changed_when: cf_dns_w.json.success | default(false)
-  failed_when: false
-  no_log: true
-
-- name: "If the CNAME was refused: print why"
-  ansible.builtin.debug:
-    msg: >-
-      {{ cf_hostname }}: HTTP {{ cf_dns_w.status | default('?') }}:
-      {{ cf_dns_w.json.errors | default(cf_dns_w.msg) | default('no detail') }}
-  changed_when: true
-  when:
-    - cf_dns_w is not skipped
-    - (cf_dns_w.status | default(0) not in [200, 201]) or not (cf_dns_w.json.success | default(false))
-
-- name: "If wrong or missing: check the CNAME was written"
-  ansible.builtin.assert:
-    that:
-      - cf_dns_w.status | default(0) in [200, 201]
-      - cf_dns_w.json.success | default(false)
-    fail_msg: >-
-      {{ cf_hostname }} does not point at this tunnel. The tunnel and its credentials
-      exist; a re-run picks them up and tries the record again. A 403 is a missing
-      DNS : Edit; "record already exists" means an A/AAAA at that name to remove first.
-    quiet: true
-  when: cf_dns_w is not skipped
+# _cf-dns.yml since 2026-11-18, moved word for word (its header lists the one input added).
+- name: Write the CNAME for {{ cf_hostname }}
+  ansible.builtin.import_tasks: _cf-dns.yml

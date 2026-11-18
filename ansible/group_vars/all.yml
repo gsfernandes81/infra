@@ -66,8 +66,9 @@ cf_api_token_howto: |
 
 # ── who may log in to a browser-facing deployment ───────────────────────────
 # server-create-deployment-tunnel.yml puts an Access login in front of a deployment whose
-# edge.yml says `access: browser`, and the policy admits the addresses in this file, one
-# per line (# comments allowed). A FILE ON THE CONTROL NODE, NOT A LIST HERE, because this
+# edge.yml says `access: browser`, and server-create-browser-login.yml in front of a browser
+# hostname on a host's own tunnel (syncthing-three); both policies admit the addresses in
+# this file, one per line (# comments allowed). A FILE ON THE CONTROL NODE, NOT A LIST HERE, because this
 # repo is public and an email address in it is one more thing the world can read and a
 # scraper can use. Not a secret, so no 600 check — but never on the command line either,
 # for the same reason as the token: it would sit in shell history on the control node.

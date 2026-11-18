@@ -373,10 +373,24 @@ next morning, `sudo cat /var/lib/mirror-backup/last-success` on `zero` is recent
    more on `zero` are uploads since the push), and `sudo stat` one file on each for its
    owner and mode. Then `sudo rm -rf /media/mirror/restore`.
 2. **Syncthing on `three`,** if `free -m` showed room through the seeding:
-   `ansible-playbook playbooks/server-deploy-compose.yml -e deployment=syncthing-three -K`,
-   then its GUI through `three`'s tunnel, once it has a DNS record and an Access login
-   application, which no play makes yet (`docs/management-plane.md`, phase 9). Watch
-   `free -m` for a day.
+   `ansible-playbook playbooks/server-deploy-compose.yml -e deployment=syncthing-three -K`.
+   Then its GUI, behind an Access login, with one play from the phone:
+
+   ```fish
+   # on the phone, in ~/infra/ansible: put three's Syncthing GUI behind the Access login, then give it its DNS record
+   ansible-playbook playbooks/server-create-browser-login.yml -e host=three -e subdomain=syncthing-three
+   ```
+
+   It asks nothing. It reads who may log in from `~/.config/cloudflare/access-emails` on the
+   phone, the same file `calibre-web`'s login uses, and when the file is missing it prints how
+   to make one and stops with nothing made. It prints how many addresses it admits, never
+   the addresses; that a login looks like a redirect to the team's `cloudflareaccess.com`
+   page, read off `torrents`; then that `syncthing-three.gsrpi.uk` redirects to the login;
+   and last the GUI's address and the undo. If it says the name does not answer from here
+   yet, re-run it in a few minutes. Then open `https://syncthing-three.gsrpi.uk/` on the
+   phone and log in with one of those addresses. A "Host check error" page means the tunnel config lacks the
+   `httpHostHeader` that `hosts/three/leap/README.md` § After the first boot, step 3, gives
+   it. Watch `free -m` for a day.
 3. **A lock and an unlock,** to see both commands work on the real drive: the lock prints
    `locked`, and the unlock asks for the passphrase again.
 

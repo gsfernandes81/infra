@@ -26,7 +26,9 @@
 #     like every tracked /etc file;
 #   - start cloudflared, which is the host's first-boot script's and the owner's;
 #   - gate the hostname behind Access. server-create-fleet-ssh-access.yml does that once the
-#     connector is up, and refuses a hostname that is not in the host's tracked ingress.
+#     connector is up, and refuses a hostname that is not in the host's tracked ingress;
+#   - give any other hostname in that ingress its record. A browser one (syncthing-three)
+#     gets a login first and then its CNAME, from server-create-browser-login.yml.
 #
 # -K IS REQUIRED: the credentials are written as root, and ansible.cfg asks for no sudo
 # password unless told to. The API token is read from cf_api_token_file
@@ -141,4 +143,6 @@
             2. Install it with bin/install-system-file cloudflared-config.yml --commit
                --allow-content-change --new on {{ inventory_hostname }}, and start cloudflared there.
             3. Gate the hostname: server-create-fleet-ssh-access.yml -e host={{ inventory_hostname }}.
+            4. For each browser hostname in that config, once its service runs:
+               server-create-browser-login.yml -e host={{ inventory_hostname }} -e subdomain=<name>.
       changed_when: true

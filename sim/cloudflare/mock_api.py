@@ -1,12 +1,19 @@
 """A stand-in for the parts of Cloudflare's API that ansible/playbooks/_cf-api-token.yml and
 _cf-tunnel.yml call, so server-create-host-tunnel.yml can be run end to end with no account,
 and the Access calls server-create-fleet-ssh-access.yml makes (applications, reusable
-policies, service tokens). It keeps its state in memory, answers in Cloudflare's envelope
-(success, errors, result), and never records an Authorization header. Three paths are not
-Cloudflare's: GET /__state returns what it holds, POST /__control changes how it behaves,
+policies, service tokens), and those _cf-access-app.yml makes for
+server-create-browser-login.yml (an application PUT whole, its app-scoped policies), with
+_cf-dns.yml's records, deletes included. It keeps its state in memory, answers in
+Cloudflare's envelope (success, errors, result), and never records an Authorization header.
+Four paths are not Cloudflare's: GET /__state returns what it holds, POST /__control changes how it behaves,
 for the tests' adverse cases, and GET /__probe/<hostname> stands in for the edge, answering
 an unauthenticated request with 403 when an Access application covers the hostname (or it
-is `control`) and 200 otherwise. Run with python3 -I; the one argument is the port."""
+is `control`) and 200 otherwise; and GET /__login/<hostname> is the same edge seen by a
+browser, for server-create-browser-login.yml: a 302 to the team's cloudflareaccess.com login
+when an application with an `allow` policy covers the hostname (or it is `control`), and
+200 otherwise. Every DNS write records whether such an application covered the name at that
+moment, so a test can prove the login came first. Run with python3 -I; the one argument is
+the port."""
 import json
 import sys
 import uuid
@@ -18,11 +25,19 @@ ZONE_ID = "zone-sim"
 ACCOUNT_ID = "acct-sim"
 STATE = {"tunnels": {}, "records": {}, "requests": [],
          "refuse_writes": False, "refuse_dns": False, "tunnel_secrets": {},
-         "apps": {}, "policies": {}, "service_tokens": [], "never_gate": False}
+         "apps": {}, "policies": {}, "service_tokens": [], "never_gate": False,
+         "refuse_access": False, "dns_writes": []}
 
 
 def envelope(result=None, errors=None):
     return {"success": not errors, "errors": errors or [], "messages": [], "result": result}
+
+
+def login_covers(host):
+    """An application on `host` carrying an allow policy: what makes the edge ask a browser
+    to log in."""
+    return any(a.get("domain") == host and any(p.get("decision") == "allow" for p in a["policies"])
+               for a in STATE["apps"].values())
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -54,9 +69,34 @@ class Handler(BaseHTTPRequestHandler):
             covered = any(a.get("domain") == host for a in STATE["apps"].values())
             gated = host == "control" or (covered and not STATE["never_gate"])
             return self.reply(403 if gated else 200, {"probe": host})
+        if path.startswith("/__login/") and method == "GET":
+            host = path.removeprefix("/__login/")
+            if host == "control" or (login_covers(host) and not STATE["never_gate"]):
+                data = b""
+                self.send_response(302)
+                self.send_header("Location", f"https://sim.cloudflareaccess.com/cdn-cgi/access/login/{host}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return self.wfile.write(data)
+            return self.reply(200, {"login": host, "open": True})
         if path == "/__control" and method == "POST":
             change = self.body()
             STATE["never_gate"] = bool(change.get("never_gate", STATE["never_gate"]))
+            STATE["refuse_access"] = bool(change.get("refuse_access", STATE["refuse_access"]))
+            if change.get("plant_tunnel"):
+                t = change["plant_tunnel"]
+                STATE["tunnels"][t["id"]] = {"id": t["id"], "name": t["name"], "deleted_at": None,
+                                             "config_src": "local"}
+            if change.get("plant_cname"):
+                c = change["plant_cname"]
+                rid = str(uuid.uuid4())
+                STATE["records"][rid] = {"id": rid, "type": "CNAME", "name": c["name"],
+                                         "content": c["content"], "proxied": True, "comment": None}
+            if change.get("plant_app"):
+                a = change["plant_app"]
+                aid = str(uuid.uuid4())
+                STATE["apps"][aid] = {"id": aid, "name": a["name"], "domain": a["domain"],
+                                      "destinations": [], "policies": []}
             if "service_tokens" in change:
                 STATE["service_tokens"] = change["service_tokens"]
             STATE["refuse_writes"] = bool(change.get("refuse_writes", STATE["refuse_writes"]))
@@ -76,7 +116,8 @@ class Handler(BaseHTTPRequestHandler):
                     r["content"] = "elsewhere.example.invalid"
             if change.get("reset"):
                 STATE.update(tunnels={}, records={}, refuse_writes=False, refuse_dns=False,
-                             tunnel_secrets={}, apps={}, policies={}, never_gate=False)
+                             tunnel_secrets={}, apps={}, policies={}, never_gate=False,
+                             refuse_access=False, dns_writes=[])
             return self.reply(200, {"ok": True})
 
         STATE["requests"].append(f"{method} {path}")
@@ -134,7 +175,14 @@ class Handler(BaseHTTPRequestHandler):
             STATE["records"][rid] = {"id": rid, "type": b.get("type"), "name": b.get("name"),
                                      "content": b.get("content"), "proxied": b.get("proxied"),
                                      "comment": b.get("comment")}
+            STATE["dns_writes"].append({"name": b.get("name"), "login": login_covers(b.get("name"))})
             return self.reply(200, envelope(STATE["records"][rid]))
+        if p.startswith(records + "/") and method == "DELETE":
+            rid = p.rsplit("/", 1)[1]
+            if rid not in STATE["records"]:
+                return self.reply(404, envelope(errors=[{"code": 81044, "message": "Record not found"}]))
+            del STATE["records"][rid]
+            return self.reply(200, envelope({"id": rid}))
 
         access = f"/accounts/{ACCOUNT_ID}/access"
         if p == access + "/service_tokens" and method == "GET":
@@ -162,6 +210,41 @@ class Handler(BaseHTTPRequestHandler):
         apps = access + "/apps"
         if p == apps and method == "GET":
             return self.reply(200, envelope(list(STATE["apps"].values())))
+        if STATE["refuse_access"] and p.startswith(apps) and method in ("POST", "PUT"):
+            return self.reply(403, envelope(errors=[{"code": 10000, "message": "Authentication error: this token may not edit Access"}]))
+        # App-scoped policies, as _cf-access-app.yml writes them: listed, added, replaced.
+        parts = p.removeprefix(apps + "/").split("/")
+        if p.startswith(apps + "/") and len(parts) in (2, 3) and parts[1] == "policies":
+            app = STATE["apps"].get(parts[0])
+            if not app:
+                return self.reply(404, envelope(errors=[{"code": 12130, "message": "application not found"}]))
+            if len(parts) == 2 and method == "GET":
+                return self.reply(200, envelope(app["policies"]))
+            if (len(parts) == 2 and method == "POST") or (len(parts) == 3 and method == "PUT"):
+                b = self.body()
+                if not b.get("name") or b.get("decision") not in ("allow", "bypass", "deny", "non_identity"):
+                    return self.reply(400, envelope(errors=[{"code": 12000, "message": f"bad policy body: {sorted(b)}"}]))
+                pid = parts[2] if len(parts) == 3 else str(uuid.uuid4())
+                kept = [x for x in app["policies"] if x["id"] != pid]
+                if len(parts) == 3 and len(kept) == len(app["policies"]):
+                    return self.reply(404, envelope(errors=[{"code": 12130, "message": "policy not found"}]))
+                pol = {"id": pid, "name": b["name"], "decision": b["decision"],
+                       "precedence": b.get("precedence", 1), "include": b.get("include", []),
+                       "exclude": b.get("exclude", []), "require": b.get("require", [])}
+                app["policies"] = kept + [pol]
+                return self.reply(200, envelope(pol))
+        # PUT replaces the application's settings and, as the play reads back rather than
+        # assumes, keeps the policies attached to it.
+        if p.startswith(apps + "/") and len(parts) == 1 and method == "PUT":
+            app = STATE["apps"].get(parts[0])
+            if not app:
+                return self.reply(404, envelope(errors=[{"code": 12130, "message": "application not found"}]))
+            b = self.body()
+            if not b.get("domain"):
+                return self.reply(400, envelope(errors=[{"code": 12000, "message": f"bad application body: {sorted(b)}"}]))
+            app.update(name=b.get("name"), domain=b["domain"],
+                       session_duration=b.get("session_duration"))
+            return self.reply(200, envelope(app))
         if p == apps and method == "POST":
             b = self.body()
             linked = [x.get("id") for x in b.get("policies", [])]
@@ -170,6 +253,7 @@ class Handler(BaseHTTPRequestHandler):
             aid = str(uuid.uuid4())
             STATE["apps"][aid] = {"id": aid, "name": b.get("name"), "domain": b["domain"],
                                   "destinations": b.get("destinations", []),
+                                  "session_duration": b.get("session_duration"),
                                   "policies": [dict(STATE["policies"][pid], precedence=i + 1)
                                                for i, pid in enumerate(linked)]}
             return self.reply(201, envelope(STATE["apps"][aid]))

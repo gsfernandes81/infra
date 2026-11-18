@@ -2379,6 +2379,49 @@ from one of its snapshots before it leaves, as [`plans/three.md`](../plans/three
 password for Singapore goes on before the shipping power-off, with the static UK profile
 turned off (`hosts/three/leap/README.md` § Before three ships).
 
+## A browser hostname on a host's tunnel gets a login from a play
+
+**Decided 2026-11-18**, the owner's call: `syncthing-three`'s Access login and DNS record
+are made by a play, one command at slice 4 of the visit, rather than by hand in the
+dashboard. The rest came out of writing it and is proven by `cloudflare-sim.yml`.
+
+- **A play of its own, `server-create-browser-login.yml -e host=three -e
+  subdomain=syncthing-three`.** The fleet ssh play admits service tokens, asks for a yes on
+  the client list and probes with ssh, none of which a browser login needs; the deployment
+  play makes a tunnel, and `syncthing-three` is served by `three`'s. What is new is only a
+  CNAME on a tunnel that exists, after a login, and the rest is the shared tasks. It takes
+  any http rule in a host's tracked ingress, read by `system_dir()`'s rule, since that costs
+  nothing over naming `syncthing-three`. Set aside: a play for `syncthing-three` alone, and
+  an `-e remove`, since a run that fails its proof already undoes the record.
+- **The owner is admitted as `calibre-web`'s login admits people**: an `allow` policy,
+  `allowed people`, listing the addresses in `~/.config/cloudflare/access-emails` on the
+  control node, by every login method the Zero Trust account offers. It is the only login
+  a play has made here; no play made the logins on `torrents` or the Syncthing GUIs on
+  `zero` and `one`. The address stays out of this public repo, and the file and its checks are shared
+  with the deployment play (`_cf-access-emails.yml`). Set aside: one reusable login policy
+  for every application, as the fleet's ssh gate has, which would mean rewriting
+  `calibre-web`'s live application; and a prompt, which is a paste on every run.
+- **The application first, the record second.** Until the CNAME exists the name does not
+  resolve, so the application and its policy are written and read back before it, and the
+  GUI is never open. The probe runs only after the record, because a resolver caches a
+  name that does not exist yet, and calibrates on `torrents`' login first. An answer from
+  behind Access deletes the record again and keeps the application; no answer at all keeps
+  the record and says to re-run, because the login is already read back in front of it.
+- **The tunnel is the tracked config's `tunnel:`**, checked live at Cloudflare and against
+  the record `ssh-<host>` already uses, so a `tunnel:` line pasted from another host's file
+  is refused. So the play needs no `-K` and touches no host. Set aside: reading
+  `/etc/cloudflared/<host>.json` on the box, which needs sudo for an id the repo holds.
+- **A day's session**, where `calibre-web`'s is a week: this GUI can add folders and devices
+  to the backup box.
+- **The record code moved to `_cf-dns.yml`**, word for word but for its refusal message,
+  and `_cf-tunnel.yml` imports it, so the CNAME has one copy. The task lists of the three
+  plays that import `_cf-tunnel.yml` are unchanged.
+- **`three`'s Syncthing rule sets `httpHostHeader: localhost`.** Its GUI listens on
+  `127.0.0.1` only, and Syncthing answers a loopback GUI request under any other `Host` with
+  "Host check error". `zero`'s and `torrents`' GUIs listen on every address, so neither
+  needed it. Found while writing the play, unproven on a box: the GUI step in
+  `hosts/three/leap/README.md` says what the error looks like.
+
 ## The lesson worth keeping
 
 

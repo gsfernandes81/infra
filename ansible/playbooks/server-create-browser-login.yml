@@ -1,0 +1,450 @@
+---
+# PUT A BROWSER HOSTNAME ON A HOST'S OWN TUNNEL, BEHIND AN ACCESS LOGIN: `syncthing-three`,
+# three's Syncthing GUI, first, at slice 4 of the November 2026 visit. Run from the control
+# node, one hostname per run:
+#
+#     cd ansible
+#     ansible-playbook playbooks/server-create-browser-login.yml -e host=three -e subdomain=syncthing-three --check
+#     ansible-playbook playbooks/server-create-browser-login.yml -e host=three -e subdomain=syncthing-three
+#
+# No -K: it touches no host. It writes only at Cloudflare, with the API token at
+# ~/.config/cloudflare/api-token on this machine, and it probes from here.
+#
+# WHAT IT MAKES, IN THIS ORDER, so the hostname is never open for a moment:
+#   1. an Access application on <subdomain>.<dns_zone>, named <subdomain>, with one `allow`
+#      policy, "allowed people", admitting the addresses in ~/.config/cloudflare/access-emails
+#      on this machine, by whatever login methods the Zero Trust account offers. The same
+#      file, policy and code (_cf-access-emails.yml, _cf-access-app.yml) as a deployment's
+#      login from server-create-deployment-tunnel.yml. Read back before anything else;
+#   2. only then, the proxied CNAME to the host's tunnel (_cf-dns.yml, the record code every
+#      tunnel play uses). Until it exists the name does not resolve, so there is nothing to
+#      reach; once it does, the application is already in front.
+# Then it proves the result from here: a hostname known to show a login must read as one
+# (torrents.<dns_zone>, as the deployment play calibrates), and then the new hostname must
+# answer an unauthenticated request with a redirect to the Access login. If it answers
+# anything else from behind the edge, the play deletes the CNAME, so a run ends either
+# behind the login or unreachable.
+#
+# WHY A PLAY OF ITS OWN. server-create-fleet-ssh-access.yml gates ssh-<host> with service
+# tokens, and a browser cannot present one; server-create-deployment-tunnel.yml makes a
+# deployment's own tunnel, and syncthing-three is served by three's host tunnel. What is
+# new is only "a CNAME on a tunnel that exists, after a login": everything else is the
+# shared tasks. It is general to any http(s) rule in a host's tracked ingress, because that
+# costs nothing over naming syncthing-three, and nothing more general than that.
+#
+# WHAT IT READS, and where each value is derived from:
+#   hosts/<host>/system/cloudflared-config.yml, or hosts/<host>/leap/system/ for a host
+#       that has only run Leap (three): the rule bin/_infra.py's system_dir() keeps. The
+#       hostname must be one rule there with an http:// or https:// service, and the tunnel
+#       is that file's `tunnel:`. The CNAME's target is that id, checked live at Cloudflare
+#       and checked against the record ssh-<host> already uses, so a pasted id from another
+#       host's file is refused rather than routed.
+#   group_vars/all.yml dns_zone: the hostname is <subdomain>.<dns_zone> (CLAUDE.md § Repo
+#       invariants).
+#   ~/.config/cloudflare/access-emails: who may log in. A file on the control node, never
+#       the repo, which is public (group_vars/all.yml, beside cf_access_emails_file).
+#
+# Refuses, rather than guesses: a host not in [fleet]; a host with no tracked tunnel config,
+# or one with no `tunnel:`; a subdomain that is not one of that config's http(s) rules (so
+# ssh-<host>, which is server-create-fleet-ssh-access.yml's, is refused); a tunnel that is
+# not live, or that ssh-<host> does not point at; an Access application on the hostname this
+# play did not make; an empty or malformed address list; a probe that cannot read the
+# known login as one.
+#
+# Re-running is the intended way to finish after a partial failure, and a converged run
+# rewrites nothing but the application and its policy, which _cf-access-app.yml PUTs on
+# every run and reads back (its header says why). There is no -e remove: undo by hand in
+# the reverse order, the CNAME first (DNS -> Records), then the application (Zero Trust ->
+# Access -> Applications), so the name never resolves with nothing in front.
+#
+# The reasoning: docs/decisions.md § "A browser hostname on a host's tunnel gets a login
+# from a play".
+
+- name: Check the inventory is loaded
+  ansible.builtin.import_playbook: _assert-inventory.yml
+  vars:
+    required_group: control
+
+- name: Put a browser hostname behind a login
+  hosts: control
+  gather_facts: false
+
+  vars:
+    web_host: "{{ host | default('') }}"
+    web_sub: "{{ subdomain | default('') }}"
+    web_hostname: "{{ web_sub }}.{{ dns_zone }}"
+    cf_api: https://api.cloudflare.com/client/v4
+    # The filler for ids only a write could produce, inline wherever one is rendered. Why
+    # inline and not a set_fact is beside its definition in _dev-container-tunnel.yml.
+    cf_unknown_id: WOULD-BE-CREATED-BY-A-REAL-RUN
+    # A day. This login is in front of a GUI that can add folders and devices to a backup
+    # box, unlike the deployment play's week in front of a reading app.
+    web_session: 24h
+    # The tracked routing, by system_dir()'s rule: leap/system/ only when system/ is absent
+    # and leap/system/ exists. Repo-relative, for the messages.
+    web_host_dir: "{{ control_checkout }}/hosts/{{ web_host }}"
+    web_config: >-
+      hosts/{{ web_host }}/{{ 'leap/system' if (web_host_dir ~ '/system') is not directory
+      and (web_host_dir ~ '/leap/system') is directory else 'system' }}/cloudflared-config.yml
+    # The probes. URLs are variables so a test can point them at a stand-in. The known
+    # login is the deployment play's calibration: a hostname behind an Access login whose
+    # origin does not matter, because Access answers first.
+    access_calibration_hostname: "torrents.{{ dns_zone }}"
+    calibration_url: "https://{{ access_calibration_hostname }}/"
+    web_url: "https://{{ web_hostname }}/"
+    # Twelve tries ten seconds apart, as the deployment play waits: a record and an
+    # application made seconds ago can take that long to show from here.
+    probe_retries: 12
+    probe_delay: 10
+
+  tasks:
+    # ── what is being put behind a login ─────────────────────────────────────
+    - name: Check -e host names a box in the fleet
+      ansible.builtin.assert:
+        that:
+          - web_host in groups['fleet']
+          - web_host not in groups['control'] | default([])
+        fail_msg: "Say which box in [fleet]: -e host=three. Got '{{ web_host }}'. Nothing done."
+        success_msg: "host {{ web_host }}"
+
+    - name: Check {{ web_host }} has a tracked tunnel config
+      ansible.builtin.assert:
+        that: (control_checkout ~ '/' ~ web_config) is file
+        fail_msg: >-
+          {{ web_config }} does not exist, so there is no tracked routing to check the
+          hostname against. Commit {{ web_host }}'s tunnel config first, as
+          server-create-host-tunnel.yml's last message says. Nothing done.
+        success_msg: "{{ web_config }}"
+
+    - name: Read {{ web_host }}'s tracked tunnel routing
+      ansible.builtin.set_fact:
+        web_ingress: "{{ lookup('file', control_checkout ~ '/' ~ web_config) | from_yaml }}"
+
+    - name: Note {{ web_host }}'s browser hostnames and its tunnel
+      ansible.builtin.set_fact:
+        web_choices: >-
+          {{ web_ingress.ingress | default([]) | selectattr('hostname', 'defined')
+             | selectattr('service', 'defined') | selectattr('service', 'match', '^https?://')
+             | map(attribute='hostname') | list }}
+        web_tunnel_id: "{{ web_ingress.tunnel | default('') | string }}"
+
+    - name: Check {{ web_config | basename }} names its tunnel
+      ansible.builtin.assert:
+        that: web_tunnel_id is match('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+        fail_msg: >-
+          {{ web_config }} has no `tunnel:` id, so there is no tunnel to point a CNAME at.
+          Nothing done.
+        success_msg: "tunnel {{ web_tunnel_id }}"
+
+    - name: Check -e subdomain is a browser rule there
+      # The hostname is derived, so this is what keeps the derivation and the routing the
+      # same: a login on a name the tunnel does not route would prove nothing, and a login
+      # on ssh-<host> would shut out every client's service token.
+      ansible.builtin.assert:
+        that:
+          - web_sub is match('^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')
+          - web_choices | select('eq', web_hostname) | list | length == 1
+        fail_msg: >-
+          -e subdomain must name one rule in {{ web_config }} with an http:// or https://
+          service; got '{{ web_sub }}'. Its browser hostnames:
+          {{ web_choices | join(', ') if web_choices else 'none' }}. Nothing done.
+        success_msg: "{{ web_hostname }} is a browser rule on {{ web_host }}'s tunnel"
+
+    # ── the inputs, before anything is read at Cloudflare ────────────────────
+    - name: Read the Cloudflare API token
+      ansible.builtin.import_tasks: _cf-api-token.yml
+
+    - name: Read who may log in
+      ansible.builtin.import_tasks: _cf-access-emails.yml
+
+    # ── Cloudflare: the zone, the tunnel, and what covers the hostname ───────
+    - name: Read the account for {{ dns_zone }}
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/zones?name={{ dns_zone }}"
+        headers: { Authorization: "Bearer {{ cf_token }}" }
+      register: cf_zone_q
+      check_mode: false
+      changed_when: false
+      no_log: true
+
+    - name: Check the API token can see {{ dns_zone }}
+      ansible.builtin.assert:
+        that:
+          - cf_zone_q.json.success | default(false)
+          - (cf_zone_q.json.result | default([])) | length > 0
+        fail_msg: >-
+          The API token could not read zone {{ dns_zone }}: it is wrong, or missing Zone:Read.
+          ansible/README.md § "The Cloudflare API token". Nothing done.
+        success_msg: "zone {{ dns_zone }} is visible to this token"
+
+    - name: Note the zone and account ids
+      ansible.builtin.set_fact:
+        cf_zone_id: "{{ cf_zone_q.json.result[0].id }}"
+        cf_account_id: "{{ cf_zone_q.json.result[0].account.id }}"
+
+    - name: Read tunnel {{ web_tunnel_id[:8] }} at Cloudflare
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account_id }}/cfd_tunnel/{{ web_tunnel_id }}"
+        headers: { Authorization: "Bearer {{ cf_token }}" }
+        status_code: [200, 404]
+      register: web_tunnel_q
+      check_mode: false
+      changed_when: false
+      no_log: true
+
+    - name: Check tunnel {{ web_tunnel_id[:8] }} is live
+      # The same three conditions, in the same order, as _cf-tunnel.yml's dead-tunnel check;
+      # the reason for each is beside them there.
+      ansible.builtin.assert:
+        that:
+          - web_tunnel_q.json.success | default(false)
+          - web_tunnel_q.json.result is mapping
+          - web_tunnel_q.json.result.get('deleted_at') is none
+        fail_msg: >-
+          {{ web_config }} names tunnel {{ web_tunnel_id }}, which this account does not have
+          (deleted, or created on another account). A CNAME to it would reach nothing.
+          Nothing done.
+        success_msg: "tunnel {{ web_tunnel_id }} is live"
+
+    - name: Read the CNAME for ssh-{{ web_host }}.{{ dns_zone }}
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/zones/{{ cf_zone_id }}/dns_records?type=CNAME&name=ssh-{{ web_host }}.{{ dns_zone }}"
+        headers: { Authorization: "Bearer {{ cf_token }}" }
+      register: web_ssh_q
+      check_mode: false
+      changed_when: false
+      no_log: true
+
+    - name: Check ssh-{{ web_host }} uses the same tunnel
+      # The record the fleet already reaches this host through. A tunnel: line copied from
+      # another host's file would pass the live check above and route this hostname to the
+      # wrong box; this is the check that cannot.
+      ansible.builtin.assert:
+        that: >-
+          web_ssh_q.json.result | default([]) | map(attribute='content')
+          | select('eq', web_tunnel_id ~ '.cfargotunnel.com') | list | length == 1
+        fail_msg: >-
+          ssh-{{ web_host }}.{{ dns_zone }} does not CNAME to {{ web_tunnel_id }}.cfargotunnel.com
+          (it has {{ web_ssh_q.json.result | default([]) | map(attribute='content') | list }}),
+          so {{ web_config }} and the live record disagree about {{ web_host }}'s tunnel. A
+          host that has no ssh record yet wants server-create-host-tunnel.yml first. Nothing
+          done.
+        success_msg: "ssh-{{ web_host }} points at the same tunnel"
+
+    - name: Read the account's Access applications
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps"
+        headers: { Authorization: "Bearer {{ cf_token }}" }
+      register: cf_apps_q
+      check_mode: false
+      changed_when: false
+      no_log: true
+
+    # Covering means `domain`, any public `destinations` entry, or the deprecated
+    # `self_hosted_domains`, at the hostname or a path under it: the fleet ssh play's rule.
+    - name: Note which applications cover {{ web_sub }}
+      ansible.builtin.set_fact:
+        web_covering: >-
+          {%- set out = [] -%}
+          {%- for a in cf_apps_q.json.result | default([]) -%}
+            {%- set uris = (a.destinations | default([]) | selectattr('uri', 'defined')
+                            | map(attribute='uri') | list)
+                           + (a.self_hosted_domains | default([])) + [a.domain | default('')] -%}
+            {%- if web_hostname in (uris | map('regex_replace', '/.*$', '') | list) -%}
+              {%- set _ = out.append({'id': a.id, 'name': a.name | default('?')}) -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ out }}
+
+    - name: Note this play's own application, if it exists
+      ansible.builtin.set_fact:
+        web_app: "{{ web_covering | selectattr('name', 'eq', web_sub) | list | first | default({}) }}"
+        web_foreign: "{{ web_covering | rejectattr('name', 'eq', web_sub) | list }}"
+
+    - name: Check no other Access app covers {{ web_sub }}
+      # Adopting or replacing Access in front of something someone else set up is a
+      # person's call, not this play's.
+      ansible.builtin.assert:
+        that: web_foreign | length == 0
+        fail_msg: >-
+          {{ web_hostname }} is already covered by Access applications this play did not
+          make: {{ web_foreign | map(attribute='name') | list }} ({{ web_foreign
+          | map(attribute='id') | list }}). Look at them in Zero Trust -> Access ->
+          Applications; delete them, or rename the one that should stay to {{ web_sub }},
+          and re-run. Nothing done.
+        success_msg: "{{ 'only ' ~ web_sub ~ ' covers it' if web_app else 'nothing covers it yet' }}"
+
+    # ── calibrate the probe before anything is written ───────────────────────
+    # failed_when: false AND ignore_errors: true on every probe, so `uri` never stops the
+    # play on its own and the assert after it speaks: -1 (no answer: DNS, TLS, refused)
+    # fails `uri` whatever failed_when says (the deployment play's note).
+    - name: Probe {{ access_calibration_hostname }}, a known login
+      ansible.builtin.uri:
+        url: "{{ calibration_url }}"
+        follow_redirects: none
+        timeout: 20
+      register: probe_cal
+      check_mode: false
+      changed_when: false
+      failed_when: false
+      ignore_errors: true
+
+    - name: Check {{ access_calibration_hostname }} reads as a login
+      ansible.builtin.assert:
+        that:
+          - probe_cal.status | default(0) == 302
+          - "'cloudflareaccess.com' in (probe_cal.location | default(''))"
+        fail_msg: >-
+          {{ calibration_url }} answered HTTP {{ probe_cal.status | default('nothing') }}{{
+          ', redirecting to ' ~ probe_cal.location if probe_cal.location is defined else '' }},
+          not an Access login, so this probe could not recognise one on {{ web_hostname }}
+          either. Nothing done.
+        success_msg: "a login looks like: 302 to {{ (probe_cal.location | default('')) | urlsplit('hostname') }}"
+
+    - name: "--check only: print what a real run would do"
+      ansible.builtin.debug:
+        msg: >-
+          --check: would {{ 'write' if web_app else 'create' }} the Access application
+          {{ web_sub }} on {{ web_hostname }}, with one allow policy for the
+          {{ cf_access_emails | length }} address(es) in {{ cf_access_emails_file }}, read it
+          back, then point {{ web_hostname }} at tunnel {{ web_tunnel_id }}, proxied, and
+          wait for it to redirect to the login. Nothing was written.
+      changed_when: true
+      when: ansible_check_mode
+
+    # ── 1  the login: application and policy, read back ─────────────────────
+    - name: Write the login in front of {{ web_sub }}
+      ansible.builtin.import_tasks: _cf-access-app.yml
+      vars:
+        acc_name: "{{ web_sub }}"
+        acc_domain: "{{ web_hostname }}"
+        acc_existing: "{{ web_app }}"
+        acc_session: "{{ web_session }}"
+        acc_decision: allow
+        acc_policy_name: allowed people
+        # ansible.builtin only: the deployment play's dict_kv is community.general, which
+        # neither the phone's ansible-core nor CI's is promised to carry.
+        acc_include: >-
+          {%- set out = [] -%}
+          {%- for e in cf_access_emails -%}
+            {%- set _ = out.append({'email': {'email': e}}) -%}
+          {%- endfor -%}
+          {{ out }}
+        acc_emails: "{{ cf_access_emails }}"
+        acc_if_refused: >-
+          {{ web_hostname }} has no DNS record yet, so nothing is reachable; a re-run
+          finishes it.
+
+    - name: Check the login is in place before the CNAME
+      # _cf-access-app.yml has already stopped the play on any refusal; this is the ordering
+      # said once more where it matters, so a later edit to that file cannot quietly let the
+      # record below go out ahead of the login.
+      ansible.builtin.assert:
+        that:
+          - acc_app_id | default('') | length > 0
+          - acc_pol_r.json.success | default(false)
+          - acc_pol_r.json.result | default([]) | selectattr('decision', 'eq', 'allow') | list | length == 1
+        fail_msg: >-
+          No Access application with an allow policy was read back for {{ web_hostname }}, so
+          its CNAME is not written. Nothing points at {{ web_host }}'s tunnel.
+        success_msg: "{{ web_sub }} carries the login; the CNAME may follow"
+      when: not ansible_check_mode
+
+    # ── 2  the record, then the proof, and the record undone if the proof fails ──
+    - name: Point {{ web_sub }} at {{ web_host }}'s tunnel and prove it
+      block:
+        - name: Write the CNAME for {{ web_sub }}
+          ansible.builtin.import_tasks: _cf-dns.yml
+          vars:
+            cf_hostname: "{{ web_hostname }}"
+            cf_tunnel_id: "{{ web_tunnel_id }}"
+            cf_dns_comment: >-
+              {{ web_sub }} on {{ web_host }}'s tunnel, behind an Access login —
+              ansible/playbooks/server-create-browser-login.yml
+            cf_dns_if_refused: >-
+              The login is in place in front of it, and a re-run tries the record again.
+
+        - name: Wait for {{ web_sub }} to redirect to the login
+          # Never probed before the record exists: a lookup of a name that does not exist
+          # yet is cached as absent by the resolver for up to the zone's negative TTL, and
+          # would hold this wait failing long after the record is made.
+          ansible.builtin.uri:
+            url: "{{ web_url }}"
+            follow_redirects: none
+            timeout: 20
+          register: probe_web
+          until: >-
+            probe_web.status | default(0) == 302
+            and 'cloudflareaccess.com' in (probe_web.location | default(''))
+          retries: "{{ probe_retries }}"
+          delay: "{{ probe_delay }}"
+          changed_when: false
+          failed_when: false
+          ignore_errors: true
+          when: not ansible_check_mode
+
+        - name: Check {{ web_sub }} asks for a login
+          ansible.builtin.assert:
+            that:
+              - probe_web.status | default(0) == 302
+              - "'cloudflareaccess.com' in (probe_web.location | default(''))"
+            fail_msg: >-
+              {{ web_url }} answered HTTP {{ probe_web.status | default('nothing') }}{{
+              ' (' ~ probe_web.msg ~ ')' if probe_web.status | default(0) == -1 else '' }}{{
+              ', redirecting to ' ~ probe_web.location if probe_web.location is defined else '' }}
+              after {{ (probe_retries | int) * (probe_delay | int) }}s, not the Access login.
+            success_msg: "{{ web_hostname }} redirects to the Access login"
+          when: not ansible_check_mode
+
+      rescue:
+        - name: "On failure: note whether {{ web_sub }} is open"
+          # An HTTP answer that is not the login is the open state this play exists to
+          # prevent, and the record goes. No answer at all (-1: the name does not resolve
+          # from here yet) is not that: the login was read back in front of the hostname, and
+          # deleting the record would only restart the wait for it to resolve.
+          ansible.builtin.set_fact:
+            web_open: >-
+              {{ probe_web is defined and probe_web is not skipped
+                 and (probe_web.status | default(-1)) != -1 }}
+            web_record_id: >-
+              {{ cf_dns_w.json.result.id
+                 if (cf_dns_w is defined and cf_dns_w is not skipped and cf_dns_w.json.result.id is defined)
+                 else (cf_dns_q.json.result[0].id | default('') if cf_dns_q is defined else '') }}
+
+        - name: "If open: delete the CNAME for {{ web_sub }}"
+          ansible.builtin.uri:
+            url: "{{ cf_api }}/zones/{{ cf_zone_id }}/dns_records/{{ web_record_id }}"
+            method: DELETE
+            status_code: [200, 202, 204]
+            headers: { Authorization: "Bearer {{ cf_token }}" }
+          register: web_undo
+          failed_when: false
+          no_log: true
+          when:
+            - web_open | bool
+            - web_record_id | length > 0
+
+        - name: "On failure: stop, saying what failed and what is left"
+          ansible.builtin.fail:
+            msg: >-
+              {{ ansible_failed_task.name | default('a step') }} failed:
+              {{ ansible_failed_result.msg | default('') }}
+              {{ ('The CNAME was deleted, so ' ~ web_hostname ~ ' does not resolve; the login '
+                   ~ 'application is kept. Find out what answered before re-running.')
+                 if (web_undo.status | default(0)) in [200, 202, 204]
+                 else ('THE CNAME COULD NOT BE DELETED (HTTP ' ~ (web_undo.status | default('?'))
+                       ~ ') and ' ~ web_hostname ~ ' may be open: delete its record in DNS -> Records now.')
+                 if (web_undo is defined and web_undo is not skipped)
+                 else ('The login is in front of ' ~ web_hostname ~ ' but the name does not answer '
+                       ~ 'from here yet. Re-run in a few minutes; a re-run changes nothing and probes again.')
+                 if (probe_web is defined and probe_web is not skipped)
+                 else 'The login is in place; a re-run finishes the record.' }}
+
+    - name: Print the GUI's address and who may log in
+      ansible.builtin.debug:
+        msg:
+          - "https://{{ web_hostname }}/ is behind the Access login {{ web_sub }}."
+          - "Admitted: the {{ cf_access_emails | length }} address(es) in {{ cf_access_emails_file }}, for {{ web_session }} a login."
+          - "Undo: delete the CNAME first (DNS -> Records), then the application (Zero Trust -> Access -> Applications)."
+      changed_when: true
+      when: not ansible_check_mode
