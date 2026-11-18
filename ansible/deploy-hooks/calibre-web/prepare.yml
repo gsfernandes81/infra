@@ -55,5 +55,8 @@
     dest: "{{ cw_config_dir }}/kepubify/kepubify-linux-64bit"
     state: link
     force: true
+    # The target is not on the host, so there are no attributes to follow it to; without
+    # this, Ansible warns at every run that it cannot set them.
+    follow: false
   become: true
   delegate_to: "{{ dep.host }}"
