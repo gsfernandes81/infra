@@ -1,5 +1,5 @@
 # The ingress of calibre-web's OWN tunnel — not one's host tunnel, whose routing is
-# hosts/one/system/cloudflared-config.yml. Mounted read-only into the sidecar.
+# hosts/one/leap/system/cloudflared-config.yml. Mounted read-only into the sidecar.
 #
 # This file IS the routing: the tunnel is locally-managed (config_src: local), so there is
 # no dashboard copy to disagree with it. ansible/playbooks/server-create-deployment-tunnel.yml

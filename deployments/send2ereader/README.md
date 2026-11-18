@@ -108,6 +108,6 @@ Neither is used now. Measure the checkout, then remove both when you choose; the
 
 - **Do not put a `ports:` entry back.** The sidecar reaches the app on the project
   network; a published port is a second way in that nothing guards.
-- **Do not add `bookit` back to `hosts/one/system/cloudflared-config.yml`.** The DNS
+- **Do not add `bookit` back to `hosts/one/leap/system/cloudflared-config.yml`.** The DNS
   record points at the sidecar's tunnel, so a rule in `one`'s host tunnel would never
   receive a request, and the next reader of that file would think it did.
