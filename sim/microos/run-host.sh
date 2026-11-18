@@ -82,6 +82,16 @@ for vol in "${volumes[@]}"; do
 	tar -C "vol-$vol" -cf "$c/volumes/$vol.tar" .
 done
 mke2fs -q -t ext4 -L combustion -d stick combustion.img 64M
+# A tunnel's credentials belong to 65532, the cloudflared image's user, at 0600, as the
+# tunnel play leaves them and make-stick's cp -a carries them. Set in the image, since this
+# runs unprivileged; the checks prove the first boot keeps that owner.
+for dep in "${deployments[@]}"; do
+	[ "$new_host" = no ] || break
+	f=/combustion/carry/home/.$dep-secrets/tunnel.json
+	debugfs -w -R "sif $f uid 65532" combustion.img 2>/dev/null
+	debugfs -w -R "sif $f gid 65532" combustion.img 2>/dev/null
+	debugfs -w -R "sif $f mode 0100600" combustion.img 2>/dev/null
+done
 
 # ── the host's disks ─────────────────────────────────────────────────────────
 make_disks | report

@@ -162,8 +162,14 @@ else
 		n=0; for f in /home/gavin/infra/deployments/*/.env; do
 			[ -e "$f" ] || continue; n=$((n+1)); stat -c "%a %U %n" "$f"; [ "$(stat -c %a "$f")" = 600 ] || exit 1
 		done; [ "$n" -gt 0 ]'
-	check "each secrets directory is gavin's" sh -c '
-		ls -d /home/gavin/.*-secrets && [ -z "$(find /home/gavin/.*-secrets ! -user gavin)" ]'
+	# The directory is gavin's, and a tunnel's credentials stay 65532's, the cloudflared
+	# image's user, or the deployment's sidecar cannot read them.
+	check "each secrets directory is gavin's, its tunnel.json 65532's at 0600" sh -c '
+		ls -ld /home/gavin/.*-secrets /home/gavin/.*-secrets/tunnel.json || exit 1
+		for d in /home/gavin/.*-secrets; do
+			[ "$(stat -c %U "$d")" = gavin ] || exit 1
+			[ "$(stat -c "%u %g %a" "$d/tunnel.json")" = "65532 65532 600" ] || exit 1
+		done'
 fi
 # By name, from the host's own list: a tar waiting in /root/volumes, or, once the runbook has
 # restored it (leap/README.md), the volume itself. A Compose label alone would also pass a
