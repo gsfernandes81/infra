@@ -28,7 +28,7 @@
 set -eu
 
 # three's tailnet address, `tailscale ip -4` on three once it has joined.
-three=FILL-FROM-THREE-TAILNET-ADDRESS
+three=100.101.45.78
 key=/root/.ssh/mirror-backup
 state=/var/lib/mirror-backup
 # Read by sim/microos/host/three.sh, which pushes with exactly these.
