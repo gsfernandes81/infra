@@ -8,7 +8,7 @@
 # It asks for the URL without echoing it, since anyone who has it can read and post to the
 # topic, then asks whether to send a test message. It writes the URL to
 # /var/lib/mirror-backup/ntfy-url, root 0600, in a directory root's alone at 0700, where
-# hosts/<host>/system/mirror-backup-age reads it. The URL never reaches a command line, a
+# hosts/<host>/system/mirror-backup-age-check reads it. The URL never reaches a command line, a
 # process list or this play's output: it travels as a module's stdin and arguments, and
 # every task that carries it is no_log. The test message is posted from the box, the way
 # the alert will be, and the play prints only the HTTP status it got.
@@ -62,7 +62,7 @@
   tasks:
     - name: Read whether the backup alert is tracked here
       ansible.builtin.stat:
-        path: "{{ control_checkout }}/hosts/{{ inventory_hostname }}/system/mirror-backup-age"
+        path: "{{ control_checkout }}/hosts/{{ inventory_hostname }}/system/mirror-backup-age-check"
       register: ntfy_tracked
       delegate_to: localhost
 
@@ -73,7 +73,7 @@
           - ntfy_tracked.stat.exists
           - ntfy_url is match('^https?://[^\s/]+/\S+$')
         fail_msg: >-
-          {{ 'hosts/' ~ inventory_hostname ~ '/system/mirror-backup-age is not in this checkout, so nothing on '
+          {{ 'hosts/' ~ inventory_hostname ~ '/system/mirror-backup-age-check is not in this checkout, so nothing on '
              ~ inventory_hostname ~ ' reads the URL.' if not ntfy_tracked.stat.exists else
              'What was typed is not a URL with a topic: http(s)://host/topic, no spaces.' }}
           Nothing has been written.

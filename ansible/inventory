@@ -14,9 +14,7 @@
 zero
 one
 two
-# Reached at three-local, its LAN alias, until `ssh three` answers through its tunnel; then
-# plain `three` like the others, since three-local stops working once it is off-site.
-three ansible_host=three-local
+three
 
 # Hosts that run containers, and are therefore worth auditing for them. `two` is absent
 # on purpose: its one deployment is leaving (see docs/management-plane.md), its podman is
