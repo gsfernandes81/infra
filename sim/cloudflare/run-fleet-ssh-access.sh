@@ -47,6 +47,8 @@ ingress:
     service: ssh://127.0.0.1:22
   - hostname: syncthing-three.gsrpi.uk
     service: http://127.0.0.1:8384
+    originRequest:
+      httpHostHeader: localhost
   - service: http_status:404
 CFG
 fi

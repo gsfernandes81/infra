@@ -1,0 +1,53 @@
+---
+# TASKS, NOT A PLAY — who may log in through an Access login: the addresses in
+# cf_access_emails_file (group_vars/all.yml, ~/.config/cloudflare/access-emails on the
+# machine running the play), read and checked. Leaves one fact, `cf_access_emails`, a list.
+#
+#   server-create-deployment-tunnel.yml   for a deployment whose edge.yml says browser
+#   server-create-browser-login.yml       for a browser hostname on a host's own tunnel
+#
+# Moved out of the first of those on 2026-11-18, word for word, so the second reads the
+# same file by the same code. The importer puts any condition on the import itself.
+#
+# A FILE, NOT A LIST IN THE REPO: this repo is public. The reasoning is beside
+# cf_access_emails_file in group_vars/all.yml. Only the count is ever printed.
+
+- name: "Access login: find the allowed-emails list"
+  ansible.builtin.stat:
+    path: "{{ cf_access_emails_file }}"
+  register: cf_emails_stat
+  delegate_to: localhost
+  check_mode: false
+
+- name: "If no allowed-emails list: print how to make one"
+  ansible.builtin.debug:
+    msg: "{{ cf_access_emails_howto }}"
+  changed_when: true
+  when: not cf_emails_stat.stat.exists
+
+- name: "Access login: check the allowed-emails list exists"
+  ansible.builtin.assert:
+    that: cf_emails_stat.stat.exists
+    fail_msg: "No {{ cf_access_emails_file }}; see above. Nothing has been created."
+    quiet: true
+
+- name: "Access login: read the allowed-emails list"
+  # no_log: a set_fact's result is the addresses, and -v prints it under any callback.
+  ansible.builtin.set_fact:
+    cf_access_emails: >-
+      {{ lookup('file', cf_access_emails_file).splitlines()
+         | map('trim') | reject('match', '^(#|$)') | list }}
+  no_log: true
+
+- name: "Access login: check the allowed emails are valid"
+  # An application whose allow policy admits nobody is safe but useless; one that admits
+  # a typo is a login that never arrives. Count only, never the addresses — this repo
+  # is public and so are screenshots of its runs.
+  ansible.builtin.assert:
+    that:
+      - cf_access_emails | length > 0
+      - cf_access_emails | reject('match', '^[^@\s]+@[^@\s]+\.[^@\s]+$') | list | length == 0
+    fail_msg: >-
+      {{ cf_access_emails_file }} needs at least one address, one per line, and every
+      non-comment line must look like an address. Nothing has been created.
+    success_msg: "{{ cf_access_emails | length }} address(es) will be admitted"

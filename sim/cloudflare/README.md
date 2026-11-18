@@ -1,11 +1,13 @@
 # Cloudflare simulation
 
-`.github/workflows/cloudflare-sim.yml` runs two plays end to end with no Cloudflare
+`.github/workflows/cloudflare-sim.yml` runs three plays end to end with no Cloudflare
 account. `mock_api.py` stands in for the parts of Cloudflare's API that `_cf-api-token.yml`
-and `_cf-tunnel.yml` call, and for the Access applications, reusable policies and service
-tokens that `server-create-fleet-ssh-access.yml` reads and writes, answering in Cloudflare's
-envelope. `run-host-tunnel.sh` drives `server-create-host-tunnel.yml` against it with the
-runner as the host; `run-fleet-ssh-access.sh` drives the Access play, described at the end.
+and `_cf-tunnel.yml` call, for the Access applications, reusable policies and service
+tokens that `server-create-fleet-ssh-access.yml` reads and writes, and for the applications,
+app-scoped policies and records that `server-create-browser-login.yml` writes, answering in
+Cloudflare's envelope. `run-host-tunnel.sh` drives `server-create-host-tunnel.yml` against
+it with the runner as the host; `run-fleet-ssh-access.sh` and `run-browser-login.sh` drive
+the two Access plays, described after it.
 
 ## The host tunnel
 
@@ -83,3 +85,48 @@ a fleet token and an ssh config in it, and puts a shim first on `PATH` that hand
 that config with `-F`, since ssh reads its config from the passwd entry's home and not
 `$HOME`. In the repo it writes `ansible/inventory.fleet-sim` and `hosts/simleap/`, and
 `three`'s stand-in config when there is none, and removes them on exit.
+
+## The browser login
+
+`run-browser-login.sh` runs `server-create-browser-login.yml` for `syncthing-three` on
+`three`, with the same stand-in for `three`'s tunnel config as the ssh gate's script, and
+the tunnel and `ssh-three`'s record planted in the stand-in as the host tunnel play leaves
+them. It runs:
+
+- no `-e host`, a host with no tracked config, and a Leap-only host whose config names no
+  tunnel; no `-e subdomain`, `ssh-three`, and a name not in the ingress; no address list,
+  and one with a line that is not an address: each must be refused by its own check, with
+  nothing made;
+- a tunnel the account does not have, one that `ssh-three` does not point at, an
+  application on the hostname that the play did not make, and a probe whose known login
+  does not read as one: each refused, with no record made;
+- a dry run, which must say what it would do and write nothing;
+- the real run: one application, `syncthing-three`, 24 hours, with one `allow` policy
+  admitting exactly the addresses in the file; one proxied CNAME to `three`'s tunnel; and,
+  from the stand-in's record of each DNS write, the login already covering the hostname
+  when its record was written, the policy's request before the record's;
+- a re-run, which must add no application or policy and leave the record untouched, and
+  one after the record was pointed elsewhere, which must point it back;
+- a refused Access write, which must stop with Cloudflare's reason and write no record;
+- the proof failing after the record exists: with the hostname answering from behind
+  Access, the probe must stop at that first answer and the rescue must delete the record and
+  keep the application, reading a 404 on the delete as gone, and printing Cloudflare's
+  reason and saying the hostname may be open when the delete is refused; with no answer at
+  all, it must retry to the end, keep the record and say to re-run, and the re-run must
+  finish.
+
+Every run's output is searched for the API token and for the allowed addresses.
+
+### What a green run does not show
+
+The edge: the probe URLs point at the stand-in, which answers a 302 to a
+`cloudflareaccess.com` login for a hostname covered by an application with an `allow`
+policy, and 200 otherwise. Not a login either, nor Syncthing behind it, nor whether
+Cloudflare keeps app-scoped policies on an application PUT whole: the stand-in keeps them,
+and the play reads them back on the real API rather than assume it.
+
+### Running it elsewhere
+
+It needs no root. Like the ssh gate's script it sets `HOME` to a temporary directory, with
+the API token and the address list in it, and writes `ansible/inventory.login-sim` and
+`hosts/simleap/`, and `three`'s stand-in config when there is none, removing them on exit.

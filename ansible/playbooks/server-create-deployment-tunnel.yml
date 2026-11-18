@@ -258,48 +258,9 @@
     - name: Read and check the Cloudflare API token
       ansible.builtin.import_tasks: _cf-api-token.yml
 
-    - name: "Access login: find the allowed-emails list"
-      ansible.builtin.stat:
-        path: "{{ cf_access_emails_file }}"
-      register: cf_emails_stat
-      delegate_to: localhost
-      check_mode: false
-      when: deployment_edge.access == 'browser'
-
-    - name: "If no allowed-emails list: print how to make one"
-      ansible.builtin.debug:
-        msg: "{{ cf_access_emails_howto }}"
-      changed_when: true
-      when:
-        - deployment_edge.access == 'browser'
-        - not cf_emails_stat.stat.exists
-
-    - name: "Access login: check the allowed-emails list exists"
-      ansible.builtin.assert:
-        that: cf_emails_stat.stat.exists
-        fail_msg: "No {{ cf_access_emails_file }}; see above. Nothing has been created."
-        quiet: true
-      when: deployment_edge.access == 'browser'
-
     - name: "Access login: read the allowed-emails list"
-      ansible.builtin.set_fact:
-        cf_access_emails: >-
-          {{ lookup('file', cf_access_emails_file).splitlines()
-             | map('trim') | reject('match', '^(#|$)') | list }}
-      when: deployment_edge.access == 'browser'
-
-    - name: "Access login: check the allowed emails are valid"
-      # An application whose allow policy admits nobody is safe but useless; one that admits
-      # a typo is a login that never arrives. Count only, never the addresses — this repo
-      # is public and so are screenshots of its runs.
-      ansible.builtin.assert:
-        that:
-          - cf_access_emails | length > 0
-          - cf_access_emails | reject('match', '^[^@\s]+@[^@\s]+\.[^@\s]+$') | list | length == 0
-        fail_msg: >-
-          {{ cf_access_emails_file }} needs at least one address, one per line, and every
-          non-comment line must look like an address. Nothing has been created.
-        success_msg: "{{ cf_access_emails | length }} address(es) will be admitted"
+      # _cf-access-emails.yml since 2026-11-18, shared with server-create-browser-login.yml.
+      ansible.builtin.import_tasks: _cf-access-emails.yml
       when: deployment_edge.access == 'browser'
 
     - name: Read the ssh user's home directory on {{ inventory_hostname }}
