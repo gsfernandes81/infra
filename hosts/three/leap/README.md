@@ -92,6 +92,11 @@ exists. On the LAN, from the phone:
 
 ## The array
 
+The first drive is a WD Red Plus that reports itself as `WDC WD40EFZZ-68CPAN0` (sold as the
+WD49EFZZ), serial `WD-WXB2D76N8PYJ`. The owner checked the serial with WD, and smartctl read
+it on 2026-11-18 at 0 power-on hours, with no reallocated or pending sectors and error
+recovery at 7 seconds.
+
 The drive is formatted once, after the first boot, with the drive in the Argon's middle bay
 and nothing on it. After `ssh three`:
 
