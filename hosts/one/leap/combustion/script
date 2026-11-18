@@ -29,6 +29,7 @@ gavin_gid=1000
 . ./leap/firstboot.sh
 
 say "starting $host"
+set_clock
 check_carry "$host"
 mount_subvolumes
 

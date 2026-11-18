@@ -308,6 +308,17 @@ the Alpine card boots only with Leap `one` off: both claim `one`'s address and t
   - `sudo firewall-cmd --list-all` after `tailscale up`, to see Tailscale through firewalld;
   - a serial console, if a USB serial adapter is to hand.
 
+**If the first boot never answers ssh** (it answers ping on its address, but port 22 is
+refused): the script stopped. Read its log off the card on `two`, through the reader, by a
+raw search, since the reader cannot mount a card the first boot grew:
+
+```fish
+# on two: search the card's root partition for the first boot's log lines, detached, into a file; put the card's device in place of sdX
+sudo sh -c "setsid nohup sh -c 'dd if=/dev/sdX2 bs=4M count=1536 2>/dev/null | strings -n 8 | grep \"^firstboot: \" > /home/gavin/firstboot-lines.txt; echo done >> /home/gavin/firstboot-lines.txt' </dev/null >/dev/null 2>&1 &"
+```
+
+`cat ~/firstboot-lines.txt` once its last line says `done`; the `STOPPED` line says why.
+
 **Way back:** power off, the Alpine card and the Sabrent back on the old board (or on the
 8 GB board, if step 2 passed), power on, `ssh one`, then `sudo docker compose start` in
 `~/infra/deployments/garmin-mcp`, which step 1 stopped; if its play logged in to Garmin on

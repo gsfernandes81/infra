@@ -72,7 +72,9 @@ discard (`plans/visit-runbook.md` § Writing a card, and erasing a stick).
 Combustion runs the script twice. First with `--prepare`, in the initramfs before any
 network is up: the host's NetworkManager profile goes in there, so the network Combustion
 brings up for the packages already uses the host's own address rather than a DHCP lease.
-Then for real, in the new system, in order: checks the carry-over, sets the hostname, installs the packages (Tailscale's from
+Then for real, in the new system, in order: sets the clock from a plain-HTTP answer's
+`Date` header (a Pi has no clock, and HTTPS refuses certificates from the future), checks
+the carry-over, sets the hostname, installs the packages (Tailscale's from
 its own repository, openSUSE's `docker-compose` locked out, the Pi's boot firmware locked), installs `cloudflared` and
 Compose from their pinned downloads after checking each SHA-256, sets root's password,
 makes `gavin` with his old uid and gid, his password and his keys, installs the old ssh
@@ -83,7 +85,9 @@ repository into `~gavin/infra` with each deployment's `.env`, and leaves the vol
 files in `/root/volumes` for the runbook to restore once Docker runs.
 
 A failed step stops the script, and Combustion then leaves the image unconfigured rather
-than half-configured.
+than half-configured. Everything the script prints is also kept in
+`/var/log/infra-firstboot.log`, which survives a failed run: with no screen to hand, a raw
+search of the card for `firstboot:` reads it (`plans/visit-runbook.md` § Slice 1).
 
 ## What it does not do
 

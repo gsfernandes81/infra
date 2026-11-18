@@ -147,6 +147,9 @@ check "the update timer is masked" sh -c '
 check "rebootmgr's strategy is off" sh -c 'rebootmgrctl get-strategy | tee /dev/stderr | grep -q off'
 check "jeos-firstboot is masked" sh -c '[ "$(systemctl is-enabled jeos-firstboot.service)" = masked ]'
 check "the update recipes are there for every login" grep -q 'Updates on this box are by hand' /etc/motd.d/50-infra-updates
+check "the first boot kept its log, from the clock to done" sh -c '
+	f=/var/log/infra-firstboot.log; tail -n 3 "$f"
+	grep -q "firstboot: set the clock from download.opensuse.org" "$f" && grep -q "firstboot: done" "$f"'
 
 echo "-- the checkout and the carry-over"
 check "the checkout is gavin's" sh -c '[ "$(stat -c %U /home/gavin/infra)" = gavin ] && git -C /home/gavin/infra log --oneline -1'

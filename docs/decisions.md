@@ -2425,6 +2425,22 @@ dashboard. The rest came out of writing it and is proven by `cloudflare-sim.yml`
   needed it. Found while writing the play, unproven on a box: the GUI step in
   `hosts/three/leap/README.md` says what the error looks like.
 
+## A Pi's first boot sets its clock, and keeps its log
+
+**Decided 2026-11-19**, at the visit, when `one`'s first boot on the 8 GB Pi stopped twice
+with no screen to hand: it answered ping on its static address, so Combustion had found the
+stick, but ssh never came up, and nothing of the script's reached the card, since a failed
+run's snapshot and the initramfs's journal are both thrown away.
+
+- **The first boot sets the clock from a plain-HTTP `Date` header** before any download. A
+  Pi has no clock and boots at its software's build date; every download in the script is
+  HTTPS, whose certificates read "not yet valid" to a clock months behind. A VM takes its
+  host's clock, so the simulation could not meet this. The likeliest cause of the stop, not
+  proven when this was written.
+- **Everything the script prints also goes to `/var/log/infra-firstboot.log`**, which the
+  transactional shell binds from the real `/var`, so it survives a failed run, and a raw
+  search of the card for `firstboot:` reads it without mounting what the reader cannot.
+
 ## The lesson worth keeping
 
 

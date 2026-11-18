@@ -55,6 +55,32 @@ common_packages=(docker docker-buildx smartmontools btrfsprogs fish htop nano cu
 say() { echo "firstboot: $*" > /dev/console; echo "firstboot: $*"; }
 die() { say "STOPPED: $*"; exit 1; }
 
+# Everything the script prints also goes to /var/log/infra-firstboot.log. transactional-update's
+# shell binds the real /var/log into the snapshot it builds, so the log outlives a failed run,
+# whose snapshot Combustion throws away along with the initramfs's own journal. A box that
+# stops at its first boot, with no screen to hand, is read by a raw search of its card for
+# "firstboot:" (plans/visit-runbook.md). Found at the visit, when one's first boot stopped
+# without a trace.
+mkdir -p /var/log
+exec > >(tee -a /var/log/infra-firstboot.log) 2>&1
+
+# A Pi has no clock of its own: it boots at whatever date its software was built, and
+# nothing sets the time inside the initramfs, where this runs. Months behind, every HTTPS
+# certificate the downloads meet reads "not yet valid". So the time is read first from a plain
+# HTTP answer's Date header, which needs no certificate. A VM has its host's clock, which is
+# why the simulation never met this.
+set_clock() {
+	local d
+	d=$(curl -fsSI --max-time 30 http://download.opensuse.org/ | sed -n 's/^[Dd]ate: *//p' |
+		tr -d '\r' | head -n 1) || true
+	say "the clock read $(date -u '+%F %T') UTC"
+	if [ -n "$d" ] && date -u -s "$d" >/dev/null; then
+		say "set the clock from download.opensuse.org: $(date -u '+%F %T') UTC"
+	else
+		say "could not read the time over plain HTTP; the downloads may refuse their certificates"
+	fi
+}
+
 # Combustion's copy of the stick's combustion/ directory, which the script runs from.
 stick=$PWD
 
