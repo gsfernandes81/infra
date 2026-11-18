@@ -28,7 +28,9 @@ Slice 2 and slice 1 never share a day. Slice 3 waits a day after slice 1, becaus
 board is slice 1's way back until then, unless the Alpine card has booted on the 8 GB board
 (slice 1, step 2), which makes the 8 GB board its own way back.
 
-**Every Pi joins the tailnet with `--accept-dns=false`**, so Tailscale never takes over a
+**Every Pi joins the tailnet with `--accept-dns=false`**, and the tailnet approves each new
+machine by hand: a `tailscale up` that prints a login URL also needs the machine approved
+under Machines in the admin console. With `--accept-dns=false` Tailscale never takes over a
 box's resolver: if `tailscaled` broke, a box resolving through it would lose its tunnel
 too (`decisions.md`).
 
@@ -65,7 +67,9 @@ Over ssh, from the phone, any day before. Each is a step a slice would otherwise
    `ansible/group_vars/fleet.yml`, with the tracked service `hosts/zero/system/tailscaled`
    ([`hosts/zero/system/README.md`](../hosts/zero/system/README.md) § Tailscale). First an
    auth key, in the admin console under Settings, Keys: tagged `tag:fleet`, not reusable,
-   expiring within a day. Then, from the phone:
+   **pre-approved**, expiring within a day. The tailnet has device approval on, so a key
+   that is not pre-approved leaves the box waiting at "To approve your machine": approve
+   it under Machines and re-run, pressing Enter at the key prompt. Then, from the phone:
 
    ```fish
    # on the phone: read what the Tailscale play would do on zero; press Enter at the key prompt

@@ -443,7 +443,7 @@
             fail_msg: >-
               {{ inventory_hostname }} is not on the tailnet ({{ ts_state_now }}) and no
               auth key was given. Generate one in the admin console (Settings, Keys):
-              tagged tag:fleet, not reusable, a short expiry. Then re-run and paste it at
+              tagged tag:fleet, not reusable, pre-approved, a short expiry. Then re-run and paste it at
               the prompt. tailscaled is installed and running.
             success_msg: key given
 
