@@ -2456,10 +2456,11 @@ and never started a sidecar, so it could not meet either cause.
   rewrites is labelled again. Where SELinux is off, `z` does nothing.
   `security_opt: label=disable` would also work, and was not taken: it drops the
   confinement of the one container that faces the internet.
-- **The first boot no longer re-owns a secrets directory's contents.** It chowned each one
-  to gavin recursively, which took `tunnel.json` from 65532, the cloudflared image's user,
-  which the tunnel play gives it. Only the directory is chowned now. The simulation's
-  carry-over gives `tunnel.json` that owner, and its check requires the first boot keeps it.
+- **The first boot gives a tunnel's `tunnel.json` back to 65532**, the cloudflared image's
+  user, which the tunnel play gives it. Combustion's copy of the stick keeps no owners, and
+  the first boot chowned each secrets directory to gavin, so the sidecars could not read
+  their credentials. The rest of a secrets directory stays gavin's. The simulation's check
+  requires both.
 
 ## The lesson worth keeping
 

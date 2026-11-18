@@ -227,14 +227,20 @@ clone_infra() {
 		install -m 600 "$f" "/home/gavin/infra/deployments/$name/.env"
 	done
 	chown -R gavin:gavin /home/gavin/infra
-	# Each deployment's secrets directory, as its play left it in gavin's home. The directory
-	# is gavin's; what is in it keeps its owner, because a tunnel's tunnel.json belongs to
-	# 65532, the cloudflared image's user, which a recursive chown here once took from it at
-	# one's move, and the tunnel's sidecar could not read its credentials.
+	# Each deployment's secrets directory, as its play left it in gavin's home. Combustion's
+	# copy of the stick keeps no owners, so they are set here: gavin's, except a tunnel's
+	# tunnel.json, which the tunnel play gives to 65532, the cloudflared image's user. Found
+	# at one's move, where a recursive chown to gavin left the sidecars unable to read their
+	# credentials.
 	for f in "$stick"/carry/home/.*-secrets; do
 		[ -d "$f" ] || continue
+		name=$(basename "$f")
 		cp -a "$f" /home/gavin/
-		chown gavin:gavin "/home/gavin/$(basename "$f")"
+		chown -R gavin:gavin "/home/gavin/$name"
+		if [ -e "/home/gavin/$name/tunnel.json" ]; then
+			chown 65532:65532 "/home/gavin/$name/tunnel.json"
+			chmod 600 "/home/gavin/$name/tunnel.json"
+		fi
 	done
 }
 
