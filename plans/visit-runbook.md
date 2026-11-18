@@ -335,6 +335,11 @@ status` reading finished. Before its shutdown step, `zero`'s live agent slots ar
 the dev hub, and the infra agent with it, run on `zero`. The value it sends the infra
 agent is the new member's bcache UUID, for `bcache-register`.
 
+The new disk is the second WD Red Plus, serial `WD-WXB2D76H9RCN`, checked with WD by the
+owner on 2026-11-18. Its smartctl reading, as for `three`'s drive, comes before it goes in;
+once it is in `zero`, its line belongs in `hosts/zero/system/hardware.md`, through
+`bin/hw-inventory`.
+
 **Checks:** `sudo btrfs device usage /media/immich-data` shows the new device and not
 `sdb`'s; `sudo bin/check-mount-guards` passes after the reboot; Immich answers.
 
