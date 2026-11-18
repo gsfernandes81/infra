@@ -2397,16 +2397,19 @@ dashboard. The rest came out of writing it and is proven by `cloudflare-sim.yml`
   `allowed people`, listing the addresses in `~/.config/cloudflare/access-emails` on the
   control node, by every login method the Zero Trust account offers. It is the only login
   a play has made here; no play made the logins on `torrents` or the Syncthing GUIs on
-  `zero` and `one`. The address stays out of this public repo, and the file and its checks are shared
-  with the deployment play (`_cf-access-emails.yml`). Set aside: one reusable login policy
+  `zero` and `one`. The address stays out of this public repo, and the file and its checks
+  are shared with the deployment play (`_cf-access-emails.yml`). Set aside: one reusable login policy
   for every application, as the fleet's ssh gate has, which would mean rewriting
   `calibre-web`'s live application; and a prompt, which is a paste on every run.
 - **The application first, the record second.** Until the CNAME exists the name does not
   resolve, so the application and its policy are written and read back before it, and the
   GUI is never open. The probe runs only after the record, because a resolver caches a
-  name that does not exist yet, and calibrates on `torrents`' login first. An answer from
-  behind Access deletes the record again and keeps the application; no answer at all keeps
-  the record and says to re-run, because the login is already read back in front of it.
+  name that does not exist yet, and calibrates on `torrents`' login first. It retries only
+  while nothing answers: the first answer from behind Access deletes the record at once and
+  keeps the application (found by Fable's review: it had been probed for the whole wait).
+  The cost is that a non-login answer while a new application reaches the edge also
+  deletes the record, and a re-run makes it again. No answer at all keeps the record and
+  says to re-run, because the login is already read back in front of it.
 - **The tunnel is the tracked config's `tunnel:`**, checked live at Cloudflare and against
   the record `ssh-<host>` already uses, so a `tunnel:` line pasted from another host's file
   is refused. So the play needs no `-K` and touches no host. Set aside: reading

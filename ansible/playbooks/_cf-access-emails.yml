@@ -32,10 +32,12 @@
     quiet: true
 
 - name: "Access login: read the allowed-emails list"
+  # no_log: a set_fact's result is the addresses, and -v prints it under any callback.
   ansible.builtin.set_fact:
     cf_access_emails: >-
       {{ lookup('file', cf_access_emails_file).splitlines()
          | map('trim') | reject('match', '^(#|$)') | list }}
+  no_log: true
 
 - name: "Access login: check the allowed emails are valid"
   # An application whose allow policy admits nobody is safe but useless; one that admits

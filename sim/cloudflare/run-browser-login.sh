@@ -238,11 +238,28 @@ if play -e host=three -e subdomain=syncthing-three; then fail "ran on while the 
 fi
 [ "$(web_records)" = 0 ] && pass "no record left behind" || fail "the record was left behind while open"
 [ "$(apps)" = 1 ] && pass "the login application is kept" || fail "the login application went too"
+says 'after 3s' && fail "probed an open hostname for the whole wait" || pass "stopped at the first answer, without waiting out the retries"
+fleet_state
+control '{"never_gate": true, "delete_answer": "gone"}'
+if play -e host=three -e subdomain=syncthing-three; then fail "ran on while the hostname was open"; else
+	says 'The CNAME was deleted' && pass "a 404 on the delete reads as gone" || fail "a 404 on the delete was not read as gone"
+fi
+fleet_state
+control '{"never_gate": true, "delete_answer": "refuse"}'
+if play -e host=three -e subdomain=syncthing-three; then fail "ran on while the hostname was open"; else
+	says 'THE CNAME COULD NOT BE DELETED (HTTP 403)' && pass "a refused delete says the hostname may be open" || fail "a refused delete was not reported"
+	says 'may not delete DNS' && pass "printed Cloudflare's reason for the refused delete" || fail "the refused delete's reason was not printed"
+fi
+[ "$(web_records)" = 1 ] && pass "the refused delete left the record, as reported" || fail "the stand-in lost the record"
+control '{"delete_answer": null}'
 
 echo "== no answer at all after the record"
 fleet_state
 if play -e host=three -e subdomain=syncthing-three -e 'web_url=http://127.0.0.1:9/'; then fail "ran on with no answer"; else
 	says 'does not answer from here yet' && pass "no answer: said to re-run" || fail "no answer failed, but not through the rescue"
+	# The calibration for the open case's "stopped at the first answer": no answer is
+	# retried to the end, and says so.
+	says 'after 3s' && pass "no answer: retried for the whole wait" || fail "no answer was not retried"
 fi
 [ "$(web_records)" = 1 ] && pass "the record is kept when nothing answered" || fail "the record was deleted on no answer"
 if play -e host=three -e subdomain=syncthing-three; then pass "the re-run then finishes"; else fail "the re-run after no answer failed"; fi

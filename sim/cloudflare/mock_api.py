@@ -12,7 +12,8 @@ is `control`) and 200 otherwise; and GET /__login/<hostname> is the same edge se
 browser, for server-create-browser-login.yml: a 302 to the team's cloudflareaccess.com login
 when an application with an `allow` policy covers the hostname (or it is `control`), and
 200 otherwise. Every DNS write records whether such an application covered the name at that
-moment, so a test can prove the login came first. Run with python3 -I; the one argument is
+moment, so a test can prove the login came first; a record DELETE can be made to answer
+403 or 404 through /__control. Run with python3 -I; the one argument is
 the port."""
 import json
 import sys
@@ -26,7 +27,7 @@ ACCOUNT_ID = "acct-sim"
 STATE = {"tunnels": {}, "records": {}, "requests": [],
          "refuse_writes": False, "refuse_dns": False, "tunnel_secrets": {},
          "apps": {}, "policies": {}, "service_tokens": [], "never_gate": False,
-         "refuse_access": False, "dns_writes": []}
+         "refuse_access": False, "dns_writes": [], "delete_answer": None}
 
 
 def envelope(result=None, errors=None):
@@ -83,6 +84,10 @@ class Handler(BaseHTTPRequestHandler):
             change = self.body()
             STATE["never_gate"] = bool(change.get("never_gate", STATE["never_gate"]))
             STATE["refuse_access"] = bool(change.get("refuse_access", STATE["refuse_access"]))
+            # How a record DELETE answers: None as Cloudflare does, "refuse" a 403 that keeps
+            # the record, "gone" a 404 with the record removed, as if deleted a moment before.
+            if "delete_answer" in change:
+                STATE["delete_answer"] = change["delete_answer"]
             if change.get("plant_tunnel"):
                 t = change["plant_tunnel"]
                 STATE["tunnels"][t["id"]] = {"id": t["id"], "name": t["name"], "deleted_at": None,
@@ -117,7 +122,7 @@ class Handler(BaseHTTPRequestHandler):
             if change.get("reset"):
                 STATE.update(tunnels={}, records={}, refuse_writes=False, refuse_dns=False,
                              tunnel_secrets={}, apps={}, policies={}, never_gate=False,
-                             refuse_access=False, dns_writes=[])
+                             refuse_access=False, dns_writes=[], delete_answer=None)
             return self.reply(200, {"ok": True})
 
         STATE["requests"].append(f"{method} {path}")
@@ -179,6 +184,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, envelope(STATE["records"][rid]))
         if p.startswith(records + "/") and method == "DELETE":
             rid = p.rsplit("/", 1)[1]
+            if STATE["delete_answer"] == "refuse":
+                return self.reply(403, envelope(errors=[{"code": 10000, "message": "Authentication error: this token may not delete DNS"}]))
+            if STATE["delete_answer"] == "gone":
+                STATE["records"].pop(rid, None)
             if rid not in STATE["records"]:
                 return self.reply(404, envelope(errors=[{"code": 81044, "message": "Record not found"}]))
             del STATE["records"][rid]

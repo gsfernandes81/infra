@@ -109,8 +109,11 @@ them. It runs:
   one after the record was pointed elsewhere, which must point it back;
 - a refused Access write, which must stop with Cloudflare's reason and write no record;
 - the proof failing after the record exists: with the hostname answering from behind
-  Access, the rescue must delete the record and keep the application; with no answer at
-  all, it must keep the record and say to re-run, and the re-run must finish.
+  Access, the probe must stop at that first answer and the rescue must delete the record and
+  keep the application, reading a 404 on the delete as gone, and printing Cloudflare's
+  reason and saying the hostname may be open when the delete is refused; with no answer at
+  all, it must retry to the end, keep the record and say to re-run, and the re-run must
+  finish.
 
 Every run's output is searched for the API token and for the allowed addresses.
 
