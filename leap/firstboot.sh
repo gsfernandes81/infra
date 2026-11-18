@@ -228,19 +228,27 @@ clone_infra() {
 	done
 	chown -R gavin:gavin /home/gavin/infra
 	# Each deployment's secrets directory, as its play left it in gavin's home. Combustion's
-	# copy of the stick keeps no owners, so they are set here: gavin's, except a tunnel's
-	# tunnel.json, which the tunnel play gives to 65532, the cloudflared image's user. Found
-	# at one's move, where a recursive chown to gavin left the sidecars unable to read their
+	# copy of the stick keeps no owners, so they are set here: everything gavin's, then each
+	# file a deployment's .env names as TUNNEL_CREDENTIALS 65532's at 0600, as
+	# server-create-deployment-tunnel.yml leaves it for the cloudflared image's user. Keyed on
+	# the .env, not the file name: the dev hub's tunnel.json stays gavin's, since its
+	# connector runs as gavin. Found at one's move, where the sidecars could not read their
 	# credentials.
 	for f in "$stick"/carry/home/.*-secrets; do
 		[ -d "$f" ] || continue
-		name=$(basename "$f")
 		cp -a "$f" /home/gavin/
-		chown -R gavin:gavin "/home/gavin/$name"
-		if [ -e "/home/gavin/$name/tunnel.json" ]; then
-			chown 65532:65532 "/home/gavin/$name/tunnel.json"
-			chmod 600 "/home/gavin/$name/tunnel.json"
-		fi
+		chown -R gavin:gavin "/home/gavin/$(basename "$f")"
+	done
+	for f in /home/gavin/infra/deployments/*/.env; do
+		[ -e "$f" ] || continue
+		name=$(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?TUNNEL_CREDENTIALS[[:space:]]*=[[:space:]]*["\x27]?([^"\x27]*)["\x27]?[[:space:]]*$/\2/p' "$f" | tail -n 1)
+		case "$name" in
+		/home/gavin/.*-secrets/*)
+			[ -f "$name" ] || die "$f names $name as TUNNEL_CREDENTIALS, which the stick did not carry"
+			chown 65532:65532 "$name"
+			chmod 600 "$name"
+			;;
+		esac
 	done
 }
 

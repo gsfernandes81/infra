@@ -2456,11 +2456,15 @@ and never started a sidecar, so it could not meet either cause.
   rewrites is labelled again. Where SELinux is off, `z` does nothing.
   `security_opt: label=disable` would also work, and was not taken: it drops the
   confinement of the one container that faces the internet.
-- **The first boot gives a tunnel's `tunnel.json` back to 65532**, the cloudflared image's
-  user, which the tunnel play gives it. Combustion's copy of the stick keeps no owners, and
-  the first boot chowned each secrets directory to gavin, so the sidecars could not read
-  their credentials. The rest of a secrets directory stays gavin's. The simulation's check
-  requires both.
+- **The first boot gives each deployment tunnel's credentials back to 65532**, the
+  cloudflared image's user: the file the deployment's `.env` names as
+  `TUNNEL_CREDENTIALS`, which `server-create-deployment-tunnel.yml` gives that owner.
+  Combustion's copy of the stick keeps no owners, and the first boot chowned each secrets
+  directory to gavin, so the sidecars could not read their credentials. It is keyed on the
+  `.env`, not the file name: the dev hub's `tunnel.json` stays gavin's, because its
+  connector runs as gavin (the row above on the hub's tunnel). Everything else in a
+  secrets directory is gavin's. The simulation's check requires both, and at least one
+  such file.
 
 ## The lesson worth keeping
 

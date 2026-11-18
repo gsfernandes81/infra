@@ -162,13 +162,21 @@ else
 		n=0; for f in /home/gavin/infra/deployments/*/.env; do
 			[ -e "$f" ] || continue; n=$((n+1)); stat -c "%a %U %n" "$f"; [ "$(stat -c %a "$f")" = 600 ] || exit 1
 		done; [ "$n" -gt 0 ]'
-	# The directory is gavin's, and a tunnel's credentials stay 65532's, the cloudflared
-	# image's user, or the deployment's sidecar cannot read them.
-	check "each secrets directory is gavin's, its tunnel.json 65532's at 0600" sh -c '
-		ls -ld /home/gavin/.*-secrets /home/gavin/.*-secrets/tunnel.json || exit 1
-		for d in /home/gavin/.*-secrets; do
-			[ "$(stat -c %U "$d")" = gavin ] || exit 1
-			[ "$(stat -c "%u %g %a" "$d/tunnel.json")" = "65532 65532 600" ] || exit 1
+	# Each file a deployment's .env names as TUNNEL_CREDENTIALS is 65532's at 0600, the
+	# cloudflared image's user, or that deployment's sidecar cannot read it; everything else in
+	# a secrets directory is gavin's. At least one is required, so the check cannot pass on a
+	# host where no .env names one.
+	check "each tunnel's credentials are 65532's at 0600, all else gavin's" sh -c '
+		ls -ld /home/gavin/.*-secrets || exit 1
+		creds=$(sed -nE "s/^TUNNEL_CREDENTIALS=//p" /home/gavin/infra/deployments/*/.env)
+		[ -n "$creds" ] || exit 1
+		for c in $creds; do
+			stat -c "%u %g %a %n" "$c"
+			[ "$(stat -c "%u %g %a" "$c")" = "65532 65532 600" ] || exit 1
+		done
+		for f in $(find /home/gavin/.*-secrets); do
+			case " $(echo $creds) " in *" $f "*) continue ;; esac
+			[ "$(stat -c %U "$f")" = gavin ] || { echo "not gavin'"'"'s: $f"; exit 1; }
 		done'
 fi
 # By name, from the host's own list: a tar waiting in /root/volumes, or, once the runbook has
