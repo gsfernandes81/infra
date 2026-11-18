@@ -233,10 +233,12 @@ read back over the image's length and compared with the image, so a write that w
 is caught before the card reaches a Pi:
 
 ```fish
-# on two: compare the card with the image over the image's length; the two hashes must match
-set f /home/gavin/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.16.raw.xz; set n (xz --robot -l $f | awk '$1=="totals" {print $5}'); echo "image bytes: $n"
-xzcat $f | sha256sum; sudo head -c $n /dev/sdX | sha256sum
+# on two: compare the card with the image over the bytes dd wrote; put the card's device in place of sdX; the two hashes must match
+xzcat /home/gavin/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.16.raw.xz | sha256sum; sudo head -c 4599054336 /dev/sdX | sha256sum
 ```
+
+4,599,054,336 is build 3.16's uncompressed size, the byte count `dd` reports in the log;
+`two` has no `xz` to read it from the file, only BusyBox's `xzcat`.
 
 The only card reader to hand on 2026-11-19 was a Lexar RW047, an SDHC reader, which shows a
 128 GB card as about 25 GB. That is enough for this write, which stays inside the first
