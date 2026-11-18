@@ -2462,7 +2462,7 @@ and never started a sidecar, so it could not meet either cause.
   Combustion's copy of the stick keeps no owners, and the first boot chowned each secrets
   directory to gavin, so the sidecars could not read their credentials. It is keyed on the
   `.env`, not the file name: the dev hub's `tunnel.json` stays gavin's, because its
-  connector runs as gavin (the row above on the hub's tunnel). Everything else in a
+  connector runs as gavin (§ Dev containers: one compose file in `infra`). Everything else in a
   secrets directory is gavin's. The simulation's check requires both, and at least one
   such file.
 
