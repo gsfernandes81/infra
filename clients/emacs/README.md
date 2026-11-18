@@ -1,6 +1,7 @@
 # Emacs on the clients
 
-This is the editor for the phone (Termux) and for Arch in WSL on the laptop. It is **Emacs
+This is the editor for the phone (Termux) and for WSL on the laptop (openSUSE Leap, or
+Arch until it is retired). It is **Emacs
 Solo** (LionyxML/emacs-solo), a distribution built almost entirely on Emacs's own
 features, with a small private layer of ours in the two files Solo sets aside for that:
 
@@ -19,14 +20,22 @@ Run the play from `ansible/` on the client itself:
 ```sh
 cd ~/infra/ansible
 ansible-playbook playbooks/client-home-emacs.yml        # Termux
+ansible-playbook playbooks/client-home-leap.yml -K      # Leap: the OS, then this play
 ansible-playbook playbooks/client-home-emacs.yml -K     # Arch, when a package is missing
 ```
 
 The play installs Emacs 31 and the tools the config uses, checks Solo out at the pinned
 commit in `~/.emacs.d`, links our two files into it, and installs our four packages. It
 links `emacs.fish` into fish's `conf.d`, and on Termux it installs the `emacsd` service.
+On Leap it installs no package itself: Emacs 31 comes from the `editors` repository, which
+`client-home-leap.yml` sets up before it runs this play, and run alone with a package
+missing it says so. rass, and on Leap ruff and ty, come from `uv tool install` (pip on
+Termux); `uv tool upgrade --all` updates them.
+
 It refuses an existing `~/.emacs.d` that is not Solo, and any `~/.emacs`, printing how to
-move them aside.
+move them aside. The one exception is a `~/.emacs` identical to the distro's
+`/etc/skel/.emacs`, which openSUSE gives every new user: that is moved aside to
+`~/.emacs.before-infra` without asking.
 
 A first run downloads about 5 MB after the packages, most of it the package indexes. Later
 runs download only what the pin moved.
@@ -42,11 +51,11 @@ also sets `ALTERNATE_EDITOR` empty. `EDITOR` and `VISUAL` point at the same comm
   restart emacsd`, and its log in `$PREFIX/var/log/sv/emacsd/current`. termux-services
   starts its supervisor at login, so after the first install, close every Termux session
   and open a new one.
-- **On Arch** there is no service; the first `emacs` starts the server.
+- **On Leap and Arch** there is no service; the first `emacs` starts the server.
 - **The real program** is still there as `command emacs`.
 - **Restarting the server** is how a change to the `LLAMA_*` variables reaches it: the
   server reads them when it starts. On Termux `sv restart emacsd`, and `sv down emacsd`
-  stops it; on Arch `emacsclient -e '(kill-emacs)'`, and the next `emacs` starts a new
+  stops it; on Leap and Arch `emacsclient -e '(kill-emacs)'`, and the next `emacs` starts a new
   one.
 
 ## Keys worth knowing

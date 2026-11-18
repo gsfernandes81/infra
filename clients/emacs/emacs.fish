@@ -21,5 +21,6 @@ set -gx VISUAL $EDITOR
 # blues.
 set -q COLORTERM; or set -gx COLORTERM truecolor
 
-# pipx (Arch) puts rass, the ty+ruff language server wrapper, in ~/.local/bin.
+# uv puts rass, the ty+ruff language server wrapper, in ~/.local/bin, and on Leap ruff and ty
+# as well.
 test -d ~/.local/bin; and fish_add_path -g ~/.local/bin

@@ -2425,6 +2425,48 @@ dashboard. The rest came out of writing it and is proven by `cloudflare-sim.yml`
   needed it. Found while writing the play, unproven on a box: the GUI step in
   `hosts/three/leap/README.md` says what the error looks like.
 
+## WSL on the laptop moves from Arch to Leap 16.1
+
+**Decided 2026-11-18**, the owner's call, after a trial distro beside Arch the same day.
+The laptop goes to sea, on links that are slow, metered and often down, and a rolling
+release is the wrong shape for that: Arch cannot safely install one package without a full
+upgrade, and the upgrade after weeks offline is large and more likely to break. Leap 16.1
+takes small updates, installs a single package against a release that holds still, and is
+what `zero`, `one` and `three` move to. It is standard Leap, not Immutable mode: WSL boots
+no snapshots, so the mode's reasons do not apply. Mirrored networking and WSL-Hello-sudo,
+the owner's two other questions, both work on it; the first is Windows' setting and the
+same on any distro. Tumbleweed was set aside as rolling, Arch's problem again.
+
+- **Three OBS repositories, each for named packages only.** Leap's Emacs is 30.2 where
+  `clients/emacs` wants 31, its uv 0.7 against 0.13, its fish 4.0 against 4.9.
+  `editors`, `devel:languages:python` and the fish project's own `shells:fish:release:4`
+  build current ones for Leap. `zypper in --from` takes only the packages named, vendor
+  stickiness keeps them there, and the two development projects sit at priority 150, below
+  Leap's own, so a `zypper dup` cannot pull the rest of either in. The play then reads
+  each package's DISTURL and stops if one is not from its project, because a repository
+  that fails to refresh makes `--from` exit 0 with Leap's package installed (seen in a Leap
+  16.1 container). Astral's standalone uv was set aside: the OBS package is current and
+  updates with everything else.
+- **`cloudflared` from Leap's backports, for now, knowing it lags.** The hosts run
+  Cloudflare's binary because Leap's lags releases and security fixes (§ *Every box has
+  two ways in*); a client wants the same currency but not a pin to bump by hand, which is
+  what Cloudflare's RPM repository gives. On 2026-11-18 that repository's metadata was
+  signed with Cloudflare's retired 2015 key (`FBA8 C0EE … 8CAC CBF8`) while its `.repo`
+  names only the 2025 key (`CC94 B39C … 8D4E 5E73`), so zypper refused it, rightly. Leap's
+  2026.9.1 runs `cloudflared access ssh` until it is fixed; the play's header says how to
+  switch.
+- **uv replaces pipx** for the Python tools no package covers: rass everywhere but Termux,
+  and on Leap ruff and ty as well. One tool for the job the owner already uses uv for.
+- **One play for the OS, which imports the editor's.** `client-home-leap.yml` owns the
+  repositories and every package, the sudo drop-in, fish as the login shell, mirrored
+  networking in `.wslconfig`, and Hello-sudo; `client-home-emacs.yml` installs nothing on
+  Leap and refuses to run there with a package missing, so the repository choice has one
+  home. A fresh install is a root one-liner, this play and the ssh play
+  (`ansible/README.md`). Hello-sudo is the `lzlrd` fork's v3.0.0, the AUR's, pinned by
+  hash. Its cost, accepted: every `become` task of a later run asks Windows Hello, because
+  sudo caches no login across Ansible's processes; `-e hello_sudo=false` skips it.
+- **Arch stays supported by the Emacs play** until the owner retires the Arch distro.
+
 ## The lesson worth keeping
 
 
