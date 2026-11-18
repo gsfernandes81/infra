@@ -4,11 +4,12 @@ name: cloudflare-sim
 # each is tested with no Cloudflare account. Every check is named PASS or FAIL in the log,
 # and any FAIL fails the job.
 #
-#   host-tunnel        server-create-host-tunnel.yml, with the runner as the host: a dry
-#                      run, a real run, a re-run, and the adverse cases.
-#   fleet-ssh-access   server-create-fleet-ssh-access.yml for `three`, whose tunnel config is
-#                      under leap/system/: the refusals, a dry run, a real run, a re-run,
-#                      the undo, and a gate that never takes.
+#   host-tunnel        server-create-host-tunnel.yml, with the runner as a made-up new
+#                      host, simnew: a dry run, a real run, a re-run, and the adverse
+#                      cases, among them zero and three, which have tunnel configs.
+#   fleet-ssh-access   server-create-fleet-ssh-access.yml for `three`, whose leap/MOVED puts
+#                      its tunnel config under leap/system/: the refusals, a dry run, a real
+#                      run, a re-run, the undo, and a gate that never takes.
 #   browser-login      server-create-browser-login.yml for syncthing-three on `three`: the
 #                      refusals, a dry run, a real run with the login written before the
 #                      CNAME, a re-run, a refused Access write, and a proof that fails
@@ -33,6 +34,7 @@ on:
       - 'ansible/playbooks/_cf-dns.yml'
       - 'ansible/playbooks/_cf-access-app.yml'
       - 'ansible/playbooks/_cf-access-emails.yml'
+      - 'hosts/*/leap/MOVED'
       - '.github/workflows/cloudflare-sim.yml'
   pull_request:
     paths:
@@ -45,6 +47,7 @@ on:
       - 'ansible/playbooks/_cf-dns.yml'
       - 'ansible/playbooks/_cf-access-app.yml'
       - 'ansible/playbooks/_cf-access-emails.yml'
+      - 'hosts/*/leap/MOVED'
       - '.github/workflows/cloudflare-sim.yml'
   workflow_dispatch:
 

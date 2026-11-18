@@ -4,9 +4,9 @@
 # infra-name: config.yml
 # infra-mode: 0644
 #
-# THE LEAP COPY of hosts/one/system/cloudflared-config.yml, which stays the record of the
-# routing: everything below the header is the same bytes. Change the routing there and
-# copy it here, or the move installs yesterday's ingress.
+# ONE'S ROUTING since its move to Leap (hosts/one/leap/MOVED). Change the routing here.
+# hosts/one/system/cloudflared-config.yml is kept only as the way back to the Alpine card,
+# the same bytes from the next paragraph on; nothing reads it while MOVED exists.
 #
 # GENERATED INTO THE REPO by ansible/playbooks/cloudflare-tunnel-new.yml, from the
 # ingress the connector was actually serving — not from the dashboard and not from

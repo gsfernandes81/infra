@@ -1,0 +1,5 @@
+three runs Leap, from its first boot on 2026-11-18, and has no Alpine copies.
+
+This file is the record that it does: bin/install-system-file, bin/check-system-drift and
+the plays read hosts/three/leap/system/ while it exists, and hosts/three/system/ otherwise.
+docs/decisions.md § "A host's move to Leap is a file in the repo".

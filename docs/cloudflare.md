@@ -10,8 +10,9 @@ Rewritten the same day, twice, because most of what it first said stopped being 
 | Host | Tunnel | Managed | Ingress rules are in |
 |---|---|---|---|
 | `zero` | `ce28c17c-a722-4ba1-8e46-21985337f13f` | **locally** | `hosts/zero/system/cloudflared-config.yml` |
-| `one` | `1e7fde2e-ac2f-4a5e-8ad4-591208c1e2a6` | **locally** | `hosts/one/system/cloudflared-config.yml` |
+| `one` | `1e7fde2e-ac2f-4a5e-8ad4-591208c1e2a6` | **locally** | `hosts/one/leap/system/cloudflared-config.yml` |
 | `two` | `f9407a5c-9361-4b59-85ab-a1f61811fb37` | **locally** | `hosts/two/system/cloudflared-config.yml` |
+| `three` | `c971c4e9-5bf9-452e-bc60-b25a22ea1b64` | **locally** | `hosts/three/leap/system/cloudflared-config.yml` |
 | `infra-dev` | separate, in the container | locally | `dev/entrypoint.sh` writes it |
 | `or3-dev` | separate, in the container | locally | the same `dev/entrypoint.sh`, from the base image |
 

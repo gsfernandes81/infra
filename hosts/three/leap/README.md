@@ -66,13 +66,15 @@ exists. On the LAN, from the phone:
    and `torrents`' GUIs listen on every address, where Syncthing makes no such check.
 4. On `three`, in `~/infra`: `git pull`, then
    `sudo bin/install-system-file cloudflared-config.yml --commit --allow-content-change --new`,
-   then `sudo systemctl start cloudflared`. The tools read `leap/system/` for a host with
-   no Alpine copies.
+   then `sudo systemctl start cloudflared`. The tools read `leap/system/` because
+   `leap/MOVED` says `three` runs Leap. From the phone,
+   `server-install-system-files.yml -l three -e only=cloudflared-config.yml -K` does the
+   same install.
 5. `server-create-fleet-ssh-access.yml -e host=three` gates `ssh-three` behind Access,
    admitting each client's fleet token, as it does every box's ssh hostname. It reads the
-   routing from `leap/system/`, and refuses unless this client's ssh config already sends
-   `three` through `~/.config/fleet/access-ssh`, which the fleet ssh block does once the
-   infra agent has added `three` to it.
+   routing from `leap/system/`, by the same `leap/MOVED`, and refuses unless this client's
+   ssh config already sends `three` through `~/.config/fleet/access-ssh`, which the fleet
+   ssh block does once the infra agent has added `three` to it.
 6. Once Syncthing is deployed (`plans/visit-runbook.md`, slice 4), from the phone:
    `server-create-browser-login.yml -e host=three -e subdomain=syncthing-three` puts the
    GUI behind an Access login and then gives it its DNS record. The fleet ssh play leaves

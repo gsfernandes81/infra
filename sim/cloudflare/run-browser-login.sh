@@ -54,8 +54,9 @@ ingress:
 CFG
 fi
 tunnel=$(sed -n 's/^tunnel: *//p' "$three_cfg")
-# A Leap-only host whose tracked routing names no tunnel.
+# A Leap host, by its leap/MOVED, whose tracked routing names no tunnel.
 mkdir -p "$fake/leap/system"
+echo "simleap runs Leap." > "$fake/leap/MOVED"
 cat > "$fake/leap/system/cloudflared-config.yml" <<'CFG'
 ingress:
   - hostname: web-simleap.gsrpi.uk

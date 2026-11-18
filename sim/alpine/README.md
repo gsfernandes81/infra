@@ -2,7 +2,7 @@
 
 `.github/workflows/alpine-sim.yml` runs the setup plays against an Alpine container that
 stands in for `zero`: `server-install-tailscale.yml`, `server-create-backup-key.yml` and
-`server-store-backup-ntfy-url.yml`. `host/Dockerfile` is the box: Alpine 3.24, as on the
+`server-store-backup-ntfy-url.yml`, and the dry run of `server-install-system-files.yml`. `host/Dockerfile` is the box: Alpine 3.24, as on the
 fleet, with OpenRC as init, sshd, and gavin with sudo. `run-setup-plays.sh` builds it,
 reaches it over ssh as Ansible reaches a fleet host, and names each check PASS or FAIL;
 any FAIL fails the job. The job runs on an arm64 runner, so the real tarball's binaries
@@ -46,6 +46,14 @@ The ntfy play: refused a value that is not a URL; a dry run that writes and send
 a real run that stores the URL root 0600 in a 0700 directory and sends one test message,
 printing its status; a re-run that changes and sends nothing; and a topic answering 403,
 which must fail the play with the URL stored.
+
+The system files play, in `--check` only: `install-system-file --list` on the box must name
+the files the play found for `zero` before it asked the tool, and the play must read the
+same list, narrow it with `-e only`, install nothing, and refuse `two`, whose name is not
+the box's hostname. Then the box answers as `three`: `--list` must read
+`hosts/three/leap/system/`, since `three` has a `leap/MOVED`, and `-l three -e
+only=cloudflared-config.yml` must list that one file and have the tool refuse it, because
+it declares systemd and the box runs OpenRC.
 
 Every run's output is searched for the auth keys, the topic and the private backup key.
 The joining run and the first ntfy run also go through the default callback at `-vv`,

@@ -1,8 +1,8 @@
 name: alpine-sim
 
 # Runs the setup plays (server-install-tailscale.yml, server-create-backup-key.yml,
-# server-store-backup-ntfy-url.yml) end to end against an Alpine container with OpenRC as
-# init, reached over ssh (sim/alpine/). Every check is named PASS or FAIL in the log, and any
+# server-store-backup-ntfy-url.yml) end to end, and server-install-system-files.yml's dry
+# run, against an Alpine container with OpenRC as init, reached over ssh (sim/alpine/). Every check is named PASS or FAIL in the log, and any
 # FAIL fails the job. arm64, so the pinned Tailscale tarball's own binaries run as on zero.
 #
 # WHAT IT CANNOT CHECK, so nobody reads a green run as more: a real join (no auth key exists
@@ -18,6 +18,7 @@ on:
       - 'ansible/playbooks/server-install-tailscale.yml'
       - 'ansible/playbooks/server-create-backup-key.yml'
       - 'ansible/playbooks/server-store-backup-ntfy-url.yml'
+      - 'ansible/playbooks/server-install-system-files.yml'
       - 'ansible/playbooks/_review-anchor.yml'
       - 'ansible/playbooks/_sync-host-checkout.yml'
       - 'ansible/playbooks/_assert-inventory.yml'
@@ -26,7 +27,9 @@ on:
       - 'ansible/group_vars/**'
       - 'bin/install-system-file'
       - 'bin/_infra.py'
-      - 'hosts/zero/system/tailscaled'
+      - 'hosts/zero/system/**'
+      - 'hosts/three/leap/system/**'
+      - 'hosts/*/leap/MOVED'
       - '.github/workflows/alpine-sim.yml'
   pull_request:
     paths:
@@ -34,6 +37,7 @@ on:
       - 'ansible/playbooks/server-install-tailscale.yml'
       - 'ansible/playbooks/server-create-backup-key.yml'
       - 'ansible/playbooks/server-store-backup-ntfy-url.yml'
+      - 'ansible/playbooks/server-install-system-files.yml'
       - 'ansible/playbooks/_review-anchor.yml'
       - 'ansible/playbooks/_sync-host-checkout.yml'
       - 'ansible/playbooks/_assert-inventory.yml'
@@ -42,7 +46,9 @@ on:
       - 'ansible/group_vars/**'
       - 'bin/install-system-file'
       - 'bin/_infra.py'
-      - 'hosts/zero/system/tailscaled'
+      - 'hosts/zero/system/**'
+      - 'hosts/three/leap/system/**'
+      - 'hosts/*/leap/MOVED'
       - '.github/workflows/alpine-sim.yml'
   workflow_dispatch:
 

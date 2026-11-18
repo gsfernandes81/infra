@@ -3,7 +3,7 @@
 # shellcheck disable=SC2015,SC2016  # SC2016: commands for the box are single-quoted on purpose
 # Runs the setup plays end to end against an Alpine container with OpenRC as init, reached
 # over ssh as a fleet host is: server-install-tailscale.yml, server-create-backup-key.yml and
-# server-store-backup-ntfy-url.yml. Prints PASS or FAIL per check and exits 1 on any FAIL.
+# server-store-backup-ntfy-url.yml, and server-install-system-files.yml's dry run. Prints PASS or FAIL per check and exits 1 on any FAIL.
 # CI runs it on an arm64 runner (.github/workflows/alpine-sim.yml), so the real pinned
 # tarball's binaries run in the container as they would on zero. sim/alpine/README.md says
 # what each part proves and what it cannot.
@@ -364,6 +364,45 @@ if ntfy -e "ntfy_url=$url-2" -e ntfy_test=yes; then fail "passed a refused test 
 	says 'HTTP 403' && pass "stopped on the refusal and printed its status" || fail "failed, but not on the status"
 fi
 [ "$(on 'cat /var/lib/mirror-backup/ntfy-url')" = "$url-2" ] && pass "the new URL is stored anyway" || fail "the new URL was not stored"
+
+# ════ server-install-system-files.yml ════════════════════════════════════════
+# Which files the play reads for each host, and that it reads them from the tool on the box.
+# Only --check: the real run's writes are install-system-file's own, unchanged here.
+# zero's expected list is the one the play found before it asked the tool (a find over
+# hosts/zero/system/ less the docs and hw-inventory.toml), so a green run shows it unchanged.
+sf() { play server-install-system-files.yml --check "$@"; }
+zero_files=$(find "$repo/hosts/zero/system" -maxdepth 1 -type f ! -name README.md ! -name hardware.md ! -name hw-inventory.toml -printf '%f\n' | sort | tr '\n' ' ')
+zero_n=$(echo "$zero_files" | wc -w)
+echo "== the tracked system files: zero's, from the box's own tool"
+listed=$(on 'su gavin -c "cd /home/gavin/infra && bin/install-system-file --list"' | sed 's|.*/||' | sort | tr '\n' ' ')
+[ "$listed" = "$zero_files" ] && pass "install-system-file --list on zero names hosts/zero/system/'s files" || fail "--list on zero: '$listed', want '$zero_files'"
+if sf -l zero; then pass "dry run exits 0"; else fail "dry run failed"; fi
+says "$zero_n of $zero_n under hosts/zero/system: ${zero_files% }" && pass "the play read the same $zero_n files" || fail "the play read another list for zero"
+if sf -l zero -e only=sshd-infra.conf; then pass "-e only exits 0"; else fail "-e only failed"; fi
+says "1 of $zero_n under hosts/zero/system: sshd-infra.conf" && pass "-e only narrowed it to one file" || fail "-e only did not narrow the list"
+on 'test ! -e /etc/init.d/bcache-register && test ! -e /etc/cloudflared/config.yml' && pass "the dry runs installed nothing" || fail "a dry run installed something"
+if sf -l two; then fail "ran for an inventory name that is not the box's hostname"; else
+	says "two's install-system-file lists hosts/zero/system, which is not two's" && pass "refused a box whose hostname is not its inventory name" || fail "two failed, but not by the hostname check"
+fi
+
+# The same box answering as three, whose leap/MOVED sends the tool to leap/system/: the
+# command the owner had to replace by hand on 2026-11-18. The box runs OpenRC, so the tool
+# must then refuse three's systemd file, by its own init check.
+echo "== the tracked system files: three's, by its leap/MOVED"
+on 'hostname three && echo "127.0.0.1 three" >> /etc/hosts'
+sed -i 's/^two /three /' "$repo/ansible/inventory.sim"
+listed=$(on 'su gavin -c "cd /home/gavin/infra && bin/install-system-file --list"' | sed 's|/[^/]*$||' | sort -u)
+[ "$listed" = "hosts/three/leap/system" ] && pass "install-system-file --list on three reads hosts/three/leap/system" || fail "--list on three read '$listed'"
+three_n=$(find "$repo/hosts/three/leap/system" -maxdepth 1 -type f ! -name '*.md' | wc -l)
+if sf -l three -e only=cloudflared-config.yml; then pass "dry run exits 0"; else fail "dry run failed"; fi
+says "1 of $three_n under hosts/three/leap/system: cloudflared-config.yml" && pass "the play read leap/system/ for three" || fail "the play did not read leap/system/ for three"
+# The repo's callback prints a looped debug's label and not its message, so the play's log
+# names the refused file only; the reason is read from the tool itself, as the play runs it.
+grep -A1 'Print each file the dry run refused to install' play.log | grep -q '~ cloudflared-config.yml' && pass "the play counted cloudflared-config.yml as refused" || fail "the play did not count three's file as refused"
+said=$(on 'su gavin -c "cd /home/gavin/infra && bin/install-system-file cloudflared-config.yml --new --allow-content-change"' 2>&1)
+case "$said" in *'declares init=systemd but this host runs openrc'*) pass "the tool refused a systemd file on an OpenRC box" ;; *) fail "the tool did not refuse three's file on OpenRC: $said" ;; esac
+on 'test ! -e /etc/cloudflared/config.yml' && pass "installed nothing" || fail "installed three's file"
+on 'hostname zero'
 
 echo
 if [ "$fails" -gt 0 ]; then echo "$fails check(s) FAILED"; exit 1; fi
