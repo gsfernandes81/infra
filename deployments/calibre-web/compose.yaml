@@ -52,10 +52,14 @@ services:
     # wrote the credentials wrote TUNNEL_ID into .env in the same run, so the two agree.
     command: tunnel --config /etc/cloudflared/config.yml run ${TUNNEL_ID:?run ansible/playbooks/server-create-deployment-tunnel.yml -e deployment=calibre-web — it writes TUNNEL_ID}
     volumes:
-      - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
+      # `z` labels both files for containers where SELinux enforces, as on Leap, which
+      # otherwise refuses a container any file in a home directory ("permission denied" on
+      # config.yml, found at one's move). Docker relabels at every start, so a file git
+      # rewrites is labelled again. Where SELinux is off it does nothing.
+      - ./cloudflared.yml:/etc/cloudflared/config.yml:ro,z
       # Outside the repo checkout, owned by 65532 (the image's user) at 0600 — the play
       # sets both. A root-owned 0600 file here is unreadable and the connector dies on start.
-      - ${TUNNEL_CREDENTIALS:?run ansible/playbooks/server-create-deployment-tunnel.yml -e deployment=calibre-web — it writes TUNNEL_CREDENTIALS}:/etc/cloudflared/creds.json:ro
+      - ${TUNNEL_CREDENTIALS:?run ansible/playbooks/server-create-deployment-tunnel.yml -e deployment=calibre-web — it writes TUNNEL_CREDENTIALS}:/etc/cloudflared/creds.json:ro,z
     # `tunnel ready` asks the metrics server's /ready, which answers 200 once at least one
     # connection to the edge is registered — the same probe recovery.md trusts on the host
     # tunnels. Present in the pinned release's own source (subcommands.go, buildReadyCommand).

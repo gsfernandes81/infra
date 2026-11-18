@@ -34,11 +34,15 @@ services:
     # the same run, so the two name the same tunnel.
     command: tunnel --config /etc/cloudflared/config.yml run ${TUNNEL_ID:?run ansible/playbooks/server-create-deployment-tunnel.yml -e deployment=send2ereader, which writes TUNNEL_ID}
     volumes:
-      - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
+      # `z` labels both files for containers where SELinux enforces, as on Leap, which
+      # otherwise refuses a container any file in a home directory ("permission denied" on
+      # config.yml, found at one's move). Docker relabels at every start, so a file git
+      # rewrites is labelled again. Where SELinux is off it does nothing.
+      - ./cloudflared.yml:/etc/cloudflared/config.yml:ro,z
       # Outside the repo checkout, owned by 65532 (the image's user) at 0600; the play
       # sets both. A root-owned 0600 file here is unreadable and the connector exits on
       # start.
-      - ${TUNNEL_CREDENTIALS:?run ansible/playbooks/server-create-deployment-tunnel.yml -e deployment=send2ereader, which writes TUNNEL_CREDENTIALS}:/etc/cloudflared/creds.json:ro
+      - ${TUNNEL_CREDENTIALS:?run ansible/playbooks/server-create-deployment-tunnel.yml -e deployment=send2ereader, which writes TUNNEL_CREDENTIALS}:/etc/cloudflared/creds.json:ro,z
     # Answers 200 once at least one connection to the edge is registered. Health is a
     # reading here: nothing restarts on it.
     healthcheck:

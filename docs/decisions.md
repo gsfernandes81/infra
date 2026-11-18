@@ -2427,7 +2427,7 @@ dashboard. The rest came out of writing it and is proven by `cloudflare-sim.yml`
 
 ## A Pi's first boot sets its clock, and keeps its log
 
-**Decided 2026-11-19**, at the visit, when `one`'s first boot on the 8 GB Pi stopped twice
+**Decided 2026-11-18**, at the visit, when `one`'s first boot on the 8 GB Pi stopped twice
 with no screen to hand: it answered ping on its static address, so Combustion had found the
 stick, but ssh never came up, and nothing of the script's reached the card, since a failed
 run's snapshot and the initramfs's journal are both thrown away.
@@ -2440,6 +2440,22 @@ run's snapshot and the initramfs's journal are both thrown away.
 - **Everything the script prints also goes to `/var/log/infra-firstboot.log`**, which the
   transactional shell binds from the real `/var`, so it survives a failed run, and a raw
   search of the card for `firstboot:` reads it without mounting what the reader cannot.
+
+## A tunnel sidecar's two files carry `:z`
+
+**Decided 2026-11-18**, at `one`'s move to Leap, when `calibre-web`'s tunnel sidecar restarted
+on "open /etc/cloudflared/config.yml: permission denied". The simulation carries no secrets
+and never started a sidecar, so it could not meet either cause.
+
+- **The sidecar's config and credentials mounts carry `z`** in `calibre-web`, `garmin-mcp`
+  and `send2ereader`. Both files live in gavin's home, labelled `user_home_t`, which SELinux
+  refuses a container. The data disks are not the same case: their `context=` mount option
+  labels them without a write, and `:z` there was rejected because it writes labels into
+  the data (`plans/microos-cutover.md`). These two are small files the repo or a play owns,
+  where a label write costs nothing, and Docker relabels at every start, so a file git
+  rewrites is labelled again. Where SELinux is off, `z` does nothing.
+  `security_opt: label=disable` would also work, and was not taken: it drops the
+  confinement of the one container that faces the internet.
 
 ## The lesson worth keeping
 
