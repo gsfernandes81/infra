@@ -69,6 +69,11 @@ for f in "$stick"/host/system/*; do
 	case "$f" in *.md | *.toml) continue ;; esac
 	install_tracked "$f"
 done
+# The tunnel's credentials, once three has a tunnel: a rebuild carries them, check_carry
+# requires them whenever the config above is there, and cloudflared reads nothing else.
+if [ -e "$stick/host/system/cloudflared-config.yml" ]; then
+	install -D -m 600 "$stick/carry/cloudflared/$host.json" "/etc/cloudflared/$host.json"
+fi
 
 # The array's mountpoint exists only if this snapshot makes it, and while the array is
 # locked the read-only root refuses every write to it. Then its entry, noauto.
