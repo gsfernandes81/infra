@@ -228,7 +228,20 @@ lsblk -o NAME,SIZE,MODEL,TRAN
 set d sdX; readlink -f /sys/block/$d | grep -q usb; and not grep -q "^/dev/$d" /proc/mounts; and sudo sh -c "setsid nohup sh -c 'xzcat /home/gavin/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.16.raw.xz | dd of=/dev/$d bs=4M conv=fsync && sync && echo written' </dev/null >/var/log/card-write.log 2>&1 &"
 ```
 
-`sudo cat /var/log/card-write.log` ends with `written` when it is done. Label the card with
+`sudo cat /var/log/card-write.log` ends with `written` when it is done. Then the card is
+read back over the image's length and compared with the image, so a write that went wrong
+is caught before the card reaches a Pi:
+
+```fish
+# on two: compare the card with the image over the image's length; the two hashes must match
+set f /home/gavin/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.16.raw.xz; set n (xz --robot -l $f | awk '$1=="totals" {print $5}'); echo "image bytes: $n"
+xzcat $f | sha256sum; sudo head -c $n /dev/sdX | sha256sum
+```
+
+The only card reader to hand on 2026-11-19 was a Lexar RW047, an SDHC reader, which shows a
+128 GB card as about 25 GB. That is enough for this write, which stays inside the first
+4.6 GB, and the read-back proves it; on the Pi, whose slot reads SDXC, the card is its full
+size again. Label the card with
 the host's name: a host's name follows its card.
 
 **The stick** is built by `leap/make-stick` ([`leap/README.md`](../leap/README.md)), which
@@ -280,6 +293,9 @@ the Alpine card boots only with Leap `one` off: both claim `one`'s address and t
 - `systemctl --failed` is empty, or lists only `import-pubring-from-rpmdb.service`, which
   openSUSE fails on a first boot and clears at the next (`sim/microos/README.md`).
 - `findmnt /var/lib/docker` names `var-lib-docker-leap`, and `sudo docker ps` lists each app.
+- `lsblk -o NAME,SIZE,MOUNTPOINTS /dev/mmcblk0`: the root partition fills the card, about
+  119 GB on a 128 GB card. If it is still about 4 GB, the first boot did not grow it; tell
+  the infra agent, since a mounted btrfs root grows in place, without rescue mode.
 - Each app answers at its own hostname.
 - **Bench checks, sent to the infra agent for the phase table:**
   - `rpm -q kernel-firmware-brcm`, which `three`'s Wi-Fi needs;
