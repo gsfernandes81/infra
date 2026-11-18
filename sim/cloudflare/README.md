@@ -6,17 +6,20 @@ and `_cf-tunnel.yml` call, for the Access applications, reusable policies and se
 tokens that `server-create-fleet-ssh-access.yml` reads and writes, and for the applications,
 app-scoped policies and records that `server-create-browser-login.yml` writes, answering in
 Cloudflare's envelope. `run-host-tunnel.sh` drives `server-create-host-tunnel.yml` against
-it with the runner as the host; `run-fleet-ssh-access.sh` and `run-browser-login.sh` drive
+it with the runner as the host, a made-up `simnew`; `run-fleet-ssh-access.sh` and `run-browser-login.sh` drive
 the two Access plays, described after it.
 
 ## The host tunnel
 
-The script names each check PASS or FAIL and fails the job on any FAIL. Each adverse case
-must stop the play by its own check, which the script confirms from that check's message,
-not from the exit code alone. It runs:
+The new host is `simnew`, which is in the script's own inventory and has nothing under
+`hosts/`, so it stays new whatever the fleet's hosts commit. It was `three` until `three`'s
+tunnel config was committed on 2026-11-18. The script names each check PASS or FAIL and
+fails the job on any FAIL. Each adverse case must stop the play by its own check, which the
+script confirms from that check's message, not from the exit code alone. It runs:
 
-- no `-e target`, an unknown host, a group name, and `zero`, which has a tracked tunnel
-  config: each must be refused with nothing created;
+- no `-e target`, an unknown host, a group name, `zero`, whose tracked tunnel config is
+  under `system/`, and `three`, whose config is under `leap/system/`: each must be refused
+  with nothing created;
 - a rejected token, which must stop the play with no credentials written;
 - a dry run: it must exit 0 with no tunnel, no record and no credentials;
 - the real run: one tunnel named for the host, a proxied CNAME `ssh-<host>.<dns_zone>` to
@@ -45,7 +48,7 @@ real host over ssh, since the runner is the host through a local connection.
 
 ### Running it elsewhere
 
-`run-host-tunnel.sh` writes `/etc/cloudflared/three.json` as root and
+`run-host-tunnel.sh` writes `/etc/cloudflared/simnew.json` as root and
 `~/.config/cloudflare/api-token`, and refuses to start if either exists. Run it only on a
 throwaway machine, never on the control node.
 

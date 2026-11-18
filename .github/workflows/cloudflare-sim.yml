@@ -4,8 +4,9 @@ name: cloudflare-sim
 # each is tested with no Cloudflare account. Every check is named PASS or FAIL in the log,
 # and any FAIL fails the job.
 #
-#   host-tunnel        server-create-host-tunnel.yml, with the runner as the host: a dry
-#                      run, a real run, a re-run, and the adverse cases.
+#   host-tunnel        server-create-host-tunnel.yml, with the runner as a made-up new
+#                      host, simnew: a dry run, a real run, a re-run, and the adverse
+#                      cases, among them zero and three, which have tunnel configs.
 #   fleet-ssh-access   server-create-fleet-ssh-access.yml for `three`, whose leap/MOVED puts
 #                      its tunnel config under leap/system/: the refusals, a dry run, a real
 #                      run, a re-run, the undo, and a gate that never takes.

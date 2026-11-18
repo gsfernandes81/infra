@@ -2,12 +2,14 @@
 # pass and fail always succeed, so `A && pass || fail` can never run both.
 # shellcheck disable=SC2015
 # Runs ansible/playbooks/server-create-host-tunnel.yml end to end against mock_api.py, on a
-# CI runner, with `three` as the runner itself: a dry run, a real run, a re-run, and the
-# adverse cases (no target, a bad token, a refused write, a dead tunnel, a CNAME pointed
-# elsewhere). Prints PASS or FAIL per check and exits 1 on any FAIL. CI runs it
+# CI runner, with `simnew` as the runner itself: a dry run, a real run, a re-run, and the
+# adverse cases (no target, a host with a tracked tunnel config, a bad token, a refused
+# write, a dead tunnel, a CNAME pointed elsewhere). `simnew` is in this script's inventory
+# only and has no directory under hosts/, so it stays a new host whatever the fleet's hosts
+# commit; `three` was the stand-in until its own config was committed, and is now refused. Prints PASS or FAIL per check and exits 1 on any FAIL. CI runs it
 # (.github/workflows/cloudflare-sim.yml).
 #
-# It writes /etc/cloudflared/three.json as root and ~/.config/cloudflare/api-token, so it
+# It writes /etc/cloudflared/simnew.json as root and ~/.config/cloudflare/api-token, so it
 # belongs on a throwaway runner, not on a machine that has either already.
 set -uo pipefail
 
@@ -15,7 +17,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 port=8787
 api="http://127.0.0.1:$port/client/v4"
-creds=/etc/cloudflared/three.json
+creds=/etc/cloudflared/simnew.json
 fails=0
 
 pass() { echo "PASS: $*"; }
@@ -44,10 +46,12 @@ chmod 600 "$HOME/.config/cloudflare/api-token"
 # hold dns_zone and cf_api_token_file. It is made here and removed on exit.
 cat > "$repo/ansible/inventory.sim" <<'INV'
 [fleet]
-three ansible_connection=local
-# Never reached: the play must refuse zero, which has a tracked tunnel config, before any
-# task touches it.
+# A made-up new host, with nothing under hosts/: the runner itself.
+simnew ansible_connection=local
+# Never reached: the play must refuse each of these, which have a tracked tunnel config,
+# zero under system/ and three under leap/system/, before any task touches it.
 zero ansible_connection=local
+three ansible_connection=local
 
 [control]
 localhost ansible_connection=local
@@ -94,7 +98,8 @@ says() {
 		| grep -qF "$1"
 }
 
-echo "== no target, a host not in the inventory, a group name, a host that has a tunnel"
+echo "== no target, a host not in the inventory, a group name, two hosts that have a tunnel"
+[ ! -e "$repo/hosts/simnew" ] || { echo "refusing: hosts/simnew exists, so simnew is not a new host" >&2; exit 1; }
 if play; then fail "ran with no -e target"; else
 	says 'Name the host: -e target=' && pass "refused without -e target, with its own message" || fail "no -e target failed, but not by its own check"
 fi
@@ -107,28 +112,31 @@ fi
 if play -e target=zero; then fail "ran against zero, which has a tunnel"; else
 	says 'already has a tunnel' && pass "refused zero, which has a tracked tunnel config" || fail "zero failed, but not by the existing-tunnel check"
 fi
+if play -e target=three; then fail "ran against three, which has a tunnel"; else
+	says 'hosts/three has a cloudflared-config.yml' && pass "refused three, whose tunnel config is under leap/system/" || fail "three failed, but not by the existing-tunnel check"
+fi
 
 echo "== a bad token"
 printf 'not-the-token\n' > "$HOME/.config/cloudflare/api-token"
-if play -e target=three; then fail "ran with a rejected token"; else
+if play -e target=simnew; then fail "ran with a rejected token"; else
 	says 'will not accept this token' && pass "stopped on a rejected token, by the token check" || fail "a rejected token failed, but not by the token check"
 fi
 [ -e "$creds" ] && fail "wrote credentials with a rejected token" || pass "no credentials after a rejected token"
 printf 'sim-token\n' > "$HOME/.config/cloudflare/api-token"
 
 echo "== --check"
-if play -e target=three --check; then pass "dry run exits 0"; else fail "dry run failed"; fi
+if play -e target=simnew --check; then pass "dry run exits 0"; else fail "dry run failed"; fi
 [ "$(jq_state 'len(s["tunnels"])')" = 0 ] && pass "dry run created no tunnel" || fail "dry run created a tunnel"
 [ "$(jq_state 'len(s["records"])')" = 0 ] && pass "dry run wrote no DNS" || fail "dry run wrote DNS"
 [ -e "$creds" ] && fail "dry run wrote credentials" || pass "dry run wrote no credentials"
 
 echo "== the real run"
-if play_verbose -e target=three; then pass "real run exits 0 (a -vv transcript, searched for secrets)"; else fail "real run failed"; fi
+if play_verbose -e target=simnew; then pass "real run exits 0 (a -vv transcript, searched for secrets)"; else fail "real run failed"; fi
 [ "$(jq_state 'len(s["tunnels"])')" = 1 ] && pass "one tunnel" || fail "tunnels: $(jq_state 'len(s["tunnels"])')"
 tid=$(jq_state 'next(iter(s["tunnels"]), "")')
-[ "$(jq_state 'next(iter(s["tunnels"].values()), {}).get("name")')" = three ] && pass "tunnel named three" || fail "tunnel name wrong"
+[ "$(jq_state 'next(iter(s["tunnels"].values()), {}).get("name")')" = simnew ] && pass "tunnel named simnew" || fail "tunnel name wrong"
 rec=$(jq_state '[(r["name"], r["content"], r["proxied"]) for r in s["records"].values()]')
-[ "$rec" = "[('ssh-three.gsrpi.uk', '$tid.cfargotunnel.com', True)]" ] && pass "CNAME ssh-three.gsrpi.uk -> the tunnel, proxied" || fail "records: $rec"
+[ "$rec" = "[('ssh-simnew.gsrpi.uk', '$tid.cfargotunnel.com', True)]" ] && pass "CNAME ssh-simnew.gsrpi.uk -> the tunnel, proxied" || fail "records: $rec"
 if sudo test -f "$creds"; then
 	[ "$(sudo stat -c '%U %a' "$creds")" = "root 600" ] && pass "credentials root 600" || fail "credentials are $(sudo stat -c '%U %a' "$creds")"
 	got=$(sudo cat "$creds" | python3 -I -c 'import json,sys; c=json.load(sys.stdin); print(c["TunnelID"], c["AccountTag"], c["TunnelSecret"])')
@@ -140,27 +148,27 @@ fi
 sum1=$(sudo sha256sum "$creds" 2>/dev/null)
 
 echo "== a re-run, then the same with a -vv transcript"
-if play -e target=three; then pass "re-run exits 0"; else fail "re-run failed"; fi
-says "three's tunnel is $tid" && pass "printed the tunnel id" || fail "did not print the tunnel id"
-if play_verbose -e target=three; then pass "a -vv re-run exits 0, searched for secrets"; else fail "a -vv re-run failed"; fi
+if play -e target=simnew; then pass "re-run exits 0"; else fail "re-run failed"; fi
+says "simnew's tunnel is $tid" && pass "printed the tunnel id" || fail "did not print the tunnel id"
+if play_verbose -e target=simnew; then pass "a -vv re-run exits 0, searched for secrets"; else fail "a -vv re-run failed"; fi
 [ "$(jq_state 'len(s["tunnels"])')" = 1 ] && pass "re-run made no second tunnel" || fail "re-run made another tunnel"
 [ "$(jq_state 'len(s["records"])')" = 1 ] && pass "re-run made no second record" || fail "re-run made another record"
 [ "$(sudo sha256sum "$creds" 2>/dev/null)" = "$sum1" ] && pass "re-run left the credentials as they were" || fail "re-run changed the credentials"
 
 echo "== the CNAME pointed elsewhere, then a re-run"
 control '{"repoint_records": true}'
-if play -e target=three; then pass "re-run exits 0"; else fail "re-run failed"; fi
+if play -e target=simnew; then pass "re-run exits 0"; else fail "re-run failed"; fi
 [ "$(jq_state 'next(iter(s["records"].values()))["content"]')" = "$tid.cfargotunnel.com" ] && pass "re-run pointed the CNAME back" || fail "CNAME not repaired"
 [ "$(jq_state 'len(s["records"])')" = 1 ] && pass "repaired in place, not duplicated" || fail "a second record was made"
 
 echo "== the CNAME unproxied, then a re-run"
 control '{"unproxy_records": true}'
-if play -e target=three; then pass "re-run exits 0"; else fail "re-run failed"; fi
+if play -e target=simnew; then pass "re-run exits 0"; else fail "re-run failed"; fi
 [ "$(jq_state 'next(iter(s["records"].values()))["proxied"]')" = True ] && pass "re-run proxied the CNAME again" || fail "CNAME left unproxied"
 
 echo "== the tunnel deleted at Cloudflare, then a re-run"
 control '{"delete_tunnels": true}'
-if play -e target=three; then fail "ran on with credentials naming a dead tunnel"; else
+if play -e target=simnew; then fail "ran on with credentials naming a dead tunnel"; else
 	says 'which this account does not have' && pass "stopped on a dead tunnel, by its check" || fail "a dead tunnel failed, but not by its check"
 fi
 [ "$(jq_state 'len(s["tunnels"])')" = 1 ] && pass "made no replacement tunnel by itself" || fail "made a replacement tunnel"
@@ -169,7 +177,7 @@ echo "== a refused write, from a clean start"
 control '{"reset": true}'
 sudo rm -f "$creds"
 control '{"refuse_writes": true}'
-if play -e target=three; then fail "ran on through a refused write"; else pass "stopped on a refused write"; fi
+if play -e target=simnew; then fail "ran on through a refused write"; else pass "stopped on a refused write"; fi
 grep -q 'may not edit tunnels' play.log && pass "printed Cloudflare's reason" || fail "did not print Cloudflare's reason"
 [ -e "$creds" ] && fail "wrote credentials for a tunnel that was refused" || pass "no credentials after a refused write"
 
@@ -177,17 +185,17 @@ echo "== a partial failure: the tunnel made, the DNS refused, then a re-run"
 control '{"reset": true}'
 sudo rm -f "$creds"
 control '{"refuse_dns": true}'
-if play -e target=three; then fail "ran on through a refused DNS write"; else
+if play -e target=simnew; then fail "ran on through a refused DNS write"; else
 	says 'does not point at this tunnel' && pass "stopped on a refused DNS write, by its check" || fail "a refused DNS write failed, but not by its check"
 fi
 [ "$(jq_state 'len(s["tunnels"])')" = 1 ] && sudo test -f "$creds" && pass "the tunnel and its credentials exist" || fail "the partial run did not leave a tunnel and credentials"
 control '{"refuse_dns": false}'
-if play -e target=three; then pass "the re-run finished the job"; else fail "the re-run after a partial failure failed"; fi
+if play -e target=simnew; then pass "the re-run finished the job"; else fail "the re-run after a partial failure failed"; fi
 [ "$(jq_state 'len(s["tunnels"])')" = 1 ] && [ "$(jq_state 'len(s["records"])')" = 1 ] && pass "one tunnel, one record after finishing" || fail "the re-run duplicated something"
 
 echo "== the credentials lost after the tunnel was made, then a re-run"
 sudo rm -f "$creds"
-if play -e target=three; then fail "ran on with the name taken by its own lost tunnel"; else
+if play -e target=simnew; then fail "ran on with the name taken by its own lost tunnel"; else
 	says 'already have a tunnel with this name' && pass "stopped on the name in use, and printed Cloudflare's reason" || fail "the name in use failed, but not by its check"
 fi
 [ "$(jq_state 'len(s["tunnels"])')" = 1 ] && pass "made no second tunnel" || fail "made a second tunnel"
@@ -195,8 +203,8 @@ fi
 echo "== a stale A record at the hostname, from a clean start"
 control '{"reset": true}'
 sudo rm -f "$creds"
-control '{"plant_a_record": "ssh-three.gsrpi.uk"}'
-if play -e target=three; then fail "ran on with an A record in the way"; else
+control '{"plant_a_record": "ssh-simnew.gsrpi.uk"}'
+if play -e target=simnew; then fail "ran on with an A record in the way"; else
 	says 'record with that host already exists' && pass "stopped on an A record in the way, and printed Cloudflare's reason" || fail "an A record in the way failed, but not by its check"
 fi
 
