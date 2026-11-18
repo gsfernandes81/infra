@@ -380,7 +380,7 @@ visit, step 4); `one`'s old board free; a card written and labelled `three`.
 5. **Erase the stick,** once `ssh three` answers through the tunnel.
 6. **The backup.** Send the infra agent `three`'s address from `tailscale ip -4`; it fills
    it into `mirror-backup` and writes the install for `zero` of `mirror-backup` and
-   `mirror-backup-age`. Then the first push, detached, so a dropped ssh session does not end
+   `mirror-backup-age-check`. Then the first push, detached, so a dropped ssh session does not end
    it:
 
    ```fish

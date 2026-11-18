@@ -2,7 +2,7 @@
 # infra-os:   alpine
 # infra-init: openrc
 # infra-path: /etc/periodic/daily
-# infra-name: mirror-backup-age
+# infra-name: mirror-backup-age-check
 # infra-mode: 0755
 #
 # Tells the owner, through ntfy, when zero's last good backup to three is more than three
@@ -30,6 +30,6 @@ fi
 if [ -r "$state/ntfy-url" ]; then
 	curl -fsS -m 30 -H 'Title: zero backup' -d "$msg" "$(cat "$state/ntfy-url")" >/dev/null
 else
-	echo "mirror-backup-age: $msg; no $state/ntfy-url to tell the owner" >&2
+	echo "mirror-backup-age-check: $msg; no $state/ntfy-url to tell the owner" >&2
 	exit 1
 fi
