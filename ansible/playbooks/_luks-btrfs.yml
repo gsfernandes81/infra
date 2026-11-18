@@ -1,0 +1,635 @@
+---
+# NOT A PLAYBOOK YOU RUN — imported by a play that makes one host's encrypted array on one
+# whole disk: LUKS2 behind a typed passphrase, and inside it a btrfs with listed subvolumes
+# and directories. server-create-three-array.yml imports it today. Roadmap §4 plans LUKS for
+# zero, on /dev/bcacheN (lb_device_pattern); zero's btrfs spans several devices, which this
+# file does not make, so that half would grow then.
+#
+# Takes:   lb_device           the whole disk, /dev/sdX
+#          lb_device_pattern   what lb_device must match (default: a whole /dev/sdX disk)
+#          lb_luks_label       the LUKS2 label, which crypttab names
+#          lb_luks_cipher      e.g. xchacha12,aes-adiantum-plain64
+#          lb_luks_key_bits    e.g. 256
+#          lb_fs_label         the btrfs label
+#          lb_layout           top-level entries, each {name, kind: subvolume|directory,
+#                              owner, group, mode}
+#          lb_passphrase, lb_passphrase_again   from the play's vars_prompt, compared
+#          lb_confirm          the device name, typed in advance (default: ask)
+#          lb_after            a sentence the closing report ends with (default: none)
+#
+# WHAT IT DOES:
+#   1. Refuses a device that is not a whole disk matching the pattern, two passphrases that
+#      differ or are empty, a layout owner that does not exist, and a disk that is mounted,
+#      has partitions or holds any signature, unless that signature is LUKS labelled
+#      lb_luks_label: then the disk is ALREADY the array, and it is adopted. It also refuses
+#      when another device carries the label, since crypttab would pick one of the two.
+#   2. Shows the disk's size, model and serial and asks for the device name to be typed.
+#   3. On an adopted disk: checks the LUKS header (LUKS2, the label, the cipher, the key
+#      size), opens it READ-ONLY with the passphrase, mounts it read-only, and reads the
+#      layout. If the owner has it unlocked already, it reads through that instead and
+#      leaves it as it was. What matches is not touched: a run against the finished array
+#      changes nothing.
+#   4. Writes only what is missing or wrong, and only on a disk the owner has not unlocked:
+#      on a blank disk, luksFormat; inside an empty LUKS volume, mkfs.btrfs (which itself
+#      refuses a filesystem it finds); a missing subvolume or directory; an owner or mode
+#      that differs. A layout entry of the wrong kind (a directory where a subvolume
+#      belongs) is refused, since changing it means moving data.
+#   5. Proves the result from what it reads back, not from exit statuses: the header from
+#      luksDump, /dev/disk/by-label/<label> resolving to the disk (the path crypttab's
+#      LABEL= becomes), and the layout. It leaves the array closed.
+#
+# THE PASSPHRASE reaches cryptsetup on stdin only, with no newline, as systemd's prompt
+# passes it at the unlock, so the two read the same key. It is never on a command line or
+# written to disk, and every task that carries it is no_log. Those tasks do not fail on
+# their own: the next task prints cryptsetup's stderr, which cannot contain the passphrase,
+# and an assert stops the play (CLAUDE.md § Verifying changes).
+#
+# UNDER --check it opens an adopted disk read-only to read it (a mapping and a mount that it
+# removes again, neither of which writes to the disk), writes nothing, and says what a real
+# run would do. A blank disk is not opened at all.
+#
+# It leaves /dev/mapper/<lb_fs_label>-make and /run/infra-<lb_fs_label>-make behind only
+# if the run is killed; the next run removes both before anything else.
+#
+# NO NEW COLLECTIONS: ansible.builtin throughout. community.crypto's luks_device would do
+# the LUKS half, but nothing else in this repo needs that collection, and it would be a new
+# download on the phone for one task.
+
+- name: Note the names this run uses
+  ansible.builtin.set_fact:
+    lb_mapper: "{{ lb_fs_label }}-make"
+    lb_mount: "/run/infra-{{ lb_fs_label }}-make"
+    lb_pattern: "{{ lb_device_pattern | default('^/dev/sd[a-z]$') }}"
+    # name:kind:owner:group:mode, one word each, for the layout script's arguments.
+    lb_entries: >-
+      {% for e in lb_layout %}{{ e.name }}:{{ e.kind }}:{{ e.owner }}:{{ e.group }}:{{ e.mode }} {% endfor %}
+    # Reads the layout under $1 against the entries after it: one line per entry, ok,
+    # create, fix (with what is there) or conflict (an entry of the wrong kind); then each
+    # other top-level name, as extra. A subvolume's top directory is inode 256 on btrfs,
+    # and an ordinary directory never is.
+    lb_layout_script: |
+      m=$1; shift
+      for e in "$@"; do
+        name=${e%%:*}; r=${e#*:}; kind=${r%%:*}; r=${r#*:}
+        owner=${r%%:*}; r=${r#*:}; group=${r%%:*}; mode=${r#*:}
+        f=$m/$name
+        if [ ! -e "$f" ] && [ ! -L "$f" ]; then echo "create $name"; continue; fi
+        if [ -L "$f" ] || [ ! -d "$f" ]; then have=other
+        elif [ "$(stat -c %i "$f")" = 256 ]; then have=subvolume
+        else have=directory; fi
+        if [ "$have" != "$kind" ]; then echo "conflict $name is a $have, not a $kind"; continue; fi
+        now=$(stat -c '%U:%G %a' "$f")
+        if [ "$now" = "$owner:$group $(printf '%o' "$mode")" ]; then echo "ok $name"
+        else echo "fix $name is $now"; fi
+      done
+      for f in "$m"/* "$m"/.[!.]*; do
+        [ -e "$f" ] || [ -L "$f" ] || continue
+        n=${f##*/}
+        case " $* " in *" $n:"*) ;; *) echo "extra $n" ;; esac
+      done
+
+# The names, never the values, are in this task: an assert's `that` is an expression read
+# as text, so a failure prints the fail_msg and nothing typed.
+- name: Check the device, passphrases and layout given
+  ansible.builtin.assert:
+    that:
+      - lb_device is match(lb_pattern)
+      - lb_passphrase | length > 0
+      - lb_passphrase == lb_passphrase_again
+      - lb_layout | map(attribute='name') | select('match', '^[A-Za-z0-9._-]+$') | list | length == lb_layout | length
+      - lb_layout | map(attribute='kind') | reject('in', ['subvolume', 'directory']) | list | length == 0
+      - lb_layout | map(attribute='mode') | select('match', '^0[0-7]{3}$') | list | length == lb_layout | length
+    fail_msg: >-
+      {{ 'The device ' ~ lb_device ~ ' does not match ' ~ lb_pattern ~ ', a whole disk.'
+         if lb_device is not match(lb_pattern) else
+         'The passphrase was empty.' if lb_passphrase | length == 0 else
+         'The two passphrases differ.' if lb_passphrase != lb_passphrase_again else
+         'The layout has a name, kind or mode this file does not take.' }}
+      Nothing has been written.
+    success_msg: ok
+
+- name: Read the owners and groups the layout names
+  ansible.builtin.command:
+    argv: >-
+      {{ ['sh', '-c', 'for u in $1; do getent passwd "$u" >/dev/null || echo "user $u"; done;
+          for g in $2; do getent group "$g" >/dev/null || echo "group $g"; done', 'sh',
+          lb_layout | map(attribute='owner') | unique | join(' '),
+          lb_layout | map(attribute='group') | unique | join(' ')] }}
+  register: lb_owners
+  changed_when: false
+  check_mode: false
+
+- name: Check every owner and group exists
+  ansible.builtin.assert:
+    that: lb_owners.stdout_lines | length == 0
+    fail_msg: "No such {{ lb_owners.stdout_lines | join(', ') }} on {{ inventory_hostname }}. Nothing has been written."
+    success_msg: ok
+
+# key=value lines, each printed even when empty. wipefs without -a only lists, and -n
+# makes that plain; blkid -p probes the disk itself, not a cache, and -c /dev/null makes
+# the search for the label probe every device.
+- name: Read {{ lb_device }}'s partitions and signatures
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - |
+        dev=$1 label=$2
+        if [ ! -b "$dev" ]; then echo block=no; exit 0; fi
+        echo block=yes
+        echo "type=$(lsblk -dno TYPE "$dev")"
+        echo "size=$(lsblk -dno SIZE "$dev" | sed 's/^ *//')"
+        echo "model=$(lsblk -dno MODEL "$dev" | sed 's/ *$//')"
+        echo "serial=$(lsblk -dno SERIAL "$dev" | sed 's/ *$//')"
+        echo "tran=$(lsblk -dno TRAN "$dev" | sed 's/ *$//')"
+        echo "parts=$(lsblk -nro NAME,TYPE "$dev" | awk '$2 != "crypt"' | tail -n +2 | awk '{print $1}' | tr '\n' ' ')"
+        echo "crypt=$(lsblk -nro NAME,TYPE "$dev" | awk '$2 == "crypt" { print $1; exit }')"
+        echo "fs_type=$(blkid -p -s TYPE -o value "$dev" 2>/dev/null)"
+        echo "fs_label=$(blkid -p -s LABEL -o value "$dev" 2>/dev/null)"
+        echo "signatures=$(wipefs -n -i -O TYPE,OFFSET "$dev" | awk '{ printf "%s%s at %s", (NR > 1 ? ", " : ""), $1, $2 }')"
+        echo "elsewhere=$(blkid -c /dev/null -t "LABEL=$label" -o device 2>/dev/null | grep -vx "$dev" | tr '\n' ' ')"
+        echo "in_use=$(cat /proc/mounts /proc/swaps | awk -v d="$dev" 'index($1, d) == 1 { print $1 }' | tr '\n' ' ')"
+      - sh
+      - "{{ lb_device }}"
+      - "{{ lb_luks_label }}"
+  register: lb_read_dev
+  changed_when: false
+  check_mode: false
+
+- name: Note what {{ lb_device }} holds
+  ansible.builtin.set_fact:
+    lb_dev: "{{ dict(lb_read_dev.stdout_lines | map('split', '=', 1)) }}"
+
+- name: Note whether {{ lb_device }} is blank or the array
+  ansible.builtin.set_fact:
+    lb_state: >-
+      {{ 'blank' if lb_dev.block == 'yes' and lb_dev.type == 'disk' and lb_dev.parts | trim == ''
+           and lb_dev.crypt == '' and lb_dev.signatures == '' and lb_dev.fs_type == ''
+         else 'ours' if lb_dev.block == 'yes' and lb_dev.type == 'disk' and lb_dev.parts | trim == ''
+           and lb_dev.fs_type == 'crypto_LUKS' and lb_dev.fs_label == lb_luks_label
+         else 'other' }}
+    lb_shown: >-
+      {{ lb_device }}, {{ lb_dev.size | default('?') }}, {{ lb_dev.model | default('') or 'no model' }},
+      serial {{ lb_dev.serial | default('') or 'none reported' }}{{ (', ' ~ lb_dev.tran) if lb_dev.tran | default('') else '' }}
+
+- name: Check {{ lb_device }} is blank or already the array
+  ansible.builtin.assert:
+    that:
+      - lb_state in ['blank', 'ours']
+      - lb_dev.in_use | default('') | trim == ''
+      - lb_dev.elsewhere | default('') | trim == ''
+    fail_msg: >-
+      {{ lb_device ~ ' is not a block device.' if lb_dev.block != 'yes' else
+         lb_device ~ ' is a ' ~ lb_dev.type ~ ', not a whole disk.' if lb_dev.type != 'disk' else
+         lb_device ~ ' is in use: ' ~ lb_dev.in_use | trim ~ '.' if lb_dev.in_use | trim else
+         lb_device ~ ' has partitions: ' ~ lb_dev.parts | trim ~ '.' if lb_dev.parts | trim else
+         lb_device ~ ' holds a signature, so it is not new, and it is not this array: '
+           ~ (lb_dev.signatures or lb_dev.fs_type) ~ '.' if lb_state == 'other' else
+         'Another device is labelled ' ~ lb_luks_label ~ ': ' ~ lb_dev.elsewhere | trim
+           ~ '. crypttab would pick one of the two.' }}
+      ({{ lb_shown }}.) Nothing has been written.
+    success_msg: "{{ lb_state }}: {{ lb_shown }}"
+
+# Only what this file itself makes: its own mapping, checked to be on this disk, and its
+# own mount point. The owner's unlocked array is under another name and never touched.
+- name: Remove what an interrupted run left open
+  ansible.builtin.command: &lb_close
+    argv:
+      - sh
+      - -c
+      - |
+        set -e
+        if mountpoint -q "$1"; then umount "$1"; fi
+        if [ -d "$1" ]; then rmdir "$1"; fi
+        if [ -e "/dev/mapper/$2" ]; then
+          d=$(cryptsetup status "$2" | awk '$1 == "device:" { print $2 }')
+          if [ "$d" != "$3" ]; then echo "/dev/mapper/$2 is open on $d, not $3" >&2; exit 3; fi
+          cryptsetup close "$2"
+        fi
+      - sh
+      - "{{ lb_mount }}"
+      - "{{ lb_mapper }}"
+      - "{{ lb_device }}"
+  changed_when: false
+  check_mode: false
+
+- name: Note the mapping the owner has open, if any
+  ansible.builtin.set_fact:
+    lb_open_as: "{{ '' if lb_dev.crypt in ['', lb_mapper] else lb_dev.crypt }}"
+
+- name: Ask before writing to {{ lb_device }}
+  ansible.builtin.pause:
+    prompt: |
+      {{ lb_shown }}
+      {{ ('ERASE it, and make it the array ' ~ lb_luks_label ~ '?') if lb_state == 'blank' else
+         ('It is already the array ' ~ lb_luks_label ~ '. It will be opened read-only and checked,'
+          ~ ' and only what is missing or wrong is written.') }}
+      Type the device name to go on
+  register: lb_answer
+  when: lb_confirm | default('') != lb_device and not ansible_check_mode
+
+- name: Check the answer was the device name
+  ansible.builtin.assert:
+    that: >-
+      ansible_check_mode or lb_confirm | default('') == lb_device
+      or (lb_answer.user_input | default('') | trim) == lb_device
+    fail_msg: Not confirmed. Nothing has been written.
+    success_msg: going on
+
+- name: Make or check the array
+  block:
+    # ── an adopted disk: read it, read-only ────────────────────────────────────
+    - name: "If adopted: read the LUKS header"
+      ansible.builtin.command: &lb_read_header
+        argv:
+          - sh
+          - -c
+          - |
+            cryptsetup luksDump "$1" | sed -n 's/^Version:[[:space:]]*/version=/p; s/^Label:[[:space:]]*/label=/p'
+            printf 'json=%s\n' "$(cryptsetup luksDump --dump-json-metadata "$1" 2>/dev/null | tr -d '\n')"
+          - sh
+          - "{{ lb_device }}"
+      register: lb_hdr_read
+      changed_when: false
+      check_mode: false
+      when: lb_state == 'ours'
+
+    - name: "If adopted: check the header is this array's"
+      ansible.builtin.assert: &lb_check_header
+        that:
+          - lb_hdr.version | default('') == '2'
+          - lb_hdr.label | default('') == lb_luks_label
+          - lb_hdr_json.segments['0'].encryption | default('') == lb_luks_cipher
+          - lb_hdr_keys | length > 0
+          - lb_hdr_keys | reject('equalto', (lb_luks_key_bits | int) // 8) | list | length == 0
+        fail_msg: >-
+          {{ lb_device }}'s header reads LUKS{{ lb_hdr.version | default('?') }}, label
+          '{{ lb_hdr.label | default('') }}', cipher
+          {{ lb_hdr_json.segments['0'].encryption | default('?') }}, keys of
+          {{ lb_hdr_keys | map('string') | join(', ') or '?' }} bytes; wanted LUKS2,
+          {{ lb_luks_label }}, {{ lb_luks_cipher }}, {{ (lb_luks_key_bits | int) // 8 }} bytes.
+          A header is changed only by erasing the disk, which this play never does to a
+          disk that holds anything. Nothing has been written.
+        success_msg: "LUKS2, {{ lb_luks_label }}, {{ lb_luks_cipher }}, {{ lb_luks_key_bits }}-bit key"
+      vars: &lb_hdr_vars
+        lb_hdr: "{{ dict(lb_hdr_read.stdout_lines | default([]) | select('match', '^(version|label)=') | map('split', '=', 1)) }}"
+        lb_hdr_json: >-
+          {{ ((lb_hdr_read.stdout_lines | default([]) | select('match', '^json=') | first | default('json='))[5:]
+              or '{}') | from_json }}
+        lb_hdr_keys: "{{ lb_hdr_json.keyslots | default({}) | dict2items | map(attribute='value.key_size') | list }}"
+      when: lb_state == 'ours'
+
+    - name: "If adopted and locked: open it read-only"
+      ansible.builtin.command:
+        argv: [cryptsetup, open, --readonly, --key-file=-, "{{ lb_device }}", "{{ lb_mapper }}"]
+        stdin: "{{ lb_passphrase }}"
+        stdin_add_newline: false
+      register: lb_open_ro
+      no_log: true
+      failed_when: false
+      changed_when: false
+      check_mode: false
+      when: lb_state == 'ours' and lb_open_as == ''
+
+    # Nothing is mapped: --test-passphrase only tries the keyslots. A register of its own,
+    # since a skipped task would overwrite the open's (CLAUDE.md § Shell traps).
+    - name: "If adopted and unlocked: test the passphrase"
+      ansible.builtin.command:
+        argv: [cryptsetup, open, --test-passphrase, --key-file=-, "{{ lb_device }}"]
+        stdin: "{{ lb_passphrase }}"
+        stdin_add_newline: false
+      register: lb_test_pw
+      no_log: true
+      failed_when: false
+      changed_when: false
+      check_mode: false
+      when: lb_state == 'ours' and lb_open_as != ''
+
+    - name: "If the passphrase was refused: print why"
+      ansible.builtin.debug:
+        msg: >-
+          cryptsetup refused, rc {{ lb_open_ro.rc | default(lb_test_pw.rc | default('?')) }}:
+          {{ (lb_open_ro.stderr | default('') ~ lb_test_pw.stderr | default('')) | trim }}
+      changed_when: true
+      when: lb_open_ro.rc | default(0) != 0 or lb_test_pw.rc | default(0) != 0
+
+    - name: "If adopted: check the passphrase opened it"
+      ansible.builtin.assert:
+        that: lb_open_ro.rc | default(0) == 0 and lb_test_pw.rc | default(0) == 0
+        fail_msg: >-
+          The passphrase did not open {{ lb_device }} (rc 2 is a wrong passphrase). Nothing has
+          been written.
+        success_msg: "{{ ('opened read-only as ' ~ lb_mapper) if lb_open_as == '' else ('already open as ' ~ lb_open_as) }}"
+      when: lb_state == 'ours'
+
+    - name: "If adopted: read what is inside the LUKS volume"
+      ansible.builtin.command: &lb_read_inside
+        argv:
+          - sh
+          - -c
+          - |
+            m=/dev/mapper/$1
+            echo "fs_type=$(blkid -p -s TYPE -o value "$m" 2>/dev/null)"
+            echo "fs_label=$(blkid -p -s LABEL -o value "$m" 2>/dev/null)"
+            echo "signatures=$(wipefs -n -i -O TYPE,OFFSET "$m" | awk '{ printf "%s%s at %s", (NR > 1 ? ", " : ""), $1, $2 }')"
+            echo "mounted=$(findmnt -rn -o TARGET,FSROOT -S "$m" | awk '$2 == "/" { print $1; exit }')"
+          - sh
+          - "{{ lb_open_as or lb_mapper }}"
+      register: lb_inside_read
+      changed_when: false
+      check_mode: false
+      when: lb_state == 'ours'
+
+    - name: "If adopted: note what is inside"
+      ansible.builtin.set_fact:
+        lb_inside: "{{ dict(lb_inside_read.stdout_lines | map('split', '=', 1)) }}"
+      when: lb_state == 'ours'
+
+    - name: "If adopted: check inside is empty or the btrfs"
+      ansible.builtin.assert: &lb_check_inside
+        that: >-
+          (lb_inside.fs_type == 'btrfs' and lb_inside.fs_label == lb_fs_label)
+          or (lb_inside.fs_type == '' and lb_inside.signatures == '')
+        fail_msg: >-
+          Inside {{ lb_device }}'s LUKS volume is
+          {{ lb_inside.signatures or lb_inside.fs_type }}{{ (' labelled ' ~ lb_inside.fs_label) if lb_inside.fs_label else '' }},
+          not a btrfs labelled {{ lb_fs_label }}. Nothing has been written.
+        success_msg: "{{ ('btrfs, ' ~ lb_fs_label) if lb_inside.fs_type == 'btrfs' else 'empty' }}"
+      when: lb_state == 'ours'
+
+    - name: "If adopted and unmounted: mount it read-only"
+      ansible.builtin.command:
+        argv:
+          - sh
+          - -c
+          - install -d -m 700 "$1" && mount -o ro "/dev/mapper/$2" "$1"
+          - sh
+          - "{{ lb_mount }}"
+          - "{{ lb_open_as or lb_mapper }}"
+      changed_when: false
+      check_mode: false
+      when: lb_state == 'ours' and lb_inside.fs_type == 'btrfs' and lb_inside.mounted == ''
+
+    # One line per layout entry: ok, create, fix (with what is there), or conflict (an
+    # entry of the wrong kind); then any other top-level name, as extra. A subvolume's top
+    # directory is inode 256 on btrfs, and an ordinary directory never is.
+    - name: "If adopted: read the layout"
+      ansible.builtin.command: &lb_read_layout
+        argv: "{{ ['sh', '-c', lb_layout_script, 'sh', lb_layout_at] + lb_entries | trim | split }}"
+      vars:
+        lb_layout_at: "{{ lb_inside.mounted | default('') or lb_mount }}"
+      register: lb_layout_read
+      changed_when: false
+      check_mode: false
+      when: lb_state == 'ours' and lb_inside.fs_type == 'btrfs'
+
+    - name: "If adopted: check no entry is of the wrong kind"
+      ansible.builtin.assert:
+        that: lb_layout_read.stdout_lines | default([]) | select('match', '^conflict ') | list | length == 0
+        fail_msg: >-
+          {{ lb_layout_read.stdout_lines | default([]) | select('match', '^conflict ') | map('regex_replace', '^conflict ', '') | join('; ') }}.
+          Changing a kind means moving its data, which this play does not do. Nothing has
+          been written.
+        success_msg: ok
+      when: lb_state == 'ours'
+
+    - name: "If adopted: unmount and close it again"
+      ansible.builtin.command: *lb_close
+      changed_when: false
+      check_mode: false
+      when: lb_state == 'ours'
+
+    # Each entry in words, for the question below and the closing report.
+    - name: Note what a run writes
+      ansible.builtin.set_fact:
+        lb_changes: >-
+          {{ (['format ' ~ lb_device ~ ' as LUKS2, ' ~ lb_luks_cipher ~ ', ' ~ lb_luks_key_bits
+                ~ '-bit key, labelled ' ~ lb_luks_label] if lb_state == 'blank' else [])
+             + (['make a btrfs labelled ' ~ lb_fs_label ~ ' inside it']
+                if lb_state == 'blank' or lb_inside.fs_type | default('') == '' else []) }}
+        lb_have: >-
+          {{ dict(lb_layout_read.stdout_lines | default([]) | reject('match', '^extra ')
+                  | map('regex_replace', '^(\S+) (\S+).*$', '\2=\1')
+                  | map('split', '=', 1)) }}
+        lb_extra: >-
+          {{ lb_layout_read.stdout_lines | default([]) | select('match', '^extra ')
+             | map('regex_replace', '^extra ', '') | list }}
+
+    - name: Note what a run writes to the layout
+      ansible.builtin.set_fact:
+        lb_changes: >-
+          {{ lb_changes + [(('create ' ~ item.kind ~ ' ') if lb_have[item.name] | default('create') == 'create'
+                            else ('set ')) ~ item.name ~ ', ' ~ item.owner ~ ':' ~ item.group ~ ' ' ~ item.mode
+                           ~ ((' (' ~ (lb_layout_read.stdout_lines | select('match', '^fix ' ~ item.name ~ ' ')
+                                      | first | regex_replace('^fix \S+ ', '')) ~ ')')
+                              if lb_have[item.name] | default('') == 'fix' else '')] }}
+      loop: "{{ lb_layout }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: lb_have[item.name] | default('create') != 'ok'
+
+    - name: "If unlocked by the owner: check nothing needs writing"
+      ansible.builtin.assert:
+        that: lb_open_as == '' or lb_changes | length == 0 or ansible_check_mode
+        fail_msg: >-
+          {{ lb_device }} is unlocked, as {{ lb_open_as }}, and a run would {{ lb_changes | join('; ') }}.
+          This play writes only to a locked array: lock it (hosts/three/leap/README.md §
+          Unlocking says how) and run it again. Nothing has been written.
+        success_msg: ok
+
+    # ── the writes, each only if a read above found it missing ────────────────
+    - name: "If blank: write LUKS2 to {{ lb_device }}"
+      ansible.builtin.command:
+        argv:
+          - cryptsetup
+          - luksFormat
+          - --batch-mode
+          - --type=luks2
+          - --cipher={{ lb_luks_cipher }}
+          - --key-size={{ lb_luks_key_bits }}
+          - --label={{ lb_luks_label }}
+          - --key-file=-
+          - "{{ lb_device }}"
+        stdin: "{{ lb_passphrase }}"
+        stdin_add_newline: false
+      register: lb_format
+      no_log: true
+      failed_when: false
+      changed_when: true
+      when: lb_state == 'blank' and not ansible_check_mode
+
+    - name: "If the format failed: print why"
+      ansible.builtin.debug:
+        msg: "luksFormat failed, rc {{ lb_format.rc }}: {{ lb_format.stderr | default('') | trim }}"
+      changed_when: true
+      when: lb_format.rc | default(0) != 0
+
+    - name: "If blank: check the format succeeded"
+      ansible.builtin.assert:
+        that: lb_format.rc | default(0) == 0
+        fail_msg: luksFormat failed, as printed above.
+        success_msg: ok
+      when: lb_state == 'blank' and not ansible_check_mode
+
+    - name: "If writing: open the array read-write"
+      ansible.builtin.command:
+        argv: [cryptsetup, open, --key-file=-, "{{ lb_device }}", "{{ lb_mapper }}"]
+        stdin: "{{ lb_passphrase }}"
+        stdin_add_newline: false
+      register: lb_open_rw
+      no_log: true
+      failed_when: false
+      changed_when: false
+      when: lb_changes | length > 0 and not ansible_check_mode
+
+    - name: "If the open was refused: print why"
+      ansible.builtin.debug:
+        msg: "cryptsetup refused, rc {{ lb_open_rw.rc }}: {{ lb_open_rw.stderr | default('') | trim }}"
+      changed_when: true
+      when: lb_open_rw.rc | default(0) != 0
+
+    - name: "If writing: check the array opened"
+      ansible.builtin.assert:
+        that: lb_open_rw.rc | default(0) == 0
+        fail_msg: The passphrase did not open {{ lb_device }}, as printed above.
+        success_msg: "opened as {{ lb_mapper }}"
+      when: lb_changes | length > 0 and not ansible_check_mode
+
+    # Read again, right before mkfs: the guard is what is there now, not what was there.
+    - name: "If writing: read what is inside the LUKS volume"
+      ansible.builtin.command: *lb_read_inside
+      register: lb_inside_read
+      changed_when: false
+      when: lb_changes | length > 0 and not ansible_check_mode
+
+    - name: "If writing: note what is inside"
+      ansible.builtin.set_fact:
+        lb_inside: "{{ dict(lb_inside_read.stdout_lines | map('split', '=', 1)) }}"
+      when: lb_changes | length > 0 and not ansible_check_mode
+
+    - name: "If writing: check inside is empty or the btrfs"
+      ansible.builtin.assert: *lb_check_inside
+      when: lb_changes | length > 0 and not ansible_check_mode
+
+    # No -f: mkfs.btrfs refuses a device holding a filesystem, a second guard.
+    - name: "If empty inside: make the btrfs {{ lb_fs_label }}"
+      ansible.builtin.command:
+        argv: [mkfs.btrfs, -q, -L, "{{ lb_fs_label }}", "/dev/mapper/{{ lb_mapper }}"]
+      changed_when: true
+      when: lb_changes | length > 0 and not ansible_check_mode and lb_inside.fs_type == ''
+
+    - name: "If writing: mount it read-write"
+      ansible.builtin.command:
+        argv:
+          - sh
+          - -c
+          - install -d -m 700 "$1" && mount "/dev/mapper/$2" "$1"
+          - sh
+          - "{{ lb_mount }}"
+          - "{{ lb_mapper }}"
+      changed_when: false
+      when: lb_changes | length > 0 and not ansible_check_mode
+
+    - name: "If writing: read the layout"
+      ansible.builtin.command: *lb_read_layout
+      vars:
+        lb_layout_at: "{{ lb_mount }}"
+      register: lb_layout_write
+      changed_when: false
+      when: lb_changes | length > 0 and not ansible_check_mode
+
+    - name: "If missing: create the subvolume"
+      ansible.builtin.command:
+        argv: [btrfs, subvolume, create, "{{ lb_mount }}/{{ item.name }}"]
+      loop: "{{ lb_layout | selectattr('kind', 'equalto', 'subvolume') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: true
+      when:
+        - lb_changes | length > 0 and not ansible_check_mode
+        - ('create ' ~ item.name) in lb_layout_write.stdout_lines
+
+    - name: "If writing: set each entry's owner and mode"
+      ansible.builtin.file:
+        path: "{{ lb_mount }}/{{ item.name }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop: "{{ lb_layout }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: lb_changes | length > 0 and not ansible_check_mode
+
+    - name: "If writing: read the layout back"
+      ansible.builtin.command: *lb_read_layout
+      vars:
+        lb_layout_at: "{{ lb_mount }}"
+      register: lb_layout_after
+      changed_when: false
+      when: lb_changes | length > 0 and not ansible_check_mode
+
+    - name: "If writing: check every entry reads as wanted"
+      ansible.builtin.assert:
+        that: lb_layout_after.stdout_lines | select('match', '^ok ') | list | length == lb_layout | length
+        fail_msg: "The layout reads back as: {{ lb_layout_after.stdout_lines | join('; ') }}"
+        success_msg: "{{ lb_layout_after.stdout_lines | join('; ') }}"
+      when: lb_changes | length > 0 and not ansible_check_mode
+
+    - name: "If writing: unmount and close it"
+      ansible.builtin.command: *lb_close
+      changed_when: false
+      when: lb_changes | length > 0 and not ansible_check_mode
+
+    # ── the proof, from what reads back ────────────────────────────────────────
+    - name: "If written: read the LUKS header back"
+      ansible.builtin.command: *lb_read_header
+      register: lb_hdr_read
+      changed_when: false
+      when: lb_changes | length > 0 and not ansible_check_mode
+
+    - name: "If written: check the header is this array's"
+      ansible.builtin.assert: *lb_check_header
+      vars: *lb_hdr_vars
+      when: lb_changes | length > 0 and not ansible_check_mode
+
+    - name: Read where /dev/disk/by-label/{{ lb_luks_label }} leads
+      ansible.builtin.command:
+        argv: [sh, -c, 'udevadm settle; readlink -f "/dev/disk/by-label/$1"', sh, "{{ lb_luks_label }}"]
+      register: lb_by_label
+      changed_when: false
+      check_mode: false
+      when: not (lb_state == 'blank' and ansible_check_mode)
+
+    - name: Check crypttab's LABEL= finds {{ lb_device }}
+      ansible.builtin.assert:
+        that: lb_by_label.stdout | trim == lb_device
+        fail_msg: >-
+          /dev/disk/by-label/{{ lb_luks_label }} leads to '{{ lb_by_label.stdout | trim }}',
+          not {{ lb_device }}, so crypttab's LABEL={{ lb_luks_label }} would not find it.
+        success_msg: "by-label: {{ lb_by_label.stdout | trim }}"
+      when: not (lb_state == 'blank' and ansible_check_mode)
+
+  always:
+    - name: Unmount and close what this run opened
+      ansible.builtin.command: *lb_close
+      changed_when: false
+      check_mode: false
+
+- name: Print what was done to {{ lb_device }}
+  ansible.builtin.debug:
+    msg: >-
+      {{ (['DRY RUN, nothing written. ' ~ lb_shown ~ ':']
+          + (['a real run would:'] + lb_changes if lb_changes else
+             ['already the array ' ~ lb_luks_label ~ ' with the btrfs ' ~ lb_fs_label
+              ~ ' and its layout; a real run would change nothing.'])
+          if ansible_check_mode else
+          ([lb_shown ~ ' is already the array ' ~ lb_luks_label ~ ', and nothing was changed:'
+            ~ ' its header, its btrfs ' ~ lb_fs_label ~ ' and every entry of its layout match.']
+           if not lb_changes else
+           [lb_shown ~ ':'] + lb_changes
+           + ['Proved from what reads back: the header, by-label, and the layout.'])
+          + ([('It is still unlocked, as ' ~ lb_open_as ~ ', as it was found.') if lb_open_as else 'It is locked.']))
+         + (['Not in the layout, and left alone: ' ~ lb_extra | join(', ')] if lb_extra else [])
+         + ([lb_after] if lb_after | default('') and not ansible_check_mode else []) }}
+  changed_when: true

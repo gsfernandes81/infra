@@ -1,0 +1,116 @@
+---
+# MAKE three's BACKUP ARRAY on a new drive, or check the one already there. From the control
+# node, with the drive in the Argon and `three` in the inventory:
+#
+#     cd ansible
+#     ansible-playbook playbooks/server-create-three-array.yml -e device=/dev/sdX -K
+#
+# Find the device first, after `ssh three`: `lsblk -o NAME,SIZE,MODEL,SERIAL,TRAN`.
+#
+# WHAT IT DOES (the mechanics are _luks-btrfs.yml's, whose header says more):
+#   1. Asks for the array's passphrase twice. Refuses two that differ, a box whose hostname
+#      is not three, a device that is not a whole /dev/sdX disk, and a disk that is mounted,
+#      has partitions or holds any signature, unless it is already this array (LUKS
+#      labelled mirror-luks). It refuses too when another device carries that label,
+#      because /etc/crypttab names the array by it.
+#   2. Shows the disk's size, model and serial, and asks for the device name to be typed.
+#   3. On a blank disk: LUKS2 with Adiantum (plans/three.md § Encryption: a Pi 4 has no AES
+#      instructions), labelled mirror-luks; inside it a btrfs labelled mirror, holding the
+#      subvolume `incoming` (the backup user's, the one place zero's rsync may write), the
+#      subvolume `syncthing` (gavin's: Syncthing's data and its identity) and the directory
+#      `snapshots` (root's).
+#   4. On the array itself, a new drive's second run or the one make-mirror made: checks
+#      the header, opens it read-only with the passphrase, reads the layout, and writes
+#      only what is missing or wrong. A run against the finished array changes nothing.
+#      If it is unlocked, it reads through the unlocked volume and writes nothing.
+#   5. Proves the result from what reads back, and leaves the array locked. Unlocking is
+#      hosts/three/leap/README.md § Unlocking.
+#
+# A REPLACEMENT DRIVE is the same command on the new drive. Its passphrase need not be the
+# old one's. A second drive beside the first needs its own label, its own crypttab line and
+# its own values here; this play makes the one crypttab names.
+#
+# The passphrase is stored nowhere: it reaches cryptsetup on stdin, never a command line,
+# and no task that carries it prints anything. Under --check it writes nothing, opens an
+# existing array read-only to read it, and says what a real run would do.
+#
+# sim/microos/host/three.sh runs it in CI: --check on the blank drive, the real run, a second
+# run that must change nothing, and the refusals.
+#
+# -K IS REQUIRED: everything here is root's. -e confirm_device=<device> answers the question
+# in step 2 for a run nobody types into, as the simulation's are.
+
+- name: Check the inventory is loaded
+  ansible.builtin.import_playbook: _assert-inventory.yml
+  vars:
+    required_group: fleet
+
+- name: Check a device was named and three is known
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check -e device and three in the inventory
+      # Without three in [fleet], the play below matches no host and exits 0 having done
+      # nothing (_assert-inventory.yml, the same trap).
+      ansible.builtin.assert:
+        that:
+          - device is defined
+          - "'three' in groups['fleet']"
+        fail_msg: >-
+          {{ 'Name the drive, -e device=/dev/sdX.' if device is not defined else
+             'three is not in the inventory fleet group yet; it joins as
+             hosts/three/leap/README.md § After the first boot says.' }}
+        success_msg: "device: {{ device | default('?') }}"
+
+- name: Create three's backup array
+  hosts: three
+  gather_facts: false
+
+  # Asked once, before any task, never echoed.
+  vars_prompt:
+    - name: array_passphrase
+      prompt: Passphrase for the array (not echoed)
+      private: true
+    - name: array_passphrase_again
+      prompt: The same again
+      private: true
+
+  vars:
+    confirm_device: ""
+
+  tasks:
+    - name: Read the box's hostname
+      ansible.builtin.command: hostname
+      register: arr_hostname
+      changed_when: false
+      check_mode: false
+
+    - name: Check the box is three
+      ansible.builtin.assert:
+        that: arr_hostname.stdout | trim == 'three'
+        fail_msg: "The box this reached calls itself {{ arr_hostname.stdout | trim }}, not three. Nothing has been written."
+        success_msg: three
+
+    - name: Make or check the array on {{ device }}
+      ansible.builtin.import_tasks: _luks-btrfs.yml
+      become: true
+      vars:
+        lb_device: "{{ device }}"
+        lb_confirm: "{{ confirm_device }}"
+        lb_passphrase: "{{ array_passphrase }}"
+        lb_passphrase_again: "{{ array_passphrase_again }}"
+        # /etc/crypttab names the array by this label (hosts/three/leap/system/crypttab).
+        lb_luks_label: mirror-luks
+        lb_luks_cipher: xchacha12,aes-adiantum-plain64
+        lb_luks_key_bits: 256
+        # /etc/fstab mounts /dev/mapper/mirror, whatever its label; the label is for a
+        # person reading lsblk.
+        lb_fs_label: mirror
+        # Each mode is what the services expect: rsync-backup.conf writes into incoming as
+        # the backup user, mirror-snapshot snapshots it into snapshots, which the backup
+        # user cannot reach, and Syncthing runs as gavin.
+        lb_layout:
+          - {name: incoming, kind: subvolume, owner: backup, group: backup, mode: "0700"}
+          - {name: syncthing, kind: subvolume, owner: gavin, group: gavin, mode: "0755"}
+          - {name: snapshots, kind: directory, owner: root, group: root, mode: "0700"}
+        lb_after: Unlock it as hosts/three/leap/README.md § Unlocking says.

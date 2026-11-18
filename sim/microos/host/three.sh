@@ -5,8 +5,8 @@
 # three is a NEW host, so its stick is the one `make-stick --new` builds: no tunnel
 # credentials, .env, secrets or volumes (run-host.sh leaves them out for a host with no
 # tunnel config). After the first boot, the hooks below do what the visit does next: put a
-# tunnel in place as server-create-host-tunnel.yml and install-system-file would, format
-# the drive with make-mirror, and unlock it with the README's own command.
+# tunnel in place as server-create-host-tunnel.yml and install-system-file would, make the
+# array with server-create-three-array.yml, and unlock it with the README's own command.
 
 # zero's two values in the backup user's authorized_keys, read from the tracked line and
 # swapped on the stick for the run's own: its backup key, which the runner pushes with as
@@ -37,15 +37,21 @@ deployments=(syncthing-three)
 volumes=()
 
 # The WD Red, new and blank, on USB as the Argon's bridge puts it. Its size is how the
-# hooks find it on the box; make-mirror formats it there.
+# hooks find it on the box; server-create-three-array.yml formats it there. Beside it, a
+# small drive that already holds a filesystem, which the play must refuse.
 mirror_bytes=$((1536 * 1024 * 1024))
+stranger_bytes=$((80 * 1024 * 1024))
 make_disks() {
 	truncate -s "$mirror_bytes" mirror.img
-	echo "a blank $((mirror_bytes / 1024 / 1024))M drive for the array"
+	rm -f stranger.img
+	mke2fs -q -t ext4 -L stranger stranger.img "$((stranger_bytes / 1024 / 1024))M"
+	echo "a blank $((mirror_bytes / 1024 / 1024))M drive for the array, and an $((stranger_bytes / 1024 / 1024))M one holding ext4"
 }
 disk_args=(
 	-drive file="$PWD/mirror.img",if=none,id=mirror,format=raw
 	-device usb-storage,bus=xhci.0,drive=mirror
+	-drive file="$PWD/stranger.img",if=none,id=stranger,format=raw
+	-device usb-storage,bus=xhci.0,drive=stranger
 )
 
 luks_password=$(openssl rand -hex 12)
@@ -83,6 +89,106 @@ DIAG
 	fi
 }
 
+# server-create-three-array.yml, run from the runner as the control node, as the phone runs
+# it. The answers a person types come as -e: the device name for its question, and the
+# passphrase twice, from a file only this run can read, removed straight after. Neither
+# secret may appear in its output. Usage: array_play <log> <device> <pass> <pass again> [args]
+array_play() {
+	local log=$1 dev=$2 p1=$3 p2=$4 rc=0 s
+	shift 4
+	local inv=$repo/ansible/inventory.sim-host vars=$PWD/array-vars.yml
+	cat > "$inv" <<INV
+[fleet]
+three ansible_host=127.0.0.1 ansible_port=$(cat port) ansible_user=gavin ansible_ssh_private_key_file=$PWD/key ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+[control]
+localhost
+INV
+	( umask 077; printf 'ansible_become_password: "%s"\narray_passphrase: "%s"\narray_passphrase_again: "%s"\n' \
+		"$password" "$p1" "$p2" > "$vars" )
+	install -d -m 700 "$HOME/.ssh/cp"
+	# COLUMNS: wide, so the callback wraps no sentence the checks below look for.
+	( cd "$repo/ansible" && COLUMNS=400 ANSIBLE_CONFIG=$repo/ansible/ansible.cfg ansible-playbook -i "$inv" \
+		playbooks/server-create-three-array.yml -e "device=$dev" -e "confirm_device=$dev" -e "@$vars" "$@" \
+		) < /dev/null > "$log" 2>&1 || rc=$?
+	rm -f "$inv" "$vars"
+	for s in "$password" "$p1" "$p2"; do
+		if grep -qF -- "$s" "$log"; then
+			echo "FAIL a secret appeared in the play's output ($log)"
+			sed -i "s/$s/<secret>/g" "$log"
+		fi
+	done
+	return "$rc"
+}
+
+# The play against the blank drive: --check first, which must write nothing, then the real
+# run, then a second run, which must change nothing, as the first run against the owner's
+# own array will. Then what it must refuse, each leaving the drive as it was.
+array_plays() {
+	local dev=$1 stranger=$2 rc
+	if ! command -v ansible-playbook >/dev/null; then
+		if [ -n "${GITHUB_ACTIONS:-}" ]; then echo "FAIL no ansible-playbook here"; else echo "SKIP no ansible-playbook here"; fi
+		return 0
+	fi
+	rc=0; array_play array-check.log "$dev" "$luks_password" "$luks_password" --check || rc=$?
+	sed 's/^/    | /' array-check.log | tail -n 12
+	if [ "$rc" = 0 ] && grep -q 'DRY RUN, nothing written' array-check.log &&
+		[ -z "$(printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 "sudo -S -p '' wipefs -n $dev")" ]; then
+		echo "PASS --check says what it would do, and the drive is still blank"
+	else
+		echo "FAIL --check failed (exit $rc) or wrote to the drive"
+	fi
+
+	rc=0; array_play array.log "$dev" "$luks_password" "$luks_password" || rc=$?
+	sed 's/^/    | /' array.log | tail -n 16
+	if [ "$rc" = 0 ] && grep -q 'Proved from what reads back' array.log; then
+		echo "PASS the play made the array"
+	else
+		echo "FAIL the play could not make the array (exit $rc):"
+		grep -B2 -A6 'FAILED' array.log | head -n 30 | sed 's/^/    | /'
+	fi
+
+	# The repo's callback shows a debug task as DONE, so a CHANGED line is a real change.
+	rc=0; array_play array-again.log "$dev" "$luks_password" "$luks_password" || rc=$?
+	sed 's/^/    | /' array-again.log | tail -n 10
+	if [ "$rc" = 0 ] && ! grep -q ' CHANGED$' array-again.log && grep -q 'nothing was changed' array-again.log; then
+		echo "PASS a second run adopts the array and changes nothing"
+	else
+		echo "FAIL the second run failed (exit $rc) or changed something:"
+		grep -E ' (CHANGED|FAILED)$' array-again.log | sed 's/^/    | /'
+	fi
+
+	rc=0; array_play array-again-check.log "$dev" "$luks_password" "$luks_password" --check || rc=$?
+	if [ "$rc" = 0 ] && grep -q 'a real run would change nothing' array-again-check.log; then
+		echo "PASS --check on the array says a run would change nothing"
+	else
+		echo "FAIL --check on the array failed (exit $rc) or found something to change:"
+		tail -n 12 array-again-check.log | sed 's/^/    | /'
+	fi
+
+	echo "-- what the play must refuse"
+	rc=0; array_play array-wrong.log "$dev" wrong-passphrase wrong-passphrase || rc=$?
+	if [ "$rc" != 0 ] && grep -q 'The passphrase did not open' array-wrong.log && ! grep -q ' CHANGED$' array-wrong.log; then
+		echo "PASS a wrong passphrase is refused, and nothing written: $(grep -m1 -o 'cryptsetup refused.*' array-wrong.log)"
+	else
+		echo "FAIL a wrong passphrase was not refused as one (exit $rc):"
+		tail -n 12 array-wrong.log | sed 's/^/    | /'
+	fi
+	rc=0; array_play array-differ.log "$dev" "$luks_password" "${luks_password}x" || rc=$?
+	if [ "$rc" != 0 ] && grep -q 'The two passphrases differ' array-differ.log; then
+		echo "PASS two passphrases that differ are refused"
+	else
+		echo "FAIL two passphrases that differ were not refused (exit $rc)"
+	fi
+	rc=0; array_play array-stranger.log "$stranger" "$luks_password" "$luks_password" || rc=$?
+	if [ "$rc" != 0 ] && grep -q 'holds a signature, so it is not new' array-stranger.log &&
+		[ "$(printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 "sudo -S -p '' blkid -p -s LABEL -o value $stranger")" = stranger ]; then
+		echo "PASS a drive holding a filesystem is refused and left as it was: $(grep -m1 -o 'holds a signature.*' array-stranger.log | head -c 120)"
+	else
+		echo "FAIL the drive holding ext4 was not refused as one (exit $rc):"
+		tail -n 12 array-stranger.log | sed 's/^/    | /'
+	fi
+}
+
 sim_after_firstboot() {
 	local dev
 	echo "===== three's tunnel, as server-create-host-tunnel.yml and install-system-file leave it"
@@ -107,19 +213,15 @@ TUNNEL
 		echo "FAIL cloudflared did not start once its config was in place"
 	fi
 
-	echo "===== the array, made by make-mirror and unlocked as the README says"
-	dev=$(ssh_as gavin@127.0.0.1 "lsblk -dnbro NAME,SIZE" | awk -v s="$mirror_bytes" '$2 == s { print "/dev/" $1 }' || true)
-	echo "the blank drive is ${dev:-not found}"
-	# The script under test, not the box's checkout, which is main's until the deploy stage.
+	echo "===== the array, made by server-create-three-array.yml and unlocked as the README says"
+	dev=$(ssh_as gavin@127.0.0.1 "lsblk -dnbro NAME,SIZE" | awk -v s="$mirror_bytes" '$1 ~ /^sd/ && $2 == s { print "/dev/" $1 }' || true)
+	stranger=$(ssh_as gavin@127.0.0.1 "lsblk -dnbro NAME,SIZE" | awk -v s="$stranger_bytes" '$1 ~ /^sd/ && $2 == s { print "/dev/" $1 }' || true)
+	echo "the blank drive is ${dev:-not found}; the one holding ext4 is ${stranger:-not found}"
+	array_plays "$dev" "$stranger"
+	# make-mirror stays beside the play for now, so its refusal is still checked. The copy
+	# under test, not the box's checkout, which is main's until the deploy stage.
 	ssh_as gavin@127.0.0.1 "cat > /tmp/make-mirror" < "$repo/hosts/three/leap/make-mirror" ||
 		echo "FAIL could not copy make-mirror to the box"
-	if { printf '%s\n' "$password" "$dev" "$luks_password" "$luks_password"; } |
-		ssh_as gavin@127.0.0.1 "sudo -S -p '' bash /tmp/make-mirror $dev" > make-mirror.log 2>&1; then
-		echo "PASS make-mirror made the array"
-	else
-		echo "FAIL make-mirror could not make the array"
-	fi
-	sed 's/^/    /' make-mirror.log
 	if { printf '%s\n' "$password" "$dev"; } |
 		ssh_as gavin@127.0.0.1 "sudo -S -p '' bash /tmp/make-mirror $dev" > make-mirror-again.log 2>&1; then
 		echo "FAIL make-mirror erased a drive that already holds the array"
