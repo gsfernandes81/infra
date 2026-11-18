@@ -2479,7 +2479,8 @@ Alpine copies for `one` too, since `one` keeps both.
   `install-system-file`, `check-system-drift`, the fleet ssh play and the browser login
   play read that rule, the two plays as one line of Jinja each. The move's commit adds the
   file, and going back to the Alpine card is a commit that deletes it, so the Alpine copies
-  stay in the tree as the way back. `three` has one from its first boot.
+  stay in the tree as the way back. `three` has one from its first boot, and `one` from
+  its move; `hosts/one/system/README.md` says its copies there are the way back.
 - **Asking the box was set aside.** The tools could use `leap/system/` wherever
   `/run/systemd/system` exists, and the play could stat the same path on each host. The
   fleet ssh play and the browser login play read a host's routing on the control node

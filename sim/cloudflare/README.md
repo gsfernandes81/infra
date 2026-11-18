@@ -60,8 +60,9 @@ removes it on exit; once it is committed, the script uses it. It runs:
   directories whose ssh rule points at the wrong port in each: each must be refused by its
   own check, the stand-in first naming its `system/` file and then, once the script writes
   its `leap/MOVED`, its `leap/system/` file;
-- dry runs for `one`, which has both directories and no `leap/MOVED`, and must read
-  `system/`, and for `three`, which must read `leap/system/`; neither may write to Access;
+- dry runs for `one`, which keeps its Alpine `system/` beside `leap/system/` and a
+  `leap/MOVED`, and must read `leap/system/`, and for `three`, which must read
+  `leap/system/` too; neither may write to Access;
 - the real run: one application, `fleet ssh three`, on `ssh-three` only and not on
   `syncthing-three`, linked to one `non_identity` policy that admits the enabled fleet
   tokens and not the disabled one or a dev token, then the final message;

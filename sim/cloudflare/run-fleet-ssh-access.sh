@@ -5,7 +5,8 @@
 # a host whose leap/MOVED sends it to leap/system/: the refusals, a dry run, a real run to
 # the final message, a re-run, the undo, and a gate that never takes, which must be undone
 # by the play's rescue. Also `one`, and a stand-in with both directories, read without and
-# then with a leap/MOVED, to show the marker and nothing else picks the directory. Prints PASS or FAIL per check and exits 1 on any FAIL. CI runs it
+# then with a leap/MOVED, to show the marker and nothing else picks the directory. Prints
+# PASS or FAIL per check and exits 1 on any FAIL. CI runs it
 # (.github/workflows/cloudflare-sim.yml).
 #
 # It writes nothing outside a temporary HOME except, in the repo, an inventory beside
@@ -148,9 +149,9 @@ if play -e host=simleap; then fail "ran for a wrong ssh rule"; else
 	says 'hosts/simleap/leap/system/cloudflared-config.yml has no rule sending ssh-simleap.gsrpi.uk' && pass "read leap/system/ once leap/MOVED exists, and refused its wrong rule" || fail "simleap with MOVED failed, but not by the ssh-rule check in leap/system/"
 fi
 
-echo "== --check: one, which has system/ and leap/system/ and no leap/MOVED, then three"
+echo "== --check: one, which keeps its Alpine system/ beside leap/system/ and leap/MOVED, then three"
 if play -e host=one --check; then
-	says 'which hosts/one/system/cloudflared-config.yml routes' && pass "one: system/, with no leap/MOVED" || fail "one: did not read system/"
+	says 'which hosts/one/leap/system/cloudflared-config.yml routes' && pass "one: leap/system/, by its leap/MOVED" || fail "one: did not read leap/system/"
 else fail "one: dry run failed"; fi
 if play -e host=three --check; then
 	says 'which hosts/three/leap/system/cloudflared-config.yml routes' && pass "three: read leap/system/" || fail "three: did not read leap/system/"

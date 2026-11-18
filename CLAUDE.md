@@ -31,7 +31,7 @@ Full orientation is `README.md`; the reasoning is `docs/decisions.md`. Quick map
   `two`, one reviewed root script, on no PATH. `hosts/<host>/leap/` is the host's move to
   Leap, ahead of it: its first-boot script and the `/etc` copies that replace `system/`
   once it has moved. `hosts/<host>/leap/MOVED` is the record that it has: the tools and
-  the plays read `leap/system/` while it exists (`three`) and `system/` otherwise.
+  the plays read `leap/system/` while it exists (`one`, `three`) and `system/` otherwise.
 - **`leap/`** — what every Leap host's first boot shares (`firstboot.sh`) and
   `make-stick`, which builds a host's first-boot stick on its old system. Its README.
 - **`bin/`** — `check-sources`, `check-system-drift` (reports, never writes),
