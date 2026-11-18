@@ -183,10 +183,10 @@
          lb_device ~ ' is a ' ~ lb_dev.type ~ ', not a whole disk.' if lb_dev.type != 'disk' else
          lb_device ~ ' is in use: ' ~ lb_dev.in_use | trim ~ '.' if lb_dev.in_use | trim else
          lb_device ~ ' has partitions: ' ~ lb_dev.parts | trim ~ '.' if lb_dev.parts | trim else
-         'Another device is labelled ' ~ lb_luks_label ~ ': ' ~ lb_dev.elsewhere | trim
-           ~ '. crypttab would pick one of the two.' if lb_dev.elsewhere | trim else
          lb_device ~ ' holds a signature, so it is not new, and it is not this array: '
-           ~ (lb_dev.signatures or lb_dev.fs_type) ~ '.' }}
+           ~ (lb_dev.signatures or lb_dev.fs_type) ~ '.' if lb_state == 'other' else
+         'Another device is labelled ' ~ lb_luks_label ~ ': ' ~ lb_dev.elsewhere | trim
+           ~ '. crypttab would pick one of the two.' }}
       ({{ lb_shown }}.) Nothing has been written.
     success_msg: "{{ lb_state }}: {{ lb_shown }}"
 
