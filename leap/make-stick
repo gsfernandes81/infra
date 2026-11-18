@@ -41,14 +41,17 @@ hostdir=$repo/hosts/$host/leap
 
 [ "$(id -u)" -eq 0 ] || die "run as root: the carry-over is root's to read"
 [ -d "$hostdir" ] || die "no $hostdir"
+# The short name: one's hostname is its full name, one.gsrpi.uk.
+this=$(hostname)
+this=${this%%.*}
 if [ -z "$new" ]; then
 	# The carry-over is this box's own, so building one host's stick on another would carry
 	# the wrong keys and credentials.
-	[ "$(hostname)" = "$host" ] || die "this is $(hostname), not $host"
+	[ "$this" = "$host" ] || die "this is $this, not $host"
 else
 	# A new host's stick takes nothing of this box's but gavin's, and a host with a tunnel
 	# or volumes to carry has an old system to build its stick on.
-	[ "$(hostname)" != "$host" ] || die "this is $host itself; leave out --new"
+	[ "$this" != "$host" ] || die "this is $host itself; leave out --new"
 	[ ! -e "$hostdir/system/cloudflared-config.yml" ] || die "$host has a tunnel config, so it is not new"
 	[ ! -e "$hostdir/volumes" ] || die "$host lists volumes to carry, so it is not new"
 fi
