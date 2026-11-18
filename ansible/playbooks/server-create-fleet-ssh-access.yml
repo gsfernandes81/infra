@@ -38,9 +38,10 @@
 # tunnel, such as a Syncthing GUI, wants a login rather than a service token, and is
 # server-create-browser-login.yml's.
 #
-# The tracked routing is hosts/<host>/system/cloudflared-config.yml, or, for a host that has
-# only ever run Leap and so has no system/ (three), hosts/<host>/leap/system/: the rule
-# bin/_infra.py's system_dir() keeps. A host with both is still on Alpine, and system/ wins.
+# The tracked routing is hosts/<host>/system/cloudflared-config.yml, or
+# hosts/<host>/leap/system/ for a host whose hosts/<host>/leap/MOVED says it runs Leap: the
+# rule bin/_infra.py's system_dir() keeps. A host with both directories and no MOVED is
+# still on Alpine, and system/ wins.
 #
 # Refuses, rather than guesses: a host not in the fleet; a host with no tracked tunnel
 # config; a hostname that is not that host's tracked ssh rule; an application on the
@@ -74,12 +75,12 @@
     # until that hostname was deleted on 2026-10-27, after which the probe reached nothing.
     control_hostname: "dev.{{ dns_zone }}"
     control_url: "https://{{ control_hostname }}/"
-    # The tracked routing, by system_dir()'s rule (the header): leap/system/ only when
-    # system/ is absent and leap/system/ exists. Repo-relative, for the messages.
+    # The tracked routing, by system_dir()'s rule (the header): leap/system/ when
+    # leap/MOVED exists, system/ otherwise. Repo-relative, for the messages.
     fleet_host_dir: "{{ control_checkout }}/hosts/{{ fleet_host }}"
     fleet_config: >-
-      hosts/{{ fleet_host }}/{{ 'leap/system' if (fleet_host_dir ~ '/system') is not directory
-      and (fleet_host_dir ~ '/leap/system') is directory else 'system' }}/cloudflared-config.yml
+      hosts/{{ fleet_host }}/{{ 'leap/system' if (fleet_host_dir ~ '/leap/MOVED') is file
+      else 'system' }}/cloudflared-config.yml
     # About 90 seconds for a new application to reach the edge.
     gate_retries: 18
     gate_delay: 5

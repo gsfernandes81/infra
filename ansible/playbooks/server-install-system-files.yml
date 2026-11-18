@@ -5,6 +5,7 @@
 #   ansible-playbook playbooks/server-install-system-files.yml -K                   # install it
 #   ansible-playbook playbooks/server-install-system-files.yml -l zero -K           # one host
 #   ansible-playbook playbooks/server-install-system-files.yml -e only=cloudflared -K
+#   ansible-playbook playbooks/server-install-system-files.yml -l three -e only=cloudflared-config.yml -K
 #
 # THIS IS A DRIVER, NOT A REIMPLEMENTATION. Every guard lives in bin/install-system-file
 # and stays there: the infra- header, the refusal to change content without being told,
@@ -56,8 +57,7 @@
   vars:
     tool: "{{ infra_checkout }}/bin/install-system-file"
     # infra_checkout (the host's) and control_checkout (this control node's) come from
-    # group_vars. The control node's checkout is the source of which files exist per host,
-    # so a file added to the repo shows up here without editing this play.
+    # group_vars.
 
   tasks:
     # ── the review anchor: what the person running this actually has ─────────
@@ -80,20 +80,49 @@
         anchor_head: "{{ anchor_head_raw.stdout | trim }}"
         sync_untouched: Nothing was installed.
 
+    # WHICH FILES, asked of the tool on the host rather than found here. The tool reads
+    # hosts/<host>/system/, or hosts/<host>/leap/system/ once hosts/<host>/leap/MOVED says
+    # the host runs Leap (bin/_infra.py system_dir()), and the play installs through that
+    # tool, so a list made here by a rule of its own could name files the tool then cannot
+    # find. Until 2026-11-18 it did: the play searched system/ only, so it found nothing for
+    # three and the Alpine copies for one. The host's checkout is the reviewed commit by now
+    # (above), so a file added to the repo still shows up without editing this play.
     - name: Read the tracked system files for {{ inventory_hostname }}
-      ansible.builtin.find:
-        paths: "{{ control_checkout }}/hosts/{{ inventory_hostname }}/system"
-        file_type: file
-        excludes: ["README.md", "hardware.md", "hw-inventory.toml"]
+      ansible.builtin.command:
+        cmd: "{{ tool }} --list"
+        chdir: "{{ infra_checkout }}"
       register: tracked
-      delegate_to: localhost
+      changed_when: false
       check_mode: false
+
+    # The tool names the host by its hostname, the play by the inventory. A box answering
+    # to another name would get that name's files, so the two must agree.
+    - name: Check the tool read hosts/{{ inventory_hostname }}
+      ansible.builtin.assert:
+        that: tracked.stdout_lines | reject('match', '^hosts/' ~ inventory_hostname ~ '/') | list | length == 0
+        fail_msg: >-
+          {{ inventory_hostname }}'s install-system-file lists
+          {{ (tracked.stdout_lines | first | dirname) if tracked.stdout_lines else 'nothing' }}, which is not
+          {{ inventory_hostname }}'s, so the box's hostname is not its inventory name.
+          Nothing was installed.
+        quiet: true
 
     - name: Note which files to install, narrowed by -e only
       ansible.builtin.set_fact:
         files: >-
-          {{ tracked.files | map(attribute='path') | map('basename')
+          {{ tracked.stdout_lines | map('basename')
              | select('match', '^' ~ (only | default('.*')) ~ '$') | list | sort }}
+
+    # The directory as well as the names, since the directory is what differs between a
+    # host's Alpine copies and its Leap ones. changed_when: true for the reason given at
+    # the diffs below.
+    - name: Print which files to install, and from where
+      ansible.builtin.debug:
+        msg: >-
+          {{ files | length }} of {{ tracked.stdout_lines | length }} under
+          {{ (tracked.stdout_lines | first | dirname) if tracked.stdout_lines else 'nothing' }}:
+          {{ files | join(' ') }}
+      changed_when: true
 
     # ── dry run, ALWAYS — this is what --check shows and what a real run previews ─
     # Not --commit. The tool prints the diff it would apply and exits 0 if clean,
@@ -165,8 +194,9 @@
           {{ inst.results | default([]) | selectattr('changed', 'defined')
              | selectattr('changed') | map(attribute='item.item') | list }}.
           NOTHING WAS RESTARTED. cloudflared files want stop / poll 20241 / start;
-          sshd-infra.conf wants `rc-service sshd reload`; fstab and bcache-register
-          take effect at the next boot.
+          sshd-infra.conf wants sshd reloaded (rc-service on Alpine, systemctl on
+          Leap); a systemd unit wants `systemctl daemon-reload` first; fstab and
+          bcache-register take effect at the next boot.
       changed_when: true
       when:
         - not ansible_check_mode

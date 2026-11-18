@@ -2,10 +2,10 @@
 # pass and fail always succeed, so `A && pass || fail` can never run both.
 # shellcheck disable=SC2015
 # Runs ansible/playbooks/server-create-fleet-ssh-access.yml against mock_api.py for `three`,
-# a host with no system/ whose tunnel config is under leap/system/: the refusals, a dry run,
-# a real run to the final message, a re-run, the undo, and a gate that never takes, which
-# must be undone by the play's rescue. Also `one`, which has both directories, to show
-# system/ wins there. Prints PASS or FAIL per check and exits 1 on any FAIL. CI runs it
+# a host whose leap/MOVED sends it to leap/system/: the refusals, a dry run, a real run to
+# the final message, a re-run, the undo, and a gate that never takes, which must be undone
+# by the play's rescue. Also `one`, and a stand-in with both directories, read without and
+# then with a leap/MOVED, to show the marker and nothing else picks the directory. Prints PASS or FAIL per check and exits 1 on any FAIL. CI runs it
 # (.github/workflows/cloudflare-sim.yml).
 #
 # It writes nothing outside a temporary HOME except, in the repo, an inventory beside
@@ -52,14 +52,16 @@ ingress:
   - service: http_status:404
 CFG
 fi
-# A Leap-only host whose tracked routing sends its ssh hostname to the wrong port.
-mkdir -p "$fake/leap/system"
+# A host with both directories, whose tracked routing sends its ssh hostname to the wrong
+# port in each. Its leap/MOVED is written part-way through.
+mkdir -p "$fake/system" "$fake/leap/system"
 cat > "$fake/leap/system/cloudflared-config.yml" <<'CFG'
 ingress:
   - hostname: ssh-simleap.gsrpi.uk
     service: ssh://127.0.0.1:2222
   - service: http_status:404
 CFG
+cp "$fake/leap/system/cloudflared-config.yml" "$fake/system/"
 
 sim_home=$(mktemp -d)
 python3 -I "$here/mock_api.py" "$port" &
@@ -131,7 +133,7 @@ says() {
 }
 apps() { jq_state 'len(s["apps"])'; }
 
-echo "== no host, a host with no tracked config, a Leap host whose ssh rule is wrong"
+echo "== no host, a host with no tracked config, a host whose ssh rule is wrong, before and after its move"
 if play; then fail "ran with no -e host"; else
 	says 'Say which box in [fleet]' && pass "refused without -e host" || fail "no -e host failed, but not by its own check"
 fi
@@ -139,12 +141,16 @@ if play -e host=four; then fail "ran for a host with no tracked config"; else
 	says 'hosts/four/system/cloudflared-config.yml does not exist' && pass "refused a host with no tracked config, naming system/" || fail "four failed, but not by the config check"
 fi
 if play -e host=simleap; then fail "ran for a wrong ssh rule"; else
-	says 'hosts/simleap/leap/system/cloudflared-config.yml has no rule sending ssh-simleap.gsrpi.uk' && pass "read leap/system/ for a Leap-only host, and refused its wrong rule" || fail "simleap failed, but not by the ssh-rule check"
+	says 'hosts/simleap/system/cloudflared-config.yml has no rule sending ssh-simleap.gsrpi.uk' && pass "read system/ with both directories and no leap/MOVED, and refused its wrong rule" || fail "simleap without MOVED failed, but not by the ssh-rule check in system/"
+fi
+echo "simleap runs Leap." > "$fake/leap/MOVED"
+if play -e host=simleap; then fail "ran for a wrong ssh rule"; else
+	says 'hosts/simleap/leap/system/cloudflared-config.yml has no rule sending ssh-simleap.gsrpi.uk' && pass "read leap/system/ once leap/MOVED exists, and refused its wrong rule" || fail "simleap with MOVED failed, but not by the ssh-rule check in leap/system/"
 fi
 
-echo "== --check: one, which has system/ and leap/system/, then three"
+echo "== --check: one, which has system/ and leap/system/ and no leap/MOVED, then three"
 if play -e host=one --check; then
-	says 'which hosts/one/system/cloudflared-config.yml routes' && pass "one: system/ wins over leap/system/" || fail "one: did not read system/"
+	says 'which hosts/one/system/cloudflared-config.yml routes' && pass "one: system/, with no leap/MOVED" || fail "one: did not read system/"
 else fail "one: dry run failed"; fi
 if play -e host=three --check; then
 	says 'which hosts/three/leap/system/cloudflared-config.yml routes' && pass "three: read leap/system/" || fail "three: did not read leap/system/"

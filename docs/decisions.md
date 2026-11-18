@@ -2466,6 +2466,37 @@ and never started a sidecar, so it could not meet either cause.
   secrets directory is gavin's. The simulation's check requires both, and at least one
   such file.
 
+## A host's move to Leap is a file in the repo
+
+**Decided 2026-11-18**, at `one`'s move to Leap, when the owner had to install `three`'s
+tunnel config with `sudo bin/install-system-file` by hand: `server-install-system-files.yml`
+searched `hosts/<host>/system/` only, so it found nothing for `three` and the Alpine copies
+for `one`. The tools' own rule, "`leap/system/` when there is no `system/`", picked the
+Alpine copies for `one` too, since `one` keeps both.
+
+- **`hosts/<host>/leap/MOVED` says the host runs Leap.** While it exists,
+  `system_dir()` in `bin/_infra.py` returns `leap/system/`, and `system/` otherwise.
+  `install-system-file`, `check-system-drift`, the fleet ssh play and the browser login
+  play read that rule, the two plays as one line of Jinja each. The move's commit adds the
+  file, and going back to the Alpine card is a commit that deletes it, so the Alpine copies
+  stay in the tree as the way back. `three` has one from its first boot.
+- **Asking the box was set aside.** The tools could use `leap/system/` wherever
+  `/run/systemd/system` exists, and the play could stat the same path on each host. The
+  fleet ssh play and the browser login play read a host's routing on the control node
+  without reaching that host, so they would have kept a repo rule of their own and could
+  disagree with the tools. A wrong answer from the marker is not silent either:
+  `install-system-file` refuses a file whose `infra-init` is not what the box runs.
+- **Deleting `one`'s Alpine copies was set aside.** It would have kept the old rule
+  working, but `hosts/<host>/system/` is also where `bin/hw-inventory` writes
+  `hardware.md`. A Leap host would get a `system/` directory the first time it ran, and the
+  old rule would then send its tools to Alpine copies that do not exist.
+- **The play asks the tool for the list.** `install-system-file --list` on the host prints
+  the files it would accept, and the play installs exactly those, so the play has no rule
+  of its own to drift. The host's checkout is already pinned to the reviewed commit at that
+  point. The play also checks that every path the tool prints is under
+  `hosts/<inventory name>/`, since the tool goes by the box's hostname. `alpine-sim.yml`
+  runs the play's dry run for `zero` and for the box answering as `three`.
+
 ## The lesson worth keeping
 
 

@@ -30,7 +30,13 @@
 #     then claimed its own rollback had failed too.
 #
 # usage: bin/install-system-file <name> [--commit] [--allow-content-change] [--new]
+#        bin/install-system-file --list
 # exit 0 = installed (or dry run clean)   1 = refused, failed, or rolled back
+#
+# --list prints the repo path of every file this host's copy would accept, one per line,
+# and writes nothing. server-install-system-files.yml asks it rather than finding the files
+# itself, so the play and the tool cannot disagree about which directory is this host's
+# (system/ on Alpine, leap/system/ once hosts/<host>/leap/MOVED says it runs Leap).
 
 import argparse
 import os
@@ -43,7 +49,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _infra import (  # noqa: E402
-    host_init_system, live_path, parse_header, strip_header, system_dir, this_host,
+    REPO, host_init_system, live_path, parse_header, strip_header, system_dir, this_host,
+    tracked_files,
 )
 
 BACKUP_ROOT = Path.home() / ".infra-backups"
@@ -215,7 +222,10 @@ def main():
     ap = argparse.ArgumentParser(
         description="Install one tracked /etc copy onto this host.",
     )
-    ap.add_argument("name", help="filename under hosts/<thishost>/system/")
+    ap.add_argument("name", nargs="?",
+                    help="filename under this host's system/ (leap/system/ on Leap)")
+    ap.add_argument("--list", action="store_true",
+                    help="print the tracked files this host would accept, and write nothing")
     ap.add_argument("--commit", action="store_true",
                     help="actually write (default is a dry run)")
     ap.add_argument("--allow-content-change", action="store_true",
@@ -225,6 +235,18 @@ def main():
     args = ap.parse_args()
 
     host = this_host()
+    if args.list:
+        if args.name or args.commit or args.allow_content_change or args.new:
+            ap.error("--list takes no file name and no other option")
+        tracked = tracked_files(host)
+        if tracked is None:
+            print(f"no tracked files: {system_dir(host)} does not exist", file=sys.stderr)
+            return 1
+        for p in tracked:
+            print(p.relative_to(REPO))
+        return 0
+    if not args.name:
+        ap.error("name a tracked file, or pass --list")
     entry = system_dir(host) / args.name
     if not entry.is_file():
         print(f"no tracked file {entry}", file=sys.stderr)

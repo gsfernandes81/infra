@@ -51,16 +51,17 @@ throwaway machine, never on the control node.
 
 ## The fleet's ssh gate
 
-`run-fleet-ssh-access.sh` runs `server-create-fleet-ssh-access.yml` for `three`, which has
-no `system/` and keeps its tunnel config under `leap/system/`. Until that config is
-committed after the visit, the script writes a stand-in in its shape and removes it on
-exit; once it is committed, the script uses it. It runs:
+`run-fleet-ssh-access.sh` runs `server-create-fleet-ssh-access.yml` for `three`, whose
+`leap/MOVED` says it runs Leap, so its tunnel config is read from `leap/system/`. Until
+that config is committed after the visit, the script writes a stand-in in its shape and
+removes it on exit; once it is committed, the script uses it. It runs:
 
-- no `-e host`, a host in `[fleet]` with no tracked config, and a Leap-only host whose ssh
-  rule points at the wrong port: each must be refused by its own check, the last naming
-  its `leap/system/` file;
-- dry runs for `one`, which has both directories, and must read `system/`, and for
-  `three`, which must read `leap/system/`; neither may write to Access;
+- no `-e host`, a host in `[fleet]` with no tracked config, and a stand-in host with both
+  directories whose ssh rule points at the wrong port in each: each must be refused by its
+  own check, the stand-in first naming its `system/` file and then, once the script writes
+  its `leap/MOVED`, its `leap/system/` file;
+- dry runs for `one`, which has both directories and no `leap/MOVED`, and must read
+  `system/`, and for `three`, which must read `leap/system/`; neither may write to Access;
 - the real run: one application, `fleet ssh three`, on `ssh-three` only and not on
   `syncthing-three`, linked to one `non_identity` policy that admits the enabled fleet
   tokens and not the disabled one or a dev token, then the final message;
@@ -93,10 +94,10 @@ that config with `-F`, since ssh reads its config from the passwd entry's home a
 the tunnel and `ssh-three`'s record planted in the stand-in as the host tunnel play leaves
 them. It runs:
 
-- no `-e host`, a host with no tracked config, and a Leap-only host whose config names no
-  tunnel; no `-e subdomain`, `ssh-three`, and a name not in the ingress; no address list,
-  and one with a line that is not an address: each must be refused by its own check, with
-  nothing made;
+- no `-e host`, a host with no tracked config, and a Leap host (by its `leap/MOVED`) whose
+  config names no tunnel; no `-e subdomain`, `ssh-three`, and a name not in the ingress; no
+  address list, and one with a line that is not an address: each must be refused by its own
+  check, with nothing made;
 - a tunnel the account does not have, one that `ssh-three` does not point at, an
   application on the hostname that the play did not make, and a probe whose known login
   does not read as one: each refused, with no record made;
