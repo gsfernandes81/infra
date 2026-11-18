@@ -2497,6 +2497,11 @@ Alpine copies for `one` too, since `one` keeps both.
   point. The play also checks that every path the tool prints is under
   `hosts/<inventory name>/`, since the tool goes by the box's hostname. `alpine-sim.yml`
   runs the play's dry run for `zero` and for the box answering as `three`.
+- **Phase 2g's tunnel plays refuse a host that has moved.** `server-create-tunnel.yml`,
+  `server-cutover-tunnel.yml` and `server-delete-tunnel.yml` were written for OpenRC and
+  read or write `hosts/<host>/system/`, so each first imports `_alpine-only.yml`, which
+  stops on a `leap/MOVED`. Porting them was set aside: a Leap host gets its first tunnel
+  from `server-create-host-tunnel.yml`, and no move to a second tunnel is planned.
 
 ## The lesson worth keeping
 

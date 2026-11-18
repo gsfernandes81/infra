@@ -1,0 +1,20 @@
+---
+# NOT A PLAYBOOK YOU RUN — imported first by the Alpine-era tunnel plays from phase 2g
+# (server-create-tunnel.yml, server-cutover-tunnel.yml, server-delete-tunnel.yml). They
+# assume OpenRC's cloudflared (the cutover cycles it with rc-service) and read or write
+# hosts/<host>/system/, so on a host that has moved to Leap they would act on the Alpine
+# copies and the wrong init. A host has moved when hosts/<host>/leap/MOVED exists
+# (bin/_infra.py system_dir(), and docs/decisions.md § "A host's move to Leap is a file in
+# the repo").
+#
+# Read on the control node, from its checkout, so it refuses before anything reaches the
+# host.
+
+- name: Check {{ inventory_hostname }} has not moved to Leap
+  ansible.builtin.assert:
+    that: (control_checkout ~ '/hosts/' ~ inventory_hostname ~ '/leap/MOVED') is not file
+    fail_msg: >-
+      hosts/{{ inventory_hostname }}/leap/MOVED says {{ inventory_hostname }} runs Leap.
+      This play is from phase 2g, written for Alpine and OpenRC, and reads the Alpine
+      copies in hosts/{{ inventory_hostname }}/system/. Nothing was changed.
+    success_msg: "{{ inventory_hostname }} has no leap/MOVED, so it is on Alpine"
