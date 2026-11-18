@@ -1,0 +1,420 @@
+---
+# AN openSUSE LEAP CLIENT, FROM A FRESH INSTALL: WSL on the laptop. From ansible/:
+#
+#     ansible-playbook playbooks/client-home-leap.yml -K
+#
+# The whole of a fresh install is ansible/README.md § *A fresh openSUSE Leap client*: one
+# command as root to get git, Ansible and a sudo that asks for YOUR password, then this
+# play, then client-home-ssh-config.yml. This play imports client-home-emacs.yml at the
+# end, so the OS and the editor are one run.
+#
+# In order, it:
+#   1. refuses anything but openSUSE Leap;
+#   2. writes the sudo drop-in the bootstrap wrote (Leap ships `Defaults targetpw`, so sudo
+#      asks for ROOT's password), so the drop-in is tracked here and not only in a paste;
+#   3. adds three OBS repositories, for the packages Leap carries too old, and installs each
+#      of those packages FROM its repository, then checks where each one came from;
+#   4. installs the rest from Leap itself, and keeps downloaded packages in zypper's cache;
+#   5. makes fish the login shell, which is what `wsl` starts;
+#   6. in WSL only: mirrored networking in Windows' .wslconfig, and WSL-Hello-sudo, so sudo
+#      asks Windows Hello first and falls back to the password;
+#   7. imports client-home-emacs.yml.
+#
+# WHY THESE REPOSITORIES, AND WHY `--from`. Leap 16.1 is a point release, which is the
+# point (docs/decisions.md § *WSL on the laptop moves from Arch to Leap 16.1*), but a few
+# packages there are far behind: Emacs 30.2 where the config wants 31, uv 0.7 against
+# 0.13, fish 4.0 against 4.9. `zypper in --from <repo>` takes the named packages from that
+# repository and nothing else, and zypper's vendor stickiness keeps updating them from it
+# afterwards. editors and devel:languages:python are large development projects, so they
+# also get priority 150, BELOW Leap's own 99: a later `zypper dup` must not pull their
+# other packages in.
+#
+# THE SOURCE CHECK IS NOT DECORATION. On 2026-11-18, in a Leap 16.1 container, a
+# repository that failed to refresh (a TLS error) left `zypper in --from fish fish` to exit
+# 0 having installed Leap's own fish 4.0.1. So after installing, the play reads each
+# package's DISTURL, which names the OBS project it was built in, and stops if one is not
+# from its repository.
+#
+# CLOUDFLARED IS LEAP'S, FOR NOW. Cloudflare's own repository is the better source for a
+# client (it updates with everything else), but on 2026-11-18 its metadata was signed with
+# Cloudflare's retired 2015 key while its .repo file names only the 2025 key, so zypper
+# rightly refused it. Leap's backports carry 2026.9.1, which is enough for `cloudflared
+# access ssh`. When `zypper ref` accepts pkg.cloudflare.com again, add it to `leap_repos`
+# below with `packages: [cloudflared]` and drop cloudflared from `leap_packages`.
+#
+# WSL-HELLO-SUDO is the lzlrd fork's v3.0.0 release, pinned by SHA-256: the fork the AUR
+# package builds, newer than nullpo-head's v2.0.0. The play does what its install.sh does,
+# without install.sh's prompts: the Windows half under %LOCALAPPDATA%\Programs, the PAM
+# module, its config, the key (the one step that shows a Windows Hello prompt, and only
+# when no key exists yet), and one `auth sufficient` line ahead of sudo's own. ONCE IT IS
+# IN, EVERY `become` TASK OF A LATER RUN ASKS WINDOWS HELLO: sudo does not cache a login
+# across Ansible's separate processes. Skip it with -e hello_sudo=false. Undo it from
+# PowerShell, which needs no sudo: `wsl -d <distro> -u root`, then `rm /etc/pam.d/sudo` if
+# the play made it (sudo falls back to Leap's /usr/lib/pam.d/sudo), else delete the line.
+#
+# It reaches download.opensuse.org, github.com (the Hello release), and through the imported
+# Emacs play GitHub and the Emacs package archives. It changes nothing outside this client,
+# except Windows' .wslconfig and %LOCALAPPDATA%\Programs\wsl-hello-sudo, both through
+# /mnt/c. It never runs `wsl --shutdown`; mirrored networking waits for the next one.
+#
+# FROM THIS DIRECTORY, for the reason _assert-inventory.yml gives.
+# NO NEW COLLECTIONS: ansible.builtin, and community.general for zypper and ini_file, which
+# requirements.yml already lists.
+
+- name: Check the inventory is loaded
+  ansible.builtin.import_playbook: _assert-inventory.yml
+  vars:
+    required_group: control
+
+- name: Set up this openSUSE Leap client
+  hosts: control
+  gather_facts: false
+
+  vars:
+    # lookup('env', ...), never ~ or a fact: the same rule as the other client plays.
+    home: "{{ lookup('env', 'HOME') }}"
+    login_user: "{{ lookup('env', 'USER') }}"
+    in_wsl: "{{ lookup('env', 'WSL_DISTRO_NAME') | length > 0 }}"
+    windows_home_wsl: "{{ windows_home | default('/mnt/c/Users/gavin') }}"
+    win_mnt: "{{ windows_home_wsl | regex_search('^/mnt/[a-z]') }}"
+
+    # Each repository: the OBS project, the Leap release it builds for (Leap's own unless
+    # stated), its priority, and the packages taken from it. shells:fish:release:4 builds
+    # no 16.1 yet; 16.0's build runs on 16.1, as 16.x releases share their libraries. When
+    # a 16.1/ appears there, drop `release:` and run this play again, before Leap 16.0's
+    # end of life takes the 16.0 builds away.
+    leap_repos:
+      - alias: editors
+        project: editors
+        priority: 150
+        packages: [emacs, emacs-nox]
+      - alias: devel-python
+        project: devel:languages:python
+        priority: 150
+        packages: [python313-uv]
+      - alias: fish
+        project: shells:fish:release:4
+        release: "16.0"
+        priority: 99
+        packages: [fish]
+
+    # The packages of leap_repos that are not from their repository, as [{alias, packages}],
+    # read from `rpm_lines`, which each task that uses this sets to rpm's answer for
+    # leap_repos' packages. rpm -q answers one line per name, in order: `<name> <disturl>`,
+    # or `package <name> is not installed`, and an OBS build's DISTURL reads
+    # obs://build.opensuse.org/<project>/<release>/…, so the project is in it.
+    from_wrong: >-
+      {%- set out = [] -%}
+      {%- set ns = namespace(i=0) -%}
+      {%- for r in leap_repos -%}
+        {%- set wrong = [] -%}
+        {%- for p in r.packages -%}
+          {%- if ('build.opensuse.org/' ~ r.project ~ '/') not in (rpm_lines[ns.i] | default('')) -%}
+            {%- set _ = wrong.append(p) -%}
+          {%- endif -%}
+          {%- set ns.i = ns.i + 1 -%}
+        {%- endfor -%}
+        {%- if wrong -%}{%- set _ = out.append({'alias': r.alias, 'packages': wrong}) -%}{%- endif -%}
+      {%- endfor -%}
+      {{ out }}
+
+    # From Leap itself. tar, curl and iproute2 because the WSL image is minimal enough to
+    # lack them, and Ansible's unarchive needs tar.
+    leap_packages: [git-core, tar, gzip, curl, iproute2, cloudflared, tree-sitter-python, tree-sitter-markdown, aspell, aspell-en]
+
+    hello_sudo: true
+    hello_version: v3.0.0
+    hello_sha256: d24fb2750ef3e79242eafdeab13f536e19bf8164bfd9f8df7a666bafd0e72c4e
+    hello_url: "https://github.com/lzlrd/wsl-hello-sudo/releases/download/{{ hello_version }}/release.tar.gz"
+    hello_cache: "{{ home }}/.cache/infra/wsl-hello-sudo-{{ hello_version }}"
+    hello_win_dir: "{{ windows_home_wsl }}/AppData/Local/Programs/wsl-hello-sudo"
+    hello_key: "pam_wsl_hello_{{ login_user }}.pem"
+
+  tasks:
+    # ── 1. what this is ─────────────────────────────────────────────────────────
+    - name: Read this client's OS and release
+      ansible.builtin.shell: . /etc/os-release && printf '%s %s\n' "$ID" "$VERSION_ID"
+      register: os_release
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Check this client is openSUSE Leap
+      ansible.builtin.assert:
+        that: (os_release.stdout | default('')).split() | first | default('') == 'opensuse-leap'
+        fail_msg: >-
+          This play sets up openSUSE Leap, and /etc/os-release says
+          `{{ os_release.stdout | default('nothing') | trim }}`. client-home-emacs.yml alone
+          still works on Termux and Arch.
+        quiet: true
+
+    - name: Note the Leap release
+      ansible.builtin.set_fact:
+        leap_version: "{{ os_release.stdout.split()[1] }}"
+
+    # ── 2. sudo asks for your password, not root's ─────────────────────────────
+    # The bootstrap wrote these bytes already, or no `become` here could have run. The
+    # same two lines as hosts/*/leap/system/sudoers-gavin, for the same reason.
+    - name: Write the sudo drop-in for {{ login_user }}
+      ansible.builtin.copy:
+        dest: "/etc/sudoers.d/50-{{ login_user }}"
+        content: |
+          # Written by ansible/playbooks/client-home-leap.yml. Leap ships `Defaults targetpw`
+          # with `ALL ALL=(ALL) ALL`, so sudo would ask for ROOT's password.
+          Defaults:{{ login_user }} !targetpw
+          {{ login_user }} ALL=(ALL) ALL
+        owner: root
+        group: root
+        mode: "0440"
+        validate: visudo -cf %s
+      become: true
+
+    # ── 3. the three repositories, and each package from its own ───────────────
+    - name: Add the OBS repositories
+      community.general.zypper_repository:
+        name: "{{ item.alias }}"
+        repo: >-
+          https://download.opensuse.org/repositories/{{ item.project | replace(':', ':/') }}/{{
+          item.release | default(leap_version) }}/
+        priority: "{{ item.priority }}"
+        auto_import_keys: true
+        autorefresh: true
+      loop: "{{ leap_repos }}"
+      loop_control:
+        label: "{{ item.alias }}"
+      register: repos_added
+      become: true
+
+    # A repository that cannot refresh fails this, rather than leaving `--from` to fall
+    # back to Leap's package without a word. The keys of new repositories are trusted on
+    # first use here; the task after the installs prints them.
+    - name: Refresh every repository
+      ansible.builtin.command: zypper -n --gpg-auto-import-keys refresh
+      changed_when: false
+      become: true
+      when: not ansible_check_mode
+
+    - name: Read where the repository packages came from
+      ansible.builtin.command:
+        argv: "{{ ['rpm', '-q', '--qf', '%{NAME} %{DISTURL}\n'] + leap_repos | map(attribute='packages') | flatten }}"
+      register: disturl_before
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Note which packages need their repository
+      ansible.builtin.set_fact:
+        from_needed: "{{ from_wrong }}"
+      vars:
+        rpm_lines: "{{ disturl_before.stdout_lines }}"
+
+    - name: Install each package from its repository
+      ansible.builtin.command:
+        argv: "{{ ['zypper', '-n', 'install', '--from', item.alias] + item.packages }}"
+      loop: "{{ from_needed }}"
+      loop_control:
+        label: "{{ item.alias }}: {{ item.packages | join(' ') }}"
+      become: true
+      when: not ansible_check_mode
+
+    - name: Read where they came from, after installing
+      ansible.builtin.command:
+        argv: "{{ ['rpm', '-q', '--qf', '%{NAME} %{DISTURL}\n'] + leap_repos | map(attribute='packages') | flatten }}"
+      register: disturl_after
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: from_needed | length > 0 and not ansible_check_mode
+
+    - name: Check each package came from its repository
+      ansible.builtin.assert:
+        that: from_wrong | length == 0
+        fail_msg: |-
+          A package is not from the repository it should be. rpm reports:
+          {{ disturl_after.stdout | default('') }}
+          Expected, per package: {% for r in leap_repos %}{{ r.packages | join(', ') }} from build.opensuse.org/{{ r.project }}; {% endfor %}
+          zypper falls back to Leap's own package when a repository cannot be read, so
+          `sudo zypper ref` and its errors are the place to start.
+        quiet: true
+      vars:
+        rpm_lines: "{{ disturl_after.stdout_lines }}"
+      when: disturl_after is not skipped
+
+    - name: "If a repository was added: print trusted keys"
+      ansible.builtin.command: rpm -q gpg-pubkey --qf '%{VERSION}-%{RELEASE}  %{SUMMARY}\n'
+      register: pubkeys
+      changed_when: false
+      check_mode: false
+      when: repos_added is changed
+
+    - name: "If a repository was added: show the keys"
+      ansible.builtin.debug:
+        msg: "{{ pubkeys.stdout_lines }}"
+      changed_when: true
+      when: repos_added is changed
+
+    # ── 4. the rest, from Leap ─────────────────────────────────────────────────
+    - name: Install the packages Leap carries
+      community.general.zypper:
+        name: "{{ leap_packages }}"
+        state: present
+      become: true
+
+    # Every downloaded package stays in /var/cache/zypp/packages, so anything installed
+    # once can be installed again with no network: worth it on a ship.
+    - name: Read which repositories drop their downloads
+      ansible.builtin.shell: grep -L '^keeppackages=1' /etc/zypp/repos.d/*.repo || true
+      register: repos_not_keeping
+      changed_when: false
+      check_mode: false
+
+    - name: "If any: keep downloads in every repository"
+      ansible.builtin.command: zypper -n modifyrepo --keep-packages --all
+      become: true
+      when: repos_not_keeping.stdout | length > 0
+
+    # ── 5. fish is the login shell ─────────────────────────────────────────────
+    - name: Make fish the login shell of {{ login_user }}
+      ansible.builtin.user:
+        name: "{{ login_user }}"
+        shell: /usr/bin/fish
+      become: true
+
+    # ── 6. WSL: Windows' side ──────────────────────────────────────────────────
+    # Mirrored networking: WSL sees the laptop's own interfaces, so 127.0.0.1 reaches
+    # Windows' llama-server (clients/emacs/README.md) and a ship's captive portal or VPN
+    # looks the same from both sides. dnsTunneling and autoProxy are on by default in
+    # current WSL, so they are not written.
+    - name: "WSL only: set mirrored networking in .wslconfig"
+      community.general.ini_file:
+        path: "{{ windows_home_wsl }}/.wslconfig"
+        section: wsl2
+        option: networkingMode
+        value: mirrored
+        no_extra_spaces: true
+      register: wslconfig
+      when: in_wsl | bool
+
+    - name: "If .wslconfig changed: print when it applies"
+      ansible.builtin.debug:
+        msg: >-
+          {{ windows_home_wsl }}/.wslconfig now asks for mirrored networking. WSL reads it
+          when it starts: `wsl --shutdown` from PowerShell, which ends every distro, then
+          open this one again.
+      changed_when: true
+      when: wslconfig is changed
+
+    - name: "WSL, Hello-sudo: install its Windows Hello prompt"
+      when: in_wsl | bool and hello_sudo | bool
+      block:
+        - name: "Hello-sudo: create the download directory"
+          ansible.builtin.file:
+            path: "{{ hello_cache }}"
+            state: directory
+            mode: "0755"
+
+        - name: "Hello-sudo: download {{ hello_version }}, hash-checked"
+          ansible.builtin.get_url:
+            url: "{{ hello_url }}"
+            dest: "{{ hello_cache }}/release.tar.gz"
+            checksum: "sha256:{{ hello_sha256 }}"
+            mode: "0644"
+
+        - name: "Hello-sudo: unpack the release"
+          ansible.builtin.unarchive:
+            src: "{{ hello_cache }}/release.tar.gz"
+            dest: "{{ hello_cache }}"
+            remote_src: true
+            creates: "{{ hello_cache }}/release/build/pam_wsl_hello.so"
+
+        # /mnt/c takes no Unix modes; interop runs any .exe there.
+        - name: "Hello-sudo: create its Windows directory"
+          ansible.builtin.file:
+            path: "{{ hello_win_dir }}"
+            state: directory
+
+        - name: "Hello-sudo: copy WindowsHelloBridge.exe there"
+          ansible.builtin.copy:
+            src: "{{ hello_cache }}/release/build/WindowsHelloBridge.exe"
+            dest: "{{ hello_win_dir }}/WindowsHelloBridge.exe"
+            remote_src: true
+
+        - name: "Hello-sudo: install the PAM module"
+          ansible.builtin.copy:
+            src: "{{ hello_cache }}/release/build/pam_wsl_hello.so"
+            dest: /usr/lib64/security/pam_wsl_hello.so
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0644"
+          become: true
+
+        - name: "Hello-sudo: create its config directories"
+          ansible.builtin.file:
+            path: /etc/pam_wsl_hello/public_keys
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+          become: true
+
+        - name: "Hello-sudo: write its config"
+          ansible.builtin.copy:
+            dest: /etc/pam_wsl_hello/config
+            content: |
+              authenticator_path = "{{ hello_win_dir }}/WindowsHelloBridge.exe"
+              win_mnt = "{{ win_mnt }}"
+            owner: root
+            group: root
+            mode: "0644"
+          become: true
+
+        # The bridge writes the public key into its working directory. 171 is its "a
+        # credential of that name exists" (install.sh's KEY_ALREADY_EXIST_ERR): a key made
+        # by an earlier install, whose .pem is then already beside it.
+        - name: "If no key yet: create it (Windows Hello asks)"
+          ansible.builtin.command:
+            argv: ["./WindowsHelloBridge.exe", creator, "pam_wsl_hello_{{ login_user }}"]
+            chdir: "{{ hello_win_dir }}"
+            creates: "{{ hello_win_dir }}/{{ hello_key }}"
+          register: hello_creator
+          failed_when: hello_creator.rc not in [0, 171]
+
+        - name: "Hello-sudo: install the public key"
+          ansible.builtin.copy:
+            src: "{{ hello_win_dir }}/{{ hello_key }}"
+            dest: "/etc/pam_wsl_hello/public_keys/{{ hello_key }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0644"
+          become: true
+          when: not ansible_check_mode
+
+        # Leap keeps sudo's PAM file in /usr/lib/pam.d, and /etc/pam.d/sudo, when present,
+        # replaces it whole. force: false, so an /etc copy someone made is edited, never
+        # overwritten.
+        - name: "Hello-sudo: copy sudo's PAM file into /etc"
+          ansible.builtin.copy:
+            src: /usr/lib/pam.d/sudo
+            dest: /etc/pam.d/sudo
+            remote_src: true
+            force: false
+            owner: root
+            group: root
+            mode: "0644"
+          become: true
+
+        # Last, so every become above ran on the password. Ahead of the first auth line, so
+        # Hello is asked first and common-auth's password is the fallback.
+        - name: "Hello-sudo: ask Windows Hello before the password"
+          ansible.builtin.lineinfile:
+            path: /etc/pam.d/sudo
+            line: "auth     sufficient     pam_wsl_hello.so"
+            insertbefore: '^auth'
+            firstmatch: true
+          become: true
+
+# ── 7. the editor ──────────────────────────────────────────────────────────────
+- name: Set up Emacs
+  ansible.builtin.import_playbook: client-home-emacs.yml

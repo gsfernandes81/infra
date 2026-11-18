@@ -1,19 +1,24 @@
 ---
-# EMACS ON THE MACHINE YOU RUN IT FROM: the phone (Termux) or Arch in WSL. From ansible/:
+# EMACS ON THE MACHINE YOU RUN IT FROM: the phone (Termux), or WSL on the laptop (openSUSE
+# Leap, or Arch). From ansible/:
 #
-#     ansible-playbook playbooks/client-home-emacs.yml          # Termux
+#     ansible-playbook playbooks/client-home-emacs.yml          # Termux, or Leap
 #     ansible-playbook playbooks/client-home-emacs.yml -K       # Arch: pacman needs sudo
 #     ansible-playbook playbooks/client-home-emacs.yml --check  # what it would install
 #
 # -K is needed on Arch only when a package is missing: the play reads what is installed
-# without sudo and asks pacman for the rest.
+# without sudo and asks pacman for the rest. ON LEAP IT INSTALLS NO PACKAGE AT ALL: Emacs 31,
+# uv and fish come from OBS repositories with `--from`, and that choice is
+# client-home-leap.yml's, which imports this play at its end. Run alone on a Leap client
+# missing a package, this play stops and says to run that one.
 #
 # The editor is Emacs Solo (a distribution, pinned in clients/emacs/SOURCE) with a private
 # layer of ours (clients/emacs/private*.el): NANO's modeline, evil for Vim keys, corfu,
 # minuet's ghost text from llama-server, soft wrap with Helix's ↪. In order, the play:
 #   1. installs Emacs 31 and what the config uses: git, the python and markdown
 #      tree-sitter grammars, ty, ruff, and rass, which runs the two as one language
-#      server for eglot;
+#      server for eglot. rass is in no distro, so it comes from uv (pip on Termux), and
+#      on Leap ruff and ty do too, as Leap's ruff is old and it has no ty;
 #   2. checks Solo out at the pinned commit in ~/.emacs.d and links our two files into it;
 #   3. installs the four packages our layer uses, headless, so the first start does not
 #      freeze while it downloads them;
@@ -63,7 +68,15 @@
     # flyspell setup fails on en_US without them the first time flyspell loads.
     packages:
       termux: [emacs, git, fish, tree-sitter-python, tree-sitter-markdown, ruff, ty, python-pip, termux-services, aspell, aspell-en]
-      arch: [emacs-nox, git, fish, tree-sitter-python, tree-sitter-markdown, ruff, ty, python-pipx, aspell, aspell-en]
+      arch: [emacs-nox, git, fish, tree-sitter-python, tree-sitter-markdown, ruff, ty, uv, aspell, aspell-en]
+      opensuse: [emacs-nox, git-core, fish, tree-sitter-python, tree-sitter-markdown, python313-uv, aspell, aspell-en]
+
+    # What no package covers, by the name to install and the command it puts on PATH:
+    # through pip on Termux, `uv tool install` elsewhere, into ~/.local/bin.
+    tools:
+      termux: {rassumfrassum: rass}
+      arch: {rassumfrassum: rass}
+      opensuse: {ruff: ruff, ty: ty, rassumfrassum: rass}
 
   tasks:
     - name: Check clients/emacs/SOURCE holds a URL and a sha
@@ -80,18 +93,27 @@
         path: /etc/arch-release
       register: arch_release
 
-    - name: Note whether this client is Termux or Arch
+    - name: Read /etc/os-release's ID, where there is one
+      ansible.builtin.shell: . /etc/os-release && printf '%s\n' "$ID"
+      register: os_id
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Note whether this client is Termux, Arch or Leap
       ansible.builtin.set_fact:
         client_os: >-
           {{ 'termux' if lookup('env', 'TERMUX_VERSION') | length > 0
-             else 'arch' if arch_release.stat.exists else 'other' }}
+             else 'arch' if arch_release.stat.exists
+             else 'opensuse' if os_id.stdout | default('') | trim == 'opensuse-leap'
+             else 'other' }}
 
-    - name: Check this client is Termux or Arch
+    - name: Check this client is Termux, Arch or Leap
       ansible.builtin.assert:
         that: client_os != 'other'
         fail_msg: >-
-          This play knows Termux and Arch Linux, and this is neither. The config in
-          clients/emacs is not tied to either; only the package names here are.
+          This play knows Termux, Arch Linux and openSUSE Leap, and this is none of them.
+          The config in clients/emacs is not tied to any; only the package names here are.
         quiet: true
 
     # Unprivileged reads of what is installed, so a run with nothing to install needs no
@@ -115,30 +137,61 @@
       check_mode: false
       when: client_os == 'arch'
 
+    # rpm prints `package <name> is not installed` on stdout for a missing one.
+    - name: "Leap: read which packages are installed"
+      ansible.builtin.command:
+        argv: "{{ ['rpm', '-q', '--qf', '%{NAME}\n'] + packages.opensuse }}"
+      register: installed_opensuse
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: client_os == 'opensuse'
+
     - name: Note which packages are missing
       ansible.builtin.set_fact:
         missing: >-
           {{ packages.termux | difference(installed_termux.stdout_lines
                | select('search', ' ii ?$') | map('split') | map('first'))
              if client_os == 'termux' else
-             packages.arch | difference(installed_arch.stdout_lines | map('split') | map('first')) }}
+             packages.arch | difference(installed_arch.stdout_lines | map('split') | map('first'))
+             if client_os == 'arch' else
+             packages.opensuse | difference(installed_opensuse.stdout_lines
+               | reject('search', ' is not installed$')) }}
 
-    # rass is a 52 KB Python wheel that no distro packages (Arch has it only in the AUR).
-    # `shell` for `command -v`, a builtin; the play's own PATH includes ~/.local/bin
-    # below.
-    - name: Read whether rass is on PATH
-      ansible.builtin.shell: command -v rass
+    - name: "Leap: check every package is installed"
+      ansible.builtin.assert:
+        that: missing | length == 0
+        fail_msg: >-
+          Missing on this Leap client: {{ missing | join(' ') }}. This play installs no
+          package on Leap, because Emacs, uv and fish must come from their OBS repositories:
+          run client-home-leap.yml -K, which installs them and then runs this play.
+        quiet: true
+      when: client_os == 'opensuse'
+
+    # rass is a 52 KB Python wheel that no distro packages (Arch has it only in the AUR),
+    # and on Leap ruff and ty join it. `shell` for `command -v`, a builtin; the play's own
+    # PATH includes ~/.local/bin below.
+    - name: Read which tools are on PATH
+      ansible.builtin.shell: command -v {{ item.value }}
       environment:
         PATH: "{{ home }}/.local/bin:{{ lookup('env', 'PATH') }}"
-      register: rass_path
+      loop: "{{ tools[client_os] | dict2items }}"
+      loop_control:
+        label: "{{ item.value }}"
+      register: tool_paths
       changed_when: false
       failed_when: false
       check_mode: false
 
+    - name: Note which tools are missing
+      ansible.builtin.set_fact:
+        missing_tools: "{{ tool_paths.results | rejectattr('rc', 'eq', 0) | map(attribute='item.key') | list }}"
+
     - name: "--check only: print the packages it would install"
       ansible.builtin.debug:
         msg: >-
-          would install: {{ (missing + (['rassumfrassum (pip)'] if rass_path.rc != 0 else []))
+          would install: {{ (missing + (missing_tools | map('regex_replace', '$',
+                            ' (pip)' if client_os == 'termux' else ' (uv)') | list))
                             | join(' ') or 'nothing' }}
       changed_when: true
       when: ansible_check_mode
@@ -157,14 +210,35 @@
       # already says what would be installed.
       when: client_os == 'arch' and missing | length > 0 and not ansible_check_mode
 
-    - name: "If no rass: install rassumfrassum with pip or pipx"
+    # uv picks the Python itself: the system's when it fits, else one it downloads once.
+    - name: Install the missing tools with pip or uv
       ansible.builtin.command:
-        argv: "{{ ['pip', 'install', 'rassumfrassum'] if client_os == 'termux'
-                  else ['pipx', 'install', 'rassumfrassum'] }}"
-      when: rass_path.rc != 0 and not ansible_check_mode
+        argv: "{{ ['pip', 'install', item] if client_os == 'termux'
+                  else ['uv', 'tool', 'install', item] }}"
+      loop: "{{ missing_tools }}"
+      when: not ansible_check_mode
 
     # Emacs reads ~/.emacs or ~/.emacs.el in preference to ~/.emacs.d/init.el, so either
-    # would hide Solo without a word.
+    # would hide Solo without a word. openSUSE puts a ~/.emacs in every new home, from
+    # /etc/skel, so a fresh Leap user always has one; a byte-identical copy of the skeleton
+    # is the distro's and not anyone's config, so it alone is moved aside, under the name
+    # the guard below tells a person to use.
+    - name: Probe for ~/.emacs and the distro's /etc/skel copy
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        get_checksum: true
+      loop: ["{{ home }}/.emacs", /etc/skel/.emacs]
+      register: skel_emacs
+
+    - name: "If ~/.emacs is /etc/skel's: move it aside"
+      ansible.builtin.command:
+        argv: [mv, -n, "{{ home }}/.emacs", "{{ home }}/.emacs.before-infra"]
+        removes: "{{ home }}/.emacs"
+        creates: "{{ home }}/.emacs.before-infra"
+      when:
+        - skel_emacs.results[0].stat.exists and skel_emacs.results[1].stat.exists
+        - skel_emacs.results[0].stat.checksum == skel_emacs.results[1].stat.checksum
+
     - name: Probe for ~/.emacs and ~/.emacs.el
       ansible.builtin.stat:
         path: "{{ item }}"

@@ -10,7 +10,8 @@ is missing from it.
 **The `client-` plays are the exception, and only because they target the client.**
 `client-home-ssh-config.yml` writes `~/.ssh/config` on whatever machine runs it and
 reaches no host at all. `client-home-claude-remote.yml` likewise installs one binary
-there, and `client-home-emacs.yml` sets up Emacs there. Each is run wherever that client
+there, `client-home-emacs.yml` sets up Emacs there, and `client-home-leap.yml` sets up the
+OS of an openSUSE Leap client. Each is run wherever that client
 is: the phone, or WSL on the laptop, where one run of the ssh play also configures
 Windows. See *The laptop is two clients* below. That is not a second control plane: it
 cannot touch a Pi.
@@ -37,7 +38,8 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 |---|---|---|
 | set up this phone or laptop: every ssh alias, every service token (the fleet's `fleet-<client>` too, never expiring), Windows too from WSL, and on the phone `ssh g14`, the tunnel to the laptop's llama-server | `client-home-ssh-config.yml` | the [API token](#the-cloudflare-api-token) on this machine; it mints the service tokens itself |
 | put the remote view on this phone or laptop (`claude-remote dev`), or move it to the hub's new claude-sessions after a pin bump | `client-home-claude-remote.yml` | the `dev` block from the play above; reaches github.com only |
-| set up Emacs on this phone or WSL: packages, Emacs Solo at the pinned commit in `~/.emacs.d` with [`clients/emacs`](../clients/emacs/README.md)'s layer linked in, its packages, `emacs` as emacsclient in fish, and on Termux the `emacsd` service; removes the retired Neovim play's `~/.config/nvim` link | `client-home-emacs.yml` · `-K` on Arch when a package is missing · `--check` lists what it would install | Termux or Arch; reaches GitHub and the package archives |
+| set up an openSUSE Leap client from a fresh install (WSL on the laptop): the sudo drop-in, the `editors`, `devel:languages:python` and `shells:fish:release:4` repositories with Emacs 31, uv and fish taken from them by `--from` and checked by where they were built, the rest from Leap, zypper's package cache kept, fish as the login shell; in WSL mirrored networking in `.wslconfig` and WSL-Hello-sudo (pinned by hash); then the Emacs play below. See [A fresh openSUSE Leap client](#a-fresh-opensuse-leap-client) | `client-home-leap.yml -K` · `-e hello_sudo=false` skips installing Hello-sudo | the bootstrap; reaches download.opensuse.org and GitHub |
+| set up Emacs on this phone or WSL: packages, Emacs Solo at the pinned commit in `~/.emacs.d` with [`clients/emacs`](../clients/emacs/README.md)'s layer linked in, its packages, rass (and on Leap ruff and ty) through `uv tool install`, `emacs` as emacsclient in fish, and on Termux the `emacsd` service; moves openSUSE's skeleton `~/.emacs` aside; removes the retired Neovim play's `~/.config/nvim` link | `client-home-emacs.yml` · `-K` on Arch when a package is missing · `--check` lists what it would install | Termux, Arch, or Leap after `client-home-leap.yml`, which installs its packages; reaches GitHub and the package archives |
 | rotate one dev container's service token on this client, or add it once its tunnel exists | `client-home-ssh-config.yml -e container=or3-dev -e replace_token=true` | the same |
 | let a new phone or laptop into the dev containers | `server-add-authorized-keys.yml -e client_pubkey_file=~/laptop.pub` | a route to `zero` |
 | gate one Pi's ssh hostname behind Access, admitting each client's fleet token, proved from here and undone if the proof fails. **One host per run, `one` first, `zero` last** | `server-create-fleet-ssh-access.yml -e host=one` · `-e remove=true` to undo · no `-K` | the API token, and this client set up by the play above |
@@ -231,6 +233,47 @@ From Termux `/mnt/c` does not exist, the Windows half is skipped, and the block 
 wrapper are rendered to `~/ssh-dev-block-windows-<alias>.txt` for reference. **The laptop's
 token cannot be made from there**: it is minted per client, so run the play in WSL, which
 writes both of the laptop's sides.
+
+### A fresh openSUSE Leap client
+
+The laptop's WSL is Leap 16.1 (`docs/decisions.md` § *WSL on the laptop moves from Arch to
+Leap 16.1*). From nothing, it is one command as root, two plays and the optional third:
+
+```powershell
+# PowerShell; the install asks for a user name: gavin
+wsl --install -d openSUSE-Leap-16.1
+wsl -d openSUSE-Leap-16.1 -u root -- sh -c "zypper -n in git-core ansible-core && printf '%s\n' 'Defaults:gavin !targetpw' 'gavin ALL=(ALL) ALL' > /etc/sudoers.d/50-gavin && chmod 0440 /etc/sudoers.d/50-gavin && visudo -cf /etc/sudoers.d/50-gavin"
+```
+
+```sh
+# in the new distro, as gavin
+git clone https://github.com/gsfernandes81/infra.git ~/infra
+cd ~/infra/ansible
+ansible-galaxy collection install -r requirements.yml
+ansible-playbook playbooks/client-home-leap.yml -K         # the OS, then Emacs
+ansible-playbook playbooks/client-home-ssh-config.yml      # every ssh alias and token, both sides
+ansible-playbook playbooks/client-home-claude-remote.yml   # optional: claude-remote
+```
+
+- **The root line is the bootstrap, and only it.** Leap ships `Defaults targetpw`, so until
+  the drop-in exists sudo wants root's password, which a WSL install may never have set;
+  `wsl -u root` needs none. `client-home-leap.yml` writes the same drop-in again, so it is
+  tracked rather than living only in this paste. `visudo -cf` checks the one file:
+  `visudo -c` also complains that Leap's own `/usr/etc/sudoers` is 0444, which is how the
+  package ships it, and sudo accepts.
+- **`wsl -u root` is also the way back in** if a sudo or PAM change goes wrong.
+- **The ssh play needs this machine's API token first** ([below](#the-cloudflare-api-token)).
+  A fresh install has no token files, so it mints new ones for this client.
+  **Do not run it in a second distro beside a working one**: both have the same
+  `uname -n`, the Windows hostname, so it would mint under the same name and rewrite the
+  Windows token file the other distro shares. Copy `~/.ssh`, `~/.config/fleet` and
+  `~/.config/<alias>` across instead.
+- **Once Hello-sudo is in, each `become` task of a later `client-home-leap.yml` run asks
+  Windows Hello.** sudo caches no login across Ansible's processes. `-e hello_sudo=false`
+  on a run leaves an installed Hello in place and only skips (re)installing it.
+- **Before going to sea:** `sudo zypper ref && sudo zypper up` here and `wsl --update` in
+  PowerShell. Every package downloaded is kept in zypper's cache, so anything installed
+  once can be installed again offline.
 
 ### Run them from this directory, or they do nothing at all
 
