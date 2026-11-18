@@ -28,6 +28,7 @@ on:
       - 'bin/install-system-file'
       - 'bin/_infra.py'
       - 'hosts/zero/system/**'
+      - 'hosts/three/leap/system/**'
       - 'hosts/*/leap/MOVED'
       - '.github/workflows/alpine-sim.yml'
   pull_request:
@@ -46,6 +47,7 @@ on:
       - 'bin/install-system-file'
       - 'bin/_infra.py'
       - 'hosts/zero/system/**'
+      - 'hosts/three/leap/system/**'
       - 'hosts/*/leap/MOVED'
       - '.github/workflows/alpine-sim.yml'
   workflow_dispatch:
