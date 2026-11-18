@@ -2457,6 +2457,45 @@ and never started a sidecar, so it could not meet either cause.
   `security_opt: label=disable` would also work, and was not taken: it drops the
   confinement of the one container that faces the internet.
 
+## `three`'s array is made by a play, which adopts the array it finds
+
+**Decided 2026-11-18**, the owner's call: making `three`'s backup array becomes a play,
+`server-create-three-array.yml`, so a new or replacement drive is one command from the
+phone. The rest came out of writing it and is proven by the `host` job's `three` run.
+
+- **A play, not only `make-mirror`.** A replacement drive is disaster recovery, and the
+  play runs from the control node like every other setup step, and can be run again to
+  check the array. `make-mirror` stays for the first drive, made before `three` is in the inventory.
+- **It adopts the array it finds.** A drive that is already LUKS labelled `mirror-luks` is
+  not refused: its header is checked, it is opened read-only with the passphrase, and only
+  what is missing or wrong is written. So a run against the array `make-mirror` made reports
+  no change, and that run is the play's first real test. Any other signature or partition
+  is refused, as `make-mirror` refuses it. If the owner has the array unlocked, the play
+  reads through that and writes nothing.
+- **The mechanics are a task file, `_luks-btrfs.yml`, the values the play's.** LUKS2 with a
+  typed passphrase on stdin, a btrfs with listed subvolumes and directories, the read-back
+  proof and the adoption are what roadmap §4's LUKS for `zero` needs too, on
+  `/dev/bcacheN` through `lb_device_pattern`. Only one disk per array: `zero`'s btrfs spans
+  several, so that part would grow when `zero`'s turn comes. The device pattern, labels,
+  cipher and layout are `three`'s, in the play. Set aside: host vars for
+  `three`, which would scatter one play's values across two files for no second reader.
+- **`ansible.builtin` only.** `community.crypto`'s `luks_device` covers the LUKS half, but
+  nothing else in the repo needs that collection, and it would be a new download on the
+  phone. `community.general`'s `filesystem` and `btrfs_subvolume` are already installed but
+  would be the only writes here not guarded by the same read, so `mkfs.btrfs` (without
+  `-f`, which refuses an existing filesystem) and `btrfs subvolume create` run as commands,
+  each after a read that found the thing missing.
+- **The passphrase is typed at a prompt, twice.** As with the Tailscale key and the ntfy
+  URL, a file on the phone would be a second copy of a secret whose only home is the
+  owner's head. It reaches `cryptsetup` on stdin with no newline, as systemd's prompt
+  passes it, and the simulation proves the two agree by unlocking the play's array with
+  the README's command.
+- **Set aside: systemd-repart, Ignition or Combustion, and disko.** Each makes encrypted
+  disks declaratively, and each wants the key as a file, a TPM or a first-boot-only config.
+  `three`'s passphrase is typed by hand at every unlock and no key is stored on the box
+  (`plans/three.md` § Encryption), and the drive is formatted after the first boot, not
+  during it.
+
 ## The lesson worth keeping
 
 

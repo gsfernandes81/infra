@@ -10,7 +10,7 @@ its first boot, in `one`'s shape ([`leap/README.md`](../../../leap/README.md)), 
 | `combustion/script` | The first-boot script. |
 | `system/` | Every file the first boot installs, each at the path its `infra-` header names. |
 | `fstab.append` | The array's entry, `noauto`. |
-| `make-mirror` | Formats the backup drive, once, at the visit. |
+| `make-mirror` | Formats the backup drive by hand, on the box. The play `server-create-three-array.yml` does the same from the phone, and checks the array afterwards. |
 
 ## Before the stick
 
@@ -98,19 +98,38 @@ it on 2026-11-18 at 0 power-on hours, with no reallocated or pending sectors and
 recovery at 7 seconds.
 
 The drive is formatted once, after the first boot, with the drive in the Argon's middle bay
-and nothing on it. After `ssh three`:
+and nothing on it. The array is LUKS2 with Adiantum, labelled `mirror-luks`, which
+`/etc/crypttab` names. Inside is a btrfs holding `incoming` (where zero's backup lands),
+`syncthing` and `snapshots`.
+
+The play makes it from the phone, once `three` is in the inventory. First find the drive,
+after `ssh three`:
 
 ```fish
 # find the new drive: the WD Red, about 3.6T, with no partitions
 lsblk -o NAME,SIZE,MODEL,SERIAL,TRAN
-# format it; it asks for the device name, then the passphrase twice, and leaves it locked
-sudo ~/infra/hosts/three/leap/make-mirror /dev/sdX
 ```
 
-`make-mirror` refuses a drive with partitions or any signature on it, so it never formats a
-drive in use. It writes LUKS2 with Adiantum, labelled `mirror-luks`, which
-`/etc/crypttab` names. Inside is a btrfs holding `incoming` (where zero's backup lands),
-`syncthing` and `snapshots`.
+Then on the phone, with the device that listing showed:
+
+```fish
+# make three's array; it asks for the passphrase twice, then shows the drive's model and serial and asks for its name
+cd ~/infra/ansible; and ansible-playbook playbooks/server-create-three-array.yml -e device=/dev/sdX -K
+```
+
+It refuses a drive with partitions or any signature on it, so it never formats a drive in
+use, unless the drive is already this array. Then it opens the array read-only, checks
+its header and layout, and writes only what is missing or wrong, so a second run says
+nothing was changed. It leaves the array locked. A replacement drive is the same command.
+`--check` writes nothing and says what a run would do.
+
+Before `three` is in the inventory, `make-mirror` makes the same array on the box, and the
+play run afterwards checks it:
+
+```fish
+# on three: format the drive; it asks for the device name, then the passphrase twice, and leaves it locked
+sudo ~/infra/hosts/three/leap/make-mirror /dev/sdX
+```
 
 ### Unlocking, after every boot
 

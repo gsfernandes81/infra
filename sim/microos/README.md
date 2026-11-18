@@ -143,8 +143,11 @@ The run then checks, each as PASS or FAIL, and any FAIL fails the job:
   waiting at a passphrase prompt and Docker skipped by its condition; then the visit's next
   steps, as `host/three.sh` gives them. A stand-in tunnel goes in as
   `server-create-host-tunnel.yml` and `install-system-file` would leave it, and
-  `cloudflared` starts. `make-mirror`, the copy under test, formats the blank drive and
-  refuses it a second time. The README's unlock command runs over `ssh -tt`, and
+  `cloudflared` starts. `server-create-three-array.yml`, run from the runner as the control
+  node, says under `--check` what it would do and leaves the drive blank; then makes the
+  array; then runs again and must change nothing, as it will against the owner's own
+  array; and refuses a wrong passphrase, two that differ, and a second drive holding ext4.
+  `make-mirror` refuses the finished array. The README's unlock command runs over `ssh -tt`, and
   `host/unlock.py` answers sudo's prompt and systemd's passphrase prompt as the owner
   would. `host/three-unlocked.sh` then checks the array is LUKS2 with Adiantum and mounted
   with the container context, that the mount started Docker and both timers, that a

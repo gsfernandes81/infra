@@ -361,7 +361,11 @@ visit, step 4); `one`'s old board free; a card written and labelled `three`.
    step 1's.
 3. **The drive.** Its serial checked with WD, and `sudo smartctl -d sat -i -A -l scterc
    /dev/sdX` read (`three.md` § The Argon EON), then the array made and unlocked, as
-   [`hosts/three/leap/README.md`](../hosts/three/leap/README.md) § The array says.
+   [`hosts/three/leap/README.md`](../hosts/three/leap/README.md) § The array says. Here
+   `three` is not yet in the inventory, so the array is made with `make-mirror` on the box.
+   Once step 4 has put `three` in the inventory, run
+   `server-create-three-array.yml -e device=/dev/sdX -K` from the phone against it. It
+   must end saying nothing was changed.
 4. **The two ways in.** `sudo tailscale up --advertise-tags=tag:fleet --accept-dns=false`
    on `three`. Then, before the tunnel play, the infra agent merges the branch
    `three-joins-fleet`, which puts `three` in the inventory, reached at `three-local` until
