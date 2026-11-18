@@ -67,6 +67,8 @@ base_packages:
   - smartmontools
   - sudo
   - usbutils          # lsusb -t — absent on one, where BusyBox answers -t with a flat list
+  - xz                # `xz -l` reads an image's size before a card read-back; BusyBox has
+                      # only xzcat (plans/visit-runbook.md § Writing a card)
   - zram-init
 
 # Images server-prune-images.yml keeps although no container uses them and no tracked
