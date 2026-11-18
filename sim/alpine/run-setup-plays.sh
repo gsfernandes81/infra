@@ -399,7 +399,8 @@ says "1 of $three_n under hosts/three/leap/system: cloudflared-config.yml" && pa
 # The repo's callback prints a looped debug's label and not its message, so the play's log
 # names the refused file only; the reason is read from the tool itself, as the play runs it.
 grep -A1 'Print each file the dry run refused to install' play.log | grep -q '~ cloudflared-config.yml' && pass "the play counted cloudflared-config.yml as refused" || fail "the play did not count three's file as refused"
-on 'su gavin -c "cd /home/gavin/infra && bin/install-system-file cloudflared-config.yml --new --allow-content-change"' 2>&1 | grep -qF 'declares init=systemd but this host runs openrc' && pass "the tool refused a systemd file on an OpenRC box" || fail "the tool did not refuse three's file on OpenRC"
+said=$(on 'su gavin -c "cd /home/gavin/infra && bin/install-system-file cloudflared-config.yml --new --allow-content-change"' 2>&1)
+case "$said" in *'declares init=systemd but this host runs openrc'*) pass "the tool refused a systemd file on an OpenRC box" ;; *) fail "the tool did not refuse three's file on OpenRC: $said" ;; esac
 on 'test ! -e /etc/cloudflared/config.yml' && pass "installed nothing" || fail "installed three's file"
 on 'hostname zero'
 
