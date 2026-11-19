@@ -188,8 +188,10 @@ duty must not cut the slice between steps 4 and 8. The owner:
 6. Runs `btrfs replace start -r 4` from `sdb`'s bcache device to `/dev/mapper/data-4`.
    Immich keeps running. Waits until `btrfs replace status` reads *finished* and the
    filesystem shows the mapping and not the old device. **Nothing reboots or shuts down
-   before this.** An interrupted replace leaves one full copy, on the worn WD Elements
-   disk, and one partial.
+   before step 7's install.** No data is at risk, since writes go to `sdb` too and it
+   stays whole, but until then nothing at boot opens the new member, and btrfs refuses to
+   mount an array whose replace target or devid 4 is missing; the runbook has the block
+   that opens it by hand.
 7. Sends `sdb`'s and the new disk's bcache UUIDs and the LUKS UUID to the infra agent,
    which commits `bcache-register` with the new UUID in place of `sdb`'s, not beside it,
    and `dmcrypt` with the LUKS UUID. The owner pulls on `zero` and installs both, and

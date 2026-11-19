@@ -389,7 +389,8 @@ through `ssh dev`.
    `/dev/bcache0` and `/dev/bcache1`; the slaves loop prints four lines, a backing disk
    and `sda1` for each bcache device, and the backing line for `sdb` names `bcache1`, as
    the survey did (the `sda1` lines carry the cache's own `dev.uuid`, which is not the one
-   to send); `bcache-register` is in `sysinit`, and `btrfs-scan` and `modules` in
+   to send); the usage line `/dev/bcache1, ID: 4` together with the slaves line
+   `bcache1 sdb` is what makes step 7's devid 4 `sdb`'s, which `zero` read on 2026-11-19; `bcache-register` is in `sysinit`, and `btrfs-scan` and `modules` in
    `boot`; `localmount` is in no runlevel, which is right: `bootmisc`, in `boot`, declares
    `need localmount`, so OpenRC starts it in the boot runlevel's order, after anything in
    that runlevel it `use`s or is `after` (dmcrypt, once step 8 adds it); and both
@@ -456,15 +457,17 @@ through `ssh dev`.
    sudo dmesg | grep -i bcache | tail -n 5
    sudo bcache-super-show /dev/$d | grep -E '^(dev.uuid|cset.uuid)'
    sudo blkid /dev/$d
+   echo add | sudo tee /sys/block/$d/uevent; sleep 2; ls -l /dev/disk/by-uuid/ | grep "/$d\$"
    ```
 
    It reads right when the device is `bcache2`; its state is `clean`, not `no cache`; its
    mode reads `[none]`; dmesg says `Caching <disk> as bcache2 on set <CSET>`; and the
    superblock's `cset.uuid` is the cache set's. **Note its `dev.uuid`** for step 8, and
-   check blkid's `UUID=` is the same: blkid is what mdev names `/dev/disk/by-uuid/` from,
-   and that link is what `bcache-register` registers at boot. The link itself appears only
-   at the next boot, since mdev made the disk's links before this superblock existed, so
-   its absence from `/dev/disk/by-uuid` now means nothing. A
+   check blkid's `UUID=` is the same, and that the last line is a link of that name to the
+   new disk. `bcache-register` registers `/dev/disk/by-uuid/<dev.uuid>` at boot, and mdev
+   makes that link with blkid's answer whenever the disk is added. It made the disk's links
+   when it was plugged in, before this superblock existed, so the `add` event is sent again
+   by hand, as mdev's own coldplug does; a missing link here would be missing at boot. A
    `Couldn't attach` line in dmesg is a refused attach: stop there.
    **Way back:** `echo 1 | sudo tee /sys/block/$d/bcache/stop` and unplug the disk;
    nothing in the array has changed.
@@ -537,9 +540,12 @@ through `ssh dev`.
    sudo btrfs replace status -1 /media/immich-data
    ```
 
-   Run the status line again now and then. **Nothing reboots or shuts down until it reads
-   finished**: an interrupted replace leaves one full copy, on the worn WD Elements disk,
-   and one partial. Then:
+   Run the status line again now and then. **Nothing reboots or shuts down until step 8 has
+   installed the files.** No data is at risk: writes go to `sdb` as well, so it stays a
+   whole copy until the replace finishes. The hazard is the mount. Until step 8, nothing at
+   boot registers the new disk or opens `data-4`, and btrfs refuses to mount an array whose
+   replace target is missing, even with `sdb` there; after the replace, devid 4 itself is
+   missing. Then:
 
    ```fish
    # step 7, on zero: once the status reads finished: devid 4 is the mapping, sdb's device is gone, and the counters
@@ -555,6 +561,24 @@ through `ssh dev`.
    `sdb` as devid 4. A new disk that drops off the USB 2 port mid-copy ends the replace
    the same way. After it finishes there is none, since the replace wipes `sdb`'s btrfs
    superblock: the array is whole on the new disk and the WD Elements disk.
+
+   **If `zero` loses power or reboots between here and step 8's install,** the array comes
+   up unmounted and the box up, as always. Open the new member by hand, with the LUKS UUID
+   noted at step 6 in place of LUKS-UUID, then mount; a replace still running resumes by
+   itself at the mount:
+
+   ```fish
+   # power lost during steps 7 and 8, on zero: register the new disk with bcache, open data-4 with the key file, scan, mount, and cycle immich and syncthing
+   set d (lsblk -dbno NAME,SIZE | awk '$1 ~ /^sd/ && $2 > 3500000000000 {print $1}'); test (count $d) -eq 1; and echo /dev/$d | sudo tee /sys/fs/bcache/register; sleep 3; ls /dev/bcache*
+   set l (sudo findfs UUID=LUKS-UUID); test -n "$l"; and sudo cryptsetup open --key-file /etc/keys/data.key $l data-4; and ls -l /dev/mapper/data-4
+   sudo btrfs device scan; and sudo mount -a; and findmnt -t btrfs -o TARGET,SOURCE; and sudo btrfs replace status -1 /media/immich-data
+   cd ~/infra/hosts/zero/immich; and sudo docker compose stop; and sudo docker compose start
+   cd ~/infra/hosts/zero/syncthing; and sudo docker compose stop; and sudo docker compose start
+   ```
+
+   After the lsblk line `/dev/bcache` lists three devices (the new one registers with its
+   cache set already attached), the mapping exists, findmnt lists the `/media` mounts, and
+   the replace status reads running or finished. Then carry on from where it stopped.
 
 8. **The agent commits; the owner installs.** Send the infra agent three values, none of
    them secret: `sdb`'s `dev.uuid` (step 2), the new disk's `dev.uuid` (step 5) and the
@@ -582,12 +606,17 @@ through `ssh dev`.
    sudo true; and bin/install-system-file bcache-register --commit --allow-content-change; and bin/install-system-file dmcrypt --commit --allow-content-change; and bin/install-system-file dm-crypt.conf --new --commit
    sudo rc-update add dmcrypt boot
    sudo rc-update -u; and grep "^depinfo_"(grep "_service='dmcrypt'" /run/openrc/deptree | cut -d_ -f2)"_i" /run/openrc/deptree
+   for u in (grep -oE '[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}' /etc/init.d/bcache-register); echo $u (readlink -f /dev/disk/by-uuid/$u); end
+   grep -E '^ *rc_parallel' /etc/rc.conf
    ```
 
    It reads right when each install ends `post-install checks: ok`, and dmcrypt's lines
    include an `iafter` of `bcache-register` and of `modules`, and an `ibefore` of
    `btrfs-scan`, `checkfs` and `localmount` (the CI container shows no `localmount`, which
-   OpenRC leaves out of a container; on `zero` it is there). Nothing has restarted.
+   OpenRC leaves out of a container; on `zero` it is there). Each of `bcache-register`'s
+   three UUIDs resolves to a disk: `sda1`, the WD Elements disk and the new disk, which is
+   the link the boot will register; **stop unless all three resolve**. `rc_parallel` prints
+   nothing or reads `NO`: the order above is for a serial start. Nothing has restarted.
 
 9. **`sdb` out of the cache set.** Put `sdb`'s backing name from step 2 (`sdb`, or its
    partition) in place of `SDB`:
@@ -595,12 +624,14 @@ through `ssh dev`.
    ```fish
    # step 9, on zero: detach sdb's bcache device from the cache set and stop it, only if the array no longer names it
    set s SDB; set o (basename (readlink /sys/class/block/$s/bcache/dev)); echo "sdb's bcache device: $o"
-   sudo btrfs filesystem show /media/immich-data | grep -q "/dev/$o\$"; and echo "STOP: $o is still in the array"; or begin; echo 1 | sudo tee /sys/class/block/$s/bcache/detach; sleep 2; echo 1 | sudo tee /sys/class/block/$s/bcache/stop; end
+   set fs (sudo btrfs filesystem show /media/immich-data); and string match -qr '/dev/(mapper/data-4|dm-[0-9]+)$' $fs; and not string match -q "*/dev/$o" $fs; and begin; echo 1 | sudo tee /sys/class/block/$s/bcache/detach; sleep 2; echo 1 | sudo tee /sys/class/block/$s/bcache/stop; end; or echo "STOP: $o was not detached"
+   printf '%s\n' $fs
    sleep 2; ls /sys/block | grep bcache
    ```
 
-   It reads right when the device is `bcache1`, no `STOP` line prints, and two bcache
-   devices are left. Its data is already gone from the array, so there is nothing to undo.
+   It detaches only when the filesystem could be read, names the mapping, and does not
+   name `sdb`'s device. It reads right when the device is `bcache1`, no `STOP` line prints,
+   and two bcache devices are left. Its data is already gone from the array, so there is nothing to undo.
 
 10. **The shutdown, the move, and the reboot test.** One shutdown does both: the new disk
     goes into `sdb`'s bay, so the boot after it is the configuration `zero` keeps, and it

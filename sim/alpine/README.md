@@ -82,7 +82,7 @@ device that stands in for `zero`'s new bcache device. It runs:
   `dmcrypt` resolves `source=` with whichever `zero` has;
 - `install-system-file dmcrypt`: refusing the repo's placeholder, then, with the UUID
   filled in, passing the good entry and refusing an unknown UUID, an entry with no `key=`,
-  a key file others can read and a key that does not open the volume; then installing it
+  a key file outside `/etc`, a name dmcrypt does not read, a key file others can read and a key that does not open the volume; then installing it
   over cryptsetup-openrc's own `/etc/conf.d/dmcrypt`, with `bcache-register` and
   `dm-crypt.conf`;
 - OpenRC's recorded order for `dmcrypt`, read with the runbook's own `grep` of the

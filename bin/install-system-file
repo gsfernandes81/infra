@@ -231,6 +231,8 @@ def parse_dmcrypt_conf(data):
     dmcrypt_* lines skipped, and target= or swap= starting a new entry. Returns a list of
     (line number, {key: value}) and a list of problems."""
     entries, problems = [], []
+    known = ("target", "swap", "source", "key", "remdev", "gpg_options", "loop_file",
+             "options", "pre_mount", "post_mount")
     for lineno, line in enumerate(data.splitlines(), 1):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
@@ -240,6 +242,9 @@ def parse_dmcrypt_conf(data):
             problems.append(f"line {lineno}: not a name=value line, which dmcrypt skips")
             continue
         if name.startswith("rc_") or name.startswith("dmcrypt_"):
+            continue
+        if name not in known:
+            problems.append(f"line {lineno}: {name}= is not a setting dmcrypt reads; it would skip the line")
             continue
         try:
             words = shlex.split(value)
@@ -300,6 +305,11 @@ def validate_dmcrypt_conf(path):
             continue
         if not source:
             problems.append(f"{label}: no source=")
+            continue
+        if not key.startswith("/etc/"):
+            # dmcrypt runs in the boot runlevel before localmount, so the key must be on the
+            # root filesystem, which on zero holds /etc.
+            problems.append(f"{label}: key file {key} is outside /etc, so it may not be mounted when dmcrypt runs")
             continue
 
         st = run(["sudo", "stat", "-c", "%u %a", key])

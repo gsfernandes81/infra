@@ -27,7 +27,9 @@
 #   after modules         - /etc/modules-load.d/dm-crypt.conf loads dm-crypt and dm-mod.
 #   before btrfs-scan     - btrfs-scan registers every btrfs member it can see; a scan
 #                           before the open misses devid 4 and the array will not mount.
-#   before localmount     - localmount only `use`s dmcrypt; this makes the order certain.
+#   before localmount     - OpenRC's localmount declares `use lvm modules dmcrypt`, and
+#                           on zero it is in no runlevel, started as bootmisc's `need`;
+#                           this states the order outright.
 # bcache-register also says `before dmcrypt btrfs-scan`, so either file alone orders it.
 #
 # No options=, so discards stop at dm-crypt, deliberately: the disk beneath is a hard disk

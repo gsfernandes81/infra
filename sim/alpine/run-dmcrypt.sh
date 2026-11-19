@@ -116,6 +116,12 @@ case "$said" in *'finds no device'*) pass "refused a UUID nothing has" ;; *) fai
 on "cp /run/dmcrypt.filled $conf && sed -i '/^key=/d' $conf"
 said=$(tool 'dmcrypt --allow-content-change')
 case "$said" in *'no key='*) pass "refused an entry with no key=, which would ask at the console" ;; *) fail "did not refuse a missing key=: $said" ;; esac
+on "cp /run/dmcrypt.filled $conf && sed -i 's|^key=.*|key=/home/gavin/data.key|' $conf"
+said=$(tool 'dmcrypt --allow-content-change')
+case "$said" in *'outside /etc'*) pass "refused a key file outside /etc" ;; *) fail "did not refuse a key outside /etc: $said" ;; esac
+on "cp /run/dmcrypt.filled $conf && sed -i 's|^target=|tagret=|' $conf"
+said=$(tool 'dmcrypt --allow-content-change')
+case "$said" in *'not a setting dmcrypt reads'*) pass "refused a name dmcrypt does not read" ;; *) fail "did not refuse an unknown name: $said" ;; esac
 on "cp /run/dmcrypt.filled $conf && chmod 644 $key"
 said=$(tool 'dmcrypt --allow-content-change')
 case "$said" in *'it must be root'*) pass "refused a key file others can read" ;; *) fail "did not refuse a 0644 key file: $said" ;; esac
