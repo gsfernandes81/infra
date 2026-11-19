@@ -664,7 +664,9 @@ through) is found and written back; review caught that the first cut compared `d
 alone and would have left such a widening in place for ever. So the write now sends
 `destinations` (one public entry, the domain), `allowed_idps: []` (as
 `_dev-container-tunnel.yml` already did) and `options_preflight_bypass: false`, where the
-first cut left `allowed_idps` out. The read-back after a write stops the run when a field
+first cut left `allowed_idps` out. An empty `allowed_idps` means every login method the
+account has: read by the owner on 2026-11-19, every Access application on the account
+returns `[]`, `calibre-web`'s and `syncthing-three`'s working browser logins among them. The read-back after a write stops the run when a field
 this file sends still differs, and prints, without stopping, a field Cloudflare leaves out
 of its answer: an absent `app_launcher_visible`, whose documented default is true but which
 an omitted false would also leave absent. Such a field means every run writes again, as
