@@ -14,20 +14,21 @@ its first boot, in `one`'s shape ([`leap/README.md`](../../../leap/README.md)), 
 
 ## Before the stick
 
-`system/backup-authorized-keys` carries two of zero's values as placeholders, and
-`make-stick` refuses a stick while they are there. Both exist once zero is on the tailnet
-(`server-install-tailscale.yml`). From the phone:
+Two files carry zero's values as placeholders, and `make-stick` refuses a stick while they
+are there: `system/restore-authorized-keys`, zero's restore key, and `system/zero-known-hosts`,
+zero's ssh host key, which the pull pins. Both are printed by one play, once zero is on the
+tailnet (`server-install-tailscale.yml`). From the phone:
 
 ```fish
-# on the phone: make zero's backup key if it has none, and print the values three's key line needs
-cd ~/infra/ansible; and ansible-playbook playbooks/server-create-backup-key.yml -e target=zero -K
+# on the phone: make zero's restore key if it has none, and print it, zero's address and zero's host key for three's files
+cd ~/infra/ansible; and ansible-playbook playbooks/server-create-restore-key.yml -e target=zero -K
 ```
 
-It makes `/root/.ssh/mirror-backup` only if no key is there, and prints its public key,
-zero's tailnet address and the key's fingerprint. The infra agent commits the key and the
-address in place of the placeholders, checking the key against the fingerprint, and the
-stick can be built. [`plans/visit-runbook.md`](../../../plans/visit-runbook.md) § Before
-the visit, step 4, is the same step.
+It makes `/root/.ssh/restore` only if no key is there. The infra agent commits the key and
+zero's host key in place of the placeholders, checking each against the fingerprint the play
+prints, and the stick can be built. Zero's tailnet address is already in both files. A
+rebuilt three also makes a new pull key (§ The backup), so zero's mirror line changes after
+its first boot.
 
 ## The stick
 
@@ -111,8 +112,19 @@ sudo ~/infra/hosts/three/leap/make-mirror /dev/sdX
 
 `make-mirror` refuses a drive with partitions or any signature on it, so it never formats a
 drive in use. It writes LUKS2 with Adiantum, labelled `mirror-luks`, which
-`/etc/crypttab` names. Inside is a btrfs holding `incoming` (where zero's backup lands),
-`syncthing` and `snapshots`.
+`/etc/crypttab` names. Inside is a btrfs holding `syncthing` and `received-backups`:
+
+| On the array | What | Whose |
+|---|---|---|
+| `received-backups/`, `received-backups/immich/` | directories | root's, 755 |
+| `received-backups/immich/current/` | subvolume: the copy of zero's newest snapshot that `mirror-pull` keeps up to date | the backup user's, 700 |
+| `received-backups/immich/current/.snapshots/<N>/snapshot` | snapper's read-only snapshots of `current/`, one per good pull | root's, 750 |
+| `received-backups/immich/state/` | `pulled`: what the last good pull copied | the backup user's, 700 |
+| `received-backups/immich/last-pulled` | what the last snapshot holds | root's |
+| `syncthing/` | subvolume: Syncthing's data and identity | gavin's |
+
+The array made on 2026-11-18 holds the layout before the pull: `incoming` and `snapshots`.
+Its change is § The backup, below, step 2.
 
 ### Unlocking, after every boot
 
@@ -125,16 +137,16 @@ ssh -t three 'sudo systemctl start systemd-cryptsetup@mirror.service; and sudo s
 
 Two starts, so the mount's 5-minute wait for the device begins only once the passphrase is
 in, however long finding it takes. The mount starts Docker, which brings Syncthing up
-under its restart policy, and the snapshot and scrub timers. Until then, Docker is skipped
+under its restart policy, and the pull and scrub timers. Until then, Docker is skipped
 by its condition, and `docker` answers that it cannot connect. A hand `mount /media/mirror`
 starts none of them: only `systemctl start` does. For a few seconds while Docker first
 starts, a new ssh connection can be refused; the simulation saw one attempt fail between
 two that answered. Try again. The cause is not yet known (`docs/management-plane.md`,
-phase 9). A backup run against a locked `three`
-fails and the next one retries.
+phase 9). A pull against a locked `three` is skipped by
+its condition, and the timer, `Persistent=`, pulls once the array is unlocked.
 
-To lock it again without a reboot (Docker, a running snapshot and a running scrub stop
-with the mount). The passphrase is not cached, so the next unlock asks for it again:
+To lock it again without a reboot (Docker, a running pull and a running scrub stop with
+the mount). The passphrase is not cached, so the next unlock asks for it again:
 
 ```fish
 # lock three's array: Docker first, then the mount, then the LUKS volume; it prints
@@ -142,33 +154,132 @@ with the mount). The passphrase is not cached, so the next unlock asks for it ag
 ssh -t three 'sudo systemctl stop docker.service media-mirror.mount systemd-cryptsetup@mirror.service; and test ! -e /dev/mapper/mirror; and echo locked'
 ```
 
-### Snapshots and scrubs
+### Snapshots, scrubs
 
-Twice a day, `mirror-snapshot` makes at most one read-only snapshot of `incoming`, named for
-the day in UTC, and keeps the newest 90. It skips a turn while the backup user has a
-process. The scrub runs monthly. A turn missed while the box was off or locked runs once
-the array is unlocked. `btrfs scrub status /media/mirror` shows the last result.
+Snapshots are the backup's, below. The scrub runs monthly; a month missed while the box was
+off or locked scrubs once the array is unlocked. `btrfs scrub status /media/mirror` shows
+the last result.
 
 ## The backup
 
-zero pushes it nightly at 04:00 (`hosts/zero/system/mirror-backup`) into `incoming`, over
-the tailnet, with a key that starts only the rsync daemon of `system/rsync-backup.conf`. That
-daemon runs as the backup user and can only write into `incoming`: it serves no file back,
-lists nothing, and confines every name and symlink to that directory. The backup user is not
-root, so each file's real owner and mode travel in an xattr (`--fake-super`), and a restore
-puts them back.
+`three` pulls `zero`'s backup ([`plans/three-backup-pull.md`](../../../plans/three-backup-pull.md)).
+`zero` takes an hourly read-only snapper snapshot of its Immich, the library and Postgres in
+one subvolume. Daily at 01:00 UTC, `mirror-pull.timer` starts `mirror-pull.service`, which
+runs `/usr/local/bin/mirror-pull` as the backup user: it lists `zero`'s snapshots, picks the
+newest finished one, and, if it is not the one pulled last, copies it with rsync into
+`received-backups/immich/current`, at 32 Mbit/s. Only a success starts
+`mirror-snapshot.service`, which takes a read-only snapper snapshot of `current/`, prunes to
+14 daily, 8 weekly and 12 monthly, and writes `last-pulled`. A pull cut off, or one of a
+snapshot `zero` deleted mid-way (rsync's exit 24), takes no snapshot; the next day's pull
+finishes the copy.
 
-A restore from a snapshot on `three`, into a directory that is not on the array's
-`incoming`, with owners and modes as zero had them. After `ssh three`:
+The backup user owns `current/` and nothing else, never logs in, and runs the pull in a
+sandbox that can write only `current/` and `state/`. It reaches `zero` with its own key,
+`/home/backup/.ssh/zero-pull`, through `system/backup-ssh-config`, which names zero's tailnet
+address and accepts only the host key in `system/zero-known-hosts`; both are root's. On
+`zero` that key runs nothing but a read-only rsync daemon. zero's owners and modes are kept
+in an xattr (`--fake-super`), and every symlink is stored with a `/rsyncd-munged/` prefix, so
+none leads anywhere on `three`.
+
+The timezone is UTC: 01:00 in a UK winter, 02:00 in a UK summer, 09:00 in Singapore.
+
+### The pull's setup, owner-run, on the array made on 2026-11-18
+
+Once, in this order, after `ssh three`. The first boot of a rebuilt `three` does steps 3, 4
+and 5 itself, and `make-mirror` makes step 2's layout on a new drive.
+
+1. **Unlock**, as § Unlocking says, and pull the checkout: `cd ~/infra; and git pull --ff-only`.
+2. **The layout.** The old `incoming` and `snapshots` must be empty, since no push ever ran;
+   the first command prints nothing if so, and the rest runs only then:
+
+   ```fish
+   # on three: check the old push's places are empty, then remove them and make received-backups
+   sudo find /media/mirror/incoming /media/mirror/snapshots -mindepth 1 | head
+   test -z (sudo find /media/mirror/incoming /media/mirror/snapshots -mindepth 1 | head -n 1); and sudo btrfs subvolume delete /media/mirror/incoming; and sudo rmdir /media/mirror/snapshots; and sudo install -d -m 755 /media/mirror/received-backups /media/mirror/received-backups/immich; and sudo btrfs subvolume create /media/mirror/received-backups/immich/current; and sudo chown backup:backup /media/mirror/received-backups/immich/current; and sudo chmod 700 /media/mirror/received-backups/immich/current; and sudo btrfs subvolume create /media/mirror/received-backups/immich/current/.snapshots; and sudo chmod 750 /media/mirror/received-backups/immich/current/.snapshots; and sudo install -d -o backup -g backup -m 700 /media/mirror/received-backups/immich/state; and sudo ls -la /media/mirror /media/mirror/received-backups/immich
+   ```
+
+3. **What the push left, gone; the restore user made; the array's mount hardened.** The
+   timer first, so nothing starts the old script:
+
+   ```fish
+   # on three: stop and remove the old snapshot timer and script, the push's daemon config and key line; give backup no shell; make the restore user
+   sudo systemctl disable --now mirror-snapshot.timer; sudo rm -f /etc/systemd/system/mirror-snapshot.timer /usr/local/sbin/mirror-snapshot /etc/rsync-backup.conf /home/backup/.ssh/authorized_keys
+   sudo usermod -s /usr/sbin/nologin backup; and sudo useradd --system --user-group --no-create-home --home-dir /home/restore --shell /bin/bash --comment "zero's read-only restores" restore; and sudo install -d -m 755 /home/restore /home/restore/.ssh
+   sudo sed -i '/[[:space:]]\/media\/mirror[[:space:]]/s/,noatime /,noatime,nosuid,nodev /' /etc/fstab; and grep /media/mirror /etc/fstab
+   ```
+
+   The fstab line ends `noatime,nosuid,nodev 0 0`; it takes effect at the next unlock.
+4. **The pull key**, made here and never carried:
+
+   ```fish
+   # on three: make the backup user's key to zero, then print its public half and fingerprint for zero's mirror line
+   sudo ssh-keygen -t ed25519 -N '' -C 'three mirror-pull' -f /home/backup/.ssh/zero-pull; and sudo chown backup:backup /home/backup/.ssh/zero-pull /home/backup/.ssh/zero-pull.pub
+   cat /home/backup/.ssh/zero-pull.pub; ssh-keygen -lf /home/backup/.ssh/zero-pull.pub
+   ```
+
+   Send the infra agent the public key and its fingerprint: it commits the key into
+   `hosts/zero/system/mirror-authorized-keys`, which `zero` then installs
+   (`hosts/zero/system/README.md` § The backup).
+5. **The files**, each with a dry run first, once the infra agent has committed zero's two
+   values (§ Before the stick):
+
+   ```fish
+   # on three: install the pull, its units, snapper's config, the restore module and both users' ssh files; then label them and reload systemd
+   cd ~/infra; and git pull --ff-only
+   for f in mirror-pull mirror-pull.service mirror-pull.timer mirror-snapshot.service mirror-mount.conf snapper-config-received-immich backup-ssh-config zero-known-hosts sudoers-restore rsyncd-restore.conf restore-authorized-keys
+       bin/install-system-file $f --new; and sudo bin/install-system-file $f --new --commit --allow-content-change; or break
+   end
+   sudo restorecon -Rv /home/backup /home/restore /usr/local/bin/mirror-pull; and sudo systemctl daemon-reload; and sudo systemctl start mirror-pull.timer
+   ```
+
+   `mirror-snapshot.service` and `mirror-mount.conf` exist already, so their dry runs show a
+   content change; the rest are new. From the phone,
+   `server-install-system-files.yml -l three -K` does the same installs.
+6. **The first pull**, once `zero` has its first snapshot (`hosts/zero/system/README.md`
+   § The backup). In the UK, over the LAN, with no rate limit, by a runtime drop-in that
+   the next boot forgets:
+
+   ```fish
+   # on three: lift the rate limit until the next boot, and start the first pull without waiting for it
+   sudo mkdir -p /run/systemd/system/mirror-pull.service.d; and printf '[Service]\nEnvironment=MIRROR_PULL_BWLIMIT=0\n' | sudo tee /run/systemd/system/mirror-pull.service.d/lan.conf; and sudo systemctl daemon-reload; and sudo systemctl start --no-block mirror-pull.service
+   ```
+
+   ```fish
+   # on three: follow the pull and its snapshot, then list three's snapshots
+   journalctl -fu mirror-pull -u mirror-snapshot
+   sudo snapper --no-dbus -c received-immich list
+   ```
+
+   The journal ends `pulled snapshot <N> of <time>`, rsync's statistics, and
+   `snapshot taken of the pull of zero snapshot <N>`; the list shows one snapshot,
+   `pulled <N>`. About 93 GB on 2026-11-02, so hours. If the session drops, the pull goes on.
+   Before the box ships, remove the drop-in:
+   `sudo rm /run/systemd/system/mirror-pull.service.d/lan.conf; and sudo systemctl daemon-reload`.
+
+**Checks:** each morning `journalctl -u mirror-pull -u mirror-snapshot --since yesterday`
+reads a pull and a snapshot, or `nothing new`; `systemctl list-timers mirror-pull.timer`
+names the next 01:00 UTC. Nothing alerts when pulls stop; that waits on a fleet-wide dead
+man's switch (`docs/management-plane.md`, phase table).
+
+**Way back:** nothing on `zero` depends on `three`. Stop the timer and leave the array.
+
+### Restore
+
+A restore onto `zero` runs from `zero`, with its restore key
+(`hosts/zero/system/README.md` § A restore). On `three` itself, into a directory off
+`received-backups`, with the owners and modes `zero` had, the pull's xattr read back:
 
 ```fish
-# restore Immich's library from a snapshot; --fake-super reads the kept owners, -M--super writes them
-sudo ls /media/mirror/snapshots
-sudo rsync -aHAX --numeric-ids --fake-super -M--super --mkpath /media/mirror/snapshots/2026-11-20/immich/library/ /media/mirror/restore/library/
+# on three: list three's snapshots, then restore Immich's library from snapshot N into /media/mirror/restore; --fake-super reads the kept owners, -M--super writes them
+sudo snapper --no-dbus -c received-immich list
+sudo rsync -aHAX --numeric-ids --fake-super -M--super --mkpath /media/mirror/received-backups/immich/current/.snapshots/N/snapshot/data/library/ /media/mirror/restore/library/
 ```
 
-Use a date the listing shows in place of `2026-11-20`. Getting a restore back onto zero is
-the visit runbook's.
+Put a number from the list in place of `N`; its description, `pulled <M>`, names zero's
+snapshot. A database to look into is a reflink copy of that snapshot's `db`, which costs no
+space, started in a throwaway Postgres container, whose entrypoint gives the files back to
+its own user (§ Slice 4 in [`plans/visit-runbook.md`](../../../plans/visit-runbook.md)).
+Never `btrfs property set ... ro false` on a snapshot: copy it.
 
 ## The fan
 

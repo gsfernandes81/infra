@@ -1,8 +1,9 @@
 # Alpine simulation
 
 `.github/workflows/alpine-sim.yml` runs the setup plays against an Alpine container that
-stands in for `zero`: `server-install-tailscale.yml`, `server-create-backup-key.yml` and
-`server-store-backup-ntfy-url.yml`, and the dry run of `server-install-system-files.yml`. `host/Dockerfile` is the box: Alpine 3.24, as on the
+stands in for `zero`: `server-install-tailscale.yml`, `server-create-restore-key.yml` and
+`server-store-backup-ntfy-url.yml`, and the dry run of `server-install-system-files.yml`;
+then `zero`'s snapper install, and `install-system-file`'s sudoers check. `host/Dockerfile` is the box: Alpine 3.24, as on the
 fleet, with OpenRC as init, sshd, and gavin with sudo. `run-setup-plays.sh` builds it,
 reaches it over ssh as Ansible reaches a fleet host, and names each check PASS or FAIL;
 any FAIL fails the job. The job runs on an arm64 runner, so the real tarball's binaries
@@ -10,7 +11,8 @@ run in the container as they would on `zero`.
 
 The container's hostname is `zero`, its checkout is cloned from this commit, and the plays
 pull it and require it to match, as on the fleet. The inventory also names it `two`, which
-tracks no `tailscaled` and no backup, and names the runner `one`, which is not Alpine.
+tracks no `tailscaled` and serves `three` no snapshots, and names the runner `one`, which
+is not Alpine.
 
 ## What it runs
 
@@ -37,10 +39,10 @@ The Tailscale play:
 - a box off the tailnet with no key, which must stop at the key check; with a key, which
   must join; and a join that rewrites `/etc/resolv.conf`, which must fail the play.
 
-The backup key play: refused off the tailnet and on a host with no backup push; a dry run
-that makes nothing; a real run that makes an ed25519 key, root 0600 in a 0700 directory,
-commented `zero mirror-backup`, and prints it with its fingerprint and the address; and a
-re-run that leaves the key as it was.
+The restore key play: refused off the tailnet and on a host `three` does not pull from; a
+dry run that makes nothing; a real run that makes an ed25519 key, root 0600 in a 0700
+directory, commented `zero restore`, and prints it, the address, the box's ssh host key and
+both fingerprints; and a re-run that leaves the key as it was.
 
 The ntfy play: refused a value that is not a URL; a dry run that writes and sends nothing;
 a real run that stores the URL root 0600 in a 0700 directory and sends one test message,
@@ -55,7 +57,20 @@ the box's hostname. Then the box answers as `three`: `--list` must read
 only=cloudflared-config.yml` must list that one file and have the tool refuse it, because
 it declares systemd and the box runs OpenRC.
 
-Every run's output is searched for the auth keys, the topic and the private backup key.
+`zero`'s snapper, as `hosts/zero/system/README.md` § The backup installs it, on Alpine 3.24
+arm64, `zero`'s release and architecture: the URL and the `sha256sum` line are read out of
+the README and run as they are, and must print `OK`; apk must refuse a copy with bytes
+changed, which its signature no longer matches; apk must install the file with its
+dependencies from Alpine 3.24's own repositories, pin `snapper=0.13.1-r0` in its world, and
+leave it out of an `apk upgrade`; no runlevel may start `dbus`, which apk installs with it;
+`snapper --no-dbus` must answer; the package's hourly script must read an empty
+`SNAPPER_CONFIGS`; and `/bin/setpriv` must be util-linux's only once `setpriv` is added.
+
+`install-system-file`'s sudoers check, calibrated first: `visudo -cf` must pass the box's own
+`/etc/sudoers.d/gavin`, the dry run of `sudoers-mirror` must pass its pre-check, and a copy
+broken in the checkout must be refused before anything is written, with sudo still working.
+
+Every run's output is searched for the auth keys, the topic and the private restore key.
 The joining run and the first ntfy run also go through the default callback at `-vv`,
 because the repo's own callback prints no successful result and would hide a missing
 `no_log`.

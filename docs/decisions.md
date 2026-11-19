@@ -2033,6 +2033,10 @@ alike.
 
 ## `three` is the off-site backup: rsync from `zero`, snapshots on `three`
 
+**⚠︎SUPERSEDED in part 2026-11-19** by § *`zero`'s backup is pulled by rsync from snapshots*
+and § *The pull, as built*, below: the push became a pull, and the one write-only key became
+two read-only ones. LUKS, the unlock by hand and Syncthing's identity stand.
+
 **Decided 2026-11-03**, the owner's call. The design is in
 [`plans/three.md`](../plans/three.md) § *Backups* and § *Encryption*; this records why.
 
@@ -2214,7 +2218,9 @@ writing `hosts/three/leap/` and are proven by the `host` job's `three` run.
 - **The timers start with the mount, not at boot.** Both are `Persistent=`, so a run missed
   while the box was off or locked fires as soon as its timer starts. Started at boot, it
   would fire on a locked array and be spent on a skipped run.
-- **The backup user's shell is bash, not nologin.** sshd runs a key's forced command
+- **⚠︎SUPERSEDED 2026-11-19 (§ *The pull, as built*): the backup user never logs in now, so
+  its shell is nologin; the `restore` user keeps bash, for the same reason.** The backup
+  user's shell is bash, not nologin. sshd runs a key's forced command
   through the user's shell, so nologin would refuse the push itself. The key's
   `restrict` and forced command are what keep the user from a shell, and its home and
   `.ssh` are root's, so it cannot add a key.
@@ -2229,10 +2235,17 @@ writing `hosts/three/leap/` and are proven by the `host` job's `three` run.
   first simulated plan showed a host left out of it is dropped without a word.
 - **Docker's store stays on the SD card.** Only Syncthing's data and identity need the
   encryption, and Docker runs only once the array is unlocked.
-- **The newest 90 daily snapshots are kept**, a default the owner can change in
-  `mirror-snapshot`: three months to notice a bad overwrite from `zero`.
+- **⚠︎SUPERSEDED 2026-11-19: snapper keeps daily 14, weekly 8, monthly 12 (§ *`zero`'s backup
+  is pulled by rsync from snapshots*).** The newest 90 daily snapshots are kept, a default
+  the owner can change in `mirror-snapshot`: three months to notice a bad overwrite from
+  `zero`.
 
 ## `zero`'s backup to `three`: rsync's own daemon behind the key, owners in an xattr
+
+**⚠︎SUPERSEDED 2026-11-19** by § *The pull, as built*: no key writes to `three` any more, so
+the write-only daemon, the push at 04:00, the `.~tmp~` clean-up and the age alert are gone.
+What carries over: rsync's own daemon behind a forced command, owners kept in an xattr
+(`fake super`), and the lock's ordering and `password-cache=no`.
 
 **Decided 2026-11-04.** The first point was left to the infra agent by the owner, the
 second is the owner's call; the `host` job's `three` run proves both.
@@ -2369,7 +2382,9 @@ out of writing them and is proven by `alpine-sim.yml`.
   line needs. `server-store-backup-ntfy-url.yml` stores the alert's URL. Step 6 is
   `server-install-system-files.yml -l <host> -e only=sshd-infra.conf`, with sshd reloaded
   by hand, since that play never restarts anything.
-- **The backup key and the ntfy URL are two plays, not one.** They wait on different
+- **⚠︎SUPERSEDED 2026-11-19: `server-create-backup-key.yml` became
+  `server-create-restore-key.yml` (§ *The pull, as built*), and the ntfy URL's only reader is
+  not used.** The backup key and the ntfy URL are two plays, not one. They wait on different
   things: the key on Tailscale, since it prints the tailnet address, and the URL on
   nothing. They are redone apart: a leaked topic is replaced without touching the key, and
   a new key also needs `three`'s line changed. Set aside: one play, which saves a command
@@ -2661,6 +2676,61 @@ Alpine copies for `one` too, since `one` keeps both.
   edge/testing, pinned, run with `--no-dbus` from an hourly periodic script. The pull runs
   daily at 01:00 at 32 Mbit/s. `autodefrag` leaves the `/media/immich` line, since it
   unshares snapshot extents (issue #23 for a timed defrag).
+
+## The pull, as built
+
+**Decided 2026-11-19**, building `plans/three-backup-pull.md` (branch `backup-pull`). These
+came out of the build, are proven by `microos-sim.yml`'s `three` run and `alpine-sim.yml`,
+and refine the owner's design without changing it.
+
+- **`autodefrag` leaves every line on `zero`'s array, not only Immich's.** btrfs holds it for
+  the whole filesystem: the first mount's options win, and a later mount's are ignored, so
+  it cannot be off for one subvolume and on for another. The move's remount with
+  `noautodefrag` drops it at once. Set aside: keeping it on `/media/syncthing`, which would
+  have kept it on `/media/immich` too.
+- **Every symlink the pull receives is stored munged** (`--munge-links`, a
+  `/rsyncd-munged/` prefix), **and the restore module unmunges it on the way out**
+  (`munge symlinks = yes`). The restore daemon can read any file on `three`, and a module
+  without chroot follows a symlink in a requested path, so a link a compromised `zero` sent,
+  `current/x -> /etc`, would have let `zero` read `three`'s shadow file and host key back
+  through its restore key. Munged, no link leads anywhere, and restores get the real
+  targets. Both daemons also refuse `--copy-links` and its kin. Set aside: chroot, which
+  needs a second capability, `CAP_SYS_CHROOT`; and `--safe-links`, whose lexical check has
+  had bypasses.
+- **The forced commands and the sudoers lines name absolute paths**: `/bin/setpriv` on Alpine,
+  `/usr/bin/setpriv` on Leap, `/usr/bin/rsync` on both. Alpine's BusyBox has a `setpriv`
+  applet without `--reuid`, and util-linux's `setpriv` package installs over it at
+  `/bin/setpriv`; a path names which one runs, and setpriv's own `execvp` of rsync then
+  does not depend on PATH.
+- **`install-system-file` runs `visudo -cf` on a sudoers file before it writes.** sudo
+  refuses to run over one bad file in `/etc/sudoers.d`, which would take the post-install
+  check and the rollback with it, on a remote box. Calibrated by `alpine-sim.yml`.
+- **`zero`'s host key is pinned on `three` from the repo**, `zero-known-hosts`, checked under
+  the name `zero` (`HostKeyAlias`), not learned at the first pull. The play that makes
+  `zero`'s restore key prints it, so one command gives `three` both values;
+  `server-create-backup-key.yml` became `server-create-restore-key.yml`. `zero` learns
+  `three`'s host key at its first restore (`accept-new`), checked against the fingerprint
+  `make-stick` printed.
+- **The pull hands its result to the snapshot through two files**: `state/pulled`, the backup
+  user's, written only by a good pull and removed at the start of the next, which
+  `mirror-snapshot.service` needs (`ConditionPathExists=`), reads, and trusts only as digits
+  and a time; and `last-pulled`, root's, in root's directory, written only after the
+  snapshot. Root never writes into a directory the backup user owns, so a symlink there
+  cannot turn a root write elsewhere.
+- **The pull runs sandboxed**: `ProtectSystem=strict`, writable only `current/` and `state/`,
+  no capabilities, no new privileges. It parses what `zero` sends.
+- **snapper runs with `--no-dbus` on `three` too.** Its config is in no `SNAPPER_CONFIGS`, so
+  neither snapperd nor Leap's snapper timers know it, and Leap's own root config is left as
+  the image has it.
+- **The timer is `01:00:00 UTC`**, named in UTC so it means the same whatever timezone
+  `three` is set to; it is 09:00 in Singapore.
+- **`mirror-backup-age-check` stays in the tree, marked not used**, with
+  `server-store-backup-ntfy-url.yml`, until the fleet-wide dead man's switch is designed.
+  Set aside: deleting both now, which would decide for that design.
+- **The simulation's `zero` is an Alpine container of `zero`'s release**, privileged and on
+  the runner's network, not the Ubuntu runner itself: snapper 0.13.1 from edge/testing,
+  util-linux's `setpriv`, Alpine's sudo and BusyBox's `adduser` and `flock` are what `zero`
+  runs, where the runner's would have been Ubuntu's, of another version.
 
 ## The lesson worth keeping
 

@@ -160,7 +160,7 @@ fail_or_skip() {
 	if [ -n "${GITHUB_ACTIONS:-}" ]; then echo "FAIL $*"; else echo "SKIP $*"; fi
 }
 # A command in the stand-in for zero, as root there.
-zx() { sudo docker exec -i sim-zero sh -euc "$1"; }
+zx() { sudo docker exec sim-zero sh -euc "$1"; }
 # The stand-in's newest finished snapshot: the highest number with an info.xml.
 znewest() {
 	sudo find "$zimm/.snapshots" -mindepth 2 -maxdepth 2 -name info.xml -printf '%h\n' 2> /dev/null |
@@ -260,7 +260,7 @@ zero_up() {
 		echo "the runner's own sshd holds port 22; stopping it for zero's stand-in"
 		sudo systemctl stop ssh.socket ssh.service 2> /dev/null || true
 	fi
-	sudo docker run -d --name sim-zero --hostname zero --privileged --network host \
+	sudo docker run -d --name sim-zero --privileged --network host \
 		-v "$zimm:/media/immich" -v "$repo:/repo:ro" "$zero_image" sleep infinity > /dev/null || return 1
 	echo "zero's stand-in: $zero_image"
 	zx 'apk add --quiet openssh sudo rsync setpriv btrfs-progs' || return 1
@@ -322,7 +322,7 @@ zero_caps() {
 	done
 	[ -n "$pids" ] || { echo "FAIL no rsync daemon of the mirror user ran on zero to read"; return 0; }
 	for p in $pids; do
-		st=$(zx "grep -E '^(Uid|Gid|Cap(Inh|Prm|Eff|Amb)):' /proc/$p/status" | tr '\t' ' ' | tr -s ' ' | tr '\n' ';')
+		st=$(zx "grep -E '^(Uid|Gid|Cap(Inh|Prm|Eff|Amb)):' /proc/$p/status" | tr '\t' ' ' | tr -s ' ' | tr '\n' ';') || true
 		echo "    zero's daemon, pid $p: $st"
 		case "$st" in
 		*"CapPrm: 0000000000000004;"*"CapEff: 0000000000000004;"*"CapAmb: 0000000000000004;"*) ;;
@@ -339,13 +339,17 @@ zero_kill_daemon() {
 	local pids
 	pids=$(zx 'pgrep -u mirror -x rsync || true')
 	# Killed by pid from a list made first, never by a pattern (CLAUDE.md § Shell traps).
-	[ -n "$pids" ] && zx "kill $(echo "$pids" | tr '\n' ' ')"
+	[ -n "$pids" ] && { zx "kill $(echo "$pids" | tr '\n' ' ')" || true; }
 	echo "killed zero's daemon: ${pids:-none was running}" | tr '\n' ' '
 	echo
 }
 
 sim_backup() {
-	local key n n2 since before pg_ok=no restore_dir
+	local key n n2 since before pg_ok=no restore_dir out rc link
+	# Every step reports its own PASS or FAIL, so a step that fails must not end the stage
+	# under run-host.sh's set -e and leave the later checks unrun. This runs in the report
+	# pipeline's subshell, so the setting ends with it.
+	set +e
 	echo "===== zero's backup, pulled by three from the runner standing in for zero"
 	if ! command -v docker > /dev/null; then
 		fail_or_skip "no docker on the runner for zero's stand-in"
@@ -447,7 +451,7 @@ sim_backup() {
 	zx 'cp /etc/snapper/configs/immich /root/immich.tracked
 		i=1; for n in $(ls /media/immich/.snapshots | sort -rn); do
 			[ -e /media/immich/.snapshots/$n/info.xml ] || continue
-			sed -i "s:<date>.*</date>:<date>$(date -u -d "@$(( $(date -u +%s) / 86400 * 86400 + 43200 - i * 86400 ))" "+%Y-%m-%d %H:%M:%S")</date>:" /media/immich/.snapshots/$n/info.xml
+			sed -i "s|<date>.*</date>|<date>$(date -u -d "@$(( $(date -u +%s) / 86400 * 86400 + 43200 - i * 86400 ))" "+%Y-%m-%d %H:%M:%S")</date>|" /media/immich/.snapshots/$n/info.xml
 			i=$((i + 1))
 		done
 		snapper --no-dbus -c immich set-config TIMELINE_LIMIT_HOURLY=1 TIMELINE_LIMIT_DAILY=2'
@@ -480,12 +484,17 @@ sim_backup() {
 	n2=$(as_root three-backup.sh newest | tail -n 1)
 	zrs() { zx "rsync -e 'ssh -i /root/.ssh/restore -p $(cat port) -o StrictHostKeyChecking=accept-new -o BatchMode=yes' $*"; }
 	# Less the placeholders of the nested subvolumes, whose times btrfs makes up at each
-	# lookup; three-backup.sh's first step checked them.
-	if out=$(zrs "-naHAXc --numeric-ids -i --delete --exclude=/.snapshots --exclude=/data/thumbs --exclude=/data/encoded-video restore@127.0.0.1::backups/immich/current/.snapshots/$n2/snapshot/ /media/immich/.snapshots/$n/snapshot/" 2>&1) &&
-		[ -z "$out" ]; then
-		echo "PASS a checksum dry run through the restore module finds three's snapshot $n2 and zero's $n alike: contents, owners, modes, times, symlinks"
+	# lookup; three-backup.sh's first step checked them. A symlink's owner is not kept (a
+	# user xattr cannot be set on one), so the symlink may differ in owner and group alone;
+	# its target, the third flag, may not.
+	rc=0
+	out=$(zrs "-naHAXc --numeric-ids -i --delete --exclude=/.snapshots --exclude=/data/thumbs --exclude=/data/encoded-video restore@127.0.0.1::backups/immich/current/.snapshots/$n2/snapshot/ /media/immich/.snapshots/$n/snapshot/" 2>&1) || rc=$?
+	link='^\.L\.[^ ]{8} data/library/link\.jpg -> a\.jpg$'
+	grep -qE "$link" <<<"$out" && echo "NOTE the symlink comes back with its target, and with the backup user's owner: $(grep -E "$link" <<<"$out")"
+	if [ "$rc" = 0 ] && ! grep -vE "$link" <<<"$out" | grep -q .; then
+		echo "PASS a checksum dry run through the restore module finds three's snapshot $n2 and zero's $n alike: contents, owners, modes, times, symlink targets"
 	else
-		echo "FAIL the restore module's copy differs from zero's snapshot $n:"
+		echo "FAIL the restore module's copy differs from zero's snapshot $n (rsync exit $rc):"
 		printf '%s\n' "$out" | head -n 12 | sed 's/^/    /'
 	fi
 	restore_dir=/root/restored

@@ -148,11 +148,13 @@ The run then checks, each as PASS or FAIL, and any FAIL fails the job:
   `cloudflared` starts. `make-mirror`, the copy under test, formats the blank drive and
   refuses it a second time. The README's unlock command runs over `ssh -tt`, and
   `host/unlock.py` answers sudo's prompt and systemd's passphrase prompt as the owner
-  would. `host/three-unlocked.sh` then checks the array is LUKS2 with Adiantum and mounted
-  with the container context, that the mount started Docker and both timers, that a
-  container reads and writes it, the snapshot script's three paths (a snapshot, a skipped
-  turn, the pruning to 90), and a scrub. After the reboot, the array is locked again, and
-  the same command brings it back;
+  would. `host/three-unlocked.sh` then checks the array is LUKS2 with Adiantum, mounted
+  with the container context, `nosuid` and `nodev`, holding `make-mirror`'s layout, that
+  the mount started Docker and the pull and scrub timers, that a container reads and
+  writes it, and a scrub. After the reboot, the array is locked again, and the same
+  command brings it back;
+- on `three`, zero's backup, pulled from the runner standing in for `zero`
+  (`sim_backup` in `host/three.sh`, with `host/three-backup.sh` on the box), below.
 - in rescue mode (`host/rescue.sh`), entered with `systemctl isolate`: gavin logs in, and
   sshd, the network, `cloudflared`, `tailscaled` and logins are up while Docker is down;
 - after a reboot, proved by a new boot id, the box checks again on its static address;
@@ -169,6 +171,78 @@ and prints what the box knows about why.
 
 The stand-in tunnel credentials cannot connect, so the run shows `cloudflared` installed,
 enabled and retrying, not serving.
+
+### `three`'s pull, from a stand-in for `zero`
+
+The runner plays `zero` after the move: a 2 GB btrfs on a loop file with the subvolume
+`immich` mounted on its own, holding `data/` (with `thumbs` and `encoded-video` as nested
+subvolumes, a symlink, a file owned by 1000:1000 at 640) and `db/`, where a Postgres
+container keeps writing, and `.snapshots`, a subvolume, root's, 750. `zero` itself is an
+Alpine container of `zero`'s release (the digest in `sim/alpine/host/Dockerfile`),
+privileged, on the runner's network, with that mount at `/media/immich`. It is set up as
+`hosts/zero/system/README.md` § The backup has the owner set up `zero`: snapper 0.13.1 from
+edge/testing (x86_64 here; `alpine-sim.yml` checks the README's aarch64 SHA-256), util-linux's
+`setpriv`, Alpine's sudo and rsync, the `mirror` user made with BusyBox's `adduser`, and
+`zero`'s tracked files at their headers' paths, sudoers through `visudo`. Its sshd answers on
+the runner's port 22, which the VM reaches at qemu's host address, the address `three`'s
+tracked ssh config is given in place of `zero`'s; the run's stand-ins replace `zero`'s host
+key, its restore key and the two `from=` addresses. Its snapshots are the tracked hourly
+script's, run by hand. `three` makes its pull key as its README says, and its public half
+goes into the stand-in's mirror line.
+
+Each numbered point is the design's (`plans/three-backup-pull.md`), with how it is shown:
+
+1. **A full pull.** `mirror-pull.service`, started as the timer would, under the README's
+   runtime drop-in that lifts the rate limit. `tree-hash.sh` hashes every path, owner,
+   mode, size and content of `zero`'s snapshot on the runner, and of `three`'s snapshot of
+   its copy read back through `--fake-super`; the two must match. `thumbs` and
+   `encoded-video` must be empty directories, `current/.snapshots` must hold only
+   `three`'s own numbered snapshots, a file's owner must sit in `user.rsync.%stat` while
+   the file on disk is the backup user's, and the symlink must be stored as
+   `/rsyncd-munged/a.jpg`.
+2. **Snapshots only after a good pull.** After each pull the count of `three`'s snapshots
+   must rise by one, described `pulled <N>`, and `last-pulled` name `<N>`; a pull with
+   nothing new must end `nothing new` with no snapshot (the snapshot unit skipped by its
+   condition). Then a pull of a 24 MB file at 256 KiB/s is cut by killing `zero`'s daemon
+   once the file has begun to arrive: the service must fail, with no new snapshot,
+   `last-pulled` unchanged and `state/pulled` gone. The next pull must succeed.
+3. **A second pull copies only changes.** A file added and one deleted on `zero`: the new
+   one must arrive, the deleted one leave `current/` and stay in `three`'s first snapshot,
+   and an unchanged 8 MB file keep its inode and ctime, so it was not written again.
+4. **Least privilege.** As the backup user, with its own key and config: a command, sftp,
+   an upload, a `--delete` into the module, a path climbing out with `..`, another module
+   and a port forward must each get nothing. On the stand-in, `sudo -l -U mirror` must allow
+   exactly the forced command and refuse another config, another user and a shell; and
+   mid-transfer, the daemon's `/proc/<pid>/status` must read the mirror user's uid and
+   `0x4` (`CAP_DAC_READ_SEARCH`) as its permitted, effective and ambient sets.
+5. **A locked array skips the pull.** After the README's lock, a start of the pull must be
+   skipped by its condition, not failed, with the timer stopped; the unlock must start the
+   timer, calendared `01:00:00 UTC`, and the next pull succeed.
+6. **Cleanup keeps the newest.** On each side every snapshot is dated a day apart at noon,
+   the newest yesterday, and the limits lowered: `zero` hourly 1 and daily 2, `three` daily
+   2 with no weekly or monthly. Then `zero`'s hourly script and `three`'s snapshot unit,
+   each of which takes a snapshot and cleans up, must leave exactly two: the one taken now
+   and yesterday's.
+7. **`--delete` never touches `three`'s `.snapshots`.** `zero`'s snapshot holds an empty
+   `.snapshots`, which `--delete` would mirror over `three`'s. A dry run as root without
+   the filters must show rsync deleting inside it (the calibration; the backup user cannot
+   even list it), and every pull must keep every earlier snapshot.
+8. **Exit 24 is a failure.** A slow pull of a 24 MB file in the last directory, with files
+   after it; once it has begun, snapper deletes that snapshot on `zero`. The service must
+   fail with status 24, with no snapshot and `last-pulled` unchanged.
+9. **The restore module.** From the stand-in, as root with the restore key, a checksum dry
+   run of `three`'s snapshot against `zero`'s through the module must print nothing:
+   contents, owners, modes, times and the symlink's real target. A real restore must write
+   1000:1000 640 and Postgres's 70:70 700, and the symlink pointing at `a.jpg`; during it,
+   the restore daemon on `three` must hold only `0x4`. The key must run no command, an upload
+   be refused as read only, and nothing outside the module be read; `sudo -l -U restore`
+   must allow exactly its command.
+10. **A database restore.** A reflink copy of `db` from `three`'s newest snapshot, in a
+    throwaway Postgres on `three`, must log an automatic recovery, accept connections, and
+    return all 100 rows written before the snapshots began; the snapshot stays read-only.
+
+The rate limit is lifted for every pull but the two cut ones, which set 256 KiB/s by a
+second runtime drop-in.
 
 ## Traps the simulation found, each handled in the code
 
@@ -218,6 +292,8 @@ Those come in later simulations or on the bench at the visit.
 on any Linux machine with KVM, `qemu-system-x86_64`, `qemu-img`, `mke2fs` and an ssh
 client. `run-docker-store.sh` also needs Docker, btrfs-progs and sudo for one loop mount,
 and `run-host.sh` needs btrfs-progs, openssl and sudo for one loop mount, and
-`ansible-playbook` with `ansible/requirements.yml`'s collections for its deploy stage. Each writes only
+`ansible-playbook` with `ansible/requirements.yml`'s collections for its deploy stage; for `three`,
+Docker, a loop device and two mounts under sudo, and the runner's port 22, whose own sshd it
+stops if one holds it. Each writes only
 inside its work directory. Do not run them in the `infra` container: that container is on
 `zero`, has no KVM, and would compete with Immich.

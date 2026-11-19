@@ -56,9 +56,12 @@ rate() {
 	fi
 	systemctl daemon-reload
 }
+# The units' own lines since <time>: every line rsync or the two units wrote about an error
+# or a result, then the last few, which hold rsync's statistics.
 journal() {
-	journalctl --no-pager -o cat --since "@$1" -u mirror-pull.service -u mirror-snapshot.service |
-		grep -vE '^(Starting|Finished|Started|Stopped|Deactivated) ' | tail -n "${2:-12}" | sed 's/^/    | /'
+	journalctl --no-pager -o cat --since "@$1" -u mirror-pull.service -u mirror-snapshot.service > /root/sim-journal
+	grep -E '^rsync|^mirror-(pull|snapshot):|status=' /root/sim-journal | head -n 20 | sed 's/^/    | /'
+	grep -E '^(Total bytes|Literal data|Number of regular files transferred)' /root/sim-journal | tail -n 3 | sed 's/^/    | /'
 }
 
 case "${1:?step}" in
@@ -111,7 +114,7 @@ pull) # <expected zero snapshot> <expected count after> : a pull that must succe
 		[ \"\$(cut -d' ' -f1 $d/last-pulled)\" = $2 ] && [ \"\$(stat -c %U $d/last-pulled)\" = root ]"
 	check "every snapshot three held before is still there" sh -c "
 		$(declare -f snaps); cur=$cur; snaps > /root/sim-snaps-after
-		! comm -23 /root/sim-snaps-before /root/sim-snaps-after | grep ."
+		! grep -vxFf /root/sim-snaps-after /root/sim-snaps-before"
 	;;
 nothing-new) # <count>
 	t0=$(date +%s)
@@ -138,9 +141,16 @@ first) # <zero snapshot>
 	check "a.jpg's real owner and mode are kept in rsync's xattr, 1000:1000 640" sh -c "
 		s=\$(python3 -c 'import os,sys; print(os.getxattr(sys.argv[1], \"user.rsync.%stat\").decode())' $cur/data/library/a.jpg); echo \"\$s\"
 		[ \"\$s\" = '100640 0,0 1000:1000' ] && [ \"\$(stat -c %U $cur/data/library/a.jpg)\" = backup ]"
-	check "a symlink zero sent is stored munged, leading nowhere" sh -c "
-		t=\$(readlink $cur/data/library/link.jpg); echo \"link.jpg -> \$t\"
-		[ \"\$t\" = /rsyncd-munged/a.jpg ] && [ ! -e /rsyncd-munged ]"
+	# The backup user cannot set the xattr that keeps an owner on a symlink, so rsync may
+	# keep the link as a plain file holding its target, its type in the xattr; or it is a
+	# symlink, munged. Either way no link on three leads anywhere.
+	check "a symlink zero sent leads nowhere on three: a plain file, or a munged link" sh -c "
+		f=$cur/data/library/link.jpg; stat -c '%F' \$f
+		x=\$(python3 -c 'import os,sys; print(os.getxattr(sys.argv[1], \"user.rsync.%stat\", follow_symlinks=False).decode())' \$f 2>&1); echo \"xattr: \$x\"
+		[ ! -e /rsyncd-munged ] || exit 1
+		if [ -L \$f ]; then t=\$(readlink \$f); echo \"a symlink to \$t\"; [ \"\$t\" = /rsyncd-munged/a.jpg ]
+		else echo \"a plain file holding: \$(cat \$f)\"; [ -f \$f ] && case \$x in 120777\ *) ;; *) exit 1 ;; esac
+		fi"
 	;;
 changes) # <before ctime of big.bin>
 	check "a file added on zero arrived, one deleted is gone from current and kept in the first snapshot" sh -c "
@@ -149,10 +159,10 @@ changes) # <before ctime of big.bin>
 		[ -e $cur/data/library/c.jpg ] && [ ! -e $cur/data/library/b.jpg ] &&
 		[ -e $cur/.snapshots/\$first/snapshot/data/library/b.jpg ]"
 	check "big.bin, unchanged on zero, was not written again" sh -c "
-		s=\$(stat -c '%i %Z' $cur/data/library/big.bin); echo \"before: $2; now: \$s\"; [ \"\$s\" = '$2' ]"
+		s=\$(stat -c '%i:%Z' $cur/data/library/big.bin); echo \"before: $2; now: \$s\"; [ \"\$s\" = '$2' ]"
 	;;
 ctime)
-	stat -c '%i %Z' "$cur/data/library/big.bin"
+	stat -c '%i:%Z' "$cur/data/library/big.bin"
 	;;
 delete-calibration)
 	# What --delete would do to three's snapshots without mirror-pull's exclude and protect
@@ -208,35 +218,44 @@ confined)
 			runuser -u backup -- sftp -b - zero 2>&1 | tail -n 2; [ ! -e /tmp/sim-sftp ]"
 	echo up > /tmp/sim-up && chown backup /tmp/sim-up
 	check "an upload into the module is refused, read only" sh -c "
-		out=\$(runuser -u backup -- rsync /tmp/sim-up mirror@zero::snapshots/sim-up 2>&1); echo \"\$out\" | tail -n 2
+		out=\$(runuser -u backup -- rsync -e ssh /tmp/sim-up mirror@zero::snapshots/sim-up 2>&1); echo \"\$out\" | tail -n 2
 		echo \"\$out\" | grep -q 'read only'"
 	mkdir -p /tmp/sim-empty && chown backup /tmp/sim-empty
 	check "a --delete into the module is refused, read only" sh -c "
-		out=\$(runuser -u backup -- rsync -r --delete /tmp/sim-empty/ mirror@zero::snapshots/ 2>&1); echo \"\$out\" | tail -n 2
+		out=\$(runuser -u backup -- rsync -e ssh -r --delete /tmp/sim-empty/ mirror@zero::snapshots/ 2>&1); echo \"\$out\" | tail -n 2
 		echo \"\$out\" | grep -q 'read only'"
-	check "a path climbing out of the module with .. lists the module, never /etc" sh -c "
-		out=\$(runuser -u backup -- rsync --list-only mirror@zero::snapshots/../../../etc/ 2>&1); echo \"\$out\" | tail -n 3
-		! echo \"\$out\" | grep -qE ' (passwd|shadow|sudoers)\$'"
+	# Each must be refused for the module's own reason, read back from rsync, never for a
+	# failure to connect at all.
+	check "a path climbing out of the module with .. is held inside it, never /etc" sh -c "
+		out=\$(runuser -u backup -- rsync -e ssh --list-only mirror@zero::snapshots/../../../etc/ 2>&1); echo \"\$out\" | tail -n 3
+		echo \"\$out\" | grep -qE 'No such file|failed' && ! echo \"\$out\" | grep -qE ' (passwd|shadow|sudoers)\$'"
 	check "nothing is read from outside it" sh -c "
-		rm -f /tmp/sim-shadow; runuser -u backup -- rsync mirror@zero::snapshots/../../../etc/shadow /tmp/sim-shadow 2>&1 | tail -n 1
-		[ ! -e /tmp/sim-shadow ]"
+		rm -f /tmp/sim-shadow; out=\$(runuser -u backup -- rsync -e ssh mirror@zero::snapshots/../../../etc/shadow /tmp/sim-shadow 2>&1)
+		echo \"\$out\" | tail -n 2; echo \"\$out\" | grep -q 'No such file' && [ ! -e /tmp/sim-shadow ]"
 	check "no other module is served, and the module list names none" sh -c "
-		out=\$(runuser -u backup -- rsync mirror@zero::other/ 2>&1); echo \"\$out\" | tail -n 1
-		echo \"\$out\" | grep -qi 'unknown module' && [ -z \"\$(runuser -u backup -- rsync mirror@zero:: 2>/dev/null)\" ]"
+		out=\$(runuser -u backup -- rsync -e ssh mirror@zero::other/ 2>&1); echo \"\$out\" | tail -n 1
+		echo \"\$out\" | grep -qi 'unknown module' &&
+		runuser -u backup -- rsync -e ssh mirror@zero:: > /tmp/sim-modules 2>&1; cat /tmp/sim-modules
+		! grep -q snapshots /tmp/sim-modules"
 	check "the key forwards nothing" sh -c "
 		runuser -u backup -- ssh -v -N -L 127.0.0.1:2298:127.0.0.1:22 zero > /tmp/sim-fwd.log 2>&1 &
 		p=\$!; sleep 4; timeout 5 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2298; head -c 7 <&3' > /tmp/sim-banner 2>/dev/null
 		sleep 1; kill \$p 2>/dev/null; wait \$p 2>/dev/null
-		grep -m1 -i 'prohibited' /tmp/sim-fwd.log; [ ! -s /tmp/sim-banner ] && grep -qi 'prohibited' /tmp/sim-fwd.log"
+		grep -iE 'prohibited|forward|channel' /tmp/sim-fwd.log | tail -n 4; [ ! -s /tmp/sim-banner ] && grep -qi 'prohibited' /tmp/sim-fwd.log"
 	rm -rf /tmp/sim-up /tmp/sim-empty /tmp/sim-banner /tmp/sim-fwd.log
 	;;
 restore-user)
-	check "sudoers lets the restore user run exactly its daemon" sh -c "
-		sudo -n -U restore -l /usr/bin/setpriv --reuid=restore --regid=restore --init-groups --inh-caps=+dac_read_search --ambient-caps=+dac_read_search /usr/bin/rsync --server --daemon --config=/etc/rsyncd-restore.conf ."
-	check "and nothing else: another daemon config, another user, a shell" sh -c "
-		! sudo -n -U restore -l /usr/bin/setpriv --reuid=restore --regid=restore --init-groups --inh-caps=+dac_read_search --ambient-caps=+dac_read_search /usr/bin/rsync --server --daemon --config=/tmp/x . &&
-		! sudo -n -U restore -l /usr/bin/setpriv --reuid=root --regid=root --init-groups --inh-caps=+dac_read_search --ambient-caps=+dac_read_search /usr/bin/rsync --server --daemon --config=/etc/rsyncd-restore.conf . &&
-		! sudo -n -U restore -l /bin/bash"
+	# Leap's own sudoers lets every user run anything with root's password (targetpw), so
+	# the rule that matters is what runs with none. Asked of sudo itself, as the restore user.
+	cmd='/usr/bin/setpriv --reuid=restore --regid=restore --init-groups --inh-caps=+dac_read_search --ambient-caps=+dac_read_search /usr/bin/rsync --server --daemon --config=/etc/rsyncd-restore.conf .'
+	check "the restore user runs its daemon through sudo with no password" sh -c "
+		out=\$(runuser -u restore -- sudo -n $cmd < /dev/null 2>&1); echo \"\$out\" | tail -n 2
+		! echo \"\$out\" | grep -qiE 'password is required|not allowed|may not run'"
+	check "and nothing else without a password: another config, another user, a shell" sh -c "
+		for c in '${cmd/rsyncd-restore.conf/rsyncd-other.conf}' '${cmd//reuid=restore/reuid=root}' /bin/bash; do
+			out=\$(runuser -u restore -- sudo -n \$c < /dev/null 2>&1); echo \"\$c: \$(echo \"\$out\" | tail -n 1)\"
+			echo \"\$out\" | grep -qi 'password is required' || exit 1
+		done"
 	;;
 caps) # <user>: the capabilities of that user's rsync daemon, while one runs
 	for i in $(seq 1 30); do
@@ -279,7 +298,7 @@ cleanup) # <the snapshot to keep besides the newest>
 	snaps | sed 's/^/    before: /'
 	i=1
 	for n in $(snaps | cut -d' ' -f1 | sort -rn); do
-		sed -i "s:<date>.*</date>:<date>$(date -u -d "today 12:00 -$i day" '+%Y-%m-%d %H:%M:%S')</date>:" "$cur/.snapshots/$n/info.xml"
+		sed -i "s|<date>.*</date>|<date>$(date -u -d "today 12:00 -$i day" '+%Y-%m-%d %H:%M:%S')</date>|" "$cur/.snapshots/$n/info.xml"
 		i=$((i + 1))
 	done
 	keep=$(newest)

@@ -89,6 +89,12 @@ manual updates: the owner reboots, then unlocks.
 
 ## Backups: rsync from `zero`, snapshots on `three`
 
+> **⚠︎ SUPERSEDED 2026-11-19 by [`three-backup-pull.md`](three-backup-pull.md):** `zero`
+> takes snapper snapshots and `three` pulls the newest with rsync, as an unprivileged user,
+> then snapshots its copy. The push, its write-only daemon and `three`'s snapshot timer
+> below are gone. Kept for the reasoning that still holds: LUKS, Tailscale, Syncthing's
+> identity. What is backed up is now Immich's whole subvolume, Postgres included.
+
 `zero` pushes the backup to `three` with rsync over Tailscale, which both join for it, by
 an exception the owner granted on 2026-11-03 to the rule that no box holds a key to
 another ([`decisions.md`](../docs/decisions.md)). The key is made nearly powerless:

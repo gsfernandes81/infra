@@ -30,8 +30,8 @@ board is slice 1's way back until then, unless the Alpine card has booted on the
 
 **`three` flies to Singapore on 21 November** (the owner, 2026-11-18), so the order is
 set by that day. Slice 1 first, with its step 2, so slice 3 need not wait a day. Slice 3
-the same day or the next, so the first push, which runs for hours, finishes in the UK.
-Slice 4 once that push has finished and a snapshot exists, before the 21st. Then
+the same day or the next, so the first pull, which runs for hours, finishes in the UK.
+Slice 4 once that pull has finished and a snapshot exists, before the 21st. Then
 [`hosts/three/leap/README.md`](../hosts/three/leap/README.md) § Before three ships, the
 last thing before its power-off. Slice 2 is not needed for `three` and never shares a day
 with slice 1, so it goes on a day left over, or after the 21st.
@@ -123,19 +123,23 @@ Over ssh, from the phone, any day before. Each is a step a slice would otherwise
    cat /etc/resolv.conf; sudo tailscale up --advertise-tags=tag:fleet --accept-dns=false; cat /etc/resolv.conf
    ```
 
-4. **`zero`'s backup key**, by `server-create-backup-key.yml`, once step 3 has passed:
+4. **`zero`'s restore key and host key**, by `server-create-restore-key.yml`, once step 3
+   has passed:
 
    ```fish
-   # on the phone: make zero's backup key if it has none, and print the values three's key line needs
-   cd ~/infra/ansible; and ansible-playbook playbooks/server-create-backup-key.yml -e target=zero -K
+   # on the phone: make zero's restore key if it has none, and print it, zero's address and zero's host key for three's files
+   cd ~/infra/ansible; and ansible-playbook playbooks/server-create-restore-key.yml -e target=zero -K
    ```
 
    It refuses until `zero` is on the tailnet, and never replaces a key that exists. It
-   prints the public key, `zero`'s tailnet address and the key's fingerprint. Send the infra
-   agent all three: it commits the key and the address into
-   `hosts/three/leap/system/backup-authorized-keys`, and checks the key, which wraps on the
-   phone's screen, against the fingerprint. Until it has, `make-stick` refuses `three`'s
-   stick.
+   prints the public key, `zero`'s tailnet address, `zero`'s ssh host key and both
+   fingerprints. Send the infra agent all of it: it commits the key into
+   `hosts/three/leap/system/restore-authorized-keys` and the host key into
+   `hosts/three/leap/system/zero-known-hosts`, checking each, which wraps on the phone's
+   screen, against its fingerprint. Until it has, `make-stick` refuses `three`'s stick, and
+   three's pull cannot connect. (It replaced `server-create-backup-key.yml` on 2026-11-19;
+   that play's `/root/.ssh/mirror-backup`, made on 2026-11-18, is deleted once the pull
+   works.)
 5. **`rsync` on the Alpine hosts:** `ansible-playbook playbooks/server-install-packages.yml
    --check --diff -K` to read what it would install, then without `--check`.
 6. **The new `PermitOpen`** (it adds `three`'s `.103`) on `two`, then `one`, then `zero`,
@@ -200,7 +204,10 @@ Over ssh, from the phone, any day before. Each is a step a slice would otherwise
    # on the host whose second session failed: put back the sshd drop-in from the newest backup, and reload
    set b (sudo sh -c 'ls -d /root/.infra-backups/*/*/10-infra.conf' | tail -n 1); and echo $b; and sudo cp -a $b /etc/ssh/sshd_config.d/10-infra.conf; and sudo rc-service sshd reload
    ```
-7. **The ntfy topic** for the backup's age alert, by `server-store-backup-ntfy-url.yml`:
+7. **Not needed for now: the ntfy topic** for the backup's age alert. The alert is not
+   used since `three` pulls the backup; the owner deferred it to a fleet-wide dead man's
+   switch ([`three-backup-pull.md`](three-backup-pull.md)). Kept for that design, by
+   `server-store-backup-ntfy-url.yml`:
 
    ```fish
    # on the phone: store the ntfy topic's URL on zero, root's alone, and send it one test message
@@ -384,35 +391,204 @@ visit, step 4); `one`'s old board free; a card written and labelled `three`.
    `ssh three` answers through the tunnel, the infra agent drops `ansible_host` from the
    inventory.
 5. **Erase the stick,** once `ssh three` answers through the tunnel.
-6. **The backup.** Send the infra agent `three`'s address from `tailscale ip -4`; it fills
-   it into `mirror-backup` and writes the install for `zero` of `mirror-backup` and
-   `mirror-backup-age-check`. Then the first push, detached, so a dropped ssh session does not end
-   it:
+6. **The backup** ([`three-backup-pull.md`](three-backup-pull.md)), in this order:
+   1. `three`'s side, steps 1 to 5 of [`hosts/three/leap/README.md`](../hosts/three/leap/README.md)
+      § The backup: the layout on the array, the old push's files gone, the restore user,
+      the pull key, whose public half goes to the infra agent for `zero`'s mirror line, and
+      the files.
+   2. The move on `zero`, below.
+   3. `zero`'s side, [`hosts/zero/system/README.md`](../hosts/zero/system/README.md)
+      § The backup: snapper, the mirror user, the files, and the first snapshot.
+   4. The first pull, step 6 of `three`'s README § The backup: over the LAN with no rate
+      limit, started without waiting, so a dropped session does not end it. About 93 GB,
+      so hours. A pull that stops is finished by the next one, since `current/` keeps what
+      arrived; no snapshot is taken of it.
 
-   ```fish
-   # on zero: start the first push to three now rather than at 04:00, detached from this session; it seeds about 120 GB and runs for hours
-   sudo sh -c 'setsid nohup /etc/periodic/hourly/mirror-backup now </dev/null >/dev/null 2>&1 &'
-   ```
-
-   If it stops before it finishes, `three`'s next snapshot run clears what it staged and
-   the 04:00 run starts over.
-
-**Checks:** `pgrep -a rsync` on `zero` lists the push, and `sudo du -sh
-/media/mirror/incoming` on `three` climbs; `free -m` on `three` stays clear of its swap. The
-next morning, `sudo cat /var/lib/mirror-backup/last-success` on `zero` is recent, and
-`three` has a snapshot dated today.
+**Checks:** `journalctl -fu mirror-pull` on `three` shows the pull under way, and `sudo du
+-sh /media/mirror/received-backups/immich/current` climbs; `free -m` on `three` stays clear
+of its swap. Once it ends, `sudo snapper --no-dbus -c received-immich list` on `three`
+lists one snapshot, `pulled <N>`, and `cat
+/media/mirror/received-backups/immich/last-pulled` names the same `<N>`.
 
 **Way back:** none needed: nothing depends on `three`. Power it off.
 
+## The move on `zero`
+
+`immich-data` and `immich-db` become one subvolume, `immich`, mounted at `/media/immich`,
+with `data/` and `db/` in it, so one snapshot holds the library and Postgres at the same
+instant ([`three-backup-pull.md`](three-backup-pull.md)). Copies on the same filesystem by
+reflink, which take seconds and no extra space; the old subvolumes are only read, and kept
+until slice 4 has passed. Syncthing is not touched. Every block after `ssh zero`.
+
+| On the array (top level) | What | In a snapshot of `immich` |
+|---|---|---|
+| `immich`, mounted at `/media/immich` | new subvolume | |
+| `immich/data/` | `UPLOAD_LOCATION`: `library`, `upload`, `backups`, `profile` | yes |
+| `immich/data/thumbs/`, `immich/data/encoded-video/` | nested subvolumes, which Immich regenerates | no: empty directories |
+| `immich/db/` | `DB_DATA_LOCATION`, mode 700, Postgres's uid | yes |
+| `immich/.snapshots/` | nested subvolume, root's, 750: snapper's snapshots | no: an empty directory |
+| `media-syncthing` (278), at `/media/syncthing` | unchanged | |
+
+**Before:**
+
+- A database dump off the array, by hand, as [`docs/recovery.md`](../docs/recovery.md)
+  § Immich's database says.
+- The asset count from Immich's web UI (Administration, Server stats), written down.
+- `cp --version` reads GNU coreutils: the move needs GNU `cp` for `--reflink=always` and for
+  `-a`'s ACLs and xattrs (the array mounts with `acl`). If it reads BusyBox, `sudo apk add
+  coreutils` first.
+- A quiet hour: phones queue their uploads while Immich is stopped.
+
+**Steps:**
+
+1. **Read the subvolumes**, and mount the array's top level:
+
+   ```fish
+   # on zero: mount the array's top level, then list its subvolumes
+   sudo mount /mnt/ext; and sudo btrfs subvolume list /mnt/ext
+   ```
+
+   It lists `media-syncthing` 278, `media-immich-db` 279 and `media-immich-data` 280. Any
+   other numbers: stop, and send the list to the infra agent.
+2. **Stop Immich:**
+
+   ```fish
+   # on zero: stop Immich's containers, then list what still runs
+   cd ~/infra/hosts/zero/immich; and sudo docker compose stop; and sudo docker ps --format '{{.Names}}'
+   ```
+
+   No `immich_` name is left in the list.
+3. **Make `immich`, by reflink.** `--reflink=always` fails rather than fall back to a full
+   copy. `db` takes the old root's owner and mode from `cp -a`; `data` takes them from the
+   `/.` copy into it.
+
+   ```fish
+   # on zero: the new subvolume, its db and data by reflink, the two nested subvolumes filled by the same copy
+   sudo btrfs subvolume create /mnt/ext/immich; and sudo cp -a --reflink=always /mnt/ext/media-immich-db /mnt/ext/immich/db; and sudo mkdir /mnt/ext/immich/data; and sudo btrfs subvolume create /mnt/ext/immich/data/thumbs; and sudo btrfs subvolume create /mnt/ext/immich/data/encoded-video; and sudo cp -a --reflink=always /mnt/ext/media-immich-data/. /mnt/ext/immich/data/
+   ```
+
+4. **Prove the copies.** Each prints nothing. A dry run compares names, sizes, times,
+   owners, modes, ACLs and xattrs, and writes nothing. Never with `-x`, which would skip
+   the nested subvolumes as other filesystems.
+
+   ```fish
+   # on zero: compare each copy with its source; both must print nothing
+   sudo rsync -aHAXn -i --delete /mnt/ext/media-immich-data/ /mnt/ext/immich/data/
+   sudo rsync -aHAXn -i --delete /mnt/ext/media-immich-db/ /mnt/ext/immich/db/
+   ```
+
+5. **`.snapshots`**, a nested subvolume, so no snapshot holds the ones before it. Then the
+   list, whose `immich` line gives the id step 7 needs:
+
+   ```fish
+   # on zero: snapper's snapshot subvolume, root's, mode 750; then the subvolumes with their ids
+   sudo btrfs subvolume create /mnt/ext/immich/.snapshots; and sudo chmod 750 /mnt/ext/immich/.snapshots; and sudo btrfs subvolume list /mnt/ext
+   ```
+
+   Four new lines: `immich`, `immich/data/thumbs`, `immich/data/encoded-video` and
+   `immich/.snapshots`. Send `immich`'s id to the infra agent.
+6. **The new mountpoint, guarded** (CLAUDE.md § Mount guards):
+
+   ```fish
+   # on zero: the bare mountpoint, made immutable; the touch must fail with "Operation not permitted"
+   sudo mkdir /media/immich; and sudo chattr +i /media/immich; and sudo touch /media/immich/x
+   ```
+
+7. **fstab.** The infra agent commits `hosts/zero/system/fstab` with one line in place of
+   the two Immich lines, from this template, with the id from step 5 in place of `<ID>`:
+
+   ```
+   UUID=813c830a-0892-41e8-b39b-32d661c79e2c	/media/immich			btrfs	nofail,subvolid=<ID>,noatime,acl,discard=async							0 0
+   ```
+
+   The other options are the old lines' less `autodefrag`, which the same file already drops
+   from every line on the array. Then:
+
+   ```fish
+   # on zero: install the new fstab; the dry run must show only the Immich lines and the autodefrag removals
+   cd ~/infra; and git pull --ff-only; and bin/install-system-file fstab
+   sudo bin/install-system-file fstab --commit --allow-content-change
+   ```
+
+   ```fish
+   # on zero: unmount the old Immich subvolumes, mount the new one, drop autodefrag from the whole filesystem, and read the options back
+   sudo umount /media/immich-data /media/immich-db; and sudo mount /media/immich; and sudo mount -o remount,noautodefrag /media/immich; and grep ' /media/immich \| /media/syncthing ' /proc/mounts
+   ```
+
+   btrfs holds `autodefrag` for the whole filesystem, not per mount, so the remount drops
+   it from `/media/syncthing` too; neither line in the output names it.
+8. **Immich's `.env`.** In `~/infra/hosts/zero/immich/.env`:
+   `UPLOAD_LOCATION=/media/immich/data` and `DB_DATA_LOCATION=/media/immich/db`. The infra
+   agent changes `.env.example` and the docs that name the old paths to match, in the same
+   commit as the fstab (`three-backup-pull.md` § Changes at the move).
+9. **Start.** Immich's bind mounts change, so its containers are recreated, by the redeploy
+   play from the phone; the dump was taken before, and the hook cannot dump a stopped
+   database:
+
+   ```fish
+   # on the phone: redeploy Immich on its new paths, without the pre-deploy dump
+   cd ~/infra/ansible; and ansible-playbook playbooks/server-deploy-compose.yml -e deployment=immich -e immich_dump=false -K
+   ```
+
+   ```fish
+   # on zero: unmount the array's top level, which nothing needs now
+   sudo umount /mnt/ext
+   ```
+
+**Checks:** `sudo docker inspect immich_server immich_postgres --format '{{range
+.Mounts}}{{.Source}} {{end}}'` names `/media/immich/data` and `/media/immich/db`. `sudo docker
+logs immich_postgres` shows an existing cluster starting ("database system was shut down
+at"), never `initdb`. The web UI's asset count matches the one written down. `sudo
+bin/check-mount-guards` reads ok for `/media/immich`. Then `zero`'s side of the backup
+(`hosts/zero/system/README.md` § The backup).
+
+**Way back**, while nothing new has been uploaded: stop Immich, put the old `.env` lines
+back, revert the fstab commit and install it, `sudo umount /media/immich; and sudo mount
+/media/immich-data; and sudo mount /media/immich-db`, and redeploy with `immich_dump=false`.
+The move only read the old subvolumes. Uploads made after the switch exist only in the new
+one: copy them across with rsync before going back.
+
+**Later**, after slice 4: measure with `sudo btrfs filesystem du -s`, then `sudo btrfs
+subvolume delete` `media-immich-data` and `media-immich-db`, and `chattr -i` and `rmdir` the
+two old bare mountpoints. Being reflinked, they free only what has changed since.
+
 ## Slice 4: the backup proven
 
-1. **A restore**, as [`hosts/three/leap/README.md`](../hosts/three/leap/README.md) § The
-   backup says, of Immich's library from today's snapshot into `/media/mirror/restore/`.
-   Then compare it with zero's: `sudo find /media/mirror/restore/library -type f | wc -l` on
-   `three` against `sudo find /media/immich-data/library -type f | wc -l` on `zero` (a few
-   more on `zero` are uploads since the push), and `sudo stat` one file on each for its
-   owner and mode. Then `sudo rm -rf /media/mirror/restore`.
-2. **Syncthing on `three`,** if `free -m` showed room through the seeding:
+Once, after the first pull, and again only after a change to the backup path, such as `zero`
+moving to Leap.
+
+1. **The whole tree.** On `zero`, through the restore module: a dry run with checksums
+   that compares `three`'s snapshot of the pull with the `zero` snapshot it pulled, every
+   file's contents, owner, mode, time and symlink. `sudo snapper --no-dbus -c
+   received-immich list` on `three` gives `three`'s newest number, and its description,
+   `pulled <M>`, the `zero` snapshot:
+
+   ```fish
+   # on zero: compare three's snapshot N with zero's snapshot M through the restore module; it prints nothing when they match; put the numbers in place of N and M
+   sudo rsync -naHAXc --numeric-ids -i --delete --exclude=/.snapshots --exclude=/data/thumbs --exclude=/data/encoded-video -e 'ssh -i /root/.ssh/restore' restore@100.101.45.78::backups/immich/current/.snapshots/N/snapshot/ /media/immich/.snapshots/M/snapshot/
+   ```
+
+   It reads every file on both boxes, so it takes a while, and prints nothing. The first
+   connection asks to accept `three`'s host key: check its fingerprint against the one
+   `make-stick` printed. The two placeholders are left out because btrfs makes up their
+   times.
+2. **The database.** On `three`, a reflink copy of the snapshot's `db`, which costs no space,
+   then a throwaway container of the Postgres image in `deployments/immich/compose.yaml`
+   (its digest too), with no network, on that directory. Its entrypoint gives the files to
+   its own user before it starts:
+
+   ```fish
+   # on three: copy the db of snapshot N by reflink, and start Immich's Postgres image on it with no network; put the image and digest from deployments/immich/compose.yaml in place of IMAGE
+   sudo cp -a --reflink=always /media/mirror/received-backups/immich/current/.snapshots/N/snapshot/db /media/mirror/restore-db; and sudo docker run -d --name restore-check --network none -v /media/mirror/restore-db:/var/lib/postgresql/data IMAGE
+   sudo docker logs -f restore-check
+   ```
+
+   The log reads an automatic recovery, then "ready to accept connections". Then a count
+   of Immich's assets, `sudo docker exec restore-check psql -U postgres -d immich -tAc
+   'select count(*) from asset'` (`assets` before Immich 1.137), matches the web UI's but for
+   uploads since the snapshot.
+   Then `sudo docker rm -f restore-check; and sudo rm -rf /media/mirror/restore-db`.
+3. **Syncthing on `three`,** if `free -m` showed room through the pull:
    `ansible-playbook playbooks/server-deploy-compose.yml -e deployment=syncthing-three -K`.
    Then its GUI, behind an Access login, with one play from the phone:
 
@@ -431,11 +607,14 @@ next morning, `sudo cat /var/lib/mirror-backup/last-success` on `zero` is recent
    phone and log in with one of those addresses. A "Host check error" page means the tunnel config lacks the
    `httpHostHeader` that `hosts/three/leap/README.md` § After the first boot, step 3, gives
    it. Watch `free -m` for a day.
-3. **A lock and an unlock,** to see both commands work on the real drive: the lock prints
-   `locked`, and the unlock asks for the passphrase again.
+4. **A lock and an unlock,** to see both commands work on the real drive: the lock prints
+   `locked`, and the unlock asks for the passphrase again and starts the pull's timer.
+5. **A restore of Immich itself**, if one is ever run from this: `thumbs` and
+   `encoded-video` come back empty, and Immich checks each of its folders for an empty
+   `.immich` file before its first start, so one is put in each.
 
-**Checks:** the counts match but for new uploads, the owner and mode match, and Syncthing's
-GUI answers.
+**Checks:** step 1 prints nothing, step 2's count matches but for new uploads, and
+Syncthing's GUI answers.
 
 **Way back:** for Syncthing, `sudo docker compose down` in its deployment; nothing else
 changes.
@@ -443,8 +622,9 @@ changes.
 ## After the visit
 
 Over ssh: the dev hub moves to `one`, at a quiet time and not in a slice; podman later.
-Before `three` ships, the tailnet's policy limits what each tagged box reaches: `zero` only
-`three`'s sshd, for the backup, and `three` nothing of `zero`'s (`decisions.md`, filed in
-the phase table).
+Before `three` ships, the tailnet's policy limits what each tagged box reaches: `three`
+only `zero`'s sshd, for the pull, and `zero` only `three`'s sshd, for restores (filed in the
+phase table). A policy written to the push's old shape, `three` reaching nothing of
+`zero`'s, would stop the pull.
 `three` ships to Singapore at a date the owner picks, after
 [`hosts/three/leap/README.md`](../hosts/three/leap/README.md) § Before three ships.

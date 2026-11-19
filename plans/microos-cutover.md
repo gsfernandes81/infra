@@ -109,7 +109,9 @@ login as root is refused with a valid key in place.
    secrets, and reboots through `transactional-update`. Disks hot-added after boot test
    `nofail`, `RequiresMountsFor=` and the mount guards against late USB disks. bcache
    under btrfs RAID1 on virtual disks tests `zero`'s assembly.
-6. **The backup's pieces, as tracked files, written 2026-11-04** (`hosts/three/leap/`,
+6. **The backup's pieces, as tracked files, written 2026-11-04, and replaced 2026-11-19** by
+   the pull ([`three-backup-pull.md`](three-backup-pull.md)), which the same job proves. The
+   push as it was: (`hosts/three/leap/`,
    `hosts/zero/system/mirror-backup*`), and proved by the `host` job's `three` run:
    `three`'s `backup` user and its one `authorized_keys` line, the snapshot timer that
    skips a running rsync, the LUKS unlock command, and `zero`'s cron job and backup-age
@@ -278,7 +280,9 @@ The owner settled the open calls on 2026-11-02.
 1. **Names follow the SD cards**, and `zero` stays on Alpine this visit (*The slices*).
 2. **Updates are by hand on every host, as a habit** (`decisions.md`).
 3. **`three`'s backup is rsync pushed from `zero`, with snapshots on `three`, and its
-   array is LUKS, unlocked by hand** (`decisions.md`, [`three.md`](three.md)).
+   array is LUKS, unlocked by hand** (`decisions.md`, [`three.md`](three.md)). The push
+   became a pull of `zero`'s snapper snapshots on 2026-11-19
+   ([`three-backup-pull.md`](three-backup-pull.md)).
 4. **`three` also runs Syncthing for access from Asia**, deferred if its memory proves
    short ([`three.md`](three.md)).
 5. **Leap 16.1 in its Immutable mode on `zero`, `one` and `three`; Alpine on `two`, and

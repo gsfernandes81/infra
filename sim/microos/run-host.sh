@@ -6,7 +6,9 @@
 #
 # Usage: sim/microos/run-host.sh <workdir> <host>
 # It writes only inside <workdir>, except one loop mount under sudo to make the stand-in
-# SSD's subvolumes. Every check prints PASS or FAIL; any FAIL fails the run.
+# SSD's subvolumes, and for three a loop device, two mounts and two containers on the
+# runner's network, one holding its port 22, for the stand-in for zero (host/three.sh).
+# Every check prints PASS or FAIL; any FAIL fails the run.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
