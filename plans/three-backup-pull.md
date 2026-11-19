@@ -150,7 +150,7 @@ arrives for days.
 # zero: /etc/btrbk/btrbk.conf                     # three: /etc/btrbk/mirror.conf
 timestamp_format         long                     timestamp_format         long
 snapshot_preserve_min    2d                       snapshot_preserve_min    latest
-snapshot_preserve        7d                       snapshot_preserve        14d 8w 12m 3y
+snapshot_preserve        7d                       snapshot_preserve        14d 8w 12m
 volume /mnt/ext                                   volume /media/mirror/received-backups
   snapshot_dir snapshots/immich                     subvolume immich/current
   subvolume immich                                    snapshot_dir    immich
@@ -230,30 +230,24 @@ as the place on `three`, the simulation's runner-as-`zero` and its Postgres rest
 and the `nosuid,nodev` mount options. Its `mirror-receive`, sudoers file and send script are
 not needed. Draft PR #22's array play is updated to this layout.
 
-## For the owner to decide
+## The owner's answers, 2026-11-19
 
-1. **The design as a whole**, and the reversed key: `three` holds a read-only key to `zero`.
-2. **btrbk's snapshot names.** btrbk joins the name and the time with a fixed dot; its config sets
-   only the name and the time format. It names snapshots `immich.20261120T0400` (its "long"
-   format; there is also `immich.20261120T040000+0000`). The owner asked for
-   `immich-2026-11-20T0400Z`. Taking btrbk's format means no snapshot script to own;
-   keeping the owner's format means a snapshot-and-prune script of about 40 lines on each
-   side instead of btrbk. Recommended: btrbk's format.
-3. **The alert**: the dead man's switch (recommended), or `zero` reading its daemon log.
-4. **When `three` pulls**: polling about every 15 minutes with a few minutes' jitter
-   (`OnUnitInactiveSec`, `RandomizedDelaySec`), pulling only when `zero` has a newer
-   snapshot than `three` holds: the owner's suggestion, recommended over a fixed 05:00. It
-   catches up as soon as `three` is unlocked after a reboot, and does not depend on the two
-   boxes' clocks agreeing.
-5. **`zero`'s retention**: 7 days, at least 2. Recommended; a long seed over the tailnet
-   that takes more than a day still finds its snapshot.
-6. **How `zero`'s read-only daemon reads everything**: as `mirror` with only
-   `CAP_DAC_READ_SEARCH`, through one sudoers line and `setpriv` (recommended), or as root
-   with the module read-only (simpler, one line fewer, but a bug in rsync's server would
-   then run as root on the critical box).
-7. **`three`'s retention ladder**: one snapshot a day for 14 days, a week for 8 weeks, a
-   month for 12 months (which covers a quarter), a year for 3 years: btrbk's
-   `14d 8w 12m 3y`, close to restic's and borg's usual daily, weekly, monthly and yearly
-   keeps and to Time Machine's hourly-daily-weekly ladder. btrbk has no quarter step.
-   Recommended; the numbers are the owner's.
-8. **`zero`'s read-only access to its own backups**, the owner's suggestion: recommended.
+1. **The design, and the keys: approved.** `three` reads from `zero` and `zero` reads from
+   `three`, both read-only; neither holds a key that can write to the other.
+2. **Snapshot names:** btrbk's format is acceptable if btrbk is used. Whether snapper
+   replaces btrbk is open (below).
+3. **The alert: deferred.** The owner wants a dead man's switch across the whole fleet, as
+   a mesh, from a prebuilt tool, designed separately later. Until then nothing alerts
+   when the pull stops; the gap is filed in the phase table.
+4. **Polling** about every 15 minutes with jitter: agreed.
+5. **`zero`'s retention**, 7 days and at least 2: agreed.
+6. **`zero`'s daemon** as `mirror` with only `CAP_DAC_READ_SEARCH`: agreed.
+7. **`three`'s retention:** no yearly step. Daily for 14 days, weekly for 8 weeks,
+   monthly for 12 months (btrbk `14d 8w 12m`), or snapper's equivalent with its quarterly
+   step if snapper is chosen.
+8. **`zero`'s read-only access to its own backups:** agreed (decision 1).
+
+**Still open: snapper or btrbk.** `zero` ends on openSUSE, where snapper is native, and the
+owner strongly prefers snapper on both boxes, so the snapshot configuration carries over
+unchanged when `zero` moves instead of being rebuilt. Whether snapper runs soundly on
+`zero`'s Alpine and OpenRC is being investigated; btrbk is the fallback if it does not.
