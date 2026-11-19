@@ -31,7 +31,8 @@
 #   4. Notes the ID of every subvolume on the array and of every earlier snapshot, by name.
 #   5. Receives with --chroot and -e, which ends at the stream's end marker.
 #   6. Checks that every earlier snapshot is still at its name with its ID. If one moved or
-#      vanished, it stops at once, touching nothing, for a person to look at.
+#      vanished, it stops at once, touching nothing, for a person to look at. The renamed
+#      snapshot is still a subvolume in the directory, so later receives go on and keep it.
 #   7. Checks that the receive succeeded and that exactly one subvolume is new on the
 #      array, at the top of the directory, named <name>-<stamp> as zero names them,
 #      read-only, with a received UUID, and nothing else is new in the directory.
@@ -144,7 +145,7 @@ for n in "${!kept[@]}"; do
 	id=$(id_of "$dir/$n") && [ "$id" = "${kept[$n]}" ] || moved+=("$(shown "$n") (ID ${kept[$n]})")
 done
 if [ "${#moved[@]}" -gt 0 ]; then
-	die "STOPPED: earlier snapshots moved or vanished during this receive: ${moved[*]}. The stream renamed them; nothing has been deleted or changed by this script. A person must look at $dir before the next receive."
+	die "STOPPED: earlier snapshots moved or vanished during this receive: ${moved[*]}. The stream renamed them; this script has deleted and changed nothing, and zero is not told the send succeeded. Each renamed snapshot is still kept, and pruned by its age; a person should look at $dir."
 fi
 
 # 7: what is new.

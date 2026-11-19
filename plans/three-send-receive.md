@@ -218,8 +218,9 @@ A compromised `zero` can send new snapshots, junk included, and fill the array; 
 array refuses sends and the age check reports it. It cannot change what is in a received
 snapshot, which is read-only, or delete one, read anything back, or run anything else. A
 crafted stream can rename earlier snapshots inside their name's directory, or leave a file or
-directory there; `mirror-receive` then stops, deletes only what is new, and leaves the rest
-for a person, and receives of that name wait until the person has looked.
+directory there. `mirror-receive` then stops that run, deletes only what is new, and leaves
+the rest for a person. A renamed snapshot is still kept, and later receives go on; a
+directory it could not remove stops receives of that name until a person removes it.
 
 A received snapshot is never made writable (`btrfs property set ... ro false`): that clears
 its received UUID and ends the chain of incremental sends. A restore works from a reflink

@@ -2647,9 +2647,10 @@ receive side, the send side and the simulation's seven checks were built 2026-11
   deletes only what is new. A compromised `zero` can send new snapshots, junk included, and
   fill the array. It cannot change what is in a received snapshot, which is read-only, or
   delete one, read anything back, or run anything else. It can rename earlier snapshots
-  within the directory, or leave a directory with something in it there; either stops that
-  name's receives until a person looks, which a compromised `zero` could do anyway by not
-  sending. The simulation sends hand-built streams that try the symlink, the rename and a
+  within the directory: that run stops, the renamed snapshots are still kept, and later
+  receives go on. It can leave a directory with something in it there, which stops that
+  name's receives until a person removes it; a compromised `zero` could stop them anyway by
+  not sending. The simulation sends hand-built streams that try the symlink, the rename and a
   dot-named subvolume.
 - **The proof of a send is `three`'s answer, not an exit status.** `mirror-receive` prints
   `received <name>-<stamp> <received UUID>`, and only that line, with the local snapshot's

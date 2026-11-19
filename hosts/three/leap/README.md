@@ -165,9 +165,10 @@ deletes anything an interrupted stream left before the next receive. The backup 
 nothing on the array, and nothing comes back over the key but that one line.
 
 `mirror-receive` treats each stream as hostile: it acts only on subvolume IDs, never on a
-path the stream could have named. If a receive renamed an earlier snapshot, or left a
-symlink, file or directory it could not remove, it says what in its last line and stops
-receiving that name until a person has looked. After `ssh three`, `sudo ls -lA
+path the stream could have named. If a stream renamed an earlier snapshot, the run stops
+and says which; the snapshot is still kept under its new name, and later receives go on. If
+a stream left a directory it could not remove, receives of that name stop until a person
+has looked. After `ssh three`, `sudo ls -lA
 /media/mirror/received-backups/immich` shows what is there; an entry that is not one of
 zero's snapshots is the stream's, and comes out with `sudo rm` for a file or link, or
 `sudo btrfs subvolume delete` for a subvolume.
