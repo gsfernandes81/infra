@@ -142,8 +142,11 @@ on "grep \"^depinfo_\$(grep \"_service='dmcrypt'\" /run/openrc/deptree | cut -d_
 sed 's/^/    | /' "$work/deptree"
 grep -q "_iafter_[0-9]*='bcache-register'" "$work/deptree" && grep -q "_iafter_[0-9]*='modules'" "$work/deptree" \
 	&& pass "the deptree has dmcrypt after bcache-register and modules" || fail "the deptree lacks dmcrypt's iafter lines"
-grep -q "_ibefore_[0-9]*='btrfs-scan'" "$work/deptree" && grep -q "_ibefore_[0-9]*='localmount'" "$work/deptree" \
-	&& pass "the deptree has dmcrypt before btrfs-scan and localmount" || fail "the deptree lacks dmcrypt's ibefore lines"
+# localmount and fsck carry `keyword -docker`, so OpenRC leaves them out of a container's
+# deptree altogether (the first run showed checkfs, btrfs-scan and local); on zero they are
+# there. btrfs-scan is the one that matters for the array, and it has no such keyword.
+grep -q "_ibefore_[0-9]*='btrfs-scan'" "$work/deptree" \
+	&& pass "the deptree has dmcrypt before btrfs-scan" || fail "the deptree lacks dmcrypt's ibefore btrfs-scan"
 on 'openrc boot' > "$work/boot.log" 2>&1
 sed 's/^/    | /' "$work/boot.log"
 order=$(on 'cd /run/openrc/started && python3 -I -c "

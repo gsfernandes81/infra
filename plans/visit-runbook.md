@@ -564,7 +564,8 @@ through `ssh dev`.
 
    It reads right when each install ends `post-install checks: ok`, and dmcrypt's lines
    include an `iafter` of `bcache-register` and of `modules`, and an `ibefore` of
-   `btrfs-scan` and of `localmount`. Nothing has restarted.
+   `btrfs-scan`, `checkfs` and `localmount` (the CI container shows no `localmount`, which
+   OpenRC leaves out of a container; on `zero` it is there). Nothing has restarted.
 
 9. **`sdb` out of the cache set.** Put `sdb`'s backing name from step 2 (`sdb`, or its
    partition) in place of `SDB`:

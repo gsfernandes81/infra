@@ -86,7 +86,8 @@ device that stands in for `zero`'s new bcache device. It runs:
   over cryptsetup-openrc's own `/etc/conf.d/dmcrypt`, with `bcache-register` and
   `dm-crypt.conf`;
 - OpenRC's recorded order for `dmcrypt`, read with the runbook's own `grep` of the
-  deptree; then the boot runlevel started for real, which must start `bcache-register`,
+  deptree (after `bcache-register` and `modules`, before `btrfs-scan`; `localmount` and
+  `fsck` carry `keyword -docker`, so a container's deptree leaves them out); then the boot runlevel started for real, which must start `bcache-register`,
   then `dmcrypt`, which opens `data-4` with the key file, then `btrfs-scan`, which
   registers it; and the btrfs inside reading back;
 - `dmcrypt` with the key file missing, and with a wrong one: each must return without
