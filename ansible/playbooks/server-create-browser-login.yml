@@ -357,9 +357,10 @@
           vars:
             cf_hostname: "{{ web_hostname }}"
             cf_tunnel_id: "{{ web_tunnel_id }}"
+            # Cloudflare refuses a comment over 100 characters (_cf-dns.yml checks it first).
             cf_dns_comment: >-
-              {{ web_sub }} on {{ web_host }}'s tunnel, behind an Access login —
-              ansible/playbooks/server-create-browser-login.yml
+              {{ web_sub }} on {{ web_host }}, behind an Access login —
+              server-create-browser-login.yml
             cf_dns_if_refused: >-
               The login is in place in front of it, and a re-run tries the record again.
 

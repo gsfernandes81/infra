@@ -174,6 +174,9 @@ class Handler(BaseHTTPRequestHandler):
                      if r["name"] == b.get("name") and r["type"] != b.get("type")]
             if clash:
                 return self.reply(400, envelope(errors=[{"code": 81053, "message": "An A, AAAA, or CNAME record with that host already exists."}]))
+            # As Cloudflare does, on 2026-11-19: a comment over 100 characters is refused.
+            if len(b.get("comment") or "") > 100:
+                return self.reply(400, envelope(errors=[{"code": 9313, "message": "DNS record comment exceeds the maximum length of 100 characters."}]))
             rid = p.rsplit("/", 1)[1] if method == "PUT" else str(uuid.uuid4())
             if method == "PUT" and rid not in STATE["records"]:
                 return self.reply(404, envelope(errors=[{"code": 81044, "message": "Record not found"}]))

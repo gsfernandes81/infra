@@ -57,6 +57,21 @@
   changed_when: true
   when: cf_dns_ok
 
+- name: "If wrong or missing: check the comment fits"
+  # Cloudflare refuses a record whose comment is over 100 characters (error 9313), and
+  # only after the play has done everything before the write. Checked here instead, before
+  # any call, so a long name fails with a sentence rather than half-way through. Found on
+  # 2026-11-19, when syncthing-three's comment came to 104.
+  ansible.builtin.assert:
+    that: (cf_dns_comment | length) <= 100
+    fail_msg: >-
+      The DNS comment for {{ cf_hostname }} is {{ cf_dns_comment | length }} characters, and
+      Cloudflare takes at most 100: "{{ cf_dns_comment }}". Shorten cf_dns_comment in the
+      play that sets it. Nothing was written.
+    success_msg: The DNS comment for {{ cf_hostname }} fits.
+  delegate_to: localhost
+  when: not cf_dns_ok
+
 - name: "If wrong or missing: write the tunnel's CNAME"
   # PUT when it exists rather than skipping. A record left pointing at a PREVIOUS
   # tunnel resolves perfectly and reaches nothing — the same failure as above, wearing
