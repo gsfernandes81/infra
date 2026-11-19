@@ -30,7 +30,7 @@ the far side of the connection.
    data/encoded-video (nested│ subvol: left out)  │   │    writable)      │ owners in xattrs
    db/     Postgres          │                    │   ├── immich.<ts>  ◄─┤ btrbk, after
                              ▼                    │   ├── immich.<ts>    │ snapshot, ro,
- snapshots/immich/                                │   └── …  90 days     │ after a good pull
+ snapshots/immich/                                │   └── …  a ladder    │ after a good pull
    immich.<ts>   (ro) ◄── newest ── pulled ───────┼──────────────────────┘
    immich.<ts>   (ro)       over ssh, read-only   │
    …  last 7                                      │
@@ -38,7 +38,7 @@ the far side of the connection.
  subvolume media-syncthing ──┐                    ├── syncthing/
    (share)                   │ 04:00              │   ├── current/   ◄─────┐
    config/   (nested subvol: │ left out)          │   ├── syncthing.<ts> ◄─┤ snapshot after
-                             ▼                    │   └── …  90 days     │ a good pull
+                             ▼                    │   └── …  a ladder    │ a good pull
  snapshots/syncthing/                             │                      │
    syncthing.<ts> (ro) ◄── newest ── pulled ──────┼──────────────────────┘
    …  last 7                                      │
@@ -55,9 +55,11 @@ Why each part is shaped this way:
 - **Nested subvolumes are left out of a snapshot**, so `thumbs`, `encoded-video` and
   Syncthing's `config` (which holds `zero`'s device key) never leave `zero`. In the
   snapshot they are empty directories, and rsync copies them as empty directories.
-- **`current/` is an ordinary writable copy** that rsync updates in place each night.
-  `--delay-updates` keeps it whole until the end of a run. The read-only snapshots beside
-  it are the history.
+- **`current/` is an ordinary writable copy** that rsync updates in place (`--inplace`),
+  so a changed file rewrites only its changed blocks. The read-only snapshots beside it are
+  the history. btrfs shares every unchanged block between them by itself, so each snapshot
+  costs only what changed since the one before; a photo kept in 30 snapshots is stored
+  once.
 - **`three` snapshots only after a good pull**, so no snapshot holds half a run, and the
   snapshot is named for the time `three` took it.
 
@@ -69,13 +71,21 @@ Why each part is shaped this way:
           run as user `mirror` with one extra capability: read any file
           from="<three's tailnet address>", restrict
 
- zero ──────────────────────────────────────► three
-          nothing: zero holds no key to three
+ zero ──ssh, key /root/.ssh/restore────────► three
+          forced command: rsync's daemon, read-only module `backups` over
+          received-backups, `fake super` on so it sends real owners and modes,
+          run as user `restore` with the one read-any-file capability
+          from="<zero's tailnet address>", restrict
 ```
 
-- **A compromised `zero`** cannot reach `three` at all. The worst it can do is stop taking
-  snapshots or serve bad data; `three`'s history from before then is untouched, because
-  only `three`'s root makes or deletes those snapshots.
+- **A compromised `zero`** can only read its own backups on `three`; it cannot write,
+  delete or run anything there. The worst it can do is stop taking snapshots or serve bad
+  data; `three`'s history from before then is untouched, because only `three`'s root makes
+  or deletes those snapshots.
+- **Restores need nothing set up on the day** (the owner, 2026-11-19): `zero` holds a
+  read-only key to its own backups. A restore onto `zero`, as root, is
+  `rsync -aHAX --numeric-ids restore@three::backups/immich/<snapshot>/ <target>/`, and the
+  module's `fake super` turns the kept owners and modes back into real ones.
 - **A compromised `three`** can read what the module serves, which is `zero`'s own backup
   data, the thing `three` exists to hold. It cannot write to `zero`, delete a snapshot, or
   run anything. The rsync daemon on `zero` runs as an unprivileged user with
@@ -92,10 +102,11 @@ Why each part is shaped this way:
   is parsed without privilege. Owners and modes are kept in an xattr (`--fake-super`), as
   in the original rsync design.
 
-This reverses the direction of the one key the fleet allows between boxes. Today's rule is
-that no box holds a key to another, with `zero`'s backup key to `three` as the agreed
-exception. Here the exception is `three`'s read-only key to `zero` instead. The owner said
-on 2026-11-19 that the rule is theirs to relax; this needs their word.
+This turns the one key the fleet allows between boxes into two read-only ones. Today's
+rule is that no box holds a key to another, with `zero`'s backup key to `three` as the
+agreed exception. Here `three` holds a read-only key to `zero`'s snapshots and `zero` a
+read-only key to its own backups; neither can write to the other. The owner said on
+2026-11-19 that the rule is theirs to relax; this needs their word.
 
 ## The pieces, and how much of each we own
 
@@ -109,8 +120,9 @@ on 2026-11-19 that the rule is theirs to relax; this needs their word.
 | `zero` | `mirror-backup-age-check` | kept or replaced, see the alert below | about 30 lines today |
 | `three` | `mirror-pull` | picks the newest snapshot of each name and runs rsync | about 30 lines of shell |
 | `three` | `mirror-pull.service` and `.timer` | systemd runs it as `backup` about every 15 minutes with a few minutes' jitter, only while the array is mounted; it never starts a second run while one is still pulling | two small units |
-| `three` | **btrbk**, snapshot-only | prebuilt; snapshots `current/` after a good pull and prunes to 90 days | a config of about 10 lines |
+| `three` | **btrbk**, snapshot-only | prebuilt; snapshots `current/` after a good pull and prunes to the retention ladder | a config of about 10 lines |
 | `three` | `mirror-snapshot.service` | systemd runs btrbk as root, started only by a successful pull (`OnSuccess=`) | one small unit |
+| `three` | `restore` user, key line, sudoers line, `rsyncd-restore.conf` | `zero`'s read-only module over its own backups | about 12 lines |
 
 No Python is needed: the only script with logic, `mirror-pull`, is a loop of three steps.
 Everything with real logic (retention, snapshot naming, deciding what to prune) is btrbk's,
@@ -123,7 +135,7 @@ simulation's package check confirms both before the build relies on them.
 for name in immich syncthing:
     newest = rsync --list-only mirror@zero::snapshots/<name>/  | the last name, sorted
     if newest is the name in last-pulled-<name>: nothing new, next name
-    rsync -aHAX --numeric-ids --fake-super --delete --delete-delay --delay-updates
+    rsync -aHAX --numeric-ids --fake-super --delete --inplace
           --timeout=900 -e "ssh <pinned options>"
           mirror@zero::snapshots/<name>/<newest>/  /media/mirror/received-backups/<name>/current/
     exit 24 (files vanished) counts as success; anything else stops the run
@@ -141,7 +153,7 @@ arrives for days.
 # zero: /etc/btrbk/btrbk.conf                     # three: /etc/btrbk/mirror.conf
 timestamp_format         long                     timestamp_format         long
 snapshot_preserve_min    2d                       snapshot_preserve_min    latest
-snapshot_preserve        7d                       snapshot_preserve        90d
+snapshot_preserve        7d                       snapshot_preserve        14d 8w 12m 3y
 volume /mnt/ext                                   volume /media/mirror/received-backups
   snapshot_dir snapshots/immich                     subvolume immich/current
   subvolume immich                                    snapshot_dir    immich
@@ -227,7 +239,8 @@ not needed. Draft PR #22's array play is updated to this layout.
 ## For the owner to decide
 
 1. **The design as a whole**, and the reversed key: `three` holds a read-only key to `zero`.
-2. **btrbk's snapshot names.** btrbk names snapshots `immich.20261120T0400` (its "long"
+2. **btrbk's snapshot names.** btrbk joins the name and the time with a fixed dot; its config sets
+   only the name and the time format. It names snapshots `immich.20261120T0400` (its "long"
    format; there is also `immich.20261120T040000+0000`). The owner asked for
    `immich-2026-11-20T0400Z`. Taking btrbk's format means no snapshot script to own;
    keeping the owner's format means a snapshot-and-prune script of about 40 lines on each
@@ -244,3 +257,9 @@ not needed. Draft PR #22's array play is updated to this layout.
    `CAP_DAC_READ_SEARCH`, through one sudoers line and `setpriv` (recommended), or as root
    with the module read-only (simpler, one line fewer, but a bug in rsync's server would
    then run as root on the critical box).
+7. **`three`'s retention ladder**: one snapshot a day for 14 days, a week for 8 weeks, a
+   month for 12 months (which covers a quarter), a year for 3 years: btrbk's
+   `14d 8w 12m 3y`, close to restic's and borg's usual daily, weekly, monthly and yearly
+   keeps and to Time Machine's hourly-daily-weekly ladder. btrbk has no quarter step.
+   Recommended; the numbers are the owner's.
+8. **`zero`'s read-only access to its own backups**, the owner's suggestion: recommended.
