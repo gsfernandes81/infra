@@ -2655,7 +2655,12 @@ Alpine copies for `one` too, since `one` keeps both.
 - **Syncthing's share on `zero` is not backed up to `three`** (the owner, 2026-11-19): it
   holds nothing critical.
 - **btrbk owns the snapshot logic on both sides,** to keep the scripts this repo maintains
-  as small as possible (the owner's aim).
+  as small as possible (the owner's aim). ⚠︎SUPERSEDED the same day by the next bullet.
+- **snapper owns the snapshot logic on both boxes** (the owner): native on Leap, where
+  `zero` ends, so its configuration carries over. On `zero`'s Alpine it comes from
+  edge/testing, pinned, run with `--no-dbus` from an hourly periodic script. The pull runs
+  daily at 01:00 at 32 Mbit/s. `autodefrag` leaves the `/media/immich` line, since it
+  unshares snapshot extents (issue #23 for a timed defrag).
 
 ## The lesson worth keeping
 

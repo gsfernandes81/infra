@@ -247,7 +247,29 @@ not needed. Draft PR #22's array play is updated to this layout.
    step if snapper is chosen.
 8. **`zero`'s read-only access to its own backups:** agreed (decision 1).
 
-**Still open: snapper or btrbk.** `zero` ends on openSUSE, where snapper is native, and the
-owner strongly prefers snapper on both boxes, so the snapshot configuration carries over
-unchanged when `zero` moves instead of being rebuilt. Whether snapper runs soundly on
-`zero`'s Alpine and OpenRC is being investigated; btrbk is the fallback if it does not.
+**snapper, not btrbk, on both boxes** (the owner, 2026-11-19, after an investigation of
+snapper on Alpine). `zero` ends on openSUSE, where snapper is native, so its configuration
+carries over unchanged when `zero` moves instead of being rebuilt. These answers supersede
+the btrbk parts of this plan above; the build rewrites them.
+
+- **On `zero`:** snapper from Alpine's edge/testing (`snapper-0.13.1-r0`, the only Alpine
+  package of it), installed once from a signature-checked file and pinned in apk's world, so
+  it gets no updates until `zero` moves to Leap; revisit at Alpine 3.25, where a library
+  change could break it. Run with `--no-dbus`: no D-Bus, no daemon, nothing on the boot
+  path. An hourly periodic script, under `flock`, makes a timeline snapshot and runs
+  timeline and number cleanup. Config `/etc/snapper/configs/immich`: hourly for 24 hours,
+  daily for 7 days; `SNAPPER_CONFIGS=""` in `/etc/snapper/snapper`, so the package's own
+  hourly script, which needs D-Bus, does nothing. `.snapshots` is made by hand, root's,
+  mode 750. Snapshots live at `/media/immich/.snapshots/<N>/snapshot`; `/mnt/ext` stays
+  `noauto`.
+- **The pull: daily at 01:00, rate-limited to 32 Mbit/s** (the owner), not the 15-minute
+  polling first agreed. `three` pulls the newest finished snapshot (the highest `<N>` with
+  an `info.xml`), records N with `info.xml`'s time, and excludes `/.snapshots`. rsync's
+  exit 24 (files vanished) is a failure: a frozen snapshot cannot lose files, so it means
+  the snapshot was deleted mid-pull.
+- **On `three`:** Leap's own snapper, `TIMELINE_CREATE="no"`, the snapshot made by the
+  service a good pull starts. Retention daily 14, weekly 8, monthly 12, no quarterly or
+  yearly step (the 12 monthlies cover a year).
+- **`autodefrag` is dropped** from the `/media/immich` fstab line: it breaks the sharing
+  between snapshots and their data and suits databases badly. A timed manual defrag is to
+  be looked at later, issue #23, which notes that a defrag unshares snapshot extents too.
