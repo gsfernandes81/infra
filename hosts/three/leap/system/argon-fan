@@ -5,60 +5,115 @@
 # infra-name: argon-fan
 # infra-mode: 0755
 #
-# Sets the Argon EON's fan from the CPU's temperature, every 30 s, run by argon-fan.service.
-# The fan's controller is a microcontroller on the Pi's own I2C bus, /dev/i2c-1, at 0x1a:
-# one byte, 0 to 100, is the fan's duty in percent, as Argon's own argononed writes it. With
-# nothing writing, it runs at full speed. The bus needs extraconfig.txt and i2c-dev.conf.
+# Turns the Argon EON's fan on or off from the CPU's and the backup drive's temperatures,
+# run by argon-fan.service. The fan's controller is a microcontroller on the Pi's own I2C
+# bus, /dev/i2c-1, at 0x1a, written one byte at a time as Argon's argononed does. With
+# nothing writing, it runs. The bus needs extraconfig.txt and i2c-dev.conf.
 #
-# The curve follows the CPU only, with a floor that keeps air moving over the WD Red in the
-# same case. Everything the drive is sent arrives through ssh and is written through LUKS,
-# both on this CPU, so a busy drive is a busy, warmer CPU, and the fan rises with it. The
-# drive's own sensor was set aside: drivetemp reads it with ATA commands through the USB
-# bridge, the kind of poll that stalled one's bridge, and smartctl is the same.
+# On or off, never a speed: on this EON, 0 stops the fan, and 20, 50 and 100 sounded the
+# same and read the same on a decibel meter (the owner, 2026-11-19), as Argon's forum
+# reports for the EON. So it writes 0 or 100.
 #
-# Any failure leaves the fan fast, never slow: an unreadable temperature asks for 100 %, a
-# failed write is logged and tried again at the next turn, and a stop sets 100 % on the way
-# out. Python's standard library only, since a package is a reboot on this box.
+# The fan goes ON when the CPU reaches 55 C or the drive 45 C, and OFF only once the CPU
+# is at or below 50 C and the drive at or below 42 C; between the two it stays as it is.
+# A temperature it cannot read counts as hot. The CPU is read every 30 s.
 #
-# To change the curve, edit the numbers below in the repo, then install and restart
+# The drive's temperature is SMART attribute 194, read with smartctl, at a rate set by the
+# disk's own activity: /sys/block/<disk>/stat, which sends the drive nothing, is read every
+# 30 s, and smartctl runs about every 3 minutes after the disk has read or written, and
+# every 30 minutes when it has not, so a room warming the case is still seen. `-n standby`
+# keeps smartctl from waking a spun-down drive; standby counts as cooling, so the last
+# reading is kept. A failed read, or a reading over an hour old, counts as hot. The owner
+# chose this polling (decisions.md § three's fan): a SMART poll stalled one's USB bridge
+# in 2026, but that drive was failing, and this one is new and healthy.
+#
+# The drive is found by the array's LUKS label, which is on the whole disk. Without the
+# label (the drive is not attached) the fan follows the CPU alone, and says so.
+#
+# A stop sets the fan on, and a write that fails is logged once and tried again at the
+# next turn. Python's standard library only, since a package is a reboot on this box.
+# To change a threshold, edit the numbers below in the repo, then install and restart
 # (hosts/three/leap/README.md § The fan).
 
 import fcntl
-import math
 import os
+import re
 import signal
+import subprocess
 import sys
 import time
 
 BUS = "/dev/i2c-1"
 ADDRESS = 0x1A
 I2C_SLAVE = 0x0703  # linux/i2c-dev.h
-SENSOR = "/sys/class/thermal/thermal_zone0/temp"
-INTERVAL = 30  # seconds
+CPU_SENSOR = "/sys/class/thermal/thermal_zone0/temp"
+DRIVE_LABEL = "/dev/disk/by-label/mirror-luks"
+SMARTCTL = "/usr/sbin/smartctl"
 
-FLOOR = 20  # percent, at LOW and below
-LOW = 50.0  # degrees C
-HIGH = 70.0  # degrees C, and 100 % from here up
-HYSTERESIS = 4.0  # degrees C the CPU must cool below a speed's start before it drops
-STEP = 5  # percent; the duty is rounded up to a multiple of it
+INTERVAL = 30  # seconds between turns: the CPU, and a look at the disk's counters
+CPU_ON, CPU_OFF = 55.0, 50.0  # degrees C
+DRIVE_ON, DRIVE_OFF = 45, 42  # degrees C
+POLL_BUSY = 180  # seconds between smartctl runs once the disk has read or written
+POLL_IDLE = 1800  # seconds between smartctl runs while it has not
+STALE = 2 * POLL_IDLE  # a drive reading older than this counts as unknown
+
+STANDBY = re.compile(r"Device is in (STANDBY|SLEEP)")
 
 
 def log(message):
     print(message, flush=True)
 
 
-def duty_for(temp):
-    if temp <= LOW:
-        return FLOOR
-    if temp >= HIGH:
-        return 100
-    duty = FLOOR + (100 - FLOOR) * (temp - LOW) / (HIGH - LOW)
-    return min(100, math.ceil(duty / STEP) * STEP)
-
-
-def read_temp():
-    with open(SENSOR) as f:
+def read_cpu():
+    with open(CPU_SENSOR) as f:
         return int(f.read().strip()) / 1000
+
+
+def find_disk():
+    """The whole disk under the array's LUKS label, as its name in /sys/block, or None
+    without the label. A partition is taken up to its disk, in case the label ever
+    moves onto one."""
+    if not os.path.exists(DRIVE_LABEL):
+        return None
+    name = os.path.basename(os.path.realpath(DRIVE_LABEL))
+    node = os.path.realpath(f"/sys/class/block/{name}")
+    if os.path.exists(os.path.join(node, "partition")):
+        name = os.path.basename(os.path.dirname(node))
+    return name
+
+
+def read_stat(disk):
+    """Sectors read and written, from the kernel's counters: no command to the drive."""
+    with open(f"/sys/block/{disk}/stat") as f:
+        fields = f.read().split()
+    return int(fields[2]), int(fields[6])
+
+
+def parse_smart(text, rc):
+    """('temp', degrees), ('standby', None) or ('error', why), from smartctl -A's output."""
+    if STANDBY.search(text):
+        return "standby", None
+    for line in text.splitlines():
+        fields = line.split()
+        # ID NAME FLAG VALUE WORST THRESH TYPE UPDATED WHEN_FAILED RAW_VALUE, where the raw
+        # value may carry more after the number: "31 (Min/Max 20/45)".
+        if len(fields) >= 10 and fields[0] == "194":
+            m = re.match(r"\d+", fields[9])
+            if m and 0 < int(m.group()) < 100:
+                return "temp", int(m.group())
+    lines = text.strip().splitlines()
+    return "error", (f"no temperature (attribute 194) from smartctl, exit {rc}: "
+                     f"{lines[-1] if lines else 'no output'}")
+
+
+def read_smart(disk):
+    try:
+        out = subprocess.run(
+            [SMARTCTL, "-n", "standby", "-d", "sat", "-A", f"/dev/{disk}"],
+            capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return "error", f"smartctl: {exc}"
+    return parse_smart(out.stdout, out.returncode)
 
 
 def write_duty(duty):
@@ -71,12 +126,155 @@ def write_duty(duty):
         os.close(fd)
 
 
-def describe(exc):
+def describe_write(exc):
     if isinstance(exc, FileNotFoundError) and exc.filename == BUS:
         return (f"no {BUS}: the Pi's I2C bus is off or i2c-dev is not loaded "
                 f"(extraconfig.txt in /boot/efi takes a reboot); trying again every "
                 f"{INTERVAL} s")
-    return f"cannot write the fan's speed to {ADDRESS:#04x} on {BUS}: {exc}; trying again every {INTERVAL} s"
+    return (f"cannot write to the fan's controller, {ADDRESS:#04x} on {BUS}: {exc}; "
+            f"trying again every {INTERVAL} s")
+
+
+def show(drive):
+    if isinstance(drive, int):
+        return f"drive {drive} C"
+    return {"standby": "drive in standby", "absent": "no drive", None: "drive unknown"}[drive]
+
+
+class Fan:
+    """One turn per step(). Every input is a function, so the logic runs against stubs."""
+
+    def __init__(self, now=time.monotonic, cpu=read_cpu, disk=find_disk, stat=read_stat,
+                 smart=read_smart, write=write_duty, say=log):
+        self.now, self.cpu, self.disk, self.stat = now, cpu, disk, stat
+        self.smart, self.write, self.say = smart, write, say
+        self.on = None  # what the controller was last set to: True, False, or not yet
+        self.notes = {}  # the last message of each kind, so each is logged once
+        self.disk_name = None
+        self.forget_drive()
+
+    def note(self, kind, message):
+        """Log a message once, until a different one of its kind (or None) replaces it."""
+        if message is not None and message != self.notes.get(kind):
+            self.say(message)
+        self.notes[kind] = message
+
+    def forget_drive(self):
+        self.reading = None  # the last temperature, and when it was read or confirmed
+        self.read_at = None
+        self.standby = False
+        self.counters = None
+        self.active = False  # read or written since the last smartctl run
+        self.polled_at = None
+        self.failed = False
+        self.logged = None  # the last reading logged
+
+    def drive(self):
+        """The drive's temperature for the decision: degrees, 'standby' (cooling, with no
+        reading yet), 'absent', or None for unknown."""
+        now = self.now()
+        try:
+            disk = self.disk()
+        except OSError as exc:
+            self.note("disk", f"cannot resolve {DRIVE_LABEL}: {exc}")
+            return None
+        if disk is None:
+            self.note("disk", f"no {DRIVE_LABEL}: the array's drive is not attached; "
+                              f"the fan follows the CPU alone")
+            self.disk_name = None
+            self.forget_drive()
+            return "absent"
+        if disk != self.disk_name:
+            self.note("disk", f"drive found at /dev/{disk}, by its LUKS label")
+            self.disk_name = disk
+            self.forget_drive()
+
+        try:
+            counters = self.stat(disk)
+        except (OSError, ValueError, IndexError):
+            counters = None
+        if counters is not None and self.counters is not None and counters != self.counters:
+            self.active = True
+        if counters is not None:
+            self.counters = counters
+
+        since = None if self.polled_at is None else now - self.polled_at
+        if (since is None or since >= POLL_IDLE
+                or ((self.active or self.failed) and since >= POLL_BUSY)):
+            kind, value = self.smart(disk)
+            self.polled_at, self.active = now, False
+            if kind == "temp":
+                self.failed, self.standby = False, False
+                self.reading, self.read_at = value, now
+                self.note("smart", None)
+                if self.logged is None or abs(value - self.logged) >= 2:
+                    self.say(f"drive {value} C")
+                    self.logged = value
+            elif kind == "standby":
+                self.failed = False
+                self.note("smart", "drive in standby; keeping its last reading")
+                self.standby = True
+                if self.reading is not None:
+                    self.read_at = now
+            else:
+                self.failed, self.standby = True, False
+                self.reading = self.read_at = None
+                self.note("smart", f"{value}; the drive's temperature is unknown")
+
+        if self.reading is not None and now - self.read_at <= STALE:
+            return self.reading
+        if self.reading is not None:
+            self.note("smart", f"the drive's last reading is over {STALE // 60} minutes old")
+        if self.standby:
+            return "standby"
+        return None
+
+    def decide(self, cpu, drive):
+        """(on, reason): on is True or False, or the current state, held between the
+        thresholds."""
+        unknown = []
+        if cpu is None:
+            unknown.append("the CPU's temperature is unknown")
+        if drive is None:
+            unknown.append("the drive's temperature is unknown")
+        if unknown:
+            return True, " and ".join(unknown)
+        hot = []
+        if cpu >= CPU_ON:
+            hot.append(f"the CPU is at or above {CPU_ON:g} C")
+        if isinstance(drive, int) and drive >= DRIVE_ON:
+            hot.append(f"the drive is at or above {DRIVE_ON} C")
+        if hot:
+            return True, " and ".join(hot)
+        if cpu <= CPU_OFF and (not isinstance(drive, int) or drive <= DRIVE_OFF):
+            if isinstance(drive, int):
+                return False, f"the CPU is at or below {CPU_OFF:g} C and the drive at or below {DRIVE_OFF} C"
+            if drive == "standby":
+                return False, f"the CPU is at or below {CPU_OFF:g} C and the drive in standby"
+            return False, f"the CPU is at or below {CPU_OFF:g} C, with no drive"
+        if self.on is None:
+            return True, "between the thresholds at the start"
+        return self.on, "between the thresholds"
+
+    def step(self):
+        try:
+            cpu = self.cpu()
+            self.note("cpu", None)
+        except (OSError, ValueError) as exc:
+            cpu = None
+            self.note("cpu", f"cannot read {CPU_SENSOR}: {exc}")
+        drive = self.drive()
+        on, reason = self.decide(cpu, drive)
+        try:
+            self.write(100 if on else 0)
+        except OSError as exc:
+            self.note("write", describe_write(exc))
+            return
+        if on != self.on or self.notes.get("write"):
+            cpu_text = "CPU unknown" if cpu is None else f"CPU {cpu:.1f} C"
+            self.say(f"fan {'on' if on else 'off'}: {reason} ({cpu_text}, {show(drive)})")
+        self.on = on
+        self.note("write", None)
 
 
 def stop(signum, frame):
@@ -86,48 +284,20 @@ def stop(signum, frame):
 def main():
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    duty = None  # what the controller was last set to
-    since = None  # the temperature the current duty was chosen at
-    failing = None  # the last write failure logged, so each is logged once
-    unread = None  # and the last failure to read the temperature
-    log(f"floor {FLOOR} % to {LOW:.0f} C, 100 % from {HIGH:.0f} C, "
-        f"{HYSTERESIS:.0f} C hysteresis, every {INTERVAL} s")
+    log(f"on at CPU {CPU_ON:g} C or drive {DRIVE_ON} C, off at CPU {CPU_OFF:g} C and "
+        f"drive {DRIVE_OFF} C; the drive read every {POLL_BUSY // 60} min while busy, "
+        f"{POLL_IDLE // 60} min while idle")
+    fan = Fan()
     try:
         while True:
-            try:
-                temp = read_temp()
-                want = duty_for(temp)
-                if duty is not None and want < duty and temp > since - HYSTERESIS:
-                    want = duty
-                reading = f"CPU {temp:.1f} C"
-            except (OSError, ValueError) as exc:
-                temp, want = HIGH, 100
-                reading = f"cannot read {SENSOR} ({exc})"
-                if reading != unread:
-                    log(f"{reading}; asking for 100 %")
-                unread = reading
-            else:
-                unread = None
-            try:
-                write_duty(want)
-            except OSError as exc:
-                message = describe(exc)
-                if message != failing:
-                    log(message)
-                    failing = message
-            else:
-                if want != duty or failing:
-                    log(f"{reading}, fan {want} %")
-                if want != duty:
-                    since = temp
-                duty, failing = want, None
+            fan.step()
             time.sleep(INTERVAL)
     finally:
         try:
             write_duty(100)
-            log("stopping: fan set to 100 %")
+            log("stopping: fan on")
         except OSError as exc:
-            log(f"stopping: could not set the fan to 100 %: {exc}")
+            log(f"stopping: could not turn the fan on: {exc}")
 
 
 if __name__ == "__main__":
