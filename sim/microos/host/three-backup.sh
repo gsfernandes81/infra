@@ -30,6 +30,22 @@ listing() {
 	done
 	return 0
 }
+# Every subvolume on the array, as "ID UUID path".
+subvols() {
+	btrfs subvolume list -u /media/mirror | sed -n 's/^ID \([0-9]*\) gen .* uuid \([-0-9a-f]*\) path \(.*\)$/\1 \2 \3/p'
+}
+# Each subvolume recorded before is still on the array, with the same UUID.
+kept_all() {
+	local id uuid p missing=0
+	while read -r id uuid p; do
+		if [ "$(btrfs subvolume show -r "$id" /media/mirror 2> /dev/null | awk '$1 == "UUID:" { print $2 }')" != "$uuid" ]; then
+			echo "gone or changed: ID $id, $p"
+			missing=1
+		fi
+	done < /root/sim-subvols
+	echo "$(wc -l < /root/sim-subvols) recorded, $(subvols | wc -l) now"
+	[ "$missing" = 0 ]
+}
 owner_mode() {
 	local s
 	s=$(stat -c '%U %a' "$@" | sort -u)
@@ -99,12 +115,19 @@ confined) # <immich count> <syncthing count>
 		ls /tmp/sim-escape* 2>/dev/null; ! ls /tmp/sim-escape* >/dev/null 2>&1'
 	# The forced command refuses a name before sudo; these show sudoers and the script refuse
 	# it too, each on its own.
-	check "sudo lets the backup user run mirror-receive immich, unasked for a password" \
-		runuser -u backup -- sudo -n -l /usr/local/sbin/mirror-receive immich
-	check "sudo refuses the backup user mirror-receive with another name" sh -c '
-		! runuser -u backup -- sudo -n -l /usr/local/sbin/mirror-receive other'
-	check "sudo refuses the backup user anything else" sh -c '
-		! runuser -u backup -- sudo -n -l /usr/bin/true && ! runuser -u backup -- sudo -n true'
+	# Asked as root with -U, so the answers do not hang on sudo's listpw setting.
+	check "sudoers lets the backup user run mirror-receive immich and syncthing" sh -c '
+		sudo -n -U backup -l /usr/local/sbin/mirror-receive immich &&
+		sudo -n -U backup -l /usr/local/sbin/mirror-receive syncthing'
+	check "sudoers refuses the backup user mirror-receive with another name, or none" sh -c '
+		! sudo -n -U backup -l /usr/local/sbin/mirror-receive other &&
+		! sudo -n -U backup -l /usr/local/sbin/mirror-receive'
+	check "sudoers refuses the backup user anything else" sh -c '
+		! sudo -n -U backup -l /usr/bin/true && ! sudo -n -U backup -l /bin/bash'
+	# An empty stream, so the run is real but receives nothing.
+	check "the backup user runs mirror-receive with no password asked" sh -c '
+		out=$(runuser -u backup -- sudo -n /usr/local/sbin/mirror-receive immich < /dev/null 2>&1); echo "$out"
+		echo "$out" | grep -q "mirror-receive: refused: btrfs receive failed"'
 	check "mirror-receive itself refuses a name off its list" sh -c '
 		out=$(/usr/local/sbin/mirror-receive other < /dev/null 2>&1); echo "$out"; echo "$out" | grep -q refused'
 	check "sudoers-backup passes visudo" visudo -cf /etc/sudoers.d/60-backup
@@ -124,6 +147,33 @@ locked)
 	fi
 	check "the array is locked, its LUKS volume closed, and received-backups not there" sh -c "
 		! findmnt /media/mirror && ! test -e /dev/mapper/mirror && ! test -e $rb"
+	;;
+attack-record)
+	# Every subvolume on the array, as "ID UUID path", before a hostile stream.
+	subvols > /root/sim-subvols
+	listing immich
+	echo "recorded $(wc -l < /root/sim-subvols) subvolumes on the array"
+	;;
+attack-check) # <kind> [the snapshot a rename aimed at]
+	kind=$2
+	check "every subvolume on the array is still there, with its ID and UUID" kept_all
+	newer=$(comm -13 <(cut -d' ' -f1,2 /root/sim-subvols | sort) <(subvols | cut -d' ' -f1,2 | sort))
+	case "$kind" in
+	rename)
+		check "only the stream's own junk-rename is new, left as it was" sh -c "
+			echo '$newer'; [ \"\$(echo '$newer' | grep -c .)\" = 1 ] &&
+			btrfs subvolume list /media/mirror | grep -q ' path received-backups/immich/junk-rename\$'"
+		old_id=$(awk -v p="received-backups/immich/$3" '$3 == p { print $1 }' /root/sim-subvols)
+		check "the renamed snapshot is the same subvolume, ID $old_id, now at .moved" sh -c "
+			btrfs subvolume list /media/mirror | grep -q '^ID $old_id .* path received-backups/immich/.moved\$'"
+		;;
+	*)
+		check "nothing the stream made is left on the array" sh -c "echo '$newer'; [ -z '$newer' ]"
+		;;
+	esac
+	check "no symlink, file or plain directory is left in received-backups/immich" sh -c "
+		find $rb/immich -mindepth 1 -maxdepth 1 \\( ! -type d -o ! -inum 256 \\) -printf '%f %y\\n' | grep . && exit 1; exit 0"
+	check "received-backups/immich is still root's, mode 700" owner_mode "$rb/immich"
 	;;
 has-half) # <name>: exits 0 while a receive is under way or was left half done
 	listing "$2"
@@ -151,7 +201,7 @@ count) # <name> <n>
 	;;
 pruned) # <name> <snapshot> <other name> <its count>
 	check "with 0 days kept, only the newest $2 snapshot, $3, survives" sh -c "
-		ls -1 $rb/$2; [ \"\$(ls -1 $rb/$2)\" = '$3' ]"
+		ls -A1 $rb/$2; [ \"\$(ls -A1 $rb/$2)\" = '$3' ]"
 	check "$4's snapshots were left alone: still $5" count_is "$4" "$5"
 	;;
 restore) # <immich snapshot> <Postgres image>

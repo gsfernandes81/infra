@@ -12,26 +12,37 @@
 # sudoers (sudoers-backup) allows it with the name immich or syncthing and nothing else.
 # Root, because btrfs receive creates subvolumes and sets owners.
 #
+# THE STREAM IS HOSTILE. `btrfs receive --chroot` stops a path from climbing above the
+# name's directory, but does not clean `..` out of the stream's paths, so a crafted stream
+# can make, rename or link entries in that directory itself, beside every earlier snapshot.
+# So this script never hands a name the stream could have chosen to a root command that
+# follows a path: a symlink planted as ../x would turn a delete onto any subvolume it
+# names. It finds subvolumes by their IDs and acts on IDs (`btrfs subvolume show -r`,
+# `btrfs subvolume delete --subvolid`). The only operations on names are unlink and rmdir,
+# which never follow a link.
+#
 # In order, and it stops at the first refusal:
-#   1. Refuses unless the array is mounted. Against a locked three, zero's run fails and
-#      the next night retries.
-#   2. Refuses a name not on its list, which sudoers has already checked.
-#   3. One receive at a time.
-#   4. Deletes what an interrupted stream left in that name's directory: a subvolume that
-#      is writable or has no received UUID. A finished receive is always both read-only
-#      and received. A stream that fails while this script still runs is cleaned up at
-#      once (step 6); this step is for one whose receive was killed outright, by a power
-#      cut or the OOM killer.
-#   5. Receives with --chroot, which confines every path in the stream to the directory,
-#      and -e, which ends at the stream's end marker.
-#   6. Checks that the receive succeeded and that exactly one subvolume arrived, named
-#      <name>-<stamp> as zero names them, read-only, with a received UUID. Otherwise
-#      whatever arrived, a cut stream's half included, is deleted and the run refused.
-#   7. Prints `received <name>-<stamp> <received UUID>` on stdout, the one line zero
+#   1. Refuses unless the array is mounted, a name not on its list, and a second receive
+#      while one runs.
+#   2. Reads every entry in the name's directory, dotfiles included. Any entry that is not
+#      a subvolume (a symlink, a file, a plain directory) is refused and left for a person.
+#   3. Deletes, by ID, a subvolume that is writable or has no received UUID: what a receive
+#      killed outright leaves, by a power cut or the OOM killer.
+#   4. Notes the ID of every subvolume on the array and of every earlier snapshot, by name.
+#   5. Receives with --chroot and -e, which ends at the stream's end marker.
+#   6. Checks that every earlier snapshot is still at its name with its ID. If one moved or
+#      vanished, it stops at once, touching nothing, for a person to look at.
+#   7. Checks that the receive succeeded and that exactly one subvolume is new on the
+#      array, at the top of the directory, named <name>-<stamp> as zero names them,
+#      read-only, with a received UUID, and nothing else is new in the directory.
+#      Otherwise it refuses, deleting only what is new: subvolumes by ID, deepest first,
+#      and symlinks, files and empty directories by unlink and rmdir. A directory with
+#      something in it is left for a person, and stops later receives of that name.
+#   8. Prints `received <name>-<stamp> <received UUID>` on stdout, the one line zero
 #      compares with its own snapshot's UUID; everything else goes to stderr.
-#   8. Deletes that name's snapshots created more than 90 days ago, never the one just
-#      received. The age is the subvolume's creation time on three's clock, never its name
-#      or a count, so a compromised zero cannot push history out by sending many
+#   9. Deletes that name's snapshots created more than 90 days ago, by ID, never the one
+#      just received. The age is the subvolume's creation time on three's clock, never its
+#      name or a count, so a compromised zero cannot push history out by sending many
 #      snapshots, or ones with misleading names.
 #
 # Never make a received snapshot writable (`btrfs property set ... ro false`): that clears
@@ -41,6 +52,7 @@
 # MIRROR_RECEIVE_KEEP_DAYS overrides the 90 days, for sim/microos only, which forces it to
 # 0 to watch the pruning. Nothing zero sends can set it: sshd accepts no environment from
 # the key, and sudo's env_reset clears it before this runs.
+# shellcheck disable=SC2015  # each `a && b || die` means "unless both hold, stop"
 set -euo pipefail
 
 top=/media/mirror
@@ -63,71 +75,151 @@ esac
 mountpoint -q "$top" || die "$top is not mounted: the array is locked"
 # The layout is the array's own (make-mirror), so a missing or loosened one is refused
 # rather than made here.
-[ -d "$base" ] || die "no $base on the array"
+[ -d "$base" ] && [ ! -L "$base" ] || die "no $base on the array"
 [ "$(stat -c '%U %a' "$base")" = "root 700" ] || die "$base is $(stat -c '%U %a' "$base"), not root 700"
 dir=$base/$name
+[ ! -L "$dir" ] || die "$dir is a symlink; left for a person to look at"
 install -d -m 700 "$dir"
 
 # A minute's grace, for a receive whose stream has just been cut and is still ending.
 exec 9> /run/mirror-receive.lock
 flock -w 60 9 || die "a receive is still going"
 
-# Prints "<ro> <received UUID>" for a subvolume: true or false, and - for none.
-state_of() {
-	local ro ruuid
-	ro=$(btrfs property get -ts "$1" ro) || return 1
-	ruuid=$(btrfs subvolume show "$1" | awk '$1 == "Received" && $2 == "UUID:" { print $3 }')
-	echo "${ro#ro=} ${ruuid:--}"
+# The subvolume ID of one entry in the directory, or failure if it is anything but a
+# subvolume's own top directory (inode 256 on btrfs). Never through a symlink.
+id_of() {
+	[ ! -L "$1" ] && [ -d "$1" ] && [ "$(stat -c %i "$1")" = 256 ] || return 1
+	btrfs inspect-internal rootid "$1"
 }
+# One field of a subvolume, by ID, as `btrfs subvolume show` prints it. The last match,
+# since the path and Name lines come first and a name may hold a newline.
+field() {
+	btrfs subvolume show -r "$1" "$top" | sed -n "s/^[[:space:]]*$2:[[:space:]]*//p" | tail -n 1
+}
+# The subvolume's path from the array's top, by ID: the first line of show.
+path_of() {
+	btrfs subvolume show -r "$1" "$top" | head -n 1 | sed 's|^/||'
+}
+# Every subvolume ID on the array, one per line. A line that does not start "ID " is part
+# of a name with a newline in it, and is skipped; a fake ID it carried is either one that
+# was already there, and so never new, or none at all.
+all_ids() {
+	btrfs subvolume list "$top" | sed -n 's/^ID \([0-9][0-9]*\) gen .*/\1/p'
+}
+# Entries in the directory, NUL-separated, dotfiles included.
+entries() {
+	find "$dir" -mindepth 1 -maxdepth 1 -printf '%f\0'
+}
+shown() { printf '%q' "$1"; }
 
-shopt -s nullglob
-for s in "$dir"/*; do
-	if ! st=$(state_of "$s" 2>/dev/null); then
-		die "$s is not a subvolume; only this script writes here, so it is left for a person to look at"
-	fi
-	if [ "${st% *}" != true ] || [ "${st#* }" = - ]; then
-		say "deleting $(basename "$s"), left by an interrupted receive (read-only: ${st% *}, received UUID: ${st#* })"
-		btrfs subvolume delete "$s" >&2
-	fi
-done
+# 2 and 3: every entry a subvolume; delete what an interrupted receive left.
+declare -A kept=()
+while IFS= read -r -d '' n; do
+	id=$(id_of "$dir/$n") ||
+		die "$dir/$(shown "$n") is not a subvolume (a symlink, file or plain directory): left for a person to look at, and no receive of $name until it is gone"
+	flags=$(field "$id" Flags)
+	ruuid=$(field "$id" 'Received UUID')
+	case "$flags" in
+	*readonly*) [ -n "$ruuid" ] && [ "$ruuid" != - ] && { kept[$n]=$id; continue; } ;;
+	esac
+	say "deleting $(shown "$n") (ID $id), left by an interrupted receive (flags: $flags, received UUID: ${ruuid:--})"
+	btrfs subvolume delete --subvolid "$id" "$top" >&2
+done < <(entries)
 
-# What was there before, by glob rather than ls, so a name the stream chose cannot split
-# into two.
-declare -A had=()
-for s in "$dir"/*; do had[${s##*/}]=1; done
+# 4: what was there before.
+declare -A before=()
+while read -r id; do before[$id]=1; done < <(all_ids)
+
+# 5
 rc=0
 btrfs receive --chroot -e "$dir" >&2 || rc=$?
-new=()
-for s in "$dir"/*; do
-	[ -n "${had[${s##*/}]-}" ] || new+=("${s##*/}")
-done
 
-# Whatever arrived is deleted if the stream failed or is not what zero sends.
+# The stream may have changed the directory's own owner or mode, through `..`.
+chown root:root "$dir"
+chmod 700 "$dir"
+
+# 6: every earlier snapshot still at its name, with its ID.
+moved=()
+for n in "${!kept[@]}"; do
+	id=$(id_of "$dir/$n") && [ "$id" = "${kept[$n]}" ] || moved+=("$(shown "$n") (ID ${kept[$n]})")
+done
+if [ "${#moved[@]}" -gt 0 ]; then
+	die "STOPPED: earlier snapshots moved or vanished during this receive: ${moved[*]}. The stream renamed them; nothing has been deleted or changed by this script. A person must look at $dir before the next receive."
+fi
+
+# 7: what is new.
+new_ids=()
+while read -r id; do
+	[ -n "${before[$id]-}" ] || new_ids+=("$id")
+done < <(all_ids)
+got=
+got_id=
+planted=()
+while IFS= read -r -d '' n; do
+	[ -n "${kept[$n]-}" ] && continue
+	if id=$(id_of "$dir/$n"); then
+		if [ -z "$got" ]; then got=$n got_id=$id; else planted+=("$n"); fi
+	else
+		planted+=("$n")
+	fi
+done < <(entries)
+
 refuse() {
-	local n
-	for n in "${new[@]}"; do
-		btrfs subvolume delete "$dir/$n" >&2 || true
+	local id left=() n p remaining=("${new_ids[@]}")
+	# Subvolumes first, deepest first: a subvolume with another inside cannot be deleted
+	# until the inner one is, so each pass deletes what it can.
+	for _ in 1 2 3 4 5 6 7 8; do
+		left=()
+		for id in "${remaining[@]}"; do
+			p=$(path_of "$id" 2> /dev/null || true)
+			case "$p" in
+			"received-backups/$name/"*) ;;
+			*)
+				say "a new subvolume, ID $id, is not under received-backups/$name ('$(shown "$p")'); left alone"
+				continue
+				;;
+			esac
+			btrfs subvolume delete --subvolid "$id" "$top" >&2 2> /dev/null || left+=("$id")
+		done
+		remaining=("${left[@]}")
+		[ "${#remaining[@]}" -eq 0 ] && break
 	done
+	left=()
+	for id in "${remaining[@]}"; do left+=("subvolume ID $id"); done
+	# Then what else the stream put in the directory: unlink and rmdir never follow a link.
+	for n in "${planted[@]}"; do
+		p=$dir/$n
+		if [ -L "$p" ] || { [ -e "$p" ] && [ ! -d "$p" ]; }; then
+			rm -f -- "$p" || left+=("$(shown "$n")")
+		elif [ -d "$p" ] && [ "$(stat -c %i "$p")" != 256 ]; then
+			rmdir -- "$p" 2> /dev/null || left+=("$(shown "$n")")
+		fi
+	done
+	[ "${#left[@]}" -eq 0 ] || say "left for a person to look at in $dir: ${left[*]}; no receive of $name until they are gone"
 	die "$*"
 }
-[ "$rc" -eq 0 ] || refuse "btrfs receive failed (exit $rc)"
-[ "${#new[@]}" -eq 1 ] || refuse "expected one new subvolume, found ${#new[@]}: ${new[*]-none}"
-got=${new[0]}
-[[ "$got" =~ ^$name-[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{4}Z$ ]] || refuse "$got is not named $name-<stamp>"
-st=$(state_of "$dir/$got") || refuse "$got is not a subvolume"
-[ "${st% *}" = true ] || refuse "$got is not read-only"
-ruuid=${st#* }
-[ "$ruuid" != - ] || refuse "$got has no received UUID"
+[ "$rc" -eq 0 ] || refuse "refused: btrfs receive failed (exit $rc)"
+[ "${#planted[@]}" -eq 0 ] || refuse "refused: the stream left more than one new entry in $dir: $(for n in "${planted[@]}"; do shown "$n"; echo -n ' '; done)"
+[ -n "$got" ] || refuse "refused: no new subvolume arrived in $dir"
+[ "${#new_ids[@]}" -eq 1 ] && [ "${new_ids[0]}" = "$got_id" ] ||
+	refuse "refused: expected one new subvolume on the array, found IDs ${new_ids[*]-none}"
+[[ "$got" =~ ^$name-[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{4}Z$ ]] || refuse "refused: $(shown "$got") is not named $name-<stamp>"
+case "$(field "$got_id" Flags)" in *readonly*) ;; *) refuse "refused: $got is not read-only" ;; esac
+ruuid=$(field "$got_id" 'Received UUID')
+[ -n "$ruuid" ] && [ "$ruuid" != - ] || refuse "refused: $got has no received UUID"
+
+# 8
 echo "received $got $ruuid"
 
-# Creation time, as `btrfs subvolume show` prints it on three's clock.
+# 9: by creation time on three's clock, by ID. A delete that fails is reported, and the
+# rest go on: the receive itself has succeeded.
 cutoff=$(($(date +%s) - keep_days * 86400))
-for s in "$dir"/*; do
-	[ "$(basename "$s")" = "$got" ] && continue
-	created=$(btrfs subvolume show "$s" | sed -n 's/^[[:space:]]*Creation time:[[:space:]]*//p')
-	t=$(date -d "$created" +%s) || die "cannot read when $s was created: '$created'"
+for n in "${!kept[@]}"; do
+	id=${kept[$n]}
+	created=$(field "$id" 'Creation time')
+	t=$(date -d "$created" +%s) || { say "cannot read when ID $id was created: '$created'"; continue; }
 	if [ "$t" -lt "$cutoff" ]; then
-		say "pruning $(basename "$s"), created $created"
-		btrfs subvolume delete "$s" >&2
+		say "pruning $(shown "$n") (ID $id), created $created"
+		btrfs subvolume delete --subvolid "$id" "$top" >&2 || say "could not delete ID $id"
 	fi
 done

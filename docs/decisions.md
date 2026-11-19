@@ -1993,8 +1993,8 @@ alike.
 ⚠︎SUPERSEDED IN PART 2026-11-19 by *`zero`'s backup to `three` by btrfs send/receive*
 below: the transfer is `btrfs send` of `zero`'s snapshots, not rsync, and `three` takes no
 snapshots of its own. The first bullet's exception, push not pull, LUKS with Adiantum and
-Syncthing's identity inside the volume all stand; so does rsync over Syncthing's untrusted
-device, now as send/receive over it.
+Syncthing's identity inside the volume all stand; so does the choice of rsync instead of
+Syncthing's untrusted device, which now holds for send/receive.
 
 **Decided 2026-11-03**, the owner's call. The design is in
 [`plans/three.md`](../plans/three.md) § *Backups* and § *Encryption*; this records why.
@@ -2610,8 +2610,7 @@ Alpine copies for `one` too, since `one` keeps both.
 **Decided 2026-11-19**, the owner's calls, from
 [`plans/three-send-receive.md`](../plans/three-send-receive.md), which keeps the move on
 `zero` until it is done. It replaces the rsync push of 2026-11-03 and 2026-11-04 (above). The
-receive side, the send side and the simulation's seven checks were built on the branch
-`send-receive`.
+receive side, the send side and the simulation's seven checks were built 2026-11-19.
 
 - **Send/receive, not rsync.** rsync copies a live tree file by file, so Immich's library
   and its database reach `three` at different moments, which Immich's backup docs warn
@@ -2632,10 +2631,26 @@ receive side, the send side and the simulation's seven checks were built on the 
   forced command takes the name zero asks for only when it is exactly `immich` or
   `syncthing`, and runs `sudo -n /usr/local/sbin/mirror-receive <name>`. sudoers allows
   those two invocations and nothing else, with a `!ALL` against Leap's own `ALL ALL=(ALL)
-  ALL`. The script checks the name again and receives with `--chroot`, which confines every
-  path in the stream. A compromised `zero` can send new snapshots, junk included, and fill
-  the array; it cannot change or delete a received snapshot, read anything back, or run
-  anything else.
+  ALL`. The script checks the name again and receives with `--chroot`. The array mounts
+  `nosuid,nodev`, so nothing received can carry either.
+- **The stream is treated as hostile, and `mirror-receive` acts only on subvolume IDs.**
+  `btrfs receive --chroot` stops a path climbing above the name's directory but does not
+  clean `..` out of the stream's paths, so a crafted stream can make, rename or link entries
+  in that directory, beside every earlier snapshot. A symlink planted there would have
+  turned a clean-up that went by name into a root delete of any subvolume it pointed at
+  (found in review, 2026-11-19). So the script reads entries without following links, finds
+  subvolumes by ID, and deletes by ID (`btrfs subvolume delete --subvolid`); the only
+  operations on a name are unlink and rmdir. It notes every subvolume's ID before the
+  receive, and afterwards requires every earlier snapshot still at its name with its ID,
+  and exactly one new subvolume on the array, at the top of the directory, rightly named.
+  If an earlier snapshot moved, it stops and deletes nothing; on any other refusal it
+  deletes only what is new. A compromised `zero` can send new snapshots, junk included, and
+  fill the array. It cannot change what is in a received snapshot, which is read-only, or
+  delete one, read anything back, or run anything else. It can rename earlier snapshots
+  within the directory, or leave a directory with something in it there; either stops that
+  name's receives until a person looks, which a compromised `zero` could do anyway by not
+  sending. The simulation sends hand-built streams that try the symlink, the rename and a
+  dot-named subvolume.
 - **The proof of a send is `three`'s answer, not an exit status.** `mirror-receive` prints
   `received <name>-<stamp> <received UUID>`, and only that line, with the local snapshot's
   own UUID, makes `zero` record the snapshot as sent. Anything else deletes the new snapshot

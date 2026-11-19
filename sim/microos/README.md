@@ -167,14 +167,19 @@ The run then checks, each as PASS or FAIL, and any FAIL fails the job:
   subvolumes' placeholders do not arrive at all, and `host/tree-hash.sh` gives the same hash of every path,
   owner, mode, size and content on both sides; an incremental carries an added and a
   deleted file, with a stream a fraction of the full one; the key refuses every other
-  command and name, sudo and `mirror-receive` each refuse a bad name on their own, an empty
-  or junk stream is refused with nothing back, sftp reads nothing and the key forwards
-  nothing; a run against the locked array fails cleanly, keeps both parents and writes no
+  command and name, sudoers (asked as root with `sudo -U backup -l`) and `mirror-receive`
+  each refuse a bad name on their own, an empty or junk stream is refused with nothing
+  back, sftp reads nothing and the key forwards nothing; a run against the locked array fails cleanly, keeps both parents and writes no
   success, and the next run succeeds; a send cut mid-stream (rate-limited by `pv`, the
   runner's ssh killed once the receive is under way) keeps the parent and writes no success,
   and the next run deletes planted half-received subvolumes and succeeds; a reflink copy of
   the received `db` starts in a throwaway Postgres container on `three`, recovers, and
-  answers with the 100 rows written before the snapshot; and `mirror-receive` with 0 days
+  answers with the 100 rows written before the snapshot; three hand-built streams
+  (`host/bad-stream.py`), which `btrfs send` never makes, use `..` paths to plant symlinks
+  to the live Syncthing subvolume and to an earlier snapshot, to rename an earlier snapshot
+  to a dot name, and to make a dot-named subvolume, and each deletes or changes no
+  subvolume on the array but its own junk, with a legitimate run succeeding after; and
+  `mirror-receive` with 0 days
   kept deletes every snapshot but the newest, from which the next run still sends;
 - in rescue mode (`host/rescue.sh`), entered with `systemctl isolate`: gavin logs in, and
   sshd, the network, `cloudflared`, `tailscaled` and logins are up while Docker is down;

@@ -378,27 +378,33 @@ visit, step 4); `one`'s old board free; a card written and labelled `three`.
    `ssh three` answers through the tunnel, the infra agent drops `ansible_host` from the
    inventory.
 5. **Erase the stick,** once `ssh three` answers through the tunnel.
-6. **The backup.** Send the infra agent `three`'s address from `tailscale ip -4`; it fills
-   it into `mirror-backup` and writes the install for `zero` of `mirror-backup` and
-   `mirror-backup-age-check`. Then the first push, detached, so a dropped ssh session does not end
-   it:
+6. **The backup,** by btrfs send/receive ([`three-send-receive.md`](three-send-receive.md)).
+   It needs the move on `zero` first (that plan's § The layout on `zero`, and the move), and
+   the infra agent's install for `zero` of `mirror-backup` and `mirror-backup-age-check`.
+   Then the first send, in full, detached, so a dropped ssh session does not end it:
 
    ```fish
-   # on zero: start the first push to three now rather than at 04:00, detached from this session; it seeds about 120 GB and runs for hours
-   sudo sh -c 'setsid nohup /etc/periodic/hourly/mirror-backup now </dev/null >/dev/null 2>&1 &'
+   # on zero: start the first full send to three now rather than at 04:00, detached from this session; about 120 GB, hours
+   sudo sh -c 'setsid nohup /etc/periodic/hourly/mirror-backup now full </dev/null >/dev/null 2>&1 &'
    ```
 
-   If it stops before it finishes, `three`'s next snapshot run clears what it staged and
-   the 04:00 run starts over.
+   A stream cannot resume. If it is cut, `three` deletes the half-received subvolume at the
+   next receive, and that subvolume's send starts over with `now full` again; each
+   subvolume is its own stream, so a cut costs one.
 
-**Checks:** `pgrep -a rsync` on `zero` lists the push, and `sudo du -sh
-/media/mirror/incoming` on `three` climbs; `free -m` on `three` stays clear of its swap. The
-next morning, `sudo cat /var/lib/mirror-backup/last-success` on `zero` is recent, and
-`three` has a snapshot dated today.
+**Checks:** as [`three-send-receive.md`](three-send-receive.md) § The first send says.
+`sudo tail /var/lib/mirror-backup/last.log` on `zero` shows each subvolume sending, then
+`three answered: received <name>-<stamp> <UUID>`; `sudo ls -A
+/media/mirror/received-backups/immich` on `three` lists the snapshot; `free -m` on `three`
+stays clear of its swap. Once both are done, `sudo cat /var/lib/mirror-backup/last-success`
+on `zero` is recent.
 
 **Way back:** none needed: nothing depends on `three`. Power it off.
 
 ## Slice 4: the backup proven
+
+Step 1 below is replaced by [`three-send-receive.md`](three-send-receive.md) § Slice 4,
+revised, until the stage 3 rewrite of this runbook.
 
 1. **A restore**, as [`hosts/three/leap/README.md`](../hosts/three/leap/README.md) § The
    backup says, of Immich's library from today's snapshot into `/media/mirror/restore/`.

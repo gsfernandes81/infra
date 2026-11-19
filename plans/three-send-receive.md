@@ -6,7 +6,7 @@ and `mirror-backup-age-check` were removed from `zero` on 2026-11-18 to wait for
 `zero` has no off-site copy until the first send below. Draft PR #22 (`three-array-play`,
 the array as a play) is parked until this layout is settled.
 
-**Built on the branch `send-receive`:** the receive side on `three` (§ The receive side,
+**Built 2026-11-19:** the receive side on `three` (§ The receive side,
 § What is removed, for `three`), the send side on `zero` as tracked files, not installed
 (§ The send side), and the simulation's seven checks (§ How the simulation proves it).
 Its reasoning is in [`docs/decisions.md`](../docs/decisions.md) § *`zero`'s backup to
@@ -171,7 +171,7 @@ since.
       is about 120 GB, and no run starts one unasked.
    3. Pipes `btrfs send [-p <parent>] <snapshot>` through ssh to `backup@three`, passing
       the name as the ssh command, rate-limited by `pv` when a rate is set (answer 7).
-   4. Reads `three`'s last line, `received <stamp> <received UUID>`, and compares the UUID
+   4. Reads `three`'s last line, `received <name>-<stamp> <received UUID>`, and compares the UUID
       with the snapshot's own (`btrfs subvolume show`). Only a match counts.
    5. On a match, writes `last-sent-<name>`, then deletes that subvolume's older
       snapshots beyond the last 7, keeping the one just sent (answer 2). On anything else, deletes the new
@@ -207,15 +207,19 @@ array; `received-backups`, which replaces `incoming`, is root's, mode 700.
    UUID: what an interrupted stream leaves.
 5. Runs `btrfs receive --chroot -e /media/mirror/received-backups/<name>` on its stdin.
    `--chroot` confines every path in the stream to that directory.
-6. Checks the new subvolume is read-only with a received UUID, and prints `received <stamp>
-   <received UUID>`.
+6. Checks the new subvolume is read-only with a received UUID, and prints `received
+   <name>-<stamp> <received UUID>`. As built, it acts only on subvolume IDs, since the
+   stream's paths may carry `..` (`docs/decisions.md`).
 7. Prunes that subvolume's snapshots created more than 90 days ago, never the newest. The
    age is the subvolume's creation time on `three`'s clock, never its name or a count, so
    a compromised `zero` cannot push history out by sending many snapshots or misnamed ones.
 
 A compromised `zero` can send new snapshots, junk included, and fill the array; a full
-array refuses sends and the age check reports it. It cannot change or delete a received
-snapshot, read anything back, or run anything else.
+array refuses sends and the age check reports it. It cannot change what is in a received
+snapshot, which is read-only, or delete one, read anything back, or run anything else. A
+crafted stream can rename earlier snapshots inside their name's directory, or leave a file or
+directory there; `mirror-receive` then stops, deletes only what is new, and leaves the rest
+for a person, and receives of that name wait until the person has looked.
 
 A received snapshot is never made writable (`btrfs property set ... ro false`): that clears
 its received UUID and ends the chain of incremental sends. A restore works from a reflink

@@ -24,8 +24,9 @@
 #   3. Pipes `btrfs send [-p <parent>]` through pv, when $state/rate sets a rate, and ssh to
 #      three, asking for the name. three's mirror-receive answers with one line,
 #      `received <name>-<stamp> <received UUID>`.
-#   4. Only that line, with this snapshot's own UUID, counts. Then it writes last-sent-<name>
-#      and deletes that subvolume's snapshots beyond the newest 7, never the one just sent.
+#   4. Only that line, with this snapshot's own UUID, and btrfs send's exit 0, count. Then
+#      it writes last-sent-<name> and deletes that subvolume's snapshots beyond the newest
+#      7, never the one just sent.
 #      Anything else deletes the new snapshot and keeps the parent, which three still has.
 # last-success is written only when both subvolumes matched; mirror-backup-age-check reads
 # it. Nested subvolumes stay out of a snapshot, and so out of the backup: Immich's thumbs
@@ -172,9 +173,11 @@ send_one() {
 		echo "sending $name-$stamp, UUID $uuid, in full"
 	fi
 
-	# The UUID in three's answer is the proof, not an exit status: a stream cut anywhere
-	# leaves no answer. Each status is still logged, for whoever reads why.
+	# The proof is three's answer with this snapshot's UUID, and btrfs send's own exit 0,
+	# which runs in a pipeline whose status is ssh's, so it is kept in a file. A stream cut
+	# anywhere leaves no answer. ssh's status is logged, for whoever reads why.
 	rc=0
+	rm -f "$state/send-rc"
 	reply=$(
 		{
 			src=0
@@ -183,13 +186,14 @@ send_one() {
 			else
 				btrfs send "$snap" || src=$?
 			fi
-			echo "btrfs send exit $src" >&2
+			echo "$src" > "$state/send-rc"
 		} | throttle | to_three "$name"
 	) || rc=$?
 	line=$(printf '%s\n' "$reply" | tail -n 1)
-	echo "three answered: ${line:-nothing} (ssh exit $rc)"
+	send_rc=$(cat "$state/send-rc" 2> /dev/null || echo none)
+	echo "three answered: ${line:-nothing} (btrfs send exit $send_rc, ssh exit $rc)"
 
-	if [ "$line" = "received $name-$stamp $uuid" ]; then
+	if [ "$send_rc" = 0 ] && [ "$line" = "received $name-$stamp $uuid" ]; then
 		echo "$name-$stamp" > "$state/last-sent-$name.new" &&
 			mv "$state/last-sent-$name.new" "$state/last-sent-$name" || return 1
 		# Stamps sort as times, newest first here; the first $keep stay.

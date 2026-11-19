@@ -296,7 +296,7 @@ zero_postgres() {
 
 sim_backup() {
 	local rc i pg_ok=no snap_i snap_s prev_i prev_s n_i n_s before bg pids out c half stamp s uuid
-	local full_i inc_i full_s inc_s
+	local full_i inc_i full_s inc_s first_i kind
 	echo "===== zero's backup, sent by hosts/zero/system/mirror-backup from the runner standing in for zero"
 	zero_busybox
 	if ! zero_make; then
@@ -335,6 +335,7 @@ sim_backup() {
 	rc=0
 	zero_run zero-full.log full || rc=$?
 	snap_i=$(zsent immich) snap_s=$(zsent syncthing)
+	first_i=$snap_i
 	if [ "$rc" = 0 ] && [ "$snap_i" != none ] && [ "$snap_s" != none ] && [ "$(zsuccess)" != none ] &&
 		grep -q "three answered: received $snap_i $(zuuid immich "$snap_i") " zero-full.log &&
 		grep -q "three answered: received $snap_s $(zuuid syncthing "$snap_s") " zero-full.log; then
@@ -526,6 +527,35 @@ sim_backup() {
 		as_root three-backup.sh restore "$snap_i" "$pg_image"
 	else
 		fail_or_skip "no restore: the runner's Postgres did not run"
+	fi
+
+	echo "-- streams a compromised zero could send"
+	# Hand-built (host/bad-stream.py), through the backup key as zero's own would go. Each
+	# uses paths with .. that land beside the earlier snapshots. three-backup.sh records
+	# every subvolume first, and then checks nothing was deleted or changed but the
+	# stream's own junk.
+	for kind in symlink dot rename; do
+		as_root three-backup.sh attack-record > /dev/null
+		case "$kind" in
+		symlink) out=$(python3 -I "$here/host/bad-stream.py" symlink /media/mirror/syncthing "$first_i" | bk immich 2>&1 || true) ;;
+		dot) out=$(python3 -I "$here/host/bad-stream.py" dot | bk immich 2>&1 || true) ;;
+		rename) out=$(python3 -I "$here/host/bad-stream.py" rename "$first_i" | bk immich 2>&1 || true) ;;
+		esac
+		printf '%s\n' "$out" | grep 'mirror-receive' | sed 's/^/    /'
+		case "$kind:$out" in
+		*"received "*) echo "FAIL the $kind stream was accepted" ;;
+		rename:*"STOPPED: earlier snapshots moved"*) echo "PASS mirror-receive stops on the rename, touching nothing" ;;
+		symlink:*"mirror-receive: refused"* | dot:*"mirror-receive: refused"*) echo "PASS mirror-receive refuses the $kind stream" ;;
+		*) echo "FAIL the $kind stream was not refused as expected" ;;
+		esac
+		as_root three-backup.sh attack-check "$kind" "$first_i"
+	done
+	rc=0
+	zero_run zero-after-attacks.log || rc=$?
+	if [ "$rc" = 0 ] && grep -q "incremental from $snap_i\$" zero-after-attacks.log; then
+		echo "PASS a legitimate run after the three streams still succeeds"
+	else
+		echo "FAIL the run after the hostile streams (exit $rc)"
 	fi
 
 	echo "-- pruning, with 0 days kept"

@@ -164,6 +164,14 @@ received UUID, which zero checks against its own. It refuses while the array is 
 deletes anything an interrupted stream left before the next receive. The backup user owns
 nothing on the array, and nothing comes back over the key but that one line.
 
+`mirror-receive` treats each stream as hostile: it acts only on subvolume IDs, never on a
+path the stream could have named. If a receive renamed an earlier snapshot, or left a
+symlink, file or directory it could not remove, it says what in its last line and stops
+receiving that name until a person has looked. After `ssh three`, `sudo ls -lA
+/media/mirror/received-backups/immich` shows what is there; an entry that is not one of
+zero's snapshots is the stream's, and comes out with `sudo rm` for a file or link, or
+`sudo btrfs subvolume delete` for a subvolume.
+
 Never make a received snapshot writable (`btrfs property set ... ro false`): that clears
 its received UUID, and zero's next incremental has no parent to land on. A restore is a
 reflink copy out of a snapshot, which takes no time and no space until the copy changes,

@@ -105,7 +105,9 @@ send/receive*, and the move on `zero` that it waits for is
   `mirror-receive`, which receives with `--chroot` into
   `received-backups/<name>/<name>-<stamp>`, root's, and answers with the snapshot's
   received UUID. The `backup` user is only the login and owns nothing on the array. A
-  compromised `zero` can add snapshots but cannot change, delete or read back the ones there.
+  compromised `zero` can add snapshots, but cannot change what is in the ones there,
+  delete them or read them back; it can rename them within their directory, which
+  `mirror-receive` notices and stops on.
 - The received snapshots are the history: `three` keeps 90 days of them, never its newest,
   and takes none of its own. `zero` keeps its newest 7.
 - Against a locked `three`, a run fails and the next one retries. A check on `zero` tells
