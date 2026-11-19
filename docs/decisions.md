@@ -2648,10 +2648,12 @@ Alpine copies for `one` too, since `one` keeps both.
   careful-setup consensus is that whatever parses the protected machine's data on the
   backup box runs unprivileged, and that the backup box alone controls its history.
 - **btrfs snapshots on `zero`, rsync pulled by `three`.** `zero` snapshots one `immich`
-  subvolume (library and Postgres together) and its Syncthing share, read-only; `three`
+  subvolume (library and Postgres together), read-only; `three`
   pulls the newest snapshot with rsync as an unprivileged user and snapshots its copy
   itself. The consistency the owner wanted from send/receive comes from rsync reading a
   frozen snapshot. The design, for the owner's review, is `plans/three-backup-pull.md`.
+- **Syncthing's share on `zero` is not backed up to `three`** (the owner, 2026-11-19): it
+  holds nothing critical.
 - **btrbk owns the snapshot logic on both sides,** to keep the scripts this repo maintains
   as small as possible (the owner's aim).
 

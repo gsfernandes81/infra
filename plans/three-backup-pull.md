@@ -35,15 +35,9 @@ the far side of the connection.
    immich.<ts>   (ro)       over ssh, read-only   │
    …  last 7                                      │
                                                   │
- subvolume media-syncthing ──┐                    ├── syncthing/
-   (share)                   │ 04:00              │   ├── current/   ◄─────┐
-   config/   (nested subvol: │ left out)          │   ├── syncthing.<ts> ◄─┤ snapshot after
-                             ▼                    │   └── …  a ladder    │ a good pull
- snapshots/syncthing/                             │                      │
-   syncthing.<ts> (ro) ◄── newest ── pulled ──────┼──────────────────────┘
-   …  last 7                                      │
-                                                  └── (syncthing-three's own subvolume,
-                                                       separate, never pulled into)
+ subvolume media-syncthing                        │
+   not snapshotted, not pulled:                   └── (syncthing-three's own subvolume,
+   nothing critical (owner, 2026-11-19)                separate, never pulled into)
 ```
 
 Why each part is shaped this way:
@@ -52,9 +46,12 @@ Why each part is shaped this way:
   snapshot freezes both at the same instant. rsync then copies a tree that is not
   changing, so the copy on `three` is consistent: the database and the photos agree.
   Postgres comes back from it as from a power cut.
-- **Nested subvolumes are left out of a snapshot**, so `thumbs`, `encoded-video` and
-  Syncthing's `config` (which holds `zero`'s device key) never leave `zero`. In the
-  snapshot they are empty directories, and rsync copies them as empty directories.
+- **Nested subvolumes are left out of a snapshot**, so `thumbs` and `encoded-video`
+  never leave `zero`. In the snapshot they are empty directories, and rsync copies them as
+  empty directories.
+- **Syncthing's share is not backed up** (the owner, 2026-11-19): it holds nothing
+  critical. So `media-syncthing` is neither snapshotted nor pulled, and the send/receive
+  plan's step for its `config` subvolume is dropped from the move.
 - **`current/` is an ordinary writable copy** that rsync updates in place (`--inplace`),
   so a changed file rewrites only its changed blocks. The read-only snapshots beside it are
   the history. btrfs shares every unchanged block between them by itself, so each snapshot
@@ -132,7 +129,7 @@ simulation's package check confirms both before the build relies on them.
 ### `mirror-pull` on `three`, in outline
 
 ```
-for name in immich syncthing:
+for name in immich:          # one series today; the loop keeps a second cheap
     newest = rsync --list-only mirror@zero::snapshots/<name>/  | the last name, sorted
     if newest is the name in last-pulled-<name>: nothing new, next name
     rsync -aHAX --numeric-ids --fake-super --delete --inplace
@@ -157,10 +154,7 @@ snapshot_preserve        7d                       snapshot_preserve        14d 8
 volume /mnt/ext                                   volume /media/mirror/received-backups
   snapshot_dir snapshots/immich                     subvolume immich/current
   subvolume immich                                    snapshot_dir    immich
-  snapshot_dir snapshots/syncthing                    snapshot_name   immich
-  subvolume media-syncthing                         subvolume syncthing/current
-    snapshot_name syncthing                           snapshot_dir    syncthing
-                                                      snapshot_name   syncthing
+                                                      snapshot_name   immich
 ```
 
 btrbk prunes by the snapshot's own timestamp, on the clock of the box running it; on
@@ -193,9 +187,9 @@ The old age check ran on `zero` and read a marker `zero`'s own push wrote. With 
   `/root/.ssh/mirror-backup` (deleted once the pull works).
 
 **`three`:**
-- Layout: `received-backups/immich/current` and `received-backups/syncthing/current` as
-  subvolumes owned by `backup` (rsync writes there), `received-backups` itself root's and
-  mode 755 so `backup` can reach them; snapshots root's and read-only.
+- Layout: `received-backups/immich/current` as a subvolume owned by `backup` (rsync writes
+  there), `received-backups` itself root's and mode 755 so `backup` can reach it; snapshots
+  root's and read-only.
 - Package: `btrbk`.
 - New: `mirror-pull` with its service and timer, btrbk's config, `mirror-snapshot.service`
   (replacing today's snapshot script and timer), the private key for `backup` (made on
@@ -210,7 +204,7 @@ with a small Postgres writing during the snapshot, and the runner's real btrbk a
 daemon serving it. It checks:
 
 1. A first pull copies the newest snapshot; owners, modes and contents match by a hash of
-   the tree, read back through `--fake-super`. `thumbs` and `config` are empty directories.
+   the tree, read back through `--fake-super`. `thumbs` and `encoded-video` are empty directories.
 2. `three` takes a snapshot only after the pull succeeded; a pull cut off halfway leaves
    `current/` as it was and no new snapshot.
 3. A second night pulls only what changed.
