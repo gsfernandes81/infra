@@ -45,5 +45,5 @@ rc_after="bcache-register modules"
 rc_before="btrfs-scan localmount"
 
 target=data-4
-source='UUID=FILL-FROM-LUKS-UUID'
+source='UUID=c00f99a6-20ba-4fdc-af80-b6fde37131f1'
 key='/etc/keys/data.key'

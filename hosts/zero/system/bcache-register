@@ -51,7 +51,7 @@ start() {
 	i=0
 	while [ "$i" -lt 30 ]; do
 		for uuid in f5ec31d1-faf2-4e71-ba18-7769a1172323 \
-		            908229e0-adce-4258-8b25-57d8a21d1d01 \
+		            589733f6-bc6c-414c-8154-2ccd390d80dd \
 		            a3d7a86c-2caa-4141-b7b4-513c58e7295d; do
 			case " $registered " in *" $uuid "*) continue ;; esac
 			dev="/dev/disk/by-uuid/$uuid"
