@@ -27,8 +27,8 @@ the far side of the connection.
    data/   library upload    │ 04:00 btrbk        ├── immich/
            backups profile   │ snapshot, ro       │   ├── current/   ◄─────┐ rsync, as `backup`
    data/thumbs        (nested│ subvol: left out)  │   │   (plain copy,    │ --fake-super:
-   data/encoded-video (nested│ subvol: left out)  │   │    writable)      │ owners in xattrs
-   db/     Postgres          │                    │   ├── immich.<ts>  ◄─┤ 05:00+ btrbk
+   data/encoded-video (nested│ subvol: left out)  │   │    writable)      │ owners in xattrs;
+   db/     Postgres          │                    │   ├── immich.<ts>  ◄─┤ btrbk, after
                              ▼                    │   ├── immich.<ts>    │ snapshot, ro,
  snapshots/immich/                                │   └── …  90 days     │ after a good pull
    immich.<ts>   (ro) ◄── newest ── pulled ───────┼──────────────────────┘
@@ -108,7 +108,7 @@ on 2026-11-19 that the rule is theirs to relax; this needs their word.
 | `zero` | `rsyncd-mirror.conf` | rsync's own daemon config: one read-only module | about 10 lines |
 | `zero` | `mirror-backup-age-check` | kept or replaced, see the alert below | about 30 lines today |
 | `three` | `mirror-pull` | picks the newest snapshot of each name and runs rsync | about 30 lines of shell |
-| `three` | `mirror-pull.service` and `.timer` | systemd runs it as `backup`, at 05:00, only while the array is mounted | two small units |
+| `three` | `mirror-pull.service` and `.timer` | systemd runs it as `backup` about every 15 minutes with a few minutes' jitter, only while the array is mounted; it never starts a second run while one is still pulling | two small units |
 | `three` | **btrbk**, snapshot-only | prebuilt; snapshots `current/` after a good pull and prunes to 90 days | a config of about 10 lines |
 | `three` | `mirror-snapshot.service` | systemd runs btrbk as root, started only by a successful pull (`OnSuccess=`) | one small unit |
 
@@ -122,16 +122,18 @@ simulation's package check confirms both before the build relies on them.
 ```
 for name in immich syncthing:
     newest = rsync --list-only mirror@zero::snapshots/<name>/  | the last name, sorted
+    if newest is the name in last-pulled-<name>: nothing new, next name
     rsync -aHAX --numeric-ids --fake-super --delete --delete-delay --delay-updates
           --timeout=900 -e "ssh <pinned options>"
           mirror@zero::snapshots/<name>/<newest>/  /media/mirror/received-backups/<name>/current/
     exit 24 (files vanished) counts as success; anything else stops the run
-write which snapshot was pulled, for the log
+    write newest to last-pulled-<name> once three's snapshot of it is taken
 ```
 
 `set -eu`, no pipelines whose status matters, no parsing beyond picking the last name of
-a sorted list (btrbk's names sort by time). If `newest` is the same as last night's, the
-pull still runs and finds nothing to copy; a check below notices when that goes on.
+a sorted list (btrbk's names sort by time) and comparing it with one remembered name. Most
+runs find nothing new and end after one listing. The alert below notices when nothing new
+arrives for days.
 
 ### btrbk's two configs, in outline
 
@@ -231,7 +233,11 @@ not needed. Draft PR #22's array play is updated to this layout.
    keeping the owner's format means a snapshot-and-prune script of about 40 lines on each
    side instead of btrbk. Recommended: btrbk's format.
 3. **The alert**: the dead man's switch (recommended), or `zero` reading its daemon log.
-4. **The pull time**: 05:00, an hour after `zero`'s 04:00 snapshot. Recommended.
+4. **When `three` pulls**: polling about every 15 minutes with a few minutes' jitter
+   (`OnUnitInactiveSec`, `RandomizedDelaySec`), pulling only when `zero` has a newer
+   snapshot than `three` holds: the owner's suggestion, recommended over a fixed 05:00. It
+   catches up as soon as `three` is unlocked after a reboot, and does not depend on the two
+   boxes' clocks agreeing.
 5. **`zero`'s retention**: 7 days, at least 2. Recommended; a long seed over the tailnet
    that takes more than a day still finds its snapshot.
 6. **How `zero`'s read-only daemon reads everything**: as `mirror` with only
