@@ -237,7 +237,7 @@ def validate_sudoers(path):
     With -f, visudo checks the syntax of the file it is given and not its owner or mode,
     so the repo copy (gavin's, 0644) and the live file (root's, 0440) read the same.
     Calibrated by sim/alpine/run-setup-plays.sh on Alpine: the live /etc/sudoers.d/gavin
-    reads `parsed OK`, zero's sudoers-mirror passes, and a broken copy of it is refused.
+    reads `parsed OK`, zero's sudoers-backup passes, and a broken copy of it is refused.
     """
     visudo = "/usr/sbin/visudo"
     if not Path(visudo).exists():

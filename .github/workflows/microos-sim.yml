@@ -15,8 +15,8 @@ on:
   push:
     paths: ['sim/microos/**', '.github/workflows/microos-sim.yml', 'leap/**', 'hosts/*/leap/**',
       'hosts/one/*', 'hosts/three/*', 'hosts/zero/system/snapper-*',
-      'hosts/zero/system/sudoers-mirror', 'hosts/zero/system/rsyncd-mirror.conf',
-      'hosts/zero/system/mirror-authorized-keys', 'hosts/zero/system/sshd-infra.conf',
+      'hosts/zero/system/sudoers-backup', 'hosts/zero/system/rsyncd-backup.conf',
+      'hosts/zero/system/backup-authorized-keys', 'hosts/zero/system/sshd-infra.conf',
       'sim/alpine/host/Dockerfile',
       'ansible/playbooks/server-deploy-compose.yml', 'ansible/playbooks/server-update-leap.yml',
       'ansible/playbooks/_deploy-compose-one.yml', 'ansible/playbooks/_sync-host-checkout.yml',
@@ -29,8 +29,8 @@ on:
   pull_request:
     paths: ['sim/microos/**', '.github/workflows/microos-sim.yml', 'leap/**', 'hosts/*/leap/**',
       'hosts/one/*', 'hosts/three/*', 'hosts/zero/system/snapper-*',
-      'hosts/zero/system/sudoers-mirror', 'hosts/zero/system/rsyncd-mirror.conf',
-      'hosts/zero/system/mirror-authorized-keys', 'hosts/zero/system/sshd-infra.conf',
+      'hosts/zero/system/sudoers-backup', 'hosts/zero/system/rsyncd-backup.conf',
+      'hosts/zero/system/backup-authorized-keys', 'hosts/zero/system/sshd-infra.conf',
       'sim/alpine/host/Dockerfile',
       'ansible/playbooks/server-deploy-compose.yml', 'ansible/playbooks/server-update-leap.yml',
       'ansible/playbooks/_deploy-compose-one.yml', 'ansible/playbooks/_sync-host-checkout.yml',

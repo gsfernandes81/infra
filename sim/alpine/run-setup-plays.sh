@@ -324,7 +324,7 @@ if play server-create-restore-key.yml -e target=zero; then fail "made a key off 
 fi
 on 'echo Running > /var/lib/fake-tailscale/state'
 if play server-create-restore-key.yml -e target=two; then fail "made a key for a host three does not pull"; else
-	says 'hosts/two/system/rsyncd-mirror.conf is not in this checkout' && pass "refused a host three does not pull" || fail "two failed, but not by its check"
+	says 'hosts/two/system/rsyncd-backup.conf is not in this checkout' && pass "refused a host three does not pull" || fail "two failed, but not by its check"
 fi
 on 'test ! -e /root/.ssh/restore' && pass "no key made by a refusal" || fail "a refusal made a key"
 
@@ -449,13 +449,13 @@ fi
 # which must be refused before anything is written.
 echo "== install-system-file: sudoers is checked by visudo before it is written"
 on 'sudo visudo -cf /etc/sudoers.d/gavin' 2>&1 | grep -q 'parsed OK' && pass "visudo reads the box's own sudoers.d/gavin as parsed OK" || fail "visudo does not pass the box's own sudoers file"
-said=$(on 'su gavin -c "cd /home/gavin/infra && bin/install-system-file sudoers-mirror --new"' 2>&1)
-case "$said" in *'pre-checks on the repo copy: ok'*'DRY RUN'*) pass "sudoers-mirror passes the pre-check" ;; *) fail "sudoers-mirror did not pass: $(echo "$said" | tail -n 3 | tr '\n' ' ')" ;; esac
-on "su gavin -c 'cd /home/gavin/infra && sed -i \"s/NOPASSWD:/NOPASSWD/\" hosts/zero/system/sudoers-mirror'"
-said=$(on 'su gavin -c "cd /home/gavin/infra && bin/install-system-file sudoers-mirror --new --commit"' 2>&1)
+said=$(on 'su gavin -c "cd /home/gavin/infra && bin/install-system-file sudoers-backup --new"' 2>&1)
+case "$said" in *'pre-checks on the repo copy: ok'*'DRY RUN'*) pass "sudoers-backup passes the pre-check" ;; *) fail "sudoers-backup did not pass: $(echo "$said" | tail -n 3 | tr '\n' ' ')" ;; esac
+on "su gavin -c 'cd /home/gavin/infra && sed -i \"s/NOPASSWD:/NOPASSWD/\" hosts/zero/system/sudoers-backup'"
+said=$(on 'su gavin -c "cd /home/gavin/infra && bin/install-system-file sudoers-backup --new --commit"' 2>&1)
 case "$said" in *'fails validate_sudoers'*) pass "a broken copy is refused by visudo" ;; *) fail "a broken copy was not refused: $(echo "$said" | tail -n 3 | tr '\n' ' ')" ;; esac
-on 'test ! -e /etc/sudoers.d/mirror && sudo true' && pass "nothing was written, and sudo still works" || fail "a broken sudoers file was written"
-on 'su gavin -c "cd /home/gavin/infra && git checkout -q hosts/zero/system/sudoers-mirror"'
+on 'test ! -e /etc/sudoers.d/backup && sudo true' && pass "nothing was written, and sudo still works" || fail "a broken sudoers file was written"
+on 'su gavin -c "cd /home/gavin/infra && git checkout -q hosts/zero/system/sudoers-backup"'
 
 echo
 if [ "$fails" -gt 0 ]; then echo "$fails check(s) FAILED"; exit 1; fi

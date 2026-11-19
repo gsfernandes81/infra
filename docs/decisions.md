@@ -2728,6 +2728,10 @@ and refine the owner's design without changing it.
   the snapshot being pulled, and the pull finished whole: the rsync sender's working
   directory keeps a deleted subvolume readable to the end. So snapper's cleanup cannot spoil
   a pull, and files vanishing means `zero` served something other than a frozen snapshot.
+- **The user `three` logs into on `zero` is `backup`, as on `three`** (the owner, 2026-11-19):
+  `mirror` reads as RAID. Its sudoers file, rsyncd config and key line are named for it.
+  `three`'s `/media/mirror`, `mirror-luks` and the `mirror-pull` and `mirror-snapshot` names
+  stay until the owner decides them.
 - **The pull runs sandboxed**: `ProtectSystem=strict`, writable only `current/` and `state/`,
   no capabilities, no new privileges. It parses what `zero` sends.
 - **snapper runs with `--no-dbus` on `three` too.** Its config is in no `SNAPPER_CONFIGS`, so

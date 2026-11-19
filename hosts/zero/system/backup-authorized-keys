@@ -1,0 +1,18 @@
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /home/backup/.ssh
+# infra-name: authorized_keys
+# infra-mode: 0644
+#
+# three's pull key, the one key that lets zero's backup user in (plans/three-backup-pull.md).
+# Root's file in root's directory, so zero's backup user cannot add another. The key opens no
+# shell, terminal or forwarding (restrict), comes only from three's tailnet address
+# (from=), and whatever the client asks for, sshd runs the read-only rsync daemon of
+# rsyncd-backup.conf through the one sudo rule in sudoers-backup.
+#
+# The user is `backup`, as on three, not `mirror`, which reads as RAID (the owner,
+# 2026-11-19). The key is three's /home/backup/.ssh/zero-pull.pub, which the owner made on
+# three on 2026-11-19 (hosts/three/leap/README.md § The backup); its fingerprint is
+# SHA256:9rZpPX2SVlOOQfM1T81VzH6sOdk+0AvyLIaXm8B5juM. A rebuilt three makes a new key, and so
+# a new line here, then an install-system-file on zero.
+restrict,from="100.101.45.78",command="sudo -n /bin/setpriv --reuid=backup --regid=backup --init-groups --inh-caps=+dac_read_search --ambient-caps=+dac_read_search /usr/bin/rsync --server --daemon --config=/etc/rsyncd-backup.conf ." ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINJk4CpUFmf3OYi3HIPK/RzGHiYLMis61u1RfqYNrHz0 three backup-pull

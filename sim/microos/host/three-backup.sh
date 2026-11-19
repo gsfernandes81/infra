@@ -85,8 +85,8 @@ layout)
 	;;
 key)
 	# As hosts/three/leap/README.md § The backup has the owner make it. The public half is
-	# printed last, for the runner to put in zero's mirror line.
-	ssh-keygen -q -t ed25519 -N '' -C 'three mirror-pull' -f /home/backup/.ssh/zero-pull &&
+	# printed last, for the runner to put in zero's key line.
+	ssh-keygen -q -t ed25519 -N '' -C 'three backup-pull' -f /home/backup/.ssh/zero-pull &&
 		chown backup:backup /home/backup/.ssh/zero-pull /home/backup/.ssh/zero-pull.pub &&
 		stat -c '%U %a %n' /home/backup/.ssh/zero-pull >&2 &&
 		cut -d' ' -f1,2 /home/backup/.ssh/zero-pull.pub
@@ -178,7 +178,7 @@ delete-calibration)
 	n=$(sed -n 's/ .*//p' "$d/last-pulled")
 	rsync -n -i -aHAX --numeric-ids --fake-super --munge-links --delete \
 		-e 'ssh -F /home/backup/.ssh/config -o UserKnownHostsFile=/home/backup/.ssh/known_hosts' \
-		"mirror@zero::snapshots/$n/snapshot/" "$cur/" > /root/sim-delete.log 2>&1
+		"backup@zero::snapshots/$n/snapshot/" "$cur/" > /root/sim-delete.log 2>&1
 	check "calibration: without the filters, --delete would empty three's .snapshots" sh -c "
 		grep -m3 'deleting .*\.snapshots/' /root/sim-delete.log || tail -n 5 /root/sim-delete.log
 		grep -q 'deleting .*\.snapshots/' /root/sim-delete.log"
@@ -217,35 +217,35 @@ start)
 confined)
 	# As the backup user, with its own key and ssh config, as mirror-pull reaches zero.
 	check "the key runs no command of its own on zero" sh -c "
-		out=\$(runuser -u backup -- ssh mirror@zero 'echo SIM-SHELL-OPENED; id' < /dev/null 2>&1); rc=\$?; echo \"exit \$rc: \$out\" | tail -n 2
+		out=\$(runuser -u backup -- ssh backup@zero 'echo SIM-SHELL-OPENED; id' < /dev/null 2>&1); rc=\$?; echo \"exit \$rc: \$out\" | tail -n 2
 		! echo \"\$out\" | grep -qiE 'SIM-SHELL-OPENED|permission denied'"
 	check "sftp reads nothing through the key" sh -c "
-		rm -f /tmp/sim-sftp; out=\$(echo 'get /etc/passwd /tmp/sim-sftp' | runuser -u backup -- sftp -b - mirror@zero 2>&1)
+		rm -f /tmp/sim-sftp; out=\$(echo 'get /etc/passwd /tmp/sim-sftp' | runuser -u backup -- sftp -b - backup@zero 2>&1)
 		echo \"\$out\" | tail -n 2; [ ! -e /tmp/sim-sftp ] && ! echo \"\$out\" | grep -qi 'permission denied'"
 	echo up > /tmp/sim-up && chown backup /tmp/sim-up
 	check "an upload into the module is refused, read only" sh -c "
-		out=\$(runuser -u backup -- rsync -e ssh /tmp/sim-up mirror@zero::snapshots/sim-up 2>&1); echo \"\$out\" | tail -n 2
+		out=\$(runuser -u backup -- rsync -e ssh /tmp/sim-up backup@zero::snapshots/sim-up 2>&1); echo \"\$out\" | tail -n 2
 		echo \"\$out\" | grep -q 'read only'"
 	mkdir -p /tmp/sim-empty && chown backup /tmp/sim-empty
 	check "a --delete into the module is refused, read only" sh -c "
-		out=\$(runuser -u backup -- rsync -e ssh -r --delete /tmp/sim-empty/ mirror@zero::snapshots/ 2>&1); echo \"\$out\" | tail -n 2
+		out=\$(runuser -u backup -- rsync -e ssh -r --delete /tmp/sim-empty/ backup@zero::snapshots/ 2>&1); echo \"\$out\" | tail -n 2
 		echo \"\$out\" | grep -q 'read only'"
 	# Each must be refused for the module's own reason, read back from rsync, never for a
 	# failure to connect at all.
 	check "a path climbing out of the module with .. is held inside it, never /etc" sh -c "
-		out=\$(runuser -u backup -- rsync -e ssh --list-only mirror@zero::snapshots/../../../etc/ 2>&1); echo \"\$out\" | tail -n 3
+		out=\$(runuser -u backup -- rsync -e ssh --list-only backup@zero::snapshots/../../../etc/ 2>&1); echo \"\$out\" | tail -n 3
 		echo \"\$out\" | grep -qE 'No such file|failed' && ! echo \"\$out\" | grep -qE ' (passwd|shadow|sudoers)\$'"
 	check "nothing is read from outside it" sh -c "
-		rm -f /tmp/sim-shadow; out=\$(runuser -u backup -- rsync -e ssh mirror@zero::snapshots/../../../etc/shadow /tmp/sim-shadow 2>&1)
+		rm -f /tmp/sim-shadow; out=\$(runuser -u backup -- rsync -e ssh backup@zero::snapshots/../../../etc/shadow /tmp/sim-shadow 2>&1)
 		echo \"\$out\" | tail -n 2; echo \"\$out\" | grep -q 'No such file' && [ ! -e /tmp/sim-shadow ]"
 	check "no other module is served, and the module list names none" sh -c "
-		out=\$(runuser -u backup -- rsync -e ssh mirror@zero::other/ 2>&1); echo \"\$out\" | tail -n 1
+		out=\$(runuser -u backup -- rsync -e ssh backup@zero::other/ 2>&1); echo \"\$out\" | tail -n 1
 		echo \"\$out\" | grep -qi 'unknown module' &&
-		runuser -u backup -- rsync -e ssh mirror@zero:: > /tmp/sim-modules 2>&1; cat /tmp/sim-modules
+		runuser -u backup -- rsync -e ssh backup@zero:: > /tmp/sim-modules 2>&1; cat /tmp/sim-modules
 		! grep -q snapshots /tmp/sim-modules"
 	# A remote forward is asked for at once, so sshd's refusal comes back on its own.
 	check "the key forwards nothing" sh -c "
-		out=\$(timeout 30 runuser -u backup -- ssh -N -o ExitOnForwardFailure=yes -R 127.0.0.1:2297:127.0.0.1:22 mirror@zero < /dev/null 2>&1)
+		out=\$(timeout 30 runuser -u backup -- ssh -N -o ExitOnForwardFailure=yes -R 127.0.0.1:2297:127.0.0.1:22 backup@zero < /dev/null 2>&1)
 		rc=\$?; echo \"exit \$rc: \$out\" | tail -n 2
 		[ \$rc != 0 ] && [ \$rc != 124 ] && echo \"\$out\" | grep -qi 'forwarding failed'"
 	rm -rf /tmp/sim-up /tmp/sim-empty /tmp/sim-modules

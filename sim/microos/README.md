@@ -182,13 +182,13 @@ Alpine container of `zero`'s release (the digest in `sim/alpine/host/Dockerfile`
 privileged, on the runner's network, with that mount at `/media/immich`. It is set up as
 `hosts/zero/system/README.md` § The backup has the owner set up `zero`: snapper 0.13.1 from
 edge/testing (x86_64 here; `alpine-sim.yml` checks the README's aarch64 SHA-256), util-linux's
-`setpriv`, Alpine's sudo and rsync, the `mirror` user made with BusyBox's `adduser`, and
+`setpriv`, Alpine's sudo and rsync, the `backup` user made with BusyBox's `adduser`, and
 `zero`'s tracked files at their headers' paths, sudoers through `visudo`. Its sshd answers on
 the runner's port 22, which the VM reaches at qemu's host address, the address `three`'s
 tracked ssh config is given in place of `zero`'s; the run's stand-ins replace `zero`'s host
 key, its restore key and the two `from=` addresses. Its snapshots are the tracked hourly
 script's, run by hand. `three` makes its pull key as its README says, and its public half
-goes into the stand-in's mirror line.
+goes into the stand-in's key line.
 
 Each numbered point is the design's (`plans/three-backup-pull.md`), with how it is shown:
 
@@ -212,9 +212,9 @@ Each numbered point is the design's (`plans/three-backup-pull.md`), with how it 
    and an unchanged 8 MB file keep its inode and ctime, so it was not written again.
 4. **Least privilege.** As the backup user, with its own key and config: a command, sftp,
    an upload, a `--delete` into the module, a path climbing out with `..`, another module
-   and a port forward must each get nothing. On the stand-in, `sudo -l -U mirror` must allow
+   and a port forward must each get nothing. On the stand-in, `sudo -l -U backup` must allow
    exactly the forced command and refuse another config, another user and a shell; and
-   mid-transfer, the daemon's `/proc/<pid>/status` must read the mirror user's uid and
+   mid-transfer, the daemon's `/proc/<pid>/status` must read zero's backup user's uid and
    `0x4` (`CAP_DAC_READ_SEARCH`) as its permitted, effective and ambient sets.
 5. **A locked array skips the pull.** After the README's lock, a start of the pull must be
    skipped by its condition, not failed, with the timer stopped; the unlock must start the

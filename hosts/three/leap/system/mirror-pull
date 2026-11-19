@@ -35,7 +35,7 @@
 set -eu
 
 dst=/media/mirror/received-backups/immich
-src=mirror@zero::snapshots
+src=backup@zero::snapshots
 bwlimit=${MIRROR_PULL_BWLIMIT:-3906}
 die() { echo "mirror-pull: $*" >&2; exit 1; }
 

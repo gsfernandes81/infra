@@ -57,9 +57,9 @@ exemption, which is a real cost on a 512 MB armv6 box running diskless.
 | `snapper-config-immich` | `/etc/snapper/configs/immich` | snapper's config for `/media/immich`: hourly snapshots kept 24 hours, daily ones 7 days, the owner's own kept 10 deep; root alone; no qgroups (§ The backup). **Not installed**: after the move. |
 | `snapper-sysconfig` | `/etc/snapper/snapper` | `SNAPPER_CONFIGS=""`, as the package ships it, so the package's own hourly script, which needs D-Bus, does nothing. **Not installed**. |
 | `snapper-immich` | `/etc/periodic/hourly/snapper-immich` | The hourly snapshot and its cleanup, `snapper --no-dbus`, under `flock` (BusyBox's applet). **Not installed**: after the move, since it refuses while `/media/immich` is not mounted. |
-| `sudoers-mirror` | `/etc/sudoers.d/mirror` | Lets the `mirror` user run, as root, exactly one command: `setpriv` dropping back to `mirror` with `CAP_DAC_READ_SEARCH` alone, then rsync's read-only daemon. `install-system-file` runs `visudo -cf` on it before writing. **Not installed**. |
-| `rsyncd-mirror.conf` | `/etc/rsyncd-mirror.conf` | That daemon's one module, `snapshots`, read-only, over `/media/immich/.snapshots`. **Not installed**. |
-| `mirror-authorized-keys` | `/home/mirror/.ssh/authorized_keys` | `three`'s pull key: `restrict`, only from `three`'s tailnet address, forced to the daemon above through sudo. Holds a placeholder until the owner makes the key on `three`. **Not installed**. |
+| `sudoers-backup` | `/etc/sudoers.d/backup` | Lets the `backup` user run, as root, exactly one command: `setpriv` dropping back to `backup` with `CAP_DAC_READ_SEARCH` alone, then rsync's read-only daemon. `install-system-file` runs `visudo -cf` on it before writing. **Not installed**. |
+| `rsyncd-backup.conf` | `/etc/rsyncd-backup.conf` | That daemon's one module, `snapshots`, read-only, over `/media/immich/.snapshots`. **Not installed**. |
+| `backup-authorized-keys` | `/home/backup/.ssh/authorized_keys` | `three`'s pull key: `restrict`, only from `three`'s tailnet address, forced to the daemon above through sudo. Holds a placeholder until the owner makes the key on `three`. **Not installed**. |
 | `mirror-backup-age-check` | `/etc/periodic/daily/mirror-backup-age-check` | **Not used, and not to be installed.** It read the push's `last-success`, and the push is gone: with the pull, `zero` never learns whether a pull succeeded. The owner deferred the alert to a dead man's switch for the whole fleet, designed separately; this file and `server-store-backup-ntfy-url.yml` stay until that design says whether it reuses them. |
 
 **The mountpoints are `chattr +i`.** That is the actual protection against a failed
@@ -74,10 +74,10 @@ mountpoint, or you will get `Permission denied` as root and not know why.
 `three` pulls `zero`'s backup ([`plans/three-backup-pull.md`](../../../plans/three-backup-pull.md)).
 `zero` takes a read-only snapper snapshot of `/media/immich`, the library in `data/` and
 Postgres in `db/`, at the top of each hour, and keeps 24 hourly and 7 daily ones in
-`/media/immich/.snapshots/<N>/snapshot`. Daily at 01:00 UTC `three` logs in as `mirror`,
+`/media/immich/.snapshots/<N>/snapshot`. Daily at 01:00 UTC `three` logs in as `backup`,
 with a key that runs nothing but a read-only rsync daemon, and copies the newest finished
 one. Nothing on `zero` pushes, and nothing on `zero` runs as root for it but the instant
-`setpriv` takes to drop to `mirror`.
+`setpriv` takes to drop to `backup`.
 
 **snapper is from Alpine's edge/testing**, `snapper-0.13.1-r0`, the only Alpine package of
 it, installed once from the file and pinned in apk's world, so no `apk upgrade` moves it. It
@@ -87,7 +87,8 @@ built against, and a release that moves one breaks it. It runs with `--no-dbus` 
 apk installs `dbus` as a dependency, and no runlevel starts it, which is how it stays
 (installing a tool is not enabling it, CLAUDE.md § Landmines). `flock` in the hourly script
 is BusyBox's applet, in Alpine's BusyBox since long before 3.24 (its `busyboxconfig` sets
-`CONFIG_FLOCK=y`); `command -v flock` on `zero` confirms it before the script is installed.
+`CONFIG_FLOCK=y`). On `zero`, on 2026-11-19, `command -v flock` read `/usr/bin/flock` and
+`/bin/setpriv --version` util-linux 2.42.3.
 
 **setpriv is util-linux's**, from Alpine's `setpriv` package, which installs `/bin/setpriv`
 over BusyBox's applet of that name. BusyBox's has no `--reuid`, so the forced command would
@@ -98,6 +99,9 @@ release and architecture, and `microos-sim.yml`'s `three` job runs `zero`'s side
 Alpine container for `three` to pull from.
 
 ### The install, owner-run
+
+**Done on 2026-11-19:** the packages block and the user block below, by the owner, as
+written; the old `mirror` user, made first, removed.
 
 The steps after the move need `/media/immich` and its `.snapshots`, which the move makes
 ([`plans/visit-runbook.md`](../../../plans/visit-runbook.md) § The move on `zero`). After
@@ -118,13 +122,14 @@ refuses a file whose signature no key in `/etc/apk/keys` made; never pass it
 reinstall: edge drops a version when it builds the next.
 
 ```fish
-# on zero: the mirror user, its home and .ssh root's; BusyBox locks the account with !, which sshd refuses a key for, so * replaces it: no password, not locked
-sudo addgroup -S mirror; and sudo adduser -S -D -H -h /home/mirror -s /bin/sh -G mirror mirror
-sudo sed -i 's/^mirror:![^:]*:/mirror:*:/' /etc/shadow; and sudo install -d -m 755 /home/mirror /home/mirror/.ssh
-sudo grep '^mirror:' /etc/shadow | cut -d: -f1,2; getent passwd mirror
+# on zero: zero's backup user, its home and .ssh root's; BusyBox locks the account with !, which sshd refuses a key for, so * replaces it: no password, not locked
+sudo addgroup -S backup; and sudo adduser -S -D -H -h /home/backup -s /bin/sh -G backup backup
+sudo sed -i 's/^backup:![^:]*:/backup:*:/' /etc/shadow; and sudo install -d -m 755 /home/backup /home/backup/.ssh
+sudo grep '^backup:' /etc/shadow | cut -d: -f1,2; getent passwd backup
 ```
 
-The shadow line reads `mirror:*`; the passwd line ends `/home/mirror:/bin/sh`. A real shell,
+The user is `backup`, as on `three`, not `mirror`, which reads as RAID (the owner). The
+shadow line reads `backup:*`; the passwd line ends `/home/backup:/bin/sh`. A real shell,
 because sshd runs a forced command through the user's shell.
 
 ```fish
@@ -133,19 +138,19 @@ cd ~/infra/ansible; and ansible-playbook playbooks/server-create-restore-key.yml
 ```
 
 Send the infra agent what it prints. Then, once `three`'s key is
-made and committed into `mirror-authorized-keys` (`hosts/three/leap/README.md` § The
+made and committed into `backup-authorized-keys` (`hosts/three/leap/README.md` § The
 backup), and after the move, each file with a dry run first:
 
 ```fish
 # on zero: install the backup's files; each dry run shows a new file, then --commit writes it
 sudo install -d -m 755 /etc/snapper/configs
 cd ~/infra; and git pull --ff-only
-for f in snapper-sysconfig snapper-config-immich sudoers-mirror rsyncd-mirror.conf mirror-authorized-keys snapper-immich
+for f in snapper-sysconfig snapper-config-immich sudoers-backup rsyncd-backup.conf backup-authorized-keys snapper-immich
     bin/install-system-file $f --new; and sudo bin/install-system-file $f --new --commit --allow-content-change; or break
 end
 ```
 
-`sudoers-mirror` is checked by `visudo` before it is written: a bad file in `/etc/sudoers.d`
+`sudoers-backup` is checked by `visudo` before it is written: a bad file in `/etc/sudoers.d`
 stops sudo altogether. Then the first snapshot, by hand, and the list:
 
 ```fish
@@ -161,8 +166,7 @@ It lists snapshot 0, `current`, and 1, `timeline`. `three`'s first pull is
 `grep autodefrag /proc/mounts` prints nothing (the move's remount drops it);
 `rc-update show | grep -w dbus` prints nothing.
 
-**Way back:** delete the six files the loop installed, the mirror user (`sudo deluser
-mirror`) and snapper (`sudo apk del snapper`); the snapshots stay until `sudo btrfs
+**Way back:** delete the six files the loop installed, zero's backup user (`sudo deluser backup`) and snapper (`sudo apk del snapper`); the snapshots stay until `sudo btrfs
 subvolume delete` takes them, and cost only what changed since each.
 
 ### A restore

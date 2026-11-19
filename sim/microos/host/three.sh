@@ -146,7 +146,7 @@ TUNNEL
 # keeps its snapshots in. Zero itself is an Alpine container of zero's release, privileged
 # and on the runner's network, with that mount at /media/immich: it installs snapper from
 # edge/testing, util-linux's setpriv, sudo and rsync as hosts/zero/system/README.md has the
-# owner do, makes the mirror user the same way, installs zero's tracked files at the paths
+# owner do, makes zero's backup user the same way, installs zero's tracked files at the paths
 # their headers name, and serves three's key with its own sshd on the runner's port 22,
 # which the VM reaches at qemu's host address. Its snapshots are the tracked hourly
 # script's, run by hand.
@@ -253,7 +253,7 @@ zero_postgres() {
 }
 
 # The stand-in for zero, set up as hosts/zero/system/README.md § The backup has the owner
-# set up zero, with three's backup key, made on three, in the mirror line.
+# set up zero, with three's backup key, made on three, in the key line.
 zero_up() {
 	local key=$1 f
 	sudo docker rm -f sim-zero > /dev/null 2>&1 || true
@@ -272,23 +272,23 @@ zero_up() {
 	zx 'cd /root && wget -q "https://dl-cdn.alpinelinux.org/alpine/edge/testing/$(apk --print-arch)/snapper-0.13.1-r0.apk" &&
 		apk add --quiet ./snapper-0.13.1-r0.apk && apk add --quiet snapper=0.13.1-r0' || return 1
 	zx 'snapper --version | head -n 1; /bin/setpriv --version; rsync --version | head -n 1; sudo -V | head -n 1' | sed 's/^/    /'
-	# The mirror user as the README makes it. BusyBox's adduser locks the account with !,
+	# Zero's backup user as the README makes it. BusyBox's adduser locks the account with !,
 	# and sshd refuses a key for a locked account, so * replaces it: no password, not locked.
-	zx 'addgroup -S mirror && adduser -S -D -H -h /home/mirror -s /bin/sh -G mirror mirror &&
-		sed -i "s/^mirror:![^:]*:/mirror:*:/" /etc/shadow && install -d -m 755 /home/mirror /home/mirror/.ssh' || return 1
+	zx 'addgroup -S backup && adduser -S -D -H -h /home/backup -s /bin/sh -G backup backup &&
+		sed -i "s/^backup:![^:]*:/backup:*:/" /etc/shadow && install -d -m 755 /home/backup /home/backup/.ssh' || return 1
 	# zero's tracked files, each at the path its header names, three's address and key in
-	# the mirror line swapped for the runner's own, sudoers checked as install-system-file
+	# the key line swapped for the runner's own, sudoers checked as install-system-file
 	# checks it.
-	for f in snapper-config-immich snapper-sysconfig snapper-immich sudoers-mirror rsyncd-mirror.conf \
-		mirror-authorized-keys sshd-infra.conf; do
+	for f in snapper-config-immich snapper-sysconfig snapper-immich sudoers-backup rsyncd-backup.conf \
+		backup-authorized-keys sshd-infra.conf; do
 		zx "f=/repo/hosts/zero/system/$f
 			p=\$(sed -n 's/^# infra-path:[[:space:]]*//p' \$f); n=\$(sed -n 's/^# infra-name:[[:space:]]*//p' \$f)
 			m=\$(sed -n 's/^# infra-mode:[[:space:]]*//p' \$f)
-			sed -e 's/from=\"[^\"]*\"/from=\"127.0.0.1\"/' -e 's|FILL-FROM-THREE-BACKUP-KEY|$key three mirror-pull|' \$f > /tmp/f
+			sed -e 's/from=\"[^\"]*\"/from=\"127.0.0.1\"/' -e '/^restrict,/s|\\(command=\"[^\"]*\"\\) .*\$|\\1 $key sim three backup-pull|' \$f > /tmp/f
 			install -D -m \$m /tmp/f \$p/\$n
 			case \$p in /etc/sudoers.d) visudo -cf \$p/\$n ;; esac" || { echo "FAIL could not install zero's $f"; return 1; }
 	done
-	zx 'grep -v "^#" /home/mirror/.ssh/authorized_keys | cut -c1-80' | sed 's/^/    mirror line: /'
+	zx 'grep -v "^#" /home/backup/.ssh/authorized_keys | cut -c1-80' | sed 's/^/    key line: /'
 	sudo docker cp zero-host sim-zero:/etc/ssh/ssh_host_ed25519_key
 	zx 'chown root:root /etc/ssh/ssh_host_ed25519_key && chmod 600 /etc/ssh/ssh_host_ed25519_key &&
 		ssh-keygen -y -f /etc/ssh/ssh_host_ed25519_key > /etc/ssh/ssh_host_ed25519_key.pub &&
@@ -301,24 +301,24 @@ zero_up() {
 
 # The checks only zero's side can make: its sudoers and the capabilities of its daemon.
 zero_confined() {
-	local cmd='/bin/setpriv --reuid=mirror --regid=mirror --init-groups --inh-caps=+dac_read_search --ambient-caps=+dac_read_search /usr/bin/rsync --server --daemon --config=/etc/rsyncd-mirror.conf .'
-	if zx "sudo -n -U mirror -l $cmd" > /dev/null 2>&1; then
-		echo "PASS zero's sudoers lets the mirror user run exactly its daemon"
+	local cmd='/bin/setpriv --reuid=backup --regid=backup --init-groups --inh-caps=+dac_read_search --ambient-caps=+dac_read_search /usr/bin/rsync --server --daemon --config=/etc/rsyncd-backup.conf .'
+	if zx "sudo -n -U backup -l $cmd" > /dev/null 2>&1; then
+		echo "PASS zero's sudoers lets zero's backup user run exactly its daemon"
 	else
-		echo "FAIL zero's sudoers does not allow the mirror user its daemon"
+		echo "FAIL zero's sudoers does not allow zero's backup user its daemon"
 	fi
-	if zx "sudo -n -U mirror -l ${cmd/rsyncd-mirror.conf/rsyncd-other.conf}" > /dev/null 2>&1 ||
-		zx "sudo -n -U mirror -l ${cmd//reuid=mirror/reuid=root}" > /dev/null 2>&1 ||
-		zx 'sudo -n -U mirror -l /bin/sh' > /dev/null 2>&1; then
-		echo "FAIL zero's sudoers allows the mirror user something else"
+	if zx "sudo -n -U backup -l ${cmd/rsyncd-backup.conf/rsyncd-other.conf}" > /dev/null 2>&1 ||
+		zx "sudo -n -U backup -l ${cmd//reuid=backup/reuid=root}" > /dev/null 2>&1 ||
+		zx 'sudo -n -U backup -l /bin/sh' > /dev/null 2>&1; then
+		echo "FAIL zero's sudoers allows zero's backup user something else"
 	else
 		echo "PASS and nothing else: another daemon config, another user, a shell"
 	fi
 }
-# The mirror user's rsync processes on the stand-in, from /proc: BusyBox's pgrep found none
+# Zero's backup user's rsync processes on the stand-in, from /proc: BusyBox's pgrep found none
 # while one ran.
 zero_daemons() {
-	zx 'u=$(id -u mirror); for d in /proc/[0-9]*; do
+	zx 'u=$(id -u backup); for d in /proc/[0-9]*; do
 		[ "$(cat $d/comm 2>/dev/null)" = rsync ] && [ "$(awk "/^Uid:/ { print \$2 }" $d/status 2>/dev/null)" = "$u" ] && echo ${d#/proc/}
 	done; true'
 }
@@ -329,7 +329,7 @@ zero_caps() {
 		[ -n "$pids" ] && break
 		sleep 1
 	done
-	[ -n "$pids" ] || { echo "FAIL no rsync daemon of the mirror user ran on zero to read"; return 0; }
+	[ -n "$pids" ] || { echo "FAIL no rsync daemon of zero's backup user ran on zero to read"; return 0; }
 	for p in $pids; do
 		st=$(zx "grep -E '^(Uid|Gid|Cap(Inh|Prm|Eff|Amb)):' /proc/$p/status" | tr '\t' ' ' | tr -s ' ' | tr '\n' ';') || true
 		echo "    zero's daemon, pid $p: $st"
@@ -338,11 +338,11 @@ zero_caps() {
 		*) echo "FAIL zero's rsync daemon holds other capabilities"; return 0 ;;
 		esac
 		case "$st" in
-		"Uid: $(zx 'id -u mirror') "*) ;;
-		*) echo "FAIL zero's rsync daemon is not running as the mirror user"; return 0 ;;
+		"Uid: $(zx 'id -u backup') "*) ;;
+		*) echo "FAIL zero's rsync daemon is not running as zero's backup user"; return 0 ;;
 		esac
 	done
-	echo "PASS zero's rsync daemon runs as the mirror user with CAP_DAC_READ_SEARCH and nothing else"
+	echo "PASS zero's rsync daemon runs as zero's backup user with CAP_DAC_READ_SEARCH and nothing else"
 }
 zero_kill_daemon() {
 	local pids
@@ -366,7 +366,7 @@ sim_backup() {
 	fi
 	as_root three-backup.sh layout
 	# three's key to zero, made on three as its README says; the public half goes into
-	# zero's mirror line, as the owner sends it to the infra agent.
+	# zero's key line, as the owner sends it to the infra agent.
 	key=$(as_root three-backup.sh key 2> key.err | tail -n 1)
 	sed 's/^/    /' key.err
 	case "$key" in

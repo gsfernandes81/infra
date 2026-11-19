@@ -67,7 +67,7 @@ leave it out of an `apk upgrade`; no runlevel may start `dbus`, which apk instal
 `SNAPPER_CONFIGS`; and `/bin/setpriv` must be util-linux's only once `setpriv` is added.
 
 `install-system-file`'s sudoers check, calibrated first: `visudo -cf` must pass the box's own
-`/etc/sudoers.d/gavin`, the dry run of `sudoers-mirror` must pass its pre-check, and a copy
+`/etc/sudoers.d/gavin`, the dry run of `sudoers-backup` must pass its pre-check, and a copy
 broken in the checkout must be refused before anything is written, with sudo still working.
 
 Every run's output is searched for the auth keys, the topic and the private restore key.

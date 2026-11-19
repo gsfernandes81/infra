@@ -8,15 +8,15 @@
 # root's directory, as is known_hosts beside it (zero-known-hosts), so the backup user can
 # change neither where it connects nor which host key it accepts.
 #
-# zero by its tailnet address, never a name (CLAUDE.md § Landmines), as the mirror user, the
-# one its key line lets in (hosts/zero/system/mirror-authorized-keys). Its host key is checked
+# zero by its tailnet address, never a name (CLAUDE.md § Landmines), as zero's backup user, the
+# one its key line lets in (hosts/zero/system/backup-authorized-keys). Its host key is checked
 # under the name zero (HostKeyAlias), against the one key in known_hosts, and an unknown or
 # changed one stops the pull. The key is the user's own, which the owner makes on three
 # (hosts/three/leap/README.md § The backup), and it is the only one offered. A dead path
 # ends the run within about three minutes rather than hanging.
 Host zero
 	HostName 100.121.158.58
-	User mirror
+	User backup
 	HostKeyAlias zero
 	IdentityFile /home/backup/.ssh/zero-pull
 	IdentitiesOnly yes

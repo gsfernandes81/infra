@@ -27,7 +27,7 @@ cd ~/infra/ansible; and ansible-playbook playbooks/server-create-restore-key.yml
 It makes `/root/.ssh/restore` only if no key is there. The infra agent commits the key and
 zero's host key in place of the placeholders, checking each against the fingerprint the play
 prints, and the stick can be built. Zero's tailnet address is already in both files. A
-rebuilt three also makes a new pull key (§ The backup), so zero's mirror line changes after
+rebuilt three also makes a new pull key (§ The backup), so zero's key line changes after
 its first boot.
 
 ## The stick
@@ -214,13 +214,13 @@ the box every time.
 4. **The pull key**, made here and never carried:
 
    ```fish
-   # on three: make the backup user's key to zero, then print its public half and fingerprint for zero's mirror line
-   sudo ssh-keygen -t ed25519 -N '' -C 'three mirror-pull' -f /home/backup/.ssh/zero-pull; and sudo chown backup:backup /home/backup/.ssh/zero-pull /home/backup/.ssh/zero-pull.pub
+   # on three: make the backup user's key to zero, then print its public half and fingerprint for zero's key line
+   sudo ssh-keygen -t ed25519 -N '' -C 'three backup-pull' -f /home/backup/.ssh/zero-pull; and sudo chown backup:backup /home/backup/.ssh/zero-pull /home/backup/.ssh/zero-pull.pub
    cat /home/backup/.ssh/zero-pull.pub; ssh-keygen -lf /home/backup/.ssh/zero-pull.pub
    ```
 
    Send the infra agent the public key and its fingerprint: it commits the key into
-   `hosts/zero/system/mirror-authorized-keys`, which `zero` then installs
+   `hosts/zero/system/backup-authorized-keys`, which `zero` then installs
    (`hosts/zero/system/README.md` § The backup).
 5. **The files**, each with a dry run first, once the infra agent has committed zero's two
    values (§ Before the stick):

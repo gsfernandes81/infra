@@ -394,11 +394,11 @@ visit, step 4); `one`'s old board free; a card written and labelled `three`.
 6. **The backup** ([`three-backup-pull.md`](three-backup-pull.md)), in this order:
    1. `three`'s side, steps 1 to 5 of [`hosts/three/leap/README.md`](../hosts/three/leap/README.md)
       § The backup: the layout on the array, the old push's files gone, the restore user,
-      the pull key, whose public half goes to the infra agent for `zero`'s mirror line, and
+      the pull key, whose public half goes to the infra agent for `zero`'s key line, and
       the files.
    2. The move on `zero`, below.
    3. `zero`'s side, [`hosts/zero/system/README.md`](../hosts/zero/system/README.md)
-      § The backup: snapper, the mirror user, the files, and the first snapshot.
+      § The backup: snapper, zero's backup user, the files, and the first snapshot.
    4. The first pull, step 6 of `three`'s README § The backup: over the LAN with no rate
       limit, started without waiting, so a dropped session does not end it. About 93 GB,
       so hours. A pull that stops is finished by the next one, since `current/` keeps what

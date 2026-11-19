@@ -9,9 +9,9 @@ stays until they are done:
 |---|---|---|
 | 1. The files on both boxes, the play for zero's restore key, the simulation | repo | **built**, proved by `microos-sim.yml` (`host`, `three`) and `alpine-sim.yml` |
 | 2. zero's restore key and host key, committed into three's files | `zero`, then the infra agent | not done |
-| 3. three's layout, users, pull key and files | `three` | not done: `hosts/three/leap/README.md` § The backup |
+| 3. three's layout, users, pull key and files | `three` | the pull key made 2026-11-19 and committed into zero's key line; the rest not done: `hosts/three/leap/README.md` § The backup |
 | 4. The move on `zero`: one `immich` subvolume, its `.snapshots`, the fstab line, Immich's `.env` | `zero` | not done: `plans/visit-runbook.md` § The move on `zero` |
-| 5. zero's packages, mirror user and files; the first snapshot | `zero` | not done: `hosts/zero/system/README.md` § The backup |
+| 5. zero's packages, backup user and files; the first snapshot | `zero` | the packages (snapper pinned, setpriv, rsync, sudo) and the `backup` user done 2026-11-19; the files and the first snapshot not done: `hosts/zero/system/README.md` § The backup |
 | 6. The first pull, then slice 4's checks on the real data | `three`, `zero` | not done: `plans/visit-runbook.md` § Slice 3, step 6, and § Slice 4 |
 
 It replaced the send/receive plan, `three-send-receive.md`, whose transfer the owner dropped
@@ -73,10 +73,10 @@ the far side of a connection.
 ## Who can do what
 
 ```
- three ──ssh as mirror, key /home/backup/.ssh/zero-pull──► zero
+ three ──ssh as backup, key /home/backup/.ssh/zero-pull──► zero
           restrict, from="100.101.45.78" (three's tailnet address)
-          forced: sudo -n /bin/setpriv --reuid=mirror ... rsync --server --daemon
-                  --config=/etc/rsyncd-mirror.conf .   (module `snapshots`, read only)
+          forced: sudo -n /bin/setpriv --reuid=backup ... rsync --server --daemon
+                  --config=/etc/rsyncd-backup.conf .   (module `snapshots`, read only)
 
  zero ──ssh as restore, key /root/.ssh/restore─────────────► three
           restrict, from="100.121.158.58" (zero's tailnet address)
@@ -116,7 +116,7 @@ This turns the one key the fleet allowed between boxes into two read-only ones (
 | `zero` | `snapper-config-immich` → `/etc/snapper/configs/immich` | hourly 24, daily 7, number cleanup for the owner's own (10), root alone, no qgroups, `BACKGROUND_COMPARISON="no"` |
 | `zero` | `snapper-sysconfig` → `/etc/snapper/snapper` | `SNAPPER_CONFIGS=""`, so the package's D-Bus hourly script does nothing |
 | `zero` | `snapper-immich` → `/etc/periodic/hourly/` | under `flock`: create a timeline snapshot, clean up timeline and number, `--no-dbus`, log to syslog |
-| `zero` | `sudoers-mirror`, `rsyncd-mirror.conf`, `mirror-authorized-keys` | the `mirror` user's one command, its read-only module over `/media/immich/.snapshots`, and three's key line |
+| `zero` | `sudoers-backup`, `rsyncd-backup.conf`, `backup-authorized-keys` | the `backup` user's one command, its read-only module over `/media/immich/.snapshots`, and three's key line |
 | `zero` | `fstab` | `autodefrag` gone from every array line |
 | `three` | `mirror-pull` → `/usr/local/bin/` | about 40 lines of POSIX shell: list, pick, compare, rsync, record |
 | `three` | `mirror-pull.service`, `.timer` | as `backup`, sandboxed, `ConditionPathIsMountPoint=`, `OnSuccess=mirror-snapshot.service`; daily `01:00:00 UTC`, 10 minutes' jitter, `Persistent=` |
@@ -160,7 +160,7 @@ line; `docs/fleet-inventory.md` regenerates.
    when the pull stops; the gap is filed in the phase table.
 4. **Polling** about every 15 minutes: superseded by the daily pull below.
 5. **`zero`'s retention:** hourly for a day, daily for 7 days.
-6. **`zero`'s daemon** as `mirror` with only `CAP_DAC_READ_SEARCH`: agreed.
+6. **`zero`'s daemon** as `backup` with only `CAP_DAC_READ_SEARCH`: agreed.
 7. **`three`'s retention:** daily 14, weekly 8, monthly 12, no quarterly or yearly step.
 8. **`zero`'s read-only access to its own backups:** agreed (decision 1).
 
