@@ -404,7 +404,7 @@ through `ssh dev`.
 
    ```fish
    # step 3, on zero: install cryptsetup and its dmcrypt service, load dm-crypt, and find the new disk, the only sd disk over 3.5 TB, and read it
-   sudo apk add cryptsetup cryptsetup-openrc
+   sudo apk add cryptsetup cryptsetup-openrc blkid
    sudo modprobe dm-crypt; and grep -c device-mapper /proc/misc
    set d (lsblk -dbno NAME,SIZE | awk '$1 ~ /^sd/ && $2 > 3500000000000 {print $1}'); echo "new disk: $d"
    sudo smartctl -d sat -i -A /dev/$d
@@ -415,7 +415,9 @@ through `ssh dev`.
    It reads right when `/proc/misc` counts 1; one disk name; smartctl shows serial
    `WD-WXB2D76H9RCN`, a few power-on hours, and 0 for `Reallocated_Sector_Ct`,
    `Current_Pending_Sector`, `Offline_Uncorrectable` and `UDMA_CRC_Error_Count`; and blkid
-   prints nothing and exits 2, a blank disk. The sector sizes show what each bridge
+   prints nothing and exits 2, a blank disk. `blkid` is installed here because Alpine's
+   default is BusyBox's, which ignores `-p` and exits 0 on a blank disk, so step 6's guard
+   would refuse to format (found on `zero`, 2026-11-19). The sector sizes show what each bridge
    reports; the new disk moves from the borrowed Sabrent into `zero`'s at step 10, and its
    bcache block of 4096 (step 5) suits a bridge reporting 512 or 4096 alike. Send the smartctl lines to the agent; once the
    disk is in `zero`, its line belongs in `hosts/zero/system/hardware.md` through
