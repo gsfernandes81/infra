@@ -654,18 +654,29 @@ launcher flags in forms that do not compare equal to what was sent, so a field c
 differ on every run. That reason is answered by comparing a subset with normalisation, not
 the whole object. A duration compares as a length of time (`24h` and `24h0m0s` are equal),
 include rules as a set, a domain's hostname without case, an absent
-`auto_redirect_to_identity` as its documented false, and an absent `allowed_idps`, `exclude`
-or `require` as empty. Nothing else is normalised. A false "differs" costs one write, as
-before; a false "same" would leave a wrong login in place. The read-back after a write
-stops the run when a field this file sends still differs, and prints, without stopping, a
-field it cannot prove: an absent `app_launcher_visible`, whose documented default is true
-but which an omitted false would also leave absent, and `allowed_idps`, which the file does
-not send. Such a field means every run writes again, as before, with the reason printed.
-Two things change with it. A field set by hand outside that list now survives, where the
-whole PUT reset it. And the policy's name is now managed: it was kept as found and is now
-written as `acc_policy_name` when it differs. The stand-in in `sim/cloudflare/` answers with
-Cloudflare's extra fields, Go's `24h0m0s` and the rules reversed, and counts every Access
-write, so CI proves that a re-run writes nothing. `_dev-container-tunnel.yml` still PUTs
+`auto_redirect_to_identity` or `options_preflight_bypass` as its documented false, and an
+absent `allowed_idps`, `exclude` or `require` as empty. Nothing else is normalised. A false
+"differs" costs one write, as before; a false "same" would leave a wrong login in place.
+**What an application covers is compared too:** every public `destinations[].uri` and every
+`self_hosted_domains` entry, hostname without case, must make exactly the one domain, so a
+hostname or path added by hand to the no-login application (the one that lets everyone
+through) is found and written back; review caught that the first cut compared `domain`
+alone and would have left such a widening in place for ever. So the write now sends
+`destinations` (one public entry, the domain), `allowed_idps: []` (as
+`_dev-container-tunnel.yml` already did) and `options_preflight_bypass: false`, where the
+first cut left `allowed_idps` out. The read-back after a write stops the run when a field
+this file sends still differs, and prints, without stopping, a field Cloudflare leaves out
+of its answer: an absent `app_launcher_visible`, whose documented default is true but which
+an omitted false would also leave absent. Such a field means every run writes again, as
+before, with the reason printed. A read that answers anything but a 200 with success and an
+application says so, rather than comparing as an application with every field absent.
+Two things change with it. A field set by hand outside that list survives a run that writes
+nothing; a write still PUTs the application whole. And the policy's name is now managed: it
+was kept as found and is now written as `acc_policy_name` when it differs. The bypass path's
+trailing slash is compared exactly until the live `domain` of `calibre-web`'s no-login
+application shows whether Cloudflare keeps it. The stand-in in `sim/cloudflare/` answers
+with Cloudflare's extra fields, Go's `24h0m0s`, a destination for the domain and the rules
+reversed, and counts every Access write, so CI proves that a re-run writes nothing. `_dev-container-tunnel.yml` still PUTs
 unconditionally; it is a different play and did not follow.
 
 ## garmin-mcp — a Garmin MCP for claude.ai, on `one` (read-only; five writes added, amended below)

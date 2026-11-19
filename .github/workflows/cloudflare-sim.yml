@@ -18,7 +18,8 @@ name: cloudflare-sim
 #                      or not answering (kept).
 #   access-pair        _cf-access-app.yml imported twice as server-create-deployment-
 #                      tunnel.yml imports it, a login and a no-login path: a dry run, a
-#                      first run, a re-run that writes nothing, and hand changes repaired.
+#                      first run, a re-run that writes nothing, hand changes repaired (the
+#                      no-login path widened among them), and an unreadable application.
 #
 # WHAT IT CANNOT CHECK, so nobody reads a green run as more: Cloudflare's real API (the
 # stand-in answers in its envelope, with the fields the plays read, plus, on an Access

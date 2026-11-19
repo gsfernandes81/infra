@@ -3,7 +3,7 @@
 # shellcheck disable=SC2015
 # Runs access-pair.yml against mock_api.py: server-create-deployment-tunnel.yml's two
 # imports of _cf-access-app.yml, a login on pairsim.gsrpi.uk and a no-login application on
-# pairsim.gsrpi.uk/kobo, the second import running after the first in one play. A dry run,
+# pairsim.gsrpi.uk/kobo/, the second import running after the first in one play. A dry run,
 # a first run that creates both, a re-run that must write nothing, then a hand change to
 # each application that only its own import may repair. Prints PASS or FAIL per check and
 # exits 1 on any FAIL. CI runs it (.github/workflows/cloudflare-sim.yml).
@@ -16,7 +16,7 @@ repo=$(cd "$here/../.." && pwd)
 port=8790
 api="http://127.0.0.1:$port/client/v4"
 login=pairsim.gsrpi.uk
-bypass=pairsim.gsrpi.uk/kobo
+bypass=pairsim.gsrpi.uk/kobo/
 fails=0
 
 pass() { echo "PASS: $*"; }
@@ -54,7 +54,7 @@ mark() { jq_state 'len(s["access_writes"])'; }
 # Writes since a mark, per domain: ['pairsim.gsrpi.uk POST app', ...].
 since() { jq_state "[w['domain'] + ' ' + w['method'] + ' ' + w['kind'] for w in s['access_writes'][$1:]]"; }
 apps_now() { jq_state "sorted((a['domain'], a['name'], a['session_duration'], [(p['decision'], p['name'], len(p['include'])) for p in a['policies']]) for a in s['apps'].values())"; }
-want="[('$login', 'pairsim', '168h', [('allow', 'allowed people', 2)]), ('$bypass', 'pairsim /kobo (no login)', '168h', [('bypass', 'no login on this path', 1)])]"
+want="[('$login', 'pairsim', '168h', [('allow', 'allowed people', 2)]), ('$bypass', 'pairsim /kobo/ (no login)', '168h', [('bypass', 'no login on this path', 1)])]"
 
 echo "== --check"
 if play --check; then pass "dry run exits 0"; else fail "dry run failed"; fi
@@ -100,6 +100,44 @@ got=$(since "$m")
 m=$(mark)
 if play; then pass "the next run exits 0"; else fail "the next run failed"; fi
 [ "$(since "$m")" = "[]" ] && pass "the next run wrote nothing" || fail "the next run wrote $(since "$m")"
+
+echo "== the no-login path widened by hand"
+# The bypass application is the one that lets everyone through, so a hostname or path
+# added to it, or preflight requests let past, is the change that must not go unnoticed.
+dests() { jq_state "[[d['uri'] for d in a['destinations']] for a in s['apps'].values() if a['domain'] == '$bypass']"; }
+preflight() { jq_state "[a['options_preflight_bypass'] for a in s['apps'].values() if a['domain'] == '$bypass']"; }
+widen() { # <what> <set json> <check command> <expected value>
+	control "{\"edit_app\": {\"domain\": \"$bypass\", \"set\": $2}}"
+	local m
+	m=$(mark)
+	if play; then pass "$1: the run exits 0"; else fail "$1: the run failed"; fi
+	got=$(since "$m")
+	[ "$got" = "['$bypass PUT app']" ] && pass "$1: only the no-login application was written" || fail "$1: Access writes: $got"
+	got=$($3)
+	[ "$got" = "$4" ] && pass "$1: repaired" || fail "$1: after the run: $got"
+	m=$(mark)
+	if play; then pass "$1: the next run exits 0"; else fail "$1: the next run failed"; fi
+	[ "$(since "$m")" = "[]" ] && pass "$1: the next run wrote nothing" || fail "$1: the next run wrote $(since "$m")"
+}
+widen "a destination added" \
+	"{\"destinations\": [{\"type\": \"public\", \"uri\": \"$bypass\"}, {\"type\": \"public\", \"uri\": \"$login/admin\"}]}" \
+	dests "[['$bypass']]"
+widen "preflight bypass turned on" '{"options_preflight_bypass": true}' \
+	preflight "[False]"
+
+echo "== a read of the application answering 200 with success:false"
+control '{"app_read_unsuccessful": true}'
+if play; then fail "ran on when the application could not be read back"; else
+	says 'the application could not be read (it answered success:false), so it is written whole' \
+		&& pass "said the application could not be read, not that it differs" || fail "the unreadable application was not reported as unreadable"
+	says 'reading it back failed (it answered success:false)' \
+		&& pass "the read-back stopped the run, saying it could not read" || fail "failed, but not by the read-back's own message"
+	says 'differs in (absent)' && fail "an unreadable application was reported field by field" || pass "no field was reported absent"
+fi
+control '{"app_read_unsuccessful": false}'
+m=$(mark)
+if play; then pass "a run once it reads again exits 0"; else fail "the run once it reads again failed"; fi
+[ "$(since "$m")" = "[]" ] && pass "and writes nothing" || fail "Access writes: $(since "$m")"
 
 echo
 echo "requests the stand-in saw:"

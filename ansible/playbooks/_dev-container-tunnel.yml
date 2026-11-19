@@ -208,6 +208,8 @@
       # not compare equal to what was sent, so a field-by-field check would report a
       # difference on every run and be worse than no check. Converging every time is
       # cheap and correct; the cost is one `changed` in the recap.
+      # _cf-access-app.yml answered this with a subset compare on 2026-11-19
+      # (docs/decisions.md § "Sidecar, not baked-in"); this file was not converted.
       #
       # allowed_idps is deliberately empty and auto_redirect_to_identity false: this
       # application has no identity provider behind it at all. That is the answer to

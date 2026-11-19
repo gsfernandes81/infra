@@ -6,8 +6,8 @@ and `_cf-tunnel.yml` call, for the Access applications, reusable policies and se
 tokens that `server-create-fleet-ssh-access.yml` reads and writes, and for the applications,
 app-scoped policies and records that `server-create-browser-login.yml` writes, answering in
 Cloudflare's envelope. An application or app-scoped policy comes back as Cloudflare sends
-one, with ids, timestamps and defaults nobody sent, `session_duration` in Go's long form
-(`24h0m0s`) and include rules reversed, so `_cf-access-app.yml`'s compare is tested against
+one, with ids, timestamps and defaults nobody sent, a public destination for its domain,
+`session_duration` in Go's long form (`24h0m0s`) and include rules reversed, so `_cf-access-app.yml`'s compare is tested against
 more than its own echo. Each write to one is counted in `access_writes`. `run-host-tunnel.sh` drives `server-create-host-tunnel.yml` against
 it with the runner as the host, a made-up `simnew`; `run-fleet-ssh-access.sh` and `run-browser-login.sh` drive
 the two Access plays, and `run-access-pair.sh` the deployment play's two Access
@@ -154,8 +154,8 @@ the API token and the address list in it, and writes `ansible/inventory.login-si
 
 `run-access-pair.sh` runs `access-pair.yml`, a driver that imports `_cf-access-app.yml`
 twice as `server-create-deployment-tunnel.yml` does: a login on `pairsim.gsrpi.uk` with an
-`allow` policy, then a no-login application on `pairsim.gsrpi.uk/kobo` with a `bypass`
-policy admitting everyone. That play needs a host, its checkout and a tunnel, so only the
+`allow` policy, then a no-login application on `pairsim.gsrpi.uk/kobo/` with a `bypass`
+policy admitting everyone. The path ends in a slash, as `edge.yml` requires. That play needs a host, its checkout and a tunnel, so only the
 part it shares is driven. It runs:
 
 - a dry run, which must write nothing;
@@ -164,7 +164,12 @@ part it shares is driven. It runs:
 - a re-run, which must make no PUT or POST to either and whose recap counts no change;
 - both durations and both policies' rules changed, which each import must repair on its
   own application; then an address removed, which only the login's policy write may
-  repair, and a run after it that writes nothing.
+  repair, and a run after it that writes nothing;
+- the no-login application widened by hand, first by a second destination and then by
+  letting preflight requests past: each must be written back by the no-login application's
+  write alone, and the run after must write nothing;
+- a read of one application answering 200 with `success: false`, which must be reported as
+  unreadable, before the write and at the read-back, and never as fields that differ.
 
 Every run's output is searched for the API token and the allowed addresses. It needs no
 root and writes nothing outside a temporary directory.

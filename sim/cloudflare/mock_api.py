@@ -2,12 +2,13 @@
 _cf-tunnel.yml call, so server-create-host-tunnel.yml can be run end to end with no account,
 and the Access calls server-create-fleet-ssh-access.yml makes (applications, reusable
 policies, service tokens), and those _cf-access-app.yml makes for
-server-create-browser-login.yml (an application PUT whole, its app-scoped policies), with
+server-create-browser-login.yml (an application and its app-scoped policies), with
 _cf-dns.yml's records, deletes included. It keeps its state in memory, answers in
 Cloudflare's envelope (success, errors, result), and never records an Authorization header.
 An application, and an app-scoped policy, is answered as Cloudflare answers one: with ids,
-timestamps and defaults the plays never sent, session_duration in Go's long form (24h0m0s
-for 24h) and a policy's include rules in reverse order, so _cf-access-app.yml's subset
+timestamps and defaults the plays never sent, a public destination for its domain when it
+holds none, session_duration in Go's long form (24h0m0s for 24h) and a policy's include
+rules in reverse order, so _cf-access-app.yml's subset
 compare is tested against more than its own echo. /__state holds them as written. Every
 application and app-scoped policy write is counted in access_writes, as DNS writes are in
 dns_writes, so a test can prove a converged run wrote nothing.
@@ -21,6 +22,7 @@ when an application with an `allow` policy covers the hostname (or it is `contro
 moment, so a test can prove the login came first; a record DELETE can be made to answer
 403 or 404 through /__control. Run with python3 -I; the one argument is
 the port."""
+import copy
 import json
 import sys
 import uuid
@@ -34,11 +36,13 @@ STATE = {"tunnels": {}, "records": {}, "requests": [],
          "refuse_writes": False, "refuse_dns": False, "tunnel_secrets": {},
          "apps": {}, "policies": {}, "service_tokens": [], "never_gate": False,
          "refuse_access": False, "dns_writes": [], "delete_answer": None,
-         "access_writes": [], "ignore_app_field": None, "omit_on_read": []}
+         "access_writes": [], "ignore_app_field": None, "omit_on_read": [],
+         "app_read_unsuccessful": False}
 
 # What Cloudflare fills in on an application PUT or POST that leaves a field out.
 APP_DEFAULTS = {"type": "self_hosted", "session_duration": "24h", "allowed_idps": [],
-                "auto_redirect_to_identity": False, "app_launcher_visible": True}
+                "auto_redirect_to_identity": False, "app_launcher_visible": True,
+                "options_preflight_bypass": False, "destinations": []}
 APP_SETTINGS = ["name", "domain"] + list(APP_DEFAULTS)
 
 
@@ -78,8 +82,9 @@ def app_view(app):
     view.update(app)
     view.update(uid=app["id"], aud="aud-" + app["id"][:8], created_at="2026-11-19T00:00:00Z",
                 updated_at="2026-11-19T00:00:00Z", enable_binding_cookie=False,
-                http_only_cookie_attribute=True, options_preflight_bypass=False, tags=[],
+                http_only_cookie_attribute=True, tags=[],
                 self_hosted_domains=[app.get("domain")],
+                destinations=view["destinations"] or [{"type": "public", "uri": app.get("domain")}],
                 session_duration=go_duration(view["session_duration"]),
                 policies=[policy_view(p) for p in app.get("policies", [])])
     for field in STATE["omit_on_read"]:
@@ -155,10 +160,13 @@ class Handler(BaseHTTPRequestHandler):
                 aid = str(uuid.uuid4())
                 STATE["apps"][aid] = {"id": aid, "name": a["name"], "domain": a["domain"],
                                       "destinations": [], "policies": []}
-            # Changes made by hand in the dashboard: fields set on every application, fields
-            # set on every app-scoped policy, an address taken out of every include.
+            # Changes made by hand in the dashboard: fields set on every application, or on
+            # the one whose domain is named, fields set on every app-scoped policy, an
+            # address taken out of every include.
             for app in STATE["apps"].values():
                 app.update(change.get("edit_apps", {}))
+                if change.get("edit_app", {}).get("domain") == app.get("domain"):
+                    app.update(change["edit_app"]["set"])
                 for pol in app["policies"]:
                     pol.update(change.get("edit_app_policies", {}))
                     if change.get("drop_email"):
@@ -170,6 +178,10 @@ class Handler(BaseHTTPRequestHandler):
                 STATE["ignore_app_field"] = change["ignore_app_field"]
             if "omit_on_read" in change:
                 STATE["omit_on_read"] = change["omit_on_read"]
+            # A read of one application answering 200 with success:false and no result, as
+            # Cloudflare's envelope allows.
+            if "app_read_unsuccessful" in change:
+                STATE["app_read_unsuccessful"] = bool(change["app_read_unsuccessful"])
             if "service_tokens" in change:
                 STATE["service_tokens"] = change["service_tokens"]
             STATE["refuse_writes"] = bool(change.get("refuse_writes", STATE["refuse_writes"]))
@@ -191,7 +203,8 @@ class Handler(BaseHTTPRequestHandler):
                 STATE.update(tunnels={}, records={}, refuse_writes=False, refuse_dns=False,
                              tunnel_secrets={}, apps={}, policies={}, never_gate=False,
                              refuse_access=False, dns_writes=[], delete_answer=None,
-                             access_writes=[], ignore_app_field=None, omit_on_read=[])
+                             access_writes=[], ignore_app_field=None, omit_on_read=[],
+                             app_read_unsuccessful=False)
             return self.reply(200, {"ok": True})
 
         STATE["requests"].append(f"{method} {path}")
@@ -329,7 +342,7 @@ class Handler(BaseHTTPRequestHandler):
             ignored = STATE["ignore_app_field"]
             kept = app.get(ignored)
             for field in APP_SETTINGS:
-                app[field] = b.get(field, APP_DEFAULTS.get(field))
+                app[field] = b.get(field, copy.deepcopy(APP_DEFAULTS.get(field)))
             if ignored:
                 app[ignored] = kept
             STATE["access_writes"].append({"method": "PUT", "kind": "app", "domain": app["domain"]})
@@ -343,7 +356,7 @@ class Handler(BaseHTTPRequestHandler):
             STATE["apps"][aid] = {"id": aid, "destinations": b.get("destinations", []),
                                   "policies": [dict(STATE["policies"][pid], precedence=i + 1)
                                                for i, pid in enumerate(linked)]}
-            STATE["apps"][aid].update({f: b.get(f, APP_DEFAULTS.get(f)) for f in APP_SETTINGS})
+            STATE["apps"][aid].update({f: b.get(f, copy.deepcopy(APP_DEFAULTS.get(f))) for f in APP_SETTINGS})
             STATE["access_writes"].append({"method": "POST", "kind": "app", "domain": b["domain"]})
             return self.reply(201, envelope(app_view(STATE["apps"][aid])))
         if p.startswith(apps + "/") and method in ("GET", "DELETE"):
@@ -353,6 +366,9 @@ class Handler(BaseHTTPRequestHandler):
             if method == "DELETE":
                 del STATE["apps"][aid]
                 return self.reply(202, envelope({"id": aid}))
+            if STATE["app_read_unsuccessful"]:
+                return self.reply(200, {"success": False, "errors": [{"code": 10001, "message": "sim: unsuccessful read"}],
+                                        "messages": [], "result": None})
             return self.reply(200, envelope(app_view(STATE["apps"][aid])))
 
         return self.reply(404, envelope(errors=[{"code": 7003, "message": f"no route {method} {p}"}]))

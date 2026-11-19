@@ -20,7 +20,7 @@
     cf_session_duration: 168h
     deployment: pairsim
     deployment_hostname: pairsim.gsrpi.uk
-    bypass_path: /kobo
+    bypass_path: /kobo/
     cf_access_emails: [owner@example.com, second@example.org]
 
   tasks:
