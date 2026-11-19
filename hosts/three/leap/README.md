@@ -185,7 +185,7 @@ three files work together:
 - `system/i2c-dev.conf` loads `i2c-dev`, which makes `/dev/i2c-1`.
 - `system/argon-fan`, run by `system/argon-fan.service`, steps the fan through seven
   levels, 0, 1, 2, 3, 4, 5 and 100: silent with the CPU below 45 °C and the drive below
-  38 °C, 5 by a CPU of 60 °C or a drive of 43 °C, and 100 at 65 °C or 45 °C. It steps up as
+  45 °C, 5 by a CPU of 60 °C or a drive of 49 °C, and 100 at 65 °C or 50 °C. It steps up as
   soon as either temperature asks for more, and down only once both are a few degrees below
   the level's entry point. It reads the CPU every 30 seconds.
 - It reads the drive with `smartctl` about every 3 minutes while the drive is reading or

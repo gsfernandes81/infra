@@ -2524,7 +2524,15 @@ writes were acknowledged, but the curve it wrote made no difference to the fan.
   failure's answer. The ladder is a named constant in `argon-fan`.
 - **Each level is entered when the CPU or the drive reaches its point, whichever asks for
   more**: silent with the CPU below 45 °C and the drive below 38 °C, 5 by a CPU of 60 °C or
-  a drive of 43 °C, and 100 at 65 °C or 45 °C, the old intent kept at the top. It leaves a
+  a drive of 43 °C, and 100 at 65 °C or 45 °C, the old intent kept at the top. ⚠︎SUPERSEDED
+  for the drive the same day, by the next bullet.
+- **The drive stays silent to 45 °C** (owner, 2026-11-19): its points are 45 to 49 °C for
+  levels 1 to 5, and 50 °C for 100; the CPU's are unchanged. Google's study of its fleet
+  (Pinheiro, Weber and Barroso, FAST 2007) found failures did not rise with temperature
+  below about 45 °C, and cooler drives failed slightly more often; Backblaze's analyses
+  found no clear link within normal operating temperatures. The WD Red Plus is rated to
+  65 °C. With nothing pointing to harm between 38 and 45 °C, the fan's noise in the room
+  `three` stands in was judged not worth it. It leaves a
   level only once both are below that level's entry point, the CPU by 3 °C and the drive by
   2 °C, so it does not cycle at a threshold. A temperature that cannot be read sets 100, as
   before.

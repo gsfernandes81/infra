@@ -61,10 +61,12 @@ INTERVAL = 30  # seconds between turns: the CPU, and a look at the disk's counte
 LADDER = (0, 1, 2, 3, 4, 5, 100)
 TOP = len(LADDER) - 1
 # The temperature, in degrees C, at which each level from LADDER[1] up is entered: silent
-# with the CPU below 45 and the drive below 38, 5 by a CPU of 60 or a drive of 43, and the
-# top at 65 or 45.
+# with the CPU below 45 and the drive below 45, 5 by a CPU of 60 or a drive of 49, and the
+# top at 65 or 50. The drive stays silent to 45 by the owner's choice: the large studies
+# (Google's, FAST 2007; Backblaze's) found no rise in failures below about 45 C, and the
+# noise is not worth less (docs/decisions.md).
 CPU_STEPS = (45, 49, 52, 56, 60, 65)
-DRIVE_STEPS = (38, 39, 40, 41, 43, 45)
+DRIVE_STEPS = (45, 46, 47, 48, 49, 50)
 # How far below a level's entry point both must be before the fan leaves that level.
 CPU_HYSTERESIS, DRIVE_HYSTERESIS = 3, 2
 POLL_BUSY = 180  # seconds between smartctl runs while the disk reads or writes
