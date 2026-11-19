@@ -228,9 +228,11 @@ Each numbered point is the design's (`plans/three-backup-pull.md`), with how it 
    `.snapshots`, which `--delete` would mirror over `three`'s. A dry run as root without
    the filters must show rsync deleting inside it (the calibration; the backup user cannot
    enter it), and every pull must keep every earlier snapshot.
-8. **Exit 24 is a failure.** A slow pull of a 24 MB file in the last directory, with files
-   after it; once it has begun, snapper deletes that snapshot on `zero`. The service must
-   fail with status 24, with no snapshot and `last-pulled` unchanged.
+8. **Exit 24 is a failure.** A btrfs snapshot never loses a file, not even when snapper
+   deletes it mid-pull (an earlier run did, and the pull finished whole), so a plain
+   directory stands in for the newest snapshot: a slow pull of a 24 MB file in its last
+   directory, and once it has begun, the three files after it are removed. The service
+   must fail with status 24, with no snapshot and `last-pulled` unchanged.
 9. **The restore module.** From the stand-in, as root with the restore key, a checksum dry
    run of `three`'s snapshot against `zero`'s through the module must print nothing:
    contents, owners, modes, times and the symlink's real target. A real restore must write

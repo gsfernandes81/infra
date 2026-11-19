@@ -179,12 +179,14 @@ zsnap() {
 same_tree() {
 	local a b n
 	n=$(as_root three-backup.sh newest | tail -n 1)
-	a=$(sudo bash "$here/host/tree-hash.sh" "$zimm/.snapshots/$1/snapshot" 2>&1 | tail -n 1) || true
-	b=$(as_root tree-hash.sh --fake-super "/media/mirror/received-backups/immich/current/.snapshots/$n/snapshot" 2>&1 | tail -n 1) || true
+	a=$(sudo bash "$here/host/tree-hash.sh" "$zimm/.snapshots/$1/snapshot" 2>&1) || true
+	b=$(as_root tree-hash.sh --fake-super "/media/mirror/received-backups/immich/current/.snapshots/$n/snapshot" 2>&1) || true
 	if [ -n "$a" ] && [ "$a" = "$b" ]; then
 		echo "PASS zero's snapshot $1 and three's snapshot $n are the same tree: every path, owner, mode, size and content"
 	else
-		echo "FAIL zero's snapshot $1 and three's snapshot $n differ: zero's hashes to ${a:-nothing}, three's to ${b:-nothing}"
+		echo "FAIL zero's snapshot $1 and three's snapshot $n differ: zero's hashes to ${a:-nothing}, three's to ${b:-nothing}" |
+			head -c 2000
+		echo
 	fi
 }
 
@@ -313,10 +315,17 @@ zero_confined() {
 		echo "PASS and nothing else: another daemon config, another user, a shell"
 	fi
 }
+# The mirror user's rsync processes on the stand-in, from /proc: BusyBox's pgrep found none
+# while one ran.
+zero_daemons() {
+	zx 'u=$(id -u mirror); for d in /proc/[0-9]*; do
+		[ "$(cat $d/comm 2>/dev/null)" = rsync ] && [ "$(awk "/^Uid:/ { print \$2 }" $d/status 2>/dev/null)" = "$u" ] && echo ${d#/proc/}
+	done; true'
+}
 zero_caps() {
 	local pids p st i
 	for i in $(seq 1 30); do
-		pids=$(zx 'pgrep -u mirror -x rsync || true')
+		pids=$(zero_daemons)
 		[ -n "$pids" ] && break
 		sleep 1
 	done
@@ -337,7 +346,7 @@ zero_caps() {
 }
 zero_kill_daemon() {
 	local pids
-	pids=$(zx 'pgrep -u mirror -x rsync || true')
+	pids=$(zero_daemons)
 	# Killed by pid from a list made first, never by a pattern (CLAUDE.md § Shell traps).
 	[ -n "$pids" ] && { zx "kill $(echo "$pids" | tr '\n' ' ')" || true; }
 	echo "killed zero's daemon: ${pids:-none was running}" | tr '\n' ' '
@@ -345,7 +354,7 @@ zero_kill_daemon() {
 }
 
 sim_backup() {
-	local key n n2 since before pg_ok=no restore_dir out rc link
+	local key n n2 since before pg_ok=no restore_dir out rc link want
 	# Every step reports its own PASS or FAIL, so a step that fails must not end the stage
 	# under run-host.sh's set -e and leave the later checks unrun. This runs in the report
 	# pipeline's subshell, so the setting ends with it.
@@ -421,22 +430,29 @@ sim_backup() {
 	n=$(znewest)
 	as_root three-backup.sh pull "$n" 3
 
-	echo "-- a snapshot deleted on zero mid-pull: rsync's exit 24 is a failure"
-	# The slow file in the last directory rsync reaches, with files after it, so the whole
-	# tree is listed before the delete and what follows reads as vanished, never as a
-	# directory that could not be opened (exit 23).
-	sudo bash -c "mkdir -p '$zimm/zz' && head -c 24M /dev/urandom > '$zimm/zz/big3.bin' && for i in 1 2 3; do echo \$i > '$zimm/zz/zzz-after-'\$i; done"
-	zsnap
-	n2=$(znewest)
+	echo "-- files vanishing mid-pull: rsync's exit 24 is a failure"
+	# A btrfs snapshot cannot lose a file, and snapper deleting one mid-pull does not either:
+	# the first run deleted the snapshot being pulled and the pull finished, whole, because
+	# the sender's working directory keeps the deleted subvolume readable to the end. So a
+	# plain directory stands in for the newest snapshot, beside an info.xml, and loses three
+	# files mid-pull. The slow file is in the last directory rsync reaches, with the files
+	# after it, so the whole tree is listed first and they read as vanished (24), never as a
+	# directory that could not be opened (23).
+	n=$(znewest)
+	n2=$((n + 1))
+	sudo bash -c "set -e; s='$zimm/.snapshots'; mkdir \$s/$n2; cp \$s/$n/info.xml \$s/$n2/info.xml
+		cp -a \$s/$n/snapshot \$s/$n2/snapshot; mkdir \$s/$n2/snapshot/zz
+		head -c 24M /dev/urandom > \$s/$n2/snapshot/zz/big3.bin; for i in 1 2 3; do echo \$i > \$s/$n2/snapshot/zz/zzz-after-\$i; done" ||
+		echo "FAIL could not make the stand-in snapshot $n2"
 	since=$(as_root three-backup.sh mark | tail -n 1)
 	as_root three-backup.sh rate 256
 	as_root three-backup.sh start
 	if as_root three-backup.sh running zz/big3.bin; then
-		zx "snapper --no-dbus -c immich delete $n2" && echo "deleted zero's snapshot $n2 mid-pull"
+		sudo rm -f "$zimm/.snapshots/$n2/snapshot/zz/zzz-after-"* && echo "removed three files from the stand-in snapshot $n2 mid-pull"
 	fi
 	as_root three-backup.sh failed "$since" 24 3
 	as_root three-backup.sh rate default
-	sudo rm -rf "$zimm/zz"
+	sudo rm -rf "$zimm/.snapshots/$n2"
 	zsnap
 	n=$(znewest)
 	as_root three-backup.sh pull "$n" 4
@@ -488,7 +504,8 @@ sim_backup() {
 	# user xattr cannot be set on one), so the symlink may differ in owner and group alone;
 	# its target, the third flag, may not.
 	rc=0
-	out=$(zrs "-naHAXc --numeric-ids -i --delete --exclude=/.snapshots --exclude=/data/thumbs --exclude=/data/encoded-video restore@127.0.0.1::backups/immich/current/.snapshots/$n2/snapshot/ /media/immich/.snapshots/$n/snapshot/" 2>&1) || rc=$?
+	out=$(zrs "-naHAXc --numeric-ids -i --delete --exclude=/.snapshots --exclude=/data/thumbs --exclude=/data/encoded-video restore@127.0.0.1::backups/immich/current/.snapshots/$n2/snapshot/ /media/immich/.snapshots/$n/snapshot/" 2>&1 |
+		grep -v '^Warning: Permanently added') || rc=$?
 	link='^\.L\.[^ ]{8} data/library/link\.jpg -> a\.jpg$'
 	grep -qE "$link" <<<"$out" && echo "NOTE the symlink comes back with its target, and with the backup user's owner: $(grep -E "$link" <<<"$out")"
 	if [ "$rc" = 0 ] && ! grep -vE "$link" <<<"$out" | grep -q .; then
@@ -501,13 +518,16 @@ sim_backup() {
 	zrs "--bwlimit=2000 -aHAX --numeric-ids --exclude=/.snapshots restore@127.0.0.1::backups/immich/current/.snapshots/$n2/snapshot/ $restore_dir/" > restore.log 2>&1 &
 	as_root three-backup.sh caps restore
 	wait $! && echo "zero restored three's snapshot $n2 into $restore_dir" || { echo "FAIL the restore failed:"; sed 's/^/    /' restore.log; }
-	out=$(zx "stat -c '%n %u:%g %a' $restore_dir/data/library/a.jpg $restore_dir/db; readlink $restore_dir/data/library/link.jpg" 2>&1)
-	printf '%s\n' "$out" | sed 's/^/    /'
-	if grep -qx "$restore_dir/data/library/a.jpg 1000:1000 640" <<<"$out" && grep -qx "$restore_dir/db 70:70 700" <<<"$out" &&
-		grep -qx 'a.jpg' <<<"$out"; then
+	# Against zero's own snapshot, read the same way: Postgres's directory is 70:0 there, its
+	# image's entrypoint giving the owner and not the group.
+	out=$(zx "cd $restore_dir && stat -c '%n %u:%g %a' data/library/a.jpg db db/PG_VERSION; readlink data/library/link.jpg" 2>&1) || true
+	want=$(zx "cd /media/immich/.snapshots/$n/snapshot && stat -c '%n %u:%g %a' data/library/a.jpg db db/PG_VERSION; readlink data/library/link.jpg" 2>&1) || true
+	printf '%s\n' "$out" | sed 's/^/    restored: /'
+	if [ -n "$out" ] && [ "$out" = "$want" ] && grep -q '^data/library/a.jpg 1000:1000 640$' <<<"$out" && [ "$(tail -n 1 <<<"$out")" = a.jpg ]; then
 		echo "PASS the restore wrote zero's real owners and modes, and the symlink's own target"
 	else
-		echo "FAIL the restore did not put back owners, modes and the symlink"
+		echo "FAIL the restore did not put back owners, modes and the symlink as zero has them:"
+		printf '%s\n' "$want" | sed 's/^/    zero: /'
 	fi
 	out=$(zx "ssh -i /root/.ssh/restore -p $(cat port) -o BatchMode=yes restore@127.0.0.1 'echo SIM-SHELL-OPENED' < /dev/null" 2>&1 || true)
 	grep -q SIM-SHELL-OPENED <<<"$out" && echo "FAIL the restore key ran a command of its own" ||

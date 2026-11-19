@@ -169,9 +169,9 @@ runs `/usr/local/bin/mirror-pull` as the backup user: it lists `zero`'s snapshot
 newest finished one, and, if it is not the one pulled last, copies it with rsync into
 `received-backups/immich/current`, at 32 Mbit/s. Only a success starts
 `mirror-snapshot.service`, which takes a read-only snapper snapshot of `current/`, prunes to
-14 daily, 8 weekly and 12 monthly, and writes `last-pulled`. A pull cut off, or one of a
-snapshot `zero` deleted mid-way (rsync's exit 24), takes no snapshot; the next day's pull
-finishes the copy.
+14 daily, 8 weekly and 12 monthly, and writes `last-pulled`. A pull cut off, or one whose
+files vanish (rsync's exit 24, which a frozen snapshot cannot cause), takes no snapshot; the
+next day's pull finishes the copy.
 
 The backup user owns `current/` and nothing else, never logs in, and runs the pull in a
 sandbox that can write only `current/` and `state/`. It reaches `zero` with its own key,

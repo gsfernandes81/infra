@@ -13,7 +13,9 @@
 # The snapshots share every unchanged block with current/ and with each other, so each
 # costs what changed since the one before. The limits are plain numbers, never ranges, so
 # FREE_LIMIT and SPACE_LIMIT change nothing: snapper's space-aware cleanup only moves within
-# a range. No qgroup, so no quota.
+# a range. No qgroup, so no quota. snapper says `fsetfilecon on .../.snapshots failed errno:
+# 95` as it works: the array's context= mount gives every file one SELinux label, so its try
+# at a label of its own fails, and changes nothing (the simulation's snapshots go on).
 
 SUBVOLUME="/media/mirror/received-backups/immich/current"
 FSTYPE="btrfs"

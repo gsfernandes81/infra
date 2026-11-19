@@ -20,7 +20,8 @@ if [ "${1-}" = --fake-super ]; then
 	shift
 	tmp=$(mktemp -d /var/tmp/tree-hash.XXXXXX)
 	trap 'rm -rf "$tmp"' EXIT
-	rsync -aHAX --numeric-ids --fake-super -M--super "${1:?usage: tree-hash.sh [--fake-super] <directory>}/" "$tmp/"
+	rsync -aHAX --numeric-ids --fake-super -M--super --exclude=/.snapshots \
+		"${1:?usage: tree-hash.sh [--fake-super] <directory>}/" "$tmp/"
 	set -- "$tmp"
 fi
 cd "${1:?usage: tree-hash.sh [--fake-super] <directory>}"

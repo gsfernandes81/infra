@@ -58,9 +58,11 @@ the far side of a connection.
   `last-pulled`, since a recreated config numbers from 1 again.
 - **`current/` is an ordinary writable copy** that rsync updates in place, so a changed file
   rewrites only its changed blocks, and three's snapshots share every unchanged one.
-- **`three` snapshots only after a good pull.** A cut pull, or rsync's exit 24, which on a
-  read-only source means the snapshot was deleted mid-pull, is a failure: no snapshot, no
-  `last-pulled` change, and the next day finishes the copy.
+- **`three` snapshots only after a good pull.** A cut pull, or rsync's exit 24 (files
+  vanished, which a frozen snapshot cannot do), is a failure: no snapshot, no `last-pulled`
+  change, and the next day finishes the copy. snapper deleting the snapshot mid-pull does not
+  cause it: the simulation deleted one and the pull finished whole, the rsync sender's
+  working directory keeping the deleted subvolume readable to the end.
 - **snapper keeps its snapshots inside `current/`**, in `.snapshots`, so the pull excludes
   `/.snapshots` and protects it from `--delete` with an rsync filter. The backup user cannot
   enter it (root's, 754), a second guard; it can read the names, which rsync needs, since it

@@ -26,9 +26,12 @@
 # 32 Mbit/s, 4,000,000 bytes a second, which is 3906 in rsync's units of 1024 bytes;
 # MIRROR_PULL_BWLIMIT changes it, 0 for none, as the first pull over the LAN does.
 #
-# Exit 24, files vanished, is a failure here: a read-only snapshot cannot lose a file unless
-# snapper deleted the whole snapshot mid-pull. The next run pulls a newer one, and current/
-# keeps what arrived. No snapshot is taken of a failed or partial pull.
+# Exit 24, files vanished, is a failure here: a read-only snapshot cannot lose a file, so it
+# means what zero served was not the frozen tree it should be. Not even snapper deleting the
+# snapshot mid-pull does it: the sender's working directory keeps a deleted subvolume
+# readable to the end, and the pull finishes whole (the simulation showed it). The next run
+# pulls again, and current/ keeps what arrived. No snapshot is taken of a failed or partial
+# pull.
 set -eu
 
 dst=/media/mirror/received-backups/immich
@@ -60,7 +63,7 @@ rsync -aHAX --numeric-ids --fake-super --munge-links --delete --inplace --stats 
 	-e ssh "$src/$n/snapshot/" "$dst/current/" || rc=$?
 case $rc in
 0) ;;
-24) echo "mirror-pull: rsync exit 24, files vanished: snapshot $n was deleted on zero mid-pull" >&2; exit 24 ;;
+24) echo "mirror-pull: rsync exit 24, files vanished from zero's snapshot $n mid-pull, which a frozen snapshot cannot do" >&2; exit 24 ;;
 *) echo "mirror-pull: rsync exit $rc; current/ holds a partial pull, and no snapshot is taken" >&2; exit "$rc" ;;
 esac
 echo "$n $t" > "$dst/state/pulled.new"

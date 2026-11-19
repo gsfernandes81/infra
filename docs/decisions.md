@@ -2724,6 +2724,10 @@ and refine the owner's design without changing it.
   and a time; and `last-pulled`, root's, in root's directory, written only after the
   snapshot. Root never writes into a directory the backup user owns, so a symlink there
   cannot turn a root write elsewhere.
+- **rsync's exit 24 stays a failure, though snapper cannot cause it.** The simulation deleted
+  the snapshot being pulled, and the pull finished whole: the rsync sender's working
+  directory keeps a deleted subvolume readable to the end. So snapper's cleanup cannot spoil
+  a pull, and files vanishing means `zero` served something other than a frozen snapshot.
 - **The pull runs sandboxed**: `ProtectSystem=strict`, writable only `current/` and `state/`,
   no capabilities, no new privileges. It parses what `zero` sends.
 - **snapper runs with `--no-dbus` on `three` too.** Its config is in no `SNAPPER_CONFIGS`, so

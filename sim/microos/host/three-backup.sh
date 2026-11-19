@@ -217,11 +217,11 @@ start)
 confined)
 	# As the backup user, with its own key and ssh config, as mirror-pull reaches zero.
 	check "the key runs no command of its own on zero" sh -c "
-		out=\$(runuser -u backup -- ssh zero 'echo SIM-SHELL-OPENED; id' < /dev/null 2>&1); echo \"\$out\" | tail -n 2
-		! echo \"\$out\" | grep -q SIM-SHELL-OPENED"
+		out=\$(runuser -u backup -- ssh mirror@zero 'echo SIM-SHELL-OPENED; id' < /dev/null 2>&1); rc=\$?; echo \"exit \$rc: \$out\" | tail -n 2
+		! echo \"\$out\" | grep -qiE 'SIM-SHELL-OPENED|permission denied'"
 	check "sftp reads nothing through the key" sh -c "
-		rm -f /tmp/sim-sftp; echo 'get /etc/passwd /tmp/sim-sftp' |
-			runuser -u backup -- sftp -b - zero 2>&1 | tail -n 2; [ ! -e /tmp/sim-sftp ]"
+		rm -f /tmp/sim-sftp; out=\$(echo 'get /etc/passwd /tmp/sim-sftp' | runuser -u backup -- sftp -b - mirror@zero 2>&1)
+		echo \"\$out\" | tail -n 2; [ ! -e /tmp/sim-sftp ] && ! echo \"\$out\" | grep -qi 'permission denied'"
 	echo up > /tmp/sim-up && chown backup /tmp/sim-up
 	check "an upload into the module is refused, read only" sh -c "
 		out=\$(runuser -u backup -- rsync -e ssh /tmp/sim-up mirror@zero::snapshots/sim-up 2>&1); echo \"\$out\" | tail -n 2
@@ -245,7 +245,7 @@ confined)
 		! grep -q snapshots /tmp/sim-modules"
 	# A remote forward is asked for at once, so sshd's refusal comes back on its own.
 	check "the key forwards nothing" sh -c "
-		out=\$(timeout 30 runuser -u backup -- ssh -N -o ExitOnForwardFailure=yes -R 127.0.0.1:2297:127.0.0.1:22 zero < /dev/null 2>&1)
+		out=\$(timeout 30 runuser -u backup -- ssh -N -o ExitOnForwardFailure=yes -R 127.0.0.1:2297:127.0.0.1:22 mirror@zero < /dev/null 2>&1)
 		rc=\$?; echo \"exit \$rc: \$out\" | tail -n 2
 		[ \$rc != 0 ] && [ \$rc != 124 ] && echo \"\$out\" | grep -qi 'forwarding failed'"
 	rm -rf /tmp/sim-up /tmp/sim-empty /tmp/sim-modules
@@ -305,7 +305,7 @@ cleanup) # <the snapshot to keep besides the newest>
 	snaps | sed 's/^/    before: /'
 	i=1
 	for n in $(snaps | cut -d' ' -f1 | sort -rn); do
-		sed -i "s|<date>.*</date>|<date>$(date -u -d "today 12:00 -$i day" '+%Y-%m-%d %H:%M:%S')</date>|" "$cur/.snapshots/$n/info.xml"
+		sed -i "s|<date>.*</date>|<date>$(date -u -d "@$(($(date -u +%s) / 86400 * 86400 + 43200 - i * 86400))" '+%Y-%m-%d %H:%M:%S')</date>|" "$cur/.snapshots/$n/info.xml"
 		i=$((i + 1))
 	done
 	keep=$(newest)
