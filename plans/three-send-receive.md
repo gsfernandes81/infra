@@ -1,6 +1,6 @@
 # `zero`'s backup to `three` by btrfs send/receive
 
-A proposal of 2026-11-19, for the owner to approve before anything is built. It replaces
+A proposal of 2026-11-19; the owner answered its questions the same day (below). It replaces
 the rsync push in [`three.md`](three.md) § Backups. `mirror-backup` and
 `mirror-backup-age-check` were removed from `zero` on 2026-11-18 to wait for it, so `zero`
 has no off-site copy until the first send below. Draft PR #22 (`three-array-play`, the
@@ -40,7 +40,7 @@ The owner's calls, with the reasons given.
 - **Receive on `three` runs as root, confined.** `btrfs receive` creates subvolumes and
   sets owners, which only root can do. The key keeps `restrict` and
   `from="100.121.158.58"`, `zero`'s tailnet address, with a forced command that runs one
-  reviewed script through sudo. The script runs `btrfs receive --chroot` into `incoming`
+  reviewed script through sudo. The script runs `btrfs receive --chroot` into `received-backups/<name>`
   and nothing else. A half-received subvolume left by an interrupted stream (writable, no
   received UUID) is deleted before the next receive.
 - **Send stream protocol 1, the default**, because `zero` runs Alpine and `three` Leap, on
@@ -70,7 +70,7 @@ The owner's calls, with the reasons given.
 | `immich/db/` | `DB_DATA_LOCATION`, mode 700, Postgres's uid | yes |
 | `media-syncthing` (278), at `/media/syncthing` | unchanged | |
 | `media-syncthing/config/` | nested subvolume | no: an empty directory |
-| `snapshots/immich/`, `snapshots/syncthing/` | `zero`'s read-only snapshots | (open question 1) |
+| `snapshots/immich/`, `snapshots/syncthing/` | `zero`'s read-only snapshots, one directory per subvolume | |
 
 Syncthing's compose file names `/media/syncthing` directly and does not change. The array's
 top level is reached through the existing `noauto` fstab entry `/mnt/ext`. Subvolume names
@@ -156,16 +156,18 @@ since.
    if it did.
 3. For each of `immich` and `media-syncthing`, named `syncthing` in its snapshots and to
    `three`:
-   1. Takes a read-only snapshot, `snapshots/<name>/<stamp>`.
+   1. Takes a read-only snapshot, `snapshots/<name>/<name>-<stamp>`, `<stamp>` being the UTC
+      time as `2026-11-20T0400Z`. The name travels with the stream, so a received snapshot
+      says what it is on its own.
    2. Its parent is the snapshot named in `last-sent-<name>`, if it is still on `zero`.
       With no parent and no `full`, it refuses and moves on: a full send over the tailnet
       is about 120 GB, and no run starts one unasked.
    3. Pipes `btrfs send [-p <parent>] <snapshot>` through ssh to `backup@three`, passing
-      the name as the ssh command, optionally rate-limited (open question 7).
+      the name as the ssh command, rate-limited by `pv` when a rate is set (answer 7).
    4. Reads `three`'s last line, `received <stamp> <received UUID>`, and compares the UUID
       with the snapshot's own (`btrfs subvolume show`). Only a match counts.
    5. On a match, writes `last-sent-<name>`, then deletes that subvolume's older
-      snapshots beyond what open question 1 keeps. On anything else, deletes the new
+      snapshots beyond the last 7, keeping the one just sent (answer 2). On anything else, deletes the new
       snapshot and keeps the parent.
 4. Writes `last-success` only when both subvolumes matched.
 
@@ -186,7 +188,7 @@ passed; `mirror-backup-age-check` reports long before that.
 name to `sudo -n /usr/local/sbin/mirror-receive`. **A new sudoers file** lets the `backup`
 user run, as root and without a password, `mirror-receive immich` and `mirror-receive
 syncthing`, and nothing else. The `backup` user stays as the login and owns nothing on the
-array; `incoming` becomes root's.
+array; `received-backups`, which replaces `incoming`, is root's, mode 700.
 
 **`mirror-receive`**, a new tracked script in `/usr/local/sbin`:
 
@@ -194,9 +196,9 @@ array; `incoming` becomes root's.
    fails and the next one retries, as now.
 2. Refuses a name not on its list, which sudoers already checked.
 3. One receive at a time (`flock`).
-4. Deletes every subvolume in `incoming/<name>/` that is writable or has no received
+4. Deletes every subvolume in `received-backups/<name>/` that is writable or has no received
    UUID: what an interrupted stream leaves.
-5. Runs `btrfs receive --chroot -e /media/mirror/incoming/<name>` on its stdin.
+5. Runs `btrfs receive --chroot -e /media/mirror/received-backups/<name>` on its stdin.
    `--chroot` confines every path in the stream to that directory.
 6. Checks the new subvolume is read-only with a received UUID, and prints `received <stamp>
    <received UUID>`.
@@ -271,11 +273,11 @@ Once: at the visit if the first send is done by then, otherwise after it. It rep
 1 of `visit-runbook.md`'s slice 4; steps 2 and 3 stand.
 
 1. **The library.** On `three`, `sudo cp -a --reflink=always
-   /media/mirror/incoming/immich/<stamp>/data/library /media/mirror/restore/library`. On
-   both sides, the same snapshot, `zero`'s under `/mnt/ext/snapshots/immich/<stamp>/`:
+   /media/mirror/received-backups/immich/immich-<stamp>/data/library /media/mirror/restore/library`. On
+   both sides, the same snapshot, `zero`'s under `/mnt/ext/snapshots/immich/immich-<stamp>/`:
    `sudo find <path>/data/library -printf '%P %U:%G %m %s\n' | sort | sha256sum`. The two
    hashes match exactly, since both read the same instant.
-2. **The database.** `sudo cp -a --reflink=always .../<stamp>/db /media/mirror/restore/db`,
+2. **The database.** `sudo cp -a --reflink=always .../immich-<stamp>/db /media/mirror/restore/db`,
    then a throwaway container of the Postgres image and digest in
    `deployments/immich/compose.yaml` on that directory, with no ports. Its log reads an
    automatic recovery, then "ready to accept connections", and a count of Immich's assets
@@ -287,50 +289,33 @@ Once: at the visit if the first send is done by then, otherwise after it. It rep
 
 Repeated only after a change to the backup path, such as `zero` moving to Leap.
 
-## Open questions
+## The owner's answers, 2026-11-19
 
-Each for the owner, with the infra agent's recommendation.
+The nine questions this plan asked, as the owner answered them. They are decided, and the
+sections above already follow them.
 
-1. **Snapshot names, place and schedule on `zero`.** Recommended: `snapshots/<name>/` at
-   the array's top level, named for the UTC time, `2026-11-20T0400Z`, the same name
-   received on `three`; nightly at 04:00 as now. The 02:00 dump no longer matters for
-   consistency, but 04:00 keeps a half-written dump out of the snapshot. Keep the last
-   sent; a week of nightly snapshots on `zero` would make a deleted album a local restore,
-   once question 2 says it is cheap.
-2. **`zero`'s free space for snapshots.** Free now: `sudo btrfs filesystem usage -T
-   /media/syncthing`. After a week of snapshots, what each one alone holds, which is what
-   deleting it frees: `sudo btrfs filesystem du -s /mnt/ext/snapshots/immich/*`, the
-   *Exclusive* column. Recommended: measure before settling question 1.
-3. **Mount guards for `/media/immich`.** Recommended: `chattr +i` before the first mount
-   (the move, step 6). `check-mount-guards` finds mounts in fstab, so it covers the new line
-   with no change but its comments. The old bare mountpoints keep the flag until their
-   subvolumes are deleted. `/media/immich/db` is mode 700 and Postgres's, so a test as
-   gavin reads it as missing (`CLAUDE.md` § Shell traps): every check in the scripts and the
-   runbook runs as root or with `sudo test -d`.
-4. **The layout on `three`.** Recommended: `incoming/<name>/<stamp>`, with `incoming`
-   root's and mode 700, and no `snapshots`. PR #22's play then makes that layout; the array
-   made on 2026-11-18 is adjusted by hand first (`incoming` chowned to root, anything an
-   rsync push left in it deleted, `snapshots` removed), so the play's "nothing changed" run
-   holds. `three`'s README restore steps become a reflink copy out of a snapshot, with no
-   `--fake-super`: root received the real owners.
-5. **Syncthing on `three` (`syncthing-three`).** Recommended: it keeps its own subvolume,
-   as `make-mirror` made it, outside `incoming`, never received into. With `three`'s timer
-   gone it has no snapshots of its own; `zero`'s share arrives in `incoming` regardless.
-6. **The restore path back to `zero`.** Recommended: a few files come from a snapshot on
-   `zero` when one covers them (question 1). A whole restore is a `btrfs send` from `three`
-   into `zero`'s `btrfs receive`, with a key made for the restore and removed after, so
-   the exception to *no box holds a key to another* stays one-way in normal running. While
-   `three` is in the UK, carrying its drive is the alternative. After a whole restore, the
-   next send to `three` is a full one, unless the simulation shows an incremental from the
-   restored snapshot works. The procedure goes into `docs/recovery.md`.
-7. **Rate-limiting a tailnet send.** Recommended: `pv -q -L <rate>` in the pipe, with the
-   rate a variable in `mirror-backup`, empty on the LAN, and `pv` added to the Alpine
-   hosts' packages. The rate is the owner's, from `zero`'s upload speed. A full stream
-   cannot resume, so a seed that keeps being cut off over the tailnet is a reason to wait
-   for a LAN seed rather than retry.
-8. **How `mirror-backup-age-check` learns success.** Recommended: unchanged,
-   `/var/lib/mirror-backup/last-success`, written only when both subvolumes matched. Its
-   message already points at `last.log`. Only its comments change.
-9. **How the simulation proves it.** Recommended: the seven checks above. The Postgres
-   restore in check 7 costs CI minutes; if it proves too slow, Slice 4's real check covers
-   it, and the simulation keeps the rest.
+1. **Snapshot names:** `<subvolume>-<stamp>`, `<stamp>` the UTC time, as
+   `immich-2026-11-20T0400Z`. The owner asked for a dash before the `T` unless the dashless
+   form is a standard. It is: ISO 8601 and RFC 3339 join the date and the time with `T`
+   alone. The time drops ISO's colons, which file names do badly. Nightly at 04:00, as now.
+2. **zero's free space:** about 797 GiB free of 1.82 TiB raw (RAID1), with 131 GiB of data,
+   read on 2026-11-19. A snapshot holds only what changed or was deleted after it, so a week
+   of them costs a week's churn. Decided: `zero` keeps its last 7 nightly snapshots per
+   subvolume, and always the last one sent. A deleted album is then a local restore.
+   `btrfs filesystem du` after a week confirms the cost.
+3. **Mount guards for `/media/immich`:** as recommended.
+4. **The layout on `three`:** `received-backups/<name>/<name>-<stamp>`, not `incoming`. One
+   directory per subvolume, on `zero` too (`snapshots/<name>/`), so snapshots of different
+   subvolumes never share a directory. The owner may revisit the names on `zero`'s side.
+   The array made on 2026-11-18 is adjusted by hand before PR #22's "nothing changed" run:
+   `incoming` and `snapshots` removed (an rsync push never ran, so both are empty; checked
+   first), `received-backups` made, root's, mode 700. PR #22's play then makes that layout.
+5. **Syncthing on `three`:** keeps its own subvolume, outside `received-backups`.
+6. **The restore path, tentatively agreed:** a send from `three` back into `zero`. The rule
+   that no box holds a key to another is the owner's, and the owner may relax it. A
+   standing key on `zero` that can only pull a `btrfs send` of a received snapshot from
+   `three` is acceptable in principle: it reads `zero`'s own data back and can change
+   nothing. Decided when the restore procedure is written.
+7. **Rate-limiting:** `pv -q -L <rate>` in the pipe, as recommended.
+8. **The age check:** unchanged, as recommended.
+9. **The simulation:** the seven checks, as recommended.
