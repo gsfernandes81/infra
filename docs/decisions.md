@@ -2624,7 +2624,9 @@ receive side, the send side and the simulation's seven checks were built on the 
   cut, since its data and write-ahead log are in the same instant; the simulation restores
   one, and Slice 4 does once on the real data. What must stay out becomes a nested
   subvolume, which its parent's snapshot leaves out: Immich's `thumbs` and `encoded-video`,
-  which Immich regenerates, and Syncthing's `config`, which holds `zero`'s device key.
+  which Immich regenerates, and Syncthing's `config`, which holds `zero`'s device key. The
+  simulation found that a received snapshot has no directory for them at all, where the
+  plan expected empty ones; a restore makes them again.
 - **Receive runs as root, confined three ways.** `btrfs receive` creates subvolumes and sets
   owners, which only root can. The key keeps `restrict` and `zero`'s tailnet address; its
   forced command takes the name zero asks for only when it is exactly `immich` or

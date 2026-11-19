@@ -69,7 +69,7 @@ dir=$base/$name
 install -d -m 700 "$dir"
 
 # A minute's grace, for a receive whose stream has just been cut and is still ending.
-exec 9> /run/lock/mirror-receive
+exec 9> /run/mirror-receive.lock
 flock -w 60 9 || die "a receive is still going"
 
 # Prints "<ro> <received UUID>" for a subvolume: true or false, and - for none.

@@ -109,12 +109,15 @@ login as root is refused with a valid key in place.
    secrets, and reboots through `transactional-update`. Disks hot-added after boot test
    `nofail`, `RequiresMountsFor=` and the mount guards against late USB disks. bcache
    under btrfs RAID1 on virtual disks tests `zero`'s assembly.
-6. **The backup's pieces, as tracked files, written 2026-11-04** (`hosts/three/leap/`,
-   `hosts/zero/system/mirror-backup*`), and proved by the `host` job's `three` run:
-   `three`'s `backup` user and its one `authorized_keys` line, the snapshot timer that
-   skips a running rsync, the LUKS unlock command, and `zero`'s cron job and backup-age
-   check ([`three.md`](three.md)). The simulation checks that the key cannot open a shell, read a file, or write outside
-   `incoming`, and that a run against a locked volume fails cleanly and the next succeeds.
+6. **The backup's pieces, as tracked files, written 2026-11-04 and redone as btrfs
+   send/receive on 2026-11-19** (`hosts/three/leap/`, `hosts/zero/system/mirror-backup*`,
+   [`three-send-receive.md`](three-send-receive.md)), and proved by the `host` job's
+   `three` run: `three`'s `backup` user, its one `authorized_keys` line and its sudoers
+   file, `mirror-receive`, the LUKS unlock command, and `zero`'s cron job and backup-age
+   check, run from the runner standing in for `zero`. The simulation checks a full and an
+   incremental send, that the key runs nothing but `mirror-receive` with one of two names
+   and reads nothing back, that a run against a locked volume or a cut stream fails
+   cleanly and the next succeeds, the pruning, and a restore of the database.
 7. **A runbook for the visit**, one section per slice, each with its checks and its
    rollback: **written**, [`visit-runbook.md`](visit-runbook.md).
 
@@ -278,7 +281,8 @@ The owner settled the open calls on 2026-11-02.
 1. **Names follow the SD cards**, and `zero` stays on Alpine this visit (*The slices*).
 2. **Updates are by hand on every host, as a habit** (`decisions.md`).
 3. **`three`'s backup is rsync pushed from `zero`, with snapshots on `three`, and its
-   array is LUKS, unlocked by hand** (`decisions.md`, [`three.md`](three.md)).
+   array is LUKS, unlocked by hand** (the rsync half replaced by btrfs send/receive on
+   2026-11-19) (`decisions.md`, [`three.md`](three.md)).
 4. **`three` also runs Syncthing for access from Asia**, deferred if its memory proves
    short ([`three.md`](three.md)).
 5. **Leap 16.1 in its Immutable mode on `zero`, `one` and `three`; Alpine on `two`, and

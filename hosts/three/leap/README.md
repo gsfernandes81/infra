@@ -180,7 +180,9 @@ Use a name the listing shows in place of `immich-2026-11-20T0400Z`. The snapshot
 Immich's Postgres directory at the same instant as its library: a copy of it starts in a
 Postgres container of the image `deployments/immich/compose.yaml` names, which recovers it
 as after a power cut. Immich's `thumbs` and `encoded-video` and Syncthing's `config` are
-nested subvolumes on zero, so they are not in the backup. Getting a restore back onto zero
+nested subvolumes on zero, so they are not in the backup: a received snapshot has no
+directory for them at all, and a restore of Immich makes `thumbs` and `encoded-video`
+again. Getting a restore back onto zero
 is the visit runbook's. `sudo rm -rf /media/mirror/restore` when done.
 
 ## The fan

@@ -158,12 +158,13 @@ The run then checks, each as PASS or FAIL, and any FAIL fails the job:
   a loop file laid out as `zero`'s array will be: `immich` holding `data`, with `thumbs` and
   `encoded-video` nested subvolumes, and `db`, where a Postgres container writes
   throughout; and `media-syncthing`, with `config` nested. It runs the real
-  `hosts/zero/system/mirror-backup` as root, under BusyBox's shell and applets as on Alpine,
+  `hosts/zero/system/mirror-backup` as root, under BusyBox's shell and, where Ubuntu's
+  BusyBox has them, its applets, as on Alpine,
   pointed at the loop file, the run's key and the VM by its `MIRROR_BACKUP_*` variables,
   which only the simulation sets. In order: with no `last-sent` and no `full`, the run
   refuses both subvolumes, takes no snapshot, and unmounts the top level it mounted; a full
-  send arrives read-only with the runner's snapshot UUID as its received UUID, nothing of
-  the nested subvolumes arrives, and `host/tree-hash.sh` gives the same hash of every path,
+  send arrives read-only with the runner's snapshot UUID as its received UUID, the nested
+  subvolumes' placeholders do not arrive at all, and `host/tree-hash.sh` gives the same hash of every path,
   owner, mode, size and content on both sides; an incremental carries an added and a
   deleted file, with a stream a fraction of the full one; the key refuses every other
   command and name, sudo and `mirror-receive` each refuse a bad name on their own, an empty

@@ -73,10 +73,10 @@ The owner's calls, with the reasons given.
 |---|---|---|
 | `immich`, mounted at `/media/immich` | new subvolume | |
 | `immich/data/` | `UPLOAD_LOCATION`: `library`, `upload`, `backups`, `profile` | yes |
-| `immich/data/thumbs/`, `immich/data/encoded-video/` | nested subvolumes | no: empty directories |
+| `immich/data/thumbs/`, `immich/data/encoded-video/` | nested subvolumes | no: an empty placeholder on `zero`, absent on `three` |
 | `immich/db/` | `DB_DATA_LOCATION`, mode 700, Postgres's uid | yes |
 | `media-syncthing` (278), at `/media/syncthing` | unchanged | |
-| `media-syncthing/config/` | nested subvolume | no: an empty directory |
+| `media-syncthing/config/` | nested subvolume | no: an empty placeholder on `zero`, absent on `three` |
 | `snapshots/immich/`, `snapshots/syncthing/` | `zero`'s read-only snapshots, one directory per subvolume | |
 
 Syncthing's compose file names `/media/syncthing` directly and does not change. The array's
@@ -262,7 +262,8 @@ holding a small Postgres that is writing during the snapshot, and `media-syncthi
 do from `three`'s, so protocol 1 is tested across a real gap. It checks:
 
 1. **A full send:** the received subvolume is read-only, with the runner's snapshot UUID as
-   its received UUID; `thumbs` and `config` arrive as empty directories; a hash of every
+   its received UUID; nothing of `thumbs` and `config` arrives (the simulation found them
+   absent on `three`, not empty directories as first written); a hash of every
    path, owner, mode and size matches on both sides.
 2. **An incremental:** a file added and one deleted arrive, and the stream is small.
 3. **Confinement:** the key runs no other command, a name off the list is refused, nothing

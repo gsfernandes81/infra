@@ -268,6 +268,7 @@ zero_postgres() {
 		return 1
 	fi
 	sudo docker rm -f sim-pg > /dev/null 2>&1 || true
+	sudo docker pull -q "$pg_image" > /dev/null || true
 	if ! sudo docker run -d --name sim-pg -e POSTGRES_PASSWORD=sim \
 		-v "$ztop/immich/db:/var/lib/postgresql/data" "$pg_image" > /dev/null; then
 		echo "FAIL could not start Postgres on the runner"
