@@ -141,7 +141,8 @@ The run then checks, each as PASS or FAIL, and any FAIL fails the job:
   included, and in CI a stage that cannot run fails;
 - on `three`, after that first look: the array locked as every boot leaves it, with nothing
   waiting at a passphrase prompt and Docker skipped by its condition, and the fan's unit
-  running while it waits for an I2C bus the VM does not have; then the visit's next
+  running while it waits for an I2C bus the VM does not have, later finding the array's
+  drive by its LUKS label; then the visit's next
   steps, as `host/three.sh` gives them. A stand-in tunnel goes in as
   `server-create-host-tunnel.yml` and `install-system-file` would leave it, and
   `cloudflared` starts. `make-mirror`, the copy under test, formats the blank drive and

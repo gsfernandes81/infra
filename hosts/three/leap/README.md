@@ -173,45 +173,64 @@ the visit runbook's.
 ## The fan
 
 The Argon EON's fan has a controller on the Pi's own I2C bus, bus 1 at `0x1a`, which takes
-one byte: the speed in percent. With nothing writing to it, the fan runs at full speed.
-Leap's image leaves that bus off, so three files work together:
+one byte. On this EON only the bottom of its range changes the speed: 0 stops the fan, 1 to
+5 are five audibly different speeds, and everything from about 6 up sounds the same as 100.
+With nothing writing to it, the fan runs at full speed. Leap's image leaves that bus off, so
+three files work together:
 
 - `system/extraconfig.txt` turns the bus on, with `dtparam=i2c_arm=on`, on the FAT boot
   partition at `/boot/efi`. openSUSE's `config.txt` there ends with `include
   extraconfig.txt`; an update of the firmware package rewrites `config.txt` and leaves this
   file alone. The firmware reads it only at power-on, so it takes a reboot.
 - `system/i2c-dev.conf` loads `i2c-dev`, which makes `/dev/i2c-1`.
-- `system/argon-fan`, run by `system/argon-fan.service`, sets the speed from the CPU's
-  temperature every 30 seconds: 20 % up to 50 °C, then rising to 100 % at 70 °C. It slows
-  only once the CPU has cooled 4 °C below where the speed last rose. A stop sets the fan to
-  full, and so does a temperature it cannot read. Without the bus, it logs that and tries
-  again every 30 seconds.
+- `system/argon-fan`, run by `system/argon-fan.service`, steps the fan through seven
+  levels, 0, 1, 2, 3, 4, 5 and 100: silent with the CPU below 45 °C and the drive below
+  38 °C, 5 by a CPU of 60 °C or a drive of 43 °C, and 100 at 65 °C or 45 °C. It steps up as
+  soon as either temperature asks for more, and down only once both are a few degrees below
+  the level's entry point. It reads the CPU every 30 seconds.
+- It reads the drive with `smartctl` about every 3 minutes while the drive is reading or
+  writing, and not at all while it is idle: the CPU's idle temperature then stands in for
+  the room, and one read is taken if the CPU rises 3 °C above where it was at the last
+  reading. A SMART read on an idle drive that still spins would reset its standby timer,
+  should one ever be set; a WD Red ships with none, so it does not spin down today.
+  `smartctl` never wakes a drive that has spun down. An idle drive keeps its last reading
+  for as long as it stays idle. It finds the drive by the array's label, `mirror-luks`;
+  with the drive unplugged, it follows the CPU alone.
+- A temperature it cannot read sets the fan to 100: the CPU's, a failed drive read, or a
+  drive working for 6 minutes with no good read. So does a stop. Without the bus, it logs
+  that and tries again every 30 seconds.
 
-The curve follows the CPU only. The script's header says why that also covers the drive.
-
-To change the curve, edit the numbers at the top of `system/argon-fan` and commit. Then, on
-`three`:
+To change a level or a threshold, edit the numbers at the top of `system/argon-fan` and
+commit. Then,
+from the phone, and on `three`:
 
 ```fish
-# install the changed fan script and restart its unit: the stop sets full speed, the start the curve
-cd ~/infra; and git pull; and sudo bin/install-system-file argon-fan --commit --allow-content-change
+# on the phone: install the changed fan script on three; the first run shows it, the second installs it
+cd ~/infra/ansible; and ansible-playbook playbooks/server-install-system-files.yml -l three -e only=argon-fan --check -K
+ansible-playbook playbooks/server-install-system-files.yml -l three -e only=argon-fan -K
+```
+
+```fish
+# on three: restart the fan's unit; the stop sets 100, the start picks the level again
 sudo systemctl restart argon-fan.service
 ```
 
 To check it:
 
 ```fish
-# the fan's unit, then its log: a line at each change of speed, with the CPU's temperature
+# the fan's unit, then its log: each change of level with both temperatures and the reason,
+# and the drive's readings when they move by 2 °C or more
 systemctl status argon-fan.service
 journalctl -b -u argon-fan.service
 ```
 
-If the unit misbehaves, stop it, which sets full speed, and set a speed by hand, 40 % here:
+If the unit misbehaves, stop it, which sets 100, and set the fan by hand: 0 is off, 1 to 5
+the quiet speeds, 100 full.
 
 ```fish
-# stop the fan's unit, then write one byte, the speed in percent, to the controller
+# stop the fan's unit, then write one byte to the controller, 3 here: 0 off, 1 to 5 quiet, 100 full
 sudo systemctl stop argon-fan.service
-sudo python3 -c 'import fcntl, os; f = os.open("/dev/i2c-1", os.O_RDWR); fcntl.ioctl(f, 0x0703, 0x1a); os.write(f, bytes([40]))'
+sudo python3 -c 'import fcntl, os; f = os.open("/dev/i2c-1", os.O_RDWR); fcntl.ioctl(f, 0x0703, 0x1a); os.write(f, bytes([3]))'
 ```
 
 ## Before three ships

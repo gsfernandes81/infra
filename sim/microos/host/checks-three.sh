@@ -55,7 +55,8 @@ check "firewalld lets Syncthing in, and not its GUI" sh -c '
 
 echo "-- the fan"
 # A VM has no Argon controller and no Pi I2C bus, so the unit is checked for waiting on its
-# bus without failing the boot; the curve and the writes are the box's to show.
+# bus without failing the boot; the levels are the box's to show. The array's drive is
+# not made yet, so the unit follows the CPU alone here (three-unlocked.sh finds the drive).
 check "argon-fan is enabled and runs, waiting for its bus" sh -c '
 	systemctl is-enabled argon-fan.service && systemctl is-active argon-fan.service'
 check "i2c-dev is loaded at boot" test -d /sys/module/i2c_dev

@@ -4,11 +4,12 @@
 # infra-name: argon-fan.service
 # infra-mode: 0644
 #
-# The Argon EON's fan, from the CPU's temperature (/usr/local/sbin/argon-fan). With no bus
-# yet it logs and retries every 30 s, running rather than failed, so a box without one (the
-# simulation's VM) boots clean. Its stop sets the fan to full.
+# The Argon EON's fan, set from the CPU's and the backup drive's temperatures
+# (/usr/local/sbin/argon-fan). With no bus yet it logs and retries every 30 s, running
+# rather than failed, so a box without one (the simulation's VM) boots clean. Its stop
+# sets the fan to full speed.
 [Unit]
-Description=Set the Argon EON's fan from the CPU's temperature
+Description=Set the Argon EON's fan from the CPU's and drive's temperatures
 After=systemd-modules-load.service
 
 [Service]

@@ -41,6 +41,18 @@ check "a container reads and writes the array through the context= mount" sh -c 
 check "Compose is upstream's, from /usr/local" sh -c "
 	docker info --format '{{range .ClientInfo.Plugins}}{{.Name}} {{.Version}} {{.Path}}{{println}}{{end}}' |
 	tee /dev/stderr | grep -q '^compose .* /usr/local/lib/docker/cli-plugins/docker-compose$'"
+echo "-- the fan, with the array's drive attached"
+# Found by its LUKS label, never by a fixed name. The VM's USB disk answers no SMART, so
+# the drive's temperature reads unknown: the unit sets the fan to the top, says why, and
+# runs.
+check "argon-fan finds the drive by its LUKS label, and runs" sh -c '
+	d=$(basename "$(readlink -f /dev/disk/by-label/mirror-luks)")
+	for i in $(seq 1 12); do
+		journalctl -b --no-pager -u argon-fan | grep -q "drive found at /dev/$d," && break; sleep 5
+	done
+	journalctl -b --no-pager -u argon-fan | tail -n 6
+	journalctl -b --no-pager -u argon-fan | grep -q "drive found at /dev/$d," &&
+	systemctl is-active argon-fan.service'
 [ "$mode" = first ] || exit 0
 
 echo "-- snapshots and the scrub"
