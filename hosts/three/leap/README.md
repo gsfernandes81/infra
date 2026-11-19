@@ -274,11 +274,13 @@ A restore onto `zero` runs from `zero`, with its restore key
 ```fish
 # on three: list three's snapshots, then restore Immich's library from snapshot N into /media/mirror/restore; --fake-super reads the kept owners, -M--super writes them
 sudo snapper --no-dbus -c received-immich list
-sudo rsync -aHAX --numeric-ids --fake-super -M--super --mkpath /media/mirror/received-backups/immich/current/.snapshots/N/snapshot/data/library/ /media/mirror/restore/library/
+sudo rsync -aHA --numeric-ids --fake-super -M--super --mkpath /media/mirror/received-backups/immich/current/.snapshots/N/snapshot/data/library/ /media/mirror/restore/library/
 ```
 
 Put a number from the list in place of `N`; its description, `pulled <M>`, names zero's
-snapshot. A database to look into is a reflink copy of that snapshot's `db`, which costs no
+snapshot. No `-X`: as root on three, rsync would try to make each copy's SELinux label match
+the source's, and SELinux refuses it; the owners and modes come from the kept xattr
+without it. A database to look into is a reflink copy of that snapshot's `db`, which costs no
 space, started in a throwaway Postgres container, whose entrypoint gives the files back to
 its own user (§ Slice 4 in [`plans/visit-runbook.md`](../../../plans/visit-runbook.md)).
 Never `btrfs property set ... ro false` on a snapshot: copy it.

@@ -20,7 +20,9 @@ if [ "${1-}" = --fake-super ]; then
 	shift
 	tmp=$(mktemp -d /var/tmp/tree-hash.XXXXXX)
 	trap 'rm -rf "$tmp"' EXIT
-	rsync -aHAX --numeric-ids --fake-super -M--super --exclude=/.snapshots \
+	# No -X: the copy lands on Leap's /var, labelled by SELinux, and rsync would try to make
+	# its security.selinux match the source's. --fake-super reads the kept owners without it.
+	rsync -aH --numeric-ids --fake-super -M--super --exclude=/.snapshots \
 		"${1:?usage: tree-hash.sh [--fake-super] <directory>}/" "$tmp/"
 	set -- "$tmp"
 fi

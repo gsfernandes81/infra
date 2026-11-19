@@ -448,7 +448,13 @@ sim_backup() {
 	as_root three-backup.sh rate 256
 	as_root three-backup.sh start
 	if as_root three-backup.sh running zz/big3.bin; then
-		sudo rm -f "$zimm/.snapshots/$n2/snapshot/zz/zzz-after-"* && echo "removed three files from the stand-in snapshot $n2 mid-pull"
+		# Under sudo, glob and all: .snapshots is root's, so the runner's own shell would find
+		# nothing to remove, and say nothing.
+		if sudo sh -c "rm '$zimm/.snapshots/$n2/snapshot/zz/'zzz-after-* && ! ls '$zimm/.snapshots/$n2/snapshot/zz/' | grep -q after"; then
+			echo "removed three files from the stand-in snapshot $n2 mid-pull"
+		else
+			echo "FAIL could not remove the files from the stand-in snapshot $n2"
+		fi
 	fi
 	as_root three-backup.sh failed "$since" 24 3
 	as_root three-backup.sh rate default
@@ -504,8 +510,8 @@ sim_backup() {
 	# user xattr cannot be set on one), so the symlink may differ in owner and group alone;
 	# its target, the third flag, may not.
 	rc=0
-	out=$(zrs "-naHAXc --numeric-ids -i --delete --exclude=/.snapshots --exclude=/data/thumbs --exclude=/data/encoded-video restore@127.0.0.1::backups/immich/current/.snapshots/$n2/snapshot/ /media/immich/.snapshots/$n/snapshot/" 2>&1 |
-		grep -v '^Warning: Permanently added') || rc=$?
+	out=$(zrs "-naHAXc --numeric-ids -i --delete --exclude=/.snapshots --exclude=/data/thumbs --exclude=/data/encoded-video restore@127.0.0.1::backups/immich/current/.snapshots/$n2/snapshot/ /media/immich/.snapshots/$n/snapshot/" 2>&1) || rc=$?
+	out=$(grep -v '^Warning: Permanently added' <<<"$out" || true)
 	link='^\.L\.[^ ]{8} data/library/link\.jpg -> a\.jpg$'
 	grep -qE "$link" <<<"$out" && echo "NOTE the symlink comes back with its target, and with the backup user's owner: $(grep -E "$link" <<<"$out")"
 	if [ "$rc" = 0 ] && ! grep -vE "$link" <<<"$out" | grep -q .; then
