@@ -383,8 +383,11 @@ through `ssh dev`.
    It reads right when the scrub's status is finished with no errors; every cache mode
    reads `writethrough writeback writearound [none]`; every counter is 0; the usage lists
    `/dev/bcache0` and `/dev/bcache1`; the slaves line for `sdb` names `bcache1`, as the
-   survey did; `bcache-register`, `btrfs-scan` and `localmount` are in `boot` (or
-   `bcache-register` in `sysinit`); and both `dm-crypt.ko` and `dm-mod.ko` are listed.
+   survey did; `bcache-register` is in `sysinit`, and `btrfs-scan` and `modules` in
+   `boot`; `localmount` is in no runlevel, which is right: `bootmisc`, in `boot`, declares
+   `need localmount`, so OpenRC starts it in the boot runlevel's order, after anything in
+   that runlevel it `use`s or is `after` (dmcrypt, once step 8 adds it); and both
+   `dm-crypt.ko` and `dm-mod.ko` are listed. (zero read exactly this on 2026-11-19.)
    **Note `sdb`'s `dev.uuid`**, the value step 8 sends. Stop and tell the agent if
    `btrfs-scan` is in no runlevel, since the boot order below rests on it, or if the
    modules are missing, which means the kernel was upgraded without a reboot: `zero`
