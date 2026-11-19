@@ -27,7 +27,7 @@ the far side of the connection.
    data/   library upload    │ 04:00 btrbk        ├── immich/
            backups profile   │ snapshot, ro       │   ├── current/   ◄─────┐ rsync, as `backup`
    data/thumbs        (nested│ subvol: left out)  │   │   (plain copy,    │ --fake-super:
-   data/encoded-video (nested│ subvol: left out)  │   │    writable)      │ owners in xattrs;
+   data/encoded-video (nested│ subvol: left out)  │   │    writable)      │ owners in xattrs
    db/     Postgres          │                    │   ├── immich.<ts>  ◄─┤ btrbk, after
                              ▼                    │   ├── immich.<ts>    │ snapshot, ro,
  snapshots/immich/                                │   └── …  90 days     │ after a good pull
