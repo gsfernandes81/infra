@@ -1,5 +1,10 @@
 # `zero`'s backup to `three` by btrfs send/receive
 
+> **⚠︎ SUPERSEDED 2026-11-19 by [`three-backup-pull.md`](three-backup-pull.md).** The
+> transfer is no longer send/receive (`docs/decisions.md` § *`zero`'s backup is pulled by
+> rsync from snapshots*). Kept only for § *The layout on `zero`, and the move*, which the
+> new design reuses unchanged; deleted once that move is written into the runbook.
+
 A proposal of 2026-11-19; the owner answered its questions the same day (below). It replaces
 the rsync push in [`three.md`](three.md) § Backups. `mirror-backup` and
 `mirror-backup-age-check` were removed from `zero` on 2026-11-18 to wait for it, so `zero`

@@ -2634,6 +2634,27 @@ Alpine copies for `one` too, since `one` keeps both.
   stops on a `leap/MOVED`. Porting them was set aside: a Leap host gets its first tunnel
   from `server-create-host-tunnel.yml`, and no move to a second tunnel is planned.
 
+## `zero`'s backup is pulled by rsync from snapshots
+
+**Decided 2026-11-19** (the owner), after two security reviews of the send/receive build
+(`plans/three-send-receive.md`, never merged; branch `send-receive`).
+
+- **Not btrfs send/receive.** `btrfs receive` must run as root, and it trusts its stream:
+  it does not clean `..` out of the paths in it, and a clone's source is opened before
+  `--chroot` applies. A stream from a compromised `zero` could plant links and renames
+  beside `three`'s earlier snapshots, forge the fields a script reads back, and read files
+  anywhere on `three`. Each round of fixes found more, and no maintained tool (btrbk,
+  snapper's `snbk`) validates a stream from a hostile sender; they trust the source. The
+  careful-setup consensus is that whatever parses the protected machine's data on the
+  backup box runs unprivileged, and that the backup box alone controls its history.
+- **btrfs snapshots on `zero`, rsync pulled by `three`.** `zero` snapshots one `immich`
+  subvolume (library and Postgres together) and its Syncthing share, read-only; `three`
+  pulls the newest snapshot with rsync as an unprivileged user and snapshots its copy
+  itself. The consistency the owner wanted from send/receive comes from rsync reading a
+  frozen snapshot. The design, for the owner's review, is `plans/three-backup-pull.md`.
+- **btrbk owns the snapshot logic on both sides,** to keep the scripts this repo maintains
+  as small as possible (the owner's aim).
+
 ## The lesson worth keeping
 
 
