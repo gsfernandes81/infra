@@ -304,11 +304,28 @@
   ansible.builtin.uri:
     url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ acc_app_id }}/policies"
     headers: { Authorization: "Bearer {{ cf_token }}" }
+    timeout: 60
   register: acc_pol_q
   delegate_to: localhost
   check_mode: false
   changed_when: false
   no_log: true
+  # A read that fails says why in the next task, which no_log would otherwise hide;
+  # Cloudflare's API has answered slowly here (11 s, then a failed read, on 2026-11-19).
+  failed_when: false
+  retries: 3
+  delay: 5
+  until: acc_pol_q.status | default(0) == 200
+  when: acc_app_id | length > 0
+
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: check the policies could be read"
+  ansible.builtin.assert:
+    that: acc_pol_q.status | default(0) == 200
+    fail_msg: >-
+      Reading {{ acc_domain }}'s policies failed three times: HTTP {{ acc_pol_q.status | default('none') }},
+      {{ acc_pol_q.msg | default('no message') }}. Nothing more was written; re-run when Cloudflare answers.
+    success_msg: The policies of {{ acc_domain }} were read.
+  delegate_to: localhost
   when: acc_app_id | length > 0
 
 - name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: compare the {{ acc_decision }} policy"
@@ -398,10 +415,27 @@
   ansible.builtin.uri:
     url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ acc_app_id }}/policies"
     headers: { Authorization: "Bearer {{ cf_token }}" }
+    timeout: 60
   register: acc_pol_r
   delegate_to: localhost
   changed_when: false
   no_log: true
+  # A read that fails says why in the next task, which no_log would otherwise hide;
+  # Cloudflare's API has answered slowly here (11 s, then a failed read, on 2026-11-19).
+  failed_when: false
+  retries: 3
+  delay: 5
+  until: acc_pol_r.status | default(0) == 200
+  when: not ansible_check_mode
+
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: check the policies could be read"
+  ansible.builtin.assert:
+    that: acc_pol_r.status | default(0) == 200
+    fail_msg: >-
+      Reading {{ acc_domain }}'s policies failed three times: HTTP {{ acc_pol_r.status | default('none') }},
+      {{ acc_pol_r.msg | default('no message') }}. Nothing more was written; re-run when Cloudflare answers.
+    success_msg: The policies of {{ acc_domain }} were read.
+  delegate_to: localhost
   when: not ansible_check_mode
 
 - name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: check {{ acc_decision }} is the only policy"
