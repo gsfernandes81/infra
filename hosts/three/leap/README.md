@@ -118,7 +118,7 @@ drive in use. It writes LUKS2 with Adiantum, labelled `mirror-luks`, which
 |---|---|---|
 | `received-backups/`, `received-backups/immich/` | directories | root's, 755 |
 | `received-backups/immich/current/` | subvolume: the copy of zero's newest snapshot that `mirror-pull` keeps up to date | the backup user's, 700 |
-| `received-backups/immich/current/.snapshots/<N>/snapshot` | snapper's read-only snapshots of `current/`, one per good pull | root's, 750 |
+| `received-backups/immich/current/.snapshots/<N>/snapshot` | snapper's read-only snapshots of `current/`, one per good pull | root's; `.snapshots` 754, which lets the pull's rsync read its (absent) xattr while it decides what `--delete` removes, and enter nothing |
 | `received-backups/immich/state/` | `pulled`: what the last good pull copied | the backup user's, 700 |
 | `received-backups/immich/last-pulled` | what the last snapshot holds | root's |
 | `syncthing/` | subvolume: Syncthing's data and identity | gavin's |
@@ -178,15 +178,17 @@ sandbox that can write only `current/` and `state/`. It reaches `zero` with its 
 `/home/backup/.ssh/zero-pull`, through `system/backup-ssh-config`, which names zero's tailnet
 address and accepts only the host key in `system/zero-known-hosts`; both are root's. On
 `zero` that key runs nothing but a read-only rsync daemon. zero's owners and modes are kept
-in an xattr (`--fake-super`), and every symlink is stored with a `/rsyncd-munged/` prefix, so
-none leads anywhere on `three`.
+in an xattr (`--fake-super`). With it, rsync keeps each symlink as a plain file holding its
+target, its type in the xattr, so `three` holds no symlink of `zero`'s at all, and the target
+is munged besides (`/rsyncd-munged/...`); the restore module turns both back.
 
 The timezone is UTC: 01:00 in a UK winter, 02:00 in a UK summer, 09:00 in Singapore.
 
 ### The pull's setup, owner-run, on the array made on 2026-11-18
 
-Once, in this order, after `ssh three`. The first boot of a rebuilt `three` does steps 3, 4
-and 5 itself, and `make-mirror` makes step 2's layout on a new drive.
+Once, in this order, after `ssh three`. The first boot of a rebuilt `three` does steps 3 and 5
+itself, and `make-mirror` makes step 2's layout on a new drive; step 4, the key, is made on
+the box every time.
 
 1. **Unlock**, as § Unlocking says, and pull the checkout: `cd ~/infra; and git pull --ff-only`.
 2. **The layout.** The old `incoming` and `snapshots` must be empty, since no push ever ran;
@@ -195,7 +197,7 @@ and 5 itself, and `make-mirror` makes step 2's layout on a new drive.
    ```fish
    # on three: check the old push's places are empty, then remove them and make received-backups
    sudo find /media/mirror/incoming /media/mirror/snapshots -mindepth 1 | head
-   test -z (sudo find /media/mirror/incoming /media/mirror/snapshots -mindepth 1 | head -n 1); and sudo btrfs subvolume delete /media/mirror/incoming; and sudo rmdir /media/mirror/snapshots; and sudo install -d -m 755 /media/mirror/received-backups /media/mirror/received-backups/immich; and sudo btrfs subvolume create /media/mirror/received-backups/immich/current; and sudo chown backup:backup /media/mirror/received-backups/immich/current; and sudo chmod 700 /media/mirror/received-backups/immich/current; and sudo btrfs subvolume create /media/mirror/received-backups/immich/current/.snapshots; and sudo chmod 750 /media/mirror/received-backups/immich/current/.snapshots; and sudo install -d -o backup -g backup -m 700 /media/mirror/received-backups/immich/state; and sudo ls -la /media/mirror /media/mirror/received-backups/immich
+   test -z (sudo find /media/mirror/incoming /media/mirror/snapshots -mindepth 1 | head -n 1); and sudo btrfs subvolume delete /media/mirror/incoming; and sudo rmdir /media/mirror/snapshots; and sudo install -d -m 755 /media/mirror/received-backups /media/mirror/received-backups/immich; and sudo btrfs subvolume create /media/mirror/received-backups/immich/current; and sudo chown backup:backup /media/mirror/received-backups/immich/current; and sudo chmod 700 /media/mirror/received-backups/immich/current; and sudo btrfs subvolume create /media/mirror/received-backups/immich/current/.snapshots; and sudo chmod 754 /media/mirror/received-backups/immich/current/.snapshots; and sudo install -d -o backup -g backup -m 700 /media/mirror/received-backups/immich/state; and sudo ls -la /media/mirror /media/mirror/received-backups/immich
    ```
 
 3. **What the push left, gone; the restore user made; the array's mount hardened.** The

@@ -35,14 +35,20 @@ snaps() {
 count() { snaps | grep -c . || true; }
 newest() { snaps | tail -n 1 | cut -d' ' -f1; }
 unit_result() { systemctl show -p Result --value "$1"; }
+# A oneshot unit reads "activating" for as long as it runs, never "active", so `systemctl
+# is-active` cannot tell a running pull; its ActiveState can.
+running_now() {
+	case "$(systemctl show -p ActiveState --value "$1")" in activating | deactivating) return 0 ;; esac
+	return 1
+}
 # mirror-snapshot.service is started by the pull's OnSuccess= as the pull ends, so it is
 # waited for before anything is read.
 settle() {
 	local i
 	sleep 2
-	for i in $(seq 1 60); do
+	for i in $(seq 1 90); do
 		! systemctl list-jobs --no-legend 2>/dev/null | grep -qE 'mirror-(pull|snapshot)' &&
-			! systemctl is-active --quiet mirror-pull.service mirror-snapshot.service && return 0
+			! running_now mirror-pull.service && ! running_now mirror-snapshot.service && return 0
 		sleep 2
 	done
 	return 1
@@ -70,8 +76,8 @@ layout)
 		s=\$(stat -c '%U %a' $rb $d | sort -u); echo \"\$s\"; [ \"\$s\" = 'root 755' ]"
 	check "current is a subvolume, the backup user's, mode 700" sh -c "
 		stat -c '%i %U %a' $cur; [ \"\$(stat -c '%i %U %a' $cur)\" = '256 backup 700' ]"
-	check "current/.snapshots is a subvolume, root's, mode 750, holding no snapshot yet" sh -c "
-		stat -c '%i %U %a' $cur/.snapshots; [ \"\$(stat -c '%i %U %a' $cur/.snapshots)\" = '256 root 750' ] &&
+	check "current/.snapshots is a subvolume, root's, mode 754, holding no snapshot yet" sh -c "
+		stat -c '%i %U %a' $cur/.snapshots; [ \"\$(stat -c '%i %U %a' $cur/.snapshots)\" = '256 root 754' ] &&
 		[ -z \"\$(ls -A $cur/.snapshots)\" ]"
 	check "state is the backup user's, mode 700" sh -c "
 		[ \"\$(stat -c '%U %a' $d/state)\" = 'backup 700' ]"
@@ -167,7 +173,7 @@ ctime)
 delete-calibration)
 	# What --delete would do to three's snapshots without mirror-pull's exclude and protect
 	# filters: a dry run of the same transfer with them left out. As root, since the backup
-	# user cannot even list .snapshots (root's, 750), which is a second guard. It must show
+	# user cannot enter .snapshots (root's, 754), which is a second guard. It must show
 	# rsync deleting inside .snapshots, or the checks after the real pulls prove nothing.
 	n=$(sed -n 's/ .*//p' "$d/last-pulled")
 	rsync -n -i -aHAX --numeric-ids --fake-super --munge-links --delete \
@@ -179,7 +185,7 @@ delete-calibration)
 	;;
 running) # waits until a pull is under way, its first bytes of <file> in current/
 	for i in $(seq 1 120); do
-		if systemctl is-active --quiet mirror-pull.service && [ -s "$cur/$2" ]; then
+		if running_now mirror-pull.service && [ -s "$cur/$2" ]; then
 			echo "the pull is under way: $(stat -c %s "$cur/$2") bytes of $2 so far"
 			exit 0
 		fi
@@ -237,12 +243,12 @@ confined)
 		echo \"\$out\" | grep -qi 'unknown module' &&
 		runuser -u backup -- rsync -e ssh mirror@zero:: > /tmp/sim-modules 2>&1; cat /tmp/sim-modules
 		! grep -q snapshots /tmp/sim-modules"
+	# A remote forward is asked for at once, so sshd's refusal comes back on its own.
 	check "the key forwards nothing" sh -c "
-		runuser -u backup -- ssh -v -N -L 127.0.0.1:2298:127.0.0.1:22 zero > /tmp/sim-fwd.log 2>&1 &
-		p=\$!; sleep 4; timeout 5 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2298; head -c 7 <&3' > /tmp/sim-banner 2>/dev/null
-		sleep 1; kill \$p 2>/dev/null; wait \$p 2>/dev/null
-		grep -iE 'prohibited|forward|channel' /tmp/sim-fwd.log | tail -n 4; [ ! -s /tmp/sim-banner ] && grep -qi 'prohibited' /tmp/sim-fwd.log"
-	rm -rf /tmp/sim-up /tmp/sim-empty /tmp/sim-banner /tmp/sim-fwd.log
+		out=\$(timeout 30 runuser -u backup -- ssh -N -o ExitOnForwardFailure=yes -R 127.0.0.1:2297:127.0.0.1:22 zero < /dev/null 2>&1)
+		rc=\$?; echo \"exit \$rc: \$out\" | tail -n 2
+		[ \$rc != 0 ] && [ \$rc != 124 ] && echo \"\$out\" | grep -qi 'forwarding failed'"
+	rm -rf /tmp/sim-up /tmp/sim-empty /tmp/sim-modules
 	;;
 restore-user)
 	# Leap's own sudoers lets every user run anything with root's password (targetpw), so
@@ -276,7 +282,8 @@ caps) # <user>: the capabilities of that user's rsync daemon, while one runs
 locked)
 	check "the array is locked, and received-backups not there" sh -c "
 		! findmnt /media/mirror && ! test -e /dev/mapper/mirror && ! test -e $rb"
-	t0=$(date +%s)
+	# An earlier failed run leaves its result on the unit until something resets it.
+	systemctl reset-failed mirror-pull.service mirror-snapshot.service 2>/dev/null
 	systemctl start mirror-pull.service
 	check "a pull against the locked array is skipped by its condition, not failed" sh -c "
 		systemctl show -p ActiveState -p Result -p ConditionResult mirror-pull.service

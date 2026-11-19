@@ -63,7 +63,9 @@ the far side of a connection.
   `last-pulled` change, and the next day finishes the copy.
 - **snapper keeps its snapshots inside `current/`**, in `.snapshots`, so the pull excludes
   `/.snapshots` and protects it from `--delete` with an rsync filter. The backup user cannot
-  even list it (root's, 750), a second guard.
+  enter it (root's, 754), a second guard; it can read the names, which rsync needs, since it
+  reads the xattr of every entry in `current/` while deciding what to delete (exit 23 at
+  750, the simulation's second run).
 - **Syncthing's share is not backed up** (the owner, 2026-11-19): it holds nothing critical.
 
 ## Who can do what
@@ -88,14 +90,15 @@ the far side of a connection.
 - **A compromised `zero`** can read its own backups on `three`, and serve bad data to the
   pull. It cannot write, delete or run anything on `three`, and `three`'s history from before
   is untouched. The data it serves is parsed by rsync as the unprivileged `backup` user in a
-  sandbox that writes only `current/` and `state/`; every symlink it sends is stored munged
-  (`/rsyncd-munged/...`), so none can steer the restore daemon, which reads anything, out
-  of its module. The restore module unmunges them on the way back.
+  sandbox that writes only `current/` and `state/`. A symlink it sends never becomes one on
+  `three`: under `--fake-super` rsync keeps it as a plain file holding its target, munged
+  besides, so none can steer the restore daemon, which reads anything, out of its module.
+  The restore module turns them back into links on the way out.
 - **A compromised `three`** can read `zero`'s snapshots, the data it exists to hold. It
   cannot write to `zero`, delete a snapshot, or run anything.
 - **Both daemons refuse `--copy-links` and its kin**, so neither follows a symlink for the
   client. A path in the request that runs through a symlink already in the module is the
-  one way out of a module without chroot; on `three` none exists (all are munged), and on
+  one way out of a module without chroot; on `three` none exists, and on
   `zero` neither Immich nor Postgres keeps any.
 - **The backup user could rename `current/.snapshots`**, since it owns `current/`: it could
   hide the history from snapper, never change or delete it. Snapshots are root's and

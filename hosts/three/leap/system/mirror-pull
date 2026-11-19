@@ -17,9 +17,10 @@
 # again.
 #
 # rsync, here and on zero, is the system's own. --fake-super keeps zero's owners, modes and
-# ACLs in an xattr, since the backup user cannot chown. --munge-links stores every symlink
-# with a /rsyncd-munged/ prefix, so a link zero sends never leads anywhere on three; the
-# restore module unmunges it on the way back (rsyncd-restore.conf). --inplace rewrites only
+# ACLs in an xattr, since the backup user cannot chown; with it rsync keeps each symlink as
+# a plain file holding its target, so no link zero sends becomes one on three.
+# --munge-links prefixes that target with /rsyncd-munged/ besides, in case a later rsync
+# stores real links; the restore module turns both back (rsyncd-restore.conf). --inplace rewrites only
 # the blocks that changed, which keeps them shared with three's earlier snapshots.
 # /.snapshots is three's own, and is both excluded and protected from --delete. The rate is
 # 32 Mbit/s, 4,000,000 bytes a second, which is 3906 in rsync's units of 1024 bytes;

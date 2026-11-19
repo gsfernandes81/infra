@@ -8,7 +8,7 @@
 # btrfs labelled mirror holding the subvolume `syncthing` (gavin's, Syncthing's data and its
 # identity) and received-backups/immich, where zero's backup is pulled
 # (plans/three-backup-pull.md): `current`, a subvolume the backup user owns and mirror-pull
-# fills; inside it `.snapshots`, root's subvolume, where snapper keeps three's read-only
+# fills; inside it `.snapshots`, root's subvolume (754), where snapper keeps three's read-only
 # snapshots of current/; and `state`, the backup user's, for what a pull just copied. The
 # directories above them are root's, mode 755, so the backup user reaches its two and
 # nothing else. It asks for the passphrase twice and stores it nowhere. It leaves the array
@@ -72,7 +72,10 @@ btrfs subvolume create "$mnt/received-backups/immich/current" >/dev/null
 chown backup:backup "$mnt/received-backups/immich/current"
 chmod 700 "$mnt/received-backups/immich/current"
 btrfs subvolume create "$mnt/received-backups/immich/current/.snapshots" >/dev/null
-chmod 750 "$mnt/received-backups/immich/current/.snapshots"
+# 754, not snapper's usual 750: deciding what --delete removes, the pull's rsync reads the
+# xattr of every entry in current/, the protected .snapshots too, and reading an xattr takes
+# read permission. r without x shows the backup user the numbers and lets it enter none.
+chmod 754 "$mnt/received-backups/immich/current/.snapshots"
 install -d -o backup -g backup -m 700 "$mnt/received-backups/immich/state"
 btrfs subvolume create "$mnt/syncthing" >/dev/null
 chown gavin:gavin "$mnt/syncthing"

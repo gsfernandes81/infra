@@ -198,8 +198,9 @@ Each numbered point is the design's (`plans/three-backup-pull.md`), with how it 
    its copy read back through `--fake-super`; the two must match. `thumbs` and
    `encoded-video` must be empty directories, `current/.snapshots` must hold only
    `three`'s own numbered snapshots, a file's owner must sit in `user.rsync.%stat` while
-   the file on disk is the backup user's, and the symlink must be stored as
-   `/rsyncd-munged/a.jpg`.
+   the file on disk is the backup user's, and the symlink must lead nowhere: rsync keeps it
+   as a plain file whose xattr records a link (or, from an rsync that stores links, a link
+   to `/rsyncd-munged/a.jpg`).
 2. **Snapshots only after a good pull.** After each pull the count of `three`'s snapshots
    must rise by one, described `pulled <N>`, and `last-pulled` name `<N>`; a pull with
    nothing new must end `nothing new` with no snapshot (the snapshot unit skipped by its
@@ -226,7 +227,7 @@ Each numbered point is the design's (`plans/three-backup-pull.md`), with how it 
 7. **`--delete` never touches `three`'s `.snapshots`.** `zero`'s snapshot holds an empty
    `.snapshots`, which `--delete` would mirror over `three`'s. A dry run as root without
    the filters must show rsync deleting inside it (the calibration; the backup user cannot
-   even list it), and every pull must keep every earlier snapshot.
+   enter it), and every pull must keep every earlier snapshot.
 8. **Exit 24 is a failure.** A slow pull of a 24 MB file in the last directory, with files
    after it; once it has begun, snapper deletes that snapshot on `zero`. The service must
    fail with status 24, with no snapshot and `last-pulled` unchanged.

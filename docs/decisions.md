@@ -2688,15 +2688,22 @@ and refine the owner's design without changing it.
   it cannot be off for one subvolume and on for another. The move's remount with
   `noautodefrag` drops it at once. Set aside: keeping it on `/media/syncthing`, which would
   have kept it on `/media/immich` too.
-- **Every symlink the pull receives is stored munged** (`--munge-links`, a
-  `/rsyncd-munged/` prefix), **and the restore module unmunges it on the way out**
-  (`munge symlinks = yes`). The restore daemon can read any file on `three`, and a module
-  without chroot follows a symlink in a requested path, so a link a compromised `zero` sent,
-  `current/x -> /etc`, would have let `zero` read `three`'s shadow file and host key back
-  through its restore key. Munged, no link leads anywhere, and restores get the real
-  targets. Both daemons also refuse `--copy-links` and its kin. Set aside: chroot, which
-  needs a second capability, `CAP_SYS_CHROOT`; and `--safe-links`, whose lexical check has
-  had bypasses.
+- **No symlink `zero` sends becomes one on `three`.** The restore daemon can read any file
+  on `three`, and a module without chroot follows a symlink in a requested path, so a link a
+  compromised `zero` sent, `current/x -> /etc`, would let `zero` read `three`'s shadow file
+  and host key back through its restore key. Under `--fake-super`, rsync on Linux keeps a
+  symlink as a plain file holding its target, its type in the xattr (the simulation's second
+  run showed it), and the pull also munges every target (`--munge-links`, a
+  `/rsyncd-munged/` prefix), in case a later rsync stores real links. The restore module
+  (`fake super`, `munge symlinks = yes`) turns both back, so restores get the real targets;
+  a symlink's owner is not kept. Both daemons also refuse `--copy-links` and its kin. Set
+  aside: chroot, which needs a second capability, `CAP_SYS_CHROOT`; and `--safe-links`,
+  whose lexical check has had bypasses.
+- **`current/.snapshots` is 754, not snapper's usual 750.** Deciding what `--delete` removes,
+  the backup user's rsync reads the xattr of every entry in `current/`, the excluded and
+  protected `.snapshots` too, and at 750 it was refused and the pull ended in exit 23. Read
+  without search shows the snapshot numbers and enters none. `zero`'s stays 750: its daemon
+  reads with `CAP_DAC_READ_SEARCH`.
 - **The forced commands and the sudoers lines name absolute paths**: `/bin/setpriv` on Alpine,
   `/usr/bin/setpriv` on Leap, `/usr/bin/rsync` on both. Alpine's BusyBox has a `setpriv`
   applet without `--reuid`, and util-linux's `setpriv` package installs over it at
