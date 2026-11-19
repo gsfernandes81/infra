@@ -5,6 +5,12 @@ policies, service tokens), and those _cf-access-app.yml makes for
 server-create-browser-login.yml (an application PUT whole, its app-scoped policies), with
 _cf-dns.yml's records, deletes included. It keeps its state in memory, answers in
 Cloudflare's envelope (success, errors, result), and never records an Authorization header.
+An application, and an app-scoped policy, is answered as Cloudflare answers one: with ids,
+timestamps and defaults the plays never sent, session_duration in Go's long form (24h0m0s
+for 24h) and a policy's include rules in reverse order, so _cf-access-app.yml's subset
+compare is tested against more than its own echo. /__state holds them as written. Every
+application and app-scoped policy write is counted in access_writes, as DNS writes are in
+dns_writes, so a test can prove a converged run wrote nothing.
 Four paths are not Cloudflare's: GET /__state returns what it holds, POST /__control changes how it behaves,
 for the tests' adverse cases, and GET /__probe/<hostname> stands in for the edge, answering
 an unauthenticated request with 403 when an Access application covers the hostname (or it
@@ -27,11 +33,58 @@ ACCOUNT_ID = "acct-sim"
 STATE = {"tunnels": {}, "records": {}, "requests": [],
          "refuse_writes": False, "refuse_dns": False, "tunnel_secrets": {},
          "apps": {}, "policies": {}, "service_tokens": [], "never_gate": False,
-         "refuse_access": False, "dns_writes": [], "delete_answer": None}
+         "refuse_access": False, "dns_writes": [], "delete_answer": None,
+         "access_writes": [], "ignore_app_field": None, "omit_on_read": []}
+
+# What Cloudflare fills in on an application PUT or POST that leaves a field out.
+APP_DEFAULTS = {"type": "self_hosted", "session_duration": "24h", "allowed_idps": [],
+                "auto_redirect_to_identity": False, "app_launcher_visible": True}
+APP_SETTINGS = ["name", "domain"] + list(APP_DEFAULTS)
 
 
 def envelope(result=None, errors=None):
     return {"success": not errors, "errors": errors or [], "messages": [], "result": result}
+
+
+def go_duration(d):
+    """Cloudflare stores a duration and answers in Go's Duration.String() form: 24h0m0s."""
+    units = {"h": 3600, "m": 60, "s": 1}
+    total, num = 0, ""
+    for c in str(d):
+        if c.isdigit():
+            num += c
+        elif c in units and num:
+            total, num = total + int(num) * units[c], ""
+        else:
+            return d
+    if num:
+        return d
+    h, rest = divmod(total, 3600)
+    m, sec = divmod(rest, 60)
+    return f"{h}h{m}m{sec}s" if h else (f"{m}m{sec}s" if m else f"{sec}s")
+
+
+def policy_view(pol):
+    """An app-scoped policy as Cloudflare answers it."""
+    return dict(pol, include=list(reversed(pol.get("include", []))), uid=pol["id"],
+                created_at="2026-11-19T00:00:00Z", updated_at="2026-11-19T00:00:00Z",
+                approval_required=False, isolation_required=False,
+                purpose_justification_required=False, session_duration="24h", reusable=False)
+
+
+def app_view(app):
+    """An application as Cloudflare answers it: its defaults, ids and timestamps added."""
+    view = dict(APP_DEFAULTS)
+    view.update(app)
+    view.update(uid=app["id"], aud="aud-" + app["id"][:8], created_at="2026-11-19T00:00:00Z",
+                updated_at="2026-11-19T00:00:00Z", enable_binding_cookie=False,
+                http_only_cookie_attribute=True, options_preflight_bypass=False, tags=[],
+                self_hosted_domains=[app.get("domain")],
+                session_duration=go_duration(view["session_duration"]),
+                policies=[policy_view(p) for p in app.get("policies", [])])
+    for field in STATE["omit_on_read"]:
+        view.pop(field, None)
+    return view
 
 
 def login_covers(host):
@@ -102,6 +155,21 @@ class Handler(BaseHTTPRequestHandler):
                 aid = str(uuid.uuid4())
                 STATE["apps"][aid] = {"id": aid, "name": a["name"], "domain": a["domain"],
                                       "destinations": [], "policies": []}
+            # Changes made by hand in the dashboard: fields set on every application, fields
+            # set on every app-scoped policy, an address taken out of every include.
+            for app in STATE["apps"].values():
+                app.update(change.get("edit_apps", {}))
+                for pol in app["policies"]:
+                    pol.update(change.get("edit_app_policies", {}))
+                    if change.get("drop_email"):
+                        pol["include"] = [i for i in pol["include"]
+                                          if i.get("email", {}).get("email") != change["drop_email"]]
+            # A field an application PUT leaves as it was, as if Cloudflare ignored it, and
+            # fields left out of every application read, as if Cloudflare omitted them.
+            if "ignore_app_field" in change:
+                STATE["ignore_app_field"] = change["ignore_app_field"]
+            if "omit_on_read" in change:
+                STATE["omit_on_read"] = change["omit_on_read"]
             if "service_tokens" in change:
                 STATE["service_tokens"] = change["service_tokens"]
             STATE["refuse_writes"] = bool(change.get("refuse_writes", STATE["refuse_writes"]))
@@ -122,7 +190,8 @@ class Handler(BaseHTTPRequestHandler):
             if change.get("reset"):
                 STATE.update(tunnels={}, records={}, refuse_writes=False, refuse_dns=False,
                              tunnel_secrets={}, apps={}, policies={}, never_gate=False,
-                             refuse_access=False, dns_writes=[], delete_answer=None)
+                             refuse_access=False, dns_writes=[], delete_answer=None,
+                             access_writes=[], ignore_app_field=None, omit_on_read=[])
             return self.reply(200, {"ok": True})
 
         STATE["requests"].append(f"{method} {path}")
@@ -221,7 +290,7 @@ class Handler(BaseHTTPRequestHandler):
         # Applications: created already linked to policies by id, as the play asks.
         apps = access + "/apps"
         if p == apps and method == "GET":
-            return self.reply(200, envelope(list(STATE["apps"].values())))
+            return self.reply(200, envelope([app_view(a) for a in STATE["apps"].values()]))
         if STATE["refuse_access"] and p.startswith(apps) and method in ("POST", "PUT"):
             return self.reply(403, envelope(errors=[{"code": 10000, "message": "Authentication error: this token may not edit Access"}]))
         # App-scoped policies, as _cf-access-app.yml writes them: listed, added, replaced.
@@ -231,7 +300,7 @@ class Handler(BaseHTTPRequestHandler):
             if not app:
                 return self.reply(404, envelope(errors=[{"code": 12130, "message": "application not found"}]))
             if len(parts) == 2 and method == "GET":
-                return self.reply(200, envelope(app["policies"]))
+                return self.reply(200, envelope([policy_view(x) for x in app["policies"]]))
             if (len(parts) == 2 and method == "POST") or (len(parts) == 3 and method == "PUT"):
                 b = self.body()
                 if not b.get("name") or b.get("decision") not in ("allow", "bypass", "deny", "non_identity"):
@@ -244,9 +313,12 @@ class Handler(BaseHTTPRequestHandler):
                        "precedence": b.get("precedence", 1), "include": b.get("include", []),
                        "exclude": b.get("exclude", []), "require": b.get("require", [])}
                 app["policies"] = kept + [pol]
-                return self.reply(200, envelope(pol))
-        # PUT replaces the application's settings and, as the play reads back rather than
-        # assumes, keeps the policies attached to it.
+                STATE["access_writes"].append({"method": method, "kind": "policy",
+                                               "domain": app.get("domain")})
+                return self.reply(200, envelope(policy_view(pol)))
+        # PUT replaces the application's settings whole, a field left out taking Cloudflare's
+        # default, and, as the play reads back rather than assumes, keeps the policies
+        # attached to it.
         if p.startswith(apps + "/") and len(parts) == 1 and method == "PUT":
             app = STATE["apps"].get(parts[0])
             if not app:
@@ -254,21 +326,26 @@ class Handler(BaseHTTPRequestHandler):
             b = self.body()
             if not b.get("domain"):
                 return self.reply(400, envelope(errors=[{"code": 12000, "message": f"bad application body: {sorted(b)}"}]))
-            app.update(name=b.get("name"), domain=b["domain"],
-                       session_duration=b.get("session_duration"))
-            return self.reply(200, envelope(app))
+            ignored = STATE["ignore_app_field"]
+            kept = app.get(ignored)
+            for field in APP_SETTINGS:
+                app[field] = b.get(field, APP_DEFAULTS.get(field))
+            if ignored:
+                app[ignored] = kept
+            STATE["access_writes"].append({"method": "PUT", "kind": "app", "domain": app["domain"]})
+            return self.reply(200, envelope(app_view(app)))
         if p == apps and method == "POST":
             b = self.body()
             linked = [x.get("id") for x in b.get("policies", [])]
             if not b.get("domain") or any(pid not in STATE["policies"] for pid in linked):
                 return self.reply(400, envelope(errors=[{"code": 12000, "message": f"bad application body: {sorted(b)}"}]))
             aid = str(uuid.uuid4())
-            STATE["apps"][aid] = {"id": aid, "name": b.get("name"), "domain": b["domain"],
-                                  "destinations": b.get("destinations", []),
-                                  "session_duration": b.get("session_duration"),
+            STATE["apps"][aid] = {"id": aid, "destinations": b.get("destinations", []),
                                   "policies": [dict(STATE["policies"][pid], precedence=i + 1)
                                                for i, pid in enumerate(linked)]}
-            return self.reply(201, envelope(STATE["apps"][aid]))
+            STATE["apps"][aid].update({f: b.get(f, APP_DEFAULTS.get(f)) for f in APP_SETTINGS})
+            STATE["access_writes"].append({"method": "POST", "kind": "app", "domain": b["domain"]})
+            return self.reply(201, envelope(app_view(STATE["apps"][aid])))
         if p.startswith(apps + "/") and method in ("GET", "DELETE"):
             aid = p.rsplit("/", 1)[1]
             if aid not in STATE["apps"]:
@@ -276,7 +353,7 @@ class Handler(BaseHTTPRequestHandler):
             if method == "DELETE":
                 del STATE["apps"][aid]
                 return self.reply(202, envelope({"id": aid}))
-            return self.reply(200, envelope(STATE["apps"][aid]))
+            return self.reply(200, envelope(app_view(STATE["apps"][aid])))
 
         return self.reply(404, envelope(errors=[{"code": 7003, "message": f"no route {method} {p}"}]))
 

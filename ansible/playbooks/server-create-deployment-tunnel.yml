@@ -72,8 +72,9 @@
 # live behind a green recap. Deleting Access in front of something is a person's call.
 #
 # Re-running is the intended way to finish after a partial failure, and a converged run
-# changes nothing but the Access applications and policies, which are PUT unconditionally
-# (the reason is beside the same choice in _dev-container-tunnel.yml) and then read back.
+# writes no Access application or policy: _cf-access-app.yml writes each only where it
+# differs from what that file sets, and reads the policies back on every run (its header
+# says why).
 #
 # The reasoning for all of it is docs/decisions.md § "Sidecar, not baked-in".
 

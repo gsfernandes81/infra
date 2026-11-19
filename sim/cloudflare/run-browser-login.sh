@@ -125,6 +125,16 @@ apps() { jq_state 'len(s["apps"])'; }
 web_records() { jq_state "len([r for r in s['records'].values() if r['name'] == '$web'])"; }
 nothing_made() { [ "$(apps)" = 0 ] && [ "$(web_records)" = 0 ]; }
 requests() { jq_state 'len(s["requests"])'; }
+# Application and policy writes on syncthing-three since a mark: ['POST app', 'PUT policy'].
+access_mark() { jq_state 'len(s["access_writes"])'; }
+access_since() { jq_state "[w['method'] + ' ' + w['kind'] for w in s['access_writes'][$1:] if w['domain'] == '$web']"; }
+# Whether a task line is in the log: skipped tasks are not printed, so a write that did not
+# happen leaves no line, and one that did reads CHANGED.
+wrote_app() { says 'if it differs, write the application'; }
+wrote_policy() { says 'if it differs, write the allow policy'; }
+# The application and its policy as the stand-in holds them, for a check after a repair.
+app_now() { jq_state "[(a['session_duration'], a['allowed_idps'], a['app_launcher_visible']) for a in s['apps'].values() if a['domain'] == '$web']"; }
+pol_now() { jq_state "[(p['name'], sorted(i['email']['email'] for i in p['include']), p['require']) for a in s['apps'].values() if a['domain'] == '$web' for p in a['policies']]"; }
 
 echo "== no host, a host with no tracked config, a Leap host with no tunnel id"
 if play -e subdomain=syncthing-three; then fail "ran with no -e host"; else
@@ -193,7 +203,21 @@ nothing_made && [ "$(jq_state 'len(s["dns_writes"])')" = 0 ] && pass "dry run wr
 
 echo "== the real run"
 before=$(requests)
+mark=$(access_mark)
 if play -e host=three -e subdomain=syncthing-three; then pass "real run exits 0"; else fail "real run failed"; fi
+got=$(access_since "$mark")
+[ "$got" = "['POST app', 'POST policy']" ] && pass "created the application, then its policy" || fail "Access writes: $got"
+# After each write, a read of what was written: the application by its id, the policies.
+readback=$(state | python3 -I -c '
+import json, re, sys
+r = json.load(sys.stdin)["requests"][int(sys.argv[1]):]
+def at(pattern):
+    return [i for i, x in enumerate(r) if re.fullmatch(pattern, x)]
+app_w, app_r = at(r"POST .*/access/apps"), at(r"GET .*/access/apps/[^/]+")
+pol_w, pol_r = at(r"POST .*/access/apps/[^/]+/policies"), at(r"GET .*/access/apps/[^/]+/policies")
+print(bool(app_w and pol_w and any(i > app_w[0] for i in app_r) and any(i > pol_w[0] for i in pol_r)))
+' "$before")
+[ "$readback" = True ] && pass "read the application back after writing it, and the policies after theirs" || fail "no read-back after a write"
 says "https://$web/ is behind the Access login syncthing-three" && pass "printed the GUI's address" || fail "no final message"
 got=$(jq_state '[(a["name"], a["domain"], a["session_duration"]) for a in s["apps"].values()]')
 [ "$got" = "[('syncthing-three', '$web', '24h')]" ] && pass "one application, syncthing-three, on $web, 24h" || fail "applications: $got"
@@ -208,7 +232,12 @@ kinds=$(jq_state "[r.split('/')[-1] for r in s['requests'][$before:] if r.starts
 
 echo "== a re-run"
 before=$(requests)
+mark=$(access_mark)
 if play -e host=three -e subdomain=syncthing-three; then pass "re-run exits 0"; else fail "re-run failed"; fi
+got=$(access_since "$mark")
+[ "$got" = "[]" ] && pass "no PUT or POST to the application or its policy" || fail "a converged re-run wrote Access: $got"
+wrote_app || wrote_policy && fail "a converged re-run printed an Access write" || pass "no Access write task ran, so none reads CHANGED"
+[ "$(jq_state "len([r for r in s['requests'][$before:] if r.startswith('GET') and r.endswith('/policies')])")" -ge 2 ] && pass "the policies were still read, and read back" || fail "the re-run skipped the policy read-back"
 [ "$(apps)" = 1 ] && [ "$(jq_state 'sum(len(a["policies"]) for a in s["apps"].values())')" = 1 ] && pass "no second application or policy" || fail "re-run duplicated Access"
 [ "$(jq_state "len([r for r in s['requests'][$before:] if '/dns_records' in r and not r.startswith('GET')])")" = 0 ] && pass "the record was left as it was" || fail "re-run rewrote the record"
 [ "$(web_records)" = 1 ] && pass "still one record" || fail "re-run changed the record count"
@@ -221,6 +250,54 @@ fleet_state_ssh_fix
 if play -e host=three -e subdomain=syncthing-three; then pass "re-run after the record moved exits 0"; else fail "re-run after the record moved failed"; fi
 rec=$(jq_state "[(r['content'], r['proxied']) for r in s['records'].values() if r['name'] == '$web']")
 [ "$rec" = "[('$tunnel.cfargotunnel.com', True)]" ] && pass "the moved record was pointed back" || fail "records: $rec"
+
+echo "== a field this play sets, changed by hand"
+# Each change, then a run that must write only what it touches and repair it, then a run
+# that must write nothing. The stand-in answers with Cloudflare's extra fields, 24h as
+# 24h0m0s and the include rules in reverse, so a converged run proves the subset compare.
+repair() { # <what> <control json> <expected writes> <check command> <expected value> [<said>]
+	control "$2"
+	local mark
+	mark=$(access_mark)
+	if play -e host=three -e subdomain=syncthing-three; then pass "$1: the run exits 0"; else fail "$1: the run failed"; fi
+	got=$(access_since "$mark")
+	[ "$got" = "$3" ] && pass "$1: wrote $3" || fail "$1: Access writes: $got"
+	got=$($4)
+	[ "$got" = "$5" ] && pass "$1: repaired" || fail "$1: after the run: $got"
+	if [ -n "${6:-}" ]; then says "$6" && pass "$1: said '$6'" || fail "$1: did not say '$6'"; fi
+	mark=$(access_mark)
+	if play -e host=three -e subdomain=syncthing-three; then pass "$1: the next run exits 0"; else fail "$1: the next run failed"; fi
+	got=$(access_since "$mark")
+	[ "$got" = "[]" ] && pass "$1: the next run wrote nothing" || fail "$1: the next run wrote $got"
+}
+app_ok="[('24h', [], False)]"
+pol_ok="[('allowed people', ['owner@example.com', 'second@example.org'], [])]"
+repair "session duration altered" '{"edit_apps": {"session_duration": "12h"}}' "['PUT app']" app_now "$app_ok" \
+	'the application differs in session_duration'
+repair "a login method pinned" '{"edit_apps": {"allowed_idps": ["idp-github"]}}' "['PUT app']" app_now "$app_ok"
+repair "the launcher turned on" '{"edit_apps": {"app_launcher_visible": true}}' "['PUT app']" app_now "$app_ok"
+repair "an address removed" '{"drop_email": "second@example.org"}' "['PUT policy']" pol_now "$pol_ok" \
+	'the allow policy differs in include.'
+repair "the policy renamed, with a require rule" \
+	'{"edit_app_policies": {"name": "renamed by hand", "require": [{"email_domain": {"domain": "example.net"}}]}}' \
+	"['PUT policy']" pol_now "$pol_ok"
+
+echo "== an application write that does not take, and a field Cloudflare does not return"
+control '{"edit_apps": {"session_duration": "12h"}, "ignore_app_field": "session_duration"}'
+mark=$(access_mark)
+if play -e host=three -e subdomain=syncthing-three; then fail "ran on when the write did not take"; else
+	says 'it still differs in session_duration' && pass "the read-back stopped the run, naming session_duration" || fail "the ignored write failed, but not by the read-back"
+fi
+[ "$(access_since "$mark")" = "['PUT app']" ] && pass "and wrote no policy after it" || fail "Access writes: $(access_since "$mark")"
+control '{"ignore_app_field": null}'
+if play -e host=three -e subdomain=syncthing-three; then pass "a re-run then repairs it"; else fail "the re-run after the ignored write failed"; fi
+[ "$(app_now)" = "$app_ok" ] && pass "the session duration is back" || fail "after the re-run: $(app_now)"
+control '{"omit_on_read": ["app_launcher_visible"]}'
+mark=$(access_mark)
+if play -e host=three -e subdomain=syncthing-three; then pass "a field missing from the read exits 0"; else fail "a field missing from the read failed the run"; fi
+[ "$(access_since "$mark")" = "['PUT app']" ] && pass "and writes, since absent cannot be proved false" || fail "Access writes: $(access_since "$mark")"
+says 'app_launcher_visible cannot be proved' && pass "and says the field cannot be proved" || fail "did not say which field was unproved"
+control '{"omit_on_read": []}'
 
 echo "== a refused Access write"
 fleet_state

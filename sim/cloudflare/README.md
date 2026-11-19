@@ -1,13 +1,17 @@
 # Cloudflare simulation
 
 `.github/workflows/cloudflare-sim.yml` runs three plays end to end with no Cloudflare
-account. `mock_api.py` stands in for the parts of Cloudflare's API that `_cf-api-token.yml`
+account, and the Access tasks a fourth shares. `mock_api.py` stands in for the parts of Cloudflare's API that `_cf-api-token.yml`
 and `_cf-tunnel.yml` call, for the Access applications, reusable policies and service
 tokens that `server-create-fleet-ssh-access.yml` reads and writes, and for the applications,
 app-scoped policies and records that `server-create-browser-login.yml` writes, answering in
-Cloudflare's envelope. `run-host-tunnel.sh` drives `server-create-host-tunnel.yml` against
+Cloudflare's envelope. An application or app-scoped policy comes back as Cloudflare sends
+one, with ids, timestamps and defaults nobody sent, `session_duration` in Go's long form
+(`24h0m0s`) and include rules reversed, so `_cf-access-app.yml`'s compare is tested against
+more than its own echo. Each write to one is counted in `access_writes`. `run-host-tunnel.sh` drives `server-create-host-tunnel.yml` against
 it with the runner as the host, a made-up `simnew`; `run-fleet-ssh-access.sh` and `run-browser-login.sh` drive
-the two Access plays, described after it.
+the two Access plays, and `run-access-pair.sh` the deployment play's two Access
+applications, all described after it.
 
 ## The host tunnel
 
@@ -110,8 +114,16 @@ them. It runs:
   admitting exactly the addresses in the file; one proxied CNAME to `three`'s tunnel; and,
   from the stand-in's record of each DNS write, the login already covering the hostname
   when its record was written, the policy's request before the record's;
-- a re-run, which must add no application or policy and leave the record untouched, and
-  one after the record was pointed elsewhere, which must point it back;
+- a re-run, which must add no application or policy, make no PUT or POST to either, print
+  no Access write and still read the policies back, and leave the record untouched; and one
+  after the record was pointed elsewhere, which must point it back;
+- a field the play sets, changed in the stand-in as if by hand: the session duration, a
+  login method pinned, the launcher turned on, an address removed, and the policy renamed
+  with a `require` rule. Each run after one must write only the object it touches, say which
+  field differed (never an address), and repair it; the run after that must write nothing;
+- an application write the stand-in ignores, which the read-back must stop on, naming the
+  field, before the policy; and a field the stand-in leaves out of its answers, which must
+  be written, said to be unprovable, and not fail the run;
 - a refused Access write, which must stop with Cloudflare's reason and write no record;
 - the proof failing after the record exists: with the hostname answering from behind
   Access, the probe must stop at that first answer and the rescue must delete the record and
@@ -128,10 +140,31 @@ The edge: the probe URLs point at the stand-in, which answers a 302 to a
 `cloudflareaccess.com` login for a hostname covered by an application with an `allow`
 policy, and 200 otherwise. Not a login either, nor Syncthing behind it, nor whether
 Cloudflare keeps app-scoped policies on an application PUT whole: the stand-in keeps them,
-and the play reads them back on the real API rather than assume it.
+and the play reads them back on the real API rather than assume it. Nor the forms
+Cloudflare really answers in: the stand-in's extra fields, long durations and reversed
+rules are what the compare must survive, not a record of Cloudflare's replies.
 
 ### Running it elsewhere
 
 It needs no root. Like the ssh gate's script it sets `HOME` to a temporary directory, with
 the API token and the address list in it, and writes `ansible/inventory.login-sim` and
 `hosts/simleap/`, and `three`'s stand-in config when there is none, removing them on exit.
+
+## The deployment play's two applications
+
+`run-access-pair.sh` runs `access-pair.yml`, a driver that imports `_cf-access-app.yml`
+twice as `server-create-deployment-tunnel.yml` does: a login on `pairsim.gsrpi.uk` with an
+`allow` policy, then a no-login application on `pairsim.gsrpi.uk/kobo` with a `bypass`
+policy admitting everyone. That play needs a host, its checkout and a tunnel, so only the
+part it shares is driven. It runs:
+
+- a dry run, which must write nothing;
+- the first run: both applications, each with its one policy, created in that order, and
+  each import reading its own policies back;
+- a re-run, which must make no PUT or POST to either and whose recap counts no change;
+- both durations and both policies' rules changed, which each import must repair on its
+  own application; then an address removed, which only the login's policy write may
+  repair, and a run after it that writes nothing.
+
+Every run's output is searched for the API token and the allowed addresses. It needs no
+root and writes nothing outside a temporary directory.

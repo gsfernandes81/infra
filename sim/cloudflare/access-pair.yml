@@ -1,0 +1,76 @@
+---
+# A DRIVER FOR THE SIM, NOT A PLAY TO RUN: server-create-deployment-tunnel.yml's section 4,
+# the Access login on a deployment's hostname and the no-login application on its bypass
+# path, imported from _cf-access-app.yml exactly as that play imports it, against
+# mock_api.py. That play needs a host, its checkout and a tunnel, so the sim drives only the
+# part it shares; run-access-pair.sh runs this. The lookup below is section 3's, without
+# its edge.yml check. The login's include is built in plain Jinja, where the play uses
+# community.general.dict_kv, which CI's ansible-core does not carry: the same rules.
+
+- name: Write a deployment's login and no-login path
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+    cf_token: sim-token
+    cf_account_id: acct-sim
+    cf_unknown_id: WOULD-BE-CREATED-BY-A-REAL-RUN
+    cf_session_duration: 168h
+    deployment: pairsim
+    deployment_hostname: pairsim.gsrpi.uk
+    bypass_path: /kobo
+    cf_access_emails: [owner@example.com, second@example.org]
+
+  tasks:
+    - name: Read the account's Access applications
+      ansible.builtin.uri:
+        url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps"
+        headers: { Authorization: "Bearer {{ cf_token }}" }
+      register: cf_app_q
+      check_mode: false
+      changed_when: false
+      no_log: true
+
+    - name: Note which wanted Access applications exist
+      ansible.builtin.set_fact:
+        cf_login_app_name: "{{ deployment }}"
+        cf_bypass_app_name: "{{ deployment }} {{ bypass_path }} (no login)"
+        cf_bypass_domain: "{{ deployment_hostname ~ bypass_path }}"
+        cf_login_app: >-
+          {{ cf_app_q.json.result | selectattr('domain', 'eq', deployment_hostname) | list
+             | first | default({}) }}
+        cf_bypass_app: >-
+          {{ cf_app_q.json.result | selectattr('domain', 'eq', deployment_hostname ~ bypass_path)
+             | list | first | default({}) }}
+
+    - name: "Access login: write the application and policy"
+      ansible.builtin.import_tasks: ../../ansible/playbooks/_cf-access-app.yml
+      vars:
+        acc_name: "{{ cf_login_app_name }}"
+        acc_domain: "{{ deployment_hostname }}"
+        acc_existing: "{{ cf_login_app }}"
+        acc_session: "{{ cf_session_duration }}"
+        acc_decision: allow
+        acc_policy_name: allowed people
+        acc_include: >-
+          {%- set out = [] -%}
+          {%- for e in cf_access_emails -%}
+            {%- set _ = out.append({'email': {'email': e}}) -%}
+          {%- endfor -%}
+          {{ out }}
+        acc_emails: "{{ cf_access_emails }}"
+        acc_if_refused: The sim's login was refused.
+
+    - name: "No-login path: write the application and policy"
+      ansible.builtin.import_tasks: ../../ansible/playbooks/_cf-access-app.yml
+      vars:
+        acc_name: "{{ cf_bypass_app_name }}"
+        acc_domain: "{{ cf_bypass_domain }}"
+        acc_existing: "{{ cf_bypass_app }}"
+        acc_session: "{{ cf_session_duration }}"
+        acc_decision: bypass
+        acc_policy_name: no login on this path
+        acc_include: [{ everyone: {} }]
+        acc_if_refused: The sim's no-login path was refused.
