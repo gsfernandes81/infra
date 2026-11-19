@@ -34,8 +34,8 @@
 #
 # WHAT IT READS, and where each value is derived from:
 #   hosts/<host>/system/cloudflared-config.yml, or hosts/<host>/leap/system/ for a host
-#       that has only run Leap (three): the rule bin/_infra.py's system_dir() keeps. The
-#       hostname must be one rule there with an http:// or https:// service, and the tunnel
+#       whose hosts/<host>/leap/MOVED says it runs Leap: the rule bin/_infra.py's
+#       system_dir() keeps. The hostname must be one rule there with an http:// or https:// service, and the tunnel
 #       is that file's `tunnel:`. The CNAME's target is that id, checked live at Cloudflare
 #       and checked against the record ssh-<host> already uses, so a pasted id from another
 #       host's file is refused rather than routed.
@@ -79,12 +79,12 @@
     cf_unknown_id: WOULD-BE-CREATED-BY-A-REAL-RUN
     # A day, where the deployment play's login lasts a week; docs/decisions.md says why.
     web_session: 24h
-    # The tracked routing, by system_dir()'s rule: leap/system/ only when system/ is absent
-    # and leap/system/ exists. Repo-relative, for the messages.
+    # The tracked routing, by system_dir()'s rule: leap/system/ when leap/MOVED exists,
+    # system/ otherwise. Repo-relative, for the messages.
     web_host_dir: "{{ control_checkout }}/hosts/{{ web_host }}"
     web_config: >-
-      hosts/{{ web_host }}/{{ 'leap/system' if (web_host_dir ~ '/system') is not directory
-      and (web_host_dir ~ '/leap/system') is directory else 'system' }}/cloudflared-config.yml
+      hosts/{{ web_host }}/{{ 'leap/system' if (web_host_dir ~ '/leap/MOVED') is file
+      else 'system' }}/cloudflared-config.yml
     # The probes. URLs are variables so a test can point them at a stand-in. The known
     # login is the deployment play's calibration: a hostname behind an Access login whose
     # origin does not matter, because Access answers first.

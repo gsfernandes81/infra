@@ -122,8 +122,9 @@ install_tracked() {
 # FAT keeps no modes and refuses a chmod to any but the one its mount gives, so the file is
 # written, not installed with its header's mode, as bin/install-system-file does on vfat.
 # A box with no FAT partition there is told so and goes on, since a firmware setting is not
-# worth an unconfigured box: the simulation's VM, and a Pi whose fstab changed, where the
-# first-boot log says so. three's fan then stays at full speed and its unit logs why.
+# worth an unconfigured box; the first-boot log says so, three's fan then stays at full
+# speed, and its unit logs why. The simulation's x86 VM has a FAT /boot/efi, and its first
+# boot writes the file there.
 install_boot_file() {
 	local file=$1 name=$2
 	findmnt -n /boot/efi >/dev/null || mount /boot/efi 2>/dev/null || true

@@ -138,10 +138,10 @@
           {{ inventory_hostname }}'s tunnel is {{ cf_tunnel_id | default(cf_unknown_id, true) }}.
           Next:
             1. Commit hosts/{{ inventory_hostname }}/system/cloudflared-config.yml (leap/system/
-               for a host that has only run Leap) naming that tunnel, with
-               ssh-{{ inventory_hostname }}.{{ dns_zone }} -> ssh://127.0.0.1:22.
-            2. Install it with bin/install-system-file cloudflared-config.yml --commit
-               --allow-content-change --new on {{ inventory_hostname }}, and start cloudflared there.
+               for a host on Leap, which hosts/{{ inventory_hostname }}/leap/MOVED records) naming
+               that tunnel, with ssh-{{ inventory_hostname }}.{{ dns_zone }} -> ssh://127.0.0.1:22.
+            2. Install it: server-install-system-files.yml -l {{ inventory_hostname }}
+               -e only=cloudflared-config.yml -K, then start cloudflared there.
             3. Gate the hostname: server-create-fleet-ssh-access.yml -e host={{ inventory_hostname }}.
             4. For each browser hostname in that config, once its service runs:
                server-create-browser-login.yml -e host={{ inventory_hostname }} -e subdomain=<name>.

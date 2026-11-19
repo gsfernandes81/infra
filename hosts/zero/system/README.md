@@ -33,6 +33,13 @@ checker inferred `/etc/<filename>`, so it looked for `/etc/bcache-register` and
 `/etc/cloudflared`, found neither, and reported three failures out of four tracked
 files; it passed on `one` only because `one` tracks nothing but `fstab`.
 
+**Which directory is a host's** is one rule, `system_dir()` in `bin/_infra.py`: a host's
+copies are in `hosts/<host>/system/`, or in `hosts/<host>/leap/system/` once
+`hosts/<host>/leap/MOVED` records that it runs Leap ([`leap/README.md`](../../../leap/README.md)).
+`zero` has no `MOVED`, so its copies are these. `server-install-system-files.yml` asks
+`install-system-file --list` on the host for the files rather than finding them itself,
+so the play and the tools always read the same directory.
+
 `check-system-drift` is Python, so a host with tracked files needs `python3`.
 `zero` has it, and **`one` was verified 2026-08-23** — it runs there and reports
 correctly. `two` tracks no `/etc` files yet; when it does, it needs an interpreter or an

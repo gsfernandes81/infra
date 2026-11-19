@@ -1,5 +1,5 @@
 # The routing of send2ereader's own tunnel, mounted read-only into the sidecar. `one`'s
-# host tunnel is hosts/one/system/cloudflared-config.yml, a different file.
+# host tunnel is hosts/one/leap/system/cloudflared-config.yml, a different file.
 #
 # This file is the routing: the tunnel is locally managed, so there is no dashboard copy.
 # ansible/playbooks/server-create-deployment-tunnel.yml refuses to run unless the first

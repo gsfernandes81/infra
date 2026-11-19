@@ -1,0 +1,6 @@
+one runs Leap, since its move from Alpine on 2026-11-18.
+
+This file is the record that it does: bin/install-system-file, bin/check-system-drift and
+the plays read hosts/one/leap/system/ while it exists. hosts/one/system/ keeps the Alpine
+copies for the way back to the Alpine card, which is that card and a commit deleting this
+file. docs/decisions.md § "A host's move to Leap is a file in the repo".

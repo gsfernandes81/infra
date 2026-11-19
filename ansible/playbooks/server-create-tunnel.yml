@@ -41,6 +41,10 @@
     metrics_probe: "http://127.0.0.1:20241"
 
   tasks:
+    # ── an Alpine-era play: refuse a host that has moved to Leap ─────────────
+    - name: Check the host is still on Alpine
+      ansible.builtin.import_tasks: _alpine-only.yml
+
     # ── the API token: read, checked and verified, in one shared file ─────────
     - name: Read and verify the Cloudflare API token
       ansible.builtin.import_tasks: _cf-api-token.yml

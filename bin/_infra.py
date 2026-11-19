@@ -40,12 +40,17 @@ def this_host():
 
 
 def system_dir(host):
-    """hosts/<host>/system, or, for a host that has only ever run Leap and so has no
-    Alpine copies (three), hosts/<host>/leap/system. A host with both is still on Alpine
-    until it moves, and its system/ copies are the ones that describe it."""
-    alpine = REPO / "hosts" / host / "system"
-    leap = REPO / "hosts" / host / "leap" / "system"
-    return leap if not alpine.is_dir() and leap.is_dir() else alpine
+    """hosts/<host>/leap/system for a host that runs Leap, which the repo records with
+    hosts/<host>/leap/MOVED; hosts/<host>/system otherwise. The marker is the one fact
+    the tools and the plays read, so a host's Alpine copies can stay in the tree as the way
+    back without being mistaken for the live ones, and a directory hw-inventory makes for a
+    Leap host's hardware.md cannot send its tools to Alpine copies that do not exist.
+    docs/decisions.md § "A host's move to Leap is a file in the repo" says why it is not
+    asked of the box."""
+    hostdir = REPO / "hosts" / host
+    if (hostdir / "leap" / "MOVED").is_file():
+        return hostdir / "leap" / "system"
+    return hostdir / "system"
 
 
 def parse_header(path):
@@ -152,7 +157,7 @@ def host_init_system():
 
 
 def tracked_files(host):
-    """Every file under hosts/<host>/system that should carry a header."""
+    """Every file under system_dir(host) that should carry a header."""
     directory = system_dir(host)
     if not directory.is_dir():
         return None
