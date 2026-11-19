@@ -673,8 +673,9 @@ application says so, rather than comparing as an application with every field ab
 Two things change with it. A field set by hand outside that list survives a run that writes
 nothing; a write still PUTs the application whole. And the policy's name is now managed: it
 was kept as found and is now written as `acc_policy_name` when it differs. The bypass path's
-trailing slash is compared exactly until the live `domain` of `calibre-web`'s no-login
-application shows whether Cloudflare keeps it. The stand-in in `sim/cloudflare/` answers
+trailing slash is compared exactly, because Cloudflare keeps it: `calibre-web`'s no-login
+application, read by the owner on 2026-11-19, has `domain` and destination both
+`calibre-web.gsrpi.uk/kobo/`. The stand-in in `sim/cloudflare/` answers
 with Cloudflare's extra fields, Go's `24h0m0s`, a destination for the domain and the rules
 reversed, and counts every Access write, so CI proves that a re-run writes nothing. `_dev-container-tunnel.yml` still PUTs
 unconditionally; it is a different play and did not follow.
