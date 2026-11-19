@@ -2495,8 +2495,9 @@ in a bedroom: its controller answers on the Pi's own I2C bus, which Leap's image
   either is a package, and a package on this box is a transactional update and a reboot.
   It writes the one byte through `/dev/i2c-1` with the `I2C_SLAVE` ioctl, as `argononed`
   does with smbus.
-- ⚠︎SUPERSEDED 2026-11-19 by § `three`'s fan is on or off, by the CPU and the drive, below:
-  the EON's fan has one speed, and the drive's temperature is read after all.
+- ⚠︎SUPERSEDED 2026-11-19 by § `three`'s fan steps through the seven levels it has, below:
+  the EON's fan modulates only across 0 to 5, and the drive's temperature is read after
+  all.
   **The curve follows the CPU only, with a 20 % floor.** Every byte the WD Red is sent
   arrives by ssh and is written through LUKS, both on this CPU, so a busy drive warms the
   CPU and the fan rises with it, and the floor keeps air over the drive at idle. The
@@ -2507,20 +2508,25 @@ in a bedroom: its controller answers on the Pi's own I2C bus, which Leap's image
   sets 100 %, and a missing bus or a failed write is logged once and retried every 30 s,
   with the unit running rather than failed, so a box without the bus still boots clean.
 
-## `three`'s fan is on or off, by the CPU and the drive
+## `three`'s fan steps through the seven levels it has, by the CPU and the drive
 
 **Decided 2026-11-19**, the owner's call, after the first fan unit ran on `three`. Its
-writes were acknowledged, but the fan could not be slowed.
+writes were acknowledged, but the curve it wrote made no difference to the fan.
 
-- **The fan is on or off: the unit writes 0 or 100.** The owner measured it: 0 stops the
-  fan; 20, 50 and 100 sound the same, and read the same on a decibel meter; and the
-  two-byte form newer Argon controllers take (`0x80`, then the speed) changes nothing.
-  Argon's forum reports the same of the EON ("fan has just one speed", topic 2178), and of
-  the One V2, whose controller maps 1 to 100 onto 30 to 100 % and smooths it flat (topic
-  1575). A curve over a fan with one speed only moves the point where it starts.
-- **On at a CPU of 55 °C or a drive of 45 °C; off only at a CPU of 50 °C or below and a
-  drive of 42 °C or below.** The gap between the two is the hysteresis, so the fan does not
-  cycle around one threshold. A temperature that cannot be read turns the fan on, as
+- **The fan takes seven levels, as measured: 0, 1, 2, 3, 4, 5 and 100.** The owner listened
+  on 2026-11-19: 0 stops the fan; 1, 2, 3, 4 and 5 each sound distinct; and everything from
+  about 6 to 99 sounds the same as 100. A first listen at 20, 50 and 100 heard no
+  difference, on a decibel meter as well, and the two-byte form newer Argon controllers
+  take (`0x80`, then the speed) changed nothing. Argon's forum reports the EON's fan as
+  having one speed (topic 2178), and the One V2's controller as mapping 1 to 100 onto 30 to
+  100 % and smoothing it flat (topic 1575); on this board the bottom of the range still
+  modulates. So the unit writes only those seven values, and 100 is both the top and every
+  failure's answer. The ladder is a named constant in `argon-fan`.
+- **Each level is entered when the CPU or the drive reaches its point, whichever asks for
+  more**: silent with the CPU below 45 °C and the drive below 38 °C, 5 by a CPU of 60 °C or
+  a drive of 43 °C, and 100 at 65 °C or 45 °C, the old intent kept at the top. It leaves a
+  level only once both are below that level's entry point, the CPU by 3 °C and the drive by
+  2 °C, so it does not cycle at a threshold. A temperature that cannot be read sets 100, as
   before.
 - **The drive's temperature comes from `smartctl`, polled at a rate set by the drive's
   activity.** The kernel's counters in `/sys/block/<disk>/stat`, which send the drive
@@ -2528,7 +2534,7 @@ writes were acknowledged, but the fan could not be slowed.
   after the drive has read or written, and every 30 minutes otherwise, so a warming room is
   still seen. A drive in standby is not woken; standby counts as cooling, so the last
   reading is kept. A failed read, or a reading over an hour old, counts as unknown, which
-  turns the fan on. The owner chose this over a fixed schedule. It reverses the first
+  sets 100. The owner chose this over a fixed schedule. It reverses the first
   unit's refusal to poll the drive: a SMART poll stalled `one`'s USB bridge in 2026
   (CLAUDE.md § Landmines, `smartd`), but a failing SP900 caused that, and this WD Red is
   new and read clean at 0 hours. A poll every 30 minutes also resets the drive's idle

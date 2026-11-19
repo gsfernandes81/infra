@@ -173,25 +173,27 @@ the visit runbook's.
 ## The fan
 
 The Argon EON's fan has a controller on the Pi's own I2C bus, bus 1 at `0x1a`, which takes
-one byte. On this EON the fan is on or off: 0 stops it, and every other value runs it at the
-one speed it has. With nothing writing to it, the fan runs. Leap's image leaves that bus
-off, so three files work together:
+one byte. On this EON only the bottom of its range changes the speed: 0 stops the fan, 1 to
+5 are five audibly different speeds, and everything from about 6 up sounds the same as 100.
+With nothing writing to it, the fan runs at full speed. Leap's image leaves that bus off, so
+three files work together:
 
 - `system/extraconfig.txt` turns the bus on, with `dtparam=i2c_arm=on`, on the FAT boot
   partition at `/boot/efi`. openSUSE's `config.txt` there ends with `include
   extraconfig.txt`; an update of the firmware package rewrites `config.txt` and leaves this
   file alone. The firmware reads it only at power-on, so it takes a reboot.
 - `system/i2c-dev.conf` loads `i2c-dev`, which makes `/dev/i2c-1`.
-- `system/argon-fan`, run by `system/argon-fan.service`, turns the fan on when the CPU
-  reaches 55 °C or the drive 45 °C, and off once the CPU is at or below 50 °C and the drive
-  at or below 42 °C. Between the two, the fan stays as it is. It reads the CPU every 30
-  seconds. It reads the drive with `smartctl` about every 3 minutes while the drive is
+- `system/argon-fan`, run by `system/argon-fan.service`, steps the fan through seven
+  levels, 0, 1, 2, 3, 4, 5 and 100: silent with the CPU below 45 °C and the drive below
+  38 °C, 5 by a CPU of 60 °C or a drive of 43 °C, and 100 at 65 °C or 45 °C. It steps up as
+  soon as either temperature asks for more, and down only once both are a few degrees below
+  the level's entry point. It reads the CPU every 30 seconds. It reads the drive with `smartctl` about every 3 minutes while the drive is
   reading or writing, and every 30 minutes while it is idle, without waking a drive that
   has spun down. It finds the drive by the array's label, `mirror-luks`; with the drive
-  unplugged, it follows the CPU alone. A temperature it cannot read turns the fan on, and
-  so does a stop. Without the bus, it logs that and tries again every 30 seconds.
+  unplugged, it follows the CPU alone. A temperature it cannot read sets the fan to 100,
+  and so does a stop. Without the bus, it logs that and tries again every 30 seconds.
 
-To change a threshold, edit the numbers at the top of `system/argon-fan` and commit. Then,
+To change a level or a threshold, edit the numbers at the top of `system/argon-fan` and commit. Then,
 from the phone, and on `three`:
 
 ```fish
@@ -201,26 +203,26 @@ ansible-playbook playbooks/server-install-system-files.yml -l three -e only=argo
 ```
 
 ```fish
-# on three: restart the fan's unit; the stop turns the fan on, the start decides again
+# on three: restart the fan's unit; the stop sets 100, the start picks the level again
 sudo systemctl restart argon-fan.service
 ```
 
 To check it:
 
 ```fish
-# the fan's unit, then its log: each change of state with both temperatures and the reason,
+# the fan's unit, then its log: each change of level with both temperatures and the reason,
 # and the drive's readings when they move by 2 °C or more
 systemctl status argon-fan.service
 journalctl -b -u argon-fan.service
 ```
 
-If the unit misbehaves, stop it, which turns the fan on, and set the fan by hand: 0 is
-off, 100 is on.
+If the unit misbehaves, stop it, which sets 100, and set the fan by hand: 0 is off, 1 to 5
+the quiet speeds, 100 full.
 
 ```fish
-# stop the fan's unit, then write one byte to the controller: 0 off, 100 on
+# stop the fan's unit, then write one byte to the controller, 3 here: 0 off, 1 to 5 quiet, 100 full
 sudo systemctl stop argon-fan.service
-sudo python3 -c 'import fcntl, os; f = os.open("/dev/i2c-1", os.O_RDWR); fcntl.ioctl(f, 0x0703, 0x1a); os.write(f, bytes([0]))'
+sudo python3 -c 'import fcntl, os; f = os.open("/dev/i2c-1", os.O_RDWR); fcntl.ioctl(f, 0x0703, 0x1a); os.write(f, bytes([3]))'
 ```
 
 ## Before three ships

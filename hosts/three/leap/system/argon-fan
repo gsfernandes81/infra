@@ -5,33 +5,32 @@
 # infra-name: argon-fan
 # infra-mode: 0755
 #
-# Turns the Argon EON's fan on or off from the CPU's and the backup drive's temperatures,
-# run by argon-fan.service. The fan's controller is a microcontroller on the Pi's own I2C
-# bus, /dev/i2c-1, at 0x1a, written one byte at a time as Argon's argononed does. With
-# nothing writing, it runs. The bus needs extraconfig.txt and i2c-dev.conf.
+# Sets the Argon EON's fan from the CPU's and the backup drive's temperatures, on a ladder
+# of seven levels, run by argon-fan.service. The fan's controller is a microcontroller on
+# the Pi's own I2C bus, /dev/i2c-1, at 0x1a, written one byte at a time as Argon's argononed
+# does. With nothing writing, it runs at full speed. The bus needs extraconfig.txt and
+# i2c-dev.conf.
 #
-# On or off, never a speed: on this EON, 0 stops the fan, and 20, 50 and 100 sounded the
-# same and read the same on a decibel meter (the owner, 2026-11-19), as Argon's forum
-# reports for the EON. So it writes 0 or 100.
-#
-# The fan goes ON when the CPU reaches 55 C or the drive 45 C, and OFF only once the CPU
-# is at or below 50 C and the drive at or below 42 C; between the two it stays as it is.
-# A temperature it cannot read counts as hot. The CPU is read every 30 s.
+# The ladder is what the owner heard on this EON (LADDER below): only the bottom of the
+# controller's range modulates. Each level steps up as soon as the CPU or the drive reaches
+# its entry point, whichever asks for more, and steps down only once both are a few degrees
+# below it. A temperature it cannot read sends the fan to the top. The CPU is read every
+# 30 s.
 #
 # The drive's temperature is SMART attribute 194, read with smartctl, at a rate set by the
 # disk's own activity: /sys/block/<disk>/stat, which sends the drive nothing, is read every
 # 30 s, and smartctl runs about every 3 minutes after the disk has read or written, and
 # every 30 minutes when it has not, so a room warming the case is still seen. `-n standby`
 # keeps smartctl from waking a spun-down drive; standby counts as cooling, so the last
-# reading is kept. A failed read, or a reading over an hour old, counts as hot. The owner
-# chose this polling (decisions.md § three's fan): a SMART poll stalled one's USB bridge
-# in 2026, but that drive was failing, and this one is new and healthy.
+# reading is kept. A failed read, or a reading over an hour old, counts as unknown. The
+# owner chose this polling (decisions.md § three's fan): a SMART poll stalled one's USB
+# bridge in 2026, but that drive was failing, and this one is new and healthy.
 #
 # The drive is found by the array's LUKS label, which is on the whole disk. Without the
 # label (the drive is not attached) the fan follows the CPU alone, and says so.
 #
-# A stop sets the fan on, and a write that fails is logged once and tried again at the
-# next turn. Python's standard library only, since a package is a reboot on this box.
+# A stop sets the fan to the top, and a write that fails is logged once and tried again
+# at the next turn. Python's standard library only, since a package is a reboot on this box.
 # To change a threshold, edit the numbers below in the repo, then install and restart
 # (hosts/three/leap/README.md § The fan).
 
@@ -51,8 +50,18 @@ DRIVE_LABEL = "/dev/disk/by-label/mirror-luks"
 SMARTCTL = "/usr/sbin/smartctl"
 
 INTERVAL = 30  # seconds between turns: the CPU, and a look at the disk's counters
-CPU_ON, CPU_OFF = 55.0, 50.0  # degrees C
-DRIVE_ON, DRIVE_OFF = 45, 42  # degrees C
+# The levels written, quietest first. The owner, listening on 2026-11-19: 0 stops the fan,
+# 1 to 5 each sound distinct, and every value from about 6 to 99 sounds the same as 100, on
+# this board. So the top of the ladder is 100, and it is also what every failure writes.
+LADDER = (0, 1, 2, 3, 4, 5, 100)
+TOP = len(LADDER) - 1
+# The temperature, in degrees C, at which each level from LADDER[1] up is entered: silent
+# with the CPU below 45 and the drive below 38, 5 by a CPU of 60 or a drive of 43, and the
+# top at 65 or 45.
+CPU_STEPS = (45, 49, 52, 56, 60, 65)
+DRIVE_STEPS = (38, 39, 40, 41, 43, 45)
+# How far below a level's entry point both must be before the fan leaves that level.
+CPU_HYSTERESIS, DRIVE_HYSTERESIS = 3, 2
 POLL_BUSY = 180  # seconds between smartctl runs once the disk has read or written
 POLL_IDLE = 1800  # seconds between smartctl runs while it has not
 STALE = 2 * POLL_IDLE  # a drive reading older than this counts as unknown
@@ -148,7 +157,7 @@ class Fan:
                  smart=read_smart, write=write_duty, say=log):
         self.now, self.cpu, self.disk, self.stat = now, cpu, disk, stat
         self.smart, self.write, self.say = smart, write, say
-        self.on = None  # what the controller was last set to: True, False, or not yet
+        self.level = None  # the LADDER index the controller was last set to, or not yet
         self.notes = {}  # the last message of each kind, so each is logged once
         self.disk_name = None
         self.forget_drive()
@@ -230,31 +239,51 @@ class Fan:
         return None
 
     def decide(self, cpu, drive):
-        """(on, reason): on is True or False, or the current state, held between the
-        thresholds."""
+        """(level, reason): the index into LADDER, and why it changed, or None when it
+        holds."""
         unknown = []
         if cpu is None:
             unknown.append("the CPU's temperature is unknown")
         if drive is None:
             unknown.append("the drive's temperature is unknown")
         if unknown:
-            return True, " and ".join(unknown)
-        hot = []
-        if cpu >= CPU_ON:
-            hot.append(f"the CPU is at or above {CPU_ON:g} C")
-        if isinstance(drive, int) and drive >= DRIVE_ON:
-            hot.append(f"the drive is at or above {DRIVE_ON} C")
-        if hot:
-            return True, " and ".join(hot)
-        if cpu <= CPU_OFF and (not isinstance(drive, int) or drive <= DRIVE_OFF):
-            if isinstance(drive, int):
-                return False, f"the CPU is at or below {CPU_OFF:g} C and the drive at or below {DRIVE_OFF} C"
-            if drive == "standby":
-                return False, f"the CPU is at or below {CPU_OFF:g} C and the drive in standby"
-            return False, f"the CPU is at or below {CPU_OFF:g} C, with no drive"
-        if self.on is None:
-            return True, "between the thresholds at the start"
-        return self.on, "between the thresholds"
+            return TOP, None if self.level == TOP else " and ".join(unknown)
+        disk_temp = drive if isinstance(drive, int) else None
+        by_cpu = sum(1 for t in CPU_STEPS if cpu >= t)
+        by_drive = 0 if disk_temp is None else sum(1 for t in DRIVE_STEPS if disk_temp >= t)
+        want = max(by_cpu, by_drive)
+        current = self.level
+
+        if current is None or want > current:
+            if want == 0:
+                return 0, (f"the CPU is below {CPU_STEPS[0]} C and "
+                           + self.drive_below(drive, DRIVE_STEPS[0]))
+            why = []
+            if by_cpu == want:
+                why.append(f"the CPU is at or above {CPU_STEPS[want - 1]} C")
+            if by_drive == want:
+                why.append(f"the drive is at or above {DRIVE_STEPS[want - 1]} C")
+            return want, " and ".join(why)
+
+        # Down one level at a time, while both are far enough below its entry point.
+        level = current
+        while (level > want and cpu <= CPU_STEPS[level - 1] - CPU_HYSTERESIS
+               and (disk_temp is None
+                    or disk_temp <= DRIVE_STEPS[level - 1] - DRIVE_HYSTERESIS)):
+            level -= 1
+        if level == current:
+            return current, None
+        return level, (f"the CPU is at or below {CPU_STEPS[level] - CPU_HYSTERESIS} C and "
+                       + self.drive_below(drive, DRIVE_STEPS[level] - DRIVE_HYSTERESIS,
+                                          "at or "))
+
+    @staticmethod
+    def drive_below(drive, temp, at=""):
+        if isinstance(drive, int):
+            return f"the drive {at}below {temp} C"
+        if drive == "standby":
+            return "the drive in standby"
+        return "no drive attached"
 
     def step(self):
         try:
@@ -264,16 +293,17 @@ class Fan:
             cpu = None
             self.note("cpu", f"cannot read {CPU_SENSOR}: {exc}")
         drive = self.drive()
-        on, reason = self.decide(cpu, drive)
+        level, reason = self.decide(cpu, drive)
         try:
-            self.write(100 if on else 0)
+            self.write(LADDER[level])
         except OSError as exc:
             self.note("write", describe_write(exc))
             return
-        if on != self.on or self.notes.get("write"):
+        if level != self.level or self.notes.get("write"):
             cpu_text = "CPU unknown" if cpu is None else f"CPU {cpu:.1f} C"
-            self.say(f"fan {'on' if on else 'off'}: {reason} ({cpu_text}, {show(drive)})")
-        self.on = on
+            self.say(f"fan {LADDER[level]} (level {level} of {TOP}): "
+                     f"{reason or 'held'} ({cpu_text}, {show(drive)})")
+        self.level = level
         self.note("write", None)
 
 
@@ -284,8 +314,8 @@ def stop(signum, frame):
 def main():
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    log(f"on at CPU {CPU_ON:g} C or drive {DRIVE_ON} C, off at CPU {CPU_OFF:g} C and "
-        f"drive {DRIVE_OFF} C; the drive read every {POLL_BUSY // 60} min while busy, "
+    log(f"levels {list(LADDER)}, entered at CPU {list(CPU_STEPS)} C or drive "
+        f"{list(DRIVE_STEPS)} C; the drive read every {POLL_BUSY // 60} min while busy, "
         f"{POLL_IDLE // 60} min while idle")
     fan = Fan()
     try:
@@ -295,9 +325,9 @@ def main():
     finally:
         try:
             write_duty(100)
-            log("stopping: fan on")
+            log("stopping: fan at 100")
         except OSError as exc:
-            log(f"stopping: could not turn the fan on: {exc}")
+            log(f"stopping: could not set the fan to 100: {exc}")
 
 
 if __name__ == "__main__":
