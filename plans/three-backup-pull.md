@@ -35,7 +35,7 @@ the far side of a connection.
 ```
  zero (Alpine, snapper 0.13.1, --no-dbus)          three (Leap, snapper, --no-dbus)
  /media/immich: subvolume immich                   /media/mirror/received-backups/immich/
-   data/   library upload backups profile            current/  ◄──────────┐ mirror-pull, as `backup`,
+   data/   library upload backups profile            current/  ◄──────────┐ backup-pull, as `backup`,
    data/thumbs, data/encoded-video                     (writable copy)     │ daily 01:00 UTC, 32 Mbit/s,
            (nested subvolumes: left out)               .snapshots/<n>/     │ --fake-super --munge-links
    db/     Postgres                                      snapshot (ro) ◄─┐ │ --inplace --delete
@@ -43,7 +43,7 @@ the far side of a connection.
      info.xml   (written once finished)                     weekly 8,    │ │ /.snapshots
      snapshot   (ro)  ◄── newest finished ── read ──────── monthly 12    │ │
    ... hourly 24, daily 7                          state/pulled  ────────┼─┘
-                                                   last-pulled  ◄── mirror-snapshot.service,
+                                                   last-pulled  ◄── backup-snapshot.service,
  media-syncthing: not snapshotted, not pulled            root, only after a good pull
 ```
 
@@ -118,16 +118,17 @@ This turns the one key the fleet allowed between boxes into two read-only ones (
 | `zero` | `snapper-immich` → `/etc/periodic/hourly/` | under `flock`: create a timeline snapshot, clean up timeline and number, `--no-dbus`, log to syslog |
 | `zero` | `sudoers-backup`, `rsyncd-backup.conf`, `backup-authorized-keys` | the `backup` user's one command, its read-only module over `/media/immich/.snapshots`, and three's key line |
 | `zero` | `fstab` | `autodefrag` gone from every array line |
-| `three` | `mirror-pull` → `/usr/local/bin/` | about 40 lines of POSIX shell: list, pick, compare, rsync, record |
-| `three` | `mirror-pull.service`, `.timer` | as `backup`, sandboxed, `ConditionPathIsMountPoint=`, `OnSuccess=mirror-snapshot.service`; daily `01:00:00 UTC`, 10 minutes' jitter, `Persistent=` |
-| `three` | `mirror-snapshot.service` | as root: snapper create, cleanup timeline, write `last-pulled` |
+| `three` | `backup-pull` → `/usr/local/bin/` | about 40 lines of POSIX shell: list, pick, compare, rsync, record |
+| `three` | `backup-pull.service`, `.timer` | as `backup`, sandboxed, `ConditionPathIsMountPoint=`, `OnSuccess=backup-snapshot.service`; daily `01:00:00 UTC`, 10 minutes' jitter, `Persistent=` |
+| `three` | `backup-snapshot.service` | as root: snapper create, cleanup timeline, write `last-pulled` |
 | `three` | `snapper-config-received-immich` | `TIMELINE_CREATE="no"`, daily 14, weekly 8, monthly 12, no quarterly or yearly |
 | `three` | `backup-ssh-config`, `zero-known-hosts` | zero by address, its one pinned host key; both root's |
 | `three` | `sudoers-restore`, `rsyncd-restore.conf`, `restore-authorized-keys` | the `restore` user's one command, its read-only module over `received-backups`, zero's key line |
 | control node | `server-create-restore-key.yml` | makes zero's restore key, prints it, zero's address and zero's host key |
 
 Removed: `zero`'s `mirror-backup`; `three`'s `rsync-backup.conf`, `backup-authorized-keys`,
-`mirror-snapshot` and `mirror-snapshot.timer`. Kept and marked not used:
+`mirror-snapshot` and `mirror-snapshot.timer`, and `mirror-snapshot.service`, whose job
+`backup-snapshot.service` does. Kept and marked not used:
 `mirror-backup-age-check` and `server-store-backup-ntfy-url.yml`, until the fleet-wide dead
 man's switch is designed.
 

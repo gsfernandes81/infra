@@ -5,7 +5,7 @@
 # infra-mode: 0644
 #
 # snapper's config for three's copy of zero's Immich subvolume (plans/three-backup-pull.md).
-# mirror-pull fills current/; after each good pull, mirror-snapshot.service takes a
+# backup-pull fills current/; after each good pull, backup-snapshot.service takes a
 # read-only snapshot of it into current/.snapshots and prunes with the limits below. snapper
 # runs it with --no-dbus, and no SNAPPER_CONFIGS names it, so Leap's own snapper timers and
 # snapperd leave it alone: `sudo snapper --no-dbus -c received-immich list` lists it.
@@ -32,7 +32,7 @@ BACKGROUND_COMPARISON="no"
 NUMBER_CLEANUP="no"
 EMPTY_PRE_POST_CLEANUP="no"
 
-# Only mirror-snapshot.service takes these, one a day, after a good pull. Daily for 14 days,
+# Only backup-snapshot.service takes these, one a day, after a good pull. Daily for 14 days,
 # weekly for 8 weeks, monthly for 12 months, and no quarterly or yearly step: the 12
 # monthlies cover a year (the owner, 2026-11-19). snapper keeps the oldest snapshot of each
 # period, and never one younger than TIMELINE_MIN_AGE, so the one just taken always stays.

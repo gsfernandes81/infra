@@ -4,7 +4,7 @@
 # infra-name: config
 # infra-mode: 0644
 #
-# How the backup user's mirror-pull reaches zero (plans/three-backup-pull.md). Root's file in
+# How the backup user's backup-pull reaches zero (plans/three-backup-pull.md). Root's file in
 # root's directory, as is known_hosts beside it (zero-known-hosts), so the backup user can
 # change neither where it connects nor which host key it accepts.
 #

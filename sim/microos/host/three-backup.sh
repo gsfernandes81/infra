@@ -41,32 +41,32 @@ running_now() {
 	case "$(systemctl show -p ActiveState --value "$1")" in activating | deactivating) return 0 ;; esac
 	return 1
 }
-# mirror-snapshot.service is started by the pull's OnSuccess= as the pull ends, so it is
+# backup-snapshot.service is started by the pull's OnSuccess= as the pull ends, so it is
 # waited for before anything is read.
 settle() {
 	local i
 	sleep 2
 	for i in $(seq 1 90); do
-		! systemctl list-jobs --no-legend 2>/dev/null | grep -qE 'mirror-(pull|snapshot)' &&
-			! running_now mirror-pull.service && ! running_now mirror-snapshot.service && return 0
+		! systemctl list-jobs --no-legend 2>/dev/null | grep -qE 'backup-(pull|snapshot)' &&
+			! running_now backup-pull.service && ! running_now backup-snapshot.service && return 0
 		sleep 2
 	done
 	return 1
 }
 rate() {
-	local dir=/run/systemd/system/mirror-pull.service.d
+	local dir=/run/systemd/system/backup-pull.service.d
 	rm -f "$dir"/sim-rate.conf
 	if [ "$1" != default ]; then
 		mkdir -p "$dir"
-		printf '[Service]\nEnvironment=MIRROR_PULL_BWLIMIT=%s\n' "$1" > "$dir/sim-rate.conf"
+		printf '[Service]\nEnvironment=BACKUP_PULL_BWLIMIT=%s\n' "$1" > "$dir/sim-rate.conf"
 	fi
 	systemctl daemon-reload
 }
 # The units' own lines since <time>: every line rsync or the two units wrote about an error
 # or a result, then the last few, which hold rsync's statistics.
 journal() {
-	journalctl --no-pager -o cat --since "@$1" -u mirror-pull.service -u mirror-snapshot.service > /root/sim-journal
-	grep -E '^rsync|^mirror-(pull|snapshot):|status=' /root/sim-journal | head -n 20 | sed 's/^/    | /'
+	journalctl --no-pager -o cat --since "@$1" -u backup-pull.service -u backup-snapshot.service > /root/sim-journal
+	grep -E '^rsync|^backup-(pull|snapshot):|status=' /root/sim-journal | head -n 20 | sed 's/^/    | /'
 	grep -E '^(Total bytes|Literal data|Number of regular files transferred)' /root/sim-journal | tail -n 3 | sed 's/^/    | /'
 }
 
@@ -94,10 +94,10 @@ key)
 lan)
 	# The README's runtime drop-in for the first pull over the LAN: no rate limit, until the
 	# next boot or its removal.
-	mkdir -p /run/systemd/system/mirror-pull.service.d
-	printf '[Service]\nEnvironment=MIRROR_PULL_BWLIMIT=0\n' > /run/systemd/system/mirror-pull.service.d/lan.conf
+	mkdir -p /run/systemd/system/backup-pull.service.d
+	printf '[Service]\nEnvironment=BACKUP_PULL_BWLIMIT=0\n' > /run/systemd/system/backup-pull.service.d/lan.conf
 	systemctl daemon-reload
-	systemctl show -p Environment --value mirror-pull.service
+	systemctl show -p Environment --value backup-pull.service
 	;;
 rate) # <KiB/s | default>, a second drop-in over the README's, for the cut pulls
 	rate "$2"
@@ -105,16 +105,16 @@ rate) # <KiB/s | default>, a second drop-in over the README's, for the cut pulls
 pull) # <expected zero snapshot> <expected count after> : a pull that must succeed
 	t0=$(date +%s)
 	snaps > /root/sim-snaps-before
-	systemctl start mirror-pull.service
+	systemctl start backup-pull.service
 	settle || echo "FAIL the pull or its snapshot did not finish in two minutes"
 	journal "$t0"
 	check "the pull of zero's snapshot $2 succeeded" sh -c "
-		[ \"\$(systemctl show -p Result --value mirror-pull.service)\" = success ] &&
-		journalctl --no-pager -o cat --since @$t0 -u mirror-pull.service | grep -q 'pulled snapshot $2 of '"
+		[ \"\$(systemctl show -p Result --value backup-pull.service)\" = success ] &&
+		journalctl --no-pager -o cat --since @$t0 -u backup-pull.service | grep -q 'pulled snapshot $2 of '"
 	check "three took one snapshot after it, 'pulled $2', and holds $3" sh -c "
 		$(declare -f snaps); cur=$cur; snaps
 		[ \"\$(snaps | grep -c .)\" = $3 ] && [ \"\$(snaps | tail -n 1 | cut -d' ' -f2-)\" = 'pulled $2' ] &&
-		[ \"\$(systemctl show -p Result --value mirror-snapshot.service)\" = success ]"
+		[ \"\$(systemctl show -p Result --value backup-snapshot.service)\" = success ]"
 	check "last-pulled names snapshot $2, root's" sh -c "
 		cat $d/last-pulled; stat -c '%U %a' $d/last-pulled
 		[ \"\$(cut -d' ' -f1 $d/last-pulled)\" = $2 ] && [ \"\$(stat -c %U $d/last-pulled)\" = root ]"
@@ -125,15 +125,15 @@ pull) # <expected zero snapshot> <expected count after> : a pull that must succe
 nothing-new) # <count>
 	t0=$(date +%s)
 	lp=$(cat "$d/last-pulled")
-	systemctl start mirror-pull.service
+	systemctl start backup-pull.service
 	settle || true
 	journal "$t0" 4
 	check "a pull with nothing new copies nothing and takes no snapshot" sh -c "
 		$(declare -f snaps); cur=$cur
-		journalctl --no-pager -o cat --since @$t0 -u mirror-pull.service | grep -q 'nothing new' &&
+		journalctl --no-pager -o cat --since @$t0 -u backup-pull.service | grep -q 'nothing new' &&
 		[ \"\$(snaps | grep -c .)\" = $2 ] && [ \"\$(cat $d/last-pulled)\" = '$lp' ] &&
 		[ ! -e $d/state/pulled ] &&
-		[ \"\$(systemctl show -p ConditionResult --value mirror-snapshot.service)\" = no ]"
+		[ \"\$(systemctl show -p ConditionResult --value backup-snapshot.service)\" = no ]"
 	;;
 first) # <zero snapshot>
 	check "current holds the library and the database, and no .snapshots of zero's" sh -c "
@@ -171,7 +171,7 @@ ctime)
 	stat -c '%i:%Z' "$cur/data/library/big.bin"
 	;;
 delete-calibration)
-	# What --delete would do to three's snapshots without mirror-pull's exclude and protect
+	# What --delete would do to three's snapshots without backup-pull's exclude and protect
 	# filters: a dry run of the same transfer with them left out. As root, since the backup
 	# user cannot enter .snapshots (root's, 754), which is a second guard. It must show
 	# rsync deleting inside .snapshots, or the checks after the real pulls prove nothing.
@@ -185,22 +185,22 @@ delete-calibration)
 	;;
 running) # waits until a pull is under way, its first bytes of <file> in current/
 	for i in $(seq 1 120); do
-		if running_now mirror-pull.service && [ -s "$cur/$2" ]; then
+		if running_now backup-pull.service && [ -s "$cur/$2" ]; then
 			echo "the pull is under way: $(stat -c %s "$cur/$2") bytes of $2 so far"
 			exit 0
 		fi
 		sleep 1
 	done
-	echo "the pull never got under way: $(systemctl show -p ActiveState,Result mirror-pull.service | tr '\n' ' ')"
+	echo "the pull never got under way: $(systemctl show -p ActiveState,Result backup-pull.service | tr '\n' ' ')"
 	exit 1
 	;;
 failed) # <since> <exit status, or any> <count> : a pull that must have failed, leaving nothing
 	settle || true
 	journal "$2" 6
 	check "the pull failed with exit $3" sh -c "
-		systemctl show -p Result -p ExecMainStatus mirror-pull.service
-		st=\$(systemctl show -p ExecMainStatus --value mirror-pull.service)
-		[ \"\$(systemctl show -p Result --value mirror-pull.service)\" = exit-code ] &&
+		systemctl show -p Result -p ExecMainStatus backup-pull.service
+		st=\$(systemctl show -p ExecMainStatus --value backup-pull.service)
+		[ \"\$(systemctl show -p Result --value backup-pull.service)\" = exit-code ] &&
 		case $3 in any) [ \"\$st\" != 0 ] ;; *) [ \"\$st\" = $3 ] ;; esac"
 	check "no snapshot was taken, last-pulled is unchanged, and nothing is marked pulled" sh -c "
 		$(declare -f snaps); cur=$cur; snaps
@@ -212,10 +212,10 @@ mark)
 	date +%s
 	;;
 start)
-	systemctl start --no-block mirror-pull.service
+	systemctl start --no-block backup-pull.service
 	;;
 confined)
-	# As the backup user, with its own key and ssh config, as mirror-pull reaches zero.
+	# As the backup user, with its own key and ssh config, as backup-pull reaches zero.
 	check "the key runs no command of its own on zero" sh -c "
 		out=\$(runuser -u backup -- ssh backup@zero 'echo SIM-SHELL-OPENED; id' < /dev/null 2>&1); rc=\$?; echo \"exit \$rc: \$out\" | tail -n 2
 		! echo \"\$out\" | grep -qiE 'SIM-SHELL-OPENED|permission denied'"
@@ -283,20 +283,20 @@ locked)
 	check "the array is locked, and received-backups not there" sh -c "
 		! findmnt /media/mirror && ! test -e /dev/mapper/mirror && ! test -e $rb"
 	# An earlier failed run leaves its result on the unit until something resets it.
-	systemctl reset-failed mirror-pull.service mirror-snapshot.service 2>/dev/null
-	systemctl start mirror-pull.service
+	systemctl reset-failed backup-pull.service backup-snapshot.service 2>/dev/null
+	systemctl start backup-pull.service
 	check "a pull against the locked array is skipped by its condition, not failed" sh -c "
-		systemctl show -p ActiveState -p Result -p ConditionResult mirror-pull.service
-		[ \"\$(systemctl show -p ConditionResult --value mirror-pull.service)\" = no ] &&
-		[ \"\$(systemctl show -p Result --value mirror-pull.service)\" = success ] &&
-		! systemctl is-active --quiet mirror-pull.timer"
+		systemctl show -p ActiveState -p Result -p ConditionResult backup-pull.service
+		[ \"\$(systemctl show -p ConditionResult --value backup-pull.service)\" = no ] &&
+		[ \"\$(systemctl show -p Result --value backup-pull.service)\" = success ] &&
+		! systemctl is-active --quiet backup-pull.timer"
 	;;
 unlocked)
 	check "the unlock started the pull's timer, for 01:00 UTC" sh -c "
-		for i in \$(seq 1 30); do systemctl is-active --quiet mirror-pull.timer && break; sleep 1; done
-		systemctl show -p TimersCalendar --value mirror-pull.timer
-		systemctl is-active --quiet mirror-pull.timer &&
-		systemctl show -p TimersCalendar --value mirror-pull.timer | grep -q '01:00:00 UTC'"
+		for i in \$(seq 1 30); do systemctl is-active --quiet backup-pull.timer && break; sleep 1; done
+		systemctl show -p TimersCalendar --value backup-pull.timer
+		systemctl is-active --quiet backup-pull.timer &&
+		systemctl show -p TimersCalendar --value backup-pull.timer | grep -q '01:00:00 UTC'"
 	;;
 cleanup) # <the snapshot to keep besides the newest>
 	# Every snapshot dated a day apart at noon, the newest yesterday, then a snapshot taken
@@ -311,7 +311,7 @@ cleanup) # <the snapshot to keep besides the newest>
 	keep=$(newest)
 	cp /etc/snapper/configs/$cfg /root/sim-snapper-config
 	snapper --no-dbus -c "$cfg" set-config TIMELINE_LIMIT_DAILY=2 TIMELINE_LIMIT_WEEKLY=0 TIMELINE_LIMIT_MONTHLY=0
-	systemctl start mirror-snapshot.service
+	systemctl start backup-snapshot.service
 	snaps | sed 's/^/    after:  /'
 	check "snapper's cleanup, at daily 2, kept the newest two: the one just taken and $keep" sh -c "
 		$(declare -f snaps); cur=$cur

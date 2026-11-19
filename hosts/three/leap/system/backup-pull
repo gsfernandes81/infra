@@ -2,13 +2,13 @@
 # infra-os:   leap
 # infra-init: systemd
 # infra-path: /usr/local/bin
-# infra-name: mirror-pull
+# infra-name: backup-pull
 # infra-mode: 0755
 #
 # Pulls zero's newest finished snapper snapshot into /media/mirror/received-backups/immich/
-# current, as the unprivileged backup user (plans/three-backup-pull.md). mirror-pull.timer
-# runs it daily through mirror-pull.service; on success the service starts
-# mirror-snapshot.service, which snapshots current/ as root and records what was pulled.
+# current, as the unprivileged backup user (plans/three-backup-pull.md). backup-pull.timer
+# runs it daily through backup-pull.service; on success the service starts
+# backup-snapshot.service, which snapshots current/ as root and records what was pulled.
 #
 # A snapshot is finished once snapper has written its info.xml, which it does after the
 # btrfs snapshot itself. The newest is the highest number with one. It is pulled only if its
@@ -24,7 +24,7 @@
 # the blocks that changed, which keeps them shared with three's earlier snapshots.
 # /.snapshots is three's own, and is both excluded and protected from --delete. The rate is
 # 32 Mbit/s, 4,000,000 bytes a second, which is 3906 in rsync's units of 1024 bytes;
-# MIRROR_PULL_BWLIMIT changes it, 0 for none, as the first pull over the LAN does.
+# BACKUP_PULL_BWLIMIT changes it, 0 for none, as the first pull over the LAN does.
 #
 # Exit 24, files vanished, is a failure here: a read-only snapshot cannot lose a file, so it
 # means what zero served was not the frozen tree it should be. Not even snapper deleting the
@@ -36,8 +36,8 @@ set -eu
 
 dst=/media/mirror/received-backups/immich
 src=backup@zero::snapshots
-bwlimit=${MIRROR_PULL_BWLIMIT:-3906}
-die() { echo "mirror-pull: $*" >&2; exit 1; }
+bwlimit=${BACKUP_PULL_BWLIMIT:-3906}
+die() { echo "backup-pull: $*" >&2; exit 1; }
 
 [ "$(id -un)" = backup ] || die "run as the backup user, not $(id -un)"
 mountpoint -q /media/mirror || die "/media/mirror is not mounted: the array is locked"
@@ -52,20 +52,20 @@ awk '$1 ~ /^-/ && $5 ~ /^[0-9]+\/info\.xml$/ {
 } END { if (n != "") print n, t }' "$tmp/list" > "$tmp/newest"
 read -r n t < "$tmp/newest" || die "zero lists no finished snapshot"
 if [ "$n $t" = "$(cat "$dst/last-pulled" 2>/dev/null || true)" ]; then
-	echo "mirror-pull: snapshot $n of $t is the one pulled last; nothing new"
+	echo "backup-pull: snapshot $n of $t is the one pulled last; nothing new"
 	exit 0
 fi
 
-echo "mirror-pull: pulling snapshot $n of $t"
+echo "backup-pull: pulling snapshot $n of $t"
 rc=0
 rsync -aHAX --numeric-ids --fake-super --munge-links --delete --inplace --stats \
 	--bwlimit="$bwlimit" --timeout=900 --exclude=/.snapshots --filter='P /.snapshots' \
 	-e ssh "$src/$n/snapshot/" "$dst/current/" || rc=$?
 case $rc in
 0) ;;
-24) echo "mirror-pull: rsync exit 24, files vanished from zero's snapshot $n mid-pull, which a frozen snapshot cannot do" >&2; exit 24 ;;
-*) echo "mirror-pull: rsync exit $rc; current/ holds a partial pull, and no snapshot is taken" >&2; exit "$rc" ;;
+24) echo "backup-pull: rsync exit 24, files vanished from zero's snapshot $n mid-pull, which a frozen snapshot cannot do" >&2; exit 24 ;;
+*) echo "backup-pull: rsync exit $rc; current/ holds a partial pull, and no snapshot is taken" >&2; exit "$rc" ;;
 esac
 echo "$n $t" > "$dst/state/pulled.new"
 mv "$dst/state/pulled.new" "$dst/state/pulled"
-echo "mirror-pull: pulled snapshot $n of $t"
+echo "backup-pull: pulled snapshot $n of $t"

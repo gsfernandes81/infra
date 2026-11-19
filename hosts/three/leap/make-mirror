@@ -7,7 +7,7 @@
 # has no AES instructions), labelled mirror-luks, the label /etc/crypttab names; inside it a
 # btrfs labelled mirror holding the subvolume `syncthing` (gavin's, Syncthing's data and its
 # identity) and received-backups/immich, where zero's backup is pulled
-# (plans/three-backup-pull.md): `current`, a subvolume the backup user owns and mirror-pull
+# (plans/three-backup-pull.md): `current`, a subvolume the backup user owns and backup-pull
 # fills; inside it `.snapshots`, root's subvolume (754), where snapper keeps three's read-only
 # snapshots of current/; and `state`, the backup user's, for what a pull just copied. The
 # directories above them are root's, mode 755, so the backup user reaches its two and

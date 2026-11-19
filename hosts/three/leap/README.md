@@ -117,7 +117,7 @@ drive in use. It writes LUKS2 with Adiantum, labelled `mirror-luks`, which
 | On the array | What | Whose |
 |---|---|---|
 | `received-backups/`, `received-backups/immich/` | directories | root's, 755 |
-| `received-backups/immich/current/` | subvolume: the copy of zero's newest snapshot that `mirror-pull` keeps up to date | the backup user's, 700 |
+| `received-backups/immich/current/` | subvolume: the copy of zero's newest snapshot that `backup-pull` keeps up to date | the backup user's, 700 |
 | `received-backups/immich/current/.snapshots/<N>/snapshot` | snapper's read-only snapshots of `current/`, one per good pull | root's; `.snapshots` 754, which lets the pull's rsync read its (absent) xattr while it decides what `--delete` removes, and enter nothing |
 | `received-backups/immich/state/` | `pulled`: what the last good pull copied | the backup user's, 700 |
 | `received-backups/immich/last-pulled` | what the last snapshot holds | root's |
@@ -164,11 +164,11 @@ the last result.
 
 `three` pulls `zero`'s backup ([`plans/three-backup-pull.md`](../../../plans/three-backup-pull.md)).
 `zero` takes an hourly read-only snapper snapshot of its Immich, the library and Postgres in
-one subvolume. Daily at 01:00 UTC, `mirror-pull.timer` starts `mirror-pull.service`, which
-runs `/usr/local/bin/mirror-pull` as the backup user: it lists `zero`'s snapshots, picks the
+one subvolume. Daily at 01:00 UTC, `backup-pull.timer` starts `backup-pull.service`, which
+runs `/usr/local/bin/backup-pull` as the backup user: it lists `zero`'s snapshots, picks the
 newest finished one, and, if it is not the one pulled last, copies it with rsync into
 `received-backups/immich/current`, at 32 Mbit/s. Only a success starts
-`mirror-snapshot.service`, which takes a read-only snapper snapshot of `current/`, prunes to
+`backup-snapshot.service`, which takes a read-only snapper snapshot of `current/`, prunes to
 14 daily, 8 weekly and 12 monthly, and writes `last-pulled`. A pull cut off, or one whose
 files vanish (rsync's exit 24, which a frozen snapshot cannot cause), takes no snapshot; the
 next day's pull finishes the copy.
@@ -204,8 +204,8 @@ the box every time.
    timer first, so nothing starts the old script:
 
    ```fish
-   # on three: stop and remove the old snapshot timer and script, the push's daemon config and key line; give backup no shell; make the restore user
-   sudo systemctl disable --now mirror-snapshot.timer; sudo rm -f /etc/systemd/system/mirror-snapshot.timer /usr/local/sbin/mirror-snapshot /etc/rsync-backup.conf /home/backup/.ssh/authorized_keys
+   # on three: stop and remove the old snapshot timer, service and script, the push's daemon config and key line; give backup no shell; make the restore user
+   sudo systemctl disable --now mirror-snapshot.timer; sudo rm -f /etc/systemd/system/mirror-snapshot.timer /etc/systemd/system/mirror-snapshot.service /usr/local/sbin/mirror-snapshot /etc/rsync-backup.conf /home/backup/.ssh/authorized_keys
    sudo usermod -s /usr/sbin/nologin backup; and sudo useradd --system --user-group --no-create-home --home-dir /home/restore --shell /bin/bash --comment "zero's read-only restores" restore; and sudo install -d -m 755 /home/restore /home/restore/.ssh
    sudo sed -i '/[[:space:]]\/media\/mirror[[:space:]]/s/,noatime /,noatime,nosuid,nodev /' /etc/fstab; and grep /media/mirror /etc/fstab
    ```
@@ -228,14 +228,14 @@ the box every time.
    ```fish
    # on three: install the pull, its units, snapper's config, the restore module and both users' ssh files; then label them and reload systemd
    cd ~/infra; and git pull --ff-only
-   for f in mirror-pull mirror-pull.service mirror-pull.timer mirror-snapshot.service mirror-mount.conf snapper-config-received-immich backup-ssh-config zero-known-hosts sudoers-restore rsyncd-restore.conf restore-authorized-keys
+   for f in backup-pull backup-pull.service backup-pull.timer backup-snapshot.service mirror-mount.conf snapper-config-received-immich backup-ssh-config zero-known-hosts sudoers-restore rsyncd-restore.conf restore-authorized-keys
        bin/install-system-file $f --new; and sudo bin/install-system-file $f --new --commit --allow-content-change; or break
    end
-   sudo restorecon -Rv /home/backup /home/restore /usr/local/bin/mirror-pull; and sudo systemctl daemon-reload; and sudo systemctl start mirror-pull.timer
+   sudo restorecon -Rv /home/backup /home/restore /usr/local/bin/backup-pull; and sudo systemctl daemon-reload; and sudo systemctl start backup-pull.timer
    ```
 
-   `mirror-snapshot.service` and `mirror-mount.conf` exist already, so their dry runs show a
-   content change; the rest are new. From the phone,
+   `mirror-mount.conf` exists already, so its dry run shows a content change; the rest are
+   new. From the phone,
    `server-install-system-files.yml -l three -K` does the same installs.
 6. **The first pull**, once `zero` has its first snapshot (`hosts/zero/system/README.md`
    § The backup). In the UK, over the LAN, with no rate limit, by a runtime drop-in that
@@ -243,12 +243,12 @@ the box every time.
 
    ```fish
    # on three: lift the rate limit until the next boot, and start the first pull without waiting for it
-   sudo mkdir -p /run/systemd/system/mirror-pull.service.d; and printf '[Service]\nEnvironment=MIRROR_PULL_BWLIMIT=0\n' | sudo tee /run/systemd/system/mirror-pull.service.d/lan.conf; and sudo systemctl daemon-reload; and sudo systemctl start --no-block mirror-pull.service
+   sudo mkdir -p /run/systemd/system/backup-pull.service.d; and printf '[Service]\nEnvironment=BACKUP_PULL_BWLIMIT=0\n' | sudo tee /run/systemd/system/backup-pull.service.d/lan.conf; and sudo systemctl daemon-reload; and sudo systemctl start --no-block backup-pull.service
    ```
 
    ```fish
    # on three: follow the pull and its snapshot, then list three's snapshots
-   journalctl -fu mirror-pull -u mirror-snapshot
+   journalctl -fu backup-pull -u backup-snapshot
    sudo snapper --no-dbus -c received-immich list
    ```
 
@@ -256,10 +256,10 @@ the box every time.
    `snapshot taken of the pull of zero snapshot <N>`; the list shows one snapshot,
    `pulled <N>`. About 93 GB on 2026-11-02, so hours. If the session drops, the pull goes on.
    Before the box ships, remove the drop-in:
-   `sudo rm /run/systemd/system/mirror-pull.service.d/lan.conf; and sudo systemctl daemon-reload`.
+   `sudo rm /run/systemd/system/backup-pull.service.d/lan.conf; and sudo systemctl daemon-reload`.
 
-**Checks:** each morning `journalctl -u mirror-pull -u mirror-snapshot --since yesterday`
-reads a pull and a snapshot, or `nothing new`; `systemctl list-timers mirror-pull.timer`
+**Checks:** each morning `journalctl -u backup-pull -u backup-snapshot --since yesterday`
+reads a pull and a snapshot, or `nothing new`; `systemctl list-timers backup-pull.timer`
 names the next 01:00 UTC. Nothing alerts when pulls stop; that waits on a fleet-wide dead
 man's switch (`docs/management-plane.md`, phase table).
 

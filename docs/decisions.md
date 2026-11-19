@@ -2720,7 +2720,7 @@ and refine the owner's design without changing it.
   `make-stick` printed.
 - **The pull hands its result to the snapshot through two files**: `state/pulled`, the backup
   user's, written only by a good pull and removed at the start of the next, which
-  `mirror-snapshot.service` needs (`ConditionPathExists=`), reads, and trusts only as digits
+  `backup-snapshot.service` needs (`ConditionPathExists=`), reads, and trusts only as digits
   and a time; and `last-pulled`, root's, in root's directory, written only after the
   snapshot. Root never writes into a directory the backup user owns, so a symlink there
   cannot turn a root write elsewhere.
@@ -2728,10 +2728,13 @@ and refine the owner's design without changing it.
   the snapshot being pulled, and the pull finished whole: the rsync sender's working
   directory keeps a deleted subvolume readable to the end. So snapper's cleanup cannot spoil
   a pull, and files vanishing means `zero` served something other than a frozen snapshot.
-- **The user `three` logs into on `zero` is `backup`, as on `three`** (the owner, 2026-11-19):
-  `mirror` reads as RAID. Its sudoers file, rsyncd config and key line are named for it.
-  `three`'s `/media/mirror`, `mirror-luks` and the `mirror-pull` and `mirror-snapshot` names
-  stay until the owner decides them.
+- **"backup", not "mirror", wherever the name means the backup** (the owner, 2026-11-19):
+  `mirror` reads as RAID. The user `three` logs into on `zero` is `backup`, as on `three`,
+  with `sudoers-backup`, `rsyncd-backup.conf` and `backup-authorized-keys` (`zero`'s, in
+  `hosts/zero/system/`; `three`'s file of that name went with the push). `three`'s units are
+  `backup-pull` and `backup-snapshot`. The names installed on `three` (`/media/mirror`,
+  `mirror-luks`, `mirror-scrub`, `make-mirror` and the rest) and `zero`'s
+  `/var/lib/mirror-backup` stay until the owner decides them.
 - **The pull runs sandboxed**: `ProtectSystem=strict`, writable only `current/` and `state/`,
   no capabilities, no new privileges. It parses what `zero` sends.
 - **snapper runs with `--no-dbus` on `three` too.** Its config is in no `SNAPPER_CONFIGS`, so

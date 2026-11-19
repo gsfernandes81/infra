@@ -11,7 +11,7 @@
 # Left out on both sides: .snapshots, each box's own, and the placeholders a snapshot holds
 # for its nested subvolumes (data/thumbs, data/encoded-video), which three-backup.sh checks
 # on its own. A symlink counts by its name and type alone: three stores its target munged
-# (mirror-pull's --munge-links), and a user xattr, where the pull keeps an owner, cannot be
+# (backup-pull's --munge-links), and a user xattr, where the pull keeps an owner, cannot be
 # set on a symlink, so its owner is not kept.
 #
 # Usage: tree-hash.sh [--fake-super] <directory>

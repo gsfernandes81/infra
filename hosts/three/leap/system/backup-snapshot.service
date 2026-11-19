@@ -1,12 +1,12 @@
 # infra-os:   leap
 # infra-init: systemd
 # infra-path: /etc/systemd/system
-# infra-name: mirror-snapshot.service
+# infra-name: backup-snapshot.service
 # infra-mode: 0644
 #
 # Snapshots /media/mirror/received-backups/immich/current once a pull has succeeded, then
 # prunes to the limits in /etc/snapper/configs/received-immich, then records what was
-# pulled in last-pulled (plans/three-backup-pull.md). Started only by mirror-pull.service's
+# pulled in last-pulled (plans/three-backup-pull.md). Started only by backup-pull.service's
 # OnSuccess=, as root: the snapshots are root's and read-only, out of the backup user's
 # reach, so only three ever makes or deletes its history.
 #
@@ -33,10 +33,10 @@ TimeoutStartSec=30min
 Environment=D=/media/mirror/received-backups/immich
 ExecStart=/bin/sh -euc '\
 	read -r n t < "$$D/state/pulled"; \
-	case "$$n" in "" | *[!0-9]*) echo "mirror-snapshot: state/pulled holds no snapshot number" >&2; exit 1 ;; esac; \
-	case "$$t" in "" | *[!0-9/:T]*) echo "mirror-snapshot: state/pulled holds no time" >&2; exit 1 ;; esac; \
+	case "$$n" in "" | *[!0-9]*) echo "backup-snapshot: state/pulled holds no snapshot number" >&2; exit 1 ;; esac; \
+	case "$$t" in "" | *[!0-9/:T]*) echo "backup-snapshot: state/pulled holds no time" >&2; exit 1 ;; esac; \
 	/usr/bin/snapper --no-dbus -c received-immich create --cleanup-algorithm timeline --description "pulled $$n"; \
 	/usr/bin/snapper --no-dbus -c received-immich cleanup timeline; \
 	echo "$$n $$t" > "$$D/last-pulled.new"; \
 	mv "$$D/last-pulled.new" "$$D/last-pulled"; \
-	echo "mirror-snapshot: snapshot taken of the pull of zero snapshot $$n"'
+	echo "backup-snapshot: snapshot taken of the pull of zero snapshot $$n"'

@@ -29,7 +29,7 @@ check "received-backups is root's, current the backup user's, syncthing gavin's"
 	s=$(stat -c "%U %n" /media/mirror/received-backups /media/mirror/received-backups/immich/current /media/mirror/syncthing); echo "$s"
 	[ "$s" = "$(printf "%s\n" "root /media/mirror/received-backups" "backup /media/mirror/received-backups/immich/current" "gavin /media/mirror/syncthing")" ]'
 check "the mount started Docker and both timers" sh -c '
-	for u in docker mirror-pull.timer mirror-scrub.timer; do
+	for u in docker backup-pull.timer mirror-scrub.timer; do
 		for i in $(seq 1 30); do systemctl is-active --quiet "$u" && break; sleep 2; done
 		systemctl is-active "$u" || exit 1
 	done'

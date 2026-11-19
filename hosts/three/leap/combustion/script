@@ -54,7 +54,7 @@ make_gavin "$gavin_uid" "$gavin_gid"
 install_host_keys
 
 # Two users for zero's backup (plans/three-backup-pull.md). `backup` pulls it: systemd runs
-# mirror-pull as this user, which owns the copy in received-backups/immich/current and
+# backup-pull as this user, which owns the copy in received-backups/immich/current and
 # nothing else, so whatever zero sends is parsed without privilege. It never logs in, so it
 # has no shell and no authorized_keys. Its key to zero is made on the box by the owner, not
 # carried (hosts/three/leap/README.md § The backup). `restore` lets zero read its own backups

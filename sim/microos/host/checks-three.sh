@@ -26,9 +26,9 @@ check "Docker was skipped at boot by its condition, not failed" sh -c '
 	[ -n "$(systemctl show -p ConditionTimestamp --value docker)" ]'
 check "the mount starts Docker and both timers" sh -c '
 	w=$(systemctl show -p Wants --value media-mirror.mount); echo "$w"
-	for u in docker.service mirror-pull.timer mirror-scrub.timer; do echo "$w" | grep -qw "$u" || exit 1; done'
+	for u in docker.service backup-pull.timer mirror-scrub.timer; do echo "$w" | grep -qw "$u" || exit 1; done'
 check "the timers wait for the mount, not started at boot" sh -c '
-	! systemctl is-active --quiet mirror-pull.timer && ! systemctl is-active --quiet mirror-scrub.timer'
+	! systemctl is-active --quiet backup-pull.timer && ! systemctl is-active --quiet mirror-scrub.timer'
 # Leap's docker.socket is BindsTo=docker.service; enabled, a client's connection would start
 # Docker by another road, so a preset that enables it should show here.
 check "docker.socket is disabled and idle" sh -c '
@@ -56,11 +56,12 @@ check "restore has one key, root's, restricted, that starts only the read-only d
 check "sudoers-restore passes visudo, root 0440" sh -c '
 	visudo -cf /etc/sudoers.d/60-restore && [ "$(stat -c "%U %a" /etc/sudoers.d/60-restore)" = "root 440" ]'
 check "the pull, its snapshot service and three's snapper config are in place" sh -c '
-	ls -l /usr/local/bin/mirror-pull /etc/snapper/configs/received-immich
-	[ -x /usr/local/bin/mirror-pull ] && systemctl cat mirror-pull.service mirror-snapshot.service > /dev/null &&
-	systemctl show -p OnSuccess --value mirror-pull.service | grep -qw mirror-snapshot.service'
-check "nothing of the old push is left: no rsync-backup.conf, no snapshot script or timer" sh -c '
-	! ls /etc/rsync-backup.conf /usr/local/sbin/mirror-snapshot /etc/systemd/system/mirror-snapshot.timer 2>/dev/null'
+	ls -l /usr/local/bin/backup-pull /etc/snapper/configs/received-immich
+	[ -x /usr/local/bin/backup-pull ] && systemctl cat backup-pull.service backup-snapshot.service > /dev/null &&
+	systemctl show -p OnSuccess --value backup-pull.service | grep -qw backup-snapshot.service'
+check "nothing of the old push is left: no rsync-backup.conf, no mirror-snapshot script, service or timer" sh -c '
+	! ls /etc/rsync-backup.conf /usr/local/sbin/mirror-snapshot /etc/systemd/system/mirror-snapshot.timer \
+		/etc/systemd/system/mirror-snapshot.service 2>/dev/null'
 check "/rsyncd-munged does not exist, so no munged symlink leads anywhere" test ! -e /rsyncd-munged
 
 echo "-- networks"

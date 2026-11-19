@@ -404,7 +404,7 @@ visit, step 4); `one`'s old board free; a card written and labelled `three`.
       so hours. A pull that stops is finished by the next one, since `current/` keeps what
       arrived; no snapshot is taken of it.
 
-**Checks:** `journalctl -fu mirror-pull` on `three` shows the pull under way, and `sudo du
+**Checks:** `journalctl -fu backup-pull` on `three` shows the pull under way, and `sudo du
 -sh /media/mirror/received-backups/immich/current` climbs; `free -m` on `three` stays clear
 of its swap. Once it ends, `sudo snapper --no-dbus -c received-immich list` on `three`
 lists one snapshot, `pulled <N>`, and `cat

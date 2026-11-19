@@ -192,7 +192,7 @@ goes into the stand-in's key line.
 
 Each numbered point is the design's (`plans/three-backup-pull.md`), with how it is shown:
 
-1. **A full pull.** `mirror-pull.service`, started as the timer would, under the README's
+1. **A full pull.** `backup-pull.service`, started as the timer would, under the README's
    runtime drop-in that lifts the rate limit. `tree-hash.sh` hashes every path, owner,
    mode, size and content of `zero`'s snapshot on the runner, and of `three`'s snapshot of
    its copy read back through `--fake-super`; the two must match. `thumbs` and
