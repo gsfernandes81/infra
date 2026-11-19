@@ -48,7 +48,9 @@ exemption, which is a real cost on a 512 MB armv6 box running diskless.
 | File | Live path | Why it's tracked |
 |---|---|---|
 | `fstab` | `/etc/fstab` | All three `/media/*` entries carry `nofail`, so a missing array can never stall boot. A fourth, `/var/lib/docker` on the SSD's `sda2` (btrfs, `compress=zstd:1`), carries it too, and its bare mountpoint is immutable like theirs; installed 2026-10-26 ([`docs/decisions.md`](../../../docs/decisions.md)). |
-| `bcache-register` | `/etc/init.d/bcache-register` | The array is btrfs RAID1 across **two** bcache devices; both must assemble before it can mount rw. This registers them and waits, bounded to 30s, then **always exits 0** — a failure here must never stop the boot. |
+| `bcache-register` | `/etc/init.d/bcache-register` | The array is btrfs RAID1 across **two** bcache devices; both must assemble before it can mount rw. This registers them and waits, bounded to 30s, then **always exits 0** — a failure here must never stop the boot. Since 2026-11-19 in the repo it also runs `before dmcrypt btrfs-scan`, for the encrypted member below; installed at the disk swap, with the new disk's UUID in place of `sdb`'s. |
+| `dmcrypt` | `/etc/conf.d/dmcrypt` | Opens the array's encrypted member, `data-4`, at boot with the key file `/etc/keys/data.key`, so a boot needs nobody: encryption with protection off ([`docs/decisions.md`](../../../docs/decisions.md) § *`zero`'s encrypted member*). Its `rc_after`/`rc_before` lines put it after `bcache-register` and `modules` and before `btrfs-scan` and `localmount`. **Written 2026-11-19, not installed**: its LUKS UUID is a `FILL-FROM-` placeholder until the disk swap ([`plans/visit-runbook.md`](../../../plans/visit-runbook.md) § Slice 2), and `install-system-file` refuses it until then. Needs `cryptsetup cryptsetup-openrc`, which the swap installs. |
+| `dm-crypt.conf` | `/etc/modules-load.d/dm-crypt.conf` | Loads `dm-crypt`, and `dm-mod` with it, before `dmcrypt` runs: neither is built into `linux-rpi`. The cipher's modules load by algorithm name. **Not installed**: with `dmcrypt`, at the swap. |
 | `cloudflared` | `/etc/init.d/cloudflared` | The tunnel — the remote way in. Only trackable since Aug 2026: it previously carried the tunnel token inline, so committing it would have committed a secret. **Since 2026-08-23 it carries no secret at all** — `command_args` is `--autoupdate-freq 240h0m0s --config /etc/cloudflared/config.yml tunnel run`, and the tunnel credentials file is 0600. It is hand-written, not packaged: `docs/host-setup.md` installs the binary from GitHub, so Alpine ships no init script for it. It logged nowhere until 2026-08-23: `stdout_log`/`stderr_log` are not variables `supervise-daemon` reads, and it now uses `output_logger`/`error_logger` — see phase 2f. |
 | `zram-swap` | `/etc/init.d/zram-swap` | Compressed swap in RAM ahead of the SSD swap partition, 2 GiB zstd at priority 100. **Installed 2026-10-26**: `/proc/swaps` lists `/dev/zram0` at 2 GiB, priority 100, `[zstd]`; in the default runlevel, owner-reported; [`docs/decisions.md`](../../../docs/decisions.md) § *Zram swap on `zero`* says why. Not boot-critical: a failed start leaves the SSD swap as it was. |
 | `devpool` | `/etc/init.d/devpool` | The dev containers' one memory limit: cgroup v2 group `/sys/fs/cgroup/devpool`, 2048M soft and 2560M hard RAM, 6G swap (the owner's, 2026-10-27: reclaim early, kill only at the hard line, and let zram and the SSD swap both be used), named by `dev/compose.yaml` as each dev container's `cgroup_parent` once `DEV_CGROUP_PARENT=/devpool`. **Written 2026-10-27, not installed**: install and proof below. Not boot-critical. |
@@ -133,7 +135,76 @@ or the next run moves forward again:
 sudo rc-service tailscaled stop; and sudo cp -p /usr/local/sbin/tailscaled.previous /usr/local/sbin/tailscaled; and sudo cp -p /usr/local/bin/tailscale.previous /usr/local/bin/tailscale; and sudo rc-service tailscaled start; and tailscale version
 ```
 
+## The encrypted member
+
+From the disk swap on, the array's devid 4 is the new WD Red Plus, layered disk, bcache
+backing device, LUKS2 (`data-luks-4`, Adiantum, as on `three`), btrfs. The WD Elements disk,
+devid 3, stays plain until it is replaced the same way. `/etc/init.d/dmcrypt` opens
+`data-4` at boot with `/etc/keys/data.key`, root's, 0400, on the SD card, in the boot
+runlevel after `bcache-register` and before `btrfs-scan`. The disk also opens with the
+owner's passphrase, keyslot 1, kept in the password manager.
+
+`install-system-file dmcrypt` checks the entry before it writes: no placeholder, a `key=`
+on every entry (one without would make the boot ask at the console and wait), the key
+file root's alone, `findfs` resolving the `source=` as dmcrypt does, and `cryptsetup open
+--test-passphrase` opening it with the key file. `sim/alpine/run-dmcrypt.sh` calibrates
+each of those against a real LUKS2 volume.
+
+**If the array is not mounted after a boot.** The box still boots and ssh answers: no
+service needs dmcrypt, the `/media` entries carry `nofail`, and the bare mountpoints are
+immutable. If ssh does not answer, the same blocks run at the console. First, what is
+there:
+
+```fish
+# the array is not mounted: read the bcache devices, the mappings, dmcrypt's state and the kernel's lines
+ls /dev/bcache* /dev/mapper; rc-service dmcrypt status
+sudo dmesg | grep -iE 'bcache|crypt|btrfs' | tail -n 30
+```
+
+Two bcache devices should be listed. If one is missing, offer every disk and partition to
+bcache; one without a bcache superblock, or in use, is refused with an error, harmlessly:
+
+```fish
+# a bcache device is missing: offer every sd disk and partition to bcache by hand
+for x in /dev/(ls /sys/class/block | string match -r '^sd[a-z]+[0-9]*$'); echo $x | sudo tee /sys/fs/bcache/register; end; sleep 3; ls /dev/bcache*
+```
+
+If `/dev/mapper/data-4` is missing, open it by hand, with the key file, and with the
+passphrase if the key file fails. The source is read from the installed entry:
+
+```fish
+# data-4 is not open: open it with the key file, or else with the passphrase
+set l (sudo findfs (sed -n "s/^source='\(.*\)'\$/\1/p" /etc/conf.d/dmcrypt)); echo "LUKS device: $l"
+sudo cryptsetup open --key-file /etc/keys/data.key $l data-4; or sudo cryptsetup open $l data-4
+```
+
+Then register both members with btrfs, mount the fstab's entries, and cycle the two
+deployments that use the array, so their containers see the mounts rather than the bare
+directories:
+
+```fish
+# data-4 is open: scan, mount, and cycle immich and syncthing
+sudo btrfs device scan; and sudo mount -a; and findmnt -t btrfs -o TARGET,SOURCE
+cd ~/infra/hosts/zero/immich; and sudo docker compose stop; and sudo docker compose start
+cd ~/infra/hosts/zero/syncthing; and sudo docker compose stop; and sudo docker compose start
+```
+
+A boot that needed any of this is a fault in the order or in a file, and is filed and fixed
+before the next unattended reboot. `mount -o degraded` is the last resort, only when
+neither key opens `data-4` and Immich must serve before a fix: the array then runs on the
+WD Elements disk alone, what it writes lands in chunks that are not mirrored until a
+balance and a scrub after a second device returns, and a degraded mount hides the fault.
+`-o degraded,ro` is enough to copy something off.
+
+**Turning protection on** is in the phase table of
+[`docs/management-plane.md`](../../../docs/management-plane.md): the entry here comes out
+first, then the key file's keyslot is killed, and the unlock becomes the manual one below.
+
 ## When `crypttab` lands here
+
+**On Alpine, the encrypted member above is opened by a key file for now**, the owner's
+decision of 2026-11-19 to encrypt with protection off; what follows is the design once
+protection is on, written for systemd's `crypttab` on the move to Leap.
 
 The design is decided; full reasoning in
 [`docs/roadmap.md`](../../../docs/roadmap.md#4-encrypted-data-volume-on-zero).
@@ -167,6 +238,7 @@ Gotchas:
 - On Debian 12 a non-root encrypted device with **only** a crypttab entry silently fails
   to unlock and never prompts; it needs an fstab entry carrying `_netdev` as well.
 - **No key material in this repo, ever.** `*.key`/`*.keyfile` are gitignored. There is
-  no keyfile in this design, but the ignore stays as a backstop.
+  no keyfile in this design once protection is on; until then `/etc/keys/data.key` lives
+  on `zero` alone, and the ignore stays as a backstop.
 - Because only the data disk is encrypted and not root, none of this needs initramfs
   networking and `/boot/cmdline.txt` is never touched.

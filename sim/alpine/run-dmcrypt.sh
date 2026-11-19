@@ -136,6 +136,14 @@ case "$said" in *'post-install checks: ok'*) pass "installed dm-crypt.conf" ;; *
 # waits its 30 s for devices that never come here, then always exits 0.
 echo "== the boot runlevel: bcache-register, then dmcrypt, then btrfs-scan"
 on 'rc-update -q add bcache-register boot; rc-update -q add dmcrypt boot; rc-update -q add btrfs-scan boot; rc-update -u' >/dev/null
+# The runbook's step 8 reads dmcrypt's recorded order with this grep; its output is checked
+# here so the runbook's command is known to read the deptree's real format.
+on "grep \"^depinfo_\$(grep \"_service='dmcrypt'\" /run/openrc/deptree | cut -d_ -f2)_i\" /run/openrc/deptree" > "$work/deptree"
+sed 's/^/    | /' "$work/deptree"
+grep -q "_iafter_[0-9]*='bcache-register'" "$work/deptree" && grep -q "_iafter_[0-9]*='modules'" "$work/deptree" \
+	&& pass "the deptree has dmcrypt after bcache-register and modules" || fail "the deptree lacks dmcrypt's iafter lines"
+grep -q "_ibefore_[0-9]*='btrfs-scan'" "$work/deptree" && grep -q "_ibefore_[0-9]*='localmount'" "$work/deptree" \
+	&& pass "the deptree has dmcrypt before btrfs-scan and localmount" || fail "the deptree lacks dmcrypt's ibefore lines"
 on 'openrc boot' > "$work/boot.log" 2>&1
 sed 's/^/    | /' "$work/boot.log"
 order=$(on 'cd /run/openrc/started && python3 -I -c "
@@ -145,6 +153,7 @@ t = {n: os.lstat(n).st_mtime_ns for n in names if os.path.lexists(n)}
 print(\" \".join(sorted(t, key=t.get)))"')
 [ "$order" = "bcache-register dmcrypt btrfs-scan" ] && pass "started in that order" || fail "started in the order '$order'"
 on "test -b /dev/mapper/$target" && pass "dmcrypt opened /dev/mapper/$target with the key file" || fail "no /dev/mapper/$target after dmcrypt started"
+grep -q "registered: /dev/mapper/$target" "$work/boot.log" && pass "btrfs-scan, after it, registered /dev/mapper/$target" || fail "btrfs-scan did not register /dev/mapper/$target"
 [ "$(on "mount /dev/mapper/$target /mnt/sim && cat /mnt/sim/proof; umount /mnt/sim")" = kept ] && pass "the btrfs inside reads back" || fail "the btrfs inside did not read back"
 
 # ── a boot that cannot unlock still finishes ───────────────────────────────

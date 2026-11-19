@@ -155,6 +155,13 @@ read 6 reported-uncorrectable reads, 8 command timeouts and 1.22 million load cy
 about twice its design figure. btrfs's error counters were all zero, and the last scrub,
 on 2026-08-03, found no errors. A new WD49EFZZ replaces it in the same Sabrent bay.
 
+**The new disk is encrypted from the start** (the owner, 2026-11-19): disk, bcache backing
+device, LUKS2 with Adiantum as on `three`, btrfs, so the SSD cache holds only ciphertext of
+it. A key file on `zero`'s SD card opens it at every boot, which keeps boots unattended:
+encryption with protection off, until a passphrase replaces the key file
+([`decisions.md`](../docs/decisions.md) § *`zero`'s encrypted member*). The WD Elements disk
+stays plain until it is replaced the same way.
+
 `zero` keeps bcache. On 2026-11-02 both devices read `writethrough`, with a hit ratio of
 89 and 91 % since boot and 97 % over the last day. Without the cache those reads would go
 to two hard disks behind one USB bridge on the critical box. The question is reopened once
@@ -163,31 +170,45 @@ the dev hub has left `zero` and its page cache has room.
 The swap borrows `one`'s Sabrent for its free bay, so the array keeps both copies while it
 copies. `zero`'s two fast ports already hold its Sabrent and the WD Elements disk, so the
 borrowed Sabrent goes on a USB 2 port, and 131 G copies at 30 to 40 MB/s, about an hour. A
-duty must not cut the slice between steps 4 and 6. The owner:
+duty must not cut the slice between steps 4 and 8. The owner:
 
 1. Powers `one` off and takes its SSD out of its Sabrent, so `zero` never sees `one`'s
    filesystem.
 2. Connects that Sabrent to a USB 2 port on `zero`, with the new drive in it.
-3. Reads the cache set's block size with `bcache-super-show` on the cache partition, runs
-   `make-bcache -B` with a matching `--block`, attaches the new device to the cache set,
-   and checks `dmesg` for a refused attach before going on.
-4. Runs `btrfs replace` from `sdb`'s bcache device to the new one. Immich keeps running.
-5. Waits until `btrfs replace status` reads *finished* and `btrfs device usage` shows the
-   new device and not the old. **Nothing reboots or shuts down before this.** An
-   interrupted replace leaves one full copy, on the worn WD Elements disk, and one
-   partial.
-6. Sends the new member's UUID to the infra agent, which commits `bcache-register` with it
-   in place of `sdb`'s, not beside it. The owner pulls on `zero` and installs it with
-   `install-system-file --allow-content-change`. The script names each member by UUID, so
-   a reboot before this leaves the array unmountable without `degraded`.
-7. Detaches `sdb`'s bcache device, shuts `zero` down, moves the new drive into `sdb`'s
-   bay, boots, and runs `check-mount-guards`.
-8. Puts `one`'s SSD back in its Sabrent, returns the Sabrent to `one`, and boots `one`, so
-   the slice ends with every box serving.
-9. Runs `btrfs filesystem resize <devid>:max` on the new member. The array stays at 1 TB
-   until the WD Elements disk is replaced as well.
-10. Wipes `sdb` on another machine, never `zero`, where its old bcache superblock could be
+3. Reads the starting state: the scrub finished clean, both bcache devices on cache mode
+   `none`, every error counter 0, `sdb`'s bcache UUID; then the new disk's SMART reading
+   (`smartctl -d sat -i -A`), and makes the key file on the SD card.
+4. Reads the cache set's block size and UUID with `bcache-super-show` on the cache
+   partition, runs `make-bcache -B` with a matching `--block`, registers the new device,
+   attaches it to the cache set, sets its cache mode to `none`, and checks `dmesg` for a
+   refused attach before going on.
+5. Formats the new bcache device as LUKS2 with the key file, adds the owner's passphrase as
+   a second keyslot, opens it as `data-4`, and reads the header back: cipher, label, two
+   keyslots.
+6. Runs `btrfs replace start -r 4` from `sdb`'s bcache device to `/dev/mapper/data-4`.
+   Immich keeps running. Waits until `btrfs replace status` reads *finished* and the
+   filesystem shows the mapping and not the old device. **Nothing reboots or shuts down
+   before this.** An interrupted replace leaves one full copy, on the worn WD Elements
+   disk, and one partial.
+7. Sends `sdb`'s and the new disk's bcache UUIDs and the LUKS UUID to the infra agent,
+   which commits `bcache-register` with the new UUID in place of `sdb`'s, not beside it,
+   and `dmcrypt` with the LUKS UUID. The owner pulls on `zero` and installs both, and
+   `dm-crypt.conf`, with `install-system-file`, adds `dmcrypt` to the boot runlevel, then
+   detaches and stops `sdb`'s bcache device. The scripts name each member by UUID, so a
+   reboot before this leaves the array unmountable without `degraded`.
+8. Shuts `zero` down, moves the new drive into `sdb`'s bay, and boots with nobody's help:
+   dmcrypt opens the member with the key file, the array mounts with both devices,
+   `check-mount-guards` passes, and Immich answers. The infra agent's session ends at the
+   shutdown and comes back through `ssh dev`.
+9. Sets both bcache devices back to `writethrough`, puts `one`'s SSD back in its Sabrent,
+   returns the Sabrent to `one`, and boots `one`, so the slice ends with every box serving.
+10. Optionally runs `btrfs filesystem resize 4:max` on the new member. The array stays at
+    1 TB until the WD Elements disk is replaced as well.
+11. Wipes `sdb` on another machine, never `zero`, where its old bcache superblock could be
     registered again. It holds Immich's photos, unencrypted.
+
+The commands, each step's checks and its way back are
+[`visit-runbook.md`](visit-runbook.md) § *Slice 2*.
 
 ## Deferred, each until its trigger
 
