@@ -187,13 +187,21 @@ three files work together:
   levels, 0, 1, 2, 3, 4, 5 and 100: silent with the CPU below 45 °C and the drive below
   38 °C, 5 by a CPU of 60 °C or a drive of 43 °C, and 100 at 65 °C or 45 °C. It steps up as
   soon as either temperature asks for more, and down only once both are a few degrees below
-  the level's entry point. It reads the CPU every 30 seconds. It reads the drive with `smartctl` about every 3 minutes while the drive is
-  reading or writing, and every 30 minutes while it is idle, without waking a drive that
-  has spun down. It finds the drive by the array's label, `mirror-luks`; with the drive
-  unplugged, it follows the CPU alone. A temperature it cannot read sets the fan to 100,
-  and so does a stop. Without the bus, it logs that and tries again every 30 seconds.
+  the level's entry point. It reads the CPU every 30 seconds.
+- It reads the drive with `smartctl` about every 3 minutes while the drive is reading or
+  writing, and not at all while it is idle: the CPU's idle temperature then stands in for
+  the room, and one read is taken if the CPU rises 3 °C above where it was at the last
+  reading. A SMART read on an idle drive that still spins would reset its standby timer,
+  should one ever be set; a WD Red ships with none, so it does not spin down today.
+  `smartctl` never wakes a drive that has spun down. An idle drive keeps its last reading
+  for as long as it stays idle. It finds the drive by the array's label, `mirror-luks`;
+  with the drive unplugged, it follows the CPU alone.
+- A temperature it cannot read sets the fan to 100: the CPU's, a failed drive read, or a
+  drive working for 6 minutes with no good read. So does a stop. Without the bus, it logs
+  that and tries again every 30 seconds.
 
-To change a level or a threshold, edit the numbers at the top of `system/argon-fan` and commit. Then,
+To change a level or a threshold, edit the numbers at the top of `system/argon-fan` and
+commit. Then,
 from the phone, and on `three`:
 
 ```fish

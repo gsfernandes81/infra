@@ -17,14 +17,19 @@
 # below it. A temperature it cannot read sends the fan to the top. The CPU is read every
 # 30 s.
 #
-# The drive's temperature is SMART attribute 194, read with smartctl, at a rate set by the
-# disk's own activity: /sys/block/<disk>/stat, which sends the drive nothing, is read every
-# 30 s, and smartctl runs about every 3 minutes after the disk has read or written, and
-# every 30 minutes when it has not, so a room warming the case is still seen. `-n standby`
-# keeps smartctl from waking a spun-down drive; standby counts as cooling, so the last
-# reading is kept. A failed read, or a reading over an hour old, counts as unknown. The
-# owner chose this polling (decisions.md § three's fan): a SMART poll stalled one's USB
-# bridge in 2026, but that drive was failing, and this one is new and healthy.
+# The drive's temperature is SMART attribute 194, read with smartctl only while the drive
+# is working. /sys/block/<disk>/stat, which sends the drive nothing, is read every 30 s;
+# after the disk has read or written, smartctl runs about every 3 minutes. While it is
+# idle, smartctl does not run at all, and the CPU's idle temperature stands in for the
+# room: one read is taken if the CPU has risen 3 C above where it was at the last reading,
+# and one at the start. A SMART read on an idle drive that is still spinning resets its
+# standby timer, should one ever be set (a WD Red ships with none, so it does not spin
+# down today). `-n standby` keeps smartctl from waking a spun-down drive; standby counts as
+# cooling, so the last reading is kept. An idle drive keeps its last reading for as long as
+# it stays idle. The reading counts as unknown, which sets the top level, only after a
+# failed read, or once the disk has been working for 6 minutes with no good read. The owner
+# chose this polling (decisions.md § three's fan): a SMART poll stalled one's USB bridge in
+# 2026, but that drive was failing, and this one is new and healthy.
 #
 # The drive is found by the array's LUKS label, which is on the whole disk. Without the
 # label (the drive is not attached) the fan follows the CPU alone, and says so.
@@ -62,15 +67,19 @@ CPU_STEPS = (45, 49, 52, 56, 60, 65)
 DRIVE_STEPS = (38, 39, 40, 41, 43, 45)
 # How far below a level's entry point both must be before the fan leaves that level.
 CPU_HYSTERESIS, DRIVE_HYSTERESIS = 3, 2
-POLL_BUSY = 180  # seconds between smartctl runs once the disk has read or written
-POLL_IDLE = 1800  # seconds between smartctl runs while it has not
-STALE = 2 * POLL_IDLE  # a drive reading older than this counts as unknown
+POLL_BUSY = 180  # seconds between smartctl runs while the disk reads or writes
+CPU_RISE = 3.0  # degrees C over the CPU at the last reading that read an idle drive again
+STALE = 2 * POLL_BUSY  # seconds the disk may work with no good read before it is unknown
 
 STANDBY = re.compile(r"Device is in (STANDBY|SLEEP)")
 
 
 def log(message):
-    print(message, flush=True)
+    # A log that cannot be written never stops the fan's control.
+    try:
+        print(message, flush=True)
+    except OSError:
+        pass
 
 
 def read_cpu():
@@ -169,18 +178,20 @@ class Fan:
         self.notes[kind] = message
 
     def forget_drive(self):
-        self.reading = None  # the last temperature, and when it was read or confirmed
-        self.read_at = None
+        self.reading = None  # the last temperature read
+        self.answered = False  # the last smartctl run gave a temperature or standby
         self.standby = False
+        self.cpu_at_reading = None  # the CPU's temperature at the last answer
         self.counters = None
         self.active = False  # read or written since the last smartctl run
+        self.busy_since = None  # first activity since the last answer
         self.polled_at = None
-        self.failed = False
         self.logged = None  # the last reading logged
 
-    def drive(self):
+    def drive(self, cpu=None):
         """The drive's temperature for the decision: degrees, 'standby' (cooling, with no
-        reading yet), 'absent', or None for unknown."""
+        reading yet), 'absent', or None for unknown. `cpu` is this turn's CPU temperature,
+        the room's stand-in while the drive is idle."""
         now = self.now()
         try:
             disk = self.disk()
@@ -204,39 +215,45 @@ class Fan:
             counters = None
         if counters is not None and self.counters is not None and counters != self.counters:
             self.active = True
+            if self.busy_since is None:
+                self.busy_since = now
         if counters is not None:
             self.counters = counters
 
+        # Busy, or with no answer yet (the start, or after a failed read): every 3 minutes.
+        # Idle: only when the CPU says the room has warmed.
         since = None if self.polled_at is None else now - self.polled_at
-        if (since is None or since >= POLL_IDLE
-                or ((self.active or self.failed) and since >= POLL_BUSY)):
+        due = since is None or (since >= POLL_BUSY and (self.active or not self.answered))
+        if (not due and self.answered and cpu is not None and self.cpu_at_reading is not None
+                and cpu >= self.cpu_at_reading + CPU_RISE):
+            due = True
+        if due:
             kind, value = self.smart(disk)
             self.polled_at, self.active = now, False
+            if kind in ("temp", "standby"):
+                self.answered, self.busy_since, self.cpu_at_reading = True, None, cpu
+                self.note("smart", None if kind == "temp" else
+                          "drive in standby; keeping its last reading")
             if kind == "temp":
-                self.failed, self.standby = False, False
-                self.reading, self.read_at = value, now
-                self.note("smart", None)
+                self.standby, self.reading = False, value
                 if self.logged is None or abs(value - self.logged) >= 2:
                     self.say(f"drive {value} C")
                     self.logged = value
             elif kind == "standby":
-                self.failed = False
-                self.note("smart", "drive in standby; keeping its last reading")
                 self.standby = True
-                if self.reading is not None:
-                    self.read_at = now
             else:
-                self.failed, self.standby = True, False
-                self.reading = self.read_at = None
+                self.answered, self.standby, self.reading = False, False, None
                 self.note("smart", f"{value}; the drive's temperature is unknown")
 
-        if self.reading is not None and now - self.read_at <= STALE:
-            return self.reading
+        if not self.answered:
+            return None
+        if self.busy_since is not None and now - self.busy_since > STALE:
+            self.note("smart", f"the drive has worked for over {STALE // 60} minutes with "
+                               f"no good read; its temperature is unknown")
+            return None
         if self.reading is not None:
-            self.note("smart", f"the drive's last reading is over {STALE // 60} minutes old")
-        if self.standby:
-            return "standby"
-        return None
+            return self.reading
+        return "standby"
 
     def decide(self, cpu, drive):
         """(level, reason): the index into LADDER, and why it changed, or None when it
@@ -292,7 +309,7 @@ class Fan:
         except (OSError, ValueError) as exc:
             cpu = None
             self.note("cpu", f"cannot read {CPU_SENSOR}: {exc}")
-        drive = self.drive()
+        drive = self.drive(cpu)
         level, reason = self.decide(cpu, drive)
         try:
             self.write(LADDER[level])
@@ -316,7 +333,7 @@ def main():
     signal.signal(signal.SIGINT, stop)
     log(f"levels {list(LADDER)}, entered at CPU {list(CPU_STEPS)} C or drive "
         f"{list(DRIVE_STEPS)} C; the drive read every {POLL_BUSY // 60} min while busy, "
-        f"{POLL_IDLE // 60} min while idle")
+        f"and while idle only once the CPU rises {CPU_RISE:g} C")
     fan = Fan()
     try:
         while True:

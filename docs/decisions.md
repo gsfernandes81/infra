@@ -2528,17 +2528,20 @@ writes were acknowledged, but the curve it wrote made no difference to the fan.
   level only once both are below that level's entry point, the CPU by 3 °C and the drive by
   2 °C, so it does not cycle at a threshold. A temperature that cannot be read sets 100, as
   before.
-- **The drive's temperature comes from `smartctl`, polled at a rate set by the drive's
-  activity.** The kernel's counters in `/sys/block/<disk>/stat`, which send the drive
-  nothing, are read every 30 s. `smartctl -n standby -d sat -A` runs about every 3 minutes
-  after the drive has read or written, and every 30 minutes otherwise, so a warming room is
-  still seen. A drive in standby is not woken; standby counts as cooling, so the last
-  reading is kept. A failed read, or a reading over an hour old, counts as unknown, which
-  sets 100. The owner chose this over a fixed schedule. It reverses the first
+- **The drive's temperature comes from `smartctl`, only while the drive works.** The
+  kernel's counters in `/sys/block/<disk>/stat`, which send the drive nothing, are read
+  every 30 s. `smartctl -n standby -d sat -A` runs about every 3 minutes after the drive has
+  read or written, and not at all while it is idle: the CPU's idle temperature stands in for
+  the room, and one read is taken when the CPU rises 3 °C over its value at the last
+  reading, and one at the start. A SMART read on an idle drive that still spins resets its
+  standby timer, should one ever be set; a WD Red ships with none. A drive in standby is not
+  woken; standby counts as cooling, so the last reading is kept, and an idle drive keeps its
+  reading indefinitely. A failed read counts as unknown, which sets 100, and so does a drive
+  that has worked for 6 minutes, twice the busy interval, with no good read. The owner chose
+  this over a fixed schedule, first with a 30-minute read while idle, then with none. It reverses the first
   unit's refusal to poll the drive: a SMART poll stalled `one`'s USB bridge in 2026
   (CLAUDE.md § Landmines, `smartd`), but a failing SP900 caused that, and this WD Red is
-  new and read clean at 0 hours. A poll every 30 minutes also resets the drive's idle
-  timer, so a spin-down timer set longer than that would never fire.
+  new and read clean at 0 hours.
 - **The drive is found by the array's LUKS label, `mirror-luks`**, which is on the whole
   disk, never by a fixed `sda`. Without the label, the unit follows the CPU alone and says
   so.
