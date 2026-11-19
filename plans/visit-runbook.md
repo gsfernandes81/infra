@@ -254,8 +254,14 @@ sticks cannot discard, so zeros are the fallback:
 ```fish
 # on the host the stick booted: erase the first-boot stick, only if it is the stick; zeros where it cannot discard; put its device in place of sdX
 lsblk -o NAME,SIZE,MODEL,TRAN,LABEL
-set d sdX; sudo blkid /dev/$d | grep -q 'LABEL="combustion"'; and begin; sudo blkdiscard /dev/$d; or sudo blkdiscard -z /dev/$d; end; and echo erased
+set d sdX; sudo blkid -p /dev/$d | grep -q 'LABEL="combustion"'; and begin; sudo blkdiscard -f /dev/$d; or sudo blkdiscard -fz /dev/$d; end; and echo erased
 ```
+
+`blkid -p` reads the device itself, where plain `blkid` can answer from its cache about a
+card that is no longer in the reader. `blkdiscard` refuses a device that still carries a
+filesystem unless given `-f`; the label check above is what makes forcing it safe. The
+Lexar reader shows a 128 GB card as about 23 GB, so only that much is erased, which covers
+the stick: `make-stick` writes at its start.
 
 ## Slice 1: `one` moves to the 8 GB board
 
