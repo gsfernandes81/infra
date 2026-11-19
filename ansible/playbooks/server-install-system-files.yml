@@ -9,7 +9,8 @@
 #
 # THIS IS A DRIVER, NOT A REIMPLEMENTATION. Every guard lives in bin/install-system-file
 # and stays there: the infra- header, the refusal to change content without being told,
-# the per-type validators (sshd -t, OpenRC syntax, fstab UUIDs against /sys/fs/btrfs),
+# the per-type validators (sshd -t, OpenRC syntax, fstab UUIDs against /sys/fs/btrfs, a
+# dmcrypt entry opened with its key file),
 # the backup outside /etc/init.d, and the post-install check that rolls back. That tool
 # is a dry run by default and writes only with --commit — which is exactly Ansible's
 # check-mode contract, so --check here runs it without --commit and a normal run with.

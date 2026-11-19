@@ -68,6 +68,36 @@ boots on bare metal rather than in a container. ntfy itself: `serve.py` answers 
 message. And a real tailnet: the refusal to restart over it is shown only from an
 address in its range.
 
+## The encrypted member
+
+A second job runs `run-dmcrypt.sh`: `zero`'s encrypted array member
+([`plans/visit-runbook.md`](../../plans/visit-runbook.md) § Slice 2) as far as a container
+takes it, in a box built from the same `host/Dockerfile`, against a LUKS2 volume on a loop
+device that stands in for `zero`'s new bcache device. It runs:
+
+- the key file made with the runbook's commands, and the format and passphrase slot with
+  the runbook's flags: Adiantum, the label, two keyslots, Argon2 at 256 MiB, read back
+  from `luksDump`;
+- `findfs UUID=` resolving the LUKS2 UUID, BusyBox's and then util-linux's, since
+  `dmcrypt` resolves `source=` with whichever `zero` has;
+- `install-system-file dmcrypt`: refusing the repo's placeholder, then, with the UUID
+  filled in, passing the good entry and refusing an unknown UUID, an entry with no `key=`,
+  a key file outside `/etc`, a name dmcrypt does not read, a key file others can read and a key that does not open the volume; then installing it
+  over cryptsetup-openrc's own `/etc/conf.d/dmcrypt`, with `bcache-register` and
+  `dm-crypt.conf`;
+- OpenRC's recorded order for `dmcrypt`, read with the runbook's own `grep` of the
+  deptree (after `bcache-register` and `modules`, before `btrfs-scan`; `localmount` and
+  `fsck` carry `keyword -docker`, so a container's deptree leaves them out); then the boot runlevel started for real, which must start `bcache-register`,
+  then `dmcrypt`, which opens `data-4` with the key file, then `btrfs-scan`, which
+  registers it; and the btrfs inside reading back;
+- `dmcrypt` with the key file missing, and with a wrong one: each must return without
+  asking anyone, and map nothing.
+
+**What it does not show:** a Pi's kernel (the runner's arm64 kernel provides dm-crypt and
+Adiantum here), bcache (`bcache-register` waits its 30 seconds for devices that never come
+and exits 0), a two-device array, and OpenRC as it boots on bare metal. The reboot test on
+`zero`, at step 10 of the slice, is the proof of those.
+
 ## Running it elsewhere
 
 It builds and runs a privileged container, binds `127.0.0.1:2222`, and writes

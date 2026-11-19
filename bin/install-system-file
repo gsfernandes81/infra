@@ -41,6 +41,8 @@
 import argparse
 import os
 import re
+import shlex
+import shutil
 import subprocess
 import stat
 import sys
@@ -223,12 +225,128 @@ def validate_sshd_config(path):
     return problems
 
 
+def parse_dmcrypt_conf(data):
+    """The entries of a /etc/conf.d/dmcrypt, read the way cryptsetup-openrc's
+    /etc/init.d/dmcrypt reads them: one line at a time, comments, blank lines, rc_* and
+    dmcrypt_* lines skipped, and target= or swap= starting a new entry. Returns a list of
+    (line number, {key: value}) and a list of problems."""
+    entries, problems = [], []
+    known = ("target", "swap", "source", "key", "remdev", "gpg_options", "loop_file",
+             "options", "pre_mount", "post_mount")
+    for lineno, line in enumerate(data.splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        name, sep, value = stripped.partition("=")
+        if not sep:
+            problems.append(f"line {lineno}: not a name=value line, which dmcrypt skips")
+            continue
+        if name.startswith("rc_") or name.startswith("dmcrypt_"):
+            continue
+        if name not in known:
+            problems.append(f"line {lineno}: {name}= is not a setting dmcrypt reads; it would skip the line")
+            continue
+        try:
+            words = shlex.split(value)
+        except ValueError as exc:
+            problems.append(f"line {lineno}: {exc}")
+            continue
+        value = words[0] if len(words) == 1 else " ".join(words)
+        if name in ("target", "swap"):
+            entries.append((lineno, {name: value}))
+        elif not entries:
+            problems.append(f"line {lineno}: {name}= outside an entry, which dmcrypt ignores")
+        else:
+            entries[-1][1][name] = value
+    return entries, problems
+
+
+def validate_dmcrypt_conf(path):
+    """Every entry opens, unattended, with what is on this box now.
+
+    An entry the boot cannot open costs a mount, which nofail and the immutable
+    mountpoints absorb. An entry that ASKS costs the boot: dmcrypt runs cryptsetup with
+    no timeout, at a console nobody watches. So each entry must name a key file, the key
+    file must be root's alone, the source must resolve the way dmcrypt resolves it
+    (findfs), and the key must open it -- `cryptsetup open --test-passphrase`, which
+    reads the key and maps nothing. A placeholder left by the repo is refused first.
+
+    Calibrated in sim/alpine/run-dmcrypt.sh against a real LUKS2 volume on a loop device:
+    the good entry passes, and each of the refusals below is shown refusing.
+    """
+    problems = []
+    data = read_bytes(path).decode(errors="replace")
+    for lineno, line in enumerate(data.splitlines(), 1):
+        if "FILL-FROM-" in line and not line.lstrip().startswith("#"):
+            problems.append(f"line {lineno}: a FILL-FROM- placeholder is left in: {line.strip()}")
+    if problems:
+        return problems
+    r = run(["sh", "-n", str(path)])
+    if r.returncode != 0:
+        return [f"shell syntax error: {r.stderr.strip()}"]
+
+    entries, problems = parse_dmcrypt_conf(data)
+    if problems:
+        return problems
+    cryptsetup = shutil.which("cryptsetup") or "/sbin/cryptsetup"
+    if entries and not Path(cryptsetup).exists():
+        return ["cryptsetup is not installed (apk add cryptsetup cryptsetup-openrc)"]
+
+    for lineno, e in entries:
+        label = f"entry at line {lineno} ({e.get('target') or e.get('swap')})"
+        if "swap" in e:
+            continue  # a swap entry makes a new random key every boot; nothing to check
+        key, source = e.get("key"), e.get("source")
+        if not key:
+            problems.append(f"{label}: no key=, so dmcrypt would ask at the console and the boot would wait")
+            continue
+        if ":" in key or e.get("remdev") or e.get("loop_file"):
+            problems.append(f"{label}: only a plain key file on this box is supported here")
+            continue
+        if not source:
+            problems.append(f"{label}: no source=")
+            continue
+        if not key.startswith("/etc/"):
+            # dmcrypt runs in the boot runlevel before localmount, so the key must be on the
+            # root filesystem, which on zero holds /etc.
+            problems.append(f"{label}: key file {key} is outside /etc, so it may not be mounted when dmcrypt runs")
+            continue
+
+        st = run(["sudo", "stat", "-c", "%u %a", key])
+        if st.returncode != 0:
+            problems.append(f"{label}: cannot read key file {key}: {st.stderr.strip() or 'no such file'}")
+            continue
+        uid, mode = st.stdout.split()
+        if uid != "0" or int(mode, 8) & 0o077:
+            problems.append(f"{label}: key file {key} is uid {uid} mode {mode}; it must be root's, 0400 or 0600")
+            continue
+
+        if "=" in source:
+            # findfs is what dmcrypt itself runs, so this is the boot's own answer.
+            f = run(["sudo", "findfs", source])
+            dev = f.stdout.strip()
+            if f.returncode != 0 or not dev:
+                problems.append(f"{label}: findfs {source} finds no device")
+                continue
+        else:
+            dev = source
+        if run(["sudo", cryptsetup, "isLuks", dev]).returncode != 0:
+            problems.append(f"{label}: {dev} is not a LUKS volume")
+            continue
+        t = run(["sudo", cryptsetup, "open", "--test-passphrase", "--key-file", key, dev])
+        if t.returncode != 0:
+            problems.append(f"{label}: the key file does not open {dev}: {t.stderr.strip()}")
+    return problems
+
+
 def validators_for(live):
     v = []
     if live.parent == Path("/etc/init.d"):
         v.append(validate_openrc_script)
     if live.name == "fstab":
         v.append(validate_fstab)
+    if live == Path("/etc/conf.d/dmcrypt"):
+        v.append(validate_dmcrypt_conf)
     # The main file, and any drop-in the Include pulls in.
     if live.name == "sshd_config" or live.parent == Path("/etc/ssh/sshd_config.d"):
         v.append(validate_sshd_config)

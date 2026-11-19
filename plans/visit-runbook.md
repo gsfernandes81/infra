@@ -334,24 +334,375 @@ labels.
 
 ## Slice 2: `zero`'s disk swap
 
-Not the day of slice 1. Every step, its checks and its order are in
-[`three.md`](three.md) § *`zero`'s disk swap*: it borrows `one`'s Sabrent, so `one` is off
-for its length, and nothing reboots between `btrfs replace` starting and `btrfs replace
-status` reading finished. Before its shutdown step, `zero`'s live agent slots are checked:
-the dev hub, and the infra agent with it, run on `zero`. The value it sends the infra
-agent is the new member's bcache UUID, for `bcache-register`.
+Not the day of slice 1. [`three.md`](three.md) § *`zero`'s disk swap* says why and in what
+order; this section is the commands. It borrows `one`'s Sabrent, so `one` is off for its
+length, and nothing reboots between `btrfs replace` starting and `btrfs replace status`
+reading finished.
 
 The new disk is the second WD Red Plus, serial `WD-WXB2D76H9RCN`, checked with WD by the
-owner on 2026-11-18. Its smartctl reading, as for `three`'s drive, comes before it goes in;
-once it is in `zero`, its line belongs in `hosts/zero/system/hardware.md`, through
-`bin/hw-inventory`.
+owner on 2026-11-18. **It is encrypted from the start**, the owner's decision of 2026-11-19
+([`decisions.md`](../docs/decisions.md) § *`zero`'s encrypted member*): the disk, then its
+bcache backing device, then LUKS2 with Adiantum as on `three`, then btrfs. A key file on
+`zero`'s SD card opens it at every boot, so boots stay unattended. That is encryption with
+protection off: turning it on later is a passphrase in place of the key file, with no
+reformat.
 
-**Checks:** `sudo btrfs device usage /media/immich-data` shows the new device and not
-`sdb`'s; `sudo bin/check-mount-guards` passes after the reboot; Immich answers.
+The names, which the owner may change before step 6: LUKS label `data-luks-4`, mapping
+`data-4`, key file `/etc/keys/data.key`. The 4 is the btrfs devid, which the new disk takes
+over from `sdb`.
 
-**Way back:** before `btrfs replace` finishes, `btrfs replace cancel` leaves `sdb` where it
-was. After, there is none, since the replace wipes `sdb`'s superblock: the array is whole
-on the new disk and the WD Elements, and a new disk that misbehaves is replaced the same way.
+**Before:**
+
+- the branch that made this section merged, and `git pull` run in `~/infra` on `zero`;
+- the scrub finished, with both bcache devices on cache mode `none`, as on 2026-11-19;
+- `one`'s live slots checked, since it is off for the slice;
+- the owner's password manager open, for the passphrase of step 6;
+- about 2 to 3 hours, most of it the copy.
+
+A fleet-wide `server-install-system-files.yml` run before the slice is harmless: it would
+install the reordered `bcache-register` (a `before` on a service in no runlevel orders
+nothing) and create `dm-crypt.conf`, and list `dmcrypt` as refused for its placeholder.
+
+**Where the agent stops.** The infra agent runs on `zero`, so it is there until step 10's
+shutdown. At step 8 it commits the values the owner sends it. After the reboot it is back
+through `ssh dev`.
+
+1. **`one`'s Sabrent.** Power `one` off, take its SSD out of its Sabrent so `zero` never
+   sees `one`'s filesystem, put the new disk in it, and connect it to a USB 2 port on
+   `zero`.
+
+2. **The starting state.**
+
+   ```fish
+   # step 2, on zero: the scrub, the caches, the error counters, each bcache device's backing disk and its UUID, the boot services, the kernel's dm modules
+   sudo btrfs scrub status /media/immich-data
+   cat /sys/block/bcache*/bcache/cache_mode
+   sudo btrfs device stats /media/immich-data
+   sudo btrfs device usage /media/immich-data | grep -E '^/dev'
+   for s in /sys/block/bcache*/slaves/*; set n (basename $s); echo (string split / $s)[4] $n (sudo bcache-super-show /dev/$n | string match -r 'dev.uuid.*'); end
+   rc-update show -v | grep -E '^ *(bcache-register|btrfs-scan|dmcrypt|localmount|modules) '
+   ls /lib/modules/(uname -r)/kernel/drivers/md/ | grep -E '^dm-(crypt|mod)'
+   ```
+
+   It reads right when the scrub's status is finished with no errors; every cache mode
+   reads `writethrough writeback writearound [none]`; every counter is 0; the usage lists
+   `/dev/bcache0` and `/dev/bcache1`; the slaves loop prints four lines, a backing disk
+   and `sda1` for each bcache device, and the backing line for `sdb` names `bcache1`, as
+   the survey did (the `sda1` lines carry the cache's own `dev.uuid`, which is not the one
+   to send); the usage line `/dev/bcache1, ID: 4` together with the slaves line
+   `bcache1 sdb` is what makes step 7's devid 4 `sdb`'s, which `zero` read on 2026-11-19; `bcache-register` is in `sysinit`, and `btrfs-scan` and `modules` in
+   `boot`; `localmount` is in no runlevel, which is right: `bootmisc`, in `boot`, declares
+   `need localmount`, so OpenRC starts it in the boot runlevel's order, after anything in
+   that runlevel it `use`s or is `after` (dmcrypt, once step 8 adds it); and both
+   `dm-crypt.ko` and `dm-mod.ko` are listed. (zero read exactly this on 2026-11-19.)
+   **Note `sdb`'s `dev.uuid`**, the value step 8 sends. Stop and tell the agent if
+   `btrfs-scan` is in no runlevel, since the boot order below rests on it, or if the
+   modules are missing, which means the kernel was upgraded without a reboot: `zero`
+   reboots first, on its own, before anything here.
+
+3. **The tools, the module, the new disk.**
+
+   ```fish
+   # step 3, on zero: install cryptsetup and its dmcrypt service, load dm-crypt, and find the new disk, the only sd disk over 3.5 TB, and read it
+   sudo apk add cryptsetup cryptsetup-openrc
+   sudo modprobe dm-crypt; and grep -c device-mapper /proc/misc
+   set d (lsblk -dbno NAME,SIZE | awk '$1 ~ /^sd/ && $2 > 3500000000000 {print $1}'); echo "new disk: $d"
+   sudo smartctl -d sat -i -A /dev/$d
+   sudo blkid -p /dev/$d; echo "blkid exit $status"
+   lsblk -do NAME,LOG-SEC,PHY-SEC
+   ```
+
+   It reads right when `/proc/misc` counts 1; one disk name; smartctl shows serial
+   `WD-WXB2D76H9RCN`, a few power-on hours, and 0 for `Reallocated_Sector_Ct`,
+   `Current_Pending_Sector`, `Offline_Uncorrectable` and `UDMA_CRC_Error_Count`; and blkid
+   prints nothing and exits 2, a blank disk. The sector sizes show what each bridge
+   reports; the new disk moves from the borrowed Sabrent into `zero`'s at step 10, and its
+   bcache block of 4096 (step 5) suits a bridge reporting 512 or 4096 alike. Send the smartctl lines to the agent; once the
+   disk is in `zero`, its line belongs in `hosts/zero/system/hardware.md` through
+   `bin/hw-inventory`. If blkid prints a partition table on the disk with that serial,
+   `sudo apk add wipefs; and sudo wipefs -a /dev/$d` clears it; anything else, stop.
+
+4. **The key file**, 4096 random bytes on the SD card, root's alone.
+
+   ```fish
+   # step 4, on zero: make the key file, never over an existing one, and read its mode and size, never its bytes
+   sudo install -d -m 700 /etc/keys
+   sudo sh -c 'test ! -e /etc/keys/data.key && umask 077 && dd if=/dev/urandom of=/etc/keys/data.key bs=512 count=8 status=none && chmod 400 /etc/keys/data.key'
+   sudo stat -c '%a %U %s %n' /etc/keys /etc/keys/data.key
+   ```
+
+   It reads right as `700 root … /etc/keys` and `400 root 4096 /etc/keys/data.key`. The
+   key is never printed, copied into the repo, into `~/.infra-backups` or into a handover.
+   An image of `zero`'s SD card now carries it, so such an image is secret-bearing.
+
+5. **The bcache backing device.** First the cache set's block size and UUID:
+
+   ```fish
+   # step 5, on zero: read the cache set's block size and UUID from the cache partition
+   sudo bcache-super-show /dev/sda1 | grep -E '^(dev.sectors_per_block|cset.uuid)'
+   ```
+
+   `sectors_per_block` must be 8 (4096 bytes) or less. The new device's block is 4096
+   whatever it reads: bcache refuses a backing block smaller than the cache set's, never a
+   larger one, and refuses at registration a block smaller than the disk's logical
+   sector, which a bridge may report as 4096. Then:
+
+   ```fish
+   # step 5, on zero: make the new disk a bcache backing device with a 4096-byte block, register it, attach it to the cache set, cache mode none; put the cset.uuid in place of CSET
+   set d (lsblk -dbno NAME,SIZE | awk '$1 ~ /^sd/ && $2 > 3500000000000 {print $1}'); test (count $d) -eq 1; and sudo make-bcache -B --block 4096 /dev/$d
+   test -e /sys/block/$d/bcache; or echo /dev/$d | sudo tee /sys/fs/bcache/register
+   echo CSET | sudo tee /sys/block/$d/bcache/attach
+   echo none | sudo tee /sys/block/$d/bcache/cache_mode
+   echo "new bcache device:" (basename (readlink /sys/block/$d/bcache/dev)); cat /sys/block/$d/bcache/state /sys/block/$d/bcache/cache_mode
+   sudo dmesg | grep -i bcache | tail -n 5
+   sudo bcache-super-show /dev/$d | grep -E '^(dev.uuid|cset.uuid)'
+   sudo blkid /dev/$d
+   echo add | sudo tee /sys/block/$d/uevent; sleep 2; ls -l /dev/disk/by-uuid/ | grep "/$d\$"
+   ```
+
+   It reads right when the device is `bcache2`; its state is `clean`, not `no cache`; its
+   mode reads `[none]`; dmesg says `Caching <disk> as bcache2 on set <CSET>`; and the
+   superblock's `cset.uuid` is the cache set's. **Note its `dev.uuid`** for step 8, and
+   check blkid's `UUID=` is the same, and that the last line is a link of that name to the
+   new disk. `bcache-register` registers `/dev/disk/by-uuid/<dev.uuid>` at boot, and mdev
+   makes that link with blkid's answer whenever the disk is added. It made the disk's links
+   when it was plugged in, before this superblock existed, so the `add` event is sent again
+   by hand, as mdev's own coldplug does; a missing link here would be missing at boot. A
+   `Couldn't attach` line in dmesg is a refused attach: stop there.
+   **Way back:** `echo 1 | sudo tee /sys/block/$d/bcache/stop` and unplug the disk;
+   nothing in the array has changed.
+
+6. **LUKS2 on the new bcache device**, with the key file, labelled, without a prompt:
+
+   ```fish
+   # step 6, on zero: format the new bcache device as LUKS2 with Adiantum and the key file, only if it holds no signature
+   set d (lsblk -dbno NAME,SIZE | awk '$1 ~ /^sd/ && $2 > 3500000000000 {print $1}'); set b (basename (readlink /sys/block/$d/bcache/dev)); echo "formatting /dev/$b"
+   test (count $d) -eq 1; and test -b /dev/$b; and not sudo blkid -p /dev/$b; and sudo cryptsetup luksFormat --batch-mode --type luks2 --cipher xchacha12,aes-adiantum-plain64 --key-size 256 --sector-size 4096 --pbkdf-memory 262144 --label data-luks-4 --key-file /etc/keys/data.key /dev/$b
+   ```
+
+   `/dev/$b` is read from the new disk's own bcache directory, so it cannot name
+   `bcache0` or `bcache1`, and blkid refusing to find a signature on it is the second
+   guard. `--sector-size 4096` is set rather than left to cryptsetup, which picks it from
+   the device it sees; it matches the bcache block and btrfs's own 4 KiB sectors.
+   `--pbkdf-memory 262144` keeps each keyslot's Argon2 at 256 MiB, so the disk
+   still opens on a 1 GB board such as `three`'s: cryptsetup otherwise sizes it to the Pi
+   5's memory, up to 1 GiB, and a smaller box then refuses with *Not enough available
+   memory to open a keyslot*.
+
+   Then the owner's passphrase as a second keyslot, the way in if the key file is lost
+   with the SD card. It asks twice and shows nothing:
+
+   ```fish
+   # step 6, on zero: add the owner's passphrase as keyslot 1, authorised by the key file
+   set d (lsblk -dbno NAME,SIZE | awk '$1 ~ /^sd/ && $2 > 3500000000000 {print $1}'); set b (basename (readlink /sys/block/$d/bcache/dev))
+   sudo cryptsetup luksAddKey --pbkdf-memory 262144 --key-file /etc/keys/data.key /dev/$b
+   ```
+
+   The passphrase goes into the password manager now, before going on. It does not turn
+   protection on: the key file's slot still opens the disk with nobody there. Protection
+   comes on only when that slot is killed (`docs/management-plane.md`, the phase table).
+
+   ```fish
+   # step 6, on zero: open it as data-4 with the key file, read the header, test the passphrase, and resolve the UUID the way the boot will
+   set d (lsblk -dbno NAME,SIZE | awk '$1 ~ /^sd/ && $2 > 3500000000000 {print $1}'); set b (basename (readlink /sys/block/$d/bcache/dev))
+   sudo cryptsetup open --key-file /etc/keys/data.key /dev/$b data-4; and ls -l /dev/mapper/data-4
+   sudo cryptsetup luksDump /dev/$b | grep -E '^(Version|Label|UUID):|^[[:space:]]+cipher:|^  [0-9]+: luks2|Memory:'
+   sudo cryptsetup open --test-passphrase --key-slot 1 /dev/$b; and echo "the passphrase opens keyslot 1"
+   sudo findfs UUID=(sudo cryptsetup luksUUID /dev/$b)
+   grep -E '^driver.*adiantum' /proc/crypto | sort -u
+   ```
+
+   It reads right when `/dev/mapper/data-4` exists; the dump shows `Version: 2`,
+   `Label: data-luks-4`, `cipher: xchacha12,aes-adiantum-plain64`, keyslots `0: luks2`
+   and `1: luks2`, and `Memory: 262144` twice; the passphrase prompt ends with *the
+   passphrase opens keyslot 1*; findfs prints `/dev/bcache2`, the lookup the boot makes;
+   and `/proc/crypto` lists an Adiantum driver. **Note the `UUID:`** for step 8.
+   **Way back:** `sudo cryptsetup close data-4`, then step 5's.
+
+   **A header backup is optional here.** `cryptsetup luksHeaderBackup /dev/$b
+   --header-backup-file <file>` saves the 16 MiB in front of the data, which holds the
+   keyslots. The array's other copy already covers this member, so a damaged header costs a
+   second replace, not data. If one is taken, CLAUDE.md § *Backups of secret-bearing files*
+   governs it: the header with the key file opens the disk, so it never lives on `zero`
+   beside `/etc/keys`, never in the repo, `~/.infra-backups` or the backup to `three`, and
+   is kept at mode 600 off the box, with the passphrase. A header saved while the key
+   file's slot exists keeps that slot alive in the copy, so once protection is on, any
+   earlier copy is destroyed and a new one taken.
+
+7. **The copy.** `-r` reads from the other mirror, the WD Elements disk, wherever it can,
+   and from `sdb` only for a block whose other copy is bad, so the failing disk is read as
+   little as possible. Writes during the copy still go to `sdb` as well, so it stays a
+   whole copy until the replace finishes. Immich keeps running. About an hour over USB 2.
+
+   ```fish
+   # step 7, on zero: replace devid 4, sdb's bcache device, with the encrypted member, reading from the other mirror wherever it can
+   sudo btrfs replace start -r 4 /dev/mapper/data-4 /media/immich-data
+   sudo btrfs replace status -1 /media/immich-data
+   ```
+
+   Run the status line again now and then. **Nothing reboots or shuts down until step 8 has
+   installed the files.** No data is at risk: writes go to `sdb` as well, so it stays a
+   whole copy until the replace finishes. The hazard is the mount. Until step 8, nothing at
+   boot registers the new disk or opens `data-4`, and btrfs refuses to mount an array whose
+   replace target is missing, even with `sdb` there; after the replace, devid 4 itself is
+   missing. Then:
+
+   ```fish
+   # step 7, on zero: once the status reads finished: devid 4 is the mapping, sdb's device is gone, and the counters
+   sudo btrfs replace status -1 /media/immich-data
+   sudo btrfs filesystem show /media/immich-data
+   sudo btrfs device stats /media/immich-data
+   ```
+
+   It reads right when the status is finished with `0 write errs, 0 uncorr. read errs`;
+   the filesystem lists two devices, devid 3 on a `/dev/bcache` path and devid 4 on
+   `/dev/mapper/data-4`, and no `bcache1`; and every counter is 0.
+   **Way back, until it finishes:** `sudo btrfs replace cancel /media/immich-data` leaves
+   `sdb` as devid 4. A new disk that drops off the USB 2 port mid-copy ends the replace
+   the same way. After it finishes there is none, since the replace wipes `sdb`'s btrfs
+   superblock: the array is whole on the new disk and the WD Elements disk.
+
+   **If `zero` loses power or reboots between here and step 8's install,** the array comes
+   up unmounted and the box up, as always. Open the new member by hand, with the LUKS UUID
+   noted at step 6 in place of LUKS-UUID, then mount; a replace still running resumes by
+   itself at the mount:
+
+   ```fish
+   # power lost during steps 7 and 8, on zero: register the new disk with bcache, open data-4 with the key file, scan, mount, and cycle immich and syncthing
+   set d (lsblk -dbno NAME,SIZE | awk '$1 ~ /^sd/ && $2 > 3500000000000 {print $1}'); test (count $d) -eq 1; and echo /dev/$d | sudo tee /sys/fs/bcache/register; sleep 3; ls /dev/bcache*
+   set l (sudo findfs UUID=LUKS-UUID); test -n "$l"; and sudo cryptsetup open --key-file /etc/keys/data.key $l data-4; and ls -l /dev/mapper/data-4
+   sudo btrfs device scan; and sudo mount -a; and findmnt -t btrfs -o TARGET,SOURCE; and sudo btrfs replace status -1 /media/immich-data
+   cd ~/infra/hosts/zero/immich; and sudo docker compose stop; and sudo docker compose start
+   cd ~/infra/hosts/zero/syncthing; and sudo docker compose stop; and sudo docker compose start
+   ```
+
+   After the lsblk line `/dev/bcache` lists three devices (the new one registers with its
+   cache set already attached), the mapping exists, findmnt lists the `/media` mounts, and
+   the replace status reads running or finished. Then carry on from where it stopped.
+
+8. **The agent commits; the owner installs.** Send the infra agent three values, none of
+   them secret: `sdb`'s `dev.uuid` (step 2), the new disk's `dev.uuid` (step 5) and the
+   LUKS `UUID` (step 6). It commits `bcache-register` with the new disk's UUID in place of
+   `sdb`'s, not beside it, and `dmcrypt` with the LUKS UUID in place of
+   `FILL-FROM-LUKS-UUID`, both to `main`. Then:
+
+   ```fish
+   # step 8, on zero: pull the agent's commit and dry-run the three files: bcache-register's diff, dmcrypt's check opening the member with the key file, dm-crypt.conf new
+   cd ~/infra; and git pull --ff-only
+   bin/install-system-file bcache-register --allow-content-change
+   bin/install-system-file dmcrypt --allow-content-change
+   bin/install-system-file dm-crypt.conf --new
+   ```
+
+   It reads right when `bcache-register`'s diff is `sdb`'s UUID out, the new one in and the
+   `before dmcrypt btrfs-scan` order, and each ends `pre-checks on the repo copy: ok` and
+   `DRY RUN`. `dmcrypt`'s check is the boot's unlock short of the boot: findfs resolves its
+   `source=` and `cryptsetup open --test-passphrase` opens it with the key file. If it
+   refuses although step 6's open worked, the check is wrong, not the member: stop and tell
+   the agent.
+
+   ```fish
+   # step 8, on zero: install the three files, add dmcrypt to the boot runlevel, and read the order OpenRC recorded for it
+   sudo true; and bin/install-system-file bcache-register --commit --allow-content-change; and bin/install-system-file dmcrypt --commit --allow-content-change; and bin/install-system-file dm-crypt.conf --new --commit
+   sudo rc-update add dmcrypt boot
+   sudo rc-update -u; and grep "^depinfo_"(grep "_service='dmcrypt'" /run/openrc/deptree | cut -d_ -f2)"_i" /run/openrc/deptree
+   for u in (grep -oE '[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}' /etc/init.d/bcache-register); echo $u (readlink -f /dev/disk/by-uuid/$u); end
+   grep -E '^ *rc_parallel' /etc/rc.conf
+   ```
+
+   It reads right when each install ends `post-install checks: ok`, and dmcrypt's lines
+   include an `iafter` of `bcache-register` and of `modules`, and an `ibefore` of
+   `btrfs-scan`, `checkfs` and `localmount` (the CI container shows no `localmount`, which
+   OpenRC leaves out of a container; on `zero` it is there). Each of `bcache-register`'s
+   three UUIDs resolves to a disk: `sda1`, the WD Elements disk and the new disk, which is
+   the link the boot will register; **stop unless all three resolve**. `rc_parallel` prints
+   nothing or reads `NO`: the order above is for a serial start. Nothing has restarted.
+
+9. **`sdb` out of the cache set.** Put `sdb`'s backing name from step 2 (`sdb`, or its
+   partition) in place of `SDB`:
+
+   ```fish
+   # step 9, on zero: detach sdb's bcache device from the cache set and stop it, only if the array no longer names it
+   set s SDB; set o (basename (readlink /sys/class/block/$s/bcache/dev)); echo "sdb's bcache device: $o"
+   set fs (sudo btrfs filesystem show /media/immich-data); and string match -qr '/dev/(mapper/data-4|dm-[0-9]+)$' $fs; and not string match -q "*/dev/$o" $fs; and begin; echo 1 | sudo tee /sys/class/block/$s/bcache/detach; sleep 2; echo 1 | sudo tee /sys/class/block/$s/bcache/stop; end; or echo "STOP: $o was not detached"
+   printf '%s\n' $fs
+   sleep 2; ls /sys/block | grep bcache
+   ```
+
+   It detaches only when the filesystem could be read, names the mapping, and does not
+   name `sdb`'s device. It reads right when the device is `bcache1`, no `STOP` line prints,
+   and two bcache devices are left. Its data is already gone from the array, so there is nothing to undo.
+
+10. **The shutdown, the move, and the reboot test.** One shutdown does both: the new disk
+    goes into `sdb`'s bay, so the boot after it is the configuration `zero` keeps, and it
+    proves the unattended unlock, the boot order and the UUIDs at once. Everything is named
+    by UUID, so the move changes no file. Check `zero`'s live agent slots first: the dev
+    hub and the infra agent's session end here.
+
+    ```fish
+    # step 10, on zero: power off
+    sudo poweroff
+    ```
+
+    Once the Pi's light stops, switch `zero`'s Sabrent off, take `sdb` out of its bay, put
+    the new disk in it, unplug the borrowed Sabrent from `zero`, switch `zero`'s Sabrent
+    on, and power `zero` on. After a few minutes, `ssh zero`:
+
+    ```fish
+    # step 10, on zero: after the boot: dmcrypt opened the member with nobody there, the array mounted with both devices, the guards hold, Immich answers
+    rc-service dmcrypt status; ls -l /dev/mapper/data-4
+    sudo btrfs filesystem show /media/immich-data
+    findmnt -t btrfs -o TARGET,SOURCE
+    sudo btrfs device stats /media/immich-data
+    cd ~/infra; and sudo bin/check-mount-guards
+    curl -fsS http://127.0.0.1:2283/api/server/ping
+    ```
+
+    It reads right when dmcrypt is started and the mapping exists; the filesystem lists
+    two devices, one of them `/dev/mapper/data-4` (or `/dev/dm-0`, the same device); findmnt lists the three `/media` mounts
+    and `/var/lib/docker`; every counter is 0; check-mount-guards passes; and Immich
+    answers `{"res":"pong"}`. Then `ssh dev` brings the agent back, to be told how it read.
+
+    **If the array is not mounted.** The box boots and ssh answers either way: nothing on
+    the boot path needs the array, the `/media` entries carry `nofail`, and the bare
+    mountpoints are immutable, so nothing writes into them. If ssh does not answer, the
+    same blocks run at `zero`'s own console, a keyboard and the micro-HDMI port.
+    [`hosts/zero/system/README.md`](../hosts/zero/system/README.md) § *The encrypted
+    member* has the blocks: read what is there, register a missing bcache device, open
+    `data-4` with the key file or else the passphrase, then scan, mount and cycle Immich
+    and Syncthing. A boot that needed them is a fault in the order or the files, and the
+    agent fixes it before step 11.
+
+    **`mount -o degraded` is the last resort**, only when `data-4` cannot be opened by
+    either key and Immich must serve before a fix. The array would then run on the worn
+    WD Elements disk alone, with no second copy; what it writes while degraded lands in
+    unmirrored chunks that need a balance and a scrub once a second device is back; and a
+    mounted degraded array hides the fault it is working around. `-o degraded,ro` is
+    enough to copy something off.
+
+11. **The end of the slice.**
+
+    ```fish
+    # step 11, on zero: both bcache devices back to writethrough
+    for m in /sys/block/bcache*/bcache/cache_mode; echo writethrough | sudo tee $m; end; cat /sys/block/bcache*/bcache/cache_mode
+    ```
+
+    Each reads `[writethrough]`. Then `one`'s SSD back into its Sabrent, the Sabrent back
+    on `one`, and `one` powered on, so the slice ends with every box serving.
+    `sudo btrfs filesystem resize 4:max /media/immich-data` is optional: a RAID1 array of
+    a 4 TB and a 1 TB disk holds 1 TB either way, until the WD Elements disk is replaced as
+    well. `sdb` is wiped on another machine, never `zero`, where its old bcache superblock
+    could be registered again; it holds Immich's photos, unencrypted.
+
+**Checks:** dmcrypt opened `data-4` at boot with nobody there; `sudo btrfs filesystem show
+/media/immich-data` lists `/dev/mapper/data-4` and not `sdb`'s device; `sudo
+bin/check-mount-guards` passes after the reboot; Immich answers; both caches read
+`writethrough`.
+
+**Way back:** step by step above. Until step 7's replace finishes, every step is undone by
+closing the mapping, stopping the new bcache device and unplugging the disk. After it, the
+array is the new disk and the WD Elements disk, and a new disk that misbehaves is replaced
+the same way.
 
 ## Slice 3: `three` joins
 
