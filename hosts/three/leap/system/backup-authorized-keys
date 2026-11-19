@@ -4,14 +4,21 @@
 # infra-name: authorized_keys
 # infra-mode: 0644
 #
-# zero's backup key, the one key that lets the backup user in (plans/three.md § Backups).
-# Root's file in root's directory, so the backup user cannot add another. The key opens no
-# shell, terminal or forwarding (restrict), comes only from zero's tailnet address (from=),
-# and whatever the client asks for, sshd runs the rsync daemon of rsync-backup.conf, which
-# can only write into /media/mirror/incoming.
+# zero's backup key, the one key that lets the backup user in (docs/decisions.md § zero's
+# backup to three by btrfs send/receive). Root's file in root's directory, so the backup
+# user cannot add another. The key opens no shell, terminal or forwarding (restrict), comes
+# only from zero's tailnet address (from=), and whatever the client asks for, sshd runs the
+# forced command instead, with the client's command in SSH_ORIGINAL_COMMAND. zero's
+# mirror-backup asks for the name of the subvolume it is sending, immich or syncthing.
+#
+# The forced command takes that name only when it is exactly one of the two, and runs
+# mirror-receive with it through `sudo -n`, which never prompts; anything else is refused
+# before sudo runs. sudoers-backup allows those two invocations and nothing else, and
+# mirror-receive checks the name a third time. The quotes keep the name one word that the
+# shell never splits or expands.
 #
 # zero's two values, from server-create-backup-key.yml on 2026-11-18 (hosts/three/leap/README.md
 # § Before the stick): zero's tailnet address, and /root/.ssh/mirror-backup.pub, whose
 # fingerprint is SHA256:CjbPiNyKKzvTZb60xObBkwgjLWbpH6CSyq+rqXUCBI0. A new key or address
 # for zero means a new line here, then a new stick or an install-system-file on three.
-restrict,from="100.121.158.58",command="rsync --server --daemon --config=/etc/rsync-backup.conf ." ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIL+FViXrAAkhwUAvxcOInjLK0007iTUDtgZvckbhhIKa zero mirror-backup
+restrict,from="100.121.158.58",command="case \"$SSH_ORIGINAL_COMMAND\" in immich|syncthing) exec sudo -n /usr/local/sbin/mirror-receive \"$SSH_ORIGINAL_COMMAND\" ;; *) echo 'mirror-receive: refused; ask for immich or syncthing' >&2; exit 1 ;; esac" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIL+FViXrAAkhwUAvxcOInjLK0007iTUDtgZvckbhhIKa zero mirror-backup

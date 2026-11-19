@@ -111,8 +111,8 @@ sudo ~/infra/hosts/three/leap/make-mirror /dev/sdX
 
 `make-mirror` refuses a drive with partitions or any signature on it, so it never formats a
 drive in use. It writes LUKS2 with Adiantum, labelled `mirror-luks`, which
-`/etc/crypttab` names. Inside is a btrfs holding `incoming` (where zero's backup lands),
-`syncthing` and `snapshots`.
+`/etc/crypttab` names. Inside is a btrfs holding the directory `received-backups`, root's
+at mode 700, where zero's backup lands, and the subvolume `syncthing`, gavin's.
 
 ### Unlocking, after every boot
 
@@ -125,7 +125,7 @@ ssh -t three 'sudo systemctl start systemd-cryptsetup@mirror.service; and sudo s
 
 Two starts, so the mount's 5-minute wait for the device begins only once the passphrase is
 in, however long finding it takes. The mount starts Docker, which brings Syncthing up
-under its restart policy, and the snapshot and scrub timers. Until then, Docker is skipped
+under its restart policy, and the scrub timer. Until then, Docker is skipped
 by its condition, and `docker` answers that it cannot connect. A hand `mount /media/mirror`
 starts none of them: only `systemctl start` does. For a few seconds while Docker first
 starts, a new ssh connection can be refused; the simulation saw one attempt fail between
@@ -133,8 +133,7 @@ two that answered. Try again. The cause is not yet known (`docs/management-plane
 phase 9). A backup run against a locked `three`
 fails and the next one retries.
 
-To lock it again without a reboot (Docker, a running snapshot and a running scrub stop
-with the mount). The passphrase is not cached, so the next unlock asks for it again:
+To lock it again without a reboot (Docker and a running scrub stop with the mount). The passphrase is not cached, so the next unlock asks for it again:
 
 ```fish
 # lock three's array: Docker first, then the mount, then the LUKS volume; it prints
@@ -144,31 +143,45 @@ ssh -t three 'sudo systemctl stop docker.service media-mirror.mount systemd-cryp
 
 ### Snapshots and scrubs
 
-Twice a day, `mirror-snapshot` makes at most one read-only snapshot of `incoming`, named for
-the day in UTC, and keeps the newest 90. It skips a turn while the backup user has a
-process. The scrub runs monthly. A turn missed while the box was off or locked runs once
-the array is unlocked. `btrfs scrub status /media/mirror` shows the last result.
+The history is zero's own snapshots, received: `received-backups/<name>/<name>-<stamp>`, one
+directory per subvolume, `immich` and `syncthing`, each snapshot read-only and named for the
+UTC time zero took it, as `immich-2026-11-20T0400Z`. `three` takes none of its own.
+`mirror-receive` deletes a name's snapshots once they were received more than 90 days ago,
+by `three`'s clock, and never the newest. The scrub runs monthly, and a month's turn missed
+while the box was off or locked runs once the array is unlocked. `btrfs scrub status
+/media/mirror` shows the last result.
 
 ## The backup
 
-zero pushes it nightly at 04:00 (`hosts/zero/system/mirror-backup`) into `incoming`, over
-the tailnet, with a key that starts only the rsync daemon of `system/rsync-backup.conf`. That
-daemon runs as the backup user and can only write into `incoming`: it serves no file back,
-lists nothing, and confines every name and symlink to that directory. The backup user is not
-root, so each file's real owner and mode travel in an xattr (`--fake-super`), and a restore
-puts them back.
+zero sends it nightly at 04:00 (`hosts/zero/system/mirror-backup`), over the tailnet, as a
+btrfs send stream of each subvolume's new snapshot, incremental from the last one `three`
+confirmed. The key logs in as the backup user, whose forced command runs
+`system/mirror-receive` through sudo with the name zero asked for, `immich` or `syncthing`,
+and nothing else (`system/backup-authorized-keys`, `system/sudoers-backup`).
+`mirror-receive` runs `btrfs receive --chroot` into that name's directory as root, so
+owners and modes arrive as zero had them, then answers with the snapshot's name and
+received UUID, which zero checks against its own. It refuses while the array is locked, and
+deletes anything an interrupted stream left before the next receive. The backup user owns
+nothing on the array, and nothing comes back over the key but that one line.
 
-A restore from a snapshot on `three`, into a directory that is not on the array's
-`incoming`, with owners and modes as zero had them. After `ssh three`:
+Never make a received snapshot writable (`btrfs property set ... ro false`): that clears
+its received UUID, and zero's next incremental has no parent to land on. A restore is a
+reflink copy out of a snapshot, which takes no time and no space until the copy changes,
+with owners, modes and ACLs as zero had them. After `ssh three`:
 
 ```fish
-# restore Immich's library from a snapshot; --fake-super reads the kept owners, -M--super writes them
-sudo ls /media/mirror/snapshots
-sudo rsync -aHAX --numeric-ids --fake-super -M--super --mkpath /media/mirror/snapshots/2026-11-20/immich/library/ /media/mirror/restore/library/
+# restore Immich's library from one of zero's snapshots; the listing shows which there are
+sudo ls /media/mirror/received-backups/immich
+sudo mkdir -p /media/mirror/restore
+sudo cp -a --reflink=always /media/mirror/received-backups/immich/immich-2026-11-20T0400Z/data/library /media/mirror/restore/library
 ```
 
-Use a date the listing shows in place of `2026-11-20`. Getting a restore back onto zero is
-the visit runbook's.
+Use a name the listing shows in place of `immich-2026-11-20T0400Z`. The snapshot's `db` is
+Immich's Postgres directory at the same instant as its library: a copy of it starts in a
+Postgres container of the image `deployments/immich/compose.yaml` names, which recovers it
+as after a power cut. Immich's `thumbs` and `encoded-video` and Syncthing's `config` are
+nested subvolumes on zero, so they are not in the backup. Getting a restore back onto zero
+is the visit runbook's. `sudo rm -rf /media/mirror/restore` when done.
 
 ## The fan
 

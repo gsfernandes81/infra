@@ -149,10 +149,32 @@ The run then checks, each as PASS or FAIL, and any FAIL fails the job:
   refuses it a second time. The README's unlock command runs over `ssh -tt`, and
   `host/unlock.py` answers sudo's prompt and systemd's passphrase prompt as the owner
   would. `host/three-unlocked.sh` then checks the array is LUKS2 with Adiantum and mounted
-  with the container context, that the mount started Docker and both timers, that a
-  container reads and writes it, the snapshot script's three paths (a snapshot, a skipped
-  turn, the pruning to 90), and a scrub. After the reboot, the array is locked again, and
-  the same command brings it back;
+  with the container context, that `received-backups` is root's at mode 700 and the backup
+  user owns nothing there, that the mount started Docker and the scrub timer, that a
+  container reads and writes it, and a scrub. After the reboot, the array is locked again,
+  and the same command brings it back;
+- on `three`, zero's backup by btrfs send/receive (`host/three.sh` on the runner,
+  `host/three-backup.sh` on the box). The runner stands in for `zero` with a small btrfs on
+  a loop file laid out as `zero`'s array will be: `immich` holding `data`, with `thumbs` and
+  `encoded-video` nested subvolumes, and `db`, where a Postgres container writes
+  throughout; and `media-syncthing`, with `config` nested. It runs the real
+  `hosts/zero/system/mirror-backup` as root, under BusyBox's shell and applets as on Alpine,
+  pointed at the loop file, the run's key and the VM by its `MIRROR_BACKUP_*` variables,
+  which only the simulation sets. In order: with no `last-sent` and no `full`, the run
+  refuses both subvolumes, takes no snapshot, and unmounts the top level it mounted; a full
+  send arrives read-only with the runner's snapshot UUID as its received UUID, nothing of
+  the nested subvolumes arrives, and `host/tree-hash.sh` gives the same hash of every path,
+  owner, mode, size and content on both sides; an incremental carries an added and a
+  deleted file, with a stream a fraction of the full one; the key refuses every other
+  command and name, sudo and `mirror-receive` each refuse a bad name on their own, an empty
+  or junk stream is refused with nothing back, sftp reads nothing and the key forwards
+  nothing; a run against the locked array fails cleanly, keeps both parents and writes no
+  success, and the next run succeeds; a send cut mid-stream (rate-limited by `pv`, the
+  runner's ssh killed once the receive is under way) keeps the parent and writes no success,
+  and the next run deletes planted half-received subvolumes and succeeds; a reflink copy of
+  the received `db` starts in a throwaway Postgres container on `three`, recovers, and
+  answers with the 100 rows written before the snapshot; and `mirror-receive` with 0 days
+  kept deletes every snapshot but the newest, from which the next run still sends;
 - in rescue mode (`host/rescue.sh`), entered with `systemctl isolate`: gavin logs in, and
   sshd, the network, `cloudflared`, `tailscaled` and logins are up while Docker is down;
 - after a reboot, proved by a new boot id, the box checks again on its static address;
@@ -218,6 +240,8 @@ Those come in later simulations or on the bench at the visit.
 on any Linux machine with KVM, `qemu-system-x86_64`, `qemu-img`, `mke2fs` and an ssh
 client. `run-docker-store.sh` also needs Docker, btrfs-progs and sudo for one loop mount,
 and `run-host.sh` needs btrfs-progs, openssl and sudo for one loop mount, and
-`ansible-playbook` with `ansible/requirements.yml`'s collections for its deploy stage. Each writes only
-inside its work directory. Do not run them in the `infra` container: that container is on
+`ansible-playbook` with `ansible/requirements.yml`'s collections for its deploy stage.
+For `three`, `run-host.sh` also needs Docker, `pv` and `busybox`, and adds a `noauto` line
+for its loop file to the machine's `/etc/fstab`, as `zero`'s `/mnt/ext` has one. Apart from
+that line, each writes only inside its work directory. Do not run them in the `infra` container: that container is on
 `zero`, has no KVM, and would compete with Immich.

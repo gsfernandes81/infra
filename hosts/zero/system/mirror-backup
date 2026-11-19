@@ -5,66 +5,216 @@
 # infra-name: mirror-backup
 # infra-mode: 0755
 #
-# Pushes zero's backup to three, nightly at 04:00, over the tailnet (plans/three.md §
-# Backups). Root's cron runs /etc/periodic/hourly every hour and this acts only in the 04
-# hour, because the daily slot, 02:00, is when Immich writes its nightly database dump, and
-# a push then could copy a dump half-written. 04 local stays clear of an 02:00 UTC dump in
-# summer time too. `sudo /etc/periodic/hourly/mirror-backup now` runs it at once, as the
-# first push at the visit does. What goes: Immich's library, upload,
-# backups (its nightly database dumps) and profile, and zero's Syncthing share. Never the
-# live Postgres directory, which a copy mid-write leaves inconsistent, nor thumbs and
-# encoded-video, which Immich regenerates, nor Syncthing's own config, which holds zero's
+# Sends zero's backup to three, nightly at 04:00, over the tailnet, as btrfs snapshots
+# (docs/decisions.md § zero's backup to three by btrfs send/receive). Root's cron runs
+# /etc/periodic/hourly every hour and this acts only in the 04 hour, clear of Immich's
+# nightly database dump at 02:00, the daily slot. `mirror-backup now` runs it at once;
+# `mirror-backup now full` also allows a full send, which no run makes unasked: over the
+# tailnet a full send is about 120 GB.
+#
+# For each of two subvolumes at the array's top level, immich (Immich's data and its
+# Postgres directory together, so one snapshot holds both at one instant) and
+# media-syncthing (zero's Syncthing share), named immich and syncthing in their snapshots
+# and to three:
+#   1. Its parent is the snapshot named in $state/last-sent-<name>, if zero still has it.
+#      With none, and no `full`, it refuses that subvolume and goes on to the next.
+#   2. Takes a read-only snapshot, snapshots/<name>/<name>-<stamp>, the stamp being the UTC
+#      time as 2026-11-20T0400Z. The name travels with the stream, so a received snapshot
+#      says what it is on its own.
+#   3. Pipes `btrfs send [-p <parent>]` through pv, when $state/rate sets a rate, and ssh to
+#      three, asking for the name. three's mirror-receive answers with one line,
+#      `received <name>-<stamp> <received UUID>`.
+#   4. Only that line, with this snapshot's own UUID, counts. Then it writes last-sent-<name>
+#      and deletes that subvolume's snapshots beyond the newest 7, never the one just sent.
+#      Anything else deletes the new snapshot and keeps the parent, which three still has.
+# last-success is written only when both subvolumes matched; mirror-backup-age-check reads
+# it. Nested subvolumes stay out of a snapshot, and so out of the backup: Immich's thumbs
+# and encoded-video, which it regenerates, and Syncthing's config, which holds zero's
 # device key and has no business on a box abroad.
 #
-# The key, /root/.ssh/mirror-backup, can do one thing on three: write into its incoming
-# directory, through the rsync daemon its authorized_keys line starts. Files appear in place
-# only at the end of a run (--delay-updates), deletions mirror (--delete-delay), and three's
-# snapshots keep what a run overwrites or deletes. Owners and modes travel as numbers and
-# are kept on three in an xattr, since its receiving user is not root.
+# The snapshot is taken with Immich running. Postgres recovers from it as from a power cut,
+# because its data and its write-ahead log are in the same instant.
 #
-# A run against a locked three fails, and the next night retries; mirror-backup-age-check tells
-# the owner when the last good run is too old. Each run's output is in
-# /var/lib/mirror-backup/last.log; a good run writes its time to last-success.
+# The key, /root/.ssh/mirror-backup, can do one thing on three: run mirror-receive with
+# one of those two names (hosts/three/leap/system/backup-authorized-keys). A run against a
+# locked three fails, and the next night retries. Each run's output is in $state/last.log.
+#
+# To start a subvolume's chain over, after three's array is replaced or its copy has
+# expired: delete $state/last-sent-<name>, then `mirror-backup now full`.
+#
+# It needs btrfs-progs, which zero's array already needs, the openssh client, and pv only
+# when a rate is set (`apk add pv`); everything else is BusyBox. The array's top level is
+# reached through fstab's noauto entry for /mnt/ext: mounted if it is not, and unmounted
+# after only if this run mounted it.
+#
+# MIRROR_BACKUP_THREE, _PORT, _KEY, _STATE and _TOP override three's address, its ssh port,
+# the key, the state directory and the array's top level, for sim/microos/host/three.sh
+# only, which runs this script on the runner standing in for zero. Nothing on zero sets
+# them.
 set -eu
 
 # three's tailnet address, `tailscale ip -4` on three once it has joined.
-three=100.101.45.78
-key=/root/.ssh/mirror-backup
-state=/var/lib/mirror-backup
-# Read by sim/microos/host/three.sh, which pushes with exactly these.
-# --timeout, so a path that dies without a reset ends the run in 15 minutes rather than
-# hours, as three's daemon does on its side.
-rsync_opts="-aHAX --numeric-ids --delete --delete-delay --delay-updates --timeout=900"
+three=${MIRROR_BACKUP_THREE:-100.101.45.78}
+port=${MIRROR_BACKUP_PORT:-22}
+key=${MIRROR_BACKUP_KEY:-/root/.ssh/mirror-backup}
+state=${MIRROR_BACKUP_STATE:-/var/lib/mirror-backup}
+top=${MIRROR_BACKUP_TOP:-/mnt/ext}
+# Snapshots kept on zero per subvolume, the one just sent among them: a week of local
+# history, so a deleted album is a local restore.
+keep=7
 
-[ "${1-}" = now ] || [ "$(date +%H)" = 04 ] || exit 0
-case "$three" in FILL-FROM-*)
-	echo "mirror-backup: three's address is not filled in" >&2
-	exit 1
-	;;
-esac
-[ -r "$key" ] || { echo "mirror-backup: no key at $key" >&2; exit 1; }
+die() { echo "mirror-backup: $*" >&2; exit 1; }
+
+now=no
+full=no
+for a in "$@"; do
+	case "$a" in
+	now) now=yes ;;
+	full) full=yes ;;
+	*) die "usage: mirror-backup [now] [full]" ;;
+	esac
+done
+[ "$now" = yes ] || [ "$(date +%H)" = 04 ] || exit 0
+case "$three" in FILL-FROM-*) die "three's address is not filled in" ;; esac
+[ -r "$key" ] || die "no key at $key"
 install -d -m 700 "$state"
 exec 9> "$state/lock"
 flock -n 9 || { echo "mirror-backup: a run is still going" >&2; exit 0; }
 exec > "$state/last.log" 2>&1
 date
 
+# A rate in pv's terms, such as 2M for 2 MiB/s, for a send that must leave the line usable.
+# Set, it is used or the run refuses: never a full send at full speed by accident.
+rate=
+if [ -s "$state/rate" ]; then
+	rate=$(cat "$state/rate")
+	case "$rate" in
+	'' | [!0-9]* | *[!0-9KMGT]*) die "$state/rate holds '$rate', not a rate such as 2M" ;;
+	esac
+	command -v pv >/dev/null || die "$state/rate sets $rate, and pv is not installed"
+	echo "rate-limited to $rate/s by $state/rate"
+fi
+
+mounted_here=no
+unmount() {
+	if [ "$mounted_here" = yes ]; then
+		umount "$top" || echo "mirror-backup: could not unmount $top"
+	fi
+}
+trap unmount EXIT
+trap 'exit 1' HUP INT TERM
+if ! mountpoint -q "$top"; then
+	mount "$top" || die "could not mount $top"
+	mounted_here=yes
+fi
+
 # three's host key is learned at the first run and pinned from then on. The first run goes
 # over the tailnet, whose addresses WireGuard ties to each node's own key, so the answer
-# cannot come from another box.
-rsh="ssh -i $key -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$state/known_hosts"
-
-# rsync's exit 24 is "some files vanished before they could be sent", which Immich's
-# uploads in progress cause; the next run takes them.
-push() {
-	rc=0
-	# shellcheck disable=SC2086  # rsync_opts is a list of options
-	rsync $rsync_opts -e "$rsh" "$@" || rc=$?
-	[ "$rc" = 0 ] || [ "$rc" = 24 ]
+# cannot come from another box. ServerAlive ends a run whose path has died without a reset
+# after 15 minutes, rather than hours.
+to_three() {
+	ssh -i "$key" -p "$port" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=30 \
+		-o ServerAliveInterval=60 -o ServerAliveCountMax=15 \
+		-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$state/known_hosts" \
+		"backup@$three" "$1"
 }
-push /media/immich-data/library /media/immich-data/upload /media/immich-data/backups \
-	/media/immich-data/profile "backup@$three::incoming/immich/"
-push --exclude=/config/ /media/syncthing/ "backup@$three::incoming/syncthing/"
+throttle() {
+	if [ -n "$rate" ]; then pv -q -L "$rate"; else cat; fi
+}
+uuid_of() {
+	btrfs subvolume show "$1" | awk '$1 == "UUID:" { print $2; exit }'
+}
 
-date +%s > "$state/last-success"
-echo "mirror-backup: done"
+# One instant's name for both subvolumes' snapshots.
+stamp=$(date -u +%Y-%m-%dT%H%MZ)
+
+# Called in an `&&` list, where `set -e` does not reach, so every step checks its own
+# result.
+send_one() {
+	name=$1
+	sub=$top/$2
+	dir=$top/snapshots/$name
+	snap=$dir/$name-$stamp
+	snap_re="$name-[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{4}Z"
+	echo "== $name, from $sub"
+	[ -d "$sub" ] || { echo "mirror-backup: no subvolume $sub"; return 1; }
+	mkdir -p "$dir" && chmod 700 "$top/snapshots" "$dir" || return 1
+
+	parent=
+	if [ -s "$state/last-sent-$name" ]; then
+		last=$(cat "$state/last-sent-$name")
+		if ! printf '%s\n' "$last" | grep -qxE "$snap_re"; then
+			echo "mirror-backup: last-sent-$name holds '$last', not one of its snapshots' names"
+			return 1
+		fi
+		if [ -d "$dir/$last" ]; then
+			parent=$dir/$last
+		else
+			echo "the last snapshot sent, $last, is no longer on zero"
+		fi
+	fi
+	if [ -z "$parent" ] && [ "$full" != yes ]; then
+		echo "mirror-backup: $name has no parent to send from, and a full send is made only when asked for: mirror-backup now full"
+		return 1
+	fi
+	[ ! -e "$snap" ] || { echo "mirror-backup: $snap exists already; a run this minute made it"; return 1; }
+
+	btrfs subvolume snapshot -r "$sub" "$snap" || return 1
+	uuid=$(uuid_of "$snap")
+	if [ -z "$uuid" ]; then
+		echo "mirror-backup: cannot read $snap's UUID"
+		btrfs subvolume delete "$snap"
+		return 1
+	fi
+	if [ -n "$parent" ]; then
+		echo "sending $name-$stamp, UUID $uuid, incremental from ${parent##*/}"
+	else
+		echo "sending $name-$stamp, UUID $uuid, in full"
+	fi
+
+	# The UUID in three's answer is the proof, not an exit status: a stream cut anywhere
+	# leaves no answer. Each status is still logged, for whoever reads why.
+	rc=0
+	reply=$(
+		{
+			src=0
+			if [ -n "$parent" ]; then
+				btrfs send -p "$parent" "$snap" || src=$?
+			else
+				btrfs send "$snap" || src=$?
+			fi
+			echo "btrfs send exit $src" >&2
+		} | throttle | to_three "$name"
+	) || rc=$?
+	line=$(printf '%s\n' "$reply" | tail -n 1)
+	echo "three answered: ${line:-nothing} (ssh exit $rc)"
+
+	if [ "$line" = "received $name-$stamp $uuid" ]; then
+		echo "$name-$stamp" > "$state/last-sent-$name.new" &&
+			mv "$state/last-sent-$name.new" "$state/last-sent-$name" || return 1
+		# Stamps sort as times, newest first here; the first $keep stay.
+		# shellcheck disable=SC2010  # the names are this script's own stamps
+		ls -1 "$dir" | grep -xE "$snap_re" | sort -r |
+			awk -v k="$keep" 'NR > k' | while read -r old; do
+				[ "$old" = "$name-$stamp" ] && continue
+				echo "pruning $old"
+				btrfs subvolume delete "$dir/$old"
+			done
+		return 0
+	fi
+	echo "mirror-backup: three did not confirm $name-$stamp; deleting it, and keeping ${parent:-no parent}"
+	btrfs subvolume delete "$snap"
+	return 1
+}
+
+ok=0
+send_one immich immich && ok=$((ok + 1))
+send_one syncthing media-syncthing && ok=$((ok + 1))
+date
+if [ "$ok" -eq 2 ]; then
+	date +%s > "$state/last-success"
+	echo "mirror-backup: done"
+else
+	echo "mirror-backup: $((2 - ok)) of 2 subvolumes not sent; last-success not written"
+	exit 1
+fi

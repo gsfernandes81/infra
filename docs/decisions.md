@@ -1990,6 +1990,12 @@ alike.
 
 ## `three` is the off-site backup: rsync from `zero`, snapshots on `three`
 
+⚠︎SUPERSEDED IN PART 2026-11-19 by *`zero`'s backup to `three` by btrfs send/receive*
+below: the transfer is `btrfs send` of `zero`'s snapshots, not rsync, and `three` takes no
+snapshots of its own. The first bullet's exception, push not pull, LUKS with Adiantum and
+Syncthing's identity inside the volume all stand; so does rsync over Syncthing's untrusted
+device, now as send/receive over it.
+
 **Decided 2026-11-03**, the owner's call. The design is in
 [`plans/three.md`](../plans/three.md) § *Backups* and § *Encryption*; this records why.
 
@@ -2186,10 +2192,18 @@ writing `hosts/three/leap/` and are proven by the `host` job's `three` run.
   first simulated plan showed a host left out of it is dropped without a word.
 - **Docker's store stays on the SD card.** Only Syncthing's data and identity need the
   encryption, and Docker runs only once the array is unlocked.
-- **The newest 90 daily snapshots are kept**, a default the owner can change in
-  `mirror-snapshot`: three months to notice a bad overwrite from `zero`.
+- ⚠︎SUPERSEDED 2026-11-19 by the send/receive section below, where `three`'s snapshot
+  timer is gone and `mirror-receive` keeps 90 days of received snapshots. **The newest 90
+  daily snapshots are kept**, a default the owner can change in `mirror-snapshot`: three
+  months to notice a bad overwrite from `zero`.
 
 ## `zero`'s backup to `three`: rsync's own daemon behind the key, owners in an xattr
+
+⚠︎SUPERSEDED IN PART 2026-11-19 by *`zero`'s backup to `three` by btrfs send/receive*
+below. Gone: the rsync daemon behind the key, owners in an xattr, the `.~tmp~` clean-up.
+Standing: the key line waiting for zero's values, the pinned host key, the 04:00 run from
+`/etc/periodic/hourly`, a lock that really locks, Syncthing's config left out, and the
+alert's URL in root's file.
 
 **Decided 2026-11-04.** The first point was left to the infra agent by the owner, the
 second is the owner's call; the `host` job's `three` run proves both.
@@ -2590,6 +2604,70 @@ Alpine copies for `one` too, since `one` keeps both.
   read or write `hosts/<host>/system/`, so each first imports `_alpine-only.yml`, which
   stops on a `leap/MOVED`. Porting them was set aside: a Leap host gets its first tunnel
   from `server-create-host-tunnel.yml`, and no move to a second tunnel is planned.
+
+## `zero`'s backup to `three` by btrfs send/receive
+
+**Decided 2026-11-19**, the owner's calls, from
+[`plans/three-send-receive.md`](../plans/three-send-receive.md), which keeps the move on
+`zero` until it is done. It replaces the rsync push of 2026-11-03 and 2026-11-04 (above). The
+receive side, the send side and the simulation's seven checks were built on the branch
+`send-receive`.
+
+- **Send/receive, not rsync.** rsync copies a live tree file by file, so Immich's library
+  and its database reach `three` at different moments, which Immich's backup docs warn
+  against, and the live Postgres directory cannot be copied at all. The rsync design's
+  edges were all at the join: staged half-files, a snapshot timer that must skip a running
+  push, owners kept in an xattr. A read-only snapshot is one instant; `btrfs send` carries
+  it whole, and each later send only what changed.
+- **Immich's data and database become one subvolume on `zero`, `immich`**, because btrfs
+  snapshots one subvolume at a time. Postgres recovers from such a snapshot as from a power
+  cut, since its data and write-ahead log are in the same instant; the simulation restores
+  one, and Slice 4 does once on the real data. What must stay out becomes a nested
+  subvolume, which its parent's snapshot leaves out: Immich's `thumbs` and `encoded-video`,
+  which Immich regenerates, and Syncthing's `config`, which holds `zero`'s device key.
+- **Receive runs as root, confined three ways.** `btrfs receive` creates subvolumes and sets
+  owners, which only root can. The key keeps `restrict` and `zero`'s tailnet address; its
+  forced command takes the name zero asks for only when it is exactly `immich` or
+  `syncthing`, and runs `sudo -n /usr/local/sbin/mirror-receive <name>`. sudoers allows
+  those two invocations and nothing else, with a `!ALL` against Leap's own `ALL ALL=(ALL)
+  ALL`. The script checks the name again and receives with `--chroot`, which confines every
+  path in the stream. A compromised `zero` can send new snapshots, junk included, and fill
+  the array; it cannot change or delete a received snapshot, read anything back, or run
+  anything else.
+- **The proof of a send is `three`'s answer, not an exit status.** `mirror-receive` prints
+  `received <name>-<stamp> <received UUID>`, and only that line, with the local snapshot's
+  own UUID, makes `zero` record the snapshot as sent. Anything else deletes the new snapshot
+  and keeps the parent.
+- **The parent rule.** The newest snapshot that reached `three` survives on both sides until
+  the next send succeeds. `zero` keeps its newest 7 per subvolume, so a deleted album is a
+  local restore. `three` deletes received snapshots older than 90 days by their creation
+  time on its own clock, never by name or count, and never the newest, so a compromised
+  `zero` cannot push history out by sending many snapshots or misnamed ones. The 90 days stay
+  open to adjustment.
+- **Half-received subvolumes are deleted, never resumed.** A stream cannot resume. A cut
+  stream leaves a subvolume that is writable or has no received UUID; `mirror-receive`
+  deletes it when its receive fails, and again before every receive, for one killed outright.
+  Each subvolume is its own stream, so a cut costs one.
+- **No full send unasked.** With no parent, `mirror-backup` refuses that subvolume unless
+  run as `mirror-backup now full`: over the tailnet a full send is about 120 GB. A rate in
+  `/var/lib/mirror-backup/rate` sends through `pv -q -L`, and a rate set with no `pv`
+  refuses rather than send at full speed.
+- **Names:** snapshots are `<name>-<stamp>`, the stamp the UTC time as `2026-11-20T0400Z`:
+  ISO 8601 joins date and time with `T` alone, and the time drops the colons file names do
+  badly. They live in `snapshots/<name>/` on `zero` and `received-backups/<name>/` on
+  `three`, one directory per subvolume. `received-backups` is root's, mode 700; the backup
+  user owns nothing on the array.
+- **Send stream protocol 1, the default**, because `zero` runs Alpine and `three` Leap, on
+  different kernels and btrfs-progs; the simulation crosses the same kind of gap. Re-checked
+  when `zero` moves to Leap.
+- **Gone:** the rsync daemon config, `three`'s own snapshot timer and service (the received
+  snapshots are the history), and the rsync parts of `mirror-backup`. rsync stays installed
+  for the move's checks and for restores. `mirror-backup-age-check` is unchanged and reads
+  the new `last-success`, written only when both subvolumes were confirmed.
+- **The simulation runs `zero`'s real `mirror-backup`** from the runner, under BusyBox's
+  shell and applets as on Alpine, against a loop-file btrfs laid out as `zero`'s array will
+  be. Its paths and `three`'s address are overridden by `MIRROR_BACKUP_*` variables that
+  only the simulation sets.
 
 ## The lesson worth keeping
 

@@ -1,12 +1,19 @@
 # `zero`'s backup to `three` by btrfs send/receive
 
-A proposal of 2026-11-19; the owner answered its questions the same day (below). It replaces
-the rsync push in [`three.md`](three.md) § Backups. `mirror-backup` and
-`mirror-backup-age-check` were removed from `zero` on 2026-11-18 to wait for it, so `zero`
-has no off-site copy until the first send below. Draft PR #22 (`three-array-play`, the
-array as a play) is parked until this layout is settled. When the owner approves it and it
-is built, its reasoning moves to [`docs/decisions.md`](../docs/decisions.md), the rsync
-rows there are marked superseded, and this file is deleted.
+A proposal of 2026-11-19; the owner answered its questions the same day (below) and
+approved it. It replaces the rsync push in [`three.md`](three.md) § Backups. `mirror-backup`
+and `mirror-backup-age-check` were removed from `zero` on 2026-11-18 to wait for it, so
+`zero` has no off-site copy until the first send below. Draft PR #22 (`three-array-play`,
+the array as a play) is parked until this layout is settled.
+
+**Built on the branch `send-receive`:** the receive side on `three` (§ The receive side,
+§ What is removed, for `three`), the send side on `zero` as tracked files, not installed
+(§ The send side), and the simulation's seven checks (§ How the simulation proves it).
+Its reasoning is in [`docs/decisions.md`](../docs/decisions.md) § *`zero`'s backup to
+`three` by btrfs send/receive*, and the rsync rows there are marked superseded. **Still
+open:** the move on `zero` (§ The layout on `zero`, and the move) with the path changes
+listed in § What is removed, the installs on both boxes, the first send, Slice 4, and PR
+#22's layout. This file is deleted once those are done.
 
 ## Why
 

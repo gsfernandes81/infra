@@ -87,46 +87,40 @@ manual updates: the owner reboots, then unlocks.
 - While unlocked and running, the data is readable on the box. Encryption protects it
   powered off and after a reboot, not while it serves.
 
-## Backups: rsync from `zero`, snapshots on `three`
+## Backups: btrfs send/receive from `zero`
 
-`zero` pushes the backup to `three` with rsync over Tailscale, which both join for it, by
-an exception the owner granted on 2026-11-03 to the rule that no box holds a key to
-another ([`decisions.md`](../docs/decisions.md)). The key is made nearly powerless:
+`zero` sends its backup to `three` as btrfs snapshots over Tailscale, which both join for
+it, by an exception the owner granted on 2026-11-03 to the rule that no box holds a key to
+another. The rsync push first planned here was replaced on 2026-11-19; the reasons are in
+[`decisions.md`](../docs/decisions.md) § *`zero`'s backup to `three` by btrfs
+send/receive*, and the move on `zero` that it waits for is
+[`three-send-receive.md`](three-send-receive.md).
 
-- A `backup` user on `three` with no sudo and no password, whose shell runs only its key's
-  forced command (sshd runs that command through the user's shell, so it is a real one;
-  `decisions.md`). Its one `authorized_keys` line is
-  `restrict,from="<zero's tailnet address>",command="rsync --server --daemon
-  --config=/etc/rsync-backup.conf ."`: write-only, one directory, no forwarding, no
-  terminal, only from `zero` (`rrsync` was the first plan; openSUSE does not ship it,
-  `decisions.md`). Owners and modes are kept in an xattr, since the user cannot chown.
-- `three` takes its own daily snapshots of that directory, as root, read-only. The backup
-  user cannot touch them. A compromised `zero` could at worst overwrite the current copy;
-  every earlier snapshot survives.
-- On `zero` the key is a root-only file used by one nightly cron job (`zero` stays on
-  Alpine): `rsync -aHAX --numeric-ids --delete --delete-delay --delay-updates`. Files
-  appear in place only at the end of a run, deletions mirror, and the snapshots keep
-  history.
-- `three`'s snapshot timer skips its turn while the backup user's rsync is running, so no
-  snapshot catches half a run.
+- Nightly at 04:00, `zero` takes a read-only snapshot of each of two subvolumes, `immich`
+  (Immich's data and its Postgres directory, at one instant) and `media-syncthing`, and
+  sends it with `btrfs send`, incremental from the last snapshot `three` confirmed
+  (`hosts/zero/system/mirror-backup`). Immich's `thumbs` and `encoded-video` and
+  Syncthing's `config` are nested subvolumes, so they stay out.
+- On `three`, the key's forced command runs one reviewed script through sudo,
+  `mirror-receive`, which receives with `--chroot` into
+  `received-backups/<name>/<name>-<stamp>`, root's, and answers with the snapshot's
+  received UUID. The `backup` user is only the login and owns nothing on the array. A
+  compromised `zero` can add snapshots but cannot change, delete or read back the ones there.
+- The received snapshots are the history: `three` keeps 90 days of them, never its newest,
+  and takes none of its own. `zero` keeps its newest 7.
 - Against a locked `three`, a run fails and the next one retries. A check on `zero` tells
-  the owner (ntfy) when the last good run is older than a few days, which also covers a
+  the owner (ntfy) when the last good run is older than three days, which also covers a
   forgotten unlock.
 
-What is backed up: Immich's `library`, `upload`, `backups` (its nightly database dumps)
-and `profile`, about 93 G on 2026-11-02, and `zero`'s Syncthing share, 28 G. Never the
-live Postgres directory, which a copy mid-write leaves inconsistent; a restore is the
-library plus the latest dump. `thumbs` and `encoded-video` are left out, because Immich
-regenerates them.
+About 93 G for Immich and 28 G for Syncthing on 2026-11-02. The first full send goes over
+the LAN while `three` is still in the UK if it is ready in time, otherwise over the tailnet
+later, rate-limited. A restore from a received snapshot is tested once, as Slice 4.
 
 Push, not pull: pulling would put a key that reads `zero`'s data on the box that sits
 unattended in Singapore. Syncthing's encrypted untrusted-device mode was considered and
 set aside: still labelled beta, about twenty open issues specific to it, among them a
 share that never reaches 100 % after deletes (#8914, open since 2023) and deletes that do
 not propagate (#10528).
-
-The owner seeds the first backup over the LAN while `three` is still in the UK, and tests
-a restore from a snapshot there.
 
 ## Syncthing on `three`, for access from Asia
 

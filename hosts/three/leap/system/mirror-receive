@@ -1,0 +1,133 @@
+#!/bin/bash
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /usr/local/sbin
+# infra-name: mirror-receive
+# infra-mode: 0755
+#
+# Receives one of zero's nightly snapshots, as a btrfs send stream on stdin, into
+# /media/mirror/received-backups/<name>/ (docs/decisions.md § zero's backup to three by
+# btrfs send/receive). The one thing zero's backup key can run: its forced command
+# (backup-authorized-keys) passes the name zero asked for to `sudo -n` this script, and
+# sudoers (sudoers-backup) allows it with the name immich or syncthing and nothing else.
+# Root, because btrfs receive creates subvolumes and sets owners.
+#
+# In order, and it stops at the first refusal:
+#   1. Refuses unless the array is mounted. Against a locked three, zero's run fails and
+#      the next night retries.
+#   2. Refuses a name not on its list, which sudoers has already checked.
+#   3. One receive at a time.
+#   4. Deletes what an interrupted stream left in that name's directory: a subvolume that
+#      is writable or has no received UUID. A finished receive is always both read-only
+#      and received. A stream that fails while this script still runs is cleaned up at
+#      once (step 6); this step is for one whose receive was killed outright, by a power
+#      cut or the OOM killer.
+#   5. Receives with --chroot, which confines every path in the stream to the directory,
+#      and -e, which ends at the stream's end marker.
+#   6. Checks that the receive succeeded and that exactly one subvolume arrived, named
+#      <name>-<stamp> as zero names them, read-only, with a received UUID. Otherwise
+#      whatever arrived, a cut stream's half included, is deleted and the run refused.
+#   7. Prints `received <name>-<stamp> <received UUID>` on stdout, the one line zero
+#      compares with its own snapshot's UUID; everything else goes to stderr.
+#   8. Deletes that name's snapshots created more than 90 days ago, never the one just
+#      received. The age is the subvolume's creation time on three's clock, never its name
+#      or a count, so a compromised zero cannot push history out by sending many
+#      snapshots, or ones with misleading names.
+#
+# Never make a received snapshot writable (`btrfs property set ... ro false`): that clears
+# its received UUID and ends the chain zero's incremental sends hang from. A restore is a
+# reflink copy out of it (hosts/three/leap/README.md § The backup).
+#
+# MIRROR_RECEIVE_KEEP_DAYS overrides the 90 days, for sim/microos only, which forces it to
+# 0 to watch the pruning. Nothing zero sends can set it: sshd accepts no environment from
+# the key, and sudo's env_reset clears it before this runs.
+set -euo pipefail
+
+top=/media/mirror
+base=$top/received-backups
+keep_days=${MIRROR_RECEIVE_KEEP_DAYS:-90}
+
+die() { echo "mirror-receive: $*" >&2; exit 1; }
+say() { echo "mirror-receive: $*" >&2; }
+
+[ $# -eq 1 ] || die "usage: mirror-receive immich|syncthing"
+name=$1
+case "$name" in
+immich | syncthing) ;;
+*) die "refused: '$name' is not a name this receives" ;;
+esac
+case "$keep_days" in
+'' | *[!0-9]*) die "MIRROR_RECEIVE_KEEP_DAYS must be a whole number of days" ;;
+esac
+[ "$(id -u)" -eq 0 ] || die "run as root, through sudo"
+mountpoint -q "$top" || die "$top is not mounted: the array is locked"
+# The layout is the array's own (make-mirror), so a missing or loosened one is refused
+# rather than made here.
+[ -d "$base" ] || die "no $base on the array"
+[ "$(stat -c '%U %a' "$base")" = "root 700" ] || die "$base is $(stat -c '%U %a' "$base"), not root 700"
+dir=$base/$name
+install -d -m 700 "$dir"
+
+# A minute's grace, for a receive whose stream has just been cut and is still ending.
+exec 9> /run/lock/mirror-receive
+flock -w 60 9 || die "a receive is still going"
+
+# Prints "<ro> <received UUID>" for a subvolume: true or false, and - for none.
+state_of() {
+	local ro ruuid
+	ro=$(btrfs property get -ts "$1" ro) || return 1
+	ruuid=$(btrfs subvolume show "$1" | awk '$1 == "Received" && $2 == "UUID:" { print $3 }')
+	echo "${ro#ro=} ${ruuid:--}"
+}
+
+shopt -s nullglob
+for s in "$dir"/*; do
+	if ! st=$(state_of "$s" 2>/dev/null); then
+		die "$s is not a subvolume; only this script writes here, so it is left for a person to look at"
+	fi
+	if [ "${st% *}" != true ] || [ "${st#* }" = - ]; then
+		say "deleting $(basename "$s"), left by an interrupted receive (read-only: ${st% *}, received UUID: ${st#* })"
+		btrfs subvolume delete "$s" >&2
+	fi
+done
+
+# What was there before, by glob rather than ls, so a name the stream chose cannot split
+# into two.
+declare -A had=()
+for s in "$dir"/*; do had[${s##*/}]=1; done
+rc=0
+btrfs receive --chroot -e "$dir" >&2 || rc=$?
+new=()
+for s in "$dir"/*; do
+	[ -n "${had[${s##*/}]-}" ] || new+=("${s##*/}")
+done
+
+# Whatever arrived is deleted if the stream failed or is not what zero sends.
+refuse() {
+	local n
+	for n in "${new[@]}"; do
+		btrfs subvolume delete "$dir/$n" >&2 || true
+	done
+	die "$*"
+}
+[ "$rc" -eq 0 ] || refuse "btrfs receive failed (exit $rc)"
+[ "${#new[@]}" -eq 1 ] || refuse "expected one new subvolume, found ${#new[@]}: ${new[*]-none}"
+got=${new[0]}
+[[ "$got" =~ ^$name-[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{4}Z$ ]] || refuse "$got is not named $name-<stamp>"
+st=$(state_of "$dir/$got") || refuse "$got is not a subvolume"
+[ "${st% *}" = true ] || refuse "$got is not read-only"
+ruuid=${st#* }
+[ "$ruuid" != - ] || refuse "$got has no received UUID"
+echo "received $got $ruuid"
+
+# Creation time, as `btrfs subvolume show` prints it on three's clock.
+cutoff=$(($(date +%s) - keep_days * 86400))
+for s in "$dir"/*; do
+	[ "$(basename "$s")" = "$got" ] && continue
+	created=$(btrfs subvolume show "$s" | sed -n 's/^[[:space:]]*Creation time:[[:space:]]*//p')
+	t=$(date -d "$created" +%s) || die "cannot read when $s was created: '$created'"
+	if [ "$t" -lt "$cutoff" ]; then
+		say "pruning $(basename "$s"), created $created"
+		btrfs subvolume delete "$s" >&2
+	fi
+done

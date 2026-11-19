@@ -1,7 +1,8 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2016  # the checks are shell code for sh -c, quoted on purpose
 # three's own checks, appended to checks.sh by run-host.sh, so check is defined: the array,
-# locked as every boot leaves it, and what waits for it; the backup user; Wi-Fi; firewalld.
+# locked as every boot leaves it, and what waits for it; the backup user, its key and its
+# sudo; Wi-Fi; firewalld.
 # three-unlocked.sh checks the array once it is unlocked.
 
 echo "-- the array, locked as every boot leaves it"
@@ -23,11 +24,11 @@ check "Docker was skipped at boot by its condition, not failed" sh -c '
 	[ "$(systemctl show -p ActiveState --value docker)" = inactive ] &&
 	[ "$(systemctl show -p ConditionResult --value docker)" = no ] &&
 	[ -n "$(systemctl show -p ConditionTimestamp --value docker)" ]'
-check "the mount starts Docker and both timers" sh -c '
+check "the mount starts Docker and the scrub timer" sh -c '
 	w=$(systemctl show -p Wants --value media-mirror.mount); echo "$w"
-	for u in docker.service mirror-snapshot.timer mirror-scrub.timer; do echo "$w" | grep -qw "$u" || exit 1; done'
-check "the timers wait for the mount, not started at boot" sh -c '
-	! systemctl is-active --quiet mirror-snapshot.timer && ! systemctl is-active --quiet mirror-scrub.timer'
+	for u in docker.service mirror-scrub.timer; do echo "$w" | grep -qw "$u" || exit 1; done'
+check "the scrub timer waits for the mount, not started at boot" sh -c '
+	! systemctl is-active --quiet mirror-scrub.timer'
 # Leap's docker.socket is BindsTo=docker.service; enabled, a client's connection would start
 # Docker by another road, so a preset that enables it should show here.
 check "docker.socket is disabled and idle" sh -c '
@@ -40,10 +41,19 @@ check "backup has a shell for its forced command, and no password" sh -c '
 	passwd -S backup | tee /dev/stderr | grep -qE "^backup L"'
 check "its home and .ssh are root's, so it cannot change its keys" sh -c '
 	stat -c "%U %a %n" /home/backup /home/backup/.ssh | tee /dev/stderr | grep -v "^root 755 " | grep -q . && exit 1 || exit 0'
-check "its one key is root's, restricted, and starts only the write-only daemon" sh -c '
-	f=/home/backup/.ssh/authorized_keys; stat -c "%U %a" "$f"; grep -v "^#" "$f" | cut -c1-140
+check "its one key is root's, restricted, and runs only mirror-receive through sudo" sh -c '
+	f=/home/backup/.ssh/authorized_keys; stat -c "%U %a" "$f"; grep -v "^#" "$f" | cut -c1-200
 	[ "$(stat -c "%U %a" "$f")" = "root 644" ] && [ "$(grep -vc "^#" "$f")" = 1 ] &&
-	grep -v "^#" "$f" | grep -q "^restrict,from=\"[^\"]*\",command=\"rsync --server --daemon --config=/etc/rsync-backup.conf \.\" "'
+	grep -v "^#" "$f" | grep -q "^restrict,from=\"[^\"]*\",command=\"case " &&
+	grep -v "^#" "$f" | grep -qF "in immich|syncthing) exec sudo -n /usr/local/sbin/mirror-receive \\\"\$SSH_ORIGINAL_COMMAND\\\" ;;"'
+check "its sudoers file is root's, 0440, and passes visudo" sh -c '
+	f=/etc/sudoers.d/60-backup; stat -c "%U %a" "$f"
+	[ "$(stat -c "%U %a" "$f")" = "root 440" ] && visudo -cf "$f"'
+check "mirror-receive is installed, root's, 0755" sh -c '
+	f=/usr/local/sbin/mirror-receive; stat -c "%U %a" "$f"; [ "$(stat -c "%U %a" "$f")" = "root 755" ]'
+check "the rsync daemon config and the snapshot timer are gone" sh -c '
+	! test -e /etc/rsync-backup.conf && ! test -e /usr/local/sbin/mirror-snapshot &&
+	! systemctl cat mirror-snapshot.timer mirror-snapshot.service >/dev/null 2>&1'
 
 echo "-- networks"
 check "the DHCP profile for Singapore waits below the static one" sh -c '

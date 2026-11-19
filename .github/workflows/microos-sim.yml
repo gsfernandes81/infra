@@ -267,10 +267,12 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Install qemu and btrfs-progs
+      - name: Install qemu, btrfs-progs, and what the runner needs to stand in for zero
         run: |
+          # pv and busybox for three's run, where the runner sends zero's backup with zero's
+          # own mirror-backup, rate-limited by pv, under BusyBox as on Alpine.
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils btrfs-progs
+          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils btrfs-progs pv busybox
 
       - name: Install ansible-core and the collections the deploy play uses
         run: |

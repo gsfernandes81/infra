@@ -1,0 +1,17 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /etc/sudoers.d
+# infra-name: 60-backup
+# infra-mode: 0440
+#
+# The backup user may run mirror-receive as root, with the name immich or syncthing, with
+# no password, and nothing else (docs/decisions.md § zero's backup to three by btrfs
+# send/receive). Its key's forced command (backup-authorized-keys) runs exactly this, with
+# `sudo -n`. sudo matches the arguments exactly, so a name off the list never reaches the
+# script, which checks it again.
+#
+# The !ALL line is for Leap's own `ALL ALL=(ALL) ALL` with targetpw, which would otherwise
+# let any user, this one included, run anything with root's password. sudo takes the last
+# rule that matches, so the two below still allow mirror-receive.
+backup ALL=(ALL) !ALL
+backup ALL=(root) NOPASSWD: /usr/local/sbin/mirror-receive immich, /usr/local/sbin/mirror-receive syncthing

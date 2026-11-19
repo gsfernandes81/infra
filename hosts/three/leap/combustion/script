@@ -52,12 +52,13 @@ set_root_password
 make_gavin "$gavin_uid" "$gavin_gid"
 install_host_keys
 
-# zero's backup arrives as this user, by one authorized_keys line that allows only an rsync
-# writing into /media/mirror/incoming (plans/three.md § Backups); the line itself comes
-# with zero's key. A real shell, because sshd runs a key's forced command through the
-# user's shell, so nologin would refuse the push too; the key's restrictions are what keep
-# it from being used as one. No password. Its home and .ssh are root's, so the user cannot
-# change the keys that let it in.
+# zero's backup logs in as this user, by one authorized_keys line whose forced command can
+# only run mirror-receive through sudo, with one of two names (backup-authorized-keys,
+# sudoers-backup); the line itself comes with zero's key. The user owns nothing on the
+# array: what arrives is root's. A real shell, because sshd runs a key's forced command
+# through the user's shell, so nologin would refuse the backup too; the key's restrictions
+# are what keep it from being used as one. No password. Its home and .ssh are root's, so
+# the user cannot change the keys that let it in.
 id backup >/dev/null 2>&1 && die "a backup user exists already in this image"
 useradd --system --user-group --no-create-home --home-dir /home/backup --shell /bin/bash \
 	--comment "zero's backup push" backup
