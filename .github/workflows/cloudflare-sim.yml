@@ -1,7 +1,7 @@
 name: cloudflare-sim
 
 # Runs three plays end to end against a stand-in for Cloudflare's API (sim/cloudflare/), so
-# each is tested with no Cloudflare account. Every check is named PASS or FAIL in the log,
+# each is tested with no Cloudflare account, and the Access tasks a fourth shares. Every check is named PASS or FAIL in the log,
 # and any FAIL fails the job.
 #
 #   host-tunnel        server-create-host-tunnel.yml, with the runner as a made-up new
@@ -12,15 +12,23 @@ name: cloudflare-sim
 #                      run, a re-run, the undo, and a gate that never takes.
 #   browser-login      server-create-browser-login.yml for syncthing-three on `three`: the
 #                      refusals, a dry run, a real run with the login written before the
-#                      CNAME, a re-run, a refused Access write, and a proof that fails
-#                      with the hostname open (the CNAME deleted) or not answering (kept).
+#                      CNAME, a re-run that writes no Access, hand changes to each field
+#                      the login sets, each repaired by one write, a refused Access write,
+#                      and a proof that fails with the hostname open (the CNAME deleted)
+#                      or not answering (kept).
+#   access-pair        _cf-access-app.yml imported twice as server-create-deployment-
+#                      tunnel.yml imports it, a login and a no-login path: a dry run, a
+#                      first run, a re-run that writes nothing, hand changes repaired (the
+#                      no-login path widened among them), and an unreadable application.
 #
 # WHAT IT CANNOT CHECK, so nobody reads a green run as more: Cloudflare's real API (the
-# stand-in answers in its envelope, with the fields the plays read, and no more), the real
-# edge (no connector runs, and the stand-in answers the Access probes), ssh through a gate
-# (the ssh probe is `true`), the yes at the Access play's prompt (an extra var), a real
-# login through the browser login, and a real host over ssh (the runner is the host,
-# through a local connection).
+# stand-in answers in its envelope, with the fields the plays read, plus, on an Access
+# application or its policy, extra fields and forms of its own for the compare to survive,
+# which are not a record of Cloudflare's), a deployment's own play (access-pair drives only
+# its Access imports), the real edge (no connector runs, and the stand-in answers the
+# Access probes), ssh through a gate (the ssh probe is `true`), the yes at the Access
+# play's prompt (an extra var), a real login through the browser login, and a real host
+# over ssh (the runner is the host, through a local connection).
 
 on:
   push:
@@ -34,6 +42,7 @@ on:
       - 'ansible/playbooks/_cf-dns.yml'
       - 'ansible/playbooks/_cf-access-app.yml'
       - 'ansible/playbooks/_cf-access-emails.yml'
+      - 'ansible/playbooks/server-create-deployment-tunnel.yml'
       - 'hosts/*/leap/MOVED'
       - '.github/workflows/cloudflare-sim.yml'
   pull_request:
@@ -47,6 +56,7 @@ on:
       - 'ansible/playbooks/_cf-dns.yml'
       - 'ansible/playbooks/_cf-access-app.yml'
       - 'ansible/playbooks/_cf-access-emails.yml'
+      - 'ansible/playbooks/server-create-deployment-tunnel.yml'
       - 'hosts/*/leap/MOVED'
       - '.github/workflows/cloudflare-sim.yml'
   workflow_dispatch:
@@ -100,3 +110,17 @@ jobs:
 
       - name: Run the play against the stand-in
         run: sim/cloudflare/run-browser-login.sh
+
+  access-pair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ansible-core
+        run: |
+          pipx install ansible-core
+          ansible --version
+
+      - name: Run the shared Access tasks against the stand-in
+        run: sim/cloudflare/run-access-pair.sh

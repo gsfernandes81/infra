@@ -5,12 +5,55 @@
 # server-create-browser-login.yml, for the login on a browser hostname on a host's own
 # tunnel. Written once so a fix lands once.
 #
+# READ, COMPARE, WRITE ONLY WHAT DIFFERS. The application and its policy are each read and
+# compared with what this file sets, and written only when a field it sets differs, so a
+# converged run writes nothing and reports nothing changed. Until 2026-11-19 both were PUT
+# on every run and always reported changed; docs/decisions.md § "Sidecar, not baked-in"
+# has the row on why that changed.
+#
+# The compare is a SUBSET compare: only the fields below, never the whole object, because
+# Cloudflare adds its own ids, timestamps and defaults to what it returns. It is exact on
+# every field it covers, and normalises only where the two forms mean the same thing:
+#   application  name, type                  exact
+#                domain                      the hostname part lower-cased (DNS ignores
+#                                            case), the path exact
+#                destinations,               every public destinations[].uri and every
+#                self_hosted_domains         self_hosted_domains entry, hostname part
+#                                            lower-cased, as a set, must be exactly
+#                                            {domain}; a destination of any other type
+#                                            differs; both absent or empty is fine
+#                session_duration            as a length of time, so 24h, 1440m and
+#                                            24h0m0s are one value; unparseable is exact
+#                auto_redirect_to_identity,  false; absent counts as false, the documented
+#                options_preflight_bypass    default
+#                app_launcher_visible        false; absent DIFFERS, because the documented
+#                                            default is true while an omitted false would
+#                                            also read as absent
+#                allowed_idps                empty, as _dev-container-tunnel.yml also
+#                                            sends it; absent counts as empty
+#   policy       name, decision              exact
+#                include                     as a set: order and repeats ignored, each
+#                                            rule compared whole and exact
+#                exclude, require            empty; absent counts as empty
+# A false "differs" only costs a write, as before; a false "same" would leave a wrong
+# login in place, which is why nothing else is normalised. Everything this file does not
+# set is Cloudflare's or the dashboard's: a field set by hand outside this list
+# (enable_binding_cookie, say) survives a run that writes nothing; a write still PUTs the
+# application whole.
+#
 # Every write follows CLAUDE.md § Verifying changes for a no_log call that can be refused:
 # failed_when: false, print Cloudflare's errors, assert. The assert reads `success` as well
-# as the status, because Cloudflare answers 200 with success:false. And the policy is READ
-# BACK after it is written: the application is PUT whole on every run, and whether a PUT
-# that names no `policies` keeps app-scoped ones attached is Cloudflare's behaviour, not
-# something a fake API settles — so the end state is proved, not inferred.
+# as the status, because Cloudflare answers 200 with success:false. After an application
+# write the application is READ BACK and compared again: a field this file sends that still
+# differs stops the run; a field Cloudflare leaves out of its answer, which cannot be
+# proved either way, is printed instead, and the next run will write again. A read that
+# answers anything but a 200 with success and an application says so, and is never
+# compared as an application with every field absent.
+#
+# And the policies are READ BACK on every run, written or not: the application is PUT
+# whole when it differs, and whether a PUT that names no `policies` keeps app-scoped ones
+# attached is Cloudflare's behaviour, not something a fake API settles — so the end state
+# is proved, not inferred. That read-back also runs the policy compare again.
 #
 # ── what the importer sets ───────────────────────────────────────────────────
 #   cf_api, cf_account_id, cf_token, cf_unknown_id    from the play and _cf-tunnel.yml
@@ -20,15 +63,134 @@
 #                      importer, which knows what may count as "this one"
 #   acc_session        session_duration
 #   acc_decision       allow | bypass — the ONE policy this application carries
-#   acc_policy_name    its name, when it is created
+#   acc_policy_name    its name, written when it differs
 #   acc_include        its include rules
 #   acc_emails         optional: with `allow`, the read-back also checks these addresses
 #   acc_if_refused     what a refusal means for this application, for the fail message
+#
+# The compares, and the test of whether a read gave an application at all, are YAML
+# anchors (&acc_app_compare, &acc_pol_compare, &acc_app_readable, &acc_app_seen,
+# &acc_app_why), each written once and aliased wherever it runs again, so the read-back
+# cannot drift from the first compare. Each reads one input from its task's vars:
+# acc_app_read (the registered read), or acc_pol.
 
-- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: write the Access application"
-  # allowed_idps left out: every login method the account has. auto_redirect off, so the
-  # method picker shows. PUT unconditionally when it exists — the reason is beside the same
-  # choice in _dev-container-tunnel.yml § 3.
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: if it exists, read the application"
+  ansible.builtin.uri:
+    url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ acc_existing.id }}"
+    headers: { Authorization: "Bearer {{ cf_token }}" }
+  register: acc_app_r
+  delegate_to: localhost
+  check_mode: false
+  changed_when: false
+  # An unreadable application compares as all different, and the write that follows
+  # prints Cloudflare's reason if it is refused too.
+  failed_when: false
+  no_log: true
+  when: acc_existing | length > 0
+
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: compare the Access application"
+  # ALWAYS SET, like acc_app_id below: a second import must never see the first one's.
+  # Each entry is one field that differs, `present` if Cloudflare returned it, so the
+  # read-back can tell a write that did not take from a field it cannot prove.
+  ansible.builtin.set_fact:
+    acc_app_diff: &acc_app_compare >-
+      {%- macro dur(d) -%}
+        {%- set s = d | string | trim -%}
+        {%- set unit = {'ns': 1, 'us': 1000, 'µs': 1000, 'ms': 1000000, 's': 1000000000,
+                        'm': 60000000000, 'h': 3600000000000} -%}
+        {%- if s is match('^([0-9]*\.?[0-9]+(ns|us|µs|ms|h|m|s))+$') -%}
+          {%- set t = namespace(ns=0) -%}
+          {%- for n, u in s | regex_findall('([0-9]*\.?[0-9]+)(ns|us|µs|ms|h|m|s)') -%}
+            {%- set t.ns = t.ns + (n | float) * unit[u] -%}
+          {%- endfor -%}
+          ns:{{ t.ns | round | int }}
+        {%- else -%}
+          raw:{{ s }}
+        {%- endif -%}
+      {%- endmacro -%}
+      {%- macro host_lower(d) -%}
+        {%- set s = d | string -%}
+        {{ s.split('/', 1)[0] | lower }}{{ ('/' ~ s.split('/', 1)[1]) if '/' in s else '' }}
+      {%- endmacro -%}
+      {%- set got = acc_app_seen if acc_app_seen is mapping else {} -%}
+      {%- set out = [] -%}
+      {%- for f, want in [('name', acc_name), ('type', 'self_hosted')] -%}
+        {%- if got[f] is not defined or got[f] != want -%}
+          {%- set _ = out.append({'field': f, 'want': want, 'got': got[f] | default('(absent)'),
+                                  'present': got[f] is defined}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {%- if got.domain is not defined or host_lower(got.domain) != host_lower(acc_domain) -%}
+        {%- set _ = out.append({'field': 'domain', 'want': acc_domain,
+                                'got': got.domain | default('(absent)'),
+                                'present': got.domain is defined}) -%}
+      {%- endif -%}
+      {%- set dests = got.destinations | default([]) or [] -%}
+      {%- set covers = [] -%}
+      {%- for d in dests -%}
+        {%- set _ = covers.append(host_lower(d.uri | default('')) if (d.type | default('public')) == 'public'
+                                  else 'non-public:' ~ (d | to_json(sort_keys=True))) -%}
+      {%- endfor -%}
+      {%- for u in got.self_hosted_domains | default([]) or [] -%}
+        {%- set _ = covers.append(host_lower(u)) -%}
+      {%- endfor -%}
+      {%- if covers and (covers | unique | sort | list) != [host_lower(acc_domain)] -%}
+        {%- set _ = out.append({'field': 'destinations', 'want': [acc_domain],
+                                'got': covers | unique | sort | list, 'present': true}) -%}
+      {%- endif -%}
+      {%- if got.session_duration is not defined or dur(got.session_duration) != dur(acc_session) -%}
+        {%- set _ = out.append({'field': 'session_duration', 'want': acc_session,
+                                'got': got.session_duration | default('(absent)'),
+                                'present': got.session_duration is defined}) -%}
+      {%- endif -%}
+      {%- for f in ['auto_redirect_to_identity', 'options_preflight_bypass'] -%}
+        {%- if got[f] | default(false) is not sameas false -%}
+          {%- set _ = out.append({'field': f, 'want': false, 'got': got[f], 'present': true}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {%- if got.app_launcher_visible is not defined or got.app_launcher_visible is not sameas false -%}
+        {%- set _ = out.append({'field': 'app_launcher_visible', 'want': false,
+                                'got': got.app_launcher_visible | default('(absent)'),
+                                'present': got.app_launcher_visible is defined}) -%}
+      {%- endif -%}
+      {%- if (got.allowed_idps | default([]) or []) | length > 0 -%}
+        {%- set _ = out.append({'field': 'allowed_idps', 'want': [], 'got': got.allowed_idps,
+                                'present': true}) -%}
+      {%- endif -%}
+      {{ out }}
+  vars:
+    acc_app_read: "{{ acc_app_r }}"
+    acc_app_readable: &acc_app_readable >-
+      {{ acc_app_read.status | default(0) == 200
+         and acc_app_read.json.success | default(false) is sameas true
+         and acc_app_read.json.result | default(none) is mapping }}
+    acc_app_seen: &acc_app_seen "{{ acc_app_read.json.result if acc_app_readable else {} }}"
+
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: if the app differs, print how"
+  ansible.builtin.debug:
+    msg: >-
+      {{ acc_domain }}: {{ ('the application could not be read (' ~ acc_app_why
+      ~ '), so it is written whole') if not acc_app_readable else 'the application differs in' }}
+      {%- if acc_app_readable -%}
+        {%- for d in acc_app_diff %} {{ d.field }} ({{ d.got }}, to be {{ d.want }}){{ ',' if not loop.last else '' }}{% endfor -%}
+      {%- endif -%}.
+  changed_when: true
+  vars:
+    acc_app_read: "{{ acc_app_r }}"
+    acc_app_readable: *acc_app_readable
+    acc_app_why: &acc_app_why >-
+      {{ ('HTTP ' ~ (acc_app_read.status | default('?'))) if acc_app_read.status | default(0) != 200
+         else ('it answered success:false' if acc_app_read.json.success | default(false) is not sameas true
+         else 'it answered no application') }}
+  when:
+    - acc_existing | length > 0
+    - acc_app_diff | length > 0
+
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: if it differs, write the application"
+  # auto_redirect off, so the method picker shows; allowed_idps empty, so every login method
+  # the account has is on it, as in _dev-container-tunnel.yml. One public destination, the
+  # domain, so no hostname or path added by hand stays covered. Written whole, as the API's
+  # PUT is: everything this file sets, in one body.
   ansible.builtin.uri:
     url: >-
       {{ cf_api }}/accounts/{{ cf_account_id }}/access/apps{{
@@ -40,15 +202,19 @@
     body:
       name: "{{ acc_name }}"
       domain: "{{ acc_domain }}"
+      destinations: [{ type: public, uri: "{{ acc_domain }}" }]
       type: self_hosted
       session_duration: "{{ acc_session }}"
+      allowed_idps: []
       auto_redirect_to_identity: false
+      options_preflight_bypass: false
       app_launcher_visible: false
   register: acc_app_w
   delegate_to: localhost
   failed_when: false
   changed_when: acc_app_w.json.success | default(false)
   no_log: true
+  when: (acc_existing | length == 0) or (acc_app_diff | length > 0)
 
 - name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: if the app was refused, print why"
   ansible.builtin.debug:
@@ -80,6 +246,60 @@
       {{ acc_app_w.json.result.id if (acc_app_w is not skipped)
          else (acc_existing.id | default('')) }}
 
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: if written, read the application back"
+  ansible.builtin.uri:
+    url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ acc_app_id }}"
+    headers: { Authorization: "Bearer {{ cf_token }}" }
+  register: acc_app_v
+  delegate_to: localhost
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when: acc_app_w is not skipped
+
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: check the application took the write"
+  ansible.builtin.assert:
+    that:
+      - acc_app_readable
+      - acc_app_wrong | length == 0
+    fail_msg: >-
+      {{ acc_domain }} was written, but {{ ('reading it back failed (' ~ acc_app_why ~ ')')
+      if not acc_app_readable
+      else ('it still differs in ' ~ (acc_app_wrong | map(attribute='field') | join(', '))
+      ~ ': Cloudflare holds ' ~ (acc_app_wrong | map(attribute='got') | list)
+      ~ ' where this play sent ' ~ (acc_app_wrong | map(attribute='want') | list)) }}. If
+      Cloudflare returns one of those in another form meaning the same thing, the compare in
+      _cf-access-app.yml should normalise it; otherwise look at the application in the
+      dashboard. Its policy was not touched by this run.
+    quiet: true
+  vars:
+    acc_app_read: "{{ acc_app_v }}"
+    acc_app_readable: *acc_app_readable
+    acc_app_why: *acc_app_why
+    acc_app_seen: *acc_app_seen
+    acc_app_after: *acc_app_compare
+    acc_app_wrong: "{{ acc_app_after | selectattr('present') | list }}"
+  when: acc_app_v is not skipped
+
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: if a field is unproved, print which"
+  ansible.builtin.debug:
+    msg: >-
+      {{ acc_domain }}: written, but {{ acc_app_unproved | map(attribute='field') | join(', ') }}
+      cannot be proved, since Cloudflare leaves {{ 'it' if acc_app_unproved | length == 1
+      else 'them' }} out of its answer, so every run will write the application again until
+      the compare in _cf-access-app.yml learns what that absence means.
+  changed_when: true
+  vars:
+    acc_app_read: "{{ acc_app_v }}"
+    acc_app_readable: *acc_app_readable
+    acc_app_seen: *acc_app_seen
+    acc_app_after: *acc_app_compare
+    acc_app_unproved: "{{ acc_app_after | rejectattr('present') | list }}"
+  when:
+    - acc_app_v is not skipped
+    - acc_app_readable
+    - acc_app_unproved | length > 0
+
 - name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: read the application's policies"
   ansible.builtin.uri:
     url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ acc_app_id }}/policies"
@@ -91,32 +311,66 @@
   no_log: true
   when: acc_app_id | length > 0
 
-- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: write the {{ acc_decision }} policy"
-  ansible.builtin.uri:
-    url: >-
-      {{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{
-         acc_app_id if acc_app_id | length > 0 else cf_unknown_id }}/policies{{
-         ('/' ~ acc_pol.id) if acc_pol else '' }}
-    method: "{{ 'PUT' if acc_pol else 'POST' }}"
-    status_code: [200, 201]
-    headers: { Authorization: "Bearer {{ cf_token }}" }
-    body_format: json
-    body:
-      name: "{{ acc_pol.name | default(acc_policy_name) }}"
-      decision: "{{ acc_decision }}"
-      precedence: "{{ acc_pol.precedence | default(1) }}"
-      include: "{{ acc_include }}"
-      exclude: []
-      require: []
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: compare the {{ acc_decision }} policy"
+  # ALWAYS SET. no_log: acc_pol_found holds the include rules, which are the addresses, and
+  # -v prints a set_fact's result. acc_pol_diff holds field names only, never values.
+  ansible.builtin.set_fact:
+    acc_pol_found: "{{ acc_pol }}"
+    acc_pol_diff: &acc_pol_compare >-
+      {%- set p = acc_pol if acc_pol is mapping else {} -%}
+      {%- set out = [] -%}
+      {%- if not p -%}
+        {%- set _ = out.append('(none)') -%}
+      {%- else -%}
+        {%- if p.name | default(none) != acc_policy_name -%}{%- set _ = out.append('name') -%}{%- endif -%}
+        {%- if p.decision | default(none) != acc_decision -%}{%- set _ = out.append('decision') -%}{%- endif -%}
+        {%- if (p.include | default([]) or []) | map('to_json', sort_keys=True) | unique | sort | list
+               != acc_include | map('to_json', sort_keys=True) | unique | sort | list -%}
+          {%- set _ = out.append('include') -%}
+        {%- endif -%}
+        {%- for f in ['exclude', 'require'] -%}
+          {%- if (p[f] | default([]) or []) | length > 0 -%}{%- set _ = out.append(f) -%}{%- endif -%}
+        {%- endfor -%}
+      {%- endif -%}
+      {{ out }}
   vars:
     acc_pol: >-
       {{ acc_pol_q.json.result | default([])
          | selectattr('decision', 'eq', acc_decision) | list | first | default({}) }}
+  no_log: true
+
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: if the policy differs, print how"
+  ansible.builtin.debug:
+    msg: >-
+      {{ acc_domain }}: the {{ acc_decision }} policy differs in {{ acc_pol_diff | join(', ') }}.
+  changed_when: true
+  when:
+    - acc_pol_found | length > 0
+    - acc_pol_diff | length > 0
+
+- name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: if it differs, write the {{ acc_decision }} policy"
+  ansible.builtin.uri:
+    url: >-
+      {{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{
+         acc_app_id if acc_app_id | length > 0 else cf_unknown_id }}/policies{{
+         ('/' ~ acc_pol_found.id) if acc_pol_found else '' }}
+    method: "{{ 'PUT' if acc_pol_found else 'POST' }}"
+    status_code: [200, 201]
+    headers: { Authorization: "Bearer {{ cf_token }}" }
+    body_format: json
+    body:
+      name: "{{ acc_policy_name }}"
+      decision: "{{ acc_decision }}"
+      precedence: "{{ acc_pol_found.precedence | default(1) }}"
+      include: "{{ acc_include }}"
+      exclude: []
+      require: []
   register: acc_pol_w
   delegate_to: localhost
   failed_when: false
   changed_when: acc_pol_w.json.success | default(false)
   no_log: true
+  when: acc_pol_diff | length > 0
 
 - name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: if the policy was refused, print why"
   ansible.builtin.debug:
@@ -140,6 +394,7 @@
   when: acc_pol_w is not skipped
 
 - name: "{{ 'Access login' if acc_decision == 'allow' else 'No-login path' }}: read the policies back"
+  # Every run, written or not: the proof the header describes.
   ansible.builtin.uri:
     url: "{{ cf_api }}/accounts/{{ cf_account_id }}/access/apps/{{ acc_app_id }}/policies"
     headers: { Authorization: "Bearer {{ cf_token }}" }
@@ -156,12 +411,17 @@
       - acc_pols | length == 1
       - acc_pols[0].decision == acc_decision
       - acc_emails is not defined or (acc_pols[0].include | map(attribute='email.email') | sort) == (acc_emails | sort)
+      - acc_pol_after | length == 0
     fail_msg: >-
       {{ acc_domain }} should carry one {{ acc_decision }} policy{{ ' admitting exactly the
-      addresses in the list' if acc_emails is defined else '' }}; after the write it has
-      {{ acc_pols | map(attribute='decision') | list }}. With none it fails closed. Re-run;
-      if this persists, look at the application in the dashboard.
+      addresses in the list' if acc_emails is defined else '' }}; it has
+      {{ acc_pols | map(attribute='decision') | list }}{{ (', and it differs in '
+      ~ (acc_pol_after | join(', '))) if acc_pols | length == 1 and acc_pol_after | length > 0
+      else '' }}. With none it fails closed. Re-run; if this persists, look at the
+      application in the dashboard.
     success_msg: "{{ acc_domain }}: one {{ acc_decision }} policy"
   vars:
     acc_pols: "{{ acc_pol_r.json.result | default([]) }}"
+    acc_pol: "{{ acc_pols | first | default({}) }}"
+    acc_pol_after: *acc_pol_compare
   when: not ansible_check_mode

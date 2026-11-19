@@ -52,8 +52,9 @@
 # known login as one.
 #
 # Re-running is the intended way to finish after a partial failure, and a converged run
-# rewrites nothing but the application and its policy, which _cf-access-app.yml PUTs on
-# every run and reads back (its header says why). There is no -e remove: undo by hand in
+# writes nothing: _cf-access-app.yml writes the application and its policy only where they
+# differ from what it sets, and reads the policies back on every run (its header says
+# why). There is no -e remove: undo by hand in
 # the reverse order, the CNAME first (DNS -> Records), then the application (Zero Trust ->
 # Access -> Applications), so the name never resolves with nothing in front.
 #
@@ -303,8 +304,8 @@
     - name: "--check only: print what a real run would do"
       ansible.builtin.debug:
         msg: >-
-          --check: would {{ 'write' if web_app else 'create' }} the Access application
-          {{ web_sub }} on {{ web_hostname }}, with one allow policy for the
+          --check: would {{ 'compare, and write where it differs,' if web_app else 'create' }}
+          the Access application {{ web_sub }} on {{ web_hostname }}, with one allow policy for the
           {{ cf_access_emails | length }} address(es) in {{ cf_access_emails_file }}, read it
           back, then point {{ web_hostname }} at tunnel {{ web_tunnel_id }}, proxied, and
           wait for it to redirect to the login. Nothing was written.

@@ -17,7 +17,9 @@
 # `bringup=true` tells the second that a --check cannot see the keys the first would write.
 #
 # A routine redeploy after a change is server-deploy-compose.yml alone and never touches
-# Cloudflare: the tunnel play PUTs Access policies unconditionally.
+# Cloudflare: the tunnel play PUTs Access policies unconditionally. (Since 2026-11-19 it
+# writes them only when they differ, but it still reads Cloudflare on every run, so the
+# split stands.)
 
 - name: Give the deployment a tunnel
   ansible.builtin.import_playbook: server-create-deployment-tunnel.yml

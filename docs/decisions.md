@@ -550,7 +550,8 @@ prefix and the most specific wins, so the play proves, before the stack is start
 **`edge.yml` is the whole truth about the hostname's Access**, and the play only adds: an
 application on the hostname that `edge.yml` does not ask for — left after a `bypass_path` was
 dropped — stops the run rather than staying live behind a green recap. Each policy is **read
-back** after it is written, because the application is PUT whole on every run and whether
+back** after it is written, because the application is PUT whole on every run (only when it
+differs since 2026-11-19, amended at the end of this section) and whether
 that keeps app-scoped policies attached is Cloudflare's behaviour, not ours to assume. One
 copy of the application-and-policy code, `_cf-access-app.yml`, imported per application.
 
@@ -640,6 +641,46 @@ before, and send2ereader's own four-character key, dropped 30 seconds after the 
 stops refreshing it, is what pairs a sender with a reader. The move also ends
 `send2ereader`'s published port 3001, which is the reason § *A stack's `cloudflared`
 belongs in the stack* gave for doing it.
+
+**Amended 2026-11-19: `_cf-access-app.yml` writes the application and its policy only when
+they differ.** The owner asked, after `server-create-browser-login.yml` reported both
+CHANGED on every re-run for `syncthing-three` with nothing different. The file now reads
+each, compares only the fields it sets, writes only on a difference, and reads the
+application back after writing it. The policy read-back stays on every run, written or not,
+since whether a PUT that names no `policies` keeps app-scoped ones is still Cloudflare's to
+say. The unconditional PUT had rested on the reason beside the same choice in
+`_dev-container-tunnel.yml` § 3: Cloudflare returns `session_duration`, `allowed_idps` and the
+launcher flags in forms that do not compare equal to what was sent, so a field check would
+differ on every run. That reason is answered by comparing a subset with normalisation, not
+the whole object. A duration compares as a length of time (`24h` and `24h0m0s` are equal),
+include rules as a set, a domain's hostname without case, an absent
+`auto_redirect_to_identity` or `options_preflight_bypass` as its documented false, and an
+absent `allowed_idps`, `exclude` or `require` as empty. Nothing else is normalised. A false
+"differs" costs one write, as before; a false "same" would leave a wrong login in place.
+**What an application covers is compared too:** every public `destinations[].uri` and every
+`self_hosted_domains` entry, hostname without case, must make exactly the one domain, so a
+hostname or path added by hand to the no-login application (the one that lets everyone
+through) is found and written back; review caught that the first cut compared `domain`
+alone and would have left such a widening in place for ever. So the write now sends
+`destinations` (one public entry, the domain), `allowed_idps: []` (as
+`_dev-container-tunnel.yml` already did) and `options_preflight_bypass: false`, where the
+first cut left `allowed_idps` out. An empty `allowed_idps` means every login method the
+account has: read by the owner on 2026-11-19, every Access application on the account
+returns `[]`, `calibre-web`'s and `syncthing-three`'s working browser logins among them. The read-back after a write stops the run when a field
+this file sends still differs, and prints, without stopping, a field Cloudflare leaves out
+of its answer: an absent `app_launcher_visible`, whose documented default is true but which
+an omitted false would also leave absent. Such a field means every run writes again, as
+before, with the reason printed. A read that answers anything but a 200 with success and an
+application says so, rather than comparing as an application with every field absent.
+Two things change with it. A field set by hand outside that list survives a run that writes
+nothing; a write still PUTs the application whole. And the policy's name is now managed: it
+was kept as found and is now written as `acc_policy_name` when it differs. The bypass path's
+trailing slash is compared exactly, because Cloudflare keeps it: `calibre-web`'s no-login
+application, read by the owner on 2026-11-19, has `domain` and destination both
+`calibre-web.gsrpi.uk/kobo/`. The stand-in in `sim/cloudflare/` answers
+with Cloudflare's extra fields, Go's `24h0m0s`, a destination for the domain and the rules
+reversed, and counts every Access write, so CI proves that a re-run writes nothing. `_dev-container-tunnel.yml` still PUTs
+unconditionally; it is a different play and did not follow.
 
 ## garmin-mcp — a Garmin MCP for claude.ai, on `one` (read-only; five writes added, amended below)
 
@@ -956,6 +997,8 @@ made those two different was small: a pre-check and a set of probes. So the play
 read `${VAR:?}` names out of `compose.yaml` to check `.env` instead of keeping lists by hand,
 and leaves tunnel provisioning to `server-bring-up-deployment.yml`, because the tunnel play
 PUTs Access policies unconditionally and a routine image bump must not touch Cloudflare.
+(Since 2026-11-19 it writes them only when they differ, but it still reads Cloudflare on
+every run, so the split stands.)
 As of 2026-10-25 `send2ereader` is on it and `garmin-mcp`'s play is still its own
 (a plan, since done and deleted); `garmin-mcp` joined later that day, in the row
 *garmin-mcp joins the redeploy play*, and both old plays were deleted on 2026-10-26. The question is per **deployment**, never per container:

@@ -103,7 +103,7 @@ The halves, for reading rather than running:
 | `_client-retired-dev-ssh.yml` | the other direction: removes the blocks and token files of `infra-dev`, `dd-dev` and `ds-dev`, whose own doors the cutover retired. Whole runs only |
 | `_dev-container-tunnel.yml` | the **edge** side — tunnel, DNS, Access application and policy |
 | `_cf-tunnel.yml` | tasks, shared by the two plays that give something its own tunnel: zone and account, the tunnel with its dead-tunnel assert, the CNAME. **No Access** — each caller adds its own or none |
-| `_cf-access-app.yml` | tasks: one Access application and its one policy, read back after writing — imported once per application by `server-create-deployment-tunnel.yml` |
+| `_cf-access-app.yml` | tasks: one Access application and its one policy, each read, compared on the fields the file sets and written only when one differs; the application read back after a write, the policies on every run — imported once per application by `server-create-deployment-tunnel.yml` and once by `server-create-browser-login.yml` |
 | `_dev-host.yml` | the **host** side of the dev project on zero — the hub's and infra-dev's secrets dirs, the hub's authorized_keys, `dev/.env`'s lines |
 | `_assert-inventory.yml` | imported above every play that targets `control` or `fleet`, so a run with no inventory fails instead of exiting 0 |
 | `files/compose-oneshots.py` | run on the host by the deploy and stop/start plays: prints the container name of every one-shot in a deployment, a service another `depends_on` with `condition: service_completed_successfully` (dev's `policy` was one until 2026-11-06); reads `docker compose config` and prints names only |

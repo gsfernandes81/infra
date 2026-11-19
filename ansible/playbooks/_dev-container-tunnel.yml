@@ -208,12 +208,16 @@
       # not compare equal to what was sent, so a field-by-field check would report a
       # difference on every run and be worse than no check. Converging every time is
       # cheap and correct; the cost is one `changed` in the recap.
+      # _cf-access-app.yml answered this with a subset compare on 2026-11-19
+      # (docs/decisions.md § "Sidecar, not baked-in"); this file was not converted.
       #
-      # allowed_idps is deliberately empty and auto_redirect_to_identity false: this
-      # application has no identity provider behind it at all. That is the answer to
-      # "which IdP" — none, no account is linked to anything, and the only way through is
-      # a service token in the policy client-home-ssh-config.yml writes on each client.
-      # No policy is written here, so a freshly created application admits nobody.
+      # allowed_idps empty and auto_redirect_to_identity false. An empty list means every
+      # login method the account has, not none: every Access application on the account,
+      # browser logins that work among them, reads back `allowed_idps: []` (read by the
+      # owner on 2026-11-19). What locks this application is its policy, which admits only
+      # the service tokens client-home-ssh-config.yml writes on each client, so no login
+      # method gets anyone in. No policy is written here, so a freshly created application
+      # admits nobody.
       ansible.builtin.uri:
         url: >-
           {{ cf_api }}/accounts/{{ cf_account_id }}/access/apps{{
