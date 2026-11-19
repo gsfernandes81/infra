@@ -1,0 +1,26 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /home/backup/.ssh
+# infra-name: config
+# infra-mode: 0644
+#
+# How the backup user's mirror-pull reaches zero (plans/three-backup-pull.md). Root's file in
+# root's directory, as is known_hosts beside it (zero-known-hosts), so the backup user can
+# change neither where it connects nor which host key it accepts.
+#
+# zero by its tailnet address, never a name (CLAUDE.md § Landmines). Its host key is checked
+# under the name zero (HostKeyAlias), against the one key in known_hosts, and an unknown or
+# changed one stops the pull. The key is the user's own, which the owner makes on three
+# (hosts/three/leap/README.md § The backup), and it is the only one offered. A dead path
+# ends the run within about three minutes rather than hanging.
+Host zero
+	HostName 100.121.158.58
+	HostKeyAlias zero
+	IdentityFile /home/backup/.ssh/zero-pull
+	IdentitiesOnly yes
+	StrictHostKeyChecking yes
+	UpdateHostKeys no
+	BatchMode yes
+	ConnectTimeout 30
+	ServerAliveInterval 60
+	ServerAliveCountMax 3

@@ -1,0 +1,45 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /etc/snapper/configs
+# infra-name: received-immich
+# infra-mode: 0644
+#
+# snapper's config for three's copy of zero's Immich subvolume (plans/three-backup-pull.md).
+# mirror-pull fills current/; after each good pull, mirror-snapshot.service takes a
+# read-only snapshot of it into current/.snapshots and prunes with the limits below. snapper
+# runs it with --no-dbus, and no SNAPPER_CONFIGS names it, so Leap's own snapper timers and
+# snapperd leave it alone: `sudo snapper --no-dbus -c received-immich list` lists it.
+#
+# The snapshots share every unchanged block with current/ and with each other, so each
+# costs what changed since the one before. The limits are plain numbers, never ranges, so
+# FREE_LIMIT and SPACE_LIMIT change nothing: snapper's space-aware cleanup only moves within
+# a range. No qgroup, so no quota.
+
+SUBVOLUME="/media/mirror/received-backups/immich/current"
+FSTYPE="btrfs"
+QGROUP=""
+SPACE_LIMIT="0.5"
+FREE_LIMIT="0.2"
+
+# Root alone. zero's restore key reads the snapshots through rsyncd-restore.conf.
+ALLOW_USERS=""
+ALLOW_GROUPS=""
+SYNC_ACL="no"
+BACKGROUND_COMPARISON="no"
+
+NUMBER_CLEANUP="no"
+EMPTY_PRE_POST_CLEANUP="no"
+
+# Only mirror-snapshot.service takes these, one a day, after a good pull. Daily for 14 days,
+# weekly for 8 weeks, monthly for 12 months, and no quarterly or yearly step: the 12
+# monthlies cover a year (the owner, 2026-11-19). snapper keeps the oldest snapshot of each
+# period, and never one younger than TIMELINE_MIN_AGE, so the one just taken always stays.
+TIMELINE_CREATE="no"
+TIMELINE_CLEANUP="yes"
+TIMELINE_MIN_AGE="3600"
+TIMELINE_LIMIT_HOURLY="0"
+TIMELINE_LIMIT_DAILY="14"
+TIMELINE_LIMIT_WEEKLY="8"
+TIMELINE_LIMIT_MONTHLY="12"
+TIMELINE_LIMIT_QUARTERLY="0"
+TIMELINE_LIMIT_YEARLY="0"

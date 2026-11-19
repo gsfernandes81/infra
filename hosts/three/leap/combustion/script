@@ -45,23 +45,32 @@ echo "$host" > /etc/hostname
 # them too). The radio's driver firmware, kernel-firmware-brcm, is left to the Pi image,
 # and is a bench check (`rpm -q kernel-firmware-brcm`): installing it here could clash with
 # an image that carries all firmware in one package. No Wi-Fi profile: its password is
-# added on the box before shipping (hosts/three/leap/README.md).
-install_packages cryptsetup wpa_supplicant bcm43xx-firmware
+# added on the box before shipping (hosts/three/leap/README.md). snapper for the backup's
+# snapshots, named although an Immutable image carries it for its own root.
+install_packages cryptsetup wpa_supplicant bcm43xx-firmware snapper
 install_binaries
 set_root_password
 make_gavin "$gavin_uid" "$gavin_gid"
 install_host_keys
 
-# zero's backup arrives as this user, by one authorized_keys line that allows only an rsync
-# writing into /media/mirror/incoming (plans/three.md § Backups); the line itself comes
-# with zero's key. A real shell, because sshd runs a key's forced command through the
-# user's shell, so nologin would refuse the push too; the key's restrictions are what keep
-# it from being used as one. No password. Its home and .ssh are root's, so the user cannot
-# change the keys that let it in.
-id backup >/dev/null 2>&1 && die "a backup user exists already in this image"
-useradd --system --user-group --no-create-home --home-dir /home/backup --shell /bin/bash \
-	--comment "zero's backup push" backup
-install -d -m 755 /home/backup /home/backup/.ssh
+# Two users for zero's backup (plans/three-backup-pull.md). `backup` pulls it: systemd runs
+# mirror-pull as this user, which owns the copy in received-backups/immich/current and
+# nothing else, so whatever zero sends is parsed without privilege. It never logs in, so it
+# has no shell and no authorized_keys. Its key to zero is made on the box by the owner, not
+# carried (hosts/three/leap/README.md § The backup). `restore` lets zero read its own backups
+# back, by one authorized_keys line whose forced command starts a read-only rsync daemon. A
+# real shell, because sshd runs a key's forced command through the user's shell, so nologin
+# would refuse that too; the key's restrictions are what keep it from being used as one.
+# Neither has a password. Both homes and .ssh directories are root's, so neither user can
+# change its keys, its ssh config or the host key it trusts.
+for u in backup restore; do
+	id "$u" >/dev/null 2>&1 && die "a $u user exists already in this image"
+done
+useradd --system --user-group --no-create-home --home-dir /home/backup --shell /usr/sbin/nologin \
+	--comment "pulls zero's backup" backup
+useradd --system --user-group --no-create-home --home-dir /home/restore --shell /bin/bash \
+	--comment "zero's read-only restores" restore
+install -d -m 755 /home/backup /home/backup/.ssh /home/restore /home/restore/.ssh
 
 # Every tracked file for this host, each at the path its header names. Notes kept beside
 # them (*.md, *.toml) are not installed, as bin/_infra.py skips them.

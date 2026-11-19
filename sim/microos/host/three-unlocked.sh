@@ -2,9 +2,8 @@
 # shellcheck disable=SC2016  # the checks are shell code for sh -c, quoted on purpose
 # Runs on the simulated three as root once its array is unlocked with the command in
 # hosts/three/leap/README.md (run-host.sh, through host/three.sh), and prints PASS or FAIL
-# per check. `first` also runs the snapshot script's three paths (a snapshot, a turn skipped
-# while the backup user has a process, the pruning to 90) and a scrub; `again`, after the
-# reboot, checks only that the unlock brought everything back.
+# per check. `first` also runs a scrub; `again`, after the reboot, checks only that the
+# unlock brought everything back. The backup's pull and snapshots are three-backup.sh's.
 set -u
 
 check() {
@@ -23,13 +22,14 @@ echo "-- the array, unlocked"
 check "the array is LUKS2 with Adiantum" sh -c '
 	s=$(cryptsetup status mirror); echo "$s"
 	echo "$s" | grep -qE "type: +LUKS2" && echo "$s" | grep -qE "cipher: +xchacha12,aes-adiantum-plain64"'
-check "it is mounted at /media/mirror with the container context" sh -c '
-	findmnt -no SOURCE,OPTIONS /media/mirror | tee /dev/stderr | grep -q "context=.*container_file_t"'
-check "incoming is the backup user's, syncthing gavin's, snapshots root's" sh -c '
-	s=$(stat -c "%U %a %n" /media/mirror/incoming /media/mirror/syncthing /media/mirror/snapshots); echo "$s"
-	[ "$s" = "$(printf "%s\n" "backup 700 /media/mirror/incoming" "gavin 755 /media/mirror/syncthing" "root 700 /media/mirror/snapshots")" ]'
+check "it is mounted at /media/mirror with the container context, nosuid and nodev" sh -c '
+	o=$(findmnt -no SOURCE,OPTIONS /media/mirror); echo "$o"
+	echo "$o" | grep -q "context=.*container_file_t" && echo "$o" | grep -qw nosuid && echo "$o" | grep -qw nodev'
+check "received-backups is root's, current the backup user's, syncthing gavin's" sh -c '
+	s=$(stat -c "%U %n" /media/mirror/received-backups /media/mirror/received-backups/immich/current /media/mirror/syncthing); echo "$s"
+	[ "$s" = "$(printf "%s\n" "root /media/mirror/received-backups" "backup /media/mirror/received-backups/immich/current" "gavin /media/mirror/syncthing")" ]'
 check "the mount started Docker and both timers" sh -c '
-	for u in docker mirror-snapshot.timer mirror-scrub.timer; do
+	for u in docker mirror-pull.timer mirror-scrub.timer; do
 		for i in $(seq 1 30); do systemctl is-active --quiet "$u" && break; sleep 2; done
 		systemctl is-active "$u" || exit 1
 	done'
@@ -55,33 +55,6 @@ check "argon-fan finds the drive by its LUKS label, and runs" sh -c '
 	systemctl is-active argon-fan.service'
 [ "$mode" = first ] || exit 0
 
-echo "-- snapshots and the scrub"
-check "a snapshot run makes today's, read-only" sh -c '
-	echo data > /media/mirror/incoming/file
-	systemctl start mirror-snapshot.service
-	d=/media/mirror/snapshots/$(date -u +%F)
-	btrfs property get -ts "$d" ro | tee /dev/stderr | grep -qx ro=true && cat "$d/file"'
-check "a second run the same day keeps the one it made" sh -c '
-	systemctl start mirror-snapshot.service
-	journalctl -b --no-pager -u mirror-snapshot.service | tail -n 5 | tee /dev/stderr | grep -q " exists"'
-# A process the kernel names rsync, run as the backup user, as zero's push is: sleep under
-# that name, since only the name and the user are what the script looks at.
-check "a turn while the backup user runs rsync is skipped" sh -c '
-	install -m 755 /usr/bin/sleep /var/tmp/rsync
-	runuser -u backup -- /var/tmp/rsync 60 &
-	sleep 1
-	out=$(/usr/local/sbin/mirror-snapshot); echo "$out"
-	pkill -u backup -x rsync; rm -f /var/tmp/rsync
-	echo "$out" | grep -q "skipping this turn"'
-check "only the newest 90 snapshots are kept, oldest deleted first" sh -c '
-	for i in $(seq 1 91); do
-		btrfs subvolume snapshot -r /media/mirror/incoming "/media/mirror/snapshots/$(date -u -d "2001-01-01 +$i day" +%F)" >/dev/null
-	done
-	/usr/local/sbin/mirror-snapshot >/dev/null
-	n=$(ls /media/mirror/snapshots | wc -l); echo "$n kept; oldest $(ls /media/mirror/snapshots | head -n 1)"
-	ok=0; [ "$n" = 90 ] && [ ! -e /media/mirror/snapshots/2001-01-03 ] && [ -e /media/mirror/snapshots/2001-01-04 ] &&
-		[ -e "/media/mirror/snapshots/$(date -u +%F)" ] && ok=1
-	for s in /media/mirror/snapshots/2001-*; do btrfs subvolume delete "$s" >/dev/null; done
-	[ "$ok" = 1 ]'
+echo "-- the scrub"
 check "a scrub runs, and finds no errors" sh -c '
 	systemctl start mirror-scrub.service && btrfs scrub status /media/mirror | tee /dev/stderr | grep -qE "Error summary: +no errors found"'

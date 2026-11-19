@@ -1,0 +1,23 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /etc/systemd/system
+# infra-name: mirror-pull.timer
+# infra-mode: 0644
+#
+# The daily pull of zero's backup, at 01:00 UTC, the owner's time: 01:00 in a UK winter,
+# 02:00 in a UK summer, 09:00 in Singapore. Named in UTC so it means the same whatever
+# timezone three is set to. zero snapshots hourly, so any hour finds a snapshot at most an
+# hour old, and one zero is still taking has no info.xml yet, so mirror-pull takes the one
+# before it.
+#
+# Started by the array's mount (mirror-mount.conf), not at boot, and stopped with it.
+# Persistent, so a day missed while three was off or locked pulls once the array is
+# unlocked.
+[Unit]
+Description=Pull zero's backup daily
+PartOf=media-mirror.mount
+
+[Timer]
+OnCalendar=*-*-* 01:00:00 UTC
+RandomizedDelaySec=10min
+Persistent=true

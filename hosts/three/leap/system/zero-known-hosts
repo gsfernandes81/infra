@@ -1,0 +1,14 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /home/backup/.ssh
+# infra-name: known_hosts
+# infra-mode: 0644
+#
+# zero's ssh host key, the one key three's pull accepts for zero (backup-ssh-config names
+# it by HostKeyAlias zero). Root's file, so the backup user cannot add another.
+#
+# server-create-restore-key.yml on zero prints it, with its fingerprint, for the infra agent
+# to commit here; until then the line holds a placeholder, no pull can connect, and
+# make-stick refuses three's stick. A new host key on zero means a new line here, then an
+# install-system-file on three.
+zero FILL-FROM-ZERO-HOST-KEY

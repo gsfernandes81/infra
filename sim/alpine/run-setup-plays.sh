@@ -2,8 +2,10 @@
 # pass and fail always succeed, so `A && pass || fail` can never run both.
 # shellcheck disable=SC2015,SC2016  # SC2016: commands for the box are single-quoted on purpose
 # Runs the setup plays end to end against an Alpine container with OpenRC as init, reached
-# over ssh as a fleet host is: server-install-tailscale.yml, server-create-backup-key.yml and
-# server-store-backup-ntfy-url.yml, and server-install-system-files.yml's dry run. Prints PASS or FAIL per check and exits 1 on any FAIL.
+# over ssh as a fleet host is: server-install-tailscale.yml, server-create-restore-key.yml and
+# server-store-backup-ntfy-url.yml, and server-install-system-files.yml's dry run; then
+# zero's snapper install as hosts/zero/system/README.md gives it, and install-system-file's
+# sudoers check. Prints PASS or FAIL per check and exits 1 on any FAIL.
 # CI runs it on an arm64 runner (.github/workflows/alpine-sim.yml), so the real pinned
 # tarball's binaries run in the container as they would on zero. sim/alpine/README.md says
 # what each part proves and what it cannot.
@@ -121,8 +123,8 @@ leaks() {
 	for s in "$bad_key" "$good_key" "$ntfy_secret"; do
 		grep -qF "$s" "$log" && fail "a secret ($s) appeared in $2"
 	done
-	if on 'test -f /root/.ssh/mirror-backup' 2>/dev/null; then
-		grep -qF "$(on 'sed -n 2p /root/.ssh/mirror-backup')" "$log" && fail "the private backup key appeared in $2"
+	if on 'test -f /root/.ssh/restore' 2>/dev/null; then
+		grep -qF "$(on 'sed -n 2p /root/.ssh/restore')" "$log" && fail "the private restore key appeared in $2"
 	fi
 	return 0
 }
@@ -314,30 +316,34 @@ if ts $(fakepin 9.9.2 "$sum2") -e "tailscale_auth_key=$good_key"; then fail "pas
 fi
 on 'rm -f /etc/fake-tailscale/clobber-dns' && docker exec -i "$box" sh -c 'cat > /etc/resolv.conf' < "$work/resolv.orig"
 
-# ════ server-create-backup-key.yml ═══════════════════════════════════════════
-echo "== the backup key: refusals"
+# ════ server-create-restore-key.yml ══════════════════════════════════════════
+echo "== the restore key: refusals"
 on 'echo NeedsLogin > /var/lib/fake-tailscale/state'
-if play server-create-backup-key.yml -e target=zero; then fail "made a key off the tailnet"; else
+if play server-create-restore-key.yml -e target=zero; then fail "made a key off the tailnet"; else
 	says 'zero is not on the tailnet' && pass "refused off the tailnet" || fail "failed, but not by the tailnet check"
 fi
 on 'echo Running > /var/lib/fake-tailscale/state'
-if play server-create-backup-key.yml -e target=two; then fail "made a key for a host with no backup"; else
-	says 'hosts/two/system/mirror-backup is not in this checkout' && pass "refused a host with no backup" || fail "two failed, but not by its check"
+if play server-create-restore-key.yml -e target=two; then fail "made a key for a host three does not pull"; else
+	says 'hosts/two/system/rsyncd-mirror.conf is not in this checkout' && pass "refused a host three does not pull" || fail "two failed, but not by its check"
 fi
-on 'test ! -e /root/.ssh/mirror-backup' && pass "no key made by a refusal" || fail "a refusal made a key"
+on 'test ! -e /root/.ssh/restore' && pass "no key made by a refusal" || fail "a refusal made a key"
 
-echo "== the backup key: --check, a real run, a re-run"
-if play server-create-backup-key.yml -e target=zero --check; then pass "dry run exits 0"; else fail "dry run failed"; fi
-says 'would be made' && on 'test ! -e /root/.ssh/mirror-backup' && pass "dry run made nothing and said so" || fail "dry run wrong"
-if play server-create-backup-key.yml -e target=zero; then pass "real run exits 0"; else fail "real run failed"; fi
-[ "$(on 'stat -c "%U %a" /root/.ssh /root/.ssh/mirror-backup' | tr '\n' ' ')" = "root 700 root 600 " ] && pass "/root/.ssh 0700, the key 0600, root's" || fail "modes: $(on 'stat -c "%n %U %a" /root/.ssh /root/.ssh/mirror-backup')"
-pub=$(on 'cat /root/.ssh/mirror-backup.pub')
-case "$pub" in "ssh-ed25519 "*" zero mirror-backup") pass "ed25519, comment 'zero mirror-backup'" ;; *) fail "the public key is '$pub'" ;; esac
-fp=$(on 'ssh-keygen -lf /root/.ssh/mirror-backup.pub' | cut -d' ' -f2)
-says "key: $pub" && says 'address: 100.101.102.103' && says "fingerprint: $fp" && pass "printed the key, its fingerprint and the address" || fail "did not print the key, fingerprint and address"
-keysum=$(on 'sha256sum /root/.ssh/mirror-backup')
-if play server-create-backup-key.yml -e target=zero; then pass "re-run exits 0"; else fail "re-run failed"; fi
-[ "$(on 'sha256sum /root/.ssh/mirror-backup')" = "$keysum" ] && says 'Already there, not touched' && pass "the key was not replaced" || fail "the key was replaced"
+echo "== the restore key: --check, a real run, a re-run"
+if play server-create-restore-key.yml -e target=zero --check; then pass "dry run exits 0"; else fail "dry run failed"; fi
+says 'would be made' && on 'test ! -e /root/.ssh/restore' && pass "dry run made nothing and said so" || fail "dry run wrong"
+if play server-create-restore-key.yml -e target=zero; then pass "real run exits 0"; else fail "real run failed"; fi
+[ "$(on 'stat -c "%U %a" /root/.ssh /root/.ssh/restore' | tr '\n' ' ')" = "root 700 root 600 " ] && pass "/root/.ssh 0700, the key 0600, root's" || fail "modes: $(on 'stat -c "%n %U %a" /root/.ssh /root/.ssh/restore')"
+pub=$(on 'cat /root/.ssh/restore.pub')
+case "$pub" in "ssh-ed25519 "*" zero restore") pass "ed25519, comment 'zero restore'" ;; *) fail "the public key is '$pub'" ;; esac
+fp=$(on 'ssh-keygen -lf /root/.ssh/restore.pub' | cut -d' ' -f2)
+hostkey=$(on 'cut -d" " -f1,2 /etc/ssh/ssh_host_ed25519_key.pub')
+hostfp=$(on 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' | cut -d' ' -f2)
+says "key: $pub" && says 'address: 100.101.102.103' && says "host key: $hostkey" &&
+	says "fingerprints: $fp for the key, $hostfp for the host key" &&
+	pass "printed the key, the address, the host key and both fingerprints" || fail "did not print the key, address, host key and fingerprints"
+keysum=$(on 'sha256sum /root/.ssh/restore')
+if play server-create-restore-key.yml -e target=zero; then pass "re-run exits 0"; else fail "re-run failed"; fi
+[ "$(on 'sha256sum /root/.ssh/restore')" = "$keysum" ] && says 'Already there, not touched' && pass "the key was not replaced" || fail "the key was replaced"
 
 # ════ server-store-backup-ntfy-url.yml ═══════════════════════════════════════
 url="$srv/$ntfy_secret"
@@ -403,6 +409,53 @@ said=$(on 'su gavin -c "cd /home/gavin/infra && bin/install-system-file cloudfla
 case "$said" in *'declares init=systemd but this host runs openrc'*) pass "the tool refused a systemd file on an OpenRC box" ;; *) fail "the tool did not refuse three's file on OpenRC: $said" ;; esac
 on 'test ! -e /etc/cloudflared/config.yml' && pass "installed nothing" || fail "installed three's file"
 on 'hostname zero'
+
+# ════ zero's snapper, installed as hosts/zero/system/README.md gives it ══════
+# On zero's own release and architecture: Alpine 3.24, arm64. The file comes from edge/testing
+# by its full name, is checked against the SHA-256 in the README, and apk checks its
+# signature against Alpine's keys. The README's sha256sum line is read out and run as it is.
+echo "== zero's snapper: the pinned .apk from edge/testing"
+readme="$repo/hosts/zero/system/README.md"
+apk_url=$(grep -oE 'https://dl-cdn\.alpinelinux\.org/alpine/edge/testing/aarch64/snapper-[^ ]+\.apk' "$readme" | head -n 1)
+sha_line=$(grep -oE "echo '[0-9a-f]{64}  snapper-[^']+\.apk' \| sha256sum -c -" "$readme" | head -n 1)
+if [ -z "$apk_url" ] || [ -z "$sha_line" ]; then
+	fail "the README gives no snapper URL or no sha256sum line"
+else
+	on "cd /root && wget -q '$apk_url'" && pass "downloaded ${apk_url##*/}" || fail "could not download $apk_url"
+	out=$(on "cd /root && $sha_line" 2>&1); echo "    $out"
+	case "$out" in *': OK') pass "its SHA-256 is the README's" ;; *) fail "its SHA-256 is not the README's" ;; esac
+	# The way it would fail with a bad signature: apk refuses a file whose signature no
+	# key in /etc/apk/keys made, unless told --allow-untrusted, which the README never is.
+	on "cd /root && cp '${apk_url##*/}' bad.apk && dd if=/dev/urandom of=bad.apk bs=1 count=64 seek=200000 conv=notrunc 2>/dev/null && ! apk add --quiet ./bad.apk" >/dev/null 2>&1 &&
+		pass "apk refuses a changed copy of it" || fail "apk installed a changed copy"
+	on 'rm -f /root/bad.apk'
+	if out=$(on "cd /root && apk add --quiet './${apk_url##*/}' && apk add --quiet 'snapper=0.13.1-r0' && snapper --version" 2>&1); then
+		pass "apk installed it, with its dependencies from Alpine 3.24's own repositories: $(echo "$out" | head -n 1)"
+	else
+		fail "apk could not install it: $(echo "$out" | tail -n 3 | tr '\n' ' ')"
+	fi
+	echo "    world: $(on 'grep "^snapper" /etc/apk/world' 2>&1)"
+	on 'grep -qx "snapper=0.13.1-r0" /etc/apk/world' && pass "apk's world pins snapper=0.13.1-r0" || fail "apk's world does not pin snapper"
+	on 'apk upgrade --simulate 2>&1 | grep -qE "(Upgrading|Downgrading|Purging|Replacing) snapper"' && fail "apk upgrade would move snapper" || pass "apk upgrade leaves snapper alone"
+	on 'rc-update show | grep -qw dbus' && fail "a dependency put dbus in a runlevel" || pass "no runlevel starts dbus, though apk installed it"
+	on 'snapper --no-dbus list-configs' >/dev/null 2>&1 && pass "snapper answers with --no-dbus" || fail "snapper --no-dbus does not answer"
+	on 'sh -n /etc/periodic/hourly/snapper && . /etc/snapper/snapper && [ -z "$SNAPPER_CONFIGS" ]' && pass "the package's hourly script reads an empty SNAPPER_CONFIGS" || fail "SNAPPER_CONFIGS is not empty"
+	on '/bin/setpriv --version 2>&1 | grep -q util-linux' && fail "util-linux setpriv was already there" || pass "before apk add setpriv, /bin/setpriv is not util-linux's"
+	on 'apk add --quiet setpriv && /bin/setpriv --version' 2>&1 | grep -q util-linux && pass "apk add setpriv gives util-linux's /bin/setpriv" || fail "/bin/setpriv is not util-linux's after apk add setpriv"
+fi
+
+# ════ install-system-file's sudoers check ════════════════════════════════════
+# Calibrated first on a sudoers file that works, then the repo copy, then a broken copy,
+# which must be refused before anything is written.
+echo "== install-system-file: sudoers is checked by visudo before it is written"
+on 'sudo visudo -cf /etc/sudoers.d/gavin' 2>&1 | grep -q 'parsed OK' && pass "visudo reads the box's own sudoers.d/gavin as parsed OK" || fail "visudo does not pass the box's own sudoers file"
+said=$(on 'su gavin -c "cd /home/gavin/infra && bin/install-system-file sudoers-mirror --new"' 2>&1)
+case "$said" in *'pre-checks on the repo copy: ok'*'DRY RUN'*) pass "sudoers-mirror passes the pre-check" ;; *) fail "sudoers-mirror did not pass: $(echo "$said" | tail -n 3 | tr '\n' ' ')" ;; esac
+on "su gavin -c 'cd /home/gavin/infra && sed -i \"s/NOPASSWD:/NOPASSWD/\" hosts/zero/system/sudoers-mirror'"
+said=$(on 'su gavin -c "cd /home/gavin/infra && bin/install-system-file sudoers-mirror --new --commit"' 2>&1)
+case "$said" in *'fails validate_sudoers'*) pass "a broken copy is refused by visudo" ;; *) fail "a broken copy was not refused: $(echo "$said" | tail -n 3 | tr '\n' ' ')" ;; esac
+on 'test ! -e /etc/sudoers.d/mirror && sudo true' && pass "nothing was written, and sudo still works" || fail "a broken sudoers file was written"
+on 'su gavin -c "cd /home/gavin/infra && git checkout -q hosts/zero/system/sudoers-mirror"'
 
 echo
 if [ "$fails" -gt 0 ]; then echo "$fails check(s) FAILED"; exit 1; fi

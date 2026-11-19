@@ -1,0 +1,18 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /home/restore/.ssh
+# infra-name: authorized_keys
+# infra-mode: 0644
+#
+# zero's restore key, the one key that lets the restore user in (plans/three-backup-pull.md).
+# Root's file in root's directory, so the restore user cannot add another. The key opens no
+# shell, terminal or forwarding (restrict), comes only from zero's tailnet address (from=),
+# and whatever the client asks for, sshd runs the read-only rsync daemon of
+# rsyncd-restore.conf through the one sudo rule in sudoers-restore. It reads zero's own
+# backups and nothing else, and writes nothing.
+#
+# The key is zero's /root/.ssh/restore.pub, which server-create-restore-key.yml makes and
+# prints with its fingerprint; until then the line holds a placeholder and lets nobody in,
+# and make-stick refuses three's stick. A new key or address for zero means a new line here,
+# then a new stick or an install-system-file on three.
+restrict,from="100.121.158.58",command="sudo -n /usr/bin/setpriv --reuid=restore --regid=restore --init-groups --inh-caps=+dac_read_search --ambient-caps=+dac_read_search /usr/bin/rsync --server --daemon --config=/etc/rsyncd-restore.conf ." FILL-FROM-ZERO-RESTORE-KEY

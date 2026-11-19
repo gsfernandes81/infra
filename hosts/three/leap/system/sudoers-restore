@@ -1,0 +1,15 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /etc/sudoers.d
+# infra-name: 60-restore
+# infra-mode: 0440
+#
+# The one command the restore user may run as root, with no password: the forced command in
+# restore-authorized-keys, word for word (plans/three-backup-pull.md). util-linux's setpriv
+# drops back to the restore user, keeps CAP_DAC_READ_SEARCH alone in the inheritable and
+# ambient sets, and runs rsync's daemon, which so reads every backed-up file, whatever the
+# backup user's modes, and can change none. Root lasts only as long as setpriv takes.
+#
+# sudo matches the arguments exactly, so the forced command and this line change together.
+# In sudoers a = inside an argument is written \=.
+restore ALL=(root) NOPASSWD: /usr/bin/setpriv --reuid\=restore --regid\=restore --init-groups --inh-caps\=+dac_read_search --ambient-caps\=+dac_read_search /usr/bin/rsync --server --daemon --config\=/etc/rsyncd-restore.conf .

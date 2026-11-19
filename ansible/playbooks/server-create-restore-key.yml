@@ -1,28 +1,36 @@
 ---
-# MAKE zero's BACKUP KEY, the one zero's nightly push to `three` logs in with, and print the
-# two values `three` needs. From the control node:
+# MAKE zero's RESTORE KEY, the read-only key zero uses to read its own backups back from
+# `three`, and print the three values `three` needs. From the control node:
 #
 #     cd ansible
-#     ansible-playbook playbooks/server-create-backup-key.yml -e target=zero -K
+#     ansible-playbook playbooks/server-create-restore-key.yml -e target=zero -K
 #
 # WHAT IT DOES:
-#   1. Refuses a host whose backup push is not tracked (hosts/<host>/system/mirror-backup),
-#      and one that is not on the tailnet, because the second value it prints is the box's
-#      tailnet address: server-install-tailscale.yml first.
-#   2. Makes /root/.ssh (0700), then /root/.ssh/mirror-backup, ed25519, comment
-#      "<host> mirror-backup", only if no key is there. It NEVER replaces one: three's
-#      authorized_keys names the key, so a new one would lock the backup out until three's
-#      line is changed too. Rotating it is deleting both files by hand, then this play, then
-#      three's line.
+#   1. Refuses a host whose snapshots three does not pull (no
+#      hosts/<host>/system/rsyncd-mirror.conf), and one that is not on the tailnet, because
+#      the second value it prints is the box's tailnet address: server-install-tailscale.yml
+#      first.
+#   2. Makes /root/.ssh (0700), then /root/.ssh/restore, ed25519, comment "<host> restore",
+#      only if no key is there. It NEVER replaces one: three's authorized_keys names the
+#      key, so a new one would lock restores out until three's line is changed too.
+#      Rotating it is deleting both files by hand, then this play, then three's line.
 #   3. Checks the private key is root's at 0600 and the public key is its pair.
-#   4. Prints the public key and `tailscale ip -4`. Send both to the infra agent, which puts
-#      them in hosts/three/leap/system/backup-authorized-keys in place of its placeholders;
-#      until then leap/make-stick refuses three's stick. It prints the key's fingerprint too,
-#      which the agent checks the key against: the key wraps on a phone's screen.
+#   4. Prints the public key, `tailscale ip -4` and the box's own ssh host key. Send all
+#      three to the infra agent: the key and the address go in
+#      hosts/three/leap/system/restore-authorized-keys, and the host key in
+#      hosts/three/leap/system/zero-known-hosts, which pins zero for three's pull, in place
+#      of their placeholders; until then leap/make-stick refuses three's stick. It prints
+#      each key's fingerprint too, which the agent checks the key against: a key wraps on a
+#      phone's screen.
 #
-# The private key never leaves the box and never reaches this play's output; only the
-# public half is read. Under --check it reads and says whether it would make the key.
-# sim/alpine/run-setup-plays.sh runs it in CI against an Alpine container.
+# The private key never leaves the box and never reaches this play's output; only public
+# halves are read. Under --check it reads and says whether it would make the key.
+# sim/alpine/run-setup-plays.sh runs it in CI against an Alpine container. What the key can
+# do on three is plans/three-backup-pull.md's: read zero's backups, and nothing else.
+#
+# It replaced server-create-backup-key.yml on 2026-11-19, when zero's push became three's
+# pull. That play's key, /root/.ssh/mirror-backup, is deleted by hand once three's old key
+# line is gone (hosts/zero/system/README.md § The backup).
 #
 # -K IS REQUIRED: /root/.ssh is root's.
 
@@ -45,28 +53,30 @@
         fail_msg: Name the host, -e target=<host>, one in the inventory's fleet group.
         success_msg: "target: {{ target | default('?') }}"
 
-- name: Create a host's backup key
+- name: Create a host's restore key
   hosts: "{{ target }}"
   gather_facts: false
   become: false
 
   vars:
-    key: /root/.ssh/mirror-backup
+    key: /root/.ssh/restore
+    host_key: /etc/ssh/ssh_host_ed25519_key.pub
     tailscale_bin: /usr/local/bin/tailscale
 
   tasks:
-    - name: Read whether the backup push is tracked here
+    - name: Read whether three pulls this host's snapshots
       ansible.builtin.stat:
-        path: "{{ control_checkout }}/hosts/{{ inventory_hostname }}/system/mirror-backup"
+        path: "{{ control_checkout }}/hosts/{{ inventory_hostname }}/system/rsyncd-mirror.conf"
       register: bk_tracked
       delegate_to: localhost
 
-    - name: Check {{ inventory_hostname }} has a backup push
+    - name: Check three pulls {{ inventory_hostname }}'s snapshots
       ansible.builtin.assert:
         that: bk_tracked.stat.exists
         fail_msg: >-
-          hosts/{{ inventory_hostname }}/system/mirror-backup is not in this checkout, so
-          {{ inventory_hostname }} pushes no backup and needs no key. Nothing has been made.
+          hosts/{{ inventory_hostname }}/system/rsyncd-mirror.conf is not in this checkout,
+          so three pulls no backup from {{ inventory_hostname }} and it needs no restore key.
+          Nothing has been made.
         success_msg: tracked
 
     - name: Read whether {{ inventory_hostname }} is on the tailnet
@@ -100,9 +110,9 @@
 
     # `creates` is what makes it never overwrite: ssh-keygen runs only when the private key
     # is absent, and under --check it reports whether it would.
-    - name: "If absent: create the backup key"
+    - name: "If absent: create the restore key"
       ansible.builtin.command:
-        argv: [ssh-keygen, -q, -t, ed25519, -N, "", -C, "{{ inventory_hostname }} mirror-backup", -f, "{{ key }}"]
+        argv: [ssh-keygen, -q, -t, ed25519, -N, "", -C, "{{ inventory_hostname }} restore", -f, "{{ key }}"]
         creates: "{{ key }}"
       register: bk_made
       become: true
@@ -115,6 +125,8 @@
         printf 'derived=%s\n' "$(ssh-keygen -y -f {{ key }} | cut -d' ' -f1,2)"
         printf 'pub=%s\n' "$(cat {{ key }}.pub)"
         printf 'fp=%s\n' "$(ssh-keygen -lf {{ key }}.pub | cut -d' ' -f2)"
+        printf 'host=%s\n' "$(cut -d' ' -f1,2 {{ host_key }})"
+        printf 'hostfp=%s\n' "$(ssh-keygen -lf {{ host_key }} | cut -d' ' -f2)"
       register: bk_read
       changed_when: false
       when: not ansible_check_mode or not bk_made is changed
@@ -132,17 +144,21 @@
         bk: "{{ dict(bk_read.stdout_lines | default([]) | map('split', '=', 1)) }}"
         bk_addr: "{{ bk_ip.stdout_lines[0] | default('') | trim }}"
 
-    - name: Print the two values for three's key line
+    - name: Print the three values for three's files
       ansible.builtin.debug:
         msg: >-
           {{ ['DRY RUN: the key does not exist and would be made; re-run without --check.']
              if ansible_check_mode and bk_made is changed else
              [('Made ' if bk_made is changed else 'Already there, not touched: ') ~ key ~ '.',
-              'Send the infra agent these two, for hosts/three/leap/system/backup-authorized-keys:',
+              'Send the infra agent these three. The key and the address are for'
+                ~ ' hosts/three/leap/system/restore-authorized-keys:',
               'key:     ' ~ bk.pub | default('?'),
               'address: ' ~ bk_addr,
-              'fingerprint: ' ~ bk.fp | default('?') ~ ', for the infra agent to check the key against,'
-                ~ ' since a long line wraps on a phone.'] }}
+              'The host key is for hosts/three/leap/system/zero-known-hosts:',
+              'host key: ' ~ bk.host | default('?'),
+              'fingerprints: ' ~ bk.fp | default('?') ~ ' for the key, ' ~ bk.hostfp | default('?')
+                ~ ' for the host key, for the infra agent to check each against, since a long'
+                ~ ' line wraps on a phone.'] }}
       changed_when: true
 
     - name: Check the key is root's and the pair matches
@@ -152,10 +168,12 @@
           - bk.derived | default('') | length > 0
           - bk.pub | default('') is match(bk.derived | default('') | regex_escape ~ '( |$)')
           - bk_addr is match('^100\.')
+          - bk.host | default('') is match('ssh-ed25519 ')
         fail_msg: >-
           {{ key }} is {{ bk.mode | default('unreadable') }} (root 600 wanted), its public
           file {{ 'matches' if bk.pub | default('') is match(bk.derived | default('-') | regex_escape) else 'DOES NOT MATCH' }}
-          it, and the address read is '{{ bk_addr }}'. Fix that by hand before sending
+          it, the address read is '{{ bk_addr }}', and the host key read is
+          '{{ bk.host | default('nothing') }}'. Fix that by hand before sending
           anything to the infra agent.
         success_msg: ok
       when: not (ansible_check_mode and bk_made is changed)

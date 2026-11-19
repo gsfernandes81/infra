@@ -24,6 +24,8 @@
 #   - A content change beyond the infra- header needs --allow-content-change, so
 #     "just adding a comment" can never be cover for smuggling a real edit onto the
 #     boot path.
+#   - A sudoers file must pass visudo BEFORE it is written: one bad file in
+#     /etc/sudoers.d stops sudo altogether, and with it the rollback below.
 #   - Post-install validation is type-aware, and a failure rolls back automatically.
 #     The rollback is then VERIFIED, and reported separately from the thing that
 #     triggered it -- an uncalibrated check once reported a good system as broken and
@@ -223,8 +225,34 @@ def validate_sshd_config(path):
     return problems
 
 
+def validate_sudoers(path):
+    """`visudo -cf` on the file: sudo's own parser, which reads it as sudo will.
+
+    This one has to pass BEFORE the write, and the pre-check on the repo copy is the check
+    that counts. sudo reads every file in /etc/sudoers.d on every run and refuses to run
+    at all over one it cannot parse, so a bad file installed is a box where `sudo` no
+    longer works: the post-install check, and the rollback, both need sudo and would fail
+    with it. On zero, remote, that would leave no way to elevate but a console.
+
+    With -f, visudo checks the syntax of the file it is given and not its owner or mode,
+    so the repo copy (gavin's, 0644) and the live file (root's, 0440) read the same.
+    Calibrated by sim/alpine/run-setup-plays.sh on Alpine: the live /etc/sudoers.d/gavin
+    reads `parsed OK`, zero's sudoers-mirror passes, and a broken copy of it is refused.
+    """
+    visudo = "/usr/sbin/visudo"
+    if not Path(visudo).exists():
+        return [f"{visudo} not found -- cannot validate a sudoers file on this host"]
+    r = run(["sudo", visudo, "-cf", str(path)])
+    if r.returncode == 0:
+        return []
+    lines = (r.stderr + r.stdout).strip().splitlines()
+    return [f"visudo -cf: {ln}" for ln in lines] or [f"visudo -cf exited {r.returncode}"]
+
+
 def validators_for(live):
     v = []
+    if live.parent == Path("/etc/sudoers.d") or live == Path("/etc/sudoers"):
+        v.append(validate_sudoers)
     if live.parent == Path("/etc/init.d"):
         v.append(validate_openrc_script)
     if live.name == "fstab":

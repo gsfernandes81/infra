@@ -5,6 +5,12 @@
 # infra-name: mirror-backup-age-check
 # infra-mode: 0755
 #
+# NOT USED, AND NOT TO BE INSTALLED (2026-11-19). It reads last-success, which only the
+# rsync push wrote, and the push is gone: three now pulls from zero's snapshots, so zero
+# never learns whether a pull succeeded (plans/three-backup-pull.md). The owner deferred the
+# alert to a dead man's switch for the whole fleet, designed separately; this file and
+# server-store-backup-ntfy-url.yml stay until that design says whether it reuses them.
+#
 # Tells the owner, through ntfy, when zero's last good backup to three is more than three
 # days old: a three that is off, unreachable or left locked after a reboot, or a backup that
 # fails every night (plans/three.md § Backups). Run daily by root's cron at 02:00, two

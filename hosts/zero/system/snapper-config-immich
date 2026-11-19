@@ -1,0 +1,57 @@
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /etc/snapper/configs
+# infra-name: immich
+# infra-mode: 0644
+#
+# snapper's config for zero's Immich subvolume, mounted at /media/immich once the move in
+# plans/visit-runbook.md is done: the library in data/ and Postgres in db/, so one snapshot
+# holds both at the same instant. three pulls the newest finished snapshot from
+# /media/immich/.snapshots (plans/three-backup-pull.md). snapper reads this file and
+# snapper-immich, the hourly script, runs it with --no-dbus; nothing lists it in
+# SNAPPER_CONFIGS (/etc/snapper/snapper), so the package's own D-Bus script leaves it alone.
+#
+# It is written to carry over unchanged when zero moves to Leap, where snapper is native:
+# there TIMELINE_CREATE="yes" is what makes snapper's own timer take the hourly snapshots.
+#
+# The limits are plain numbers, never ranges, so FREE_LIMIT and SPACE_LIMIT change nothing:
+# snapper's space-aware cleanup only moves within a range. No qgroup, so no quota.
+# Keep shell syntax: snapper's Alpine scripts source this file.
+
+SUBVOLUME="/media/immich"
+FSTYPE="btrfs"
+QGROUP=""
+SPACE_LIMIT="0.5"
+FREE_LIMIT="0.2"
+
+# Root alone: the snapshots hold Postgres's files and every photo.
+ALLOW_USERS=""
+ALLOW_GROUPS=""
+SYNC_ACL="no"
+
+# Nothing ever compares two snapshots here, and a comparison reads both whole trees.
+BACKGROUND_COMPARISON="no"
+
+# A snapshot the owner takes by hand, `snapper --no-dbus -c immich create
+# --cleanup-algorithm number --description "<why>"`, before an Immich upgrade say: the
+# newest 10 are kept, each for at least an hour.
+NUMBER_CLEANUP="yes"
+NUMBER_MIN_AGE="3600"
+NUMBER_LIMIT="10"
+NUMBER_LIMIT_IMPORTANT="10"
+
+# Hourly for a day, daily for a week. snapper keeps the oldest snapshot of each hour and
+# of each day, and never one younger than TIMELINE_MIN_AGE, so the one three is pulling,
+# the newest when the pull began, stays at least a day.
+TIMELINE_CREATE="yes"
+TIMELINE_CLEANUP="yes"
+TIMELINE_MIN_AGE="3600"
+TIMELINE_LIMIT_HOURLY="24"
+TIMELINE_LIMIT_DAILY="7"
+TIMELINE_LIMIT_WEEKLY="0"
+TIMELINE_LIMIT_MONTHLY="0"
+TIMELINE_LIMIT_QUARTERLY="0"
+TIMELINE_LIMIT_YEARLY="0"
+
+EMPTY_PRE_POST_CLEANUP="no"
+EMPTY_PRE_POST_MIN_AGE="3600"

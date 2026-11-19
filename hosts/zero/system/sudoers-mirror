@@ -1,0 +1,17 @@
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /etc/sudoers.d
+# infra-name: mirror
+# infra-mode: 0440
+#
+# The one command the mirror user may run as root, with no password: the forced command in
+# mirror-authorized-keys, word for word (plans/three-backup-pull.md). setpriv, util-linux's
+# from Alpine's `setpriv` package, which installs /bin/setpriv over BusyBox's applet of the
+# same name (BusyBox's has no --reuid), drops back to the mirror user, keeps
+# CAP_DAC_READ_SEARCH alone in the inheritable and ambient sets, and runs rsync's daemon,
+# which so reads any file and can change none. Root lasts only as long as setpriv takes,
+# and the rsync is the system's own, so an Alpine update to rsync applies at once.
+#
+# sudo matches the arguments exactly, so the forced command and this line change together.
+# In sudoers a = inside an argument is written \=.
+mirror ALL=(root) NOPASSWD: /bin/setpriv --reuid\=mirror --regid\=mirror --init-groups --inh-caps\=+dac_read_search --ambient-caps\=+dac_read_search /usr/bin/rsync --server --daemon --config\=/etc/rsyncd-mirror.conf .

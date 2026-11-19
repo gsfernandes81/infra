@@ -1,0 +1,17 @@
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /home/mirror/.ssh
+# infra-name: authorized_keys
+# infra-mode: 0644
+#
+# three's pull key, the one key that lets the mirror user in (plans/three-backup-pull.md).
+# Root's file in root's directory, so the mirror user cannot add another. The key opens no
+# shell, terminal or forwarding (restrict), comes only from three's tailnet address
+# (from=), and whatever the client asks for, sshd runs the read-only rsync daemon of
+# rsyncd-mirror.conf through the one sudo rule in sudoers-mirror.
+#
+# The key is three's /home/backup/.ssh/zero-pull.pub, which the owner makes on three
+# (hosts/three/leap/README.md § The backup); until then the line holds a placeholder and
+# lets nobody in. A rebuilt three makes a new key, and so a new line here, then an
+# install-system-file on zero.
+restrict,from="100.101.45.78",command="sudo -n /bin/setpriv --reuid=mirror --regid=mirror --init-groups --inh-caps=+dac_read_search --ambient-caps=+dac_read_search /usr/bin/rsync --server --daemon --config=/etc/rsyncd-mirror.conf ." FILL-FROM-THREE-BACKUP-KEY

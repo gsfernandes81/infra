@@ -1,0 +1,39 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /etc/systemd/system
+# infra-name: mirror-pull.service
+# infra-mode: 0644
+#
+# zero's backup, pulled by /usr/local/bin/mirror-pull as the backup user, never as root:
+# whatever zero sends is parsed without privilege (plans/three-backup-pull.md). Only a
+# success starts mirror-snapshot.service, so no snapshot ever holds a partial pull.
+#
+# Skipped while the array is locked; a condition, never RequiresMountsFor=, which would start
+# the unlock and wait at a passphrase prompt (docker-mirror.conf says why). PartOf= the
+# mount, so a lock stops a pull first rather than failing on a busy array. systemd never
+# starts a second run while one is still pulling.
+#
+# The sandbox leaves the user two places to write, current/ and state/, and no way to gain a
+# privilege; it reads its key and zero's pinned host key from its home, which stays
+# read-only.
+[Unit]
+Description=Pull zero's newest snapshot into the backup array
+After=media-mirror.mount
+PartOf=media-mirror.mount
+ConditionPathIsMountPoint=/media/mirror
+OnSuccess=mirror-snapshot.service
+
+[Service]
+Type=oneshot
+User=backup
+Group=backup
+ExecStart=/usr/local/bin/mirror-pull
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ReadWritePaths=/media/mirror/received-backups/immich/current /media/mirror/received-backups/immich/state
+CapabilityBoundingSet=

@@ -47,15 +47,20 @@ exemption, which is a real cost on a 512 MB armv6 box running diskless.
 
 | File | Live path | Why it's tracked |
 |---|---|---|
-| `fstab` | `/etc/fstab` | All three `/media/*` entries carry `nofail`, so a missing array can never stall boot. A fourth, `/var/lib/docker` on the SSD's `sda2` (btrfs, `compress=zstd:1`), carries it too, and its bare mountpoint is immutable like theirs; installed 2026-10-26 ([`docs/decisions.md`](../../../docs/decisions.md)). |
+| `fstab` | `/etc/fstab` | All three `/media/*` entries carry `nofail`, so a missing array can never stall boot. A fourth, `/var/lib/docker` on the SSD's `sda2` (btrfs, `compress=zstd:1`), carries it too, and its bare mountpoint is immutable like theirs; installed 2026-10-26 ([`docs/decisions.md`](../../../docs/decisions.md)). No array line carries `autodefrag` since 2026-11-19: it unshares the blocks snapshots share, and btrfs applies it to the whole filesystem, so it leaves every line or none (§ The backup). **Not installed yet**: the move installs it. The move also replaces the two Immich lines with one `/media/immich` line, whose `subvolid` only the move learns ([`plans/visit-runbook.md`](../../../plans/visit-runbook.md) § The move on `zero`). |
 | `bcache-register` | `/etc/init.d/bcache-register` | The array is btrfs RAID1 across **two** bcache devices; both must assemble before it can mount rw. This registers them and waits, bounded to 30s, then **always exits 0** — a failure here must never stop the boot. |
 | `cloudflared` | `/etc/init.d/cloudflared` | The tunnel — the remote way in. Only trackable since Aug 2026: it previously carried the tunnel token inline, so committing it would have committed a secret. **Since 2026-08-23 it carries no secret at all** — `command_args` is `--autoupdate-freq 240h0m0s --config /etc/cloudflared/config.yml tunnel run`, and the tunnel credentials file is 0600. It is hand-written, not packaged: `docs/host-setup.md` installs the binary from GitHub, so Alpine ships no init script for it. It logged nowhere until 2026-08-23: `stdout_log`/`stderr_log` are not variables `supervise-daemon` reads, and it now uses `output_logger`/`error_logger` — see phase 2f. |
 | `zram-swap` | `/etc/init.d/zram-swap` | Compressed swap in RAM ahead of the SSD swap partition, 2 GiB zstd at priority 100. **Installed 2026-10-26**: `/proc/swaps` lists `/dev/zram0` at 2 GiB, priority 100, `[zstd]`; in the default runlevel, owner-reported; [`docs/decisions.md`](../../../docs/decisions.md) § *Zram swap on `zero`* says why. Not boot-critical: a failed start leaves the SSD swap as it was. |
 | `devpool` | `/etc/init.d/devpool` | The dev containers' one memory limit: cgroup v2 group `/sys/fs/cgroup/devpool`, 2048M soft and 2560M hard RAM, 6G swap (the owner's, 2026-10-27: reclaim early, kill only at the hard line, and let zram and the SSD swap both be used), named by `dev/compose.yaml` as each dev container's `cgroup_parent` once `DEV_CGROUP_PARENT=/devpool`. **Written 2026-10-27, not installed**: install and proof below. Not boot-critical. |
 | `cloudflared-config.yml` | `/etc/cloudflared/config.yml` | The tunnel's ingress, moved off Cloudflare on 2026-08-23. Eight hostnames, and **the order is behaviour** — cloudflared matches first-rule-wins. This file is now the authoritative record of what zero serves; the dashboard's copy is ignored. See [`../../../docs/cloudflare.md`](../../../docs/cloudflare.md). |
 | `tailscaled` | `/etc/init.d/tailscaled` | zero's second way in, and the backup's path to `three`: Tailscale's static arm64 build in `/usr/local`, since Tailscale's repo has nothing for Alpine and Alpine's package lacked the TS-2026-013 fix on 2026-11-03. Installed and moved by `server-install-tailscale.yml`, with the binaries at the pin in `ansible/group_vars/fleet.yml` (§ Tailscale, below). **Not installed yet.** |
-| `mirror-backup` | `/etc/periodic/hourly/mirror-backup` | The nightly push of Immich's library, uploads, dumps and profile and of the Syncthing share to `three`, at 04:00, clear of Immich's 02:00 database dump, over the tailnet, with the root-only key `/root/.ssh/mirror-backup`, made by `server-create-backup-key.yml`, which can only write into `three`'s `incoming` ([`plans/three.md`](../../../plans/three.md)). **Not installed**: it waits for `three`, and its address is a placeholder it refuses to run with. |
-| `mirror-backup-age-check` | `/etc/periodic/daily/mirror-backup-age-check` | Tells the owner through ntfy when the last good push is more than three days old. The topic's URL is a secret, in root's `/var/lib/mirror-backup/ntfy-url`, written by `server-store-backup-ntfy-url.yml`. **Not installed**, with `mirror-backup`. |
+| `snapper-config-immich` | `/etc/snapper/configs/immich` | snapper's config for `/media/immich`: hourly snapshots kept 24 hours, daily ones 7 days, the owner's own kept 10 deep; root alone; no qgroups (§ The backup). **Not installed**: after the move. |
+| `snapper-sysconfig` | `/etc/snapper/snapper` | `SNAPPER_CONFIGS=""`, as the package ships it, so the package's own hourly script, which needs D-Bus, does nothing. **Not installed**. |
+| `snapper-immich` | `/etc/periodic/hourly/snapper-immich` | The hourly snapshot and its cleanup, `snapper --no-dbus`, under `flock` (BusyBox's applet). **Not installed**: after the move, since it refuses while `/media/immich` is not mounted. |
+| `sudoers-mirror` | `/etc/sudoers.d/mirror` | Lets the `mirror` user run, as root, exactly one command: `setpriv` dropping back to `mirror` with `CAP_DAC_READ_SEARCH` alone, then rsync's read-only daemon. `install-system-file` runs `visudo -cf` on it before writing. **Not installed**. |
+| `rsyncd-mirror.conf` | `/etc/rsyncd-mirror.conf` | That daemon's one module, `snapshots`, read-only, over `/media/immich/.snapshots`. **Not installed**. |
+| `mirror-authorized-keys` | `/home/mirror/.ssh/authorized_keys` | `three`'s pull key: `restrict`, only from `three`'s tailnet address, forced to the daemon above through sudo. Holds a placeholder until the owner makes the key on `three`. **Not installed**. |
+| `mirror-backup-age-check` | `/etc/periodic/daily/mirror-backup-age-check` | **Not used, and not to be installed.** It read the push's `last-success`, and the push is gone: with the pull, `zero` never learns whether a pull succeeded. The owner deferred the alert to a dead man's switch for the whole fleet, designed separately; this file and `server-store-backup-ntfy-url.yml` stay until that design says whether it reuses them. |
 
 **The mountpoints are `chattr +i`.** That is the actual protection against a failed
 mount silently destroying the Immich library, and it is not visible in any file here.
@@ -63,6 +68,120 @@ mount silently destroying the Immich library, and it is not visible in any file 
 than trusting the flag. Read
 [`../../../docs/recovery.md`](../../../docs/recovery.md) before touching a bare
 mountpoint, or you will get `Permission denied` as root and not know why.
+
+## The backup
+
+`three` pulls `zero`'s backup ([`plans/three-backup-pull.md`](../../../plans/three-backup-pull.md)).
+`zero` takes a read-only snapper snapshot of `/media/immich`, the library in `data/` and
+Postgres in `db/`, at the top of each hour, and keeps 24 hourly and 7 daily ones in
+`/media/immich/.snapshots/<N>/snapshot`. Daily at 01:00 UTC `three` logs in as `mirror`,
+with a key that runs nothing but a read-only rsync daemon, and copies the newest finished
+one. Nothing on `zero` pushes, and nothing on `zero` runs as root for it but the instant
+`setpriv` takes to drop to `mirror`.
+
+**snapper is from Alpine's edge/testing**, `snapper-0.13.1-r0`, the only Alpine package of
+it, installed once from the file and pinned in apk's world, so no `apk upgrade` moves it. It
+is not upgraded until `zero` moves to Leap, where snapper is native and this config carries
+over. Revisit at Alpine 3.25: it links Boost 1.84 and other libraries of the release it was
+built against, and a release that moves one breaks it. It runs with `--no-dbus` everywhere:
+apk installs `dbus` as a dependency, and no runlevel starts it, which is how it stays
+(installing a tool is not enabling it, CLAUDE.md § Landmines). `flock` in the hourly script
+is BusyBox's applet, in Alpine's BusyBox since long before 3.24 (its `busyboxconfig` sets
+`CONFIG_FLOCK=y`); `command -v flock` on `zero` confirms it before the script is installed.
+
+**setpriv is util-linux's**, from Alpine's `setpriv` package, which installs `/bin/setpriv`
+over BusyBox's applet of that name. BusyBox's has no `--reuid`, so the forced command would
+fail with it, and the pull with it.
+
+`.github/workflows/alpine-sim.yml` runs the install below on Alpine 3.24 arm64, `zero`'s
+release and architecture, and `microos-sim.yml`'s `three` job runs `zero`'s side as an
+Alpine container for `three` to pull from.
+
+### The install, owner-run
+
+The steps after the move need `/media/immich` and its `.snapshots`, which the move makes
+([`plans/visit-runbook.md`](../../../plans/visit-runbook.md) § The move on `zero`). After
+`ssh zero`, in fish:
+
+```fish
+# on zero: the packages; check BusyBox gives flock, then util-linux's setpriv and the pinned snapper, its SHA-256 checked here and its signature by apk
+command -v flock; and sudo apk add setpriv rsync sudo; and /bin/setpriv --version
+cd /tmp; and wget https://dl-cdn.alpinelinux.org/alpine/edge/testing/aarch64/snapper-0.13.1-r0.apk
+echo '8f62f6f5b8c603abf553711f02128ee98272253bf0fc8068aa74b74c13a120d9  snapper-0.13.1-r0.apk' | sha256sum -c -
+sudo apk add ./snapper-0.13.1-r0.apk; and sudo apk add snapper=0.13.1-r0; and grep '^snapper' /etc/apk/world
+sudo install -m 600 snapper-0.13.1-r0.apk /root/; and rm snapper-0.13.1-r0.apk; and snapper --version
+```
+
+`setpriv --version` names util-linux. `sha256sum` prints `OK`; anything else, stop. `apk add`
+refuses a file whose signature no key in `/etc/apk/keys` made; never pass it
+`--allow-untrusted`. The world line reads `snapper=0.13.1-r0`. The copy in `/root` is for a
+reinstall: edge drops a version when it builds the next.
+
+```fish
+# on zero: the mirror user, its home and .ssh root's; BusyBox locks the account with !, which sshd refuses a key for, so * replaces it: no password, not locked
+sudo addgroup -S mirror; and sudo adduser -S -D -H -h /home/mirror -s /bin/sh -G mirror mirror
+sudo sed -i 's/^mirror:![^:]*:/mirror:*:/' /etc/shadow; and sudo install -d -m 755 /home/mirror /home/mirror/.ssh
+sudo grep '^mirror:' /etc/shadow | cut -d: -f1,2; getent passwd mirror
+```
+
+The shadow line reads `mirror:*`; the passwd line ends `/home/mirror:/bin/sh`. A real shell,
+because sshd runs a forced command through the user's shell.
+
+```fish
+# on the phone: make zero's restore key if it has none, and print it, zero's address and zero's host key for three's files
+cd ~/infra/ansible; and ansible-playbook playbooks/server-create-restore-key.yml -e target=zero -K
+```
+
+Send the infra agent what it prints. Then, once `three`'s key is
+made and committed into `mirror-authorized-keys` (`hosts/three/leap/README.md` § The
+backup), and after the move, each file with a dry run first:
+
+```fish
+# on zero: install the backup's files; each dry run shows a new file, then --commit writes it
+sudo install -d -m 755 /etc/snapper/configs
+cd ~/infra; and git pull --ff-only
+for f in snapper-sysconfig snapper-config-immich sudoers-mirror rsyncd-mirror.conf mirror-authorized-keys snapper-immich
+    bin/install-system-file $f --new; and sudo bin/install-system-file $f --new --commit --allow-content-change; or break
+end
+```
+
+`sudoers-mirror` is checked by `visudo` before it is written: a bad file in `/etc/sudoers.d`
+stops sudo altogether. Then the first snapshot, by hand, and the list:
+
+```fish
+# on zero: the first snapshot, as the hourly cron will take it, then snapper's list of them
+sudo /etc/periodic/hourly/snapper-immich; and sudo snapper --no-dbus -c immich list
+```
+
+It lists snapshot 0, `current`, and 1, `timeline`. `three`'s first pull is
+`hosts/three/leap/README.md`'s. Once it has worked, the push key goes:
+`sudo rm /root/.ssh/mirror-backup /root/.ssh/mirror-backup.pub`.
+
+**Checks:** `sudo snapper --no-dbus -c immich list` gains one snapshot an hour;
+`grep autodefrag /proc/mounts` prints nothing (the move's remount drops it);
+`rc-update show | grep -w dbus` prints nothing.
+
+**Way back:** delete the six files the loop installed, the mirror user (`sudo deluser
+mirror`) and snapper (`sudo apk del snapper`); the snapshots stay until `sudo btrfs
+subvolume delete` takes them, and cost only what changed since each.
+
+### A restore
+
+From `zero`, as root, with the restore key, which reads `zero`'s backups on `three` and
+writes nothing there. `sudo snapper --no-dbus -c received-immich list` on `three` gives each
+of `three`'s snapshots and its date; its description names the `zero` snapshot it pulled.
+Into a new directory, never over `/media/immich` itself:
+
+```fish
+# on zero: read three's snapshot N of zero's Immich back, with real owners and modes; put the snapshot's number in place of N
+sudo rsync -aHAX --numeric-ids --exclude=/.snapshots -e 'ssh -i /root/.ssh/restore' restore@100.101.45.78::backups/immich/current/.snapshots/N/snapshot/ /media/immich/restore-N/
+```
+
+The first connection asks to accept `three`'s host key; its fingerprint is the one
+`make-stick` printed for `three`. The module sends the owners and modes the pull kept, and
+the symlinks as `zero` had them. `data/thumbs` and `data/encoded-video` come back empty:
+Immich regenerates them, after an empty `.immich` file is put in each (its folder check).
+A single file is the same command with its path after `snapshot/`.
 
 ## `devpool`: install, then prove the kill lands inside it
 

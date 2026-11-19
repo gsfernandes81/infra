@@ -17,6 +17,11 @@
 # Under --check it says whether it would write, and sends nothing.
 # sim/alpine/run-setup-plays.sh runs it in CI against an Alpine container.
 #
+# NOT NEEDED FOR NOW (2026-11-19): mirror-backup-age-check, its only reader, is not used
+# since three pulls the backup, and the owner deferred the alert to a dead man's switch for
+# the whole fleet, designed separately (plans/three-backup-pull.md). The play stays until
+# that design says whether it reuses the topic.
+#
 # -K IS REQUIRED: the directory is root's.
 
 - name: Check the inventory is loaded

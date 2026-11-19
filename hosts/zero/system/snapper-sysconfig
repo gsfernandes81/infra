@@ -1,0 +1,17 @@
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /etc/snapper
+# infra-name: snapper
+# infra-mode: 0644
+#
+# snapper's list of configs, which only the package's own scripts read: Alpine's snapper
+# puts here what openSUSE keeps in /etc/sysconfig/snapper. It is empty, as the package
+# ships it, and tracked so it stays empty. /etc/periodic/hourly/snapper, the package's
+# hourly script, runs snapper for each config named here without --no-dbus, so it would
+# need the D-Bus daemon, which zero does not run. Empty, it does nothing; snapper-immich
+# takes zero's snapshots instead (plans/three-backup-pull.md).
+#
+# At zero's move to Leap, `immich` is added to Leap's /etc/sysconfig/snapper, and Leap's
+# own timers take over.
+
+SNAPPER_CONFIGS=""

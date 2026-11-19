@@ -1,0 +1,33 @@
+#!/bin/sh
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /etc/periodic/hourly
+# infra-name: snapper-immich
+# infra-mode: 0755
+#
+# Takes zero's hourly read-only snapshot of /media/immich, then prunes the snapshots to the
+# limits in /etc/snapper/configs/immich (plans/three-backup-pull.md). Root's cron runs
+# /etc/periodic/hourly at the top of each hour. three pulls the newest finished one.
+#
+# snapper runs with --no-dbus: no D-Bus daemon, nothing on the boot path, and nothing
+# running between the hours. Its log goes to syslog rather than a file of its own.
+#
+# One run at a time: a cleanup that deletes many snapshots can outlast the hour, and two
+# snappers on one config would race for the same snapshot numbers. flock is BusyBox's
+# applet on Alpine. While /media/immich is not mounted it refuses, rather than leave snapper
+# to fail on the bare mountpoint, which is immutable (CLAUDE.md § Mount guards).
+set -eu
+
+if ! mountpoint -q /media/immich; then
+	echo "snapper-immich: /media/immich is not mounted; no snapshot this hour" >&2
+	exit 1
+fi
+exec 9> /run/snapper-immich.lock
+if ! flock -n 9; then
+	echo "snapper-immich: the last hour's run still holds the lock; skipping this hour" >&2
+	exit 0
+fi
+snapper() { command snapper --no-dbus -q --logger-type syslog -c immich "$@"; }
+snapper create --cleanup-algorithm timeline --description timeline
+snapper cleanup timeline
+snapper cleanup number
