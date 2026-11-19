@@ -1,0 +1,44 @@
+# infra-os:   alpine
+# infra-init: openrc
+# infra-path: /etc/conf.d
+# infra-name: dmcrypt
+# infra-mode: 0644
+#
+# Opens the array's encrypted member at boot, with the key file on the SD card, so a boot
+# needs nobody. This is the "disabled" mode the owner chose on 2026-11-19
+# (docs/decisions.md § zero's encrypted member): real encryption, unlocked by a key that
+# sits in the same box. It protects the disk when the disk leaves zero alone (a return, a
+# disposal, a disk taken without the Pi), not when the whole box is taken.
+#
+# Layers, bottom up: the WD Red Plus, its bcache backing device (attached to sda1's cache
+# set), LUKS2 labelled data-luks-4, then btrfs devid 4 of the array labelled data. LUKS sits
+# above bcache, so the SSD cache holds only ciphertext of this member.
+#
+# Read by cryptsetup-openrc's /etc/init.d/dmcrypt, one line at a time. target= starts an
+# entry; source= is resolved with findfs, and key= is a plain key file, so cryptsetup runs
+# once with -d and never asks for a passphrase. An entry WITHOUT key= would ask at the
+# console and the boot would wait on it: bin/install-system-file refuses one.
+#
+# The rc_ lines are OpenRC's own (openrc-run(8)); dmcrypt's parser skips them. dmcrypt
+# itself declares only `before checkfs fsck`, so nothing else would order it:
+#   after bcache-register - /dev/bcacheN must exist before findfs can find the LUKS UUID
+#                           on it. bcache-register always exits 0; if its devices are
+#                           missing, findfs finds nothing and dmcrypt skips the entry.
+#   after modules         - /etc/modules-load.d/dm-crypt.conf loads dm-crypt and dm-mod.
+#   before btrfs-scan     - btrfs-scan registers every btrfs member it can see; a scan
+#                           before the open misses devid 4 and the array will not mount.
+#   before localmount     - localmount only `use`s dmcrypt; this makes the order certain.
+# bcache-register also says `before dmcrypt btrfs-scan`, so either file alone orders it.
+#
+# A failure leaves the box up: no service needs dmcrypt, every /media entry carries
+# nofail, and the bare mountpoints are chattr +i. Opening it by hand is
+# hosts/zero/system/README.md § The encrypted member.
+#
+# Turning protection on (docs/management-plane.md, the phase table) removes this entry
+# BEFORE the key file's keyslot is killed: without a working key the boot would prompt.
+rc_after="bcache-register modules"
+rc_before="btrfs-scan localmount"
+
+target=data-4
+source='UUID=FILL-FROM-LUKS-UUID'
+key='/etc/keys/data.key'
