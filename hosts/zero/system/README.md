@@ -175,7 +175,7 @@ passphrase if the key file fails. The source is read from the installed entry:
 ```fish
 # data-4 is not open: open it with the key file, or else with the passphrase
 set l (sudo findfs (sed -n "s/^source='\(.*\)'\$/\1/p" /etc/conf.d/dmcrypt)); echo "LUKS device: $l"
-sudo cryptsetup open --key-file /etc/keys/data.key $l data-4; or sudo cryptsetup open $l data-4
+test -n "$l"; and begin; sudo cryptsetup open --key-file /etc/keys/data.key $l data-4; or sudo cryptsetup open $l data-4; end
 ```
 
 Then register both members with btrfs, mount the fstab's entries, and cycle the two

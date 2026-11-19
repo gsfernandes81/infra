@@ -30,6 +30,9 @@
 #   before localmount     - localmount only `use`s dmcrypt; this makes the order certain.
 # bcache-register also says `before dmcrypt btrfs-scan`, so either file alone orders it.
 #
+# No options=, so discards stop at dm-crypt, deliberately: the disk beneath is a hard disk
+# with no use for them, and passing them through would show which blocks are free.
+#
 # A failure leaves the box up: no service needs dmcrypt, every /media entry carries
 # nofail, and the bare mountpoints are chattr +i. Opening it by hand is
 # hosts/zero/system/README.md § The encrypted member.

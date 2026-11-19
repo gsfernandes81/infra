@@ -304,7 +304,7 @@ def validate_dmcrypt_conf(path):
 
         st = run(["sudo", "stat", "-c", "%u %a", key])
         if st.returncode != 0:
-            problems.append(f"{label}: key file {key} does not exist")
+            problems.append(f"{label}: cannot read key file {key}: {st.stderr.strip() or 'no such file'}")
             continue
         uid, mode = st.stdout.split()
         if uid != "0" or int(mode, 8) & 0o077:

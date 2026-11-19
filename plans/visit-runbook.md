@@ -359,6 +359,10 @@ over from `sdb`.
 - the owner's password manager open, for the passphrase of step 6;
 - about 2 to 3 hours, most of it the copy.
 
+A fleet-wide `server-install-system-files.yml` run before the slice is harmless: it would
+install the reordered `bcache-register` (a `before` on a service in no runlevel orders
+nothing) and create `dm-crypt.conf`, and list `dmcrypt` as refused for its placeholder.
+
 **Where the agent stops.** The infra agent runs on `zero`, so it is there until step 10's
 shutdown. At step 8 it commits the values the owner sends it. After the reboot it is back
 through `ssh dev`.
@@ -382,8 +386,10 @@ through `ssh dev`.
 
    It reads right when the scrub's status is finished with no errors; every cache mode
    reads `writethrough writeback writearound [none]`; every counter is 0; the usage lists
-   `/dev/bcache0` and `/dev/bcache1`; the slaves line for `sdb` names `bcache1`, as the
-   survey did; `bcache-register` is in `sysinit`, and `btrfs-scan` and `modules` in
+   `/dev/bcache0` and `/dev/bcache1`; the slaves loop prints four lines, a backing disk
+   and `sda1` for each bcache device, and the backing line for `sdb` names `bcache1`, as
+   the survey did (the `sda1` lines carry the cache's own `dev.uuid`, which is not the one
+   to send); `bcache-register` is in `sysinit`, and `btrfs-scan` and `modules` in
    `boot`; `localmount` is in no runlevel, which is right: `bootmisc`, in `boot`, declares
    `need localmount`, so OpenRC starts it in the boot runlevel's order, after anything in
    that runlevel it `use`s or is `after` (dmcrypt, once step 8 adds it); and both
@@ -402,12 +408,15 @@ through `ssh dev`.
    set d (lsblk -dbno NAME,SIZE | awk '$1 ~ /^sd/ && $2 > 3500000000000 {print $1}'); echo "new disk: $d"
    sudo smartctl -d sat -i -A /dev/$d
    sudo blkid -p /dev/$d; echo "blkid exit $status"
+   lsblk -do NAME,LOG-SEC,PHY-SEC
    ```
 
    It reads right when `/proc/misc` counts 1; one disk name; smartctl shows serial
    `WD-WXB2D76H9RCN`, a few power-on hours, and 0 for `Reallocated_Sector_Ct`,
    `Current_Pending_Sector`, `Offline_Uncorrectable` and `UDMA_CRC_Error_Count`; and blkid
-   prints nothing and exits 2, a blank disk. Send the smartctl lines to the agent; once the
+   prints nothing and exits 2, a blank disk. The sector sizes show what each bridge
+   reports; the new disk moves from the borrowed Sabrent into `zero`'s at step 10, and its
+   bcache block of 4096 (step 5) suits a bridge reporting 512 or 4096 alike. Send the smartctl lines to the agent; once the
    disk is in `zero`, its line belongs in `hosts/zero/system/hardware.md` through
    `bin/hw-inventory`. If blkid prints a partition table on the disk with that serial,
    `sudo apk add wipefs; and sudo wipefs -a /dev/$d` clears it; anything else, stop.
@@ -432,22 +441,30 @@ through `ssh dev`.
    sudo bcache-super-show /dev/sda1 | grep -E '^(dev.sectors_per_block|cset.uuid)'
    ```
 
-   The block size in bytes is `sectors_per_block` times 512: 8 is 4096, 1 is 512. Then:
+   `sectors_per_block` must be 8 (4096 bytes) or less. The new device's block is 4096
+   whatever it reads: bcache refuses a backing block smaller than the cache set's, never a
+   larger one, and refuses at registration a block smaller than the disk's logical
+   sector, which a bridge may report as 4096. Then:
 
    ```fish
-   # step 5, on zero: make the new disk a bcache backing device at that block size, register it, attach it to the cache set, cache mode none; put the bytes in place of BLOCK and the cset.uuid in place of CSET
-   set d (lsblk -dbno NAME,SIZE | awk '$1 ~ /^sd/ && $2 > 3500000000000 {print $1}'); test (count $d) -eq 1; and sudo make-bcache -B --block BLOCK /dev/$d
+   # step 5, on zero: make the new disk a bcache backing device with a 4096-byte block, register it, attach it to the cache set, cache mode none; put the cset.uuid in place of CSET
+   set d (lsblk -dbno NAME,SIZE | awk '$1 ~ /^sd/ && $2 > 3500000000000 {print $1}'); test (count $d) -eq 1; and sudo make-bcache -B --block 4096 /dev/$d
    test -e /sys/block/$d/bcache; or echo /dev/$d | sudo tee /sys/fs/bcache/register
    echo CSET | sudo tee /sys/block/$d/bcache/attach
    echo none | sudo tee /sys/block/$d/bcache/cache_mode
    echo "new bcache device:" (basename (readlink /sys/block/$d/bcache/dev)); cat /sys/block/$d/bcache/state /sys/block/$d/bcache/cache_mode
    sudo dmesg | grep -i bcache | tail -n 5
    sudo bcache-super-show /dev/$d | grep -E '^(dev.uuid|cset.uuid)'
+   sudo blkid /dev/$d
    ```
 
    It reads right when the device is `bcache2`; its state is `clean`, not `no cache`; its
    mode reads `[none]`; dmesg says `Caching <disk> as bcache2 on set <CSET>`; and the
-   superblock's `cset.uuid` is the cache set's. **Note its `dev.uuid`** for step 8. A
+   superblock's `cset.uuid` is the cache set's. **Note its `dev.uuid`** for step 8, and
+   check blkid's `UUID=` is the same: blkid is what mdev names `/dev/disk/by-uuid/` from,
+   and that link is what `bcache-register` registers at boot. The link itself appears only
+   at the next boot, since mdev made the disk's links before this superblock existed, so
+   its absence from `/dev/disk/by-uuid` now means nothing. A
    `Couldn't attach` line in dmesg is a refused attach: stop there.
    **Way back:** `echo 1 | sudo tee /sys/block/$d/bcache/stop` and unplug the disk;
    nothing in the array has changed.
@@ -457,12 +474,14 @@ through `ssh dev`.
    ```fish
    # step 6, on zero: format the new bcache device as LUKS2 with Adiantum and the key file, only if it holds no signature
    set d (lsblk -dbno NAME,SIZE | awk '$1 ~ /^sd/ && $2 > 3500000000000 {print $1}'); set b (basename (readlink /sys/block/$d/bcache/dev)); echo "formatting /dev/$b"
-   test (count $d) -eq 1; and test -b /dev/$b; and not sudo blkid -p /dev/$b; and sudo cryptsetup luksFormat --batch-mode --type luks2 --cipher xchacha12,aes-adiantum-plain64 --key-size 256 --pbkdf-memory 262144 --label data-luks-4 --key-file /etc/keys/data.key /dev/$b
+   test (count $d) -eq 1; and test -b /dev/$b; and not sudo blkid -p /dev/$b; and sudo cryptsetup luksFormat --batch-mode --type luks2 --cipher xchacha12,aes-adiantum-plain64 --key-size 256 --sector-size 4096 --pbkdf-memory 262144 --label data-luks-4 --key-file /etc/keys/data.key /dev/$b
    ```
 
    `/dev/$b` is read from the new disk's own bcache directory, so it cannot name
    `bcache0` or `bcache1`, and blkid refusing to find a signature on it is the second
-   guard. `--pbkdf-memory 262144` keeps each keyslot's Argon2 at 256 MiB, so the disk
+   guard. `--sector-size 4096` is set rather than left to cryptsetup, which picks it from
+   the device it sees; it matches the bcache block and btrfs's own 4 KiB sectors.
+   `--pbkdf-memory 262144` keeps each keyslot's Argon2 at 256 MiB, so the disk
    still opens on a 1 GB board such as `three`'s: cryptsetup otherwise sizes it to the Pi
    5's memory, up to 1 GiB, and a smaller box then refuses with *Not enough available
    memory to open a keyslot*.
@@ -609,7 +628,7 @@ through `ssh dev`.
     ```
 
     It reads right when dmcrypt is started and the mapping exists; the filesystem lists
-    two devices, one of them `/dev/mapper/data-4`; findmnt lists the three `/media` mounts
+    two devices, one of them `/dev/mapper/data-4` (or `/dev/dm-0`, the same device); findmnt lists the three `/media` mounts
     and `/var/lib/docker`; every counter is 0; check-mount-guards passes; and Immich
     answers `{"res":"pong"}`. Then `ssh dev` brings the agent back, to be told how it read.
 

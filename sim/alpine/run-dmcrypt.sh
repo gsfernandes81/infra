@@ -21,7 +21,7 @@ box=infra-dmcrypt-sim
 key=/etc/keys/data.key
 target=data-4
 label=data-luks-4
-format_flags='--batch-mode --type luks2 --cipher xchacha12,aes-adiantum-plain64 --key-size 256 --pbkdf-memory 262144'
+format_flags='--batch-mode --type luks2 --cipher xchacha12,aes-adiantum-plain64 --key-size 256 --sector-size 4096 --pbkdf-memory 262144'
 fails=0
 
 pass() { echo "PASS: $*"; }
@@ -87,6 +87,7 @@ grep -Eq '^[[:space:]]+cipher:[[:space:]]+xchacha12,aes-adiantum-plain64' "$work
 grep -Eq "^Label:[[:space:]]+$label\$" "$work/dump" && pass "luksDump: label $label" || fail "luksDump shows another label"
 slots=$(grep -cE '^  [0-9]+: luks2' "$work/dump")
 [ "$slots" = 2 ] && pass "luksDump: two keyslots" || fail "luksDump: $slots keyslots"
+grep -Eq '^[[:space:]]+sector:[[:space:]]+4096' "$work/dump" && pass "luksDump: sector 4096" || fail "luksDump: the sector is not 4096"
 grep -Eq '^[[:space:]]+Memory:[[:space:]]+262144' "$work/dump" && pass "luksDump: argon2 memory 262144 KiB, which a 1 GB board can open" || fail "luksDump: the keyslots' memory is not 262144 KiB"
 on "cryptsetup open --test-passphrase --key-file /run/pass $loop" && pass "the passphrase opens it" || fail "the passphrase does not open it"
 uuid=$(on "cryptsetup luksUUID $loop")
