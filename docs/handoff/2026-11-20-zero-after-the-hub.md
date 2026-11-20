@@ -75,63 +75,9 @@ and the `dev/README.md` paragraph that names it (the `plans/dev-pool.md` item un
 
 ## 2. Phase 12: `zero` to Leap 16.1 Immutable
 
-**What is decided** (the owner, 2026-11-20; the start of the design is
-[`plans/zero-leap.md`](../../plans/zero-leap.md)):
-
-- The owner is at `zero` with a new SD card and a Combustion stick made by
-  `leap/make-stick` on Alpine. They boot the new card, the rest happens over ssh, and the
-  Alpine card is the way back, so the move writes nothing Alpine cannot read on its next
-  boot.
-- Go or no-go when it is ready; a no-go is fine and nothing is rushed.
-- The gate was a Pi 4's proof, already given. Phase 12 is ordered after 10 and 11 (the
-  phase table).
-- Immich and Syncthing come back first; Docker as today; pearl-wallet and the backup
-  source `three` pulls from come too.
-
-**What to do first:** the inventory, which the last session started and lost in the move.
-For every item, file:line, and what it means for the move:
-
-1. Every file in `hosts/zero/system/` against its Leap form: a file to adapt from
-   `hosts/one/leap/system/` or `hosts/three/leap/system/`, something Leap does itself
-   (bcache-tools' udev rule for `bcache-register`, zram-generator for `zram-swap`,
-   crypttab for `dmcrypt`/`dm-crypt.conf`, snapper is native), or nothing.
-2. The array: btrfs RAID1 over two bcache devices, one of them the LUKS2 member
-   `data-luks-4` (mapping `data-4`, key file `/etc/keys/data.key` on the card); the cache
-   SSD's `sda1` cache, `sda2` Docker store, `sda3` swap; each fstab entry's UUID and
-   subvolid. Which way LUKS and bcache stack (`decisions.md` § *`zero`'s encrypted
-   member*, `plans/visit-runbook.md` § Slice 2), and how crypttab orders against bcache
-   assembly.
-3. Immich's, Syncthing's and pearl-wallet's binds and named volumes. Leap's Docker cannot
-   adopt Alpine's store, so `zero` needs a new store subvolume on `sda2`, as `one` got
-   `var-lib-docker-leap`, and named volumes cross as tar files (`leap/README.md`).
-4. The backup source: snapper's `immich` config and the hourly script, `sudoers-backup`,
-   `rsyncd-backup.conf`, `backup-authorized-keys` with its `setpriv`, `backup-age-check`,
-   the `backup` user and its state. What `three`'s pull needs unchanged: `zero`'s ssh host
-   key (`hosts/three/leap/system/zero-known-hosts`) and its tailnet address.
-5. The carry-over gaps in `leap/make-stick` and `leap/firstboot.sh` for `zero`: the LUKS
-   key file, Tailscale's state (so the address stays), the `backup` user, `gavin` at 1001
-   (`one` is 1000), host keys, `/etc/cloudflared/zero.json`, each deployment's `.env` and
-   `~gavin/.<deployment>-secrets`.
-6. The Pi 5: the image, the locked boot firmware, health-checker's fallback, and whether
-   `sim/microos/run-host.sh` can boot a `zero` the way it boots `one` and `three`.
-7. The plays that target `zero` and need a Leap path, and the `MOVED` marker convention.
-
-**Traps already known**, each recorded where it says:
-
-- A Leap first boot with a data disk missing goes to emergency mode despite `nofail`:
-  Combustion leaves `/etc/selinux/.autorelabel`, and the relabel generator ignores
-  `nofail` (`leap/README.md` § *What the November visit's first boots taught*).
-- A data mount names its subvolume by `subvolid=`, never `subvol=`, or health-checker can
-  strand the box (`plans/microos-cutover.md`).
-- Every `/media` entry needs `context=system_u:object_r:container_file_t:s0`, and home-dir
-  binds need `:z` (`decisions.md`, calibre-web's row).
-- The first-boot script is not safe to re-run, and the docs overstate its rollback (phase
-  12's own prerequisites in the phase table).
-- The first `up` of the dev stack would recreate it; that is `one`'s concern now, not
-  `zero`'s, but `zero`'s own deployments may have the same recreate puzzle (phase table).
-
-Then the design, in `plans/zero-leap.md`: what `zero` runs that `one` and `three` did not,
-the carry-over, the day, and the questions only the owner can answer.
+Filed: the inventory and the design are in
+[`plans/zero-leap.md`](../../plans/zero-leap.md), with the traps this section listed. The
+owner's questions are open there.
 
 **Delete this note** once both pieces are done or filed, after moving anything durable
 into `decisions.md`.
