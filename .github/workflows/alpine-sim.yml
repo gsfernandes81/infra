@@ -2,9 +2,11 @@ name: alpine-sim
 
 # Runs the setup plays (server-install-tailscale.yml, server-create-restore-key.yml,
 # server-store-backup-ntfy-url.yml) end to end, server-install-system-files.yml's dry run, zero's
-# snapper install as hosts/zero/system/README.md gives it and install-system-file's sudoers
-# check, all against an Alpine container with OpenRC as init, reached over ssh (sim/alpine/). Every check is named PASS or FAIL in the log, and any
-# FAIL fails the job. arm64, so the pinned Tailscale tarball's own binaries run as on zero.
+# snapper install as hosts/zero/system/README.md gives it, install-system-file's sudoers
+# check and server-start-dev-containers.yml, all against an Alpine container with OpenRC as
+# init, reached over ssh (sim/alpine/); and server-unlock-arrays.yml's refusal of OpenRC there
+# and its unlock on the runner's own systemd. Every check is named PASS or FAIL in the log,
+# and any FAIL fails the job. arm64, so the pinned Tailscale tarball's own binaries run as on zero.
 #
 # WHAT IT CANNOT CHECK, so nobody reads a green run as more: a real join (no auth key exists
 # here; the real tailscale is shown refusing a made-up key, and a stand-in answers `up`), a
@@ -25,6 +27,11 @@ on:
       - 'ansible/playbooks/server-create-restore-key.yml'
       - 'ansible/playbooks/server-store-backup-ntfy-url.yml'
       - 'ansible/playbooks/server-install-system-files.yml'
+      - 'ansible/playbooks/server-start-dev-containers.yml'
+      - 'ansible/playbooks/server-unlock-arrays.yml'
+      - 'ansible/playbooks/files/unlock-volumes.sh'
+      - 'sim/microos/host/play-prompts.py'
+      - 'dev/Makefile'
       - 'ansible/playbooks/_review-anchor.yml'
       - 'ansible/playbooks/_sync-host-checkout.yml'
       - 'ansible/playbooks/_assert-inventory.yml'
@@ -44,6 +51,11 @@ on:
       - 'ansible/playbooks/server-create-restore-key.yml'
       - 'ansible/playbooks/server-store-backup-ntfy-url.yml'
       - 'ansible/playbooks/server-install-system-files.yml'
+      - 'ansible/playbooks/server-start-dev-containers.yml'
+      - 'ansible/playbooks/server-unlock-arrays.yml'
+      - 'ansible/playbooks/files/unlock-volumes.sh'
+      - 'sim/microos/host/play-prompts.py'
+      - 'dev/Makefile'
       - 'ansible/playbooks/_review-anchor.yml'
       - 'ansible/playbooks/_sync-host-checkout.yml'
       - 'ansible/playbooks/_assert-inventory.yml'

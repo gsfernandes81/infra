@@ -367,9 +367,13 @@ update_play() {
 	fi
 	{ printf '%s\n' "$password"; cat <<'STUBS'; } | ssh_as gavin@127.0.0.1 "sudo -S -p '' bash -s" 2>&1 | sed 's/^/    /' || true
 set -e
-printf '#!/bin/sh\necho "cloudflared version 0.0.0-sim (stand-in)"\n' > /usr/local/bin/cloudflared
-printf '#!/bin/sh\necho 0.0.0-sim\n' > /usr/local/lib/docker/cli-plugins/docker-compose
-chmod 755 /usr/local/bin/cloudflared /usr/local/lib/docker/cli-plugins/docker-compose
+# Each beside its binary, then renamed over it: cloudflared restarts every 10 s with the
+# stand-in credentials, and a write into it while it runs fails "Text file busy".
+printf '#!/bin/sh\necho "cloudflared version 0.0.0-sim (stand-in)"\n' > /usr/local/bin/cloudflared.sim
+printf '#!/bin/sh\necho 0.0.0-sim\n' > /usr/local/lib/docker/cli-plugins/docker-compose.sim
+chmod 755 /usr/local/bin/cloudflared.sim /usr/local/lib/docker/cli-plugins/docker-compose.sim
+mv -f /usr/local/bin/cloudflared.sim /usr/local/bin/cloudflared
+mv -f /usr/local/lib/docker/cli-plugins/docker-compose.sim /usr/local/lib/docker/cli-plugins/docker-compose
 # A stale copy of the update recipes, so only the play's own install can make it current.
 echo stale > /etc/motd.d/50-infra-updates
 STUBS

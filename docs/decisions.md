@@ -2859,6 +2859,52 @@ holding nothing but Syncthing, so the change costs least now.
   was named after is gone: on `three` it says which side of the pull it is, beside `zero`'s
   `immich`.
 
+## Routine actions are plays: the unlock and the dev containers' start
+
+**Decided 2026-11-20**, the owner's call: a routine action the owner types on the phone
+becomes an Ansible play, so the interface to the fleet stays Ansible rather than a set of
+remembered `ssh -t` lines. Two so far.
+
+- **`server-unlock-arrays.yml` unlocks every encrypted volume a host lists in its
+  `host_vars` file (`unlock_volumes`, a crypttab name and a mount point each)**, because the
+  list is the host's own and the play derives the units from it. `three`'s array is the
+  only entry; `zero`'s joins with an OpenRC branch, which the play refuses to guess at
+  until it is written.
+- **An empty answer declines that volume**: Enter alone leaves it locked, and the summary
+  says "left locked: no passphrase given". Typing a passphrase is the consent to unlock, so
+  one run can open some volumes and not others, and nobody has to remember a flag to skip
+  one. The summary does not say who declined, because without a terminal `pause` answers
+  empty for every prompt; detecting the terminal was set aside (Fable's review), since a
+  check that cannot be calibrated on Termux from here could refuse the owner abroad.
+- **sudo is checked on each host before any passphrase is asked for**, by a plain become of
+  `true`, because the unlock is `no_log` and a sudo failure there showed only that its output
+  was hidden, after the passphrase had been typed (Fable's review).
+- **On systemd the play answers the request `systemd-cryptsetup@<name>.service` makes**,
+  through `systemd-reply-password`, which reads the passphrase on stdin, because then the
+  unit is the one that unlocks: every crypttab option applies, `password-cache=no`
+  included, and the unit is active afterwards, so the README's lock command, `PartOf=` on
+  Docker and the timers the mount wants behave as after the manual unlock. Set aside:
+  `cryptsetup open` with the passphrase on stdin, which bypasses crypttab's options and
+  leaves the unit inactive unless started after; and a key file for `systemd-cryptsetup
+  attach`, which is a file.
+- **The passphrase is asked for at a prompt, never read from a file or an extra var**, and
+  reaches the box on the command's stdin, which under pipelining is the ssh session's own.
+  A command line is in `ps` and in sudo's journal, a file is a second copy of the one
+  secret the box is meant to hold alone, and `-e` is shell history. The prompt is one
+  `pause` looped over every host's locked volumes, because `pause` runs once per play on
+  the first host; a terminal-driven run in `microos-sim.yml` proves it asks once per
+  volume across hosts.
+- **A wrong passphrase is a failure of that volume, not of the run**: the play reports it,
+  goes on, and ends with one line per host and volume. A host with a failed volume fails
+  its last check, so the recap shows it.
+- **`server-start-dev-containers.yml` runs `make up` in `dev/` on zero as root and prints
+  its output**, the play form of `ssh -t zero 'cd ~/infra/dev && make up'`, because that
+  was the command the owner typed when the containers were down, and `dev/Makefile` already
+  allows root and builds at the checkout owner's uid. `up` only: nothing here stops or
+  removes a container. It does not replace `server-deploy-compose.yml -e deployment=dev`,
+  which plans and asks; this is the break glass, as a play. make runs as a polled async job,
+  so a phone that drops its connection mid-build does not stop the build.
+
 ## The lesson worth keeping
 
 
