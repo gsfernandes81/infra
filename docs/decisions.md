@@ -2457,6 +2457,10 @@ from one of its snapshots before it leaves, as [`plans/three.md`](../plans/three
 password for Singapore goes on before the shipping power-off, with the static UK profile
 turned off (`hosts/three/leap/README.md` § Before three ships).
 
+**Ethernet in Singapore, not Wi-Fi** (owner, 2026-11-20): `three` will be wired there, so
+no Wi-Fi profile is added before shipping; the wired profile is still switched from the UK's
+static `.103` to DHCP (`hosts/three/leap/README.md` § Before three ships).
+
 ## A browser hostname on a host's tunnel gets a login from a play
 
 **Decided 2026-11-18**, the owner's call: `syncthing-three`'s Access login and DNS record
