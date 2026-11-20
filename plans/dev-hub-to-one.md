@@ -100,7 +100,10 @@ switch.
    directory, and that the hub reaches the container by ssh. The two traps that would
    break the switch are exactly what no CI covers today. The builder judges whether the
    x86_64 images make this practical. If not, block 2 below proves it on `one` before the
-   switch.
+   switch. **The planner's call:** not practical in a VM pulling the images, so
+   `dev-smoke` checks that every bind carries `z` and that the containers read secrets
+   through group 1001, and block 2 proves the SELinux half on `one` with a throwaway
+   container.
 
 **Second step, at the switch, in one commit:**
 
@@ -229,7 +232,8 @@ handover blocks.
 2. The host tunnels' callers of `_cf-tunnel.yml` (root-owned
    `/etc/cloudflared/<host>.json`) must still write mode `0600`. Task 2 tests it.
 3. A re-run of `_dev-host.yml` against a host whose secrets are `0700`/`0600` (as on
-   `zero` today) converges to `0750`/`0640`, group 1001, without refusing. Task 2 tests it.
+   `zero` today) converges to `0750`/`0640`, group 1001, and does not refuse. Task 2
+   tests it.
 4. The long-form `tunnel.json` bind must still fail the start on a missing file after `z`
    is added (`create_host_path: false` kept). Task 1 tests it.
 5. The hub built in CI at 1001 must still hit `dev-cache.yml`'s cache: the build args stay
