@@ -5,9 +5,9 @@ A design from 2026-11-20, for the owner to review before anything is built. It m
 at the November visit. When it is done its reasoning moves to
 [`docs/decisions.md`](../docs/decisions.md) and this file is deleted.
 
-**Draft.** Nothing here is decided beyond the owner's calls below. Calls marked *agent's
-call* are the design's own and the owner can overturn any of them. Phase 12 in
-`docs/management-plane.md`, ordered after 10 and 11.
+**For the owner's approval.** Nothing here is decided beyond the owner's calls below.
+Calls marked *agent's call* are the design's own and the owner can overturn any of them.
+Phase 12 in `docs/management-plane.md`, ordered after 10 and 11.
 
 ## The owner's calls, 2026-11-20
 
@@ -24,6 +24,15 @@ call* are the design's own and the owner can overturn any of them. Phase 12 in
    (`decisions.md` § *The dev hub runs on `one`*).
 6. **Immich and Syncthing come back first;** the stack is otherwise the same as today,
    under Docker.
+7. **No new guard for a late array.** Docker's restart loop brings Immich back once the
+   array mounts, proven in the simulation. Quadlets, at phase 17, give each container a
+   systemd unit, where `RequiresMountsFor=` does it directly.
+8. **`zero` keeps its tailnet identity:** its Tailscale state is carried.
+9. **Encryption protection stays off at the move,** with the key file carried on the stick
+   and the stick wiped after the day. Phase 16 turns it on later.
+10. **Syncthing is reachable on the LAN:** firewalld lets its ports through.
+11. **A bench boot first,** of a minimal image the owner can ssh into and test.
+12. **Build 3.17** of the Pi image.
 
 ## What `zero` has that `one` and `three` did not
 
@@ -50,12 +59,36 @@ below.
   snapper's `immich` config and its hourly snapshots. All installed on Alpine on
   2026-11-20, none yet on Leap.
 - **gavin at uid 1001.** `one` and `three` are 1000. Syncthing runs as 1000 on `zero`, so
-  `/media/syncthing` is owned by 1000, which has no account on Leap `zero` unless the
-  paste shows one on Alpine. No account is made for it (*agent's call*): Syncthing's
-  container needs none, and Alpine's own reads the numbers as before.
+  `/media/syncthing` is owned by 1000, which on Alpine is an old account named `yes`. No
+  account is made for 1000 on Leap (*agent's call*): Syncthing's container needs none,
+  and Alpine reads the numbers as before.
 - **Array disks on USB.** `make-stick`'s "not a USB disk" guard does not exclude them, and
   its fstab-UUID guard misses the bcache and LUKS member partitions, so on `zero` only the
   size cap and the typed confirmation stand between the stick and an array disk.
+
+## What the paste from `zero` showed, 2026-11-20
+
+- **Subvolume ids on the array:** 278 `media-syncthing`, 281 `immich`, with 282
+  `data/thumbs`, 283 `data/encoded-video` and 284 `.snapshots` nested under it; 279 and
+  280 are the old Immich subvolumes phase 11 deletes. On `sda2`: 256 `var-lib-docker`.
+- **bcache:** `sda1` is the cache (`a3d7a86c…`), `sdb` (`589733f6…`) and `sdc`
+  (`f5ec31d1…`) the backing disks. Today `bcache0` is the plain btrfs member and `bcache1`
+  holds `data-luks-4`; nothing on Leap names either number.
+- **Tailnet address** `100.121.158.58`, as `three` expects.
+- **The Pi 5's EEPROM:** bootloader of 2025-05-08, `BOOT_ORDER=0xf41` (the SD card, then
+  USB, then again), no `PSU_MAX_CURRENT`. Alpine's `config.txt` sets nothing Pi 5 specific
+  and there is no `usercfg.txt`. So the Leap card needs no `extraconfig.txt` for USB
+  power: the disks already run under these firmware settings. The card boots before the
+  stick by the boot order.
+- **Two things to look at before the day:**
+  - `~gavin/infra/.claude/` is untracked in `zero`'s host checkout. That checkout was
+    `infra-dev`'s `/workspace` until 2026-10-27, so it may hold session worktrees with
+    commits that exist nowhere else. The fresh clone on Leap would leave them on the
+    Alpine card only. Read `git -C ~/infra worktree list` and the branches in it, and
+    account for each commit as CLAUDE.md asks of a diverged checkout, before the stick is
+    made.
+  - An anonymous volume, `294c1145…`, that no compose file names. Phase 10's measure step
+    finds its owner before anything is removed.
 
 ## The carry-over
 
@@ -107,6 +140,7 @@ directory is `hosts/zero/leap/`, laid out as `one`'s.
 | none | from `one`: `wired.nmconnection` at `192.168.86.100`, `rebootmgr.conf`, `transactional-update.conf`, `sudoers-gavin`, `docker-mounts.conf` |
 | none | `combustion/script`, from `one`'s, with gavin and his group at 1001, the `backup` user with a real shell (sshd runs the forced command through it), its root-owned home, the key file, the Tailscale state, the restore key, and `/media/immich`, `/media/syncthing` made as bare mountpoints |
 | none | `volumes`: `pearl-wallet_wallet` |
+| none | firewalld: `firewall-offline-cmd --add-service=syncthing` in `combustion/script`, as `three`'s has it (22000 tcp and udp, 21027 udp) |
 | none | `MOVED`, committed on the day once `zero` answers |
 
 **The recreate puzzle** (`server-deploy-compose.yml` planning to recreate Immich and
@@ -152,6 +186,38 @@ of the dev images leaves room for both.
 - The tunnel plays and `server-install-tailscale.yml` refuse `zero` through
   `_alpine-only.yml` once `MOVED` exists.
 
+## A late or missing array
+
+No guard is added (the owner's call 7). On a boot where the array mounts late, Immich's
+server and its database start against the bare mountpoints, which sit on the read-only
+root, so every write fails and Docker restarts them under `restart: always`. Docker sets
+up a container's bind mounts at each start, so the first restart after the array mounts
+sees it, and Immich comes back without a hand. Syncthing does the same. pearl-wallet does
+not use the array and runs throughout. The simulation proves this by attaching the array
+after Docker has started. Phase 16's gate is this proof: with protection on, every boot is
+a late array until the owner unlocks it.
+
+## The bench boot
+
+A spare SD card with build 3.17 and a minimal Combustion config, booted on `zero` with
+the Alpine card out, to prove the Pi 5 boots the image and reaches the LAN before the day.
+
+- **The stick:** `leap/make-stick --bench` writes only a script that installs gavin's
+  `authorized_keys`, enables sshd and gives the wired port `192.168.86.100`. It carries
+  no host key, password hash, tunnel credential, key file or Tailscale state.
+- **The disks are unplugged** (*agent's call*). The image would not touch them, since
+  nothing names them in its fstab and `bcache-tools`, whose udev rule registers bcache
+  devices, is not in it. Unplugging removes the question. USB power with the disks is
+  already proven under the same firmware.
+- **The owner reaches it** from the LAN with a throwaway host key:
+  `ssh -o UserKnownHostsFile=NUL -o StrictHostKeyChecking=no gavin@192.168.86.100` from
+  Windows, `/dev/null` in place of `NUL` elsewhere. Then a read-only check block: the
+  kernel, the RP1 Ethernet link, `modinfo bcache dm_crypt adiantum`, `lsusb`, `dmesg`
+  warnings, health-checker's state.
+- **After it:** power off, the Alpine card back in. The spare card is flashed again for
+  the day, since Combustion runs on a first boot only. `zero`'s services are down for the
+  length of the bench boot.
+
 ## The simulation
 
 `sim/microos/run-host.sh zero` boots `zero`'s real first-boot script, as it does `one`'s
@@ -184,10 +250,8 @@ paste from the box cover those.
 ## Before the day
 
 1. **Phase 10's removal**, so no dev secret reaches the stick and the store has room.
-2. **A read-only paste from `zero`:** `btrfs subvolume list` of the array and of `sda2`,
-   `blkid` of the bcache and LUKS devices, `id gavin`, uid 1000's name, `tailscale ip`,
-   `docker volume ls`, untracked files in `~gavin/infra`, `vcgencmd bootloader_version`,
-   `rpi-eeprom-config`, and `/boot/config.txt` with `usercfg.txt`.
+2. **`zero`'s host checkout accounted for:** the worktrees and commits under
+   `~gavin/infra/.claude/` (above).
 3. **The new store subvolume** made on `sda2` under Alpine, its id committed.
 4. **The repo work**: `hosts/zero/leap/`, `make-stick`, the first-boot script, the plays.
 5. **The simulation**, passing in CI.
@@ -196,9 +260,10 @@ paste from the box cover those.
    `dm-crypt`, `adiantum`, `nhpoly1305` and the `xchacha` modules in the kernel, for the
    build `zero` will boot. Today they are proven only on the x86_64 image the simulation
    boots.
-7. **A bench boot** on a spare card, if the owner agrees: proves the Pi 5 boots the image
-   and reaches the LAN. The Alpine card and the disks are untouched; the spare card is
-   flashed again for the day.
+7. **`leap/pins` moves to build 3.17** (the owner's call 12), with its SHA-256 from
+   openSUSE's `.sha256` file. `one` and `three` booted 3.16, which openSUSE has
+   withdrawn; the pin records what the next first boot uses.
+8. **The bench boot** (above).
 
 ## The day
 
@@ -232,4 +297,4 @@ snapper, which continues the numbering.
 
 ## Open questions for the owner
 
-*To ask after the builder check.*
+None. The owner's answers of 2026-11-20 are calls 7 to 12 above.

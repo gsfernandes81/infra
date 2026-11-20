@@ -39,7 +39,9 @@ Write the removal as fish blocks for `ssh zero`, in this order:
 1. **Measure**: `sudo du -sh` each volume below, and `sudo docker images` for the dev
    images, so the owner sees the size before anything goes. First, on `one`, `sudo docker
    volume ls` and a `du -sh` of the same volumes, so each copy on `one` is shown to exist
-   and not be empty before its original on `zero` goes.
+   and not be empty before its original on `zero` goes. And `sudo docker volume inspect`
+   the anonymous volume `294c1145…` (in the 2026-11-20 paste), which no compose file
+   names: find its owner before anything is removed.
 2. **The containers and network**: `cd ~/infra/dev; and sudo docker compose down`.
    "Exited" is not "absent" (CLAUDE.md), so this comes before any file is deleted.
 3. **The volumes**, by name, each `sudo docker volume rm`:
