@@ -14,8 +14,8 @@ its first boot, in `one`'s shape ([`leap/README.md`](../../../leap/README.md)), 
 
 ## Before the stick
 
-Two files carry zero's values as placeholders, and `make-stick` refuses a stick while they
-are there: `system/restore-authorized-keys`, zero's restore key, and `system/zero-known-hosts`,
+Two files carry zero's values, committed on 2026-11-20 from the play below; before that
+they held placeholders, and `make-stick` refuses a stick while they are there: `system/restore-authorized-keys`, zero's restore key, and `system/zero-known-hosts`,
 zero's ssh host key, which the pull pins. Both are printed by one play, once zero is on the
 tailnet (`server-install-tailscale.yml`). From the phone:
 
@@ -191,6 +191,11 @@ is munged besides (`/rsyncd-munged/...`); the restore module turns both back.
 The timezone is UTC: 01:00 in a UK winter, 02:00 in a UK summer, 09:00 in Singapore.
 
 ### The rename, owner-run, on the array made on 2026-11-18
+
+**Done on 2026-11-20**, block by block as below, with rename 16b in place of the play:
+`three` boots snapshot 3, the array unlocks as `backup` at `/media/backup`, and
+`syncthing-three` came back healthy with the subvolume, entry count and certificate rename 2
+recorded. Kept as the record, and as the procedure for any box still on the old names.
 
 Once, on the live array, before the pull's setup below. It renames the array from "mirror"
 to "backup" and reshapes it to the layout above, in place: the passphrase, the LUKS volume

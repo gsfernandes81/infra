@@ -11,8 +11,8 @@
 # rsyncd-restore.conf through the one sudo rule in sudoers-restore. It reads zero's own
 # backups and nothing else, and writes nothing.
 #
-# The key is zero's /root/.ssh/restore.pub, which server-create-restore-key.yml makes and
-# prints with its fingerprint; until then the line holds a placeholder and lets nobody in,
-# and make-stick refuses three's stick. A new key or address for zero means a new line here,
+# The key is zero's /root/.ssh/restore.pub, which server-create-restore-key.yml made on
+# 2026-11-20 and printed with its fingerprint,
+# SHA256:Kju6VRPqqHRvnOfU7EbUKyQDz+TIyv7SMktSV7g/Kmo. A new key or address for zero means a new line here,
 # then a new stick or an install-system-file on three.
-restrict,from="100.121.158.58",command="sudo -n /usr/bin/setpriv --reuid=restore --regid=restore --init-groups --inh-caps=+dac_read_search --ambient-caps=+dac_read_search --bounding-set=-all,+dac_read_search --no-new-privs /usr/bin/rsync --server --daemon --config=/etc/rsyncd-restore.conf ." FILL-FROM-ZERO-RESTORE-KEY
+restrict,from="100.121.158.58",command="sudo -n /usr/bin/setpriv --reuid=restore --regid=restore --init-groups --inh-caps=+dac_read_search --ambient-caps=+dac_read_search --bounding-set=-all,+dac_read_search --no-new-privs /usr/bin/rsync --server --daemon --config=/etc/rsyncd-restore.conf ." ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAy5WgQqMNuqSVUFjD+x+FQG0jd895nQ+q01aJH5Vdcu zero restore

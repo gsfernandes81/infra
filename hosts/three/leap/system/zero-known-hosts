@@ -8,7 +8,7 @@
 # it by HostKeyAlias zero). Root's file, so the backup user cannot add another.
 #
 # server-create-restore-key.yml on zero prints it, with its fingerprint, for the infra agent
-# to commit here; until then the line holds a placeholder, no pull can connect, and
-# make-stick refuses three's stick. A new host key on zero means a new line here, then an
-# install-system-file on three.
-zero FILL-FROM-ZERO-HOST-KEY
+# to commit here. Committed 2026-11-20, fingerprint
+# SHA256:hEz7z5L2aa3psyTMDVffoWTh7Nzf/SqdqX/FqcZphWM. A new host key on zero means a new line
+# here, then an install-system-file on three.
+zero ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJiesIOzuVmqD/iZ/IEQW3uOuUEesxcQVGWmjWHaSk/i

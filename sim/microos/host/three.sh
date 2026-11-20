@@ -20,9 +20,16 @@ rm -f zero-host zero-host.pub restore-key restore-key.pub
 ssh-keygen -q -t ed25519 -N '' -C 'sim zero host' -f zero-host
 ssh-keygen -q -t ed25519 -N '' -C 'sim zero restore' -f restore-key
 zero_addr=$(sed -n 's/^[[:space:]]*HostName //p' "$repo/hosts/three/leap/system/backup-ssh-config")
+# Each key is swapped as the file holds it, the placeholder before zero's values were
+# committed on 2026-11-20 and zero's real key since: the host key is what follows `zero` on
+# known_hosts' one line, the restore key what follows the options on authorized_keys' one.
+zero_host_key=$(awk '$1 == "zero" { $1 = ""; sub(/^ /, ""); print }' "$repo/hosts/three/leap/system/zero-known-hosts")
+zero_restore_key=$(grep '^restrict,' "$repo/hosts/three/leap/system/restore-authorized-keys" | sed 's/^.*" //')
+[ -n "$zero_host_key" ] && [ -n "$zero_restore_key" ] && [ "$zero_host_key" != "$zero_restore_key" ] ||
+	{ echo "FAIL could not read zero's host key and restore key out of three's files"; exit 1; }
 declare -A standin=(
-	[FILL-FROM-ZERO-HOST-KEY]="$(cut -d' ' -f1,2 zero-host.pub)"
-	[FILL-FROM-ZERO-RESTORE-KEY]="$(cat restore-key.pub)"
+	["$zero_host_key"]="$(cut -d' ' -f1,2 zero-host.pub)"
+	["$zero_restore_key"]="$(cat restore-key.pub)"
 	["$zero_addr"]=192.168.86.1
 )
 
