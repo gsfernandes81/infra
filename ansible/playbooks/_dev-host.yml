@@ -11,18 +11,25 @@
 #     ansible-playbook playbooks/server-create-dev-container.yml
 #
 # What it makes, and nothing else:
-#   - ~/.dev-secrets at 0700, the hub's (the edge half wrote tunnel.json into it, gavin-owned,
-#     0600 — dev/compose.yaml runs the sidecar as gavin so it can read that), with
+#   - ~/.dev-secrets at 0750, group 1001, the hub's (the edge half wrote tunnel.json into it,
+#     gavin-owned, 0640, group 1001 — dev/compose.yaml runs the sidecar as 1001, which on
+#     a host where gavin is not 1001 reads it through the group), with
 #     authorized_keys holding this control node's key: the clients allowed to `ssh dev`.
 #     Another client's key is server-add-authorized-keys.yml's job. github-app.pem, the App's
 #     key, goes in here too, by hand — it is made in a browser (dev/README.md);
-#   - ~/.infra-dev-secrets at 0700, infra-dev's DEV_SECRETS_DIR — empty by default: its only
+#   - ~/.infra-dev-secrets at 0750, group 1001, infra-dev's DEV_SECRETS_DIR — empty by default: its only
 #     candidate content is a fleet key, which the control-node question keeps out
 #     (docs/management-plane.md § "A control node inside the fleet");
-#   - in dev/.env, by line, starting one from .env.example if there is none: HOST_UID and
-#     HOST_GID (the checkout's owner), HUB_SECRETS, INFRA_SECRETS, and HUB_TUNNEL_ID — the
-#     id beside the credentials it came from, in the same run, so the two cannot name
-#     different tunnels.
+#   - in dev/.env, by line, starting one from .env.example if there is none: HUB_SECRETS,
+#     INFRA_SECRETS, and HUB_TUNNEL_ID — the id beside the credentials it came from, in the
+#     same run, so the two cannot name different tunnels.
+#
+# GROUP 1001, AND WHY NOT THE SSH USER'S. The containers run as uid 1001 on every host. Where
+# gavin is 1001 (zero) the group is gavin's own and nothing widens; where gavin is 1000 (one)
+# the files are gavin's and the containers read them through the group. A re-run converges a
+# directory made at 0700 before this to 0750, which is what lets it be run against zero as it
+# stands. Both containers copy a key out of the mount before ssh sees it, so 0640 on the
+# host file does not meet ssh's own key-mode check.
 #
 # THE HUB'S OWN KEY IS NOT HERE, and must never be: the hub makes it at first start in its
 # own volume, and it is never on the host, the control node or any other container.
@@ -48,11 +55,12 @@
          else lookup('file', lookup('env', 'HOME') ~ '/.ssh/id_ed25519.pub') }}
 
   tasks:
-    - name: Create the hub's and infra-dev's secrets directories, 0700
+    - name: Create the hub's and infra-dev's secrets dirs, 0750
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
-        mode: "0700"
+        mode: "0750"
+        group: "1001"
       loop: ["{{ hub_secrets }}", "{{ infra_secrets }}"]
 
     - name: Install the client ssh key in the hub's authorized_keys
@@ -64,10 +72,11 @@
         manage_dir: false
         state: present
 
-    - name: Write the hub's authorized_keys mode as 0600
+    - name: Write the hub's authorized_keys mode as 0640
       ansible.builtin.file:
         path: "{{ hub_secrets }}/authorized_keys"
-        mode: "0600"
+        mode: "0640"
+        group: "1001"
         state: file
       when: not ansible_check_mode
 
@@ -81,15 +90,6 @@
         mode: "0600"
         force: false
 
-    - name: Read who owns the checkout's dev/ directory
-      ansible.builtin.stat:
-        path: "{{ infra_src }}/dev"
-      register: dev_dir_owner
-      check_mode: false
-
-    # HOST_UID/HOST_GID: the uid every image's `dev` user is built at, so what it shares with
-    # the host reads as gavin's. The Makefile reads the same owner with stat, and its
-    # `_require-uid` refuses when these lines disagree with it.
     - name: Write the dev project's lines in dev/.env
       ansible.builtin.lineinfile:
         path: "{{ infra_src }}/dev/.env"
@@ -97,8 +97,6 @@
         line: "{{ item.key }}={{ item.value }}"
         mode: "0600"
       loop:
-        - { key: HOST_UID, value: "{{ dev_dir_owner.stat.uid }}" }
-        - { key: HOST_GID, value: "{{ dev_dir_owner.stat.gid }}" }
         - { key: HUB_SECRETS, value: "{{ hub_secrets }}" }
         - { key: INFRA_SECRETS, value: "{{ infra_secrets }}" }
       loop_control:
@@ -128,11 +126,11 @@
     - name: Print the dev project's host side and the steps left
       ansible.builtin.debug:
         msg:
-          - "hub       {{ hub_secrets }} (0700): authorized_keys, tunnel.json, github-app.pem {{ 'present' if app_key.stat.exists else 'NOT YET' }}"
-          - "infra-dev {{ infra_secrets }} (0700)"
-          - "env       {{ infra_src }}/dev/.env: HOST_UID, HOST_GID, HUB_SECRETS, INFRA_SECRETS, HUB_TUNNEL_ID {{ cf_tunnel_id | default('(not yet — --check)', true) }}"
+          - "hub       {{ hub_secrets }} (0750, group 1001): authorized_keys, tunnel.json, github-app.pem {{ 'present' if app_key.stat.exists else 'NOT YET' }}"
+          - "infra-dev {{ infra_secrets }} (0750, group 1001)"
+          - "env       {{ infra_src }}/dev/.env: HUB_SECRETS, INFRA_SECRETS, HUB_TUNNEL_ID {{ cf_tunnel_id | default('(not yet — --check)', true) }}"
           - ""
-          - "{{ 'The App key is missing: make the App and put its .pem at ' ~ hub_secrets ~ '/github-app.pem, 0600, and HUB_GITHUB_APP_ID in dev/.env (dev/README.md § GitHub tokens).' if not app_key.stat.exists else 'The App key is in place; HUB_GITHUB_APP_ID in dev/.env must be its id.' }}"
+          - "{{ 'The App key is missing: make the App and put its .pem at ' ~ hub_secrets ~ '/github-app.pem, 0640, group 1001, and HUB_GITHUB_APP_ID in dev/.env (dev/README.md § GitHub tokens).' if not app_key.stat.exists else 'The App key is in place; HUB_GITHUB_APP_ID in dev/.env must be its id.' }}"
           - "Then: ansible-playbook playbooks/server-deploy-compose.yml -e deployment=dev -K"
           - "and on each client, once the hub is up: ansible-playbook playbooks/client-home-ssh-config.yml (a whole run: it also removes the retired doors)"
       changed_when: true

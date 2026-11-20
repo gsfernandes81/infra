@@ -178,6 +178,9 @@
       ansible.builtin.import_tasks: _cf-tunnel.yml
       vars:
         cf_creds_path: "{{ infra_secrets }}/tunnel.json"
+        # The sidecar runs as 1001 and reads this through the group where gavin is not 1001.
+        cf_creds_mode: "0640"
+        cf_creds_group: "1001"
         cf_dns_comment: >-
           {{ cf_name }} {{ 'via the dev hub tunnel' if hub_route else 'container tunnel' }}
           — ansible/playbooks/_dev-container-tunnel.yml

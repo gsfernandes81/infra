@@ -51,6 +51,8 @@
 #   cf_dead_tunnel_hint  one sentence on what fails while the credentials name a dead tunnel
 # and, only when the reader of the credentials is not the ssh user:
 #   cf_creds_become   true to read and write the tunnel credentials file as root
+#   cf_creds_mode     the file's mode, default 0600. Only the dev caller widens it, to 0640,
+#                     for the group its containers read through.
 #   cf_creds_owner    / cf_creds_group — e.g. 65532, the uid cloudflare/cloudflared runs as.
 #                     A root-owned 0600 file is unreadable to it and the connector dies on start.
 
@@ -248,7 +250,7 @@
   when: cf_tunnel_new is not skipped
 
 - name: "New tunnel only: write the credentials on {{ inventory_hostname }}"
-  # 0600, and the content never reaches a log. This is the one artefact of the whole
+  # 0600 unless the caller says otherwise, and the content never reaches a log. This is the one artefact of the whole
   # play that lands on a host, and it is what lets anything claim to be this tunnel.
   # owner/group are omitted unless the caller names them, so a dev container's file is
   # written exactly as it always was: by the ssh user, as the ssh user.
@@ -258,7 +260,7 @@
           'TunnelID': cf_tunnel_id,
           'TunnelSecret': cf_tunnel_secret} | to_json }}
     dest: "{{ cf_creds_path }}"
-    mode: "0600"
+    mode: "{{ cf_creds_mode | default('0600') }}"
     owner: "{{ cf_creds_owner | default(omit) }}"
     group: "{{ cf_creds_group | default(omit) }}"
   become: "{{ cf_creds_become | default(false) }}"

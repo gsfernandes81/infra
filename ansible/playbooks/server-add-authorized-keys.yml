@@ -182,13 +182,14 @@
       loop_control:
         label: "{{ item.item }}"
 
-    - name: Create authorized_keys where missing, mode 600
+    - name: Create authorized_keys where missing, mode 640
       # force: false, so this only ever creates. The append is the next task's job, and a
       # copy that could overwrite is one bad re-run away from locking every client out.
       ansible.builtin.copy:
         content: ""
         dest: "{{ resolved_dirs[item] }}/authorized_keys"
-        mode: "0600"
+        mode: "0640"
+        group: "1001"
         force: false
       loop: "{{ dev_clients }}"
 

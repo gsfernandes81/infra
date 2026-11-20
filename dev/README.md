@@ -75,9 +75,9 @@ ansible-playbook playbooks/server-create-dev-container.yml                    # 
 ```
 
 The edge half makes the tunnel `dev`, its record `dev.gsrpi.uk` and an Access application with
-no policy yet; `_dev-host.yml` then makes `~/.dev-secrets` (0700: `tunnel.json`, gavin-owned
-0600 for the sidecar, and `authorized_keys` with this control node's key) and an empty
-`~/.infra-dev-secrets`, and writes the uid, gid, secrets paths and tunnel id into `dev/.env` by
+no policy yet; `_dev-host.yml` then makes `~/.dev-secrets` (0750, group 1001: `tunnel.json`,
+gavin-owned 0640 for the sidecar, and `authorized_keys` with this control node's key) and an
+empty `~/.infra-dev-secrets`, and writes the secrets paths and tunnel id into `dev/.env` by
 line. **The hub's own key is never made here**: the hub makes it at first start (*The hub*).
 
 Then the GitHub App, which compose requires — *GitHub tokens, one repo each*, steps 1–4 — and
@@ -250,7 +250,7 @@ What changes for you:
    account, *Only select repositories*: infra, or3, destiny-director, dossier, invective, nibbles,
    ionic-traces.
 3. The key to zero, never into a repo: from the phone, `scp <the.pem> zero:.dev-secrets/github-app.pem`,
-   then on zero `chmod 600 ~/.dev-secrets/github-app.pem` and delete the phone's copy.
+   then on the host `chgrp 1001 ~/.dev-secrets/github-app.pem && chmod 640 ~/.dev-secrets/github-app.pem` and delete the phone's copy.
 4. `HUB_GITHUB_APP_ID=<id>` in `dev/.env` — compose requires it, and `make check` refuses a
    missing `github-app.pem`.
 5. Proof, from `make shell C=infra`: `git -C /workspace push --dry-run origin HEAD`
@@ -1131,8 +1131,8 @@ mode, by the owner's call: the container is the boundary, and no call waits on a
 
 ## Secrets
 
-None are in git. `.env` and `.env.*` are gitignored; the rest live in mode-700 directories on
-zero, each mounted read-only into the one container that needs it:
+None are in git. `.env` and `.env.*` are gitignored; the rest live in mode-750 directories, group 1001,
+on zero, each mounted read-only into the one container that needs it:
 
 | `.env` line, default | Mounted | Holds |
 |---|---|---|
