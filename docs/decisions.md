@@ -3037,8 +3037,9 @@ given.
   0640, group 1001, which on `one` is the `devstack` group with `gavin` in it. The hub's
   ssh host key travels in the `dev_hub-state` volume, so no client re-pins it.
 - **The way back.** `zero`'s copy is stopped and kept for about three days, then removed.
-  `plans/dev-hub-to-one.md` holds that cleanup. `hosts/one/dev` replaces `hosts/zero/dev`,
-  never both, or the deploy play would deploy the stack on each host.
+  `docs/handoff/2026-11-20-zero-after-the-hub.md` § 1 holds that cleanup (it was
+  `plans/dev-hub-to-one.md` until the switch merged). `hosts/one/dev` replaces
+  `hosts/zero/dev`, never both, or the deploy play would deploy the stack on each host.
 - **Defaults follow.** `dev_host`, `cf_target` and the start play's `target` default to
   `one`. The two halves of `server-create-dev-container.yml` move together, since either
   alone would split a run across hosts.
