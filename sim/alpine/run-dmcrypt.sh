@@ -30,6 +30,7 @@ fails=0
 # more than one entry, is refused: this stands in for one member, and a guess would check
 # a file that is not the tracked one.
 tracked_conf=$repo/hosts/zero/system/dmcrypt
+[ "$(grep -c '^target=' "$tracked_conf")" = 1 ] || { echo "refusing: $tracked_conf does not have exactly one entry (target=)" >&2; exit 1; }
 [ "$(grep -c '^source=' "$tracked_conf")" = 1 ] || { echo "refusing: $tracked_conf does not have exactly one source=" >&2; exit 1; }
 source_line=$(grep '^source=' "$tracked_conf")
 case "$source_line" in
@@ -196,21 +197,33 @@ grep -q "registered: /dev/mapper/$target" "$work/boot.log" && pass "btrfs-scan, 
 [ "$(on "mount /dev/mapper/$target /mnt/sim && cat /mnt/sim/proof; umount /mnt/sim")" = kept ] && pass "the btrfs inside reads back" || fail "the btrfs inside did not read back"
 
 # ── a boot that cannot unlock still finishes ───────────────────────────────
+# Each check reads dmcrypt's own words as well as its exit, since a conf with no entry also
+# returns at once and maps nothing: the red runs after 016125c passed both checks that way.
 echo "== dmcrypt with the key file missing, then with a wrong one"
 on 'rc-service dmcrypt stop' >/dev/null 2>&1
 on "test ! -e /dev/mapper/$target" && pass "dmcrypt stop closed the mapping" || fail "the mapping is still open after stop"
 on "mv $key /run/key.away"
-if timeout 60 docker exec "$box" rc-service dmcrypt start >/dev/null 2>&1; then
-	pass "a missing key file: dmcrypt returns, skipping the entry"
+timeout 60 docker exec "$box" rc-service dmcrypt start >"$work/missing.log" 2>&1
+rc=$?
+if [ "$rc" -eq 124 ]; then
+	fail "a missing key file: dmcrypt was still waiting after 60 s"
+elif grep -q "Reason: keyfile $key does not exist" "$work/missing.log"; then
+	pass "a missing key file: dmcrypt returns (exit $rc), skipping the entry for that reason"
 else
-	[ $? -eq 124 ] && fail "a missing key file: dmcrypt was still waiting after 60 s" || pass "a missing key file: dmcrypt returns, reporting a failure"
+	fail "a missing key file: dmcrypt returned (exit $rc) without naming the missing key: $(cat "$work/missing.log")"
 fi
 on "test ! -e /dev/mapper/$target" && pass "and nothing is mapped" || fail "something was mapped without the key"
 on 'rc-service dmcrypt zap' >/dev/null 2>&1
 on "(umask 077; dd if=/dev/urandom of=$key bs=512 count=8 status=none)"
-timeout 60 docker exec "$box" rc-service dmcrypt start >/dev/null 2>&1
+timeout 60 docker exec "$box" rc-service dmcrypt start >"$work/wrong.log" 2>&1
 rc=$?
-[ "$rc" -eq 124 ] && fail "a wrong key: dmcrypt was still waiting after 60 s" || pass "a wrong key: dmcrypt returns (exit $rc), asking nobody"
+if [ "$rc" -eq 124 ]; then
+	fail "a wrong key: dmcrypt was still waiting after 60 s"
+elif [ "$rc" -ne 0 ] && grep -q "$target using:" "$work/wrong.log"; then
+	pass "a wrong key: dmcrypt tried the entry and returns (exit $rc), asking nobody"
+else
+	fail "a wrong key: dmcrypt returned (exit $rc) without failing an attempt on $target: $(cat "$work/wrong.log")"
+fi
 on "test ! -e /dev/mapper/$target" && pass "and nothing is mapped" || fail "something was mapped with a wrong key"
 on "cp -p /run/key.away $key && rc-service dmcrypt zap" >/dev/null 2>&1
 

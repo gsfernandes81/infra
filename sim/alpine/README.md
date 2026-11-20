@@ -79,14 +79,16 @@ device that stands in for `zero`'s new bcache device. It runs:
   the runbook's flags: Adiantum, the label, two keyslots, Argon2 at 256 MiB, read back
   from `luksDump`. One flag is added, `--uuid`: the stand-in takes the LUKS UUID the
   tracked `hosts/zero/system/dmcrypt` names, so the file checked and installed below is
-  the tracked one, unchanged. While that entry still carried `FILL-FROM-LUKS-UUID`, a
-  fresh UUID stood in and was filled in; anything else in `source=` stops the run;
+  the tracked one, unchanged. If the entry carries `FILL-FROM-LUKS-UUID` again, as it may
+  between a disk swap and the commit that names the new UUID, a fresh UUID stands in for
+  it; anything else in `source=`, or more than one entry, stops the run;
 - `findfs UUID=` resolving the LUKS2 UUID, BusyBox's and then util-linux's, since
   `dmcrypt` resolves `source=` with whichever `zero` has;
 - `install-system-file dmcrypt`: refusing the entry before the format, while no volume
   has its UUID, so the pass after it is the volume's doing; refusing the placeholder,
-  written back in for the purpose; then passing the good entry and refusing an unknown UUID, an entry with no `key=`,
-  a key file outside `/etc`, a name dmcrypt does not read, a key file others can read and a key that does not open the volume; then installing it
+  written back in for the purpose; then passing the good entry and refusing an unknown
+  UUID, an entry with no `key=`, a key file outside `/etc`, a name dmcrypt does not read,
+  a key file others can read and a key that does not open the volume; then installing it
   over cryptsetup-openrc's own `/etc/conf.d/dmcrypt`, with `bcache-register` and
   `dm-crypt.conf`;
 - OpenRC's recorded order for `dmcrypt`, read with the runbook's own `grep` of the
@@ -95,7 +97,8 @@ device that stands in for `zero`'s new bcache device. It runs:
   then `dmcrypt`, which opens `data-4` with the key file, then `btrfs-scan`, which
   registers it; and the btrfs inside reading back;
 - `dmcrypt` with the key file missing, and with a wrong one: each must return without
-  asking anyone, and map nothing.
+  asking anyone, and map nothing; and its output must name the missing key file, or show
+  it tried `data-4` and failed, so a conf with no entry cannot pass either check.
 
 **What it does not show:** a Pi's kernel (the runner's arm64 kernel provides dm-crypt and
 Adiantum here), bcache (`bcache-register` waits its 30 seconds for devices that never come
