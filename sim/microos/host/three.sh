@@ -779,15 +779,12 @@ STEP
 	run_block "rename 15"
 	expect_in rename-15.log "syncthing: the same subvolume, the same number of entries, the same certificate" "rename 15 finds Syncthing's subvolume as rename 2 recorded it"
 	as_root three-migrate.sh unlocked
-	# rename 16 is the phone's deploy play, whose `up` this stands in for; the play itself is
-	# checked against this box, in --check, by run-host.sh's deploy stage.
-	if printf '%s\n' "$password" | ssh_as gavin@127.0.0.1 \
-		"cd ~/infra/deployments/syncthing-three; and sudo -S -p '' docker compose up -d --quiet-pull" > redeploy.log 2>&1; then
-		echo "PASS syncthing-three's up recreated it"
-	else
-		echo "FAIL syncthing-three's up failed:"
-		tail -n 10 redeploy.log | sed 's/^/    /'
-	fi
+	# rename 16 is the phone's deploy play; its fallback on three, rename 16b, is the `up`
+	# that stands in for it here. The play itself is checked against this box, in --check,
+	# by run-host.sh's deploy stage.
+	run_block "rename 16b"
+	ssh_as gavin@127.0.0.1 "sudo docker inspect syncthing --format '{{range .Mounts}}{{.Source}} {{end}}'" > redeploy.log 2>&1
+	expect_in redeploy.log "/media/backup/syncthing" "rename 16b recreated syncthing-three on /media/backup/syncthing"
 	as_root three-migrate.sh redeployed
 	run_block "rename 17"
 	expect_in rename-17.log "/media/backup/syncthing healthy" "rename 17 reads Syncthing healthy on the new path"

@@ -219,7 +219,7 @@ else, stop and read the way back at the end.
    cd ~/infra; and git pull --ff-only; and test -e hosts/three/leap/make-backup; and echo "the checkout has the rename"
    findmnt -no SOURCE,TARGET,OPTIONS /media/mirror; sudo btrfs filesystem label /media/mirror
    sudo btrfs subvolume list /media/mirror
-   sudo blkid -L mirror-luks; readlink -f /dev/disk/by-label/mirror-luks
+   sudo blkid -L mirror-luks; readlink -e /dev/disk/by-label/mirror-luks
    findmnt -no SOURCE /; sudo btrfs subvolume get-default /
    systemctl is-system-running; systemctl --failed --no-legend
    sudo docker ps -a --format '{{.Names}} {{.Status}} {{.Mounts}}'
@@ -231,7 +231,8 @@ else, stop and read the way back at the end.
    and nothing else; `blkid` and `readlink` name the same `/dev/sdX`, which shows the
    by-label link rename 6 reads is working; `findmnt /` ends `/@/.snapshots/<N>/snapshot]`
    and `get-default` names the same `<N>` (rename 11 changes the second, and rename 13 reads
-   both again); whatever `is-system-running` and `--failed` say, rename 13 compares with it;
+   both again). If they name different numbers, stop: a snapshot is pending, and rename 11,
+   which builds on the running system, would drop it. Whatever `is-system-running` and `--failed` say, rename 13 compares with it;
    and `syncthing` up, on `/media/mirror/syncthing`. Anything else in the subvolume list, or
    an `immich` already there, stop.
 2. **Stop what uses the array**, and record Syncthing's subvolume:
@@ -264,6 +265,7 @@ else, stop and read the way back at the end.
    [ -d $m/snapshots ] || { echo "rename 3: no $m/snapshots; nothing changed"; exit 1; }
    [ -z "$(find $m/incoming -mindepth 1 | head -n 1)" ] || { echo "rename 3: $m/incoming is not empty; nothing changed"; exit 1; }
    [ -z "$(find $m/snapshots -mindepth 2 | head -n 1)" ] || { echo "rename 3: a snapshot in $m/snapshots is not empty; nothing changed"; exit 1; }
+   [ -z "$(find $m/snapshots -mindepth 1 -maxdepth 1 -name ".*" | head -n 1)" ] || { echo "rename 3: a dot entry in $m/snapshots, which the loop below would miss; nothing changed"; exit 1; }
    for s in $m/snapshots/*; do [ ! -e "$s" ] || btrfs subvolume show "$s" > /dev/null; done
    for s in $m/snapshots/*; do [ ! -e "$s" ] || btrfs subvolume delete "$s"; done
    rmdir $m/snapshots
@@ -313,13 +315,14 @@ else, stop and read the way back at the end.
    # rename 6, on three: back up the LUKS header into root's home, then relabel mirror-luks to backup-luks, and read the label back from the disk and from udev
    set dev (sudo blkid -L mirror-luks); test -b "$dev"; and echo "the array is $dev"
    test -b "$dev"; and sudo test ! -e /root/backup-luks-header.img; and sudo cryptsetup luksHeaderBackup $dev --header-backup-file /root/backup-luks-header.img; and sudo chmod 600 /root/backup-luks-header.img; and sudo ls -l /root/backup-luks-header.img
-   test -b "$dev"; and sudo test -s /root/backup-luks-header.img; and sudo cryptsetup config --label backup-luks $dev; and sudo udevadm trigger --settle --action=change $dev; and sudo cryptsetup luksDump $dev | grep -E '^(Version|Label):'; and readlink -f /dev/disk/by-label/backup-luks; and test ! -e /dev/disk/by-label/mirror-luks; and echo "relabelled"
+   test -b "$dev"; and sudo test -s /root/backup-luks-header.img; and sudo cryptsetup config --label backup-luks $dev; and sudo udevadm trigger --settle --action=change $dev; and sudo cryptsetup luksDump $dev | grep -E '^(Version|Label):'; and readlink -e /dev/disk/by-label/backup-luks; and test ! -e /dev/disk/by-label/mirror-luks; and echo "relabelled"
    ```
 
    Good output: `the array is /dev/sdX`, the device rename 1 named; the header file root's,
    `-rw-------`, about 16 MB; `Version: 2`, `Label: backup-luks`, the same `/dev/sdX`, and
    `relabelled`. The first line printing nothing means `blkid` found no `mirror-luks`, and
-   nothing after it runs.
+   nothing after it runs. Run a second time, the second line prints nothing, since the header
+   backup is there already, and the third relabels with that first backup in place.
 7. **fstab**: the array's line replaced whole by `fstab.append`'s, never one option edited,
    since the live line lacks `nosuid,nodev`, which the new line carries:
 
@@ -446,9 +449,16 @@ else, stop and read the way back at the end.
 
     Good output: `findmnt /` and `get-default` both name `<N+1>`; `/media/backup` alone;
     `inactive` twice; the same `is-system-running` and failed units as rename 1 (`starting`
-    in the first minute or so after the boot: read it again). `findmnt /`
-    naming `<N>` again means health-checker rolled the boot back; stop there, and send the
-    infra agent `journalctl -b -1 --no-pager | tail -n 100`.
+    in the first minute or so after the boot: read it again).
+
+    `findmnt /` naming `<N>` again means health-checker rolled the boot back. The box is then
+    up on `<N>`, whose root has `/media/mirror` and no `/media/backup`, while its `/etc` has
+    every change of renames 7 to 9: the array opens as `backup` and mounts under neither
+    name. Nothing on the array is lost. Stop there, and send the infra agent `journalctl -b
+    -1 --no-pager | tail -n 100`. Once that is read, there are two ways forward, each ending
+    in a reboot: `sudo transactional-update rollback <N+1>` if the failed boot was
+    transient, or `sudo transactional-update --non-interactive run mkdir /media/backup`,
+    which gives `<N>`'s root the new mount point.
 14. **The unlock**, under the new names, from the phone: the command in § Unlocking.
 
     ```fish
@@ -470,13 +480,23 @@ else, stop and read the way back at the end.
     Good output: `/dev/mapper/backup` with `nosuid,nodev` and the container context; `type:
     LUKS2`; the label `backup`; the subvolume list and the listing as rename 3 left them;
     `syncthing: the same subvolume, the same number of entries, the same certificate`; and
-    `active` twice. A diff line instead of that sentence: stop, and send it to the infra
+    `active` or `activating` for Docker, which is still starting a few seconds after the
+    mount, then `active` for the timer. A diff line instead of that sentence: stop, and send it to the infra
     agent; nothing has started Syncthing.
 16. **The redeploy**, from the phone, which recreates the container on the new path:
 
     ```fish
     # rename 16, on the phone: redeploy syncthing-three, which recreates its container on /media/backup/syncthing
     cd ~/infra/ansible; and ansible-playbook playbooks/server-deploy-compose.yml -e deployment=syncthing-three -K
+    ```
+
+    The play refuses if `three`'s Compose is older than 5.5.0, or if `three`'s checkout
+    names a different commit from the phone's after its own `git pull`. If it refuses, the
+    same recreate on `three` itself, after `ssh three`:
+
+    ```fish
+    # rename 16b, on three, only if the play refused: recreate syncthing-three on /media/backup/syncthing
+    cd ~/infra/deployments/syncthing-three; and sudo docker compose up -d
     ```
 
 17. **Read Syncthing**:
@@ -496,6 +516,9 @@ else, stop and read the way back at the end.
     sudo rm /root/backup-luks-header.img; and sudo rm -r /root/rename-2026-11-20 /root/fstab.before-rename; and rm ~/rename-syncthing.txt ~/rename-syncthing-after.txt
     ```
 
+    The backups `install-system-file` made, under `/root/.infra-backups/three/`, stay: they
+    hold the old `crypttab` and `argon-fan`, and no secret.
+
 **Way back, at each step.** None of these steps moves or rewrites Syncthing's data, so the
 way back is about names, and never about data:
 
@@ -514,8 +537,10 @@ way back is about names, and never about data:
   /etc/fstab`.
 - rename 8: `crypttab` from the backup `install-system-file` printed (`backed up ... ->`),
   and the four new files removed with `sudo rm`.
-- rename 9: `sudo cp -a /root/rename-2026-11-20/. /`, which puts every removed file back with
-  its mode; `sudo usermod -s /bin/bash backup; and sudo userdel restore`; then `sudo
+- rename 9: `sudo cp -a --no-preserve=context /root/rename-2026-11-20/. /; and sudo
+  restorecon -R /etc/systemd/system /usr/local/sbin /home/backup`, which puts every removed
+  file back with its mode, and its SELinux label from the policy rather than from root's
+  home; `sudo usermod -s /bin/bash backup; and sudo userdel restore`; then `sudo
   systemctl daemon-reload`.
 - rename 10: `argon-fan` from the backup `install-system-file` printed, then `sudo systemctl
   restart argon-fan.service`.
@@ -525,7 +550,8 @@ way back is about names, and never about data:
   running system has every change to `/etc`, and its root has `/media/mirror` and no
   `/media/backup`.
 - After rename 12, the old names would need all of that again, another snapshot and another
-  reboot. Nothing calls for it: the data is where it was, under new names.
+  reboot. Nothing calls for it: the data is where it was, under new names. A boot rolled
+  back to `<N>` is not this: rename 13 says what state that leaves and the two ways forward.
 
 ### The pull's setup, once the rename is done
 
