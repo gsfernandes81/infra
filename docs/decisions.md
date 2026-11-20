@@ -2857,7 +2857,14 @@ holding nothing but Syncthing, so the change costs least now.
   `sudoers-backup` loop had the same shape.
 - **`snapper`'s config on `three` keeps its name, `received-immich`**, though the level it
   was named after is gone: on `three` it says which side of the pull it is, beside `zero`'s
-  `immich`.
+  `immich`. The owner agreed on 2026-11-20, asking that the name suit later subvolumes:
+  it does, as `received-<subvolume>`, each with its own `/media/backup/<subvolume>/` and
+  restore module. What a second subvolume would change is the pull, which names `immich`
+  (`backup-pull`'s `dst=`), into template units, `backup-pull@<subvolume>`.
+- **snapper's `fsetfilecon … errno: 95` on `three` is expected**: the array mounts with a
+  fixed `context=` (Syncthing's container label), so no file on it can take a label of its
+  own, and snapper, which tries to label `.snapshots`, says so on each run and carries on.
+  Seen at the first pull, 2026-11-20, whose snapshot was taken.
 
 ## Routine actions are plays: the unlock and the dev containers' start
 
