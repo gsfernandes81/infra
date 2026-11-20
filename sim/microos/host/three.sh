@@ -313,7 +313,7 @@ zero_up() {
 
 # The checks only zero's side can make: its sudoers and the capabilities of its daemon.
 zero_confined() {
-	local cmd='/bin/setpriv --reuid=backup --regid=backup --init-groups --inh-caps=+dac_read_search --ambient-caps=+dac_read_search /usr/bin/rsync --server --daemon --config=/etc/rsyncd-backup.conf .'
+	local cmd='/bin/setpriv --reuid=backup --regid=backup --init-groups --inh-caps=+dac_read_search --ambient-caps=+dac_read_search --bounding-set=-all,+dac_read_search --no-new-privs /usr/bin/rsync --server --daemon --config=/etc/rsyncd-backup.conf .'
 	if zx "sudo -n -U backup -l $cmd" > /dev/null 2>&1; then
 		echo "PASS zero's sudoers lets zero's backup user run exactly its daemon"
 	else
@@ -343,10 +343,10 @@ zero_caps() {
 	done
 	[ -n "$pids" ] || { echo "FAIL no rsync daemon of zero's backup user ran on zero to read"; return 0; }
 	for p in $pids; do
-		st=$(zx "grep -E '^(Uid|Gid|Cap(Inh|Prm|Eff|Amb)):' /proc/$p/status" | tr '\t' ' ' | tr -s ' ' | tr '\n' ';') || true
+		st=$(zx "grep -E '^(Uid|Gid|Cap(Inh|Prm|Eff|Bnd|Amb)|NoNewPrivs):' /proc/$p/status" | tr '\t' ' ' | tr -s ' ' | tr '\n' ';') || true
 		echo "    zero's daemon, pid $p: $st"
 		case "$st" in
-		*"CapPrm: 0000000000000004;"*"CapEff: 0000000000000004;"*"CapAmb: 0000000000000004;"*) ;;
+		*"CapPrm: 0000000000000004;"*"CapEff: 0000000000000004;"*"CapBnd: 0000000000000004;"*"CapAmb: 0000000000000004;"*"NoNewPrivs: 1;"*) ;;
 		*) echo "FAIL zero's rsync daemon holds other capabilities"; return 0 ;;
 		esac
 		case "$st" in
@@ -354,7 +354,7 @@ zero_caps() {
 		*) echo "FAIL zero's rsync daemon is not running as zero's backup user"; return 0 ;;
 		esac
 	done
-	echo "PASS zero's rsync daemon runs as zero's backup user with CAP_DAC_READ_SEARCH and nothing else"
+	echo "PASS zero's rsync daemon runs as zero's backup user with CAP_DAC_READ_SEARCH and nothing else, bounding set included, with no_new_privs"
 }
 zero_kill_daemon() {
 	local pids
@@ -532,8 +532,9 @@ sim_backup() {
 		echo "FAIL the restore module's copy differs from zero's snapshot $n (rsync exit $rc):"
 		printf '%s\n' "$out" | head -n 12 | sed 's/^/    /'
 	fi
+	# The flags of hosts/zero/system/README.md § A restore.
 	restore_dir=/root/restored
-	zrs "--bwlimit=2000 -aHAX --numeric-ids --exclude=/.snapshots restore@127.0.0.1::immich/current/.snapshots/$n2/snapshot/ $restore_dir/" > restore.log 2>&1 &
+	zrs "--bwlimit=2000 -aHAX --no-D --chmod=ug-s --numeric-ids --exclude=/.snapshots restore@127.0.0.1::immich/current/.snapshots/$n2/snapshot/ $restore_dir/" > restore.log 2>&1 &
 	as_root three-backup.sh caps restore
 	wait $! && echo "zero restored three's snapshot $n2 into $restore_dir" || { echo "FAIL the restore failed:"; sed 's/^/    /' restore.log; }
 	# Against zero's own snapshot, read the same way: Postgres's directory is 70:0 there, its

@@ -855,11 +855,13 @@ until slice 4 has passed. Syncthing is not touched. Every block after `ssh zero`
    the two Immich lines, from this template, with the id from step 5 in place of `<ID>`:
 
    ```
-   UUID=813c830a-0892-41e8-b39b-32d661c79e2c	/media/immich			btrfs	nofail,subvolid=<ID>,noatime,acl,discard=async							0 0
+   UUID=813c830a-0892-41e8-b39b-32d661c79e2c	/media/immich			btrfs	nofail,subvolid=<ID>,noatime,acl,discard=async,nosuid,nodev					0 0
    ```
 
    The other options are the old lines' less `autodefrag`, which the same file already drops
-   from every line on the array. Then:
+   from every line on the array, plus `nosuid,nodev`: Immich and Postgres need neither, and
+   a restore into `/media/immich` then cannot bring a working device or setuid file onto
+   `zero`. Then:
 
    ```fish
    # on zero: install the new fstab; the dry run must show only the Immich lines and the autodefrag removals

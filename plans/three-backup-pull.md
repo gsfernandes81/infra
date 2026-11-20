@@ -88,8 +88,9 @@ the far side of a connection.
 - **Each daemon runs as its own unprivileged user with one capability**,
   `CAP_DAC_READ_SEARCH`: read any file, change none. One sudoers line on each box allows
   exactly the forced command; `setpriv` (util-linux) keeps that capability alone in the
-  inheritable and ambient sets and runs the system's own rsync. The simulation reads each
-  daemon's `/proc/<pid>/status` mid-transfer: permitted, effective and ambient are `0x4`.
+  inheritable, ambient and bounding sets, sets no_new_privs, and runs the system's own
+  rsync. The simulation reads each daemon's `/proc/<pid>/status` mid-transfer: permitted,
+  effective, bounding and ambient are `0x4`, and `NoNewPrivs` is 1.
 - **A compromised `zero`** can read its own backups on `three`, and serve bad data to the
   pull. It cannot write, delete or run anything on `three`, and `three`'s history from before
   is untouched. The data it serves is parsed by rsync as the unprivileged `backup` user in a
@@ -98,7 +99,10 @@ the far side of a connection.
   besides, so none can steer the restore daemon, which reads anything, out of its module.
   The restore module turns them back into links on the way out.
 - **A compromised `three`** can read `zero`'s snapshots, the data it exists to hold. It
-  cannot write to `zero`, delete a snapshot, or run anything.
+  cannot write to `zero`, delete a snapshot, or run anything. Through a bug in rsync's
+  daemon it could read every file on `zero`, since that is what `CAP_DAC_READ_SEARCH` allows
+  (`docs/decisions.md` § *The pull, as built*). A restore takes no device or setuid file
+  from it (`--no-D --chmod=ug-s`).
 - **Both daemons refuse `--copy-links` and its kin**, so neither follows a symlink for the
   client. A path in the request that runs through a symlink already in the module is the
   one way out of a module without chroot; on `three` none exists, and on

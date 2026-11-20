@@ -253,7 +253,7 @@ confined)
 restore-user)
 	# Leap's own sudoers lets every user run anything with root's password (targetpw), so
 	# the rule that matters is what runs with none. Asked of sudo itself, as the restore user.
-	cmd='/usr/bin/setpriv --reuid=restore --regid=restore --init-groups --inh-caps=+dac_read_search --ambient-caps=+dac_read_search /usr/bin/rsync --server --daemon --config=/etc/rsyncd-restore.conf .'
+	cmd='/usr/bin/setpriv --reuid=restore --regid=restore --init-groups --inh-caps=+dac_read_search --ambient-caps=+dac_read_search --bounding-set=-all,+dac_read_search --no-new-privs /usr/bin/rsync --server --daemon --config=/etc/rsyncd-restore.conf .'
 	check "the restore user runs its daemon through sudo with no password" sh -c "
 		out=\$(runuser -u restore -- sudo -n $cmd < /dev/null 2>&1); echo \"\$out\" | tail -n 2
 		! echo \"\$out\" | grep -qiE 'password is required|not allowed|may not run'"
@@ -269,11 +269,12 @@ caps) # <user>: the capabilities of that user's rsync daemon, while one runs
 		[ -n "$pids" ] && break
 		sleep 1
 	done
-	check "the $2 user's rsync daemon holds CAP_DAC_READ_SEARCH and nothing else" sh -c "
+	check "the $2 user's rsync daemon holds CAP_DAC_READ_SEARCH and nothing else, bounding set included, with no_new_privs" sh -c "
 		[ -n '$pids' ] || { echo 'no rsync of $2 running'; exit 1; }
 		for p in $pids; do
-			grep -E '^(Uid|Cap(Inh|Prm|Eff|Amb)):' /proc/\$p/status | tr '\t' ' ' | tr -s ' ' | tr '\n' ';'; echo
-			for c in CapPrm CapEff CapAmb; do
+			grep -E '^(Uid|Cap(Inh|Prm|Eff|Bnd|Amb)|NoNewPrivs):' /proc/\$p/status | tr '\t' ' ' | tr -s ' ' | tr '\n' ';'; echo
+			[ \"\$(sed -n \"s/^NoNewPrivs:[[:space:]]*//p\" /proc/\$p/status)\" = 1 ] || exit 1
+			for c in CapPrm CapEff CapBnd CapAmb; do
 				[ \"\$(sed -n \"s/^\$c:[[:space:]]*//p\" /proc/\$p/status)\" = 0000000000000004 ] || exit 1
 			done
 			[ \"\$(awk '/^Uid:/ { print \$2 \$3 \$4 \$5 }' /proc/\$p/status)\" = \"\$(id -u $2)\$(id -u $2)\$(id -u $2)\$(id -u $2)\" ] || exit 1

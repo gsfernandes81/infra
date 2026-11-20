@@ -180,7 +180,9 @@ The listing shows the directory root's at `drwx------` and `ntfy-url` root's at
 -la /var/lib/mirror-backup /var/lib/backup-alert` says which. Way back: `sudo mv
 /var/lib/backup-alert /var/lib/mirror-backup`.
 
-**Checks:** `sudo snapper --no-dbus -c immich list` gains one snapshot an hour;
+**Checks:** `rc-service crond status` says `started`, and `rc-update show | grep -w crond`
+names a runlevel, since every snapshot waits on root's cron; then `sudo snapper --no-dbus -c
+immich list` gains one snapshot an hour;
 `grep autodefrag /proc/mounts` prints nothing (the move's remount drops it);
 `rc-update show | grep -w dbus` prints nothing.
 
@@ -196,12 +198,14 @@ Into a new directory, never over `/media/immich` itself:
 
 ```fish
 # on zero: read three's snapshot N of zero's Immich back, with real owners and modes; put the snapshot's number in place of N
-sudo rsync -aHAX --numeric-ids --exclude=/.snapshots -e 'ssh -i /root/.ssh/restore' restore@100.101.45.78::immich/current/.snapshots/N/snapshot/ /media/immich/restore-N/
+sudo rsync -aHAX --no-D --chmod=ug-s --numeric-ids --exclude=/.snapshots -e 'ssh -i /root/.ssh/restore' restore@100.101.45.78::immich/current/.snapshots/N/snapshot/ /media/immich/restore-N/
 ```
 
 The first connection asks to accept `three`'s host key; its fingerprint is the one
 `make-stick` printed for `three`. The module sends the owners and modes the pull kept, and
-the symlinks as `zero` had them. `data/thumbs` and `data/encoded-video` come back empty:
+the symlinks as `zero` had them. It takes no device file and no setuid or setgid bit
+(`--no-D --chmod=ug-s`): Immich has none, and the module's `fake super` would make whatever
+`three`'s copy records into a real one on `zero`, as root. `data/thumbs` and `data/encoded-video` come back empty:
 Immich regenerates them, after an empty `.immich` file is put in each (its folder check).
 A single file is the same command with its path after `snapshot/`.
 

@@ -81,12 +81,21 @@ def live_exists(path):
     Path.exists() raises PermissionError on EACCES rather than answering, so an
     unprivileged dry run of a file in /etc/sudoers.d (0750 on Leap and Alpine) crashed
     before it showed anything: microos-sim's rename of three found it, with the dry run of
-    sudoers-restore ending the install loop. `sudo test -e` answers as root would.
+    sudoers-restore ending the install loop. sudo answers as root would.
+
+    It asks for a yes or a no, so a sudo that fails (no TTY, a wrong password) stops
+    the run instead of reading as "not there", which would show an existing file as new.
     """
     try:
         return path.exists()
     except PermissionError:
-        return run(["sudo", "test", "-e", str(path)]).returncode == 0
+        out = run(["sudo", "sh", "-c", 'if [ -e "$1" ]; then echo yes; else echo no; fi',
+                   "sh", str(path)])
+        answer = out.stdout.strip()
+        if out.returncode != 0 or answer not in ("yes", "no"):
+            print(f"cannot read {path}: sudo failed: {out.stderr.strip()}", file=sys.stderr)
+            sys.exit(1)
+        return answer == "yes"
 
 
 def live_mode(path):
@@ -94,7 +103,8 @@ def live_mode(path):
     try:
         return stat.S_IMODE(path.stat().st_mode)
     except PermissionError:
-        out = run(["sudo", "stat", "-c", "%a", str(path)])
+        # -L, as Path.stat() follows a symlink.
+        out = run(["sudo", "stat", "-L", "-c", "%a", str(path)])
         if out.returncode != 0:
             raise
         return int(out.stdout.strip(), 8)

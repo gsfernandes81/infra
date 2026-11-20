@@ -384,6 +384,8 @@ listed=$(on 'su gavin -c "cd /home/gavin/infra && bin/install-system-file --list
 [ "$listed" = "$zero_files" ] && pass "install-system-file --list on zero names hosts/zero/system/'s files" || fail "--list on zero: '$listed', want '$zero_files'"
 if sf -l zero; then pass "dry run exits 0"; else fail "dry run failed"; fi
 says "$zero_n of $zero_n under hosts/zero/system: ${zero_files% }" && pass "the play read the same $zero_n files" || fail "the play read another list for zero"
+# backup-age-check is tracked but not to be installed, so its header says init none.
+says 'backup-age-check declares init=none' && pass "the dry run refused backup-age-check, by its init none" || fail "the dry run did not refuse backup-age-check"
 if sf -l zero -e only=sshd-infra.conf; then pass "-e only exits 0"; else fail "-e only failed"; fi
 says "1 of $zero_n under hosts/zero/system: sshd-infra.conf" && pass "-e only narrowed it to one file" || fail "-e only did not narrow the list"
 on 'test ! -e /etc/init.d/bcache-register && test ! -e /etc/cloudflared/config.yml' && pass "the dry runs installed nothing" || fail "a dry run installed something"

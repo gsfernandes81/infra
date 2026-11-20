@@ -2769,7 +2769,26 @@ and refine the owner's design without changing it.
   `three` is set to; it is 09:00 in Singapore.
 - **`mirror-backup-age-check` (`backup-age-check` since 2026-11-20) stays in the tree, marked not used**, with
   `server-store-backup-ntfy-url.yml`, until the fleet-wide dead man's switch is designed.
-  Set aside: deleting both now, which would decide for that design.
+  Set aside: deleting both now, which would decide for that design. **Since 2026-11-20 its
+  header says `infra-init: none`**, which `install-system-file` refuses on every host (Fable's
+  review): a fleet run of `server-install-system-files.yml` would otherwise have installed it
+  in `/etc/periodic/daily`, where it would tell the owner every night that a backup it cannot
+  see had never succeeded.
+- **Each daemon's capability is its only one, bounding set included, with no_new_privs**
+  (Fable's review, 2026-11-20). Both forced commands and both sudoers lines add
+  `--bounding-set=-all,+dac_read_search --no-new-privs`, so a daemon taken over through an
+  rsync bug cannot gain more by running `sudo` or another setuid binary; the simulation reads
+  `CapBnd` and `NoNewPrivs` too. What that daemon keeps is still `CAP_DAC_READ_SEARCH`, which
+  reads every file on its box, not only the snapshots: on `zero`, `/etc/keys/data.key`,
+  tailscaled's state, cloudflared's credentials and Immich's `.env`. That is the accepted
+  cost of a daemon that reads Postgres's files whatever their modes. Set aside: a mount
+  namespace holding only the snapshots, which is more boot-path code; and chroot, which
+  needs `CAP_SYS_CHROOT` and can be escaped by a process holding it.
+- **A restore takes no device file and no setuid or setgid bit** (`--no-D --chmod=ug-s`), and
+  `zero`'s new `/media/immich` line carries `nosuid,nodev` (Fable's review, 2026-11-20). The
+  restore module's `fake super` makes whatever `three`'s copy records into a real mode, as
+  root, so without them a compromised `three` could have a restore write a `/dev/mem` node or
+  a setuid binary onto `zero`. Immich and Postgres have neither.
 - **The simulation's `zero` is an Alpine container of `zero`'s release**, privileged and on
   the runner's network, not the Ubuntu runner itself: snapper 0.13.1 from edge/testing,
   util-linux's `setpriv`, Alpine's sudo and BusyBox's `adduser` and `flock` are what `zero`

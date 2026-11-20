@@ -28,6 +28,10 @@ if ! flock -n 9; then
 	exit 0
 fi
 snapper() { command snapper --no-dbus -q --logger-type syslog -c immich "$@"; }
-snapper create --cleanup-algorithm timeline --description timeline
-snapper cleanup timeline
-snapper cleanup number
+# The cleanups run even when the create fails: on a full filesystem they are what frees
+# space. The run exits with the last failure, so cron still mails it.
+status=0
+snapper create --cleanup-algorithm timeline --description timeline || status=$?
+snapper cleanup timeline || status=$?
+snapper cleanup number || status=$?
+exit $status

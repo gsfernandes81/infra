@@ -1,6 +1,6 @@
 #!/bin/sh
 # infra-os:   alpine
-# infra-init: openrc
+# infra-init: none
 # infra-path: /etc/periodic/daily
 # infra-name: backup-age-check
 # infra-mode: 0755
@@ -10,6 +10,8 @@
 # never learns whether a pull succeeded (plans/three-backup-pull.md). The owner deferred the
 # alert to a dead man's switch for the whole fleet, designed separately; this file and
 # server-store-backup-ntfy-url.yml stay until that design says whether it reuses them.
+# Its header says init none, which install-system-file refuses on every host, so a fleet
+# run of server-install-system-files.yml shows it refused and never installs it.
 #
 # Tells the owner, through ntfy, when zero's last good backup to three is more than three
 # days old: a three that is off, unreachable or left locked after a reboot, or a backup that

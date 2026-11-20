@@ -15,4 +15,4 @@
 # three on 2026-11-19 (hosts/three/leap/README.md § The backup); its fingerprint is
 # SHA256:9rZpPX2SVlOOQfM1T81VzH6sOdk+0AvyLIaXm8B5juM. A rebuilt three makes a new key, and so
 # a new line here, then an install-system-file on zero.
-restrict,from="100.101.45.78",command="sudo -n /bin/setpriv --reuid=backup --regid=backup --init-groups --inh-caps=+dac_read_search --ambient-caps=+dac_read_search /usr/bin/rsync --server --daemon --config=/etc/rsyncd-backup.conf ." ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINJk4CpUFmf3OYi3HIPK/RzGHiYLMis61u1RfqYNrHz0 three backup-pull
+restrict,from="100.101.45.78",command="sudo -n /bin/setpriv --reuid=backup --regid=backup --init-groups --inh-caps=+dac_read_search --ambient-caps=+dac_read_search --bounding-set=-all,+dac_read_search --no-new-privs /usr/bin/rsync --server --daemon --config=/etc/rsyncd-backup.conf ." ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINJk4CpUFmf3OYi3HIPK/RzGHiYLMis61u1RfqYNrHz0 three backup-pull

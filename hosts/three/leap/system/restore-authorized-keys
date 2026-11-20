@@ -15,4 +15,4 @@
 # prints with its fingerprint; until then the line holds a placeholder and lets nobody in,
 # and make-stick refuses three's stick. A new key or address for zero means a new line here,
 # then a new stick or an install-system-file on three.
-restrict,from="100.121.158.58",command="sudo -n /usr/bin/setpriv --reuid=restore --regid=restore --init-groups --inh-caps=+dac_read_search --ambient-caps=+dac_read_search /usr/bin/rsync --server --daemon --config=/etc/rsyncd-restore.conf ." FILL-FROM-ZERO-RESTORE-KEY
+restrict,from="100.121.158.58",command="sudo -n /usr/bin/setpriv --reuid=restore --regid=restore --init-groups --inh-caps=+dac_read_search --ambient-caps=+dac_read_search --bounding-set=-all,+dac_read_search --no-new-privs /usr/bin/rsync --server --daemon --config=/etc/rsyncd-restore.conf ." FILL-FROM-ZERO-RESTORE-KEY

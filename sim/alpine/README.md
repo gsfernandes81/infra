@@ -51,8 +51,8 @@ which must fail the play with the URL stored.
 
 The system files play, in `--check` only: `install-system-file --list` on the box must name
 the files the play found for `zero` before it asked the tool, and the play must read the
-same list, narrow it with `-e only`, install nothing, and refuse `two`, whose name is not
-the box's hostname. Then the box answers as `three`: `--list` must read
+same list, refuse `backup-age-check` by its `infra-init: none`, narrow it with `-e only`,
+install nothing, and refuse `two`, whose name is not the box's hostname. Then the box answers as `three`: `--list` must read
 `hosts/three/leap/system/`, since `three` has a `leap/MOVED`, and `-l three -e
 only=cloudflared-config.yml` must list that one file and have the tool refuse it, because
 it declares systemd and the box runs OpenRC.
