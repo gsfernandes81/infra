@@ -110,7 +110,8 @@ switch.
 - `hosts/zero/dev` becomes `hosts/one/dev`. Never one on each host, or the deploy play
   deploys the stack on both.
 - `dev_host` and `cf_target` default to `one` in `server-create-dev-container.yml`'s two
-  halves, and `dev_host` in `server-add-authorized-keys.yml`. The two must move together:
+  halves, `dev_host` in `server-add-authorized-keys.yml`, and `target` in
+  `server-start-dev-containers.yml`. The first two must move together:
   either alone splits a run across hosts.
 - Every doc and message that says the stack is on `zero` follows: `dev/README.md`,
   `README.md` (the port table and the dev section), `CLAUDE.md`, `docs/recovery.md`,
@@ -133,8 +134,8 @@ block 4.
    - Check that gid 1001 is unused on `one` and that `/home/gavin` is mode 0700. If either
      fails, stop: the group read is only safe behind both.
    - Create the group `devstack`, gid 1001, with `gavin` as its only member. The plays run
-     as `gavin` without `become`, and a user can set a file's group only to one they belong
-     to. `gavin` owns the files anyway, so the membership grants nothing new.
+     as `gavin` without `become`, and a user can set a file's group only to one they
+     belong to. `gavin` owns the files anyway, so the membership grants nothing new.
      `hosts/one/leap/combustion/script` makes the same group, so a rebuilt `one` matches.
    - Install `make` with `transactional-update pkg install make` and reboot `one`, at the
      owner's say, since `one`'s own apps go down for a few minutes.

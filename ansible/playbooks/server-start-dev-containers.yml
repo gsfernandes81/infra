@@ -7,11 +7,11 @@
 #
 # It is `ssh -t zero 'cd ~/infra/dev && make up'` as a play, so the owner's interface stays
 # Ansible: the same build and start of every container, the hub first, and the same guards,
-# which are dev/Makefile's own (.env, the uid, the secrets, the names, the external volumes)
-# and are not copied here. Root runs make, which dev/Makefile allows (its SUDO is empty when
-# `id -u` is 0) and builds at the checkout owner's uid, not root's (HOST_UID is read from the
-# checkout's owner). It runs what the host's checkout holds, as the hand command does, and
-# prints that commit first; it pulls nothing.
+# which are dev/Makefile's own (.env, the secrets, the names, the external volumes) and are
+# not copied here. Root runs make, which dev/Makefile allows (its SUDO is empty when `id -u`
+# is 0); the images build at the stack's fixed uid, 1001, whoever runs it. It runs what the
+# host's checkout holds, as the hand command does, and prints that commit first; it pulls
+# nothing.
 #
 # `up` ONLY. Nothing here stops, restarts or removes a container: those stay at `make` on
 # zero (dev/README.md § The targets). The guarded way to change the dev project, with a plan,
