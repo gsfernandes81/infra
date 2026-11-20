@@ -401,8 +401,8 @@ is root-equivalent) and NOPASSWD sudo is in
 [`../docs/roadmap.md`](../docs/roadmap.md)'s *Not doing*. So reading the Docker socket
 costs one sudo password per run. That is the right price for a human-run inventory.
 
-**It is also the reason Phase 7 cannot just schedule this playbook.** A scheduled
-read-only run from `two` would need passwordless sudo on `zero` and `one`, which this
+**It is also why nothing schedules this playbook.** A scheduled
+read-only run from `two` (once Phase 8, dropped 2026-10-25) would need passwordless sudo on `zero` and `one`, which this
 repo refuses. The likely answer is the shape `bin/hw-inventory` already uses — each host
 writes its own report locally, and Ansible fetches it unprivileged — but that is not
 built, and pretending otherwise now would only find it later.
@@ -434,7 +434,7 @@ on 2026-08-21: `ansible.posix` 0.16 MiB, `community.general` 2.70 MiB, `communit
 version was then also inconsistent with dropping `bin/compose` for being repo-specific
 knowledge, so it went.
 
-`containers.podman` is 7.93 MiB and is **deferred** until Phase 7 needs it — see
+`containers.podman` is 7.93 MiB and is **deferred** until phase 13 (rootless podman on `one`) needs it — see
 `requirements.yml`. Adding a collection is still a decision with a number attached, and
 the number belongs in `docs/data-ledger.md` in the or3 repo; it is just a smaller number
 than this file used to claim.

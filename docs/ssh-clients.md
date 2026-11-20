@@ -539,11 +539,10 @@ neither gets a connector of its own: both move into `dev/compose.yaml` behind th
 reached by `ssh dev` like every other container. An alias for the old door would name a
 hostname with nothing behind it, which fails exactly like a container being down.
 
-Dropping the alias does not close the door, and nothing about this pretends it does. The
-rules are still on zero. Closing them edits
-`hosts/zero/system/cloudflared-config.yml` and cycles zero's connector, which is
-[`management-plane.md`](management-plane.md)'s phase 2i and the owner's to run — from a
-mesh route, since `ssh-zero.gsrpi.uk` **is** the tunnel being cycled.
+Dropping the alias did not close the door. Closing it meant editing
+`hosts/zero/system/cloudflared-config.yml` and cycling zero's connector from a mesh route,
+since `ssh-zero.gsrpi.uk` **is** the tunnel being cycled; that was
+[`management-plane.md`](management-plane.md)'s phase 2i, done by the owner on 2026-10-25.
 
 `ssh-zero-dev-or3` was already dead when its alias went: the ingress rule came off in
 `7bb2075`, so the alias named a hostname with no route behind it — which fails exactly

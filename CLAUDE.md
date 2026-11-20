@@ -68,6 +68,10 @@ anything inferable from the repo; a rule about *how to work* goes here, not ther
   never from scratch.
 - **`docs/roadmap.md`** and the phase table in `docs/management-plane.md` are the index of
   what is next. **Findings get filed into the phase table; they do not start work.**
+- **Done work there, and in `plans/`, is struck through, not marked**: a done phase is one
+  struck row with its date and where its record lives; a done item is struck, then deleted
+  at the next tidy; finished prose is deleted. `decisions.md` is the exception: its rows are
+  never struck or deleted, only marked ⚠︎SUPERSEDED.
 - **Where a doc and a generated artefact disagree, the artefact wins** —
   `docs/fleet-inventory.md` over the README's port table, `curl 127.0.0.1:20241/config`
   over `docs/cloudflare.md`. That disagreement is the signal those artefacts exist to

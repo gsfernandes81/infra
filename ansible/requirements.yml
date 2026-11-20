@@ -29,7 +29,7 @@ collections:
 # DEFERRED, deliberately:
 #
 #   containers.podman — 7.93 MiB, the most expensive of the four, and not needed until
-#   Phase 7 puts rootless podman on `one`. It may not be needed then either: if podman
+#   phase 13 puts rootless podman on `one`. It may not be needed then either: if podman
 #   ends up driven through podman-compose the same way docker is driven through
 #   docker_compose_v2, community.docker may cover it. Decide when there is something to
 #   test it against, not now.

@@ -31,7 +31,7 @@
 # here. Four things follow from being in it rather than beside it: `uri` returns parsed
 # JSON so there is no hand-rolled extractor; `--check` is a real dry run, which has
 # already caught one bad change in this repo; `no_log` is a mechanism rather than
-# discipline; and the API token becomes a Vault variable at Phase 4 with no rewrite.
+# discipline; and the API token stays one per machine, out of Vault (decided 2026-10-25).
 # It is also not a one-off — dd-dev, ds-dev and or3-dev want the same three objects, and
 # rotating the fleet's own tunnel credentials (2e, done 2026-08-29) used most of them.
 #

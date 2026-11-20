@@ -47,7 +47,7 @@ sidecar's health is the check, not `netstat`. `send2ereader`'s project refuses t
 until its first deploy from the control node has written its tunnel settings (its README).
 
 `ionic-traces` stays stopped, and 7777 is expected to be absent. It was stopped by
-decision ([management-plane.md](management-plane.md), 2c): it has very few users, only its
+decision ([`decisions.md`](decisions.md) § *From the management plane*): it has very few users, only its
 database is worth anything, and starting it would restart the crash loop that stopping it
 ended, on the one copy of that database. Its compose file, `SOURCE` and `.env` remain, so
 repairing it is for a person to decide, not a reboot. It is no longer linked from

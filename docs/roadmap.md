@@ -2,9 +2,9 @@
 
 All three hosts are in this repo now: `hosts/<host>/` carries each one's deployments as
 symlinks into `deployments/`, plus its tracked `/etc` copies. None of what follows is
-urgent; none of it should be started remotely — ~~**except §6**~~, **which is done** (2e,
-closed 2026-08-29). What follows described it as a remote operation still to do; it was one, and it was
-remote operation, because `infra-dev` is the safe place to stand that it was waiting for.
+urgent, and none of it should be started remotely. The order of what is next is
+[`management-plane.md`](management-plane.md) § *Phases*; this file holds the longer
+reasoning behind some of those phases.
 
 ## 1. Onboard `zero` into this repo — done
 
@@ -15,8 +15,8 @@ The entry stays rather than being deleted so the numbering below keeps the ancho
 
 ## 2. Podman on `one`
 
-**Deferred to MicroOS, 2026-10-25** — the owner's call. On MicroOS it is the Quadlet
-conversion in §3, with memory limits that rootless podman on OpenRC cannot enforce
+**Deferred to Leap, 2026-10-25** — the owner's call; `management-plane.md` phase 13 now
+that `one` runs Leap. It is the Quadlet conversion in §3, with memory limits that rootless podman on OpenRC cannot enforce
 ([`management-plane.md`](management-plane.md) § *What rootless podman costs on OpenRC*),
 rather than a podman-compose conversion now and a second one at the migration. The rest of
 this section still holds for whenever it happens.
@@ -41,13 +41,12 @@ rootful.
 
 ## 3. openSUSE MicroOS — the target
 
-**Scheduled for the November 2026 visit**: `one` and `three`, on Docker at first; `zero`
-stays on Alpine this visit. Its move waits only on Leap's proof on a Pi 4, which `one` and
-`three` have given (owner, 2026-11-20, `decisions.md`), and is its own design.
-⚠︎SUPERSEDED 2026-11-20: this said the move waited on a Pi 5. **The OS is openSUSE Leap
-16.1**, in its Immutable mode, decided 2026-11-03, with `two` staying on Alpine
-([`plans/microos-cutover.md`](../plans/microos-cutover.md), `decisions.md`). The text
-below was written for MicroOS and holds for Leap's Immutable mode.
+~~`one` and `three` move~~ — done at the November 2026 visit: both run **openSUSE Leap
+16.1** in its Immutable mode (decided 2026-11-03), on Docker for now. **What is left:**
+`zero`'s move, `management-plane.md` phase 12, its own design, waiting only on the dev hub
+leaving it (phase 10) and the backup being proven (phase 11); then podman on `one` (phase
+13) and on `zero` (phase 17). `two` stays on Alpine. The text below was written for
+MicroOS and holds for Leap's Immutable mode.
 
 **Decided — and gated on being ashore, not on anything technical.** Reconfirmed by the
 owner 2026-08-29: it is waiting for physical presence, and it is **not set in stone** —
@@ -257,18 +256,8 @@ above.)
 
 ## 6. Cloudflare tunnel tokens — no longer in person only
 
-`zero`'s and `one`'s tokens were world-readable for months and
-[recovery.md](recovery.md#dont-break-remote-access) says both must be assumed disclosed.
-Rotation was deferred here to "when physically present", which from a ship is months.
-
-**Reversed 2026-08-22, and ✔ DONE 2026-08-29.** `infra-dev` is a way into `zero` that does
-not traverse zero's own tunnel, which is exactly what the two-phase procedure in
-`CLAUDE.md` needs to stand on — though in the event every cutover was driven from a mesh
-route rather than from the container, which has no fleet access by default. It was
-**Phase 2e** in
-[management-plane.md](management-plane.md#sequencing-and-where-podman-fits), with the
-order, the probe, and the one check that has to happen first — proving which connector
-actually carries the session, from the owner's shell rather than from an agent process.
+~~Rotate `zero`'s and `one`'s disclosed tunnel tokens~~ — done 2026-08-29, remotely, from
+mesh routes, as `management-plane.md`'s phase 2e; the record is in `decisions.md`.
 
 ## Not doing
 

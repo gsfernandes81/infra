@@ -108,17 +108,16 @@ now gets the catch-all 404, which reads like a container that is merely down. Al
 NXDOMAIN on two resolvers.
 
 `infra-dev.gsrpi.uk` is **not** here — it has its own tunnel, run by a connector inside
-the container, which is the pattern *management-plane.md* § *Addressing* chose.
-`or3-dev.gsrpi.uk` joined it on 2026-08-24. **`dd-dev` and `ds-dev` have no tunnel of
-their own yet** — that is Phase 5 — and they are not running; until then they are reached
-through `ssh zero` and the published loopback ports 2222/2223.
+the container, the pattern the dev containers chose in August 2026. Since the hub
+(2026-10-27) every dev container is reached through `ssh dev` and the hub's one sidecar
+tunnel (`dev/README.md`); `or3-dev`'s hostname rides that tunnel too.
 
 ## One's hostnames
 
 | Hostname | Origin | |
 |---|---|---|
 | `ssh-one.gsrpi.uk` | `ssh://127.0.0.1:22` | **behind Access**, per-client service tokens |
-| `syncthing-torrents.gsrpi.uk` | `http://127.0.0.1:8384` | **behind Access**; origin down, 2c |
+| `syncthing-torrents.gsrpi.uk` | `http://127.0.0.1:8384` | **behind Access** |
 | `torrents.gsrpi.uk` | `http://127.0.0.1:8080` | **behind Access** |
 | *(catch-all)* | `http_status:404` | |
 

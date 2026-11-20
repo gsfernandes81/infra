@@ -164,7 +164,7 @@ by its condition, and `docker` answers that it cannot connect. A hand `mount /me
 starts none of them: only `systemctl start` does. For a few seconds while Docker first
 starts, a new ssh connection can be refused; the simulation saw one attempt fail between
 two that answered. Try again. The cause is not yet known (`docs/management-plane.md`,
-phase 9). A pull against a locked `three` is skipped by
+open items). A pull against a locked `three` is skipped by
 its condition, and the timer, `Persistent=`, pulls once the array is unlocked.
 
 To lock it again without a reboot (Docker, a running pull and a running scrub stop with
@@ -368,7 +368,7 @@ else, stop and read the way back at the end.
    The diff shows one line gone, `/dev/mapper/mirror /media/mirror ...noatime 0 0`, and one
    added, `/dev/mapper/backup /media/backup ...noatime,nosuid,nodev 0 0`, still `noauto`,
    which keeps a boot from waiting for the array and an SELinux relabel from mounting it
-   (`docs/management-plane.md`, phase 9).
+   (`leap/README.md` § *What the November visit's first boots taught*).
 8. **crypttab and the array's units**, each with a dry run first:
 
    ```fish
