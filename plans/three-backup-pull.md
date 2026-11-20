@@ -1,13 +1,14 @@
 # `zero`'s backup: snapper snapshots on `zero`, pulled by rsync to `three`
 
 The owner approved this design on 2026-11-19 (§ The owner's answers, at the end), and it is
-**built in the repo** on the branch `backup-pull`: the tracked files on both boxes, the
-simulation, and the owner's steps. What is left is on the boxes, in this order, so the plan
+**built in the repo** on the branch `backup-pull`, with the rename of `three`'s array
+(2026-11-20, `docs/decisions.md` § *The backup's names and layout on `three`*) on
+`backup-rename`: the tracked files on both boxes, the simulation, and the owner's steps. What is left is on the boxes, in this order, so the plan
 stays until they are done:
 
 | Stage | Where | State |
 |---|---|---|
-| 1. The files on both boxes, the play for zero's restore key, the simulation | repo | **built**, proved by `microos-sim.yml` (`host`, `three`) and `alpine-sim.yml` |
+| 1. The files on both boxes, the play for zero's restore key, the rename's procedure, the simulation | repo | **built**, proved by `microos-sim.yml` (`host`: `three`, and `three` with `migrate`) and `alpine-sim.yml` |
 | 2. zero's restore key and host key, committed into three's files | `zero`, then the infra agent | not done |
 | 3. three's rename and layout, users, pull key and files | `three` | the pull key made 2026-11-19 and committed into zero's key line; the rest not done: `hosts/three/leap/README.md` § The rename, then § The pull's setup |
 | 4. The move on `zero`: one `immich` subvolume, its `.snapshots`, the fstab line, Immich's `.env` | `zero` | not done: `plans/visit-runbook.md` § The move on `zero` |
@@ -142,6 +143,14 @@ writing throughout. `alpine-sim.yml` runs zero's snapper install on arm64 with t
 SHA-256, and `install-system-file`'s new `visudo` check. `sim/microos/README.md` lists each
 check and how it proves its point.
 
+The rename has its own job, `host` for `three` with `SIM_VARIANT=migrate`: the box set back
+to the tree before the pull, its array made by the old `make-mirror` and holding the old
+`syncthing-three`, then every fish block of `hosts/three/leap/README.md` § The rename run as
+written, and § The pull's setup, step 2. It found two faults before its first pass: dry runs
+that refused a content change, and so stopped the loop before the write; and
+`install-system-file` crashing on an unprivileged dry run in a root-only directory. Its
+first green run is 44707100446.
+
 ## Changes at the move, not before
 
 `/media/immich-data` and `/media/immich-db` become `/media/immich/data` and
@@ -182,34 +191,10 @@ unchanged when `zero` moves.
   suits databases badly. A timed manual defrag is to be looked at later, issue #23, which
   notes that a defrag unshares snapshot extents too.
 
-## Work in progress, 2026-11-20: the rename of three's array
+## PR #22, the array as a play
 
-The owner asked on 2026-11-19 for "mirror" to go wherever it means the backup, three's live
-array included, and for the immich backup to sit at `/media/backup/immich/` with no
-`received-backups` level. Built on the branch `backup-rename`, from `backup-pull`:
-
-- **Done, in the repo:** every name (`docs/decisions.md` § *The backup's names and layout on
-  `three`*); the layout in `make-backup` and every unit; the restore module `immich` over
-  `/media/backup/immich` alone; `zero`'s `backup-age-check` and `/var/lib/backup-alert`, with
-  the move of the stored URL in `hosts/zero/system/README.md` § The backup; the rename's
-  procedure, `hosts/three/leap/README.md` § The rename, eighteen owner-run fish blocks with a
-  way back at each; and its simulation, `microos-sim.yml`'s second `three` job
-  (`SIM_VARIANT=migrate`).
-- **The simulation's first run** (microos-sim 44695369706) passed the new box (`host
-  (three)`) and found a fault in the rename: a dry run of `install-system-file` without
-  `--allow-content-change` refuses a content change, so the loop never wrote `crypttab`.
-  The dry runs now pass it, and renames 9 and 11 refuse to run until what comes before them
-  is in place.
-- **The second run** (44701472432) passed every rename step, from the box of 2026-11-18 to
-  Syncthing healthy on the new path, and found a fault in `install-system-file`: an
-  unprivileged dry run of a file in a root-only directory (`/etc/sudoers.d`, 0750) crashed
-  on `Path.exists()`'s `PermissionError`, ending the pull's setup loop at `sudoers-restore`.
-  `zero`'s loop for `sudoers-backup` has the same shape. The tool now asks `sudo test -e`
-  and `sudo stat` when it cannot look itself, and `microos-sim.yml` runs on a change to it.
-- **Not done:** a green run of the rename's simulation; the Fable review; on the boxes, all
-  of it.
-- **PR #22** (the array as a play), for its change list: `lb_layout` accepts only top-level
-  names (`^[A-Za-z0-9._-]+$`); the new layout needs nested entries (`immich`,
-  `immich/current`, `immich/current/.snapshots`, `immich/state`), so the play must make
-  parents first and refuse `..`; its labels become `backup-luks` and `backup`.
-  `make-backup` is deleted when PR #22 merges.
+Its change list, for the layout of 2026-11-20: `lb_layout` accepts only top-level names
+(`^[A-Za-z0-9._-]+$`), and the layout needs nested entries (`immich`, `immich/current`,
+`immich/current/.snapshots`, `immich/state`), so the play must make parents first and refuse
+`..`; its labels become `backup-luks` and `backup`. `make-backup` is deleted when PR #22
+merges.

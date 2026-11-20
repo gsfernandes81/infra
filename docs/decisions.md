@@ -2807,6 +2807,15 @@ holding nothing but Syncthing, so the change costs least now.
   array and the old `syncthing-three` on it, and runs the README's blocks as written. The
   checks read state, not exit codes: the subvolume's UUID and a hash of every path, size and
   content in it, before and after.
+- **An owner's dry run of `install-system-file` passes `--allow-content-change` whenever the
+  commit after it does.** Without it, the dry run refuses a content change and exits 1, so
+  `dry; and commit` never commits; the rename's simulation caught it on `crypttab`. A later
+  step that needs an earlier one refuses until it is in place (renames 9 and 11).
+- **`install-system-file` asks sudo when it cannot look**: `sudo test -e` and `sudo stat`
+  where `Path.exists()` or `stat()` meets `PermissionError`, as `read_bytes` already did.
+  An unprivileged dry run of a file in `/etc/sudoers.d` (0750) otherwise crashed before it
+  showed anything, which the rename's simulation found on `sudoers-restore`; `zero`'s
+  `sudoers-backup` loop had the same shape.
 - **`snapper`'s config on `three` keeps its name, `received-immich`**, though the level it
   was named after is gone: on `three` it says which side of the pull it is, beside `zero`'s
   `immich`.
