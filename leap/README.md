@@ -88,7 +88,19 @@ files in `/root/volumes` for the runbook to restore once Docker runs.
 A failed step stops the script, and Combustion then leaves the image unconfigured rather
 than half-configured. Everything the script prints is also kept in
 `/var/log/infra-firstboot.log`, which survives a failed run: with no screen to hand, a raw
-search of the card for `firstboot:` reads it (`plans/visit-runbook.md` § Slice 1).
+search of the card for `firstboot:` reads it.
+
+**If the first boot never answers ssh** (it answers ping on its address, but port 22 is
+refused): the script stopped. Read its log off the card on `two`, through the card reader
+(`plans/visit-runbook.md` § Writing a card, and erasing a stick), by a raw search, since
+the reader cannot mount a card the first boot grew:
+
+```fish
+# on two: search the card's root partition for the first boot's log lines, detached, into a file; put the card's device in place of sdX
+sudo sh -c "setsid nohup sh -c 'dd if=/dev/sdX2 bs=4M count=1536 2>/dev/null | strings -n 8 | grep \"^firstboot: \" > /home/gavin/firstboot-lines.txt; echo done >> /home/gavin/firstboot-lines.txt' </dev/null >/dev/null 2>&1 &"
+```
+
+`cat ~/firstboot-lines.txt` once its last line says `done`; the `STOPPED` line says why.
 
 ## What it does not do
 

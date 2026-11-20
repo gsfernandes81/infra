@@ -460,8 +460,10 @@ make it live data. Re-check before trusting it.
 
 ## `zero`'s encrypted member: encrypted now, protection off
 
-Decided by the owner on 2026-11-19, while at the cluster for the disk swap
-([`plans/visit-runbook.md`](../plans/visit-runbook.md) § Slice 2).
+Decided by the owner on 2026-11-19, while at the cluster for the disk swap, slice 2 of the
+visit, done 2026-11-19 to 20. Its commands as run are in
+`git show 774eb42:plans/visit-runbook.md` § Slice 2, the starting point when the WD
+Elements disk is replaced the same way.
 
 | Decision | Because |
 |---|---|
@@ -476,6 +478,11 @@ Decided by the owner on 2026-11-19, while at the cluster for the disk swap
 | **`install-system-file` checks a dmcrypt entry by opening it** | A wrong entry costs a mount, which `nofail` and the immutable mountpoints absorb; an entry without `key=` costs the boot. So the check refuses a placeholder, an entry without `key=`, a key file others can read, a `source=` that `findfs` cannot resolve, and a key that does not open the volume (`cryptsetup open --test-passphrase`). Calibrated against a real LUKS2 volume in CI, where each refusal is shown refusing and the good entry passing. |
 | **One shutdown for the move and the reboot test** | The new disk goes into `sdb`'s bay at the same shutdown that tests the unattended unlock. Everything is named by UUID, so the move changes no file, and the boot that is tested is the configuration `zero` keeps. |
 | **A LUKS header backup is optional for this member** | The array's other copy covers it: a damaged header costs a second replace, not data. If one is taken, it is secret-bearing (with the key file or the passphrase it opens the disk, even after a keyslot is killed on the disk itself), so it never sits beside `/etc/keys`, in the repo or in `~/.infra-backups`. |
+| **util-linux's `blkid` guards the format, not BusyBox's** (found at the swap) | The guard before `luksFormat` refuses a device on which `blkid -p` finds a signature. BusyBox's `blkid`, Alpine's default, ignores `-p` and exits 0 on a blank disk, so the guard would have refused to format. |
+| **A 4096-byte bcache block and LUKS sector, set rather than detected** | bcache refuses a backing block smaller than the cache set's, and at registration one smaller than the disk's logical sector, which a USB bridge may report as 4096; 4096 suits a bridge reporting 512 as well. `--sector-size 4096` matches it and btrfs's 4 KiB sectors, where cryptsetup would pick from the device it sees. |
+| **The disk's `add` event is sent again after `make-bcache`** | mdev made the disk's `/dev/disk/by-uuid` links when it was plugged in, before the bcache superblock existed, and `bcache-register` registers by that link at boot. A link missing then is missing at boot. |
+| **Nothing reboots between the replace's start and the install of `bcache-register` and `dmcrypt`** | btrfs refuses to mount an array whose replace target is missing, and until those files nothing at boot registers the new disk or opens its LUKS volume. The replace runs with `-r`, so the failing disk is read only for a block whose other copy is bad. |
+| **The old member is wiped on another machine, never `zero`** | Its old bcache superblock could be registered again on `zero`, and it holds Immich's photos unencrypted. |
 
 ## Two things the original inventory got wrong
 
@@ -2470,7 +2477,7 @@ out of writing them and is proven by `alpine-sim.yml`.
 ## `three` flies to Singapore on 21 November
 
 **Decided 2026-11-18**, the owner's call. It sets the visit's order
-([`plans/visit-runbook.md`](../plans/visit-runbook.md) § The slices): `one`'s move first, `three`'s
+([`plans/visit-runbook.md`](../plans/visit-runbook.md) § What the visit did): `one`'s move first, `three`'s
 first boot and first push straight after, so the push finishes in the UK, and a restore
 from one of its snapshots before it leaves, as [`plans/three.md`](../plans/three.md) asks.
 `zero`'s disk swap waits if time is short, since `three` does not need it. The Wi-Fi
@@ -2720,6 +2727,34 @@ Alpine copies for `one` too, since `one` keeps both.
   edge/testing, pinned, run with `--no-dbus` from an hourly periodic script. The pull runs
   daily at 01:00 at 32 Mbit/s. `autodefrag` leaves the `/media/immich` line, since it
   unshares snapshot extents (issue #23 for a timed defrag).
+- **Each box reads from the other, and neither holds a key that writes to it** (the owner
+  approved the design and its keys, 2026-11-19). `three` reads `zero`'s snapshots for the
+  pull; `zero` reads its own backups on `three` for a restore, which the owner agreed to.
+  The one write-only key the fleet allowed between boxes (§ *`three` is the off-site
+  backup*) becomes two read-only ones. Each key runs an rsync daemon as an unprivileged
+  user holding only `CAP_DAC_READ_SEARCH`, which the owner agreed to for `zero`'s.
+- **What a compromised box can do, as approved.** A compromised `zero` can read its own
+  backups on `three` and serve bad data to the next pull. It cannot write, delete or run
+  anything on `three`, and `three`'s earlier snapshots are untouched; what it serves is
+  parsed by rsync as the unprivileged backup user, in a sandbox that writes only
+  `current/` and `state/`. A compromised `three` can read `zero`'s snapshots, the data it
+  exists to hold, and cannot write to `zero`, delete a snapshot or run anything there.
+  What a bug in either daemon would reach is in § *The pull, as built*.
+- **Retention** (the owner, 2026-11-19): `zero` keeps 24 hourly and 7 daily snapshots;
+  `three` keeps 14 daily, 8 weekly and 12 monthly, with no quarterly or yearly step.
+  Snapshots are named by snapper's numbers. The daily pull replaced the first proposal, a
+  poll about every 15 minutes.
+- **The alert is deferred** (the owner, 2026-11-19): a dead man's switch across the whole
+  fleet, as a mesh, from a prebuilt tool, designed separately. Until then nothing alerts
+  when the pull stops, and the gap is in the phase table of `management-plane.md`.
+- **Dead simple scripts, prebuilt tools where they exist, Python only where a script would
+  otherwise be complicated** (the owner's aim). None needed Python: the pull is about 40
+  lines of POSIX shell, and snapper and rsync do the rest.
+- **snapper on `zero` is pinned in apk's world and run from an hourly periodic script**,
+  so it gets no update until `zero` moves to Leap (revisit at Alpine 3.25,
+  `hosts/zero/system/README.md` § The backup). `.snapshots` is a nested subvolume made by
+  hand at the move, root's, mode 750, and `/mnt/ext`, the array's top level, stays
+  `noauto`.
 
 ## The pull, as built
 
@@ -2813,6 +2848,21 @@ and refine the owner's design without changing it.
   the runner's network, not the Ubuntu runner itself: snapper 0.13.1 from edge/testing,
   util-linux's `setpriv`, Alpine's sudo and BusyBox's `adduser` and `flock` are what `zero`
   runs, where the runner's would have been Ubuntu's, of another version.
+- **A snapshot is finished once its `info.xml` exists.** snapper writes it after the btrfs
+  snapshot, and deleting the highest snapshot leaves its directory without one, so the
+  pull takes the highest number with an `info.xml`. It compares both the number and
+  `info.xml`'s time with `last-pulled`, since a recreated snapper config numbers from 1
+  again.
+- **Nested subvolumes stay on `zero`.** A snapshot leaves out every nested subvolume, so
+  `data/thumbs` and `data/encoded-video`, which Immich regenerates, and `.snapshots` were
+  made nested at the move and are never pulled; rsync copies each as an empty directory.
+- **`current/` is an ordinary writable copy, rewritten in place** (`--inplace`), so a
+  changed file rewrites only its changed blocks and `three`'s snapshots share every
+  unchanged one.
+- **The backup user can rename `current/.snapshots`, and that is accepted.** It owns
+  `current/`, so it could hide the history from snapper, but never change or delete it:
+  snapshots are root's and read-only, deleting a subvolume needs root, and a rename cannot
+  leave the subvolume.
 
 ## The backup's names and layout on `three`
 
