@@ -21,8 +21,9 @@ the new 8 GB Pi 4, and the 1 GB Pi 4 that runs `one` today becomes `three`.
 Immich's machine learning and fill 41 G of its 64 G Docker partition; on 2026-11-02 it
 held 1.1 G in swap. Immich does not move: its library is 104 G of an array with 798 G
 free, and moving it is the riskiest migration this fleet could do. `zero` stays on Alpine
-this visit; it changes OS only once the new OS is proven on a Pi 4, which `one` and `three` have
-given ([`microos-cutover.md`](microos-cutover.md); ⚠︎SUPERSEDED 2026-11-20, this said a Pi 5).
+this visit; its move waits only on Leap's proof on a Pi 4, which `one` and `three` have
+given ([`microos-cutover.md`](microos-cutover.md); ⚠︎SUPERSEDED 2026-11-20, this said a
+Pi 5).
 
 `one` takes the work that needs memory and is not critical. The dev containers want 8 GB
 more than a Pi 5's speed. Its apps need no bulk storage, and they stay on its Sabrent and

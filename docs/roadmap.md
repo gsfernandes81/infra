@@ -42,9 +42,10 @@ rootful.
 ## 3. openSUSE MicroOS — the target
 
 **Scheduled for the November 2026 visit**: `one` and `three`, on Docker at first; `zero`
-stays on Alpine this visit. ⚠︎SUPERSEDED 2026-11-20: its move no longer waits on a Pi 5;
-the gate is a Pi 4's proof, which `one` and `three` have given (`decisions.md`). **The OS is openSUSE Leap 16.1**,
-in its Immutable mode, decided 2026-11-03, with `two` staying on Alpine
+stays on Alpine this visit. Its move waits only on Leap's proof on a Pi 4, which `one` and
+`three` have given (owner, 2026-11-20, `decisions.md`), and is its own design.
+⚠︎SUPERSEDED 2026-11-20: this said the move waited on a Pi 5. **The OS is openSUSE Leap
+16.1**, in its Immutable mode, decided 2026-11-03, with `two` staying on Alpine
 ([`plans/microos-cutover.md`](../plans/microos-cutover.md), `decisions.md`). The text
 below was written for MicroOS and holds for Leap's Immutable mode.
 

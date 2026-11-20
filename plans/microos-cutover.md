@@ -43,10 +43,10 @@ live `one` (`decisions.md`). [`visit-runbook.md`](visit-runbook.md) is the order
 steps the visit follows.
 
 **`zero` stays on Alpine this visit**, the owner's call of 2026-11-03. The disk swap is
-its only change. It moves to the new OS only once that OS has been proven on a Pi 4,
-because it is the box whose failure costs most, and slice 1 proves a Pi 4. ⚠︎SUPERSEDED
-2026-11-20: this said a Pi 5. The owner meant a Pi 4's proof, which `one` and `three` have
-given (`decisions.md`).
+its only change. Its move to the new OS waits only on Leap's proof on a Pi 4, which `one`
+and `three` have given (owner, 2026-11-20, `decisions.md`), and is its own design, not
+part of this visit. ⚠︎SUPERSEDED 2026-11-20: this said the move waited on a proof on a
+Pi 5.
 
 After the visit, over ssh: the dev hub moves to `one`, at a quiet time and not in a slice,
 because the infra container moves with it. Podman comes later still. `three` ships to
@@ -299,6 +299,7 @@ The owner settled the open calls on 2026-11-02.
 
 ## Docs this changes
 
-roadmap §3 (scheduled, with `one` and `three` first, `zero` after a Pi 4 is proven, which `one` and `three` have done),
+roadmap §3 (scheduled, with `one` and `three` first; `zero` waits only on the Pi 4's
+proof, already given),
 `docs/host-setup.md` and `docs/recovery.md` for systemd, every host README, and
 `README.md`'s host table.
