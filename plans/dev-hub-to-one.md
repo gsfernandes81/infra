@@ -16,7 +16,7 @@ Immich already presses on `zero`'s memory. The move was already planned for afte
 visit ([`microos-cutover.md`](microos-cutover.md),
 [`visit-runbook.md`](visit-runbook.md)).
 
-**The owner's calls, 2026-11-20:**
+**The owner's calls, 2026-11-20.** The owner approved this design the same day.
 
 1. The hub moves to `one` first, as its own piece. Piece B follows in this session if
    context allows, or from a handoff.
@@ -30,6 +30,12 @@ visit ([`microos-cutover.md`](microos-cutover.md),
 6. **The Pi 5 gate is withdrawn.** The owner meant `zero` waits for Leap to be proven on a
    Pi 4, which `one` and `three` have done. `decisions.md` gets a row saying so, and the
    ⚠︎SUPERSEDED marks where it says otherwise.
+7. **The volumes move as tar files over ssh**, not by `btrfs send`. The volumes are
+   directories inside `zero`'s Docker subvolume, so a send would carry the whole store,
+   images included, and need a snapshot on `zero` and a copy out of it on `one`. The
+   transport is the same two hops either way, since `sudo` on `one` cannot prompt inside a
+   pipe. The only batch moved during downtime is small, so an incremental pass buys
+   little.
 
 ## Goals, non-goals and anti-goals
 
@@ -179,8 +185,8 @@ and the dev images. "Exited" is not "absent" (CLAUDE.md).
 
 ## Left to the builder
 
-- The fish blocks' exact text, the staging subvolume's name, and whether tar or rsync
-  moves the bulk, once the sizes are known.
+- The fish blocks' exact text and the staging subvolume's name. If block 1 measures the
+  last batch as large, rsync may move that batch instead of tar.
 - Where the fixed 1001 is spelled in `compose.yaml`, and whether `.env` keeps a `DEV_UID`.
 - Whether the CI run in step 5 is practical.
 - Whether the caches (`*-uv-cache`, `*-zed-server`) move or are rebuilt. Moving is the
