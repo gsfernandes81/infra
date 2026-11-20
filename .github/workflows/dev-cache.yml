@@ -1,8 +1,8 @@
 name: dev-cache
 
 # Keep a registry layer cache of every dev image dev/compose.yaml builds, on the base tag
-# it names, so zero's build pulls layers instead of running each step (owner, 2026-11-01;
-# docs/decisions.md has the row). zero still builds every image itself, from the same
+# it names, so one's build pulls layers instead of running each step (owner, 2026-11-01;
+# docs/decisions.md has the row). one still builds every image itself, from the same
 # contexts with the same args; each service's `cache_from` names the cache.
 #
 # EACH REPO CACHES WHAT IT OWNS. The `cache` job builds the images whose Dockerfiles live
@@ -27,8 +27,8 @@ name: dev-cache
 #
 # THE CHECK. After the push, a fresh builder with no local state builds infra's targets
 # again from the registry caches alone, and the run fails if any RUN, COPY or ADD step
-# executed instead of hitting. That is the question zero's build asks. It cannot prove
-# zero's own BuildKit agrees; `docker buildx history ls` on zero after a deploy shows
+# executed instead of hitting. That is the question one's build asks. It cannot prove
+# one's own BuildKit agrees; `docker buildx history ls` on one after a deploy shows
 # that.
 
 on:
@@ -98,7 +98,7 @@ jobs:
 
       # Splits compose.yaml's targets by where the Dockerfile lives. A context in this
       # checkout is this job's to cache, and the step fails if compose.yaml does not list
-      # that cache, since zero would then never read it. A context on GitHub names the
+      # that cache, since one would then never read it. A context on GitHub names the
       # repo the dispatch job asks. Writes push.json and verify.json, the two bake
       # overrides.
       - name: Read the targets from compose.yaml
@@ -144,7 +144,7 @@ jobs:
               sys.exit(1)
           EOF
 
-      # BUILDX_BAKE_ENTITLEMENTS_FS=0 as dev/Makefile sets it on zero, for the same
+      # BUILDX_BAKE_ENTITLEMENTS_FS=0 as dev/Makefile sets it on one, for the same
       # reason: bake would otherwise ask for filesystem access to or3's key path.
       - name: Build and push each cache
         working-directory: dev
@@ -192,7 +192,7 @@ jobs:
         env:
           TARGETS: ${{ steps.targets.outputs.own }}
         run: |
-          echo "Cached for zero (arm64), every step checked: \`$TARGETS\`, in \`$CACHE_IMAGE:buildcache-<service>-arm64\`." \
+          echo "Cached for one (arm64), every step checked: \`$TARGETS\`, in \`$CACHE_IMAGE:buildcache-<service>-arm64\`." \
             >> "$GITHUB_STEP_SUMMARY"
 
   # Independent of infra's own cache: a failure there does not hold the children back.

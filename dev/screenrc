@@ -13,7 +13,7 @@ autodetach on
 
 # A status line, because a detached-and-reattached session with no chrome is easy to
 # mistake for a plain shell, and then you start a SECOND claude in it. It names the
-# container, which matters a great deal now: zero runs several of these and they all
+# container, which matters a great deal now: one runs several of these and they all
 # look alike once you are inside one.
 #
 # `%H` and not a baked name — this file is in the SHARED base, so a literal would have

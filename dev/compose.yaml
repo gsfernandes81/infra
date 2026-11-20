@@ -1,4 +1,4 @@
-# Every dev container on zero, in one Compose project, with the hub that is the way in to
+# Every dev container on one, in one Compose project, with the hub that is the way in to
 # all of them (decided 2026-10-25, built 2026-10-26 — docs/decisions.md § "Dev containers:
 # one compose file in infra"; plans/dev-pool.md has what is left). Bring it up with
 # `make up` in this directory; `gavin` is not in the docker group, so nothing here runs
@@ -108,7 +108,7 @@ x-dev: &dev
 # created, ownership included, and Compose creates every container before it starts any. So on
 # a whole-project `up` the hub's creation made the still-empty volume dev's, then infra's
 # and or3's made it root's again from their root-owned mountpoints, and the hub could not
-# install into it (zero, 2026-10-27: hub-health "claude-sessions is not installed"). Only the
+# install into it (one, 2026-10-27: hub-health "claude-sessions is not installed"). Only the
 # hub's own mount copies, so only its dev-owned mountpoint decides.
 x-opt: &opt
   type: volume
@@ -291,9 +291,9 @@ services:
       - *opt
       - *managed
       - *claude-login
-      # THE WORKSPACE IS A VOLUME, cloned into, and no longer zero's own checkout. zero's
+      # THE WORKSPACE IS A VOLUME, cloned into, and no longer one's own checkout. one's
       # ~gavin/infra is now only what the box runs; the container's tree is its own, so a
-      # commit in here never leaves zero's checkout diverged again (CLAUDE.md § Git, the
+      # commit in here never leaves one's checkout diverged again (CLAUDE.md § Git, the
       # 2026-10-25 divergence). Push to share work, as from anywhere else.
       # Its GitHub token, from the hub, read-only: its own directory of the tokens volume and
       # no other container's (hub/github-tokens). Empty until the hub's first mint.
@@ -316,7 +316,7 @@ services:
   # All three move in at the one cutover (dev/README.md § "The cutover from the old layout").
   # EACH BUILDS STRAIGHT FROM ITS REPO ON GITHUB, `main`, with its own Dockerfile and on this
   # base — BASE_TAG is a build arg every child Dockerfile already takes, so no child repo
-  # changes first, and no clone on zero is read by anything (owner, 2026-10-27). or3 is
+  # changes first, and no clone on one is read by anything (owner, 2026-10-27). or3 is
   # private, so its context is fetched over ssh with or3's own deploy key; dd and ds are
   # public, over https. Each works in its own clone in a volume, its untracked .env in an env
   # volume, its keys in a secrets directory outside any clone.
@@ -334,7 +334,7 @@ services:
       args:
         BASE_TAG: *base-tag
       # or3 is private, so its CI caches only the Dockerfile's `toolchain` stage (the base plus
-      # public installs, nothing read from the repo), in a public package zero reads with no
+      # public installs, nothing read from the repo), in a public package one reads with no
       # credential. The final stage's COPYs of or3's own files are built here, in seconds.
       cache_from:
         - type=registry,ref=ghcr.io/gsfernandes81/or3-dev:buildcache-arm64
@@ -614,7 +614,7 @@ services:
       # so where its base matches ours every layer, cargo-mutants' compile included, is a
       # pull. Still built here and on x-base-tag, because a pinned prebuilt image would stay
       # on whatever base it was built against and a base bump would need that repo to move
-      # first. When the bases differ, nothing after FROM matches and zero compiles, slower and
+      # first. When the bases differ, nothing after FROM matches and one compiles, slower and
       # still correct; since 2026-11-01 infra's dev-cache.yml dispatches that workflow with
       # x-base-tag after every base, so the arm64 cache is built on ours (the note at the
       # hub's cache_from). A cache that cannot be read (GitHub down) is an ERROR line on the
@@ -646,7 +646,7 @@ services:
       - claude-sessions-local-share:/home/dev/.local/share
 
 networks:
-  # The hub reaches each container's sshd by name here. Nothing is published on zero.
+  # The hub reaches each container's sshd by name here. Nothing is published on one.
   dev:
 
 volumes:

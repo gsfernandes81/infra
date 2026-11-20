@@ -129,7 +129,7 @@ does.
 `docker exec` on the container's host, through the host's own ssh:
 
 ```sh
-ssh -t <host> 'cd ~/infra/dev && make shell'          # infra; zero today, the project's host whichever it is
+ssh -t <host> 'cd ~/infra/dev && make shell'          # infra; one today, the project's host whichever it is
 ssh -t <host> 'cd ~/infra/dev && make shell C=<c>'    # another container; C=hub for the hub
 ssh -t <host> 'cd ~/infra/dev && make claude'         # the hub's menu, as ssh dev lands on it
 ```

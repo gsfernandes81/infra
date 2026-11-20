@@ -1,11 +1,11 @@
 ---
-# START THE DEV CONTAINERS: `make up` in dev/ on zero, as root, with its output printed. From
+# START THE DEV CONTAINERS: `make up` in dev/ on one, as root, with its output printed. From
 # the control node:
 #
 #     cd ansible
 #     ansible-playbook playbooks/server-start-dev-containers.yml -K
 #
-# It is `ssh -t zero 'cd ~/infra/dev && make up'` as a play, so the owner's interface stays
+# It is `ssh -t one 'cd ~/infra/dev && make up'` as a play, so the owner's interface stays
 # Ansible: the same build and start of every container, the hub first, and the same guards,
 # which are dev/Makefile's own (.env, the secrets, the names, the external volumes) and are
 # not copied here. Root runs make, which dev/Makefile allows (its SUDO is empty when `id -u`
@@ -14,12 +14,12 @@
 # nothing.
 #
 # `up` ONLY. Nothing here stops, restarts or removes a container: those stay at `make` on
-# zero (dev/README.md § The targets). The guarded way to change the dev project, with a plan,
+# one (dev/README.md § The targets). The guarded way to change the dev project, with a plan,
 # a y/N and a container-id comparison, is still server-deploy-compose.yml -e deployment=dev;
 # this is the break glass for when the containers are simply down.
 #
-# zero is the default target. `-e target=<host>` names another fleet host, and the play
-# refuses any host whose checkout has no dev/Makefile, zero included.
+# one is the default target. `-e target=<host>` names another fleet host, and the play
+# refuses any host whose checkout has no dev/Makefile, one included.
 #
 # make runs as an async job, polled, so a phone that drops its connection during a long
 # build does not take the build down with it: the job carries on on the box, for up to four
@@ -40,12 +40,12 @@
   tasks:
     - name: Check -e target, if given, names a fleet host
       ansible.builtin.assert:
-        that: (target | default('zero')) in groups['fleet']
-        fail_msg: "-e target={{ target | default('zero') }} is not in the inventory's fleet group."
-        success_msg: "target: {{ target | default('zero') }}"
+        that: (target | default('one')) in groups['fleet']
+        fail_msg: "-e target={{ target | default('one') }} is not in the inventory's fleet group."
+        success_msg: "target: {{ target | default('one') }}"
 
 - name: Start the dev containers
-  hosts: "{{ target | default('zero') }}"
+  hosts: "{{ target | default('one') }}"
   gather_facts: false
   become: false
 
@@ -63,8 +63,8 @@
         that: devc_makefile.stat.exists
         fail_msg: >-
           {{ dev_dir }}/Makefile is not on {{ inventory_hostname }}, so it has no dev
-          containers to start{{ '' if inventory_hostname == 'zero' else
-          '; they run on zero, the default target' }}. Nothing has run.
+          containers to start{{ '' if inventory_hostname == 'one' else
+          '; they run on one, the default target' }}. Nothing has run.
         success_msg: found
 
     - name: Read the commit {{ inventory_hostname }}'s checkout is on

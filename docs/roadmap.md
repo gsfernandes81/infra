@@ -43,7 +43,9 @@ rootful.
 
 **Scheduled for the November 2026 visit**: `one` and `three`, on Docker at first; `zero`
 stays on Alpine this visit. Its move waits only on Leap's proof on a Pi 4, which `one` and
-`three` have given (owner, 2026-11-20, `decisions.md`), and is its own design.
+`three` have given (owner, 2026-11-20, `decisions.md`), and is its own design. The dev
+hub has moved to `one` (2026-11-20), so that move is Immich, Syncthing,
+pearl-wallet and the backup source, with no dev containers in it.
 ⚠︎SUPERSEDED 2026-11-20: this said the move waited on a Pi 5. **The OS is openSUSE Leap
 16.1**, in its Immutable mode, decided 2026-11-03, with `two` staying on Alpine
 ([`plans/microos-cutover.md`](../plans/microos-cutover.md), `decisions.md`). The text

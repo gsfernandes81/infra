@@ -142,7 +142,7 @@ ARG USER_GID=1000
 # tunnels back through it, unlike or3-dev's. openssh-client is what carries every
 # ansible connection to zero, one and two, and is also what git needs for
 # git@github.com (Debian's git does not pull an ssh client under
-# --no-install-recommends). fish matches the shell on the phone and on zero,
+# --no-install-recommends). fish matches the shell on the phone and on one,
 # and is the dev user's login shell here — the /etc/shells line is added rather
 # than assumed, because that is what `chsh` and anything else consulting it read.
 #
@@ -583,7 +583,7 @@ RUN chmod 0755 /usr/local/bin/in-workspace
 # ~700 MB of daemon and spares on 2026-10-01 for exactly this reason.
 #
 # MANAGED SETTINGS RATHER THAN ANY OTHER SETTINGS FILE, because this is fleet policy
-# about zero's RAM and not a repo's preference. A project's .claude/settings.json and
+# about the host's RAM and not a repo's preference. A project's .claude/settings.json and
 # the user's own ~/.claude/settings.json both lose to this one, so no checkout and no
 # login can turn the view back on. The cost is stated rather than discovered: `claude
 # --bg` and `claude agents` do not work in these containers, the latter refusing by
@@ -808,7 +808,7 @@ COPY --chown=${USER_UID}:${USER_GID} screenrc /home/dev/.screenrc
 # what updates it.
 COPY --chown=${USER_UID}:${USER_GID} config.fish /home/dev/.config/fish/config.fish
 
-# The interactive login walkthrough, run by `make login` from a terminal on zero.
+# The interactive login walkthrough, run by `make login` from a terminal on one.
 # It lives in the IMAGE rather than in the Makefile because every step of it needs
 # a tty and the credential stores it fills are all in here.
 COPY --chown=${USER_UID}:${USER_GID} login.sh /home/dev/login.sh

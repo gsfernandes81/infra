@@ -68,7 +68,7 @@ hosts/<host>/leap/     the host's move to Leap: its first-boot script, its Leap 
 leap/                  what every Leap host shares: the first-boot steps and the stick builder
 bin/                   the scripts above (_infra.py is their shared header parser)
 ansible/               the management plane — playbooks, the fleet-inventory generator
-dev/                   every dev container on zero, one compose project, behind `ssh dev`
+dev/                   every dev container on one, one compose project, behind `ssh dev`
 clients/emacs/         the editor for the phone and WSL, set up by ansible's client-home-emacs.yml
 sim/microos/           CI simulations of the MicroOS move, run on GitHub's runners, never on a host
 sim/cloudflare/        a stand-in for Cloudflare's API, so CI can run the tunnel plays with no account
@@ -120,18 +120,18 @@ exists, and the first run of it found exactly that on `one`.
 
 | Host | |
 |---|---|
-| `one` | **8080** qBittorrent (via gluetun) · ~~**7777** ionic-traces~~ — **stopped**, see [2c](docs/management-plane.md#sequencing-and-where-podman-fits) · **8384/22000** syncthing · *send2ereader, calibre-web and garmin-mcp publish nothing — each is reached only through its own tunnel's sidecar* |
-| `zero` | **2283** Immich · **8384/22000** syncthing · *the dev containers publish nothing — `ssh dev`, or `make shell` on zero* · *pearl-wallet publishes nothing; its RPC is on the container's own loopback* |
+| `one` | **8080** qBittorrent (via gluetun) · ~~**7777** ionic-traces~~ — **stopped**, see [2c](docs/management-plane.md#sequencing-and-where-podman-fits) · **8384/22000** syncthing · *the dev containers publish nothing — `ssh dev`, or `make shell` on one* · *send2ereader, calibre-web and garmin-mcp publish nothing — each is reached only through its own tunnel's sidecar* |
+| `zero` | **2283** Immich · **8384/22000** syncthing · *pearl-wallet publishes nothing; its RPC is on the container's own loopback* |
 | `two` | **none published** — the bot's web UI (8080) and break-glass sshd (2222) exist inside the container and are deliberately not mapped. See the commented `ports:` block in `deployments/destiny-director/compose.yaml` |
 
 Both Syncthings and `torrent` are on **host or shared networking**, so `docker ps` shows
 them publishing nothing. They are still reachable; the inventory's Published column says
 which case each is, and its Listening section is the answer that covers all of them.
 
-### Dev containers on `zero`
+### Dev containers on `one`
 
-One Compose project, [`dev/compose.yaml`](dev/compose.yaml), live since 2026-10-27: a hub
-that `ssh dev` lands on — a menu of every container's sessions — and one container per repo,
+One Compose project, [`dev/compose.yaml`](dev/compose.yaml), live on `one` since
+2026-11-20 (on `zero` from 2026-10-27 until then): a hub that `ssh dev` lands on — a menu of every container's sessions — and one container per repo,
 **each named for its repo**: `infra` (this one), `or3`, `destiny-director` (+ `dd-postgres`),
 `dossier`, `invective`, `nibbles`, `ionic-traces`, `claude-sessions`. Nothing publishes a port; the hub's
 tunnel is the way in, and `or3-dev.gsrpi.uk` reaches `or3`'s own sshd for the phone's vessel
@@ -166,7 +166,7 @@ None are in git. `.gitignore` covers `.env`, `*.key`, `qBittorrent.conf`, `*.sql
 | Immich Postgres password | `deployments/immich/.env` |
 | qBittorrent `Password_PBKDF2` | `/media/torrents-config/` — data volume, never here |
 | Cloudflare tunnel credentials file | `/etc/cloudflared/<host>.json` — 0600 root, all three hosts. ~~`/etc/init.d/cloudflared`, plaintext and world-readable~~: no host has passed `--token` since 2026-08-29, and the disclosed values were voided by deleting their tunnels |
-| Discord tokens, Bungie + Sheets keys | the `destiny-director` dev container's env volume on `zero` (`dd-env`, at `/home/dev/.env.d/.env`) — app repo, not here |
+| Discord tokens, Bungie + Sheets keys | the `destiny-director` dev container's env volume on `one` (`dd-env`, at `/home/dev/.env.d/.env`) — app repo, not here |
 | **Test** Discord tokens, Postgres password, Bungie keys | `deployments/destiny-director/.env` on `two` |
 | `two` deploy key (private half) | wherever you deploy from. It reaches an unprivileged account with a normal shell, so it does **not** belong in the Claude Code cloud environment block, whose values are not masked. Public half in `~claude/.ssh/authorized_keys` on `two`. See [`hosts/two/system/README.md`](hosts/two/system/README.md) |
 

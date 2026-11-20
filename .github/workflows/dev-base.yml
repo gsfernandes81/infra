@@ -47,7 +47,7 @@ name: dev-base
 # HEADER USED TO SAY THAT TAKES 20-40 MINUTES, which was a guess nobody had checked: the
 # three runs that have actually built this image took 4m16s, 4m42s and 4m07s end to end,
 # the last of them on 2026-09-21. Call it five minutes. It is still not instant, so a
-# bumped tag is not pullable the moment the push lands — `make up` on zero fails on the
+# bumped tag is not pullable the moment the push lands — `make up` on one fails on the
 # pull until the run finishes, and `make base` is the way through if you cannot wait.
 #
 # LAYERS ARE CACHED ACROSS RUNS, AND SHIPPED AS zstd, since 2026.10.06.3. Before that,
@@ -310,4 +310,4 @@ jobs:
         run: |
           echo "pushed $IMAGE:${{ steps.tag.outputs.tag }} (arm64, amd64)"
           echo "Pushed \`$IMAGE:${{ steps.tag.outputs.tag }}\` (arm64, amd64)." >> "$GITHUB_STEP_SUMMARY"
-          echo "On zero: \`cd ~/infra/dev && make up\` pulls it." >> "$GITHUB_STEP_SUMMARY"
+          echo "On one: \`cd ~/infra/dev && make up\` pulls it." >> "$GITHUB_STEP_SUMMARY"

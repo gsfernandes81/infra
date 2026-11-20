@@ -22,7 +22,7 @@ name: dev-smoke
 # (it needs a login), and pi talking to OpenRouter (the key here is a stand-in; a scripted
 # model, dev/ci/pi-stub-model.js, makes the tool calls the gate is checked on).
 #
-# claude-sessions: the hub builds exactly as on zero, from the release hub/Dockerfile pins and
+# claude-sessions: the hub builds exactly as on one, from the release hub/Dockerfile pins and
 # checksums. To test an UNRELEASED claude-sessions against this image before a bump, dispatch
 # with its ref: the binary is compiled here and swapped in for the image's `fetch` stage
 # through dev/ci/compose.smoke.yaml.
@@ -167,7 +167,7 @@ jobs:
               printf "PASS  %d layers that only change modes, each under 1 MB (the pi install layer: %d MB)\n", n, cal / 1e6 }
           ' history.txt
 
-      # A runner never had the old projects, so the external volumes zero keeps are made here,
+      # A runner never had the old projects, so the external volumes one keeps are made here,
       # empty — after checking that `make up` refuses without them, which is the cutover's net.
       - name: Check make up refuses missing volumes, then create them (make volumes)
         run: |
@@ -498,7 +498,7 @@ jobs:
           echo "PASS  logged in on the shared login"
           grep -q '^login dir : honoured' login.txt || { echo "FAIL  the variable is not honoured"; exit 1; }
           echo "PASS  the variable is honoured"
-          # pi's three readouts, the ones the handoff tells the owner to expect on zero.
+          # pi's three readouts, the ones the handoff tells the owner to expect on one.
           grep '^pi        : ' login.txt | grep -qv MISSING || { echo "FAIL  make verify's pi line is absent or MISSING"; exit 1; }
           echo "PASS  make verify reads a pi version"
           grep -q '^pi-ext    : linked' login.txt || { echo "FAIL  the claude-sessions extension is not linked"; exit 1; }
@@ -562,7 +562,7 @@ jobs:
           docker exec infra rm -f /workspace/.smoke-marker
           echo "$fails failed"; [ "$fails" = 0 ]
 
-      # The deploy play runs these hook files against zero; here they run against the runner,
+      # The deploy play runs these hook files against one; here they run against the runner,
       # as root the way `become` runs them. Preflight under --check (its build is skipped
       # there: it would rebuild without the smoke override), the probe for real. And
       # check-names is calibrated by a stand-in from another project holding a dev name.
@@ -580,7 +580,7 @@ jobs:
               if all(isinstance(e, dict) and ("hosts" in e or any(k.endswith("import_playbook") for k in e)) for e in d):
                   print(f)' playbooks/*.yml)
           echo "$plays" | wc -l | xargs echo "playbooks:"
-          (cd ansible && for p in $plays; do ansible-playbook --syntax-check -e deployment=dev -e target=zero "$p" >/dev/null || { echo "FAIL  syntax: $p"; exit 1; }; done)
+          (cd ansible && for p in $plays; do ansible-playbook --syntax-check -e deployment=dev -e target=one "$p" >/dev/null || { echo "FAIL  syntax: $p"; exit 1; }; done)
           echo "PASS  every playbook parses"
           h="$RUNNER_TEMP/hooks.yml"
           cat > "$h" <<'YAML'
@@ -602,7 +602,7 @@ jobs:
           docker rm -f dossier >/dev/null
           grep -q "project 'dossier'" err.txt && echo "PASS  check-names refuses an old project's container, naming it"
           # A container under a name retired by the 2026-10-27 rename, in this very project, as
-          # zero has until its first deploy after it: refused, because it would share volumes.
+          # zero had until its first deploy after it: refused, because it would share volumes.
           docker run -d --name ds-dev --label com.docker.compose.project=dev dev-hub sleep 600 >/dev/null
           if make -C dev check-names SUDO= 2>err.txt; then echo "FAIL  check-names let the retired ds-dev through"; docker rm -f ds-dev; exit 1; fi
           docker rm -f ds-dev >/dev/null
@@ -790,7 +790,7 @@ jobs:
           docker compose build dossier
 
       # claude-sessions' Dockerfile.dev picks its rustup-init by architecture; this is the amd64
-      # half, and the only build of it before zero's. The toolchain must answer as dev, from
+      # half, and the only build of it before one's. The toolchain must answer as dev, from
       # the PATH the image sets, at the version it pins.
       - name: Build claude-sessions straight from its GitHub URL, and run its toolchain
         working-directory: dev

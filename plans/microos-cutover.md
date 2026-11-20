@@ -48,8 +48,8 @@ and `three` have given (owner, 2026-11-20, `decisions.md`), and is its own desig
 part of this visit. ⚠︎SUPERSEDED 2026-11-20: this said the move waited on a proof on a
 Pi 5.
 
-After the visit, over ssh: the dev hub moves to `one`, at a quiet time and not in a slice,
-because the infra container moves with it. Podman comes later still. `three` ships to
+The dev hub has moved to `one` (2026-11-20), over ssh and not in a slice, so the infra
+container stays up through `zero`'s own move. Podman comes later still. `three` ships to
 Singapore at a date the owner picks.
 
 ## Before the visit
@@ -137,7 +137,8 @@ read-only root, the reboot files and the packages. What only Leap showed:
   the probe's compose stack did. So each host's Docker on Leap gets a new, empty store:
   on `one` a new subvolume beside `var-lib-docker`, which stays as it is for the Alpine
   card. Images are pulled or rebuilt. Named volumes, which live in the store
-  (`garmin-tokens` on `one`, and the dev hub's when it moves), go across as tar files.
+  (`garmin-tokens` on `one`, and the dev hub's, which moved 2026-11-20), go across as
+  tar files.
 - **The first-boot wizard does not run.** `jeos-firstboot` waits for a file that a
   successful Combustion run deletes; the scripts mask it as well, because it powers the
   box off when it fails.

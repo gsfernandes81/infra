@@ -10,7 +10,7 @@
 # Three objects, and every one of them idempotent — each is looked up before it is
 # created, so a re-run after a partial failure is the intended way to finish:
 #
-#   1. a locally-managed tunnel   -> credentials written to {{ infra_secrets }}/tunnel.json on zero
+#   1. a locally-managed tunnel   -> credentials written to {{ infra_secrets }}/tunnel.json on one
 #   2. a proxied CNAME            -> {{ cf_hostname }}
 #   3. an Access application      -> self_hosted, no identity provider, and NO policy yet
 #
@@ -69,10 +69,10 @@
 # would cover only the tunnel and DNS, leaving Access to be clicked.
 
 - name: Create a dev container's tunnel and Access app
-  # zero, because the ONLY thing that lands on a host is the tunnel credentials file. Every
+  # one, because the ONLY thing that lands on a host is the tunnel credentials file. Every
   # Cloudflare call is delegated to the control node — they are HTTPS to a public API and
   # have no business being made from the box being configured.
-  hosts: "{{ cf_target | default('zero') }}"
+  hosts: "{{ cf_target | default('one') }}"
   gather_facts: false
   become: false
 

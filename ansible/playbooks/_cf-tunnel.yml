@@ -2,7 +2,7 @@
 # TASKS, NOT A PLAY — imported by every play that gives something its own locally-managed
 # tunnel. The underscore says it is never run by itself.
 #
-#   _dev-container-tunnel.yml       a dev container on zero; then adds its Access application
+#   _dev-container-tunnel.yml       a dev container on one; then adds its Access application
 #   server-create-deployment-tunnel.yml  a compose deployment's sidecar connector; Access
 #                                        only if the deployment's edge.yml asks for it
 #   server-create-host-tunnel.yml   a new host's first tunnel

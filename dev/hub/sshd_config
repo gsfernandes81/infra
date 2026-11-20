@@ -2,7 +2,7 @@
 # dev containers' own sshd_config without its child seams, since nothing builds on this.
 #
 # Reached only through the cloudflared sidecar on the compose network (`ssh://hub:2222` in
-# dev/cloudflared.yml); nothing is published on zero.
+# dev/cloudflared.yml); nothing is published on one.
 
 Port 2222
 ListenAddress 0.0.0.0
