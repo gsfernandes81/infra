@@ -13,7 +13,7 @@
 #
 # WHY THIS NEEDS ROOT, AND WHY IT BIND-MOUNTS /
 #
-#   While the array is mounted, `lsattr -d /media/immich-data` reports the attributes
+#   While the array is mounted, `lsattr -d /media/immich` reports the attributes
 #   of the MOUNTED btrfs root, not the ext4 directory hidden underneath it. Reading it
 #   that way would answer a different question than the one that matters, and would
 #   fail (or pass) for the wrong reason. So this bind-mounts / at a temporary path,

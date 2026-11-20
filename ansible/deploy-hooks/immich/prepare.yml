@@ -5,7 +5,7 @@
 #
 # It takes a database dump OFF THE ARRAY. The server migrates the database on its first start
 # on a new version and there is no migrating back, so this dump is the way back. Immich's own
-# nightly dump lands in /media/immich-data/backups/, on the same array as the database, and
+# nightly dump lands in /media/immich/data/backups/, on the same array as the database, and
 # does not survive losing it. This one goes to /var/backups/immich, on the SD card.
 #
 # Every confirmed redeploy dumps, not only a version change: about a minute and 141 MB the

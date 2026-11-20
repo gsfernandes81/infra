@@ -249,7 +249,7 @@ script**, run in a separate terminal, with the output pasted back.
   boot writes a regular file, `stop`/`start` reuses the filesystem, and the write lands
   through the link. Caught in review, not in production. `rm -f` before a write to any
   path something else may have re-pointed.
-- **`[ -d /path ]` runs unprivileged.** On root-only paths (a btrfs top level, `/media/immich-db`
+- **`[ -d /path ]` runs unprivileged.** On root-only paths (a btrfs top level, `/media/immich/db`
   at mode 700) it returns false for directories that demonstrably exist. Use `sudo test -d`.
   A guard built on the wrong answer silently skips the work it was meant to do.
 - **`pkill -f <pattern>` matches the shell you are running it from.** A command from an

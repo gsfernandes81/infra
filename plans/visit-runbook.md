@@ -384,10 +384,10 @@ through `ssh dev`.
 
    ```fish
    # step 2, on zero: the scrub, the caches, the error counters, each bcache device's backing disk and its UUID, the boot services, the kernel's dm modules
-   sudo btrfs scrub status /media/immich-data
+   sudo btrfs scrub status /media/immich
    cat /sys/block/bcache*/bcache/cache_mode
-   sudo btrfs device stats /media/immich-data
-   sudo btrfs device usage /media/immich-data | grep -E '^/dev'
+   sudo btrfs device stats /media/immich
+   sudo btrfs device usage /media/immich | grep -E '^/dev'
    for s in /sys/block/bcache*/slaves/*; set n (basename $s); echo (string split / $s)[4] $n (sudo bcache-super-show /dev/$n | string match -r 'dev.uuid.*'); end
    rc-update show -v | grep -E '^ *(bcache-register|btrfs-scan|dmcrypt|localmount|modules) '
    ls /lib/modules/(uname -r)/kernel/drivers/md/ | grep -E '^dm-(crypt|mod)'
@@ -562,7 +562,7 @@ through `ssh dev`.
    # step 7, on zero: once the status reads finished: devid 4 is the mapping, sdb's device is gone, and the counters
    sudo btrfs replace status -1 /media/immich-data
    sudo btrfs filesystem show /media/immich-data
-   sudo btrfs device stats /media/immich-data
+   sudo btrfs device stats /media/immich
    ```
 
    It reads right when the status is finished with `0 write errs, 0 uncorr. read errs`;
@@ -664,7 +664,7 @@ through `ssh dev`.
     rc-service dmcrypt status; ls -l /dev/mapper/data-4
     sudo btrfs filesystem show /media/immich-data
     grep ' btrfs ' /proc/mounts | cut -d' ' -f1,2
-    sudo btrfs device stats /media/immich-data
+    sudo btrfs device stats /media/immich
     cd ~/infra; and sudo bin/check-mount-guards
     curl -fsS http://127.0.0.1:2283/api/server/ping
     ```

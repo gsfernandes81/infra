@@ -10,8 +10,7 @@ UUID=BD9B-F550					/boot				vfat	rw,relatime,fmask=0022,dmask=0022,codepage=437,
 tmpfs						/tmp				tmpfs	nosuid,nodev												0 0
 UUID=eedeca9c-13a8-483b-bee7-8467869ec91a	none				swap	defaults												0 0
 UUID=813c830a-0892-41e8-b39b-32d661c79e2c	/mnt/ext			btrfs	subvolid=5,noauto,nofail,noexec,noatime,acl,discard=async					0 0
-UUID=813c830a-0892-41e8-b39b-32d661c79e2c	/media/immich-data		btrfs	nofail,subvolid=280,noatime,acl,discard=async							0 0
-UUID=813c830a-0892-41e8-b39b-32d661c79e2c 	/media/immich-db		btrfs	nofail,subvolid=279,noatime,acl,discard=async							0 0
+UUID=813c830a-0892-41e8-b39b-32d661c79e2c	/media/immich			btrfs	nofail,subvolid=281,noatime,acl,discard=async,nosuid,nodev					0 0
 UUID=813c830a-0892-41e8-b39b-32d661c79e2c	/media/syncthing		btrfs	nofail,subvolid=278,noatime,acl,discard=async							0 0
 # Docker's whole state on sda2, the SSD partition outside bcache, rather than the SD card,
 # decided 2026-10-26 (docs/decisions.md). Not on the array: its cache is writethrough, so

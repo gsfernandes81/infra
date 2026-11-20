@@ -157,7 +157,8 @@ first green run is 44707100446.
 
 ## Changes at the move, not before
 
-`/media/immich-data` and `/media/immich-db` become `/media/immich/data` and
+**Done on 2026-11-20**, in the commit that put `immich` (subvolume 281) in `zero`'s fstab.
+`/media/immich-data` and `/media/immich-db` became `/media/immich/data` and
 `/media/immich/db` only at the move. Until then these describe the fleet as it is, and are
 left alone: `CLAUDE.md` § Shell traps, `docs/recovery.md`, `deployments/immich/.env.example`,
 `.gitignore`'s comment, the Immich deploy hook's comment, `bin/check-mount-guards`' comments,

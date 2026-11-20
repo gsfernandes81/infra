@@ -70,7 +70,7 @@ netstat -tln | grep -E '2283|8384|22000'                        # all three
 ```
 
 On `zero`, recreating `immich_postgres` is fine, but losing or shadowing its mount is
-not: the database cluster is on `/media/immich-db`. Take a dump off the array before
+not: the database cluster is in `/media/immich/db`. Take a dump off the array before
 anything invasive ([Immich's database](#immichs-database)).
 
 **`two`:** nothing to bring back. Its one deployment, `destiny-director`, is stopped since
@@ -86,7 +86,7 @@ is part of the `torrents` deployment and syncs a different share from `zero`'s.
 
 Two dumps are made, and only one is off the array:
 
-- **Immich's own**, nightly, in `/media/immich-data/backups/`. It is on the same array as
+- **Immich's own**, nightly, in `/media/immich/data/backups/`. It is on the same array as
   the database, so it covers a bad migration or a deleted album, not the array's loss.
 - **The redeploy play's**, in `/var/backups/immich/` on `zero`'s SD card, readable by root
   only. [`ansible/deploy-hooks/immich/prepare.yml`](../ansible/deploy-hooks/immich/prepare.yml)
@@ -115,7 +115,7 @@ delete it; copy it elsewhere if it has to outlive that. A name that does not sta
 **Restoring** is Immich's procedure
 ([backup and restore](https://docs.immich.app/administration/backup-and-restore)), with
 one of these files as its input and the server version in the name. It starts from an
-empty database, which here means an empty `/media/immich-db`: move the old cluster aside
+empty database, which here means an empty `/media/immich/db`: move the old cluster aside
 on the same array and keep it until the restore is proved. It has not been rehearsed on
 this fleet.
 
@@ -172,11 +172,11 @@ August 2026, and the database on the unmounted disk was untouched.
 mountpoint:
 
 ```fish
-sudo umount /media/immich-data
-sudo chattr -i /media/immich-data      # the step you will forget
+sudo umount /media/immich
+sudo chattr -i /media/immich      # the step you will forget
 #   ... the work ...
-sudo chattr +i /media/immich-data      # put it back
-sudo mount /media/immich-data
+sudo chattr +i /media/immich      # put it back
+sudo mount /media/immich
 sudo bin/check-mount-guards            # prove you put it back
 ```
 
