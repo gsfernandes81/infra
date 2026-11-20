@@ -41,14 +41,6 @@ CONTAINER := $(if $(filter hub,$(C)),dev-hub,$(C))
 # `sudo` unless already root, so both `make up` and `sudo make up` work.
 SUDO := $(if $(filter 0,$(shell id -u)),,sudo)
 
-# The uid/gid the container's `dev` user is built at, read from the OWNER of this
-# checkout — not from `id -u`. Under sudo `id -u` is 0, and a dev user built at 0
-# writes root-owned files the checkout's owner cannot touch (and collides with the base
-# image's own root account at build time). The clone's owner is the right answer
-# however this was invoked.
-HOST_UID := $(shell stat -c '%u' $(CURDIR))
-HOST_GID := $(shell stat -c '%g' $(CURDIR))
-
 # `sudo env VAR=…`, not `VAR=… sudo`: sudo resets the environment, so an assignment in
 # front of it never reaches docker and compose would silently build at the defaults in
 # compose.yaml. env is inside the sudo, so it survives.
@@ -57,17 +49,13 @@ HOST_GID := $(shell stat -c '%g' $(CURDIR))
 # (.github/workflows/dev-smoke.yml puts an unreleased claude-sessions into the hub's build).
 # Empty on zero, always.
 COMPOSE_OVERRIDE ?=
-# HOST_UID and HOST_GID are also lines in .env (the dev host play writes them), so the deploy
-# play, which runs compose without this Makefile, builds at the same uid; passing them here
-# as well means a hand-made .env cannot disagree with the checkout.
-#
 # BUILDX_BAKE_ENTITLEMENTS_FS=0 (owner, 2026-10-27): Compose builds through `buildx bake`, which
 # refuses to read a file outside the working directory unless it is granted, and Compose 5.6.1
 # grants its build contexts but not a build's ssh key. or3-dev's deploy key is in OR3_SECRETS,
 # outside the checkout on purpose, so from buildx 0.38 its build failed "additional privileges
 # requested". The check guards against a bake file nobody reviewed; this one is written by
 # Compose from compose.yaml. Not by moving the key into a context: a Dockerfile could copy it.
-COMPOSE = $(SUDO) env HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) BUILDX_BAKE_ENTITLEMENTS_FS=0 \
+COMPOSE = $(SUDO) env BUILDX_BAKE_ENTITLEMENTS_FS=0 \
 	docker compose --project-directory $(CURDIR) -f $(CURDIR)/compose.yaml \
 	$(if $(COMPOSE_OVERRIDE),-f $(COMPOSE_OVERRIDE))
 DOCKER  := $(SUDO) docker
@@ -91,7 +79,7 @@ BASE_TAG := $(shell sed -n 's/^x-base-tag: &base-tag //p' $(CURDIR)/compose.yaml
 
 .PHONY: help dev base up restart stop down down-volumes status verify collections logs \
 	boot-log tunnel-log idle offload-log sessions login claude shell fleet \
-	_require-env _require-secrets _require-uid _require-own-names _require-no-retired _require-volumes volumes \
+	_require-env _require-secrets _require-own-names _require-no-retired _require-volumes volumes \
 	check check-names build
 
 help:
@@ -193,23 +181,11 @@ _require-no-retired:
 	  echo "  would share its volumes with the new. Remove them; their volumes are kept:" >&2; \
 	  echo "      sudo docker stop$$found && sudo docker rm$$found" >&2; exit 1; }
 
-_require-uid:
-	@[ "$(HOST_UID)" != "0" ] || { \
-	  echo "refusing to build the container's dev user at uid 0: this checkout is" >&2; \
-	  echo "owned by root, so every file written from the container would be too." >&2; \
-	  echo "chown the clone to your own account first." >&2; exit 1; }
-	@[ ! -f $(CURDIR)/.env ] || { \
-	  for k in HOST_UID:$(HOST_UID) HOST_GID:$(HOST_GID); do \
-	    v=$$(grep -E "^$${k%%:*}=" $(CURDIR)/.env | cut -d= -f2-); \
-	    [ "$$v" = "$${k#*:}" ] || { \
-	      echo "dev/.env says $${k%%:*}=$$v, but this checkout is owned by $${k#*:}: the deploy" >&2; \
-	      echo "  play's compose reads that line and would build at the wrong uid. Fix it, or" >&2; \
-	      echo "  re-run server-create-dev-container.yml, which writes it from the checkout." >&2; exit 1; }; \
-	  done; }
-
 # Warns rather than refuses: a missing file costs the thing that uses it, and the
-# container is still worth having up without it. The mode check is not cosmetic — ssh
-# refuses a key it considers group- or world-readable.
+# container is still worth having up without it. The mode is not cosmetic: the containers
+# run as uid 1001 and read these directories through group 1001, so 750 is what lets them in
+# where gavin is not 1001. 700 is still what zero's directories are until the dev plays
+# re-run, and is not warned about.
 _require-secrets:
 	@hub=$$(grep -E '^HUB_SECRETS=' $(CURDIR)/.env | cut -d= -f2-); \
 	[ -n "$$hub" ] || { echo "HUB_SECRETS is not set in .env" >&2; exit 1; }; \
@@ -228,18 +204,18 @@ _require-secrets:
 	[ ! -s "$$dir/id_ed25519_fleet" ] || \
 	  echo "note: fleet access IS configured — this container can reach all three hosts" >&2; \
 	mode=$$(stat -c %a "$$dir"); \
-	[ "$$mode" = 700 ] || echo "WARNING — $$dir is mode $$mode, expected 700." >&2
+	[ "$$mode" = 750 ] || [ "$$mode" = 700 ] || echo "WARNING — $$dir is mode $$mode, expected 750." >&2
 
 # ── lifecycle ───────────────────────────────────────────────────────────────
 # The OFFLINE FALLBACK for the base image. The normal path is a pull: the child's
 # FROM names ghcr.io/gsfernandes81/gsrpi-dev-base, public, built by
 # .github/workflows/dev-base.yml. This target builds the identical image locally UNDER
 # THE GHCR NAME — docker prefers a local image over a pull, so after `make base` the
-# child builds with no GitHub. Use it when GitHub is down, the month is metered, or this
-# host's uid differs from the 1001 the CI image bakes.
-base: _require-uid
+# child builds with no GitHub. Use it when GitHub is down or the month is metered. It bakes
+# 1001, the same as the CI image.
+base:
 	$(DOCKER) build -f $(CURDIR)/Dockerfile.base \
-	  --build-arg USER_UID=$(HOST_UID) --build-arg USER_GID=$(HOST_GID) \
+	  --build-arg USER_UID=1001 --build-arg USER_GID=1001 \
 	  -t ghcr.io/gsfernandes81/gsrpi-dev-base:$(BASE_TAG) $(CURDIR)
 
 # No `base` dependency: the FROM pulls from ghcr when the tag is absent locally, so
@@ -249,7 +225,7 @@ base: _require-uid
 # this order, so a failure in any build — or3's private fetch is the likeliest — stops the
 # run while whatever was there before is still running, and the old projects are refused only
 # AFTER the build has been proved. `make up` is the same thing without the plan or the y/N.
-check: _require-env _require-uid _require-secrets _require-volumes
+check: _require-env _require-secrets _require-volumes
 	@echo "dev: .env, secrets and external volumes are in place"
 
 check-names: _require-own-names _require-no-retired
@@ -263,7 +239,7 @@ check-names: _require-own-names _require-no-retired
 # count of those lines guards it, so a service name the pattern misses is refused, not skipped.
 BUILT_SERVICES = $(shell awk '/^[^ #]/{top=$$1} top=="services:" && /^  [^ #]/{svc=""} top=="services:" && /^  [A-Za-z0-9_.-]+:[ \t]*(#.*)?$$/{svc=$$1; sub(/:.*/,"",svc)} top=="services:" && /^    build:/{print (svc == "" ? "?" : svc)}' $(CURDIR)/compose.yaml)
 BUILD_LINES = $(shell awk '/^[^ #]/{top=$$1} top=="services:" && /^    build:/{n++} END{print n+0}' $(CURDIR)/compose.yaml)
-build: _require-env _require-uid
+build: _require-env
 	@if [ -n "$(S)" ]; then $(COMPOSE) build $(S); else \
 	  [ "$(words $(filter-out ?,$(BUILT_SERVICES)))" = "$(BUILD_LINES)" ] || { \
 	    echo "compose.yaml has $(BUILD_LINES) build: lines but make read the services as: $(BUILT_SERVICES)" >&2; exit 1; }; \
@@ -272,7 +248,7 @@ build: _require-env _require-uid
 
 # `build` first and no --build here, so `up` builds one image at a time as well; without
 # --build Compose still builds an image that is absent, and `build` has made every one present.
-up: _require-env _require-uid _require-secrets _require-own-names _require-no-retired _require-volumes build
+up: _require-env _require-secrets _require-own-names _require-no-retired _require-volumes build
 	$(COMPOSE) up -d $(S)
 	@printf '\n'
 	@$(MAKE) --no-print-directory status

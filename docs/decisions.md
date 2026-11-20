@@ -2839,6 +2839,27 @@ holding nothing but Syncthing, so the change costs least now.
   was named after is gone: on `three` it says which side of the pull it is, beside `zero`'s
   `immich`.
 
+## The dev stack runs as 1001 on every host
+
+**Decided 2026-11-20**, by the owner, to move the stack from `zero` to `one`, where `gavin`
+is 1000 and SELinux enforces. The first step of the move lands on `zero` first and changes
+nothing there.
+
+- **The dev user is 1001:1001, a literal.** The hub's build args and the sidecar's `user:`
+  say it in `compose.yaml`, and `make base` builds at it. The published base image bakes
+  1001 already, so one image serves both hosts. The Makefile used to read the uid from the
+  checkout's owner, to stop containers writing root-owned files into a mount. Nothing the
+  containers write is a bind mount now, since every workspace is a volume, so the reason is
+  gone and `_require-uid` with it. An old `.env` that still has `HOST_UID` is not refused.
+- **Secrets directories are 0750 and their files 0640, group 1001, owned by the ssh
+  user.** The containers read through the group, so a gavin who is not 1001 still works. On
+  `zero` group 1001 is gavin's own, so nothing there widens. Not 0755: a secrets directory
+  nobody else needs to enter stays closed to others.
+- **Every bind carries lowercase `z`.** `one` refuses a container any host path not
+  labelled for it, as `calibre-web`'s sidecar did on 2026-11-18. The hub and the sidecar
+  share `HUB_SECRETS`, so `Z` would label it for one and lock out the other. Docker on
+  `zero` ignores the option, and `dev-smoke` fails a bind without it.
+
 ## The lesson worth keeping
 
 

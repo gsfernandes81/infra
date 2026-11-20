@@ -284,12 +284,10 @@ jobs:
       - uses: docker/setup-buildx-action@v3
         if: steps.decide.outputs.build == 'true'
 
-      # USER_UID/GID 1001: the dev user must match the OWNER OF THE CHECKOUT on the
-      # host that bind-mounts it, or every file written from a container lands
-      # wrong-owner in the repo. That is gavin on zero, who is 1001:1001 (verified
-      # 2026-08-24 from inside infra-dev). Local `make base` reads the real owner per
-      # host; this build serves zero and one, where it is 1001. If a host with a
-      # different uid ever runs these containers, that host builds locally.
+      # USER_UID/GID 1001, on every host (decisions.md § The dev stack runs as 1001): the
+      # containers' secrets are read through group 1001, whoever owns them, and nothing a
+      # container writes is a bind mount. gavin is 1001 on zero and 1000 on one, and this
+      # one image serves both. compose.yaml's own args and `make base` say the same 1001.
       - name: Build and push
         if: steps.decide.outputs.build == 'true'
         uses: docker/build-push-action@v6

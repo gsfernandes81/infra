@@ -15,9 +15,9 @@ name: dev-cache
 #
 # WHAT A HIT NEEDS. The same base digest, the same args, the same Dockerfile and the same
 # files in the context. So the targets, contexts and args come from compose.yaml through
-# `buildx bake --print`, never from a list in here. HOST_UID and HOST_GID are 1001, gavin
-# on zero, as in dev-base.yml: the hub's image takes them as build args, so another value
-# would miss there.
+# `buildx bake --print`, never from a list in here. The hub's image takes USER_UID and
+# USER_GID as build args, 1001 in compose.yaml as in dev-base.yml, so another value would
+# miss there.
 #
 # THE DISPATCH CREDENTIAL is a GitHub App of its own, installed on the child repos with
 # Actions: write and nothing else: its id in the `DEV_DISPATCH_APP_ID` variable, its key
@@ -77,8 +77,8 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      # compose.yaml requires these to interpolate at all. Only HOST_UID and HOST_GID
-      # reach a build; the rest stand in, as dev-smoke.yml's do. Bake parses or3's deploy
+      # compose.yaml requires these to interpolate at all. None of them reaches a build;
+      # they stand in, as dev-smoke.yml's do. Bake parses or3's deploy
       # key even though or3 is not built here, so a throwaway key sits there; an empty
       # file fails.
       - name: Write a stand-in dev/.env
@@ -94,8 +94,6 @@ jobs:
               -e 's#^COMPOSE_PROFILES=.*#COMPOSE_PROFILES=#' \
               -e 's#^HUB_TUNNEL_ID=.*#HUB_TUNNEL_ID=none#' \
               -e 's#^HUB_GITHUB_APP_ID=.*#HUB_GITHUB_APP_ID=1#' \
-              -e 's#^HOST_UID=.*#HOST_UID=1001#' \
-              -e 's#^HOST_GID=.*#HOST_GID=1001#' \
               dev/.env.example > dev/.env
 
       # Splits compose.yaml's targets by where the Dockerfile lives. A context in this

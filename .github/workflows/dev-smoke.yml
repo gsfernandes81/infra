@@ -83,18 +83,16 @@ jobs:
         run: |
           s="$RUNNER_TEMP/secrets"
           mkdir -p "$s/hub" "$s/infra" "$s/or3" "$s/dd" "$s/ds"
-          chmod 700 "$s/hub" "$s/infra" "$s/or3" "$s/dd" "$s/ds"
+          chmod 750 "$s/hub" "$s/infra" "$s/or3" "$s/dd" "$s/ds"
           ssh-keygen -q -t ed25519 -N '' -C smoke-client -f "$s/client"
           # The App is required, so a throwaway key stands in for it: the broker signs with it
           # and GitHub refuses, which the log says. infra's token is written by hand below.
           openssl genrsa -out "$s/hub/github-app.pem" 2048 2>/dev/null
-          chmod 600 "$s/hub/github-app.pem"
           # A dummy OpenRouter key, so the hub's copy into every container's /run/github is tried.
           printf 'sk-or-smoke\n' > "$s/hub/openrouter-key"
-          chmod 600 "$s/hub/openrouter-key"
           # The client key goes into infra's authorized_keys as well, so the forwarding
           # rules every container's sshd shares can be tried with a key that is not the hub's.
-          for d in hub infra; do cp "$s/client.pub" "$s/$d/authorized_keys"; chmod 600 "$s/$d/authorized_keys"; done
+          for d in hub infra; do cp "$s/client.pub" "$s/$d/authorized_keys"; done
           sed -e "s#^HUB_SECRETS=.*#HUB_SECRETS=$s/hub#" \
               -e "s#^INFRA_SECRETS=.*#INFRA_SECRETS=$s/infra#" \
               -e "s#^OR3_SECRETS=.*#OR3_SECRETS=$s/or3#" \
@@ -103,9 +101,14 @@ jobs:
               -e 's#^COMPOSE_PROFILES=.*#COMPOSE_PROFILES=#' \
               -e 's#^HUB_TUNNEL_ID=.*#HUB_TUNNEL_ID=none#' \
               -e 's#^HUB_GITHUB_APP_ID=.*#HUB_GITHUB_APP_ID=1#' \
-              -e "s#^HOST_UID=.*#HOST_UID=$(id -u)#" \
-              -e "s#^HOST_GID=.*#HOST_GID=$(id -g)#" \
               dev/.env.example > dev/.env
+          # How one's secrets directories are made: root's, group 1001, 0750, files 0640, so the
+          # container user (1001:1001) is never the owner and reads everything through the
+          # group, as it will where gavin is 1000. The runner is 1001 with group 1001 and reads
+          # the same way; the check calibrates that before the containers are blamed.
+          sudo chown -R 0:1001 "$s/hub" "$s/infra" "$s/or3" "$s/dd" "$s/ds"
+          sudo find "$s/hub" "$s/infra" "$s/or3" "$s/dd" "$s/ds" -type f -exec chmod 640 {} +
+          [ -r "$s/hub/authorized_keys" ] || { echo "FAIL  the runner ($(id)) cannot read through group 1001, so nothing after this means anything"; exit 1; }
           echo "SMOKE_SECRETS=$s" >> "$GITHUB_ENV"
 
       # Every container starts by default and only the tunnel has a profile (owner, 2026-10-27),
@@ -114,12 +117,31 @@ jobs:
       - name: Check compose parses, and that only the tunnel is behind a profile
         working-directory: dev
         run: |
-          COMPOSE_PROFILES=tunnel HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose config -q
-          got=$(HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose config --services | sort | tr '\n' ' ')
+          COMPOSE_PROFILES=tunnel docker compose config -q
+          got=$(docker compose config --services | sort | tr '\n' ' ')
           want="claude-sessions dd-postgres destiny-director dossier hub infra invective ionic-traces nibbles or3 "
           [ "$got" = "$want" ] || { echo "FAIL  started by default: [$got], want [$want]"; exit 1; }
           echo "PASS  every container starts by default, and the tunnel does not"
           docker version --format 'docker {{.Server.Version}}'; docker compose version
+
+      # SELinux on one refuses a container any host path that is not labelled for it, and Docker
+      # on zero ignores the option, so nothing on zero's runs would ever show a bind without it.
+      # The long form (tunnel.json) is listed by jq; or3 alone is counted in the YAML, since
+      # `config --format json` cannot render its build's ssh key.
+      - name: Check every bind mount carries z (docker compose config)
+        working-directory: dev
+        run: |
+          export COMPOSE_PROFILES=tunnel
+          others=$(docker compose config --services | grep -vx or3)
+          docker compose config --format json $others > binds.json
+          jq -r '.services | to_entries[] | .key as $s | .value.volumes[]? | select(.type == "bind")
+                 | "\($s) \(.target) \(.bind.selinux // "NONE")"' binds.json | tee binds.txt
+          [ -s binds.txt ] || { echo "FAIL  no bind mounts listed, so the check reads nothing"; exit 1; }
+          if grep -v ' z$' binds.txt; then echo "FAIL  the binds above lack selinux: z"; exit 1; fi
+          binds=$(docker compose config or3 | grep -c 'type: bind') || true
+          zs=$(docker compose config or3 | grep -c 'selinux: z') || true
+          [ "$binds" -ge 1 ] && [ "$binds" = "$zs" ] || { echo "FAIL  or3 has $binds binds and $zs with z"; exit 1; }
+          echo "PASS  every bind mount carries selinux: z ($(wc -l < binds.txt) listed, or3's $binds counted)"
 
       - name: Build the base (make base)
         run: make -C dev base SUDO=
@@ -153,6 +175,15 @@ jobs:
           grep -q 'missing external volumes' err.txt && echo "PASS  refused, naming the volumes"
           make -C dev volumes SUDO=
 
+      # The fixed uid replaced HOST_UID and HOST_GID, and a dev/.env made before it still has
+      # both lines. Neither may be refused, whatever value they carry.
+      - name: Check an old dev/.env still carrying HOST_UID passes
+        run: |
+          printf 'HOST_UID=1001\nHOST_GID=1001\n' >> dev/.env
+          make -C dev check SUDO=
+          (cd dev && docker compose config -q)
+          sed -i '/^HOST_[UG]ID=/d' dev/.env
+
       # The deploy play brings the whole project up at once, and Compose creates every container
       # before it starts any; the steps below start the hub alone first, which hid this. A dev
       # container's create used to copy its root-owned mountpoint over the hub's still-empty
@@ -166,7 +197,7 @@ jobs:
           docker compose $files create hub infra
           for v in claude-sessions github-tokens hub-state queue claude-login; do
             owner=$(docker run --rm -v "dev_$v:/v" dev-hub stat -c %u /v)
-            [ "$owner" = "$(id -u)" ] || { echo "FAIL  dev_$v is owned by uid $owner, not the hub's $(id -u)"; exit 1; }
+            [ "$owner" = 1001 ] || { echo "FAIL  dev_$v is owned by uid $owner, not the hub's 1001"; exit 1; }
             echo "PASS  dev_$v is the hub's after creating every container"
           done
           docker compose $files down

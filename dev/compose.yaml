@@ -138,8 +138,11 @@ services:
     build:
       context: hub
       args:
-        USER_UID: ${HOST_UID:?set HOST_UID in dev/.env — the checkout owner's uid; the dev host play writes it}
-        USER_GID: ${HOST_GID:?set HOST_GID in dev/.env — the checkout owner's gid; the dev host play writes it}
+        # 1001, the uid the published base image bakes, on every host (decisions.md § The dev
+        # stack runs as 1001). Not read from the host: nothing the containers write is a bind
+        # mount, so the host's own uid decides nothing here.
+        USER_UID: "1001"
+        USER_GID: "1001"
       # LAYERS BUILT IN CI, READ HERE (owner, 2026-11-01). Each repo that owns a Dockerfile
       # builds it on a native arm64 runner on x-base-tag and pushes a registry cache, so this
       # build pulls layers instead of running each step: infra's own two (this one and infra)
@@ -197,9 +200,11 @@ services:
       # from the hub's dev-owned mountpoint: the dev images lack the directory, and a volume made
       # from a missing mountpoint is root's. The hub itself runs no claude and never reads it.
       - claude-login:/home/dev/.claude-login
-      # Mode-700 directory on zero holding the hub's authorized_keys (the clients' keys)
-      # and its tunnel credentials. Read-only.
-      - ${HUB_SECRETS:?set HUB_SECRETS in dev/.env — server-create-dev-container.yml -e container=dev writes it}:/run/hub-secrets:ro
+      # Mode-750 directory on the host, group 1001, holding the hub's authorized_keys (the
+      # clients' keys) and its tunnel credentials. Read-only. Lowercase `z`, not `Z`: the
+      # sidecar mounts the same directory, and `Z` would label it for this container alone.
+      # Docker on a host without SELinux ignores the option.
+      - ${HUB_SECRETS:?set HUB_SECRETS in dev/.env — server-create-dev-container.yml -e container=dev writes it}:/run/hub-secrets:ro,z
       # THE POOL'S MEMORY, for the home's header, once the pool exists — uncomment then, with
       # CLAUDE_SESSIONS_POOL above.
       # Long form with create_host_path false, so a path that is not there fails the start
@@ -228,10 +233,10 @@ services:
     container_name: dev-cloudflared
     restart: unless-stopped
     networks: [dev]
-    # As the checkout's owner, not the image's 65532: the credentials are written by the
-    # dev-container edge play, which leaves them owned by gavin at 0600, and a file the
-    # connector cannot read kills it on start. cloudflared needs no home and no shell.
-    user: "${HOST_UID:?set HOST_UID in dev/.env}:${HOST_GID:?set HOST_GID in dev/.env}"
+    # As 1001:1001, not the image's 65532: the dev-container edge play leaves the credentials
+    # at 0640 in group 1001, and a file the connector cannot read kills it on start.
+    # cloudflared needs no home and no shell.
+    user: "1001:1001"
     profiles: [tunnel]
     # THE PROFILE IS THE SWITCH, not the id: `tunnel` in COMPOSE_PROFILES once
     # server-create-dev-container.yml -e container=dev has made the tunnel. `:-`, not `:?`,
@@ -240,14 +245,14 @@ services:
     # profile on and no id, the connector refuses at start and says so in `make tunnel-log`.
     command: tunnel --config /etc/cloudflared/config.yml run ${HUB_TUNNEL_ID:-}
     volumes:
-      - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
+      - ./cloudflared.yml:/etc/cloudflared/config.yml:ro,z
       # Long form, so a missing file fails the start rather than Docker making a directory
       # called tunnel.json in the secrets directory.
       - type: bind
         source: ${HUB_SECRETS:?set HUB_SECRETS in dev/.env}/tunnel.json
         target: /etc/cloudflared/creds.json
         read_only: true
-        bind: { create_host_path: false }
+        bind: { create_host_path: false, selinux: z }
     depends_on: [hub]
     healthcheck:
       test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:20241", "ready"]
@@ -294,9 +299,9 @@ services:
       - infra-workspace:/workspace
       # The repo's untracked secrets, in a volume of their own, linked into the workspace.
       - infra-env:/home/dev/.env.d
-      # Mode-700 directory outside the repo: an optional authorized_keys, and the fleet key
+      # Mode-750 directory, group 1001, outside the repo: an optional authorized_keys, and the fleet key
       # files, absent by decision (docs/management-plane.md). Read-only.
-      - ${INFRA_SECRETS:?set INFRA_SECRETS in dev/.env to the absolute path of the secrets dir}:/run/infra-secrets:ro
+      - ${INFRA_SECRETS:?set INFRA_SECRETS in dev/.env to the absolute path of the secrets dir}:/run/infra-secrets:ro,z
       # The logins, history and state, kept from the infra-dev project they were made in, so
       # moving into this one costs no login and loses no conversation.
       - infra-claude:/home/dev/.claude
@@ -360,7 +365,7 @@ services:
       # through the hub's tunnel, for or3-tunnel's reverse forward (cloudflared.yml): the
       # base's sshd allows remote forwarding for exactly that, and this authorized_keys holds
       # the phone's key.
-      - ${OR3_SECRETS:?set OR3_SECRETS in dev/.env}:/run/or3-secrets:ro
+      - ${OR3_SECRETS:?set OR3_SECRETS in dev/.env}:/run/or3-secrets:ro,z
       - or3-claude:/home/dev/.claude
       - or3-claude:/home/dev/.claude-logins/false
       - or3-gh:/home/dev/.config/gh
@@ -409,8 +414,8 @@ services:
       - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: destiny-director, nocopy: true } }
       - dd-workspace:/workspace
       - dd-env:/home/dev/.env.d
-      # What was the clone's .dev-ssh/, moved out of it at the cutover: mode 700, read-only.
-      - ${DD_SECRETS:?set DD_SECRETS in dev/.env}:/run/dd-secrets:ro
+      # What was the clone's .dev-ssh/, moved out of it at the cutover: mode 750, group 1001, read-only.
+      - ${DD_SECRETS:?set DD_SECRETS in dev/.env}:/run/dd-secrets:ro,z
       - dd-uv-cache:/home/dev/.cache/uv
       - dd-claude:/home/dev/.claude
       - dd-claude:/home/dev/.claude-logins/false
@@ -473,7 +478,7 @@ services:
       - { type: volume, source: github-tokens, target: /run/github, read_only: true, volume: { subpath: dossier, nocopy: true } }
       - ds-workspace:/workspace
       - ds-env:/home/dev/.env.d
-      - ${DS_SECRETS:?set DS_SECRETS in dev/.env}:/run/ds-secrets:ro
+      - ${DS_SECRETS:?set DS_SECRETS in dev/.env}:/run/ds-secrets:ro,z
       - ds-uv-cache:/home/dev/.cache/uv
       - ds-claude:/home/dev/.claude
       - ds-claude:/home/dev/.claude-logins/false

@@ -1200,10 +1200,12 @@ only), and `make base` (the base, locally).
 without `sudo` — the Makefile adds one when it is not already root — and the same set is
 available from the repo root as `make dev-up`, `make dev-login` and so on.
 
-The `dev` user's uid comes from the **owner of the checkout** (`stat`), not `id -u`, which is
-0 under `sudo` and would write root-owned files into everything shared with the host. It
-refuses to build at 0, or when `dev/.env`'s `HOST_UID`/`HOST_GID` — which the deploy play's
-compose reads — disagree with the checkout.
+The `dev` user is uid and gid 1001 on every host, a literal in `compose.yaml`, in the
+hub's build and the sidecar's `user:`, and in `make base`. Nothing a container writes is
+a bind mount, so the host's own uid decides nothing. Where `gavin` is 1000 (`one`), the
+secrets directories are mode 750 and group 1001, so the containers read them through the
+group. Every bind carries `z`, for SELinux; Docker ignores it elsewhere. An old `dev/.env`
+that still has `HOST_UID` or `HOST_GID` is not refused, and nothing reads them.
 
 `restart` is `stop`/`start` deliberately: `up -d` re-evaluates the config and may recreate
 the container, ending every session in it. So a change to `compose.yaml` lands only on `up`
