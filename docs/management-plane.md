@@ -84,6 +84,7 @@ One line each; each says where its detail is. Struck when closed, deleted at the
 **Docs**
 - README's Fleet table has no row for `three`.
 - `host-setup.md`'s `zram-init` claim is out of date.
+- The status board (below) was last updated 2026-10-25, at `a4364f6`, and uses the labels from before the 2026-11-20 renumbering: rebuild it from the table.
 
 **Housekeeping**
 - Renovate: no PR since 2026-10-25; check it still runs: [#26](https://github.com/gsfernandes81/infra/issues/26).
