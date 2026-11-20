@@ -827,17 +827,19 @@ STEP
 simextra_password=$(openssl rand -hex 12)
 unlock_inv=$repo/ansible/inventory.sim-unlock
 unlock_vars=$PWD/unlock-become.yml
+unlock_become=(-e "@$unlock_vars")
 
 # A play run: <label> <answers as JSON> [ansible-playbook argument]... Its transcript is
 # unlock-<label>.log, its exit status unlock_rc, and the volumes it asked for, in order and
-# comma-separated, unlock_prompts.
+# comma-separated, unlock_prompts. gavin's sudo password goes in as -K's would, unless
+# unlock_become is set to something else (empty: as if -K were left off).
 unlock_run() {
 	local label=$1 answers=$2 s
 	shift 2
 	unlock_rc=0
 	( cd "$repo/ansible" && SIM_ANSWERS=$answers ANSIBLE_CONFIG=$repo/ansible/ansible.cfg \
 		python3 -I "$here/host/play-prompts.py" ansible-playbook -i "$unlock_inv" \
-		playbooks/server-unlock-arrays.yml -e "@$unlock_vars" "$@" ) > "unlock-$label.log" 2>&1 || unlock_rc=$?
+		playbooks/server-unlock-arrays.yml "${unlock_become[@]}" "$@" ) > "unlock-$label.log" 2>&1 || unlock_rc=$?
 	for s in "$password" "$luks_password" "$simextra_password"; do
 		if grep -qF "$s" "unlock-$label.log"; then
 			echo "FAIL a secret appeared in the unlock play's output ($label)"
@@ -936,6 +938,23 @@ INV
 	unlock_says check "three backup: DRY RUN: locked" "--check reads the array as locked"
 	locked_check backup "--check leaves the array locked"
 
+	echo "-- no -K: sudo is checked, and refused readably, before any prompt"
+	unlock_become=()
+	unlock_run nosudo "$right" -l three
+	unlock_become=(-e "@$unlock_vars")
+	unlock_asked nosudo "" "with no sudo password the play asks for no passphrase"
+	if [ "$unlock_rc" != 0 ] && grep -qE 'Check sudo answers on three .*FAILED' unlock-nosudo.log &&
+		grep -qiE 'sudo password|password is required' unlock-nosudo.log; then
+		echo "PASS with no sudo password the play stops at its sudo check, saying why"
+	else
+		echo "FAIL with no sudo password the play did not stop at its sudo check with the reason (exit $unlock_rc):"
+		grep -E 'sudo|Error|FAILED' unlock-nosudo.log | tail -n 6 | sed 's/^/    /'
+	fi
+	grep -q 'output has been hidden' unlock-nosudo.log &&
+		echo "FAIL the only word on the sudo failure is that output was hidden" ||
+		echo "PASS the sudo failure is not hidden by no_log"
+	locked_check backup "with no sudo password the array stays locked"
+
 	echo "-- the array's passphrase, and a wrong one for simextra; sim-gone unreachable"
 	unlock_run first "$wrong"
 	unlock_asked first "backup on three,simextra on three-b" "the play asks once for each locked volume, across both hosts, naming each"
@@ -951,7 +970,7 @@ INV
 	unlock_run decline '{"simextra on three-b": ""}' -l three,three-b
 	unlock_asked decline "simextra on three-b" "an open array is not asked for; the locked volume is"
 	unlock_says decline "three backup: already open" "the open array is reported already open"
-	unlock_says decline "three-b simextra: left locked by you" "Enter alone is reported as left locked by you"
+	unlock_says decline "three-b simextra: left locked: no passphrase given" "Enter alone is reported as left locked, no passphrase given"
 	locked_check simextra "Enter alone leaves simextra locked and its unit never started"
 	[ "$unlock_rc" = 0 ] && echo "PASS a declined volume is not a failure" || echo "FAIL the play exited $unlock_rc with one volume declined"
 

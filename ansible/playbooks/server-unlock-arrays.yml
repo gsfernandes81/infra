@@ -21,9 +21,10 @@
 #      noted and left.
 #   2. Asks once for each volume still locked, naming the volume and the host, without
 #      echoing what is typed. EMPTY ANSWER = DECLINE: Enter alone leaves that volume locked,
-#      and the summary says "left locked by you". Anything typed is the passphrase, and
-#      typing it is the consent to unlock. A volume already open is never asked for: one not
-#      mounted is mounted, which needs no passphrase.
+#      and the summary says "left locked: no passphrase given". Anything typed is the
+#      passphrase, and typing it is the consent to unlock. A volume already open is never
+#      asked for: one not mounted is mounted, which needs no passphrase. Before asking, it
+#      checks sudo answers on each host that needs it, so a missing -K stops there.
 #   3. Unlocks and mounts each volume given a passphrase, then checks the mount. On systemd
 #      that is the same two units as the manual unlock in hosts/three/leap/README.md §
 #      Unlocking: files/unlock-volumes.sh starts systemd-cryptsetup@<name>.service and
@@ -31,8 +32,8 @@
 #      option applies and the unit is active afterwards, as after a manual unlock, and the
 #      README's lock command works unchanged. A wrong passphrase is reported and the volume
 #      left locked; the play goes on to the next volume and host.
-#   4. Prints one line per host and volume: already open, unlocked, left locked by you,
-#      failed with the reason, or unreachable. A host with a failed volume then fails its
+#   4. Prints one line per host and volume: already open, unlocked, left locked with no
+#      passphrase given, failed with the reason, or unreachable. A host with a failed volume then fails its
 #      last check, so the recap shows it.
 #
 # THE PASSPHRASE reaches the box on the unlock command's stdin, never on a command line,
@@ -45,11 +46,14 @@
 # THE PROMPT is `pause`, looped over every locked volume of every host. pause runs once for
 # the whole play, on the first host, not once per host (it bypasses the host loop), so the
 # loop is over all hosts' volumes, and the answers are copied to every host with a run_once
-# set_fact. With no terminal on stdin pause does not wait and answers empty, which declines
-# every volume. microos-sim.yml's three job answers the prompts through a terminal.
+# set_fact. RUN IT FROM A TERMINAL: without one, pause does not wait and every prompt reads
+# as empty, so every locked volume is left locked, which is why the summary says "no
+# passphrase given" and not who chose it. microos-sim.yml's three job answers the prompts
+# through a terminal.
 #
-# Under --check it reads and reports, asks nothing and changes nothing. Without -K the read
-# still runs and every unlock fails for want of sudo, with that as its reason.
+# Under --check it reads and reports, asks nothing and changes nothing. Without -K, or with
+# a wrong sudo password, the play stops on that host at "Check sudo answers", which says
+# why, before it asks for any passphrase there; the read needs no sudo and has run.
 #
 # -K IS REQUIRED to unlock: the units are root's.
 
@@ -85,6 +89,7 @@
       loop: "{{ unlock_volumes }}"
       loop_control:
         label: "{{ item.name | default('?') }}"
+      register: unlock_shape
 
     # Unprivileged, so --check needs no -K. ignore_unreachable keeps a host it cannot reach in
     # the play long enough to be noted for the summary.
@@ -124,6 +129,19 @@
           {%-   set _ = out.append({'name': v.name, 'mount': v.mount, 'need': r[1], 'reason': r[2]}) -%}
           {%- endfor -%}
           {{ out }}
+
+    # Before any prompt, so a missing or wrong sudo password stops this host here, readably,
+    # and never after a passphrase has been typed for it: the unlock is no_log, and a sudo
+    # failure there would show only that its output was hidden. Not no_log, so the reason
+    # prints. Skipped when nothing on the host needs root.
+    - name: Check sudo answers on {{ inventory_hostname }}
+      ansible.builtin.command: "true"
+      register: unlock_sudo
+      changed_when: false
+      become: true
+      when:
+        - not ansible_check_mode
+        - unlock_vols | selectattr('need', 'in', ['ask', 'mount']) | list | length > 0
 
     - name: Ask for each locked volume's passphrase
       ansible.builtin.pause:
@@ -211,7 +229,7 @@
           {%-   elif ansible_check_mode -%}
           {%-     set o = ['ok', 'DRY RUN: ' ~ v.reason ~ '; --check asks for nothing and changes nothing'] -%}
           {%-   elif v.need == 'ask' and given | length == 0 -%}
-          {%-     set o = ['ok', 'left locked by you'] -%}
+          {%-     set o = ['ok', 'left locked: no passphrase given'] -%}
           {%-   elif ran[v.name].result | default('') in ['unlocked', 'mounted'] -%}
           {%-     set o = ['ok', ran[v.name].reason] -%}
           {%-   else -%}
@@ -222,7 +240,8 @@
           {{ out }}
 
     # Every host the play began with and that lists volumes, from whichever host is still
-    # in it: one with no outcome dropped out unreachable, and says so.
+    # in it. One with no outcome says where it stopped: unreachable, its list's shape, or a
+    # task after the read, the sudo check above all.
     - name: Print each host's volumes
       ansible.builtin.debug:
         msg: >-
@@ -233,10 +252,19 @@
           {%-       set _ = lines.append(h ~ ' ' ~ o.line) -%}
           {%-     endfor -%}
           {%-   else -%}
-          {%-     for v in hostvars[h].unlock_volumes -%}
-          {%-       set _ = lines.append(h ~ ' ' ~ v.name | default('?') ~ ': unreachable'
-                      ~ ((', ' ~ hostvars[h].unlock_unreachable) if hostvars[h].unlock_unreachable | default('') else
-                         ', dropped out of the play before its outcome; check by hand')) -%}
+          {%-     set hv = hostvars[h] -%}
+          {%-     if hv.unlock_unreachable is defined -%}
+          {%-       set why = 'unreachable, ' ~ hv.unlock_unreachable -%}
+          {%-     elif hv.unlock_vols is not defined -%}
+          {%-       set why = 'failed the unlock_volumes shape check above; nothing was read' -%}
+          {%-     elif hv.unlock_sudo is defined and hv.unlock_sudo is failed -%}
+          {%-       set why = 'not unlocked: sudo did not answer, ' ~ hv.unlock_sudo.msg | default('')
+                      | regex_replace('\\s+', ' ') | truncate(160) -%}
+          {%-     else -%}
+          {%-       set why = 'not unlocked: the play stopped on this host before its outcome, at the sudo check if -K was missing or wrong; the error is above' -%}
+          {%-     endif -%}
+          {%-     for v in hv.unlock_volumes -%}
+          {%-       set _ = lines.append(h ~ ' ' ~ v.name | default('?') ~ ': ' ~ why) -%}
           {%-     endfor -%}
           {%-   endif -%}
           {%- endfor -%}

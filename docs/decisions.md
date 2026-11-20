@@ -2851,8 +2851,14 @@ remembered `ssh -t` lines. Two so far.
   only entry; `zero`'s joins with an OpenRC branch, which the play refuses to guess at
   until it is written.
 - **An empty answer declines that volume**: Enter alone leaves it locked, and the summary
-  says "left locked by you". Typing a passphrase is the consent to unlock, so one run can
-  open some volumes and not others, and nobody has to remember a flag to skip one.
+  says "left locked: no passphrase given". Typing a passphrase is the consent to unlock, so
+  one run can open some volumes and not others, and nobody has to remember a flag to skip
+  one. The summary does not say who declined, because without a terminal `pause` answers
+  empty for every prompt; detecting the terminal was set aside (Fable's review), since a
+  check that cannot be calibrated on Termux from here could refuse the owner abroad.
+- **sudo is checked on each host before any passphrase is asked for**, by a plain become of
+  `true`, because the unlock is `no_log` and a sudo failure there showed only that its output
+  was hidden, after the passphrase had been typed (Fable's review).
 - **On systemd the play answers the request `systemd-cryptsetup@<name>.service` makes**,
   through `systemd-reply-password`, which reads the passphrase on stdin, because then the
   unit is the one that unlocks: every crypttab option applies, `password-cache=no`

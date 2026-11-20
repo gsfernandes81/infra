@@ -22,8 +22,9 @@
 # refuses any host whose checkout has no dev/Makefile, zero included.
 #
 # make runs as an async job, polled, so a phone that drops its connection during a long
-# build does not take the build down with it; the job finishes on the box either way. Its
-# output prints once it ends. Under --check it checks the target and prints what it would
+# build does not take the build down with it: the job carries on on the box, for up to four
+# hours, the deploy play's limit for a pull (_deploy-compose-one.yml), after which Ansible
+# kills it. Its output prints once it ends. Under --check it checks the target and prints what it would
 # run, and runs nothing.
 #
 # -K IS REQUIRED: make runs docker as root.
@@ -80,7 +81,7 @@
       register: devc_up
       changed_when: true
       failed_when: false
-      async: 3600
+      async: 14400
       poll: 15
       become: true
       when: not ansible_check_mode

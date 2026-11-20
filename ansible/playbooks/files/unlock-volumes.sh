@@ -24,7 +24,9 @@
 # lock command in hosts/three/leap/README.md, the mount's dependants and the PartOf= on
 # Docker behave exactly as after the owner's own unlock. A second request from the same
 # process after the answer means the passphrase was wrong: it is cancelled, which fails the
-# unit, and the failed state is reset so a later manual unlock starts clean.
+# unit, and the failed state is reset so a later manual unlock starts clean. That reading
+# needs a second try: a crypttab line with tries=1 would fail the unit on a wrong passphrase
+# without asking again, and the play would report a unit failure, not a wrong passphrase.
 set -u
 
 result() {
@@ -104,17 +106,34 @@ read_systemd() {
 # does. Starting the LUKS unit of an open volume asks for nothing, since systemd-cryptsetup
 # finds the volume active and exits 0; it is started so the unit reads active, which the
 # lock command stops. --no-block and a bounded wait, because a unit that did ask would wait
-# for an answer with no timeout.
+# for an answer with no timeout. The wait ends as soon as the unit is active, failed, or back
+# to inactive after starting. NOTHING HERE STOPS THE LUKS UNIT: one that came up late would
+# close a volume that is open, so a failure is only reset, and a unit still starting after
+# 30 s is reported and left for the owner.
 mount_systemd() {
 	name=$1 mount=$2 since=$(date +%s)
 	unit=$(crypt_unit "$name") munit=$(mount_unit "$mount")
 	systemctl start --no-block "$unit" || result failed "systemctl could not start $unit"
-	i=0
-	while [ "$(state_of "$unit")" != active ]; do
+	i=0 started=no
+	while :; do
+		state=$(state_of "$unit")
+		case $state in
+		active) break ;;
+		failed)
+			why=$(said "$unit" "$since")
+			systemctl reset-failed "$unit" 2> /dev/null
+			result failed "$unit failed on the open volume: ${why:-it said nothing}"
+			;;
+		inactive)
+			if [ "$started" = yes ]; then
+				result failed "$unit started and stopped again on the open volume: $(said "$unit" "$since")"
+			fi
+			;;
+		*) started=yes ;;
+		esac
 		i=$((i + 1))
 		if [ "$i" -gt 30 ]; then
-			systemctl stop --no-block "$unit"
-			result failed "$unit did not come up on the open volume within 30 s: $(said "$unit" "$since")"
+			result failed "$unit is still $state after 30 s on the open volume, and is left as it is; check by hand: $(said "$unit" "$since")"
 		fi
 		sleep 1
 	done
