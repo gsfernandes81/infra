@@ -10,6 +10,9 @@ Until 2026-10-24 this repo called a deployment — a Compose project under
 `deployments/<name>/` — a "stack" (`-e stack=`, `server-create-stack-tunnel.yml`). Older
 entries keep the old word.
 
+Phase numbers in rows written before 2026-11-20 are the old labels of
+`docs/management-plane.md`'s phase table. Its § *Old labels* maps the three that changed.
+
 | Decision | Because |
 |---|---|
 | Named `infra`, not `containers` | It holds host system config too. |
@@ -3018,6 +3021,96 @@ given.
 - **`zero`'s move is still its own piece.** It is not scheduled, and gets its own design.
 - **`make` is in every Leap host's first-boot packages**, because `dev/Makefile` is the dev
   stack's management interface and Leap's image has none.
+
+## From the management plane, moved 2026-11-20
+
+**Moved here on 2026-11-20**, when `docs/management-plane.md` was cut to its phase table and
+open items (the owner's call). Each was the only written record of a decision or lesson
+there. The file's full text before the cut is at commit `970cbd2`.
+
+- **The phase table's convention, and its numbering.** Done work in `management-plane.md`
+  is struck through: a done phase is one row, `~~label~~ ~~title~~`, then `done <date> →
+  <where its record lives>`; a done open item is struck, then deleted at the next tidy;
+  finished work in prose is deleted, not struck. "Closed in the repo" is not done: it is
+  split into a struck half and the step still to run. Done phases keep their old labels,
+  and the future is numbered from 10 in execution order, because 104 commit subjects and
+  about 60 mentions here name a phase, 68 of them "phase 9", and a strict renumbering would
+  make those names mean something else. Set aside: strict 1 to N numbering. The owner
+  ordered the future phases on 2026-11-20: `zero` to Leap and podman on `one` before
+  monitoring, and podman on `zero` after both.
+- **Why Ansible and not an orchestrator (2026-08-21).** Nomad and Consul were rejected.
+  Nomad ships no 32-bit ARM build, so `two` could not run it. A compromised Nomad server
+  is code execution on every client it serves, strictly worse than the zero-to-one key this
+  file refuses. A scheduler earns its keep by choosing between interchangeable
+  placements, and the pinned workloads have one each (Immich on the array, torrents on
+  `/dev/net/tun`). It makes bring-up from nothing worse: a control plane, its gossip key
+  and ACLs before any workload. And dev containers are `restart: "no"` because they hold
+  live sessions, which a scheduler's premise contradicts. Given up, stated plainly:
+  nothing rebalances or restarts a workload on a surviving host by itself.
+- **Two control nodes split by what they may do (2026-08-21), ⚠︎SUPERSEDED 2026-10-25** by
+  "the phone is the only control node". Kept for its shape: if a second control node is
+  ever argued for, it runs read-only playbooks only. Ansible has no locking, so two nodes
+  running mutating plays interleave changes undetected; restricting one to plays that
+  change nothing removes the race by construction, as `check-*` reports and
+  `install-system-file` writes.
+- **Ansible is not an exception to "fleet work is done on the box it concerns" (argued
+  2026-08-21, recorded 2026-11-20).** That rule exists because `check-system-drift` and
+  `hw-inventory` read local `/etc` and `/sys` and would mislabel another host's state.
+  Ansible gathers facts from the target over ssh, so it reads the right box. The two tools
+  keep the rule in full.
+- **Secrets: Ansible Vault in this repo is the mechanism (2026-08-21), for portability, not
+  security.** A move becomes: run the play against the new host, which renders its `.env`,
+  then tear down the old. Two costs: Vault ciphertext in git makes rotation historical
+  (an old commit keeps the old ciphertext), mitigated by the repo being private and the
+  vault password rotating on its own schedule; and Compose writes `env_file:` and
+  `environment:` values into `/var/lib/docker/containers/<id>/config.v2.json` and `docker
+  inspect` at create time, so a secret passed as an environment variable is at rest on the
+  host wherever the file lived. If the requirement ever becomes a security one, a
+  read-only mounted secrets directory (or3-dev's `/run/or3-secrets`, Compose's
+  `secrets:`) is the pattern. What Vault holds is phase 15's row.
+- **No identity provider in front of Access (2026-08-22)**, because Proton publishes no
+  OIDC or SAML for personal accounts, so it could never be one. Service tokens with a
+  `non_identity` policy need none; a human path, if ever wanted, is Access's one-time PIN
+  by email, which still configures no IdP.
+- **A control node inside the fleet: the argument (2026-08-22; decided no, 2026-10-25).**
+  It would put the control plane inside a container on a box it controls: it cannot fix
+  the box it lives in, its key reaching every host makes the blast radius circular, and
+  the box with the most on it is the worst place for it. The case for it is real: an
+  inventory run from Termux is metered to reach boxes on zero's own LAN, and free from
+  inside. Three things would change the answer: a scheduled read-only node elsewhere; a
+  read-only key with the mutating half on the phone; or the dev containers moving hosts,
+  which phase 10 does now. That reopens nothing: the owner said no on 2026-10-25.
+- **A dev container's login moves with its volume, one holder at a time (2026-08-21,
+  tested on `zero`).** Claude Code stores its credential as a plain file with nothing
+  host-derived, and `CLAUDE_CONFIG_DIR` puts it and `.claude.json` in the volume, so a
+  restored volume is logged in: a move costs no `make login`. Teardown before bring-up is a
+  hard ordering: OAuth refresh tokens rotate, so two holders means the second refresh
+  invalidates the first, and the loser writes empty tokens; getting it wrong logs out the
+  source device. The volume is working history too (22 MB then), and each copy is a
+  disclosure surface, so a play that stages one must fail the run when its permission step
+  fails, not warn: in the test an unprivileged `mkdir` failed, Docker then created the
+  directory as root at 755, and the tarball landed world-readable. And a calibration
+  lesson: the first run named `or3-claude` instead of `or3-dev_or3-claude`, Docker silently
+  made an empty volume, and `loggedIn: false` was a failure for the wrong reason. The
+  history moves with the container (owner, 2026-10-25). If a moved container's login ever
+  stops working, logging in again is an accepted cost; a move between the Pis does not
+  change the public IP (owner, 2026-10-25).
+- **`bin/compose` went because stock tooling is knowledge that transfers (2026-10-25).**
+  `docker compose` in the deployment's directory is longer to type and known to every
+  operator, agent and search result; `bin/compose` was known to this repo alone. Its
+  pinning was covered by every compose file declaring `name:`, and its refusal of
+  `destiny-director` by name was error-message quality, not a guard. The deletion and
+  `recovery.md`'s rewrite went in one commit, so that document never names a script that
+  is gone.
+- **Prefer the interface an outsider already knows over one this repo invented
+  (2026-10-25).** It is why `bin/compose` went, why the hand-rolled `apk` loop went, and
+  why `make` carries project management instead of bespoke scripts. Not a sweep: several
+  `bin/` tools do what no standard tool does. When a standard tool would do, it wins,
+  even when it is more to type.
+- **`ionic-traces` stays down (2026-08-23), the owner's call.** Very few users and only its
+  database worth anything, so repair is deferred indefinitely. Nothing is deleted: its
+  compose file, `SOURCE` and `.env` stay, and its containers were taken off `restart:
+  always`. There is no backup of `/media/ionic-mysql`.
 
 ## The lesson worth keeping
 

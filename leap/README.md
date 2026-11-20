@@ -108,6 +108,29 @@ It does not join the tailnet, which needs the owner's login (`sudo tailscale up
 --advertise-tags=tag:fleet --accept-dns=false`), and it does not start a deployment: those
 are the visit's runbook, after the box answers.
 
+## What the November visit's first boots taught
+
+Found on `one` and `three`, 2026-11-18, and kept here because the next Leap first boot
+(`zero`, phase 12) meets them again.
+
+- **A first boot with a data disk missing is fatal, despite `nofail`.** Combustion always
+  leaves `/etc/selinux/.autorelabel` in the new snapshot, and microos-tools'
+  `selinux-autorelabel-generator` then makes one relabel unit per fstab entry, with
+  `RequiresMountsFor=` and required by `local-fs.target`, ignoring `nofail`. It skips only
+  `noauto`, `x-systemd.automount` and `_netdev` entries, so `three`'s `noauto` array is
+  safe. The boot goes to emergency mode before `systemd-machine-id-commit`, so the next
+  boot is a first boot again and Combustion re-runs on the finished snapshot. `one` met it
+  when its SSD was not seen through a USB link. The same holds on any later boot that
+  relabels. Options, for phase 12: the disk attached as a precondition (what the visit
+  did), native `.mount` units for the data disks, or a report to microos-tools.
+- **The Pi image's initramfs has no Wi-Fi** (no `brcmfmac`, firmware, `wpa_supplicant` or
+  NetworkManager's Wi-Fi plugin, per build 3.17's initrd listing), so a first boot needs a
+  wired LAN on `192.168.86.0/24`.
+- **On a Pi, health-checker clears its flag:** `grub2-editenv - list` is empty after the
+  first boot. **The system's journal starts at the image's build date** until the clock
+  syncs, so early boot lines read 19 August, and `uptime` can read months for the same
+  reason. Tailscale 1.104.7 was signed by `458ca832957f5868`.
+
 ## After the first boot: the named volumes
 
 A named volume lives in Docker's store, which the new system starts empty, so each one the
