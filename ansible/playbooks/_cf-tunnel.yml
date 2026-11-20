@@ -250,10 +250,13 @@
   when: cf_tunnel_new is not skipped
 
 - name: "New tunnel only: write the credentials on {{ inventory_hostname }}"
-  # 0600 unless the caller says otherwise, and the content never reaches a log. This is the one artefact of the whole
-  # play that lands on a host, and it is what lets anything claim to be this tunnel.
-  # owner/group are omitted unless the caller names them, so a dev container's file is
-  # written exactly as it always was: by the ssh user, as the ssh user.
+  # 0600 unless the caller says otherwise, and the content never reaches a log. This is
+  # the one artefact of the whole play that lands on a host, and it is what lets anything
+  # claim to be this tunnel.
+  # mode, owner and group are the caller's to name. The host tunnels name none, so
+  # theirs is 0600 as the ssh user (or root, with cf_creds_become). The dev caller names
+  # 0640 and group 1001: its sidecar runs as uid 1001, which where gavin is 1000 reads
+  # the file through the group.
   ansible.builtin.copy:
     content: >-
       {{ {'AccountTag': cf_account_id,

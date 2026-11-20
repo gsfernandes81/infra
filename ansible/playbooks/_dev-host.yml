@@ -13,12 +13,13 @@
 # What it makes, and nothing else:
 #   - ~/.dev-secrets at 0750, group 1001, the hub's (the edge half wrote tunnel.json into it,
 #     gavin-owned, 0640, group 1001 — dev/compose.yaml runs the sidecar as 1001, which on
-#     a host where gavin is not 1001 reads it through the group), with
-#     authorized_keys holding this control node's key: the clients allowed to `ssh dev`.
+#     a host where gavin is not 1001 reads it through the group), with authorized_keys
+#     holding this control node's key: the clients allowed to `ssh dev`.
 #     Another client's key is server-add-authorized-keys.yml's job. github-app.pem, the App's
 #     key, goes in here too, by hand — it is made in a browser (dev/README.md);
-#   - ~/.infra-dev-secrets at 0750, group 1001, infra-dev's DEV_SECRETS_DIR — empty by default: its only
-#     candidate content is a fleet key, which the control-node question keeps out
+#   - ~/.infra-dev-secrets at 0750, group 1001, infra-dev's DEV_SECRETS_DIR — empty by
+#     default: its only candidate content is a fleet key, which the control-node question
+#     keeps out
 #     (docs/management-plane.md § "A control node inside the fleet");
 #   - in dev/.env, by line, starting one from .env.example if there is none: HUB_SECRETS,
 #     INFRA_SECRETS, and HUB_TUNNEL_ID — the id beside the credentials it came from, in the

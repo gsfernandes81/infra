@@ -7,3 +7,7 @@ echo "-- Docker"
 check "Docker runs, on the store on the SSD" sh -c '
 	systemctl is-active docker && findmnt -no SOURCE /var/lib/docker | tee /dev/stderr | grep -q "/var-lib-docker-leap"'
 docker_checks
+
+echo "-- the dev stack's group"
+check "devstack is gid 1001 and gavin is in it" sh -c '
+	getent group devstack | tee /dev/stderr | grep -qE "^devstack:[^:]*:1001:(.*,)?gavin(,|$)"'

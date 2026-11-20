@@ -202,6 +202,17 @@
         state: present
       loop: "{{ dev_clients }}"
 
+    - name: Write each authorized_keys mode as 0640 again
+      # authorized_key resets the file to 0600 and the user's own group on every write, which
+      # on a host where gavin is not 1001 leaves it unreadable to the container.
+      ansible.builtin.file:
+        path: "{{ resolved_dirs[item] }}/authorized_keys"
+        mode: "0640"
+        group: "1001"
+        state: file
+      loop: "{{ dev_clients }}"
+      when: not ansible_check_mode
+
     # ── and the copy sshd actually reads ─────────────────────────────────────
     # THE HOST FILE IS NOT THE ONE SSHD READS. dev/hub/entrypoint.sh and dev/entrypoint.sh
     # copy the secrets mount's authorized_keys to ~/.ssh/authorized_keys at start-up, and

@@ -39,6 +39,11 @@ install_packages
 install_binaries
 set_root_password
 make_gavin "$gavin_uid" "$gavin_gid"
+# The dev stack runs as uid and gid 1001 on every host, and gavin is 1000 here, so the plays
+# that write its secrets (group 1001, 0640) can only do it as a member of that group
+# (docs/decisions.md § The dev stack runs as 1001 on every host).
+groupadd -g 1001 devstack
+usermod -aG devstack gavin
 install_host_keys
 
 # Every tracked file for this host's /etc, each at the path its header names. Notes kept
