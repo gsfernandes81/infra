@@ -98,6 +98,16 @@ ansible-playbook playbooks/server-deploy-compose.yml -e deployment=dev -K
 question; `make dev` is `make up` then `make login`. Each starts every container, the hub
 first, and the tunnel when `COMPOSE_PROFILES` names it, and refuses while an external volume is missing: at a cutover that
 is a mistyped name to fix in `compose.yaml`, never one to create.
+From the phone it is one play, which runs `make up` in `dev/` on zero as root and prints its
+output, or the same by hand:
+
+```sh
+ansible-playbook playbooks/server-start-dev-containers.yml -K   # make up on zero, as root
+ssh -t zero 'cd ~/infra/dev && make up'                           # the same, typed
+```
+
+The play offers `up` only and runs what zero's checkout holds, as the hand command does; it
+prints that commit before make's output.
 
 On each client — the machine you ssh *from*:
 

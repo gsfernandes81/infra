@@ -1,0 +1,105 @@
+---
+# START THE DEV CONTAINERS: `make up` in dev/ on zero, as root, with its output printed. From
+# the control node:
+#
+#     cd ansible
+#     ansible-playbook playbooks/server-start-dev-containers.yml -K
+#
+# It is `ssh -t zero 'cd ~/infra/dev && make up'` as a play, so the owner's interface stays
+# Ansible: the same build and start of every container, the hub first, and the same guards,
+# which are dev/Makefile's own (.env, the uid, the secrets, the names, the external volumes)
+# and are not copied here. Root runs make, which dev/Makefile allows (its SUDO is empty when
+# `id -u` is 0) and builds at the checkout owner's uid, not root's (HOST_UID is read from the
+# checkout's owner). It runs what the host's checkout holds, as the hand command does, and
+# prints that commit first; it pulls nothing.
+#
+# `up` ONLY. Nothing here stops, restarts or removes a container: those stay at `make` on
+# zero (dev/README.md § The targets). The guarded way to change the dev project, with a plan,
+# a y/N and a container-id comparison, is still server-deploy-compose.yml -e deployment=dev;
+# this is the break glass for when the containers are simply down.
+#
+# zero is the default target. `-e target=<host>` names another fleet host, and the play
+# refuses any host whose checkout has no dev/Makefile, zero included.
+#
+# make runs as an async job, polled, so a phone that drops its connection during a long
+# build does not take the build down with it: the job carries on on the box, for up to four
+# hours, the deploy play's limit for a pull (_deploy-compose-one.yml), after which Ansible
+# kills it. Its output prints once it ends. Under --check it checks the target and prints what it would
+# run, and runs nothing.
+#
+# -K IS REQUIRED: make runs docker as root.
+
+- name: Check the inventory is loaded
+  ansible.builtin.import_playbook: _assert-inventory.yml
+  vars:
+    required_group: fleet
+
+- name: Check the target is a fleet host
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check -e target, if given, names a fleet host
+      ansible.builtin.assert:
+        that: (target | default('zero')) in groups['fleet']
+        fail_msg: "-e target={{ target | default('zero') }} is not in the inventory's fleet group."
+        success_msg: "target: {{ target | default('zero') }}"
+
+- name: Start the dev containers
+  hosts: "{{ target | default('zero') }}"
+  gather_facts: false
+  become: false
+
+  vars:
+    dev_dir: "{{ infra_checkout }}/dev"
+
+  tasks:
+    - name: Read whether {{ inventory_hostname }} has dev/Makefile
+      ansible.builtin.stat:
+        path: "{{ dev_dir }}/Makefile"
+      register: devc_makefile
+
+    - name: Check {{ inventory_hostname }} has the dev containers
+      ansible.builtin.assert:
+        that: devc_makefile.stat.exists
+        fail_msg: >-
+          {{ dev_dir }}/Makefile is not on {{ inventory_hostname }}, so it has no dev
+          containers to start{{ '' if inventory_hostname == 'zero' else
+          '; they run on zero, the default target' }}. Nothing has run.
+        success_msg: found
+
+    - name: Read the commit {{ inventory_hostname }}'s checkout is on
+      ansible.builtin.command:
+        argv: [git, -C, "{{ infra_checkout }}", log, "-1", "--format=%h %s"]
+      register: devc_commit
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Run make up in dev/ as root
+      ansible.builtin.command:
+        argv: [sh, -c, 'cd "$1" && exec make up 2>&1', make-up, "{{ dev_dir }}"]
+      register: devc_up
+      changed_when: true
+      failed_when: false
+      async: 14400
+      poll: 15
+      become: true
+      when: not ansible_check_mode
+
+    - name: Print make up's output
+      ansible.builtin.debug:
+        msg: >-
+          {{ ['checkout: ' ~ (devc_commit.stdout | default('') or 'unreadable: ' ~ devc_commit.stderr | default('') | trim)]
+             + (['DRY RUN: would run make up in ' ~ dev_dir ~ ' as root.'] if ansible_check_mode else
+                devc_up.stdout_lines | default([]) + ([devc_up.msg] if devc_up.msg is defined else [])) }}
+      changed_when: true
+
+    - name: Check make up succeeded
+      ansible.builtin.assert:
+        that: devc_up.rc | default(1) == 0
+        fail_msg: >-
+          make up exited {{ devc_up.rc | default('without a status') }} on
+          {{ inventory_hostname }}; its output is above. Whatever it started is running,
+          and `make status` on {{ inventory_hostname }} shows each container.
+        success_msg: ok
+      when: not ansible_check_mode

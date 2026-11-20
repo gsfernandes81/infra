@@ -1,0 +1,7 @@
+---
+# The encrypted volumes server-unlock-arrays.yml unlocks on three: each one's crypttab name
+# and mount point. The play derives the units from them; hosts/three/leap/README.md §
+# Unlocking has the manual command and the lock.
+unlock_volumes:
+  - name: backup
+    mount: /media/backup

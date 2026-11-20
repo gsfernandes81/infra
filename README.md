@@ -72,6 +72,7 @@ dev/                   every dev container on zero, one compose project, behind 
 clients/emacs/         the editor for the phone and WSL, set up by ansible's client-home-emacs.yml
 sim/microos/           CI simulations of the MicroOS move, run on GitHub's runners, never on a host
 sim/cloudflare/        a stand-in for Cloudflare's API, so CI can run the tunnel plays with no account
+sim/client/            CI for the client ssh play: the blocks it writes, read with `ssh -G`
 docs/                  read these
 ```
 

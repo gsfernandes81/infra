@@ -70,7 +70,25 @@ leave it out of an `apk upgrade`; no runlevel may start `dbus`, which apk instal
 `/etc/sudoers.d/gavin`, the dry run of `sudoers-backup` must pass its pre-check, and a copy
 broken in the checkout must be refused before anything is written, with sudo still working.
 
-Every run's output is searched for the auth keys, the topic and the private restore key.
+The dev containers' play: refused a target outside the fleet and a host whose checkout has
+no `dev/Makefile`; `--check` says what it would run and runs nothing; the real
+`dev/Makefile`, run as root on the box, which has no Docker, must stop at its first guard,
+the missing `dev/.env`, with its refusal printed and the play failed; and a stand-in
+checkout's `make up` must print that it ran as uid 0 in `dev/`.
+
+The unlock play, `server-unlock-arrays.yml`, typed at in a terminal by
+`sim/microos/host/play-prompts.py`: on the box, whose init is OpenRC, it must refuse the
+volume by naming its init and ask nothing; on the runner, `one`, which runs systemd, it
+must refuse a volume crypttab does not name, unprivileged, and then, with a LUKS volume on a
+loop device and its crypttab and fstab lines, report a wrong passphrase and leave the
+volume locked with its unit neither active nor failed, unlock it with the right one at
+`-vv` through the default callback, leaving `systemd-cryptsetup@simrun.service` active and
+the volume mounted `nosuid`, and report it already open on a re-run without asking; and
+the runner's journal must not hold the passphrase. The
+unlock on Leap, three's own, is `microos-sim.yml`'s.
+
+Every run's output is searched for the auth keys, the topic and the private restore key,
+and the unlock play's for the passphrase.
 The joining run and the first ntfy run also go through the default callback at `-vv`,
 because the repo's own callback prints no successful result and would hide a missing
 `no_log`.
@@ -85,10 +103,10 @@ address in its range.
 
 ## The encrypted member
 
-A second job runs `run-dmcrypt.sh`: `zero`'s encrypted array member
-([`plans/visit-runbook.md`](../../plans/visit-runbook.md) § Slice 2) as far as a container
-takes it, in a box built from the same `host/Dockerfile`, against a LUKS2 volume on a loop
-device that stands in for `zero`'s new bcache device. It runs:
+A second job runs `run-dmcrypt.sh`: `zero`'s encrypted array member (slice 2 of the visit,
+its runbook now `git show 774eb42:plans/visit-runbook.md`) as far as a container takes it,
+in a box built from the same `host/Dockerfile`, against a LUKS2 volume on a loop device
+that stands in for `zero`'s new bcache device. It runs:
 
 - the key file made with the runbook's commands, and the format and passphrase slot with
   the runbook's flags: Adiantum, the label, two keyslots, Argon2 at 256 MiB, read back

@@ -152,8 +152,26 @@ The run then checks, each as PASS or FAIL, and any FAIL fails the job:
   with the container context, `nosuid` and `nodev`, labelled `backup`, holding
   `make-backup`'s layout and nothing else at its top, that
   the mount started Docker and the pull and scrub timers, that a container reads and
-  writes it, and a scrub. After the reboot, the array is locked again, and the same
-  command brings it back;
+  writes it, and a scrub. After the reboot, the array is locked again, and on the new box
+  `server-unlock-arrays.yml` brings it back (below; the migrated box uses the README's
+  command again);
+- on `three`, after the reboot, the unlock play, from the runner as the control node, in a
+  terminal, with `host/play-prompts.py` typing at its prompts (`sim_unlock_play` in
+  `host/three.sh`). Its inventory adds `three-b`, the same VM under another name listing a
+  second volume made for the run, `simextra`, on a loop device with its own crypttab and
+  fstab lines, and `sim-gone`, which nothing answers. `--check` asks nothing and leaves the
+  array locked. Without a sudo password, as if `-K` were left off, the play stops at its sudo
+  check with the reason showing, asks for nothing, and leaves the array locked. The first run asks once for each locked volume, across both hosts, gets the
+  array's passphrase and a wrong one for `simextra`: the array is mounted `nosuid` and
+  `nodev` with `systemd-cryptsetup@backup.service` active, `simextra` is reported wrong and
+  left locked with its unit neither active nor failed and nothing waiting, `sim-gone` is
+  reported unreachable, and the play ends failed. The second, with the array open and Enter
+  alone for `simextra`, asks only for `simextra`, reports the array already open and
+  `simextra` left locked with no passphrase given, and passes. Then the README's lock command, read out of
+  the README, prints `locked` and stops Docker, and a third run unlocks both. No run's
+  output may hold a passphrase or the sudo password, and the box's journal holds neither
+  passphrase. `simextra` is removed after, and
+  crypttab and fstab put back;
 - on `three`, zero's backup, pulled from the runner standing in for `zero`
   (`sim_backup` in `host/three.sh`, with `host/three-backup.sh` on the box), below.
 - on `three`, in the second job (`SIM_VARIANT=migrate`), in place of `make-backup` and the
@@ -213,7 +231,8 @@ key, its restore key and the two `from=` addresses. Its snapshots are the tracke
 script's, run by hand. `three` makes its pull key as its README says, and its public half
 goes into the stand-in's key line.
 
-Each numbered point is the design's (`plans/three-backup-pull.md`), with how it is shown:
+Each numbered point is the design's (`docs/decisions.md` § *The pull, as built*), with how
+it is shown:
 
 1. **A full pull.** `backup-pull.service`, started as the timer would, under the README's
    runtime drop-in that lifts the rate limit. `tree-hash.sh` hashes every path, owner,

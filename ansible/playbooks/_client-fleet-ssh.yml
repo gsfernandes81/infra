@@ -30,6 +30,16 @@
 # 2026-08-28: it had been inline in the templates, which meant a client's ssh config
 # carried the dev-container explanation once PER CONTAINER — 484 lines to say 130 lines
 # of configuration. The blocks now keep what you need mid-rescue; the doc keeps the rest.
+#
+# EACH BOX HAS TWO NAMED WAYS IN AND A DEFAULT: <box>-cf through its tunnel, <box>-ts over
+# the tailnet to the address in group_vars/all.yml (tailnet_addresses; a box with none gets
+# no -ts), and the bare <box>, which today is a second name on the -cf entry. All three
+# share HostKeyAlias <box>, which the bare name already had, so the run that adds them
+# moves no known_hosts entry: `ssh zero` checks the key it always did, and the first
+# `ssh zero-cf` or `ssh zero-ts` checks that same key and asks nothing. A prompt or a
+# changed-key warning on either is not this change; stop and find out why. `-ts` needs
+# this client on the tailnet; off it, the connection gives up after ConnectTimeout's 10 s.
+#
 # NO NEW COLLECTIONS: ansible.builtin throughout.
 
 - name: Check the inventory is loaded
@@ -53,6 +63,10 @@
     ip_one: "192.168.86.101"
     ip_two: "192.168.86.102"
     ip_three: "192.168.86.103"
+
+    # The boxes the tunnel and tailnet entries are written for, in this order. Each gets
+    # `<box> <box>-cf`, and `<box>-ts` when tailnet_addresses (group_vars/all.yml) has it.
+    fleet_boxes: [zero, one, two, three]
 
     # The laptop, as WSL sees it. Set EITHER of these to "" to skip the Windows half
     # entirely. From WSL these are directly writable, so the block is MANAGED there rather
@@ -178,6 +192,24 @@
         - ssh-fleet-block.j2
         - fleet-access-ssh.sh.j2
         - cf-access-fleet.cmd.j2
+
+    # Before anything is written. A typo in a box's name would be a -ts alias silently
+    # missing; anything but a literal tailnet address would be a name, which ssh resolves
+    # first to ::1 or through DNS (CLAUDE.md § Landmines), or an entry ssh misreads.
+    - name: Check each tailnet address is a literal in 100.64/10
+      ansible.builtin.assert:
+        that:
+          - item.key in fleet_boxes
+          - item.value is string
+          - item.value is match('^100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$')
+        fail_msg: >-
+          tailnet_addresses in group_vars/all.yml has {{ item.key }}: {{ item.value }}.
+          Each key must be one of {{ fleet_boxes | join(', ') }} and each value a literal
+          IPv4 address in Tailscale's 100.64.0.0/10, as `tailscale ip -4` prints it.
+        quiet: true
+      loop: "{{ tailnet_addresses | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
 
     - name: Create ~/.ssh if missing, mode 700
       ansible.builtin.file:
@@ -496,5 +528,10 @@
             else ('skipped — windows_home or windows_ssh_config is empty'
                   if (windows_home | length == 0 or windows_ssh_config | length == 0)
                   else 'not reachable from here — paste from ' ~ windows_out) }}
+          - >-
+            tailnet: {{ fleet_boxes | select('in', tailnet_addresses) | map('regex_replace', '$', '-ts')
+            | join(', ') | default('no box', true) }} written;
+            {{ fleet_boxes | reject('in', tailnet_addresses) | join(', ') | default('none', true) }}
+            without, having no address in tailnet_addresses (group_vars/all.yml)
           - "verify with: ssh -G two-zero | grep -E 'proxycommand|hostname|user'"
       changed_when: true

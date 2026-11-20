@@ -59,8 +59,8 @@ die() { say "STOPPED: $*"; exit 1; }
 # shell binds the real /var/log into the snapshot it builds, so the log outlives a failed run,
 # whose snapshot Combustion throws away along with the initramfs's own journal. A box that
 # stops at its first boot, with no screen to hand, is read by a raw search of its card for
-# "firstboot:" (plans/visit-runbook.md). Found at the visit, when one's first boot stopped
-# without a trace.
+# "firstboot:" (leap/README.md § What the first boot does). Found at the visit, when one's
+# first boot stopped without a trace.
 mkdir -p /var/log
 exec > >(tee -a /var/log/infra-firstboot.log) 2>&1
 

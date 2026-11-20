@@ -27,7 +27,7 @@ Three blocks land in `~/.ssh/config`, each edited in place on re-runs:
 
 | Marker | Written by | Holds |
 |---|---|---|
-| `# BEGIN infra-fleet` | `client-home-ssh-config.yml` (its fleet half) → `templates/ssh-fleet-block.j2` | the four Pis, three ways each; their ProxyCommand is `~/.config/fleet/access-ssh` |
+| `# BEGIN infra-fleet` | `client-home-ssh-config.yml` (its fleet half) → `templates/ssh-fleet-block.j2` | the four Pis: the tunnel, the tailnet where a box has an address, the LAN and the mesh; the tunnel's ProxyCommand is `~/.config/fleet/access-ssh` |
 | `# BEGIN <alias>` | `client-home-ssh-config.yml` (its dev half, once per alias) → `templates/ssh-dev-block.j2` | `dev`, the hub; `or3-dev`, for the phone's vessel tunnel; and the others' old blocks until they are retired after the cutover |
 | `# BEGIN infra-laptop` | `client-home-ssh-config.yml` (its laptop half) → `templates/ssh-laptop-block.j2` | `g14`, the tunnel to the laptop's llama-server, first in the file; not written on WSL |
 
@@ -155,13 +155,36 @@ moment there is no time to check it.
 %h %p' -p 2225` trick reached the published port; with nothing published, the host hop
 and `make shell` above are the whole of it.
 
-## The fleet: three named paths to each Pi
+## The fleet: named paths to each Pi
 
 ```
-<host>                        via that box's own cloudflared tunnel
+<host>                        the default path: today the same entry as <host>-cf
+<host>-cf                     via that box's own cloudflared tunnel
+<host>-ts                     over the tailnet, to the box's address; only for a box with one
 <host>-local                  direct on the LAN
 <host>-zero|-one|-two|-three  through another box, over the LAN
 ```
+
+**`<host>` is a second name on the `-cf` entry, and that is what makes it movable.** The
+block writes `Host zero zero-cf` with the tunnel's `HostName` and `ProxyCommand`, and
+`Host zero-ts` with the tailnet address and no `ProxyCommand`. Everything that says
+`ssh zero`, the Ansible inventory included, follows whichever line carries the bare name.
+
+**`-ts` is the way in that does not go through Cloudflare.** It works only while this
+client is on the tailnet. On the phone that means giving Tailscale Android's one VPN slot,
+which is the emergency way in (`decisions.md` § *Every box has two ways in*); off the
+tailnet, `ssh zero-ts` gives up after 10 seconds (`ConnectTimeout`). The addresses are `tailnet_addresses` in
+`ansible/group_vars/all.yml`, the one record of them. A box with no line there gets no
+`-ts` entry, and the play's last message names it. A box that joins gets its line from
+`tailscale ip -4`, then a re-run of the play.
+
+**Moving the fleet off Cloudflare** is one edit to `ansible/templates/ssh-fleet-block.j2`:
+move `{{ h }}` from the `Host {{ h }} {{ h }}-cf` line to the `Host {{ h }}-ts` line, then
+re-run the play on each client. The bare name then means the tailnet, `-cf` still names
+the tunnel while it lasts, and no command or tool that says `ssh <host>` changes. A box
+with no tailnet address would be left with no bare name, so every box needs its line in
+`tailnet_addresses` first. The jump aliases (`*-zero` and the rest) use `ProxyJump <host>`,
+so they follow the bare name too.
 
 **Why the mesh exists.** On 2026-08-23 `two`'s tunnel was stopped while it was the only
 configured route to it. There was no `two-zero` to fall back to and no key on zero or one
@@ -231,6 +254,13 @@ this rescue path cannot fail closed.
 Without a shared `HostKeyAlias`, each route keeps its own `known_hosts` entry. A
 rarely-used path then has no stored key and simply prompts you to accept whatever it is
 handed — during a rescue, which is exactly when you are least likely to check.
+
+**Every path to a box, `-cf` and `-ts` included, checks its key under the box's name**, the
+name the bare alias was already checked under before those two existed. So the run that
+adds them moves no `known_hosts` entry: `ssh zero` checks the key it always did, and the
+first `ssh zero-cf` or `ssh zero-ts` checks that same key and asks nothing, because it is
+the same sshd. A prompt, or a changed-key warning, on either is not expected: stop and find
+out why before accepting anything. The same holds when the bare name moves to `-ts`.
 
 A container's key lives in a docker volume and survives rebuilds, so every route to it
 meets the same key. **The hub's is in its `hub-state` volume**, which `make down-volumes`

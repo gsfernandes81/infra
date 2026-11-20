@@ -159,7 +159,7 @@ TUNNEL
 
 # ── zero's backup, pulled by three from the runner standing in for zero ──────
 # The runner plays zero with a small btrfs on a loop file, laid out as zero's array is once
-# the move in plans/visit-runbook.md is done: the subvolume immich, mounted on its own as
+# the move of 2026-11-20 left it: the subvolume immich, mounted on its own as
 # zero mounts /media/immich, holding data (thumbs and encoded-video nested subvolumes) and
 # db, where a Postgres container writes throughout, and .snapshots, the subvolume snapper
 # keeps its snapshots in. Zero itself is an Alpine container of zero's release, privileged
@@ -558,9 +558,11 @@ sim_backup() {
 	out=$(zx "ssh -i /root/.ssh/restore -p $(cat port) -o BatchMode=yes restore@127.0.0.1 'echo SIM-SHELL-OPENED' < /dev/null" 2>&1 || true)
 	grep -q SIM-SHELL-OPENED <<<"$out" && echo "FAIL the restore key ran a command of its own" ||
 		echo "PASS the restore key runs no command of its own"
-	out=$(zrs "/etc/hostname restore@127.0.0.1::immich/sim-up" 2>&1 || true)
+	# The exit code as well as the words: an empty output is an upload that went through
+	# (exit 0) or a connection that never answered, and the two need telling apart.
+	rc=0; out=$(zrs "/etc/hostname restore@127.0.0.1::immich/sim-up" 2>&1) || rc=$?
 	grep -q 'read only' <<<"$out" && echo "PASS an upload through the restore key is refused, read only" ||
-		echo "FAIL an upload through the restore key was not refused as read only: $(tail -n 1 <<<"$out")"
+		echo "FAIL an upload through the restore key was not refused as read only (rsync exit $rc): $(tail -n 3 <<<"$out" | tr '\n' ' ')"
 	zx 'rm -f /tmp/sim-shadow'
 	zrs "restore@127.0.0.1::immich/../../../etc/shadow /tmp/sim-shadow" > /dev/null 2>&1 || true
 	zx 'test ! -e /tmp/sim-shadow' && echo "PASS nothing outside the module is read through the restore key" ||
@@ -815,8 +817,209 @@ STEP
 	as_root three-backup.sh layout
 }
 
+# ── server-unlock-arrays.yml, from the runner as the control node ────────────
+# The play, run as the owner runs it, in a terminal, with play-prompts.py typing at its
+# prompts. Its inventory adds two hosts to three: three-b, the same VM under another name,
+# whose list names a second volume made here for the run (simextra, on a loop device, with
+# its own crypttab and fstab lines), so the prompts are proved once per locked volume across
+# hosts and not only once per play; and sim-gone, which nothing answers. Four runs: --check;
+# the array's passphrase and a wrong one for simextra; Enter alone for simextra with the
+# array already open; both passphrases after the README's lock command. simextra goes again
+# afterwards, and the box is left as the README leaves it.
+simextra_password=$(openssl rand -hex 12)
+unlock_inv=$repo/ansible/inventory.sim-unlock
+unlock_vars=$PWD/unlock-become.yml
+unlock_become=(-e "@$unlock_vars")
+
+# A play run: <label> <answers as JSON> [ansible-playbook argument]... Its transcript is
+# unlock-<label>.log, its exit status unlock_rc, and the volumes it asked for, in order and
+# comma-separated, unlock_prompts. gavin's sudo password goes in as -K's would, unless
+# unlock_become is set to something else (empty: as if -K were left off).
+unlock_run() {
+	local label=$1 answers=$2 s
+	shift 2
+	unlock_rc=0
+	( cd "$repo/ansible" && SIM_ANSWERS=$answers ANSIBLE_CONFIG=$repo/ansible/ansible.cfg \
+		python3 -I "$here/host/play-prompts.py" ansible-playbook -i "$unlock_inv" \
+		playbooks/server-unlock-arrays.yml "${unlock_become[@]}" "$@" ) > "unlock-$label.log" 2>&1 || unlock_rc=$?
+	for s in "$password" "$luks_password" "$simextra_password"; do
+		if grep -qF "$s" "unlock-$label.log"; then
+			echo "FAIL a secret appeared in the unlock play's output ($label)"
+			sed -i "s/$s/<secret>/g" "unlock-$label.log"
+		fi
+	done
+	grep -vE '^prompted: ' "unlock-$label.log" | grep -E '^ +(three|three-b|sim-gone) [a-z]+: |Error|FAIL' | sed 's/^/    | /'
+	unlock_prompts=$(sed -n 's/^prompted: //p' "unlock-$label.log" | paste -sd, -)
+	echo "    exit $unlock_rc; asked for: ${unlock_prompts:-nothing}"
+	# The mount starts Docker, which can turn a new ssh connection away for a moment.
+	wait_gavin static
+}
+# A line of the play's summary: <label> <line> <what it proves>.
+unlock_says() {
+	if grep -qE "^ +$2" "unlock-$1.log"; then echo "PASS $3"; else echo "FAIL $3: no '$2' in its summary"; fi
+}
+unlock_asked() { # <label> <volumes, comma-separated> <what it proves>
+	if [ "$unlock_prompts" = "$2" ]; then echo "PASS $3"; else echo "FAIL $3: it asked for '${unlock_prompts:-nothing}'"; fi
+}
+# Runs a check on the box as root: <what it proves> <shell>.
+box_check() {
+	if { printf '%s\n' "$password"; printf '%s\n' "$2"; } | ssh_as gavin@127.0.0.1 "sudo -S -p '' bash -s" > box-check.log 2>&1; then
+		echo "PASS $1"
+	else
+		echo "FAIL $1:"
+		tail -n 8 box-check.log | sed 's/^/    /'
+	fi
+}
+# A volume locked as the play must leave one it did not unlock: closed, its unit neither
+# active nor failed, and no passphrase request left waiting.
+locked_check() { # <name> <what it proves>
+	box_check "$2" "
+		test ! -e /dev/mapper/$1 || { echo /dev/mapper/$1 exists; exit 1; }
+		s=\$(systemctl show -p ActiveState --value systemd-cryptsetup@$1.service); echo \"unit: \$s\"
+		[ \"\$s\" = inactive ] || exit 1
+		! ls /run/systemd/ask-password/ask.* 2> /dev/null"
+}
+# Open and mounted as after the README's unlock: the LUKS unit active, the mount from its
+# device, nosuid and nodev.
+open_check() { # <name> <mount> <what it proves>
+	box_check "$3" "
+		systemctl is-active systemd-cryptsetup@$1.service || exit 1
+		o=\$(findmnt -no SOURCE,OPTIONS $2); echo \"\$o\"
+		echo \"\$o\" | grep -qE '^/dev/mapper/$1(\\[| )' && echo \"\$o\" | grep -qw nosuid && echo \"\$o\" | grep -qw nodev"
+}
+
+sim_unlock_play() {
+	local -
+	local lock right wrong
+	set +e
+	echo "===== server-unlock-arrays.yml, in a terminal, from the runner"
+	if ! command -v ansible-playbook > /dev/null; then
+		fail_or_skip "no ansible-playbook here"
+		return 0
+	fi
+	# simextra: LUKS2 on a loop device, with its passphrase as the key file's whole content,
+	# which is what a typed passphrase is; a btrfs inside; crypttab and fstab lines in the
+	# shape of the array's, noauto. /var/simextra, since the root is read-only.
+	if ! { printf '%s\n' "$password"; cat <<SETUP; } | ssh_as gavin@127.0.0.1 "sudo -S -p '' bash -s" > simextra.log 2>&1; then
+set -e
+cp -a /etc/crypttab /root/crypttab.sim; cp -a /etc/fstab /root/fstab.sim
+truncate -s 200M /var/tmp/simextra.img
+dev=\$(losetup -f --show /var/tmp/simextra.img)
+printf '%s' '$simextra_password' | cryptsetup luksFormat -q --type luks2 --pbkdf pbkdf2 --pbkdf-force-iterations 1000 --key-file=- "\$dev"
+printf '%s' '$simextra_password' | cryptsetup open --key-file=- "\$dev" simextra
+mkfs.btrfs -q /dev/mapper/simextra
+cryptsetup close simextra
+printf 'simextra %s none luks,noauto,password-cache=no\n' "\$dev" >> /etc/crypttab
+printf '%s\n' '/dev/mapper/simextra /var/simextra btrfs noauto,nofail,x-systemd.after=systemd-cryptsetup@simextra.service,nosuid,nodev 0 0' >> /etc/fstab
+mkdir -p /var/simextra
+systemctl daemon-reload
+echo "simextra is on \$dev"
+SETUP
+		echo "FAIL could not make simextra:"
+		sed 's/^/    /' simextra.log
+		return 0
+	fi
+	sed 's/^/    /' simextra.log
+	cat > "$unlock_inv" <<INV
+[fleet]
+three ansible_host=127.0.0.1 ansible_port=$static_port ansible_user=gavin ansible_ssh_private_key_file=$PWD/key ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+three-b ansible_host=127.0.0.1 ansible_port=$static_port ansible_user=gavin ansible_ssh_private_key_file=$PWD/key ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' unlock_volumes='[{"name": "simextra", "mount": "/var/simextra"}]'
+sim-gone ansible_host=127.0.0.1 ansible_port=9 ansible_user=gavin unlock_volumes='[{"name": "gone", "mount": "/media/gone"}]'
+[control]
+localhost
+INV
+	( umask 077; printf 'ansible_become_password: "%s"\n' "$password" > "$unlock_vars" )
+	install -d -m 700 "$HOME/.ssh/cp"
+	right=$(printf '{"backup on three": "%s", "simextra on three-b": "%s"}' "$luks_password" "$simextra_password")
+	wrong=$(printf '{"backup on three": "%s", "simextra on three-b": "not-%s"}' "$luks_password" "$simextra_password")
+
+	echo "-- --check: reads, asks nothing, changes nothing"
+	unlock_run check '{}' -l three,three-b --check
+	[ "$unlock_rc" = 0 ] && echo "PASS --check exits 0" || echo "FAIL --check exited $unlock_rc"
+	unlock_asked check "" "--check asks for nothing"
+	unlock_says check "three backup: DRY RUN: locked" "--check reads the array as locked"
+	locked_check backup "--check leaves the array locked"
+
+	echo "-- no -K: sudo is checked, and refused readably, before any prompt"
+	unlock_become=()
+	unlock_run nosudo "$right" -l three
+	unlock_become=(-e "@$unlock_vars")
+	unlock_asked nosudo "" "with no sudo password the play asks for no passphrase"
+	if [ "$unlock_rc" != 0 ] && grep -qE 'Check sudo answers on three .*FAILED' unlock-nosudo.log &&
+		grep -qiE 'sudo password|password is required' unlock-nosudo.log; then
+		echo "PASS with no sudo password the play stops at its sudo check, saying why"
+	else
+		echo "FAIL with no sudo password the play did not stop at its sudo check with the reason (exit $unlock_rc):"
+		grep -E 'sudo|Error|FAILED' unlock-nosudo.log | tail -n 6 | sed 's/^/    /'
+	fi
+	grep -q 'output has been hidden' unlock-nosudo.log &&
+		echo "FAIL the only word on the sudo failure is that output was hidden" ||
+		echo "PASS the sudo failure is not hidden by no_log"
+	locked_check backup "with no sudo password the array stays locked"
+
+	echo "-- the array's passphrase, and a wrong one for simextra; sim-gone unreachable"
+	unlock_run first "$wrong"
+	unlock_asked first "backup on three,simextra on three-b" "the play asks once for each locked volume, across both hosts, naming each"
+	unlock_says first "three backup: unlocked, and mounted at /media/backup" "the array is unlocked"
+	open_check backup /media/backup "the array is mounted from /dev/mapper/backup, nosuid and nodev, and systemd-cryptsetup@backup.service is active"
+	unlock_says first "three-b simextra: failed: wrong passphrase; still locked" "a wrong passphrase is reported"
+	locked_check simextra "a wrong passphrase leaves simextra locked, its unit not failed, nothing waiting"
+	unlock_says first "sim-gone gone: unreachable" "a host nothing answers is reported unreachable"
+	[ "$unlock_rc" != 0 ] && echo "PASS the play ends failed after a wrong passphrase, having done the rest" ||
+		echo "FAIL the play exited 0 after a wrong passphrase"
+
+	echo "-- the array already open; Enter alone for simextra"
+	unlock_run decline '{"simextra on three-b": ""}' -l three,three-b
+	unlock_asked decline "simextra on three-b" "an open array is not asked for; the locked volume is"
+	unlock_says decline "three backup: already open" "the open array is reported already open"
+	unlock_says decline "three-b simextra: left locked: no passphrase given" "Enter alone is reported as left locked, no passphrase given"
+	locked_check simextra "Enter alone leaves simextra locked and its unit never started"
+	[ "$unlock_rc" = 0 ] && echo "PASS a declined volume is not a failure" || echo "FAIL the play exited $unlock_rc with one volume declined"
+
+	echo "-- the README's lock command, then both passphrases"
+	lock=$(awk '/^# lock three.s array/ { want = 1 } want && /^ssh -t three / { print; exit }' "$repo/hosts/three/leap/README.md" |
+		sed "s/^ssh -t three '//; s/'\$//")
+	echo "    the README's lock: $lock"
+	if [ -n "$lock" ] && SIM_SUDO_PW=$password python3 -I "$here/host/unlock.py" \
+		-i key -p "$(cat port)" -o StrictHostKeyChecking=no -o UserKnownHostsFile=known \
+		-o BatchMode=yes gavin@127.0.0.1 -- "$lock" > lock.log 2>&1 && grep -q '^locked' lock.log; then
+		echo "PASS the README's lock command locks the array the play unlocked"
+	else
+		echo "FAIL the README's lock command did not print locked:"
+		tail -n 8 lock.log | sed 's/^/    /'
+	fi
+	locked_check backup "the array is closed after the lock"
+	box_check "Docker stopped with the mount" '! systemctl is-active --quiet docker'
+	unlock_run again "$right" -l three,three-b
+	unlock_asked again "backup on three,simextra on three-b" "the play asks for both locked volumes"
+	unlock_says again "three backup: unlocked" "the array is unlocked again"
+	unlock_says again "three-b simextra: unlocked" "simextra is unlocked with its passphrase"
+	open_check backup /media/backup "the array is open and mounted, nosuid and nodev, its unit active"
+	open_check simextra /var/simextra "simextra is open and mounted, nosuid and nodev, its unit active"
+	[ "$unlock_rc" = 0 ] && echo "PASS the play exits 0 when every volume unlocks" || echo "FAIL the play exited $unlock_rc"
+	# The patterns from a file, not grep's arguments, which would put them in a process list.
+	box_check "neither passphrase is in the box's journal" "
+		p=\$(mktemp); printf '%s\n' '$luks_password' '$simextra_password' > \"\$p\"
+		journalctl -b --no-pager | grep -qFf \"\$p\"; r=\$?; rm -f \"\$p\"; [ \"\$r\" = 1 ]"
+
+	# simextra goes, and crypttab and fstab are put back as the README leaves them.
+	box_check "simextra is removed and crypttab and fstab put back" '
+		systemctl stop var-simextra.mount systemd-cryptsetup@simextra.service
+		cp -a /root/crypttab.sim /etc/crypttab && cp -a /root/fstab.sim /etc/fstab && rm /root/crypttab.sim /root/fstab.sim
+		losetup -j /var/tmp/simextra.img -O NAME --noheadings | xargs -r losetup -d
+		rm -f /var/tmp/simextra.img; rmdir /var/simextra; systemctl daemon-reload
+		! grep -q simextra /etc/crypttab /etc/fstab'
+	rm -f "$unlock_inv" "$unlock_vars"
+}
+
 sim_after_reboot() {
 	echo "===== the array after the reboot, unlocked again"
-	sim_unlock || return 0
+	# The fresh box is unlocked by the play, the migrated one by the README's command, which
+	# the fresh box already ran after its first boot.
+	if [ "$variant" = fresh ]; then
+		sim_unlock_play
+	else
+		sim_unlock || return 0
+	fi
 	as_root three-unlocked.sh again
 }

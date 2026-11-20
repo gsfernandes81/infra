@@ -460,8 +460,10 @@ make it live data. Re-check before trusting it.
 
 ## `zero`'s encrypted member: encrypted now, protection off
 
-Decided by the owner on 2026-11-19, while at the cluster for the disk swap
-([`plans/visit-runbook.md`](../plans/visit-runbook.md) § Slice 2).
+Decided by the owner on 2026-11-19, while at the cluster for the disk swap, slice 2 of the
+visit, done 2026-11-19 to 20. Its commands as run are in
+`git show 774eb42:plans/visit-runbook.md` § Slice 2, the starting point when the WD
+Elements disk is replaced the same way.
 
 | Decision | Because |
 |---|---|
@@ -476,6 +478,11 @@ Decided by the owner on 2026-11-19, while at the cluster for the disk swap
 | **`install-system-file` checks a dmcrypt entry by opening it** | A wrong entry costs a mount, which `nofail` and the immutable mountpoints absorb; an entry without `key=` costs the boot. So the check refuses a placeholder, an entry without `key=`, a key file others can read, a `source=` that `findfs` cannot resolve, and a key that does not open the volume (`cryptsetup open --test-passphrase`). Calibrated against a real LUKS2 volume in CI, where each refusal is shown refusing and the good entry passing. |
 | **One shutdown for the move and the reboot test** | The new disk goes into `sdb`'s bay at the same shutdown that tests the unattended unlock. Everything is named by UUID, so the move changes no file, and the boot that is tested is the configuration `zero` keeps. |
 | **A LUKS header backup is optional for this member** | The array's other copy covers it: a damaged header costs a second replace, not data. If one is taken, it is secret-bearing (with the key file or the passphrase it opens the disk, even after a keyslot is killed on the disk itself), so it never sits beside `/etc/keys`, in the repo or in `~/.infra-backups`. |
+| **util-linux's `blkid` guards the format, not BusyBox's** (found at the swap) | The guard before `luksFormat` refuses a device on which `blkid -p` finds a signature. BusyBox's `blkid`, Alpine's default, ignores `-p` and exits 0 on a blank disk, so the guard would have refused to format. |
+| **A 4096-byte bcache block and LUKS sector, set rather than detected** | bcache refuses a backing block smaller than the cache set's, and at registration one smaller than the disk's logical sector, which a USB bridge may report as 4096; 4096 suits a bridge reporting 512 as well. `--sector-size 4096` matches it and btrfs's 4 KiB sectors, where cryptsetup would pick from the device it sees. |
+| **The disk's `add` event is sent again after `make-bcache`** | mdev made the disk's `/dev/disk/by-uuid` links when it was plugged in, before the bcache superblock existed, and `bcache-register` registers by that link at boot. A link missing then is missing at boot. |
+| **Nothing reboots between the replace's start and the install of `bcache-register` and `dmcrypt`** | btrfs refuses to mount an array whose replace target is missing, and until those files nothing at boot registers the new disk or opens its LUKS volume. The replace runs with `-r`, so the failing disk is read only for a block whose other copy is bad. |
+| **The old member is wiped on another machine, never `zero`** | Its old bcache superblock could be registered again on `zero`, and it holds Immich's photos unencrypted. |
 
 ## Two things the original inventory got wrong
 
@@ -941,6 +948,26 @@ admitted tokens.
 
 **Not covered:** `KbdInteractiveAuthentication` is still on in `sshd-infra.conf`; turning
 it off is a change to sshd itself, for the two-phase procedure, and is not chosen.
+
+## Each Pi's ssh alias has a `-cf` and a `-ts` name, and the bare name is movable
+
+**Decided 2026-11-20 (owner).** `client-home-ssh-config.yml` writes `Host <box> <box>-cf`
+for the tunnel and, beside it, `Host <box>-ts` for the box's tailnet address, with no
+ProxyCommand. Both share `HostKeyAlias <box>`, which the bare name already had.
+
+- **The bare name sits on the `-cf` line so it can move.** If the fleet ever leaves
+  Cloudflare, `<box>` moves to the `-ts` line in the template, and everything that says
+  `ssh <box>`, the inventory and the jump aliases included, follows without an edit.
+  `docs/ssh-clients.md` § *The fleet* has the steps.
+- **One `HostKeyAlias` across both**, so the run that adds them, and a later move of the
+  bare name, never looks like a changed host key: it is the same sshd, checked under the
+  same name.
+- **The addresses are `tailnet_addresses` in `ansible/group_vars/all.yml`**, one list,
+  where a play on `control` reads it as it reads `dns_zone`. A box with no line gets no
+  `-ts`, and the play says which. Today `zero`, `one` (added 2026-11-20, from its admin-console
+  entry) and `three`; `two` is not on the tailnet. The reviewed `/etc` copies that name the same addresses
+  (the backup's `from=` lines and `backup-ssh-config`) stay literals, kept in step by hand,
+  because boot-path files are never generated from a template.
 
 ## Pinned images are bumped by a pull request, from Dependabot
 
@@ -2450,7 +2477,7 @@ out of writing them and is proven by `alpine-sim.yml`.
 ## `three` flies to Singapore on 21 November
 
 **Decided 2026-11-18**, the owner's call. It sets the visit's order
-([`plans/visit-runbook.md`](../plans/visit-runbook.md) § The slices): `one`'s move first, `three`'s
+([`plans/visit-runbook.md`](../plans/visit-runbook.md) § What the visit did): `one`'s move first, `three`'s
 first boot and first push straight after, so the push finishes in the UK, and a restore
 from one of its snapshots before it leaves, as [`plans/three.md`](../plans/three.md) asks.
 `zero`'s disk swap waits if time is short, since `three` does not need it. The Wi-Fi
@@ -2700,6 +2727,34 @@ Alpine copies for `one` too, since `one` keeps both.
   edge/testing, pinned, run with `--no-dbus` from an hourly periodic script. The pull runs
   daily at 01:00 at 32 Mbit/s. `autodefrag` leaves the `/media/immich` line, since it
   unshares snapshot extents (issue #23 for a timed defrag).
+- **Each box reads from the other, and neither holds a key that writes to it** (the owner
+  approved the design and its keys, 2026-11-19). `three` reads `zero`'s snapshots for the
+  pull; `zero` reads its own backups on `three` for a restore, which the owner agreed to.
+  The one write-only key the fleet allowed between boxes (§ *`three` is the off-site
+  backup*) becomes two read-only ones. Each key runs an rsync daemon as an unprivileged
+  user holding only `CAP_DAC_READ_SEARCH`, which the owner agreed to for `zero`'s.
+- **What a compromised box can do, as approved.** A compromised `zero` can read its own
+  backups on `three` and serve bad data to the next pull. It cannot write, delete or run
+  anything on `three`, and `three`'s earlier snapshots are untouched; what it serves is
+  parsed by rsync as the unprivileged backup user, in a sandbox that writes only
+  `current/` and `state/`. A compromised `three` can read `zero`'s snapshots, the data it
+  exists to hold, and cannot write to `zero`, delete a snapshot or run anything there.
+  What a bug in either daemon would reach is in § *The pull, as built*.
+- **Retention** (the owner, 2026-11-19): `zero` keeps 24 hourly and 7 daily snapshots;
+  `three` keeps 14 daily, 8 weekly and 12 monthly, with no quarterly or yearly step.
+  Snapshots are named by snapper's numbers. The daily pull replaced the first proposal, a
+  poll about every 15 minutes.
+- **The alert is deferred** (the owner, 2026-11-19): a dead man's switch across the whole
+  fleet, as a mesh, from a prebuilt tool, designed separately. Until then nothing alerts
+  when the pull stops, and the gap is in the phase table of `management-plane.md`.
+- **Dead simple scripts, prebuilt tools where they exist, Python only where a script would
+  otherwise be complicated** (the owner's aim). None needed Python: the pull is about 40
+  lines of POSIX shell, and snapper and rsync do the rest.
+- **snapper on `zero` is pinned in apk's world and run from an hourly periodic script**,
+  so it gets no update until `zero` moves to Leap (revisit at Alpine 3.25,
+  `hosts/zero/system/README.md` § The backup). `.snapshots` is a nested subvolume made by
+  hand at the move, root's, mode 750, and `/mnt/ext`, the array's top level, stays
+  `noauto`.
 
 ## The pull, as built
 
@@ -2793,6 +2848,21 @@ and refine the owner's design without changing it.
   the runner's network, not the Ubuntu runner itself: snapper 0.13.1 from edge/testing,
   util-linux's `setpriv`, Alpine's sudo and BusyBox's `adduser` and `flock` are what `zero`
   runs, where the runner's would have been Ubuntu's, of another version.
+- **A snapshot is finished once its `info.xml` exists.** snapper writes it after the btrfs
+  snapshot, and deleting the highest snapshot leaves its directory without one, so the
+  pull takes the highest number with an `info.xml`. It compares both the number and
+  `info.xml`'s time with `last-pulled`, since a recreated snapper config numbers from 1
+  again.
+- **Nested subvolumes stay on `zero`.** A snapshot leaves out every nested subvolume, so
+  `data/thumbs` and `data/encoded-video`, which Immich regenerates, and `.snapshots` were
+  made nested at the move and are never pulled; rsync copies each as an empty directory.
+- **`current/` is an ordinary writable copy, rewritten in place** (`--inplace`), so a
+  changed file rewrites only its changed blocks and `three`'s snapshots share every
+  unchanged one.
+- **The backup user can rename `current/.snapshots`, and that is accepted.** It owns
+  `current/`, so it could hide the history from snapper, but never change or delete it:
+  snapshots are root's and read-only, deleting a subvolume needs root, and a rename cannot
+  leave the subvolume.
 
 ## The backup's names and layout on `three`
 
@@ -2837,7 +2907,75 @@ holding nothing but Syncthing, so the change costs least now.
   `sudoers-backup` loop had the same shape.
 - **`snapper`'s config on `three` keeps its name, `received-immich`**, though the level it
   was named after is gone: on `three` it says which side of the pull it is, beside `zero`'s
-  `immich`.
+  `immich`. The owner agreed on 2026-11-20, asking that the name suit later subvolumes:
+  it does, as `received-<subvolume>`, each with its own `/media/backup/<subvolume>/` and
+  restore module. What a second subvolume would change is the pull, which names `immich`
+  (`backup-pull`'s `dst=`), into template units, `backup-pull@<subvolume>`.
+- **snapper's `fsetfilecon … errno: 95` on `three` is expected**: the array mounts with a
+  fixed `context=` (Syncthing's container label), so no file on it can take a label of its
+  own, and snapper, which tries to label `.snapshots`, says so on each run and carries on.
+  Seen at the first pull, 2026-11-20, whose snapshot was taken.
+
+## Routine actions are plays: the unlock and the dev containers' start
+
+**Decided 2026-11-20**, the owner's call: a routine action the owner types on the phone
+becomes an Ansible play, so the interface to the fleet stays Ansible rather than a set of
+remembered `ssh -t` lines. Two so far.
+
+- **`server-unlock-arrays.yml` unlocks every encrypted volume a host lists in its
+  `host_vars` file (`unlock_volumes`, a crypttab name and a mount point each)**, because the
+  list is the host's own and the play derives the units from it. `three`'s array is the
+  only entry; `zero`'s joins with an OpenRC branch, which the play refuses to guess at
+  until it is written.
+- **An empty answer declines that volume**: Enter alone leaves it locked, and the summary
+  says "left locked: no passphrase given". Typing a passphrase is the consent to unlock, so
+  one run can open some volumes and not others, and nobody has to remember a flag to skip
+  one. The summary does not say who declined, because without a terminal `pause` answers
+  empty for every prompt; detecting the terminal was set aside (Fable's review), since a
+  check that cannot be calibrated on Termux from here could refuse the owner abroad.
+- **sudo is checked on each host before any passphrase is asked for**, by a plain become of
+  `true`, because the unlock is `no_log` and a sudo failure there showed only that its output
+  was hidden, after the passphrase had been typed (Fable's review).
+- **On systemd the play answers the request `systemd-cryptsetup@<name>.service` makes**,
+  through `systemd-reply-password`, which reads the passphrase on stdin, because then the
+  unit is the one that unlocks: every crypttab option applies, `password-cache=no`
+  included, and the unit is active afterwards, so the README's lock command, `PartOf=` on
+  Docker and the timers the mount wants behave as after the manual unlock. Set aside:
+  `cryptsetup open` with the passphrase on stdin, which bypasses crypttab's options and
+  leaves the unit inactive unless started after; and a key file for `systemd-cryptsetup
+  attach`, which is a file.
+- **The passphrase is asked for at a prompt, never read from a file or an extra var**, and
+  reaches the box on the command's stdin, which under pipelining is the ssh session's own.
+  A command line is in `ps` and in sudo's journal, a file is a second copy of the one
+  secret the box is meant to hold alone, and `-e` is shell history. The prompt is one
+  `pause` looped over every host's locked volumes, because `pause` runs once per play on
+  the first host; a terminal-driven run in `microos-sim.yml` proves it asks once per
+  volume across hosts.
+- **A wrong passphrase is a failure of that volume, not of the run**: the play reports it,
+  goes on, and ends with one line per host and volume. A host with a failed volume fails
+  its last check, so the recap shows it.
+- **`server-start-dev-containers.yml` runs `make up` in `dev/` on zero as root and prints
+  its output**, the play form of `ssh -t zero 'cd ~/infra/dev && make up'`, because that
+  was the command the owner typed when the containers were down, and `dev/Makefile` already
+  allows root and builds at the checkout owner's uid. `up` only: nothing here stops or
+  removes a container. It does not replace `server-deploy-compose.yml -e deployment=dev`,
+  which plans and asks; this is the break glass, as a play. make runs as a polled async job,
+  so a phone that drops its connection mid-build does not stop the build.
+
+## The tailnet stays open between the boxes
+
+**Decided 2026-11-20**, the owner's call, before `three` shipped.
+
+- **The tailnet's policy stays allow-all among the fleet's boxes**: no rule limits what
+  `zero`, `one`, `two` or `three` reach of each other over it. The tailnet is given no trust
+  of its own: what guards each box is its sshd (keys only, no root, `PermitOpen`), its
+  forced commands and its firewall, the same whichever network a connection comes over, so
+  a rule on the tailnet would add a second place to keep in step without adding a boundary.
+  And the box-to-box ssh mesh (each box reachable through each of the others) is meant one
+  day to run over the tailnet as well, which per-pair rules would get in the way of.
+- **Set aside**: the 2026-11-05 phase-table item, which limited `three` to `zero`'s sshd for
+  the pull and `zero` to `three`'s for restores. The backup's own confinement (two keys, each
+  forced into a read-only rsync daemon) does not rely on the network.
 
 ## The dev stack runs as 1001 on every host
 

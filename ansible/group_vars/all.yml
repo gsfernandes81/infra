@@ -26,6 +26,28 @@ fleet_inventory_report: "{{ control_checkout }}/docs/fleet-inventory.md"
 # rather than the fleet's. Same call as `${VAR:?message}` over `:-` in CLAUDE.md.
 dns_zone: gsrpi.uk
 
+# ── each box's tailnet address ──────────────────────────────────────────────
+# THE ONE RECORD of the fleet's tailnet addresses, for anything that derives from them:
+# today the `<host>-ts` ssh aliases client-home-ssh-config.yml writes. A box with no line
+# here gets no -ts alias, and the play's last message names it. An address, never a
+# MagicDNS name (CLAUDE.md § Landmines, write the address).
+#
+# Add a box when it joins: `tailscale ip -4` on it, or server-create-restore-key.yml's
+# output for zero. A tagged node keeps its address for as long as it stays in the tailnet;
+# deleting it from the admin console and re-joining hands out a new one, which goes here.
+#
+# NOT YET DERIVED FROM IT, and kept in step by hand: the reviewed /etc copies that name the
+# same addresses (hosts/zero/system/backup-authorized-keys, and under hosts/three/leap/system/
+# restore-authorized-keys and backup-ssh-config). Boot-path files are never generated from a
+# template, so they will not derive from this either; a check that compares them could.
+#
+# Here and not in host_vars, so the client plays, which target `control`, read it as a plain
+# variable, as they read dns_zone, and which boxes have one is a single list.
+tailnet_addresses:
+  zero: 100.121.158.58
+  one: 100.98.28.101
+  three: 100.101.45.78
+
 # ── the Cloudflare API token ─────────────────────────────────────────────────
 # One USER token, the union of what every play that talks to Cloudflare needs, in a file
 # on the machine running the play — the phone, WSL, any client. Every such play reads it

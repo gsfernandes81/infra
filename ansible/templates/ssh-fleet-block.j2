@@ -4,7 +4,9 @@
 # The fleet. GENERATED: edit ansible/templates/ssh-fleet-block.j2 and re-run
 # playbooks/client-home-ssh-config.yml, not this. Reasoning: docs/ssh-clients.md
 #
-#   <host>                        via that box's own cloudflared tunnel
+#   <host>                        the default path: today the same entry as <host>-cf
+#   <host>-cf                     via that box's own cloudflared tunnel
+#   <host>-ts                     over the tailnet, to its address; only for a box with one
 #   <host>-local                  direct on the LAN
 #   <host>-zero|-one|-two|-three  through another box, over the LAN
 {% if adb_jump %}
@@ -13,7 +15,8 @@
 #
 # Every box is reachable through each of the others. That mesh exists because on
 # 2026-08-23 `two`'s tunnel was stopped while it was the only configured route to it.
-# `three`'s LAN paths work only while it is on this LAN; off-site, its tunnel is the way.
+# `three`'s LAN paths work only while it is on this LAN; off-site, its tunnel is the way,
+# and `three-ts` the other, while the client is on the tailnet.
 #
 # ORDERING: ssh takes the FIRST value it obtains for each keyword, so this block sits
 # ABOVE `Host *`. The playbook inserts it there rather than appending.
@@ -66,33 +69,37 @@ Host *-two
 Host *-three
   ProxyJump three
 
-# -- through each box's own cloudflared tunnel ---------------------------------
-# ssh-<host>.<dns_zone>, the ssh rule in each box's tracked cloudflared-config.yml.
-Host zero
-  HostName ssh-zero.{{ dns_zone }}
-
-Host one
-  HostName ssh-one.{{ dns_zone }}
-
-Host two
-  HostName ssh-two.{{ dns_zone }}
-
-Host three
-  HostName ssh-three.{{ dns_zone }}
-
-# Listed explicitly, not `zero*`: that would also catch zero-local and zero-two, which
-# must NOT go through the edge. Each box's ssh hostname sits behind an Access application
-# that admits per-client service tokens (server-create-fleet-ssh-access.yml), so the
-# ProxyCommand is a script that loads this client's fleet token, when it has one, into the
-# one cloudflared it runs. Without one it warns and connects anyway: that works on a host
-# not yet gated, and on a gated one the warning names the fix.
-Host zero one two three
+# -- the default path, the tunnel, and the tailnet -----------------------------
+# <host>-cf is ssh-<host>.<dns_zone>, the ssh rule in each box's tracked
+# cloudflared-config.yml, behind an Access application that admits per-client service
+# tokens (server-create-fleet-ssh-access.yml). So the ProxyCommand is a script that loads
+# this client's fleet token, when it has one, into the one cloudflared it runs. Without one
+# it warns and connects anyway: that works on a host not yet gated, and on a gated one the
+# warning names the fix.
+#
+# <host>-ts is the box's tailnet address, a literal (tailnet_addresses in
+# ansible/group_vars/all.yml), with no ProxyCommand. It works only while this client is on
+# the tailnet, which on the phone means giving Tailscale the one VPN slot.
+#
+# THE BARE <host> IS ON THE -cf LINE. Moving the fleet off Cloudflare is moving it, in the
+# template, to the -ts line, and every `ssh <host>` follows. Both entries share the box's
+# HostKeyAlias below, so the move never looks like a changed host key.
+{% for h in fleet_boxes %}
+Host {{ h }} {{ h }}-cf
+  HostName ssh-{{ h }}.{{ dns_zone }}
 {% if windows %}
   ProxyCommand {{ win_fleet_wrapper }} %h
 {% else %}
   ProxyCommand {{ fleet_access_ssh }} %h
 {% endif %}
+{% if h in tailnet_addresses %}
 
+Host {{ h }}-ts
+  HostName {{ tailnet_addresses[h] }}
+  ConnectTimeout 10
+{% endif %}
+
+{% endfor %}
 # NO DEV CONTAINER IS IN THIS BLOCK, and the reason is what they are rather than where
 # they are. `zero-dev-dd`, `zero-dev-ds` and `zero-dev-or3` were aliases for the
 # `ssh-zero-dev-*` rules on ZERO'S host tunnel - a door zero opens on a container's
@@ -148,20 +155,21 @@ Host s24
 
 # -- one host key per BOX, not per path ----------------------------------------
 # Else a rarely-used route has no stored key and prompts you to accept whatever it is
-# handed, mid-rescue. To clear one: ssh-keygen -R zero
-Host zero zero-local zero-one zero-two zero-three zero-s24
+# handed, mid-rescue. The -cf and -ts entries share it, so moving the bare name between
+# them changes no key. To clear one: ssh-keygen -R zero
+Host zero zero-cf{% if 'zero' in tailnet_addresses %} zero-ts{% endif %} zero-local zero-one zero-two zero-three zero-s24
   HostKeyAlias zero
 
-Host one one-local one-zero one-two one-three one-s24
+Host one one-cf{% if 'one' in tailnet_addresses %} one-ts{% endif %} one-local one-zero one-two one-three one-s24
   HostKeyAlias one
 
-Host three three-local three-zero three-one three-two three-s24
+Host three three-cf{% if 'three' in tailnet_addresses %} three-ts{% endif %} three-local three-zero three-one three-two three-s24
   HostKeyAlias three
 
 # ChaCha20 first: `two` is an ARM1176 with no AES acceleration, where software AES is both
 # slower AND exposed to cache-timing side channels. Ordered, not pinned, so this rescue
 # path cannot fail closed.
-Host two two-local two-zero two-one two-three two-s24
+Host two two-cf{% if 'two' in tailnet_addresses %} two-ts{% endif %} two-local two-zero two-one two-three two-s24
   HostKeyAlias two
   Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
 

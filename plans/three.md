@@ -216,8 +216,8 @@ duty must not cut the slice between steps 4 and 8. The owner:
 11. Wipes `sdb` on another machine, never `zero`, where its old bcache superblock could be
     registered again. It holds Immich's photos, unencrypted.
 
-The commands, each step's checks and its way back are
-[`visit-runbook.md`](visit-runbook.md) § *Slice 2*.
+Done 2026-11-19 to 20. The commands, each step's checks and its way back, as run, are in
+`git show 774eb42:plans/visit-runbook.md` § *Slice 2*.
 
 ## Deferred, each until its trigger
 
