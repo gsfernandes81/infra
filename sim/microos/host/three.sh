@@ -558,9 +558,11 @@ sim_backup() {
 	out=$(zx "ssh -i /root/.ssh/restore -p $(cat port) -o BatchMode=yes restore@127.0.0.1 'echo SIM-SHELL-OPENED' < /dev/null" 2>&1 || true)
 	grep -q SIM-SHELL-OPENED <<<"$out" && echo "FAIL the restore key ran a command of its own" ||
 		echo "PASS the restore key runs no command of its own"
-	out=$(zrs "/etc/hostname restore@127.0.0.1::immich/sim-up" 2>&1 || true)
+	# The exit code as well as the words: an empty output is an upload that went through
+	# (exit 0) or a connection that never answered, and the two need telling apart.
+	rc=0; out=$(zrs "/etc/hostname restore@127.0.0.1::immich/sim-up" 2>&1) || rc=$?
 	grep -q 'read only' <<<"$out" && echo "PASS an upload through the restore key is refused, read only" ||
-		echo "FAIL an upload through the restore key was not refused as read only: $(tail -n 1 <<<"$out")"
+		echo "FAIL an upload through the restore key was not refused as read only (rsync exit $rc): $(tail -n 3 <<<"$out" | tr '\n' ' ')"
 	zx 'rm -f /tmp/sim-shadow'
 	zrs "restore@127.0.0.1::immich/../../../etc/shadow /tmp/sim-shadow" > /dev/null 2>&1 || true
 	zx 'test ! -e /tmp/sim-shadow' && echo "PASS nothing outside the module is read through the restore key" ||
