@@ -789,7 +789,7 @@ a dedicated account, not this line.
 
 **One tunnel for every dev container, the hub's**, its connector the `dev-cloudflared`
 sidecar in the `tunnel` profile, pinned by digest as the deployment sidecars are, and run as
-the checkout's owner so the gavin-owned 0600 `tunnel.json` serves it. Two hostnames:
+1001:1001, so it reads `tunnel.json` (0640, group 1001) through the group. Two hostnames:
 `dev.gsrpi.uk`, the hub's sshd, and `or3-dev.gsrpi.uk`, or3's own sshd, kept for the
 phone's reverse forward to the vessel (`cloudflared.yml`). That hostname, and the phone's
 `or3-dev` alias for it, kept their `-dev` when the container lost it: renaming them is a
