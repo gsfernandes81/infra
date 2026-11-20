@@ -45,6 +45,7 @@ dns_zone: gsrpi.uk
 # variable, as they read dns_zone, and which boxes have one is a single list.
 tailnet_addresses:
   zero: 100.121.158.58
+  one: 100.98.28.101
   three: 100.101.45.78
 
 # ── the Cloudflare API token ─────────────────────────────────────────────────

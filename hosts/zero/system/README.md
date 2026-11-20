@@ -165,7 +165,8 @@ sudo /etc/periodic/hourly/snapper-immich; and sudo snapper --no-dbus -c immich l
 
 It lists snapshot 0, `current`, and 1, `timeline`. `three`'s first pull is
 `hosts/three/leap/README.md`'s. Once it has worked, the push key goes:
-`sudo rm /root/.ssh/mirror-backup /root/.ssh/mirror-backup.pub`.
+`sudo rm /root/.ssh/mirror-backup /root/.ssh/mirror-backup.pub`, **done on 2026-11-20**, after
+the first pull.
 
 The ntfy URL that `server-store-backup-ntfy-url.yml` stored for the push's alert is in
 `/var/lib/mirror-backup`, a name from before the rename (`docs/decisions.md` § *The backup's

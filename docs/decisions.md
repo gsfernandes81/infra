@@ -957,8 +957,8 @@ ProxyCommand. Both share `HostKeyAlias <box>`, which the bare name already had.
   same name.
 - **The addresses are `tailnet_addresses` in `ansible/group_vars/all.yml`**, one list,
   where a play on `control` reads it as it reads `dns_zone`. A box with no line gets no
-  `-ts`, and the play says which. Today `zero` and `three`; `one` is on the tailnet but its
-  address is recorded nowhere yet. The reviewed `/etc` copies that name the same addresses
+  `-ts`, and the play says which. Today `zero`, `one` (added 2026-11-20, from its admin-console
+  entry) and `three`; `two` is not on the tailnet. The reviewed `/etc` copies that name the same addresses
   (the backup's `from=` lines and `backup-ssh-config`) stay literals, kept in step by hand,
   because boot-path files are never generated from a template.
 
