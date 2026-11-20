@@ -168,7 +168,8 @@ The run then checks, each as PASS or FAIL, and any FAIL fails the job:
   alone for `simextra`, asks only for `simextra`, reports the array already open and
   `simextra` left locked by you, and passes. Then the README's lock command, read out of
   the README, prints `locked` and stops Docker, and a third run unlocks both. No run's
-  output may hold a passphrase or the sudo password. `simextra` is removed after, and
+  output may hold a passphrase or the sudo password, and the box's journal holds neither
+  passphrase. `simextra` is removed after, and
   crypttab and fstab put back;
 - on `three`, zero's backup, pulled from the runner standing in for `zero`
   (`sim_backup` in `host/three.sh`, with `host/three-backup.sh` on the box), below.

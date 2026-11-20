@@ -83,7 +83,8 @@ must refuse a volume crypttab does not name, unprivileged, and then, with a LUKS
 loop device and its crypttab and fstab lines, report a wrong passphrase and leave the
 volume locked with its unit neither active nor failed, unlock it with the right one at
 `-vv` through the default callback, leaving `systemd-cryptsetup@simrun.service` active and
-the volume mounted `nosuid`, and report it already open on a re-run without asking. The
+the volume mounted `nosuid`, and report it already open on a re-run without asking; and
+the runner's journal must not hold the passphrase. The
 unlock on Leap, three's own, is `microos-sim.yml`'s.
 
 Every run's output is searched for the auth keys, the topic and the private restore key,

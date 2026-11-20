@@ -491,7 +491,9 @@ says 'make up as uid 0 in /srv/fakeinfra/dev' && pass "make ran as root in dev/,
 # no branch for and must refuse without asking; and the runner, `one`, whose systemd it
 # does: a LUKS volume on a loop device with crypttab and fstab lines, a wrong passphrase, a
 # right one at -vv through the default callback, and the units stopped as the lock command
-# stops them. play-prompts.py types at the play's prompts in a terminal, as the owner does.
+# stops them, and the passphrase looked for in the runner's journal. play-prompts.py types at
+# the play's prompts in a terminal, as the owner does. The mount is /var/simrun: the
+# runner's /mnt is an fstab mount that fails, which a mount under it requires.
 echo "== the unlock play: OpenRC refused; the runner's systemd unlocks"
 run_pw=sim-unlock-$(openssl rand -hex 8)
 unlock() { # <answers as JSON> [ansible-playbook argument]...
@@ -505,7 +507,7 @@ unlock() { # <answers as JSON> [ansible-playbook argument]...
 	tail -n 30 play.log | sed 's/^/    | /'
 	return $rc
 }
-vols='{"unlock_volumes": [{"name": "simrun", "mount": "/mnt/simrun"}]}'
+vols='{"unlock_volumes": [{"name": "simrun", "mount": "/var/simrun"}]}'
 if unlock '{}' -l zero -e "$vols"; then fail "the play passed on OpenRC"; else
 	says 'zero simrun: failed: this play unlocks on systemd only so far' && pass "OpenRC is refused, by name" || fail "zero failed, but not as OpenRC"
 fi
@@ -526,8 +528,8 @@ else
 	printf '%s' "$run_pw" | sudo cryptsetup luksFormat -q --type luks2 --pbkdf pbkdf2 --pbkdf-force-iterations 1000 --key-file=- "$loopdev"
 	printf '%s' "$run_pw" | sudo cryptsetup open --key-file=- "$loopdev" simrun && sudo mkfs.ext4 -q /dev/mapper/simrun && sudo cryptsetup close simrun
 	printf 'simrun %s none luks,noauto,password-cache=no\n' "$loopdev" | sudo tee -a /etc/crypttab > /dev/null
-	echo '/dev/mapper/simrun /mnt/simrun ext4 noauto,nofail,nosuid,nodev 0 0' | sudo tee -a /etc/fstab > /dev/null
-	sudo mkdir -p /mnt/simrun && sudo systemctl daemon-reload
+	echo '/dev/mapper/simrun /var/simrun ext4 noauto,nofail,nosuid,nodev 0 0' | sudo tee -a /etc/fstab > /dev/null
+	sudo mkdir -p /var/simrun && sudo systemctl daemon-reload
 	if unlock '{"simrun on one": "not-it"}' -l one -e "$vols"; then fail "a wrong passphrase passed"; else
 		says 'one simrun: failed: wrong passphrase; still locked' && pass "a wrong passphrase is reported" || fail "a wrong passphrase was not reported as one"
 	fi
@@ -540,11 +542,13 @@ else
 		fail "the right passphrase did not unlock; the runner's journal:"
 		sudo journalctl -b --no-pager --since -2min | grep -iE 'simrun|crypt|mnt' | tail -n 40 | sed 's/^/    ! /'
 	fi
-	systemctl is-active --quiet systemd-cryptsetup@simrun.service && findmnt -no OPTIONS /mnt/simrun | grep -qw nosuid &&
+	systemctl is-active --quiet systemd-cryptsetup@simrun.service && findmnt -no OPTIONS /var/simrun | grep -qw nosuid &&
 		pass "systemd-cryptsetup@simrun.service is active and the volume mounted nosuid" || fail "not unlocked as after a manual unlock"
 	if unlock '{}' -l one -e "$vols"; then pass "a re-run passes"; else fail "a re-run failed"; fi
 	says 'one simrun: already open' && ! grep -q '^prompted: ' play.log && pass "an open volume is reported and not asked for" || fail "an open volume was asked for or misreported"
-	sudo systemctl stop mnt-simrun.mount systemd-cryptsetup@simrun.service
+	sudo journalctl -b --no-pager | grep -qF "$run_pw" && fail "the passphrase is in the runner's journal" ||
+		pass "the passphrase is nowhere in the runner's journal"
+	sudo systemctl stop var-simrun.mount systemd-cryptsetup@simrun.service
 	[ ! -e /dev/mapper/simrun ] && pass "stopping the mount and the unit locks it, as the README's lock does" || fail "stopping the units left it open"
 	if [ -e "$work/crypttab.absent" ]; then sudo rm -f /etc/crypttab; else sudo cp -a "$work/crypttab" /etc/crypttab; fi
 	sudo cp -a "$work/fstab" /etc/fstab && sudo losetup -d "$loopdev" && sudo systemctl daemon-reload

@@ -976,6 +976,10 @@ INV
 	open_check backup /media/backup "the array is open and mounted, nosuid and nodev, its unit active"
 	open_check simextra /var/simextra "simextra is open and mounted, nosuid and nodev, its unit active"
 	[ "$unlock_rc" = 0 ] && echo "PASS the play exits 0 when every volume unlocks" || echo "FAIL the play exited $unlock_rc"
+	# The patterns from a file, not grep's arguments, which would put them in a process list.
+	box_check "neither passphrase is in the box's journal" "
+		p=\$(mktemp); printf '%s\n' '$luks_password' '$simextra_password' > \"\$p\"
+		journalctl -b --no-pager | grep -qFf \"\$p\"; r=\$?; rm -f \"\$p\"; [ \"\$r\" = 1 ]"
 
 	# simextra goes, and crypttab and fstab are put back as the README leaves them.
 	box_check "simextra is removed and crypttab and fstab put back" '
