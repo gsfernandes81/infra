@@ -43,8 +43,9 @@ rootful.
 
 ~~`one` and `three` move~~ — done at the November 2026 visit: both run **openSUSE Leap
 16.1** in its Immutable mode (decided 2026-11-03), on Docker for now. **What is left:**
-`zero`'s move, `management-plane.md` phase 12, its own design, waiting only on the dev hub
-leaving it (phase 10) and the backup being proven (phase 11); then podman on `one` (phase
+`zero`'s move, `management-plane.md` phase 12, its own design, gated on nothing since Leap's
+proof on a Pi 4 and ordered after the dev hub leaving it (phase 10) and the backup being
+proven (phase 11); then podman on `one` (phase
 13) and on `zero` (phase 17). `two` stays on Alpine. The text below was written for
 MicroOS and holds for Leap's Immutable mode.
 
