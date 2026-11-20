@@ -194,4 +194,5 @@ The next session is the infra agent, starting in its container on `one`.
    `dev-hub-switch` and `dev-hub-handoff` once their branches are merged.
 6. **Next piece:** `zero` to Leap 16.1 Immutable. The owner's description: they are at the
    box with the new SD card and a Combustion stick, boot it, finish over ssh, and the
-   Alpine card is the way back. It gets its own design, as `one`'s and `three`'s did.
+   Alpine card is the way back. It gets its own design, as `one`'s and `three`'s did; it
+   is started on the branch `zero-leap`, in `plans/zero-leap.md`.
