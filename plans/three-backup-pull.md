@@ -195,7 +195,13 @@ array included, and for the immich backup to sit at `/media/backup/immich/` with
   procedure, `hosts/three/leap/README.md` § The rename, eighteen owner-run fish blocks with a
   way back at each; and its simulation, `microos-sim.yml`'s second `three` job
   (`SIM_VARIANT=migrate`).
-- **Not done:** the CI runs on the branch's head; the Fable review; on the boxes, all of it.
+- **The simulation's first run** (microos-sim 44695369706) passed the new box (`host
+  (three)`) and found a fault in the rename: a dry run of `install-system-file` without
+  `--allow-content-change` refuses a content change, so the loop never wrote `crypttab`.
+  The dry runs now pass it, and renames 9 and 11 refuse to run until what comes before them
+  is in place.
+- **Not done:** a green run of the rename's simulation; the Fable review; on the boxes, all
+  of it.
 - **PR #22** (the array as a play), for its change list: `lb_layout` accepts only top-level
   names (`^[A-Za-z0-9._-]+$`); the new layout needs nested entries (`immich`,
   `immich/current`, `immich/current/.snapshots`, `immich/state`), so the play must make

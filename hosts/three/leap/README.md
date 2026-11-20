@@ -351,13 +351,15 @@ else, stop and read the way back at the end.
    sudo install -d -m 755 /etc/systemd/system/media-backup.mount.d
    cd ~/infra
    for f in crypttab backup-mount.conf docker-backup.conf backup-scrub.service backup-scrub.timer
-       bin/install-system-file $f --new; and sudo bin/install-system-file $f --new --commit --allow-content-change; or break
+       bin/install-system-file $f --new --allow-content-change; and sudo bin/install-system-file $f --new --commit --allow-content-change; or break
    end
    ```
 
    `crypttab`'s diff changes its comments and its one line, to
    `backup LABEL=backup-luks none luks,noauto,password-cache=no`; the four others are new
-   files. Each ends `post-install checks: ok`.
+   files. Each ends `post-install checks: ok`. The dry run passes `--allow-content-change`
+   too: without it, it refuses `crypttab`'s change, and the loop stops before the write.
+   Rename 9 refuses to run until all five are in place.
 9. **The old files out**, the push's leftovers with them, then the users as the pull wants
    them and systemd reloaded. The old files hold no secret, so they are copied with their
    modes into one directory of root's, outside every directory they came from:
@@ -365,6 +367,10 @@ else, stop and read the way back at the end.
    ```fish
    # rename 9, on three: copy the old units and the push's leftovers into root's home, remove them, give backup no shell, make the restore user, reload systemd, and read what systemd now has
    sudo sh -euc '
+   grep -qE "^backup[[:space:]]+LABEL=backup-luks[[:space:]]" /etc/crypttab || { echo "rename 9: crypttab does not name backup yet, so rename 8 has not finished; nothing changed"; exit 1; }
+   for f in media-backup.mount.d/infra-wants.conf docker.service.d/infra-backup.conf backup-scrub.service backup-scrub.timer; do
+   	[ -e /etc/systemd/system/$f ] || { echo "rename 9: no /etc/systemd/system/$f, so rename 8 has not finished; nothing changed"; exit 1; }
+   done
    b=/root/rename-2026-11-20
    install -d -m 700 $b
    systemctl disable mirror-snapshot.timer mirror-scrub.timer 2> /dev/null || true
@@ -394,7 +400,7 @@ else, stop and read the way back at the end.
 
     ```fish
     # rename 10, on three: install the fan script that finds the drive by backup-luks, restart its unit (the stop sets the fan to full, the start picks the level again), and read what it found
-    cd ~/infra; and bin/install-system-file argon-fan; and sudo bin/install-system-file argon-fan --commit --allow-content-change; and sudo systemctl restart argon-fan.service
+    cd ~/infra; and bin/install-system-file argon-fan --allow-content-change; and sudo bin/install-system-file argon-fan --commit --allow-content-change; and sudo systemctl restart argon-fan.service
     journalctl -b -u argon-fan.service --since -2min --no-pager | grep -E 'drive found|no /dev/disk'
     ```
 
@@ -406,15 +412,18 @@ else, stop and read the way back at the end.
     `/etc` as it is when it is made.
 
     ```fish
-    # rename 11, on three: a new snapshot with /media/backup made and the empty /media/mirror removed, then read that it is the default and holds the right /media
-    sudo transactional-update --non-interactive run sh -c 'mkdir /media/backup && rmdir /media/mirror'
+    # rename 11, on three: only if renames 7 to 9 are all in place, a new snapshot with /media/backup made and the empty /media/mirror removed; then read that it is the default and holds the right /media
+    grep -qE '^backup[[:space:]]' /etc/crypttab; and grep -q '[[:space:]]/media/backup[[:space:]]' /etc/fstab; and test -e /etc/systemd/system/media-backup.mount.d/infra-wants.conf; and test ! -e /etc/systemd/system/mirror-scrub.timer; and sudo transactional-update --non-interactive run sh -c 'mkdir /media/backup && rmdir /media/mirror'
     findmnt -no SOURCE /; sudo btrfs subvolume get-default /
     set snap (sudo btrfs subvolume get-default / | sed -n 's|.* path @||p'); and sudo ls $snap/media
     ```
 
-    `transactional-update` ends with its new snapshot's number; `get-default` now names
+    `transactional-update` ends `New default snapshot is #<N+1>`; `get-default` now names
     that `<N+1>` while `findmnt /` still names rename 1's `<N>`; the new snapshot's `/media`
-    holds `backup` alone. A failed run makes no snapshot and changes nothing.
+    holds `backup` alone. A failed run makes no snapshot and changes nothing. No
+    `transactional-update` output at all means one of the four checks before it failed:
+    crypttab, fstab, the mount's drop-in or the old scrub timer is not as renames 7 to 9
+    leave them.
 12. **The reboot**, into the new snapshot. The session ends:
 
     ```fish
@@ -436,7 +445,8 @@ else, stop and read the way back at the end.
     ```
 
     Good output: `findmnt /` and `get-default` both name `<N+1>`; `/media/backup` alone;
-    `inactive` twice; the same `is-system-running` and failed units as rename 1. `findmnt /`
+    `inactive` twice; the same `is-system-running` and failed units as rename 1 (`starting`
+    in the first minute or so after the boot: read it again). `findmnt /`
     naming `<N>` again means health-checker rolled the boot back; stop there, and send the
     infra agent `journalctl -b -1 --no-pager | tail -n 100`.
 14. **The unlock**, under the new names, from the phone: the command in § Unlocking.
@@ -542,7 +552,7 @@ a new drive; step 1's key is then made again, and `zero`'s key line changes with
    # pull setup 2, on three: install the pull, its units, snapper's config, the restore module and both users' ssh files; then label them and reload systemd
    cd ~/infra; and git pull --ff-only
    for f in backup-pull backup-pull.service backup-pull.timer backup-snapshot.service snapper-config-received-immich backup-ssh-config zero-known-hosts sudoers-restore rsyncd-restore.conf restore-authorized-keys
-       bin/install-system-file $f --new; and sudo bin/install-system-file $f --new --commit --allow-content-change; or break
+       bin/install-system-file $f --new --allow-content-change; and sudo bin/install-system-file $f --new --commit --allow-content-change; or break
    end
    sudo restorecon -Rv /home/backup /home/restore /usr/local/bin/backup-pull; and sudo systemctl daemon-reload; and sudo systemctl start backup-pull.timer
    ```

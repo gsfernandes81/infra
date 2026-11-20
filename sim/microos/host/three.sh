@@ -614,6 +614,9 @@ run_block() {
 	echo "-- the README's $label: $(head -n 1 block.fish | cut -c3- | cut -c1-110)"
 	ssh_as gavin@127.0.0.1 fish < block.fish > "$log" 2>&1
 	sed 's/^/    | /' "$log" | head -n 60
+	# A long output is cut above; whatever refused or failed in it is shown whole.
+	[ "$(wc -l < "$log")" -le 60 ] ||
+		grep -nE 'refus|fail|FAIL|rror|denied|No such|not found|ROLL' "$log" | grep -v 'post-install checks: ok' | sed 's/^/    ! /' | head -n 30
 }
 expect_in() { # <log> <text> <what it proves>
 	if grep -qF -- "$2" "$1"; then echo "PASS $3"; else echo "FAIL $3: no '$2' in its output"; fi
@@ -744,6 +747,17 @@ STEP
 	as_root three-migrate.sh fstab
 	run_block "rename 7" "rename 7 again"
 	expect_in rename-7-again.log "rename 7: not exactly one /media/mirror line" "rename 7 refuses to run twice"
+	# Run out of order, rename 9 and rename 11 must each refuse and change nothing.
+	run_block "rename 9" "rename 9 early"
+	expect_in rename-9-early.log "rename 9: crypttab does not name backup yet, so rename 8 has not finished; nothing changed" "rename 9 refuses to run before rename 8"
+	run_block "rename 11" "rename 11 early"
+	if grep -q 'transactional-update' rename-11-early.log; then
+		echo "FAIL rename 11 ran transactional-update before renames 8 and 9"
+	else
+		echo "PASS rename 11 refuses to make a snapshot before renames 8 and 9"
+	fi
+	as_root_sh 'test -e /etc/systemd/system/mirror-scrub.timer && test -e /home/backup/.ssh/authorized_keys' &&
+		echo "PASS and neither removed anything" || echo "FAIL a refused step removed files"
 	run_block "rename 8"
 	[ "$(grep -c 'post-install checks: ok' rename-8.log)" = 5 ] && echo "PASS rename 8 installed all five files" ||
 		echo "FAIL rename 8 did not install all five files"
