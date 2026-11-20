@@ -47,9 +47,9 @@ exemption, which is a real cost on a 512 MB armv6 box running diskless.
 
 | File | Live path | Why it's tracked |
 |---|---|---|
-| `fstab` | `/etc/fstab` | All three `/media/*` entries carry `nofail`, so a missing array can never stall boot. A fourth, `/var/lib/docker` on the SSD's `sda2` (btrfs, `compress=zstd:1`), carries it too, and its bare mountpoint is immutable like theirs; installed 2026-10-26 ([`docs/decisions.md`](../../../docs/decisions.md)). No array line carries `autodefrag` since 2026-11-19: it unshares the blocks snapshots share, and btrfs applies it to the whole filesystem, so it leaves every line or none ([`docs/decisions.md`](../../../docs/decisions.md) § The pull, as built). **That change is not installed yet**: the move installs it, and also replaces the two Immich lines with one `/media/immich` line, whose `subvolid` only the move learns ([`plans/visit-runbook.md`](../../../plans/visit-runbook.md) § The move on `zero`). |
+| `fstab` | `/etc/fstab` | All three `/media/*` entries carry `nofail`, so a missing array can never stall boot. A fourth, `/var/lib/docker` on the SSD's `sda2` (btrfs, `compress=zstd:1`), carries it too, and its bare mountpoint is immutable like theirs; installed 2026-10-26 ([`docs/decisions.md`](../../../docs/decisions.md)). No array line carries `autodefrag` since 2026-11-19: it unshares the blocks snapshots share, and btrfs applies it to the whole filesystem, so it leaves every line or none ([`docs/decisions.md`](../../../docs/decisions.md) § The pull, as built). **Installed 2026-11-20** at the move, which also replaced the two Immich lines with one `/media/immich` line, `subvolid=281` ([`plans/visit-runbook.md`](../../../plans/visit-runbook.md) § What the visit did). |
 | `bcache-register` | `/etc/init.d/bcache-register` | The array is btrfs RAID1 across **two** bcache devices; both must assemble before it can mount rw. This registers them and waits, bounded to 30s, then **always exits 0** — a failure here must never stop the boot. Since 2026-11-19 in the repo it also runs `before dmcrypt btrfs-scan`, for the encrypted member below; installed 2026-11-20 at the disk swap, with the new disk's UUID in place of `sdb`'s. |
-| `dmcrypt` | `/etc/conf.d/dmcrypt` | Opens the array's encrypted member, `data-4`, at boot with the key file `/etc/keys/data.key`, so a boot needs nobody: encryption with protection off ([`docs/decisions.md`](../../../docs/decisions.md) § *`zero`'s encrypted member*). Its `rc_after`/`rc_before` lines put it after `bcache-register` and `modules` and before `btrfs-scan` and `localmount`. **Installed 2026-11-20** at the disk swap ([`plans/visit-runbook.md`](../../../plans/visit-runbook.md) § Slice 2), in the boot runlevel; the unattended reboot that day opened `data-4` with nobody there. Needs `cryptsetup cryptsetup-openrc`, installed then. |
+| `dmcrypt` | `/etc/conf.d/dmcrypt` | Opens the array's encrypted member, `data-4`, at boot with the key file `/etc/keys/data.key`, so a boot needs nobody: encryption with protection off ([`docs/decisions.md`](../../../docs/decisions.md) § *`zero`'s encrypted member*). Its `rc_after`/`rc_before` lines put it after `bcache-register` and `modules` and before `btrfs-scan` and `localmount`. **Installed 2026-11-20** at the disk swap ([`docs/decisions.md`](../../../docs/decisions.md) § *`zero`'s encrypted member*), in the boot runlevel; the unattended reboot that day opened `data-4` with nobody there. Needs `cryptsetup cryptsetup-openrc`, installed then. |
 | `dm-crypt.conf` | `/etc/modules-load.d/dm-crypt.conf` | Loads `dm-crypt`, and `dm-mod` with it, before `dmcrypt` runs: neither is built into `linux-rpi`. The cipher's modules load by algorithm name. **Installed 2026-11-20**, with `dmcrypt`. |
 | `cloudflared` | `/etc/init.d/cloudflared` | The tunnel — the remote way in. Only trackable since Aug 2026: it previously carried the tunnel token inline, so committing it would have committed a secret. **Since 2026-08-23 it carries no secret at all** — `command_args` is `--autoupdate-freq 240h0m0s --config /etc/cloudflared/config.yml tunnel run`, and the tunnel credentials file is 0600. It is hand-written, not packaged: `docs/host-setup.md` installs the binary from GitHub, so Alpine ships no init script for it. It logged nowhere until 2026-08-23: `stdout_log`/`stderr_log` are not variables `supervise-daemon` reads, and it now uses `output_logger`/`error_logger` — see phase 2f. |
 | `zram-swap` | `/etc/init.d/zram-swap` | Compressed swap in RAM ahead of the SSD swap partition, 2 GiB zstd at priority 100. **Installed 2026-10-26**: `/proc/swaps` lists `/dev/zram0` at 2 GiB, priority 100, `[zstd]`; in the default runlevel, owner-reported; [`docs/decisions.md`](../../../docs/decisions.md) § *Zram swap on `zero`* says why. Not boot-critical: a failed start leaves the SSD swap as it was. |
@@ -109,9 +109,9 @@ the move: the restore key, the six files, the first snapshot and the ntfy direct
 with `autodefrag` dropped by `sudo mount -o remount,noautodefrag /dev/bcache0 /media/immich`
 (BusyBox's `mount`, given the mountpoint alone, does not find it in `/proc/mounts`).
 
-The steps after the move need `/media/immich` and its `.snapshots`, which the move makes
-([`plans/visit-runbook.md`](../../../plans/visit-runbook.md) § The move on `zero`). After
-`ssh zero`, in fish:
+The steps after the move need `/media/immich` and its `.snapshots`, which the move made on
+2026-11-20 ([`plans/visit-runbook.md`](../../../plans/visit-runbook.md) § What the visit
+did). After `ssh zero`, in fish:
 
 ```fish
 # on zero: the packages; check BusyBox gives flock, then util-linux's setpriv and the pinned snapper, its SHA-256 checked here and its signature by apk
@@ -260,8 +260,7 @@ zero's second way in, Tailscale's own static arm64 build: `tailscaled` in
 (`docs/decisions.md`). **The pin, the version and its SHA-256, is `tailscale_static_*` in
 [`ansible/group_vars/fleet.yml`](../../../ansible/group_vars/fleet.yml)**, and nowhere
 else. `ansible/playbooks/server-install-tailscale.yml` installs it, this service and the
-join; **not installed yet**, the first run is
-[`plans/visit-runbook.md`](../../../plans/visit-runbook.md) § Before the visit, step 3.
+join; installed on 2026-11-18 by that play, from the phone.
 
 Moving it, at the monthly update and sooner for a security fix in a Tailscale bulletin,
 is a commit to that file, the version and the SHA-256 from the `.sha256` beside the
@@ -281,6 +280,26 @@ or the next run moves forward again:
 ```fish
 # on zero: go back to the previous Tailscale binaries and start tailscaled on them
 sudo rc-service tailscaled stop; and sudo cp -p /usr/local/sbin/tailscaled.previous /usr/local/sbin/tailscaled; and sudo cp -p /usr/local/bin/tailscale.previous /usr/local/bin/tailscale; and sudo rc-service tailscaled start; and tailscale version
+```
+
+**By hand, if the play cannot run**, after `ssh zero`, with the version and SHA-256 from
+`ansible/group_vars/fleet.yml` in place of the placeholders. Go on past the first block
+only if it prints `absent`, and open the URL the last line prints.
+
+```fish
+# on zero, by hand: check Alpine's own tailscale is absent; go on only if this prints "absent"
+apk info -e tailscale; and echo 'STOP: Alpine tailscale is installed'; or echo absent
+```
+
+```fish
+# on zero, by hand: install the pinned static build and the tracked service, start it, and join keeping zero's resolver
+set v VERSION; set sum PASTE_SHA256_HERE
+cd /tmp; curl -fLO https://pkgs.tailscale.com/stable/tailscale_{$v}_arm64.tgz
+echo "$sum  tailscale_"$v"_arm64.tgz" | sha256sum -c -; and tar -xzf tailscale_{$v}_arm64.tgz; and sudo install -D -m 755 tailscale_{$v}_arm64/tailscaled /usr/local/sbin/tailscaled; and sudo install -D -m 755 tailscale_{$v}_arm64/tailscale /usr/local/bin/tailscale
+rm -rf /tmp/tailscale_{$v}_arm64 /tmp/tailscale_{$v}_arm64.tgz
+cd ~/infra; and git pull --ff-only; and sudo bin/install-system-file tailscaled --commit --allow-content-change --new
+sudo rc-update add tailscaled default; and sudo rc-service tailscaled start
+cat /etc/resolv.conf; sudo tailscale up --advertise-tags=tag:fleet --accept-dns=false; cat /etc/resolv.conf
 ```
 
 ## The encrypted member

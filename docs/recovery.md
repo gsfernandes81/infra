@@ -219,7 +219,8 @@ degraded RAID1 mount without `degraded`. `/etc/init.d/bcache-register` registers
 waits up to 30 seconds for `/dev/bcache0` and `/dev/bcache1`. It always exits 0, so a
 failure there never stops the boot, and the immutable mountpoints mean nothing is written
 while the array is absent.
-**From the disk swap on** ([`plans/visit-runbook.md`](../plans/visit-runbook.md) § Slice 2),
+**From the disk swap on** (2026-11-20, [decisions.md](decisions.md) § *`zero`'s encrypted
+member*),
 one member is LUKS on its bcache device, and `/etc/init.d/dmcrypt` opens it at boot with a
 key file on the SD card, after `bcache-register` and before `btrfs-scan`. A member that
 does not open leaves the array unmounted in the same way, and the box up. Opening it by

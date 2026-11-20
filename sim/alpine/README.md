@@ -103,10 +103,10 @@ address in its range.
 
 ## The encrypted member
 
-A second job runs `run-dmcrypt.sh`: `zero`'s encrypted array member
-([`plans/visit-runbook.md`](../../plans/visit-runbook.md) § Slice 2) as far as a container
-takes it, in a box built from the same `host/Dockerfile`, against a LUKS2 volume on a loop
-device that stands in for `zero`'s new bcache device. It runs:
+A second job runs `run-dmcrypt.sh`: `zero`'s encrypted array member (slice 2 of the visit,
+its runbook now `git show 774eb42:plans/visit-runbook.md`) as far as a container takes it,
+in a box built from the same `host/Dockerfile`, against a LUKS2 volume on a loop device
+that stands in for `zero`'s new bcache device. It runs:
 
 - the key file made with the runbook's commands, and the format and passphrase slot with
   the runbook's flags: Adiantum, the label, two keyslots, Argon2 at 256 MiB, read back

@@ -36,6 +36,20 @@ table of `docs/management-plane.md`). Until then nothing alerts when the pull st
 `backup-age-check` and `server-store-backup-ntfy-url.yml` stay in the tree, marked not
 used, for that design.
 
+The topic's URL is stored on `zero`, in `/var/lib/backup-alert` since 2026-11-20
+(`hosts/zero/system/README.md` § The backup). If that design wants a new one, the play
+stores it:
+
+```fish
+# on the phone: store the ntfy topic's URL on zero, root's alone, and send it one test message
+cd ~/infra/ansible; and ansible-playbook playbooks/server-store-backup-ntfy-url.yml -e target=zero -K
+```
+
+It asks for the URL, without echoing it, then whether to send a test message: answer
+`y`. It prints that the URL was written, root 0600, and `Test message: HTTP 200`, and the
+message reaches the topic titled `zero backup`. Any other status stops the play with the
+URL stored: check the topic, then run it again with the right URL.
+
 ## A second subvolume
 
 Not planned. What it would change, template units `backup-pull@<subvolume>`, is in

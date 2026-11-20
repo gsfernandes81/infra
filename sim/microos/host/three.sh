@@ -159,7 +159,7 @@ TUNNEL
 
 # ── zero's backup, pulled by three from the runner standing in for zero ──────
 # The runner plays zero with a small btrfs on a loop file, laid out as zero's array is once
-# the move in plans/visit-runbook.md is done: the subvolume immich, mounted on its own as
+# the move of 2026-11-20 left it: the subvolume immich, mounted on its own as
 # zero mounts /media/immich, holding data (thumbs and encoded-video nested subvolumes) and
 # db, where a Postgres container writes throughout, and .snapshots, the subvolume snapper
 # keeps its snapshots in. Zero itself is an Alpine container of zero's release, privileged

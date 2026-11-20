@@ -460,8 +460,10 @@ make it live data. Re-check before trusting it.
 
 ## `zero`'s encrypted member: encrypted now, protection off
 
-Decided by the owner on 2026-11-19, while at the cluster for the disk swap
-([`plans/visit-runbook.md`](../plans/visit-runbook.md) § Slice 2).
+Decided by the owner on 2026-11-19, while at the cluster for the disk swap, slice 2 of the
+visit, done 2026-11-19 to 20. Its commands as run are in
+`git show 774eb42:plans/visit-runbook.md` § Slice 2, the starting point when the WD
+Elements disk is replaced the same way.
 
 | Decision | Because |
 |---|---|
@@ -476,6 +478,11 @@ Decided by the owner on 2026-11-19, while at the cluster for the disk swap
 | **`install-system-file` checks a dmcrypt entry by opening it** | A wrong entry costs a mount, which `nofail` and the immutable mountpoints absorb; an entry without `key=` costs the boot. So the check refuses a placeholder, an entry without `key=`, a key file others can read, a `source=` that `findfs` cannot resolve, and a key that does not open the volume (`cryptsetup open --test-passphrase`). Calibrated against a real LUKS2 volume in CI, where each refusal is shown refusing and the good entry passing. |
 | **One shutdown for the move and the reboot test** | The new disk goes into `sdb`'s bay at the same shutdown that tests the unattended unlock. Everything is named by UUID, so the move changes no file, and the boot that is tested is the configuration `zero` keeps. |
 | **A LUKS header backup is optional for this member** | The array's other copy covers it: a damaged header costs a second replace, not data. If one is taken, it is secret-bearing (with the key file or the passphrase it opens the disk, even after a keyslot is killed on the disk itself), so it never sits beside `/etc/keys`, in the repo or in `~/.infra-backups`. |
+| **util-linux's `blkid` guards the format, not BusyBox's** (found at the swap) | The guard before `luksFormat` refuses a device on which `blkid -p` finds a signature. BusyBox's `blkid`, Alpine's default, ignores `-p` and exits 0 on a blank disk, so the guard would have refused to format. |
+| **A 4096-byte bcache block and LUKS sector, set rather than detected** | bcache refuses a backing block smaller than the cache set's, and at registration one smaller than the disk's logical sector, which a USB bridge may report as 4096; 4096 suits a bridge reporting 512 as well. `--sector-size 4096` matches it and btrfs's 4 KiB sectors, where cryptsetup would pick from the device it sees. |
+| **The disk's `add` event is sent again after `make-bcache`** | mdev made the disk's `/dev/disk/by-uuid` links when it was plugged in, before the bcache superblock existed, and `bcache-register` registers by that link at boot. A link missing then is missing at boot. |
+| **Nothing reboots between the replace's start and the install of `bcache-register` and `dmcrypt`** | btrfs refuses to mount an array whose replace target is missing, and until those files nothing at boot registers the new disk or opens its LUKS volume. The replace runs with `-r`, so the failing disk is read only for a block whose other copy is bad. |
+| **The old member is wiped on another machine, never `zero`** | Its old bcache superblock could be registered again on `zero`, and it holds Immich's photos unencrypted. |
 
 ## Two things the original inventory got wrong
 
@@ -2470,7 +2477,7 @@ out of writing them and is proven by `alpine-sim.yml`.
 ## `three` flies to Singapore on 21 November
 
 **Decided 2026-11-18**, the owner's call. It sets the visit's order
-([`plans/visit-runbook.md`](../plans/visit-runbook.md) § The slices): `one`'s move first, `three`'s
+([`plans/visit-runbook.md`](../plans/visit-runbook.md) § What the visit did): `one`'s move first, `three`'s
 first boot and first push straight after, so the push finishes in the UK, and a restore
 from one of its snapshots before it leaves, as [`plans/three.md`](../plans/three.md) asks.
 `zero`'s disk swap waits if time is short, since `three` does not need it. The Wi-Fi

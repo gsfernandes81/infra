@@ -2,9 +2,10 @@
 # pass and fail always succeed, so `A && pass || fail` can never run both.
 # shellcheck disable=SC2015,SC2016  # SC2016: commands for the box are single-quoted on purpose
 # The encrypted member of zero's array, as far as a container can take it
-# (plans/visit-runbook.md § Slice 2): Alpine 3.24's own cryptsetup and dmcrypt service, the
-# tracked /etc/conf.d/dmcrypt, bcache-register and dm-crypt.conf, and install-system-file's
-# dmcrypt check, against a LUKS2 volume on a loop device standing in for zero's /dev/bcacheN.
+# (slice 2 of the visit, git show 774eb42:plans/visit-runbook.md): Alpine 3.24's own
+# cryptsetup and dmcrypt service, the tracked /etc/conf.d/dmcrypt, bcache-register and
+# dm-crypt.conf, and install-system-file's dmcrypt check, against a LUKS2 volume on a loop
+# device standing in for zero's /dev/bcacheN.
 # Prints PASS or FAIL per check and exits 1 on any FAIL. sim/alpine/README.md § The
 # encrypted member says what it proves and what it cannot.
 #
@@ -16,8 +17,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 work=${RUNNER_TEMP:-/tmp}/dmcrypt-sim
 box=infra-dmcrypt-sim
-# The runbook's own names and flags (plans/visit-runbook.md § Slice 2), so a change there
-# that this file does not follow shows as a difference in review.
+# The names and flags zero's member was made with at slice 2 of the visit (its runbook, now
+# git show 774eb42:plans/visit-runbook.md; docs/decisions.md § zero's encrypted member).
 key=/etc/keys/data.key
 target=data-4
 label=data-luks-4
