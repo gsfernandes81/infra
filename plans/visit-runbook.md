@@ -334,6 +334,8 @@ labels.
 
 ## Slice 2: `zero`'s disk swap
 
+**Done 2026-11-19 to 20.** The replace took 1 h 30 min with no errors; the new disk, encrypted as `data-luks-4`, sits in `sdb`'s old bay as `bcache1` (numbers follow registration order), and the unattended reboot opened it and mounted the array. The old WD10SPZX is being zeroed on `one`. What it found is folded into the steps below: util-linux's `blkid` (step 3), and `/proc/mounts` for Alpine's missing `findmnt`.
+
 Not the day of slice 1. [`three.md`](three.md) § *`zero`'s disk swap* says why and in what
 order; this section is the commands. It borrows `one`'s Sabrent, so `one` is off for its
 length, and nothing reboots between `btrfs replace` starting and `btrfs replace status`
