@@ -199,11 +199,25 @@ Kept here for whoever changes a first boot or the harness next.
 ## Working with CI
 
 `.github/workflows/microos-sim.yml` runs on a push touching `sim/microos/`, `leap/`,
-`hosts/*/leap/` or what the deploy play reads. The `host` job takes about 30 minutes; its
-report is the job summary and the `leap-host-<host>` artifact. Runs queue per branch and the
-hub's token cannot cancel one, so iterate on a branch and merge when green. When the guest
-cannot be reached, the harness logs in as root on the serial console and prints why. Use
-`claude-sessions keepalive` while waiting. A Fable review comes before every merge.
+`hosts/*/leap/` or what the deploy play reads. The `host` job takes 15 to 20 minutes and
+`health-mounts` about 40; each report is the job summary and an artifact, `leap-host-<host>`
+for the host jobs. When the guest cannot be reached, the harness logs in as root on the
+serial console and prints why. Use `claude-sessions keepalive` while waiting. A Fable review
+comes before every merge.
+
+Three things keep a run short without changing what it tests:
+
+- On main, a run in progress always finishes, and a newer push queues behind it. On any
+  other branch a newer push cancels the run in progress, so push the fix rather than wait
+  for the old run to finish.
+- On a branch or a pull request, `probe`, `late-disks`, `docker-store` and `health-mounts`
+  run only when the diff against main touches what they read: `sim/microos/` outside
+  `host/`, `run-host.sh` and this README, or the workflow. The host jobs always run. The
+  `changes` job's summary says which ran and why. A push to main runs everything.
+- `ci/action.yml` readies each VM job's runner. It restores the image from a cache named by
+  the checksum openSUSE publishes now, and the Ubuntu packages from one named by the runner
+  image's version. `fetch_image` still hashes what it boots. A cache made on main serves
+  every branch; one made on a branch serves only that branch.
 
 ## What a green run does not show
 
@@ -219,5 +233,6 @@ on any Linux machine with KVM, `qemu-system-x86_64`, `qemu-img`, `mke2fs` and an
 client. `run-docker-store.sh` also needs Docker, btrfs-progs and sudo for one loop mount,
 and `run-host.sh` needs btrfs-progs, openssl and sudo for one loop mount, and
 `ansible-playbook` with `ansible/requirements.yml`'s collections for its deploy stage. Each writes only
-inside its work directory. Do not run them in the `infra` container: that container is on
+inside its work directory, and in `SIM_IMAGE_DIR` when that is set, where `fetch_image` keeps
+the image between runs under its checksum. Do not run them in the `infra` container: that container is on
 `zero`, has no KVM, and would compete with Immich.

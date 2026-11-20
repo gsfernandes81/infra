@@ -39,31 +39,92 @@ on:
 permissions:
   contents: read
 
-# Runs queue rather than cancel: each report is evidence, and a push mid-run would
-# otherwise throw away the one in progress.
+# On main, runs queue rather than cancel: main is what the boxes run, so a report there is
+# evidence about a commit the fleet may pull, and a run in progress finishes. On any other
+# ref a newer push cancels the run in progress: the commit it was testing is superseded and
+# will not merge as it stands, and the new run's `changes` job diffs the whole branch
+# against main, so nothing the cancelled run would have covered goes untested. A queued
+# branch run used to wait out the whole of the one before it, 40 minutes, and the hub's
+# token cannot cancel a run by hand.
 concurrency:
   group: microos-sim-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  changes:
+    # Which of the jobs below this change can affect. The host jobs read the repo widely
+    # (leap/, hosts/, ansible/, deployments/), so they always run, and the paths above are
+    # theirs. probe, late-disks, docker-store and health-mounts read nothing outside
+    # sim/microos/ besides this file: their scripts take only lib.sh, qmp.py, ppm2png.py and
+    # their own directory, and their guests see only what those scripts copy in. So on a
+    # branch or pull request whose diff against main touches neither sim/microos/ (beyond
+    # host/, run-host.sh and README.md, which only the host jobs and readers read) nor this
+    # file, they are skipped: they would boot the same scripts against the same image main
+    # last ran them on. A push to main, a manual run, and any diff that cannot be computed
+    # run everything. A non-host job that starts reading a file outside sim/microos/ must
+    # add it to the pattern below, or it will be skipped when that file changes.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      vms: ${{ steps.diff.outputs.vms }}
+    steps:
+      # Whole history: the diff is taken from the merge base with main.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Diff the change against main
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Every failure below lands on "run everything": a wrong skip is silent, a wrong
+          # run costs only time. No grep -q in a pipeline: under pipefail its early exit can
+          # SIGPIPE the writer and turn a match into a miss.
+          set -u
+          vms=true base='' head='' changed='' read_by_vms=''
+          case "$EVENT/$REF" in
+            push/refs/heads/main) why="a push to main runs every job" ;;
+            push/*) head=HEAD; base=$(git merge-base origin/main HEAD) || base='' ;;
+            pull_request/*) head=$PR_HEAD; base=$(git merge-base "$PR_BASE" "$PR_HEAD") || base='' ;;
+            *) why="a $EVENT run runs every job" ;;
+          esac
+          if [ -n "$head" ]; then
+            if [ -n "$base" ] && changed=$(git diff --name-only "$base" "$head"); then
+              read_by_vms=$(printf '%s\n' "$changed" \
+                | grep -E '^(sim/microos/|\.github/workflows/microos-sim\.yml$)' \
+                | grep -vE '^sim/microos/(host/|run-host\.sh$|README\.md$)' || true)
+              if [ -n "$read_by_vms" ]; then
+                why="the diff against main touches files the VM jobs read: $(printf "%s" "$read_by_vms" | tr "\n" " ")"
+              else
+                vms=false
+                why="the diff against main touches no file the VM jobs read, so they are skipped"
+              fi
+            else
+              why="no diff against main could be taken, so every job runs"
+            fi
+          fi
+          echo "vms=$vms" >> "$GITHUB_OUTPUT"
+          {
+            echo "probe, late-disks, docker-store, health-mounts run: **$vms**; $why."
+            if [ -n "$changed" ]; then
+              echo; echo "Changed since ${base:0:12}:"; echo '```'; printf '%s\n' "$changed"; echo '```'
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
   probe:
+    needs: changes
+    if: needs.changes.outputs.vms == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
-      - name: Give the runner user /dev/kvm
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-          ls -l /dev/kvm
-
-      - name: Install qemu
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils
+      - uses: ./sim/microos/ci
 
       - name: Boot the image and run the probe
         run: sim/microos/run-probe.sh "$RUNNER_TEMP/microos"
@@ -97,22 +158,14 @@ jobs:
       fail-fast: false
       matrix:
         variant: [plain, wantedby, udev]
+    needs: changes
+    if: needs.changes.outputs.vms == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
-      - name: Give the runner user /dev/kvm
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Install qemu
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils
+      - uses: ./sim/microos/ci
 
       - name: Build the array, boot without it, hot-plug it
         run: sim/microos/run-late-disks.sh "$RUNNER_TEMP/late" "${{ matrix.variant }}"
@@ -138,22 +191,16 @@ jobs:
   docker-store:
     # Whether MicroOS's Docker can take over the /var/lib/docker Alpine's Docker leaves on the
     # fleet's SSDs: the store is made by Alpine 3.24's own package, then mounted in the VM.
+    needs: changes
+    if: needs.changes.outputs.vms == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
-      - name: Give the runner user /dev/kvm
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Install qemu and btrfs-progs
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils btrfs-progs
+      - uses: ./sim/microos/ci
+        with:
+          packages: qemu-system-x86 qemu-utils btrfs-progs
 
       - name: Make an Alpine Docker store and hand it to MicroOS
         run: sim/microos/run-docker-store.sh "$RUNNER_TEMP/store"
@@ -207,22 +254,14 @@ jobs:
     # What stock health-checker does about data mounts: which fstab entries its mount plugin
     # selects, and whether a data disk missing at boot, or a mount that fails at once, rolls
     # a box back or strands it. Reports ANSWER lines; fails only when the harness does.
+    needs: changes
+    if: needs.changes.outputs.vms == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
 
-      - name: Give the runner user /dev/kvm
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Install qemu
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils
+      - uses: ./sim/microos/ci
 
       - name: Boot with and without the data disk, and watch health-checker
         run: sim/microos/run-health-mounts.sh "$RUNNER_TEMP/health"
@@ -260,17 +299,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Give the runner user /dev/kvm
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Install qemu and btrfs-progs
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils btrfs-progs
+      - uses: ./sim/microos/ci
+        with:
+          packages: qemu-system-x86 qemu-utils btrfs-progs
 
       - name: Install ansible-core and the collections the deploy play uses
         run: |

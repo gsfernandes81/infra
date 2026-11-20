@@ -14,15 +14,40 @@ ssh_port=2222
 
 # Downloads the image, checks it against the published checksum, and prints which build it
 # is, because both change: MicroOS daily, Leap with each maintenance update.
+#
+# With SIM_IMAGE_DIR set (CI sets it, from sim/microos/ci/action.yml), a copy kept there
+# under the name of its published checksum is used instead of a download, and a download is
+# kept there for the next run. The checksum is fetched fresh every time and the bytes in use
+# are hashed every time, so the build under test is still whichever openSUSE publishes now:
+# a new build has a new checksum, finds no copy, and is downloaded.
 fetch_image() {
-	local want have
-	curl -fsSL -o base.qcow2 "$image_url"
+	local want have kept
 	curl -fsSL -o base.qcow2.sha256 "$image_url.sha256"
 	want=$(awk '{print $1; exit}' base.qcow2.sha256)
-	have=$(sha256sum base.qcow2 | awk '{print $1}')
+	kept=${SIM_IMAGE_DIR:+$SIM_IMAGE_DIR/$want.qcow2}
+	rm -f base.qcow2
+	if [ -n "$kept" ] && [ -f "$kept" ]; then
+		# A hard link where it can be, since nothing writes the base: the VM writes disk.qcow2.
+		ln "$kept" base.qcow2 2>/dev/null || cp "$kept" base.qcow2
+		have=$(sha256sum base.qcow2 | awk '{print $1}')
+		if [ "$want" = "$have" ]; then
+			echo "image: using the copy kept in $SIM_IMAGE_DIR; its sha256 matches" >&2
+		else
+			echo "image: the copy kept in $SIM_IMAGE_DIR is $have, not $want; downloading" >&2
+			rm -f base.qcow2 "$kept"
+		fi
+	fi
+	if [ ! -f base.qcow2 ]; then
+		curl -fsSL -o base.qcow2 "$image_url"
+		have=$(sha256sum base.qcow2 | awk '{print $1}')
+	fi
 	if [ "$want" != "$have" ]; then
 		echo "image checksum mismatch: want $want, have $have" >&2
 		return 1
+	fi
+	if [ -n "$kept" ] && [ ! -f "$kept" ]; then
+		mkdir -p "$SIM_IMAGE_DIR"
+		ln base.qcow2 "$kept" 2>/dev/null || cp base.qcow2 "$kept"
 	fi
 	echo "image: $(awk '{print $2; exit}' base.qcow2.sha256) sha256 $have," \
 		"$(curl -fsSIL "$image_url" | sed -n 's/^last-modified: //Ip' | tr -d '\r' | tail -n 1)"

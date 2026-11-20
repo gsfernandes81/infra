@@ -1,0 +1,132 @@
+name: Leap simulation runner
+description: >-
+  Readies a GitHub runner for one of the Leap simulation's VM jobs in
+  .github/workflows/microos-sim.yml: /dev/kvm for the runner user, the Ubuntu packages the
+  job names, and the Leap image under test, each from a cache when one fits.
+
+# Both caches exist to save wall-clock time, not to change what is tested. Each is keyed so
+# that a stale entry cannot be read:
+#
+# - The image is keyed by the checksum openSUSE publishes for it now, fetched fresh on every
+#   run. A new build has a new checksum, misses, and is downloaded. lib.sh's fetch_image hashes
+#   the bytes it boots every time, cached or not, and refuses a mismatch.
+# - The Ubuntu packages are keyed by the runner image's own version ($ImageOS, $ImageVersion)
+#   and the package list. The .deb files are the ones apt downloaded on that runner image, so
+#   installing them gives the same qemu the first run of the week got. A change of runner
+#   image, or of the list, misses and goes to the Ubuntu archive as before. When the kept
+#   files will not install, the step falls back to the archive too.
+#
+# A cache made on a branch is visible to that branch only; one made on main is visible to
+# every branch. Nothing here may carry a secret: both keys and both paths are public.
+#
+# Every step that only serves a cache warns rather than fails, so a cache outage costs time
+# and never a run: the simulation's own step still fetches the image and fails as it did.
+
+inputs:
+  packages:
+    description: The Ubuntu packages the job installs, space-separated.
+    default: qemu-system-x86 qemu-utils
+
+runs:
+  using: composite
+  steps:
+    - name: Give the runner user /dev/kvm
+      shell: bash
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+          | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+        ls -l /dev/kvm
+
+    - name: Name the caches
+      id: keys
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+      run: |
+        . "$GITHUB_ACTION_PATH/../lib.sh"
+        sha=$(curl -fsSL --retry 3 "$image_url.sha256" | awk '{print $1; exit}') || sha=''
+        if ! [[ $sha =~ ^[0-9a-f]{64}$ ]]; then
+          echo "::warning::no published checksum for the image; no image cache this run"
+          sha=''
+        fi
+        # shellcheck disable=SC2086  # a list, split on purpose
+        list=$(printf '%s\n' $PACKAGES | sort | paste -sd+)
+        # A runner that does not name its image version gets a key no other run shares.
+        {
+          echo "image=sim-image-${SIM_OS:-leap}-$sha"
+          echo "image-sha=$sha"
+          echo "debs=sim-debs-${ImageOS:-unknown}-${ImageVersion:-unknown-$GITHUB_RUN_ID}-$list"
+        } >> "$GITHUB_OUTPUT"
+        echo "SIM_IMAGE_DIR=$RUNNER_TEMP/sim-image" >> "$GITHUB_ENV"
+
+    - name: Restore the Ubuntu packages
+      id: debs
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.temp }}/sim-debs
+        key: ${{ steps.keys.outputs.debs }}
+
+    - name: Install the Ubuntu packages
+      id: install
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+        HIT: ${{ steps.debs.outputs.cache-hit }}
+      run: |
+        debs=$RUNNER_TEMP/sim-debs
+        # --no-download: the kept files or nothing, so a gap in them falls through to the
+        # archive below instead of half-installing.
+        if [ "$HIT" = true ] && compgen -G "$debs/*.deb" >/dev/null &&
+          sudo apt-get install -y -q --no-install-recommends --no-download "$debs"/*.deb; then
+          echo "installed from the packages kept for runner image $ImageVersion"
+          exit 0
+        fi
+        sudo apt-get update -q
+        rm -rf "$debs" && mkdir -p "$debs/partial"
+        # shellcheck disable=SC2086  # a list, split on purpose
+        sudo apt-get install -y -q --no-install-recommends -o Dir::Cache::archives="$debs" $PACKAGES
+        sudo rm -rf "$debs/partial" "$debs/lock"
+        if compgen -G "$debs/*.deb" >/dev/null; then echo "keep=true" >> "$GITHUB_OUTPUT"; fi
+
+    - name: Keep the Ubuntu packages for the next run
+      if: steps.install.outputs.keep == 'true'
+      uses: actions/cache/save@v4
+      continue-on-error: true
+      with:
+        path: ${{ runner.temp }}/sim-debs
+        key: ${{ steps.keys.outputs.debs }}
+
+    - name: Restore the image
+      id: image
+      if: steps.keys.outputs.image-sha != ''
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.temp }}/sim-image
+        key: ${{ steps.keys.outputs.image }}
+
+    - name: If no image was restored, download it
+      id: fetch
+      if: steps.keys.outputs.image-sha != '' && steps.image.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        WANT: ${{ steps.keys.outputs.image-sha }}
+      run: |
+        # fetch_image keeps the verified download in $SIM_IMAGE_DIR; the scratch directory is
+        # only for the overlay it also makes.
+        scratch=$(mktemp -d)
+        if (cd "$scratch" && . "$GITHUB_ACTION_PATH/../lib.sh" && fetch_image >/dev/null); then
+          [ -f "$SIM_IMAGE_DIR/$WANT.qcow2" ] && echo "keep=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "::warning::the image did not download here; the simulation will try again"
+        fi
+        rm -rf "$scratch"
+
+    - name: Keep the image for the next run
+      if: steps.fetch.outputs.keep == 'true'
+      uses: actions/cache/save@v4
+      continue-on-error: true
+      with:
+        path: ${{ runner.temp }}/sim-image
+        key: ${{ steps.keys.outputs.image }}

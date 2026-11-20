@@ -2686,6 +2686,30 @@ Alpine copies for `one` too, since `one` keeps both.
   daily at 01:00 at 32 Mbit/s. `autodefrag` leaves the `/media/immich` line, since it
   unshares snapshot extents (issue #23 for a timed defrag).
 
+## The Leap simulation's CI is shortened only where what it tests stays the same
+
+**2026-11-20**, asked for by the owner to shorten the build, CI, review and merge loop on
+the day before `three` flies. A run took 40 minutes, and 80 when it queued behind the one
+before it on the same branch. Measured, the time went to that queue, to `health-mounts`
+(40 minutes, its stages one long chain), and to downloads: the 1.4 GB image and the Ubuntu
+packages took from 12 seconds to almost 7 minutes per job.
+
+- **On a branch, a newer push cancels the run in progress; main still queues.** The old
+  run tests a commit that will not merge as it stands. Main is what the boxes pull, so a
+  run there always finishes and its report stands.
+- **The four VM jobs that read only `sim/microos/` are skipped on a branch or pull request
+  whose diff against main does not touch what they read.** The diff is the whole branch
+  against its merge base, not the last push, so a cancelled run's change is still seen. Any
+  failure to take the diff runs everything. The host jobs read `leap/`, `hosts/`,
+  `ansible/` and `deployments/`, and always run.
+- **The image and the Ubuntu packages are cached, keyed so a stale entry cannot be read.**
+  The image's key is the checksum openSUSE publishes now, so a new build misses. The
+  packages' key is the runner image's version. `fetch_image` hashes what it boots either
+  way.
+- **Not done, because each changes what is tested:** shortening `health-mounts`' waits,
+  splitting its chain into parallel jobs, and caching a booted VM. They are the owner's to
+  choose.
+
 ## The lesson worth keeping
 
 
