@@ -103,7 +103,10 @@ Alpine container for `three` to pull from.
 ### The install, owner-run
 
 **Done on 2026-11-19:** the packages block and the user block below, by the owner, as
-written; the old `mirror` user, made first, removed.
+written; the old `mirror` user, made first, removed. **The rest done on 2026-11-20**, after
+the move: the restore key, the six files, the first snapshot and the ntfy directory's move,
+with `autodefrag` dropped by `sudo mount -o remount,noautodefrag /dev/bcache0 /media/immich`
+(BusyBox's `mount`, given the mountpoint alone, does not find it in `/proc/mounts`).
 
 The steps after the move need `/media/immich` and its `.snapshots`, which the move makes
 ([`plans/visit-runbook.md`](../../../plans/visit-runbook.md) § The move on `zero`). After

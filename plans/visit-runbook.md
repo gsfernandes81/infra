@@ -771,6 +771,12 @@ lists one snapshot, `pulled <N>`, and `cat
 
 ## The move on `zero`
 
+**Done on 2026-11-20**: Immich stopped at 11:37 and was back at 11:44 on subvolume 281,
+both copies compared empty, Postgres opened the existing cluster, and the asset count
+matched. Steps 7 to 9 ran on `zero` itself (`docker compose up -d` in place of the play);
+the remount in step 7 needs the device named as well, as `hosts/zero/system/README.md` says.
+The old subvolumes stay until slice 4.
+
 `immich-data` and `immich-db` become one subvolume, `immich`, mounted at `/media/immich`,
 with `data/` and `db/` in it, so one snapshot holds the library and Postgres at the same
 instant ([`three-backup-pull.md`](three-backup-pull.md)). Copies on the same filesystem by
