@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The interactive login walkthrough for infra-dev. Baked into the image at
-# /home/dev/login.sh; run from a terminal on zero with:
+# /home/dev/login.sh; run from a terminal on one with:
 #
 #     cd ~/infra/dev && make login        # or: make dev, which does up + this
 #
@@ -14,7 +14,7 @@
 #   Claude Code  -> infra-claude volume ($CLAUDE_CONFIG_DIR)
 #
 # It is a script in the image rather than a Makefile recipe because every step of it
-# needs a tty and every credential store it touches is in here, not on zero.
+# needs a tty and every credential store it touches is in here, not on one.
 set -u
 
 bold() { printf '\n\033[1m%s\033[0m\n' "$1"; }
@@ -39,11 +39,11 @@ if [ -s /run/github/token ]; then
   else
     warn "a token is here but GitHub refuses it for ${DEV_REPO:-this repo}."
     info "Is the App installed on that repo? ~/.hub/github-tokens.log in the hub says what"
-    info "GitHub answered: on zero, cd ~/infra/dev && make logs C=hub"
+    info "GitHub answered: on one, cd ~/infra/dev && make logs C=hub"
   fi
 else
   warn "no token from the hub yet."
-  info "The hub writes one at its start and every 30 min; make status C=hub on zero says why"
+  info "The hub writes one at its start and every 30 min; make status C=hub on one says why"
   info "it has not (HUB_GITHUB_APP_ID, github-app.pem, or GitHub's own answer)."
 fi
 
@@ -112,9 +112,9 @@ cat <<'EOF'
   comes back, and a dropped connection costs nothing — ssh in again and press Enter.
 
   The point of working in here rather than from the phone: the model traffic goes out
-  over zero's home connection, and ansible reaches one and two over the home LAN.
+  over one's home connection, and ansible reaches zero and two over the home LAN.
   Neither touches the phone's radio. What crosses it is your keystrokes.
 
-  From a terminal on zero:  cd ~/infra/dev && make shell | make claude | make status
+  From a terminal on one:  cd ~/infra/dev && make shell | make claude | make status
   Re-run these logins:      make login        (C=<container> for another one)
 EOF

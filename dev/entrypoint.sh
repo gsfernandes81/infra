@@ -137,7 +137,7 @@ if [ -f "$SECRETS/authorized_keys" ]; then
     chmod 600 "$HOME/.ssh/authorized_keys"
 else
     say "no authorized_keys in $SECRETS — no client key goes straight in; the hub's key"
-    say "    (below) is the way in, and make shell C=<c> on zero the break glass."
+    say "    (below) is the way in, and make shell C=<c> on one the break glass."
     : > "$HOME/.ssh/authorized_keys"
     chmod 600 "$HOME/.ssh/authorized_keys"
 fi
@@ -570,7 +570,7 @@ fi
 # what `make boot-log` prints.
 # sshd runs this image's own sshd_config and nothing else — no drop-ins since 2026-10-27 — so
 # a config it refuses is a base build bug, which the smoke test (.github/workflows/dev-smoke.yml)
-# meets before any container on zero does. Its own error lands in `make boot-log`.
+# meets before any container on one does. Its own error lands in `make boot-log`.
 say "sshd on :2222 in the foreground — reached through the hub: ssh dev, then $DEV_NAME"
-say "    from zero: make shell C=$DEV_NAME   (a shell here, without the hub)"
+say "    from one: make shell C=$DEV_NAME   (a shell here, without the hub)"
 exec /usr/sbin/sshd -D -e -f /home/dev/sshd_config

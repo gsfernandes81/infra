@@ -467,7 +467,9 @@ on 'su gavin -c "cd /home/gavin/infra && git checkout -q hosts/zero/system/sudoe
 # The box has no Docker, so the real dev/Makefile is run only to its first guard, which
 # must refuse for want of dev/.env; a stand-in checkout's Makefile, whose `up` prints who ran
 # it and where, shows make runs as root in dev/ and its output prints. `three`, the box's
-# second name by now, is pointed at a checkout with no dev/, which must be refused.
+# second name by now, is pointed at a checkout with no dev/, which must be refused. Every
+# other run names `-e target=zero`, the box's own name: the play's default is `one`, where the
+# stack lives, and `one` here is the runner, which has no checkout.
 echo "== the dev containers play: refusals, --check, the real Makefile's guard, a stand-in's up"
 on 'apk add --quiet make' || fail "could not install make in the box"
 if play server-start-dev-containers.yml -e target=nowhere; then fail "ran against a host not in the fleet"; else
@@ -476,14 +478,14 @@ fi
 if play server-start-dev-containers.yml -e target=three -e infra_checkout=/nonexistent; then fail "ran on a host with no dev/"; else
 	says '/nonexistent/dev/Makefile is not on three' && pass "refused a host with no dev/Makefile" || fail "three failed, but not by its check"
 fi
-if play server-start-dev-containers.yml --check; then pass "--check exits 0, target zero by default"; else fail "--check failed"; fi
+if play server-start-dev-containers.yml -e target=zero --check; then pass "--check exits 0"; else fail "--check failed"; fi
 says 'DRY RUN: would run make up in /home/gavin/infra/dev as root' && pass "--check says what it would run" || fail "--check did not say what it would run"
-if play server-start-dev-containers.yml; then fail "the real dev/Makefile's up succeeded with no .env"; else
+if play server-start-dev-containers.yml -e target=zero; then fail "the real dev/Makefile's up succeeded with no .env"; else
 	says 'no /home/gavin/infra/dev/.env' && says 'make up exited 2' && pass "the real dev/Makefile ran as far as its .env guard, and its refusal printed and failed the play" ||
 		fail "the real dev/Makefile failed, but not at its .env guard"
 fi
 on 'mkdir -p /srv/fakeinfra/dev && printf "up:\n\t@echo \"make up as uid \$\$(id -u) in \$\$(pwd)\"\n" > /srv/fakeinfra/dev/Makefile'
-if play server-start-dev-containers.yml -e infra_checkout=/srv/fakeinfra; then pass "a stand-in's make up succeeds"; else fail "a stand-in's make up failed"; fi
+if play server-start-dev-containers.yml -e target=zero -e infra_checkout=/srv/fakeinfra; then pass "a stand-in's make up succeeds"; else fail "a stand-in's make up failed"; fi
 says 'make up as uid 0 in /srv/fakeinfra/dev' && pass "make ran as root in dev/, and its output printed" || fail "make's output does not show root in dev/"
 
 # ════ server-unlock-arrays.yml ═══════════════════════════════════════════════

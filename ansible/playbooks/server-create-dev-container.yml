@@ -55,7 +55,7 @@
 - name: Create the container's tunnel, DNS and Access app
   ansible.builtin.import_playbook: _dev-container-tunnel.yml
 
-- name: "dev only: create the dev project's host side on zero"
+- name: "dev only: create the dev project's host side on one"
   ansible.builtin.import_playbook: _dev-host.yml
   # `when` on an import applies to every task it brings in.
   when: (container | default('dev')) == 'dev'

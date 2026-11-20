@@ -21,8 +21,8 @@ FROM ghcr.io/gsfernandes81/gsrpi-dev-base:${BASE_TAG}
 USER root
 
 # Ansible. THIS CONTAINER IS A CONTROL NODE, which is the substantive reason it
-# exists rather than being a second shell on zero: an ansible run from Termux
-# crosses the phone's metered radio to reach boxes that are on zero's own LAN, and
+# exists rather than being a second shell on one: an ansible run from Termux
+# crosses the phone's metered radio to reach boxes on the home LAN, and
 # the same run from in here crosses nothing that costs anything.
 #
 # ansible-core, never the `ansible` metapackage — the same rule as the phone, and

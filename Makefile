@@ -1,6 +1,6 @@
 # infra, from the repo root.
 #
-#   make dev         stand up the infra container on zero and walk the logins
+#   make dev         stand up the infra container on one and walk the logins
 #   make dev-up      build + (re)create it
 #   make dev-status  one-screen health check
 #   make dev-verify  status + tools + collections + the fleet
@@ -17,13 +17,13 @@
 # live. Nothing here is runnable from an agent session: `gavin` is not in the docker
 # group and sudo wants a password.
 #
-# THESE RUN LOCALLY, so they only work ON the host running the container — zero. From
+# THESE RUN LOCALLY, so they only work ON the host running the container — one. From
 # the phone there is nothing to forward to and docker is simply absent; reach them over
 # ssh instead, which is the documented way and needs nothing new:
 #
-#     ssh -t zero 'cd ~/infra/dev && make up'
+#     ssh -t one 'cd ~/infra/dev && make up'
 #
-# Not wrapped in an ssh-if-not-zero rule here on purpose: a Makefile that silently does
+# Not wrapped in an ssh-if-not-one rule here on purpose: a Makefile that silently does
 # something different depending on which machine you are on is worse than one that fails
 # with "docker: not found".
 #

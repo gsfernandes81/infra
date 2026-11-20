@@ -39,11 +39,11 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 | put the remote view on this phone or laptop (`claude-remote dev`), or move it to the hub's new claude-sessions after a pin bump | `client-home-claude-remote.yml` | the `dev` block from the play above; reaches github.com only |
 | set up Emacs on this phone or WSL: packages, Emacs Solo at the pinned commit in `~/.emacs.d` with [`clients/emacs`](../clients/emacs/README.md)'s layer linked in, its packages, `emacs` as emacsclient in fish, and on Termux the `emacsd` service; removes the retired Neovim play's `~/.config/nvim` link | `client-home-emacs.yml` · `-K` on Arch when a package is missing · `--check` lists what it would install | Termux or Arch; reaches GitHub and the package archives |
 | rotate one dev container's service token on this client, or add it once its tunnel exists | `client-home-ssh-config.yml -e container=or3-dev -e replace_token=true` | the same |
-| let a new phone or laptop into the dev containers | `server-add-authorized-keys.yml -e client_pubkey_file=~/laptop.pub` | a route to `zero` |
+| let a new phone or laptop into the dev containers | `server-add-authorized-keys.yml -e client_pubkey_file=~/laptop.pub` | a route to `one` |
 | gate one Pi's ssh hostname behind Access, admitting each client's fleet token, proved from here and undone if the proof fails. **One host per run, `one` first, `zero` last** | `server-create-fleet-ssh-access.yml -e host=one` · `-e remove=true` to undo · no `-K` | the API token, and this client set up by the play above |
 | create the dev project's tunnel, DNS, Access and host side (the hub, `ssh dev`), or put or3-dev's hostname on that tunnel | `server-create-dev-container.yml` · `-e container=or3-dev -e via_hub=true` | the [API token](#the-cloudflare-api-token) |
 | bring the dev containers up, or change them: build, plan, y/N, compare ids, probe | `server-deploy-compose.yml -e deployment=dev -K` | sudo |
-| start the dev containers when they are down: `make up` in `dev/` on zero, as root, its output printed, with `dev/Makefile`'s own guards and no plan or question; the play form of `ssh -t zero 'cd ~/infra/dev && make up'`. `up` only. Refuses a host with no `dev/Makefile` | `server-start-dev-containers.yml -K` · `-e target=<host>` for another · `--check` runs nothing | sudo |
+| start the dev containers when they are down: `make up` in `dev/` on one, as root, its output printed, with `dev/Makefile`'s own guards and no plan or question; the play form of `ssh -t one 'cd ~/infra/dev && make up'`. `up` only. Refuses a host with no `dev/Makefile` | `server-start-dev-containers.yml -K` · `-e target=<host>` for another · `--check` runs nothing | sudo |
 | see what runs where, read-only, into `docs/fleet-inventory.md` — a full run that changed it commits it and asks before pushing | `server-generate-fleet-inventory.yml -K` · `-e push=true` / `push=false` / `commit=false` | sudo, and this checkout exactly at `origin/main` |
 | install the packages each Pi should have | `server-install-packages.yml -K` · `-l <host>` | sudo |
 | install the tracked `/etc` files, without restarting anything: each host's list comes from `bin/install-system-file --list` on it, so a host whose `hosts/<host>/leap/MOVED` exists gets its `leap/system/` copies | `server-install-system-files.yml -K` · `-l <host>` · `-e only=<file>`, a pattern matched against the whole name, so one file: `-l two -e only=sshd-infra.conf`, `-l three -e only=cloudflared-config.yml` | sudo |
@@ -68,7 +68,7 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 **Three ways a play picks its host, each on purpose.** A play that changes one host at a time
 (the tunnel plays, the cloudflared and Leap updates, and the three setup plays) is aimed
 with `-e target=<host>`; its `hosts:` is that variable, so leaving it out falls back to
-`one` (`zero`, for the dev containers' start; or refuses, for the updates and the setup
+`one` (or refuses, for the updates and the setup
 plays) and can never widen to the whole fleet. A fleet-wide play (packages, system files,
 the inventory, the unlock) runs on `fleet` and is narrowed with `-l <host>`. A deployment play
 (`server-create-deployment-tunnel.yml` and the two `server-deploy-` plays) reads its host
@@ -89,7 +89,7 @@ open.
 node it writes the report and commits it. Every other `server-` play changes something:
 packages, **boot-path `/etc` files**, the cloudflared and Tailscale binaries, the tailnet,
 zero's backup key and alert URL, tunnels and DNS, which volumes are unlocked, the dev containers,
-`authorized_keys` on `zero`, Access in front of the fleet's ssh hostnames. **The two
+`authorized_keys` on `one`, Access in front of the fleet's ssh hostnames. **The two
 `server-deploy-` plays are the ones that start a deployment**, Phase 3's "Ansible drives
 deployments": `garmin-mcp` first, then `send2ereader`. `server-stop-deployments.yml` stops
 and starts what those plays made, and never creates or recreates a container.
@@ -106,7 +106,7 @@ The halves, for reading rather than running:
 | `_dev-container-tunnel.yml` | the **edge** side — tunnel, DNS, Access application and policy |
 | `_cf-tunnel.yml` | tasks, shared by the two plays that give something its own tunnel: zone and account, the tunnel with its dead-tunnel assert, the CNAME. **No Access** — each caller adds its own or none |
 | `_cf-access-app.yml` | tasks: one Access application and its one policy, each read, compared on the fields the file sets and written only when one differs; the application read back after a write, the policies on every run — imported once per application by `server-create-deployment-tunnel.yml` and once by `server-create-browser-login.yml` |
-| `_dev-host.yml` | the **host** side of the dev project on zero — the hub's and infra-dev's secrets dirs, the hub's authorized_keys, `dev/.env`'s lines |
+| `_dev-host.yml` | the **host** side of the dev project on one — the hub's and infra-dev's secrets dirs, the hub's authorized_keys, `dev/.env`'s lines |
 | `_assert-inventory.yml` | imported above every play that targets `control` or `fleet`, so a run with no inventory fails instead of exiting 0 |
 | `files/compose-oneshots.py` | run on the host by the deploy and stop/start plays: prints the container name of every one-shot in a deployment, a service another `depends_on` with `condition: service_completed_successfully` (dev's `policy` was one until 2026-11-06); reads `docker compose config` and prints names only |
 | `_cf-api-token.yml` | tasks, imported by every play that talks to Cloudflare: reads the API token file, refuses it on the command line, prints the minting steps when it is missing, verifies it |
@@ -124,7 +124,7 @@ vessel link. Every other dev container is reached through the hub and needs noth
 `dev`, the hub, and `or3-dev` — and of the aliases retired at the cutover, whose blocks a
 whole run removes. Run it from `main` only after the cutover: before it, those old doors are
 still the way in. No ports: since 2026-10-04 nothing is published on the host, and
-break-glass is `ssh -t zero 'cd ~/infra/dev && make shell'`.
+break-glass is `ssh -t one 'cd ~/infra/dev && make shell'`.
 
 ### One command, for whichever client you are on
 
@@ -163,7 +163,7 @@ Termux and `uname -n` elsewhere. It matters only at minting.
 ### A new client needs two halves, and only one of them is `client-home-ssh-config.yml`
 
 The ssh block and the service token are things a client *holds*. The key that admits it
-is a fact about the **door** — the hub's and or3-dev's authorized_keys — and lives on `zero`:
+is a fact about the **door** — the hub's and or3-dev's authorized_keys — and lives on `one`:
 
 ```sh
 ansible-playbook playbooks/server-add-authorized-keys.yml \
@@ -250,12 +250,12 @@ working directory as the usual cause.
 deployment of `server-deploy-compose.yml` (`deployments/dev` links to `dev/`), so it is brought
 up and changed the way every deployment is: a preflight that runs `dev/Makefile`'s own guards
 (the uid guard among them — the play does not copy it, it calls it) and builds every image,
-then a dry-run plan, a `[y/N]`, `up`, a container-id comparison and a probe. `make up` on zero
+then a dry-run plan, a `[y/N]`, `up`, a container-id comparison and a probe. `make up` on one
 stays as the unguarded break glass, and `server-start-dev-containers.yml` runs it from here:
 
 ```sh
-ansible-playbook playbooks/server-start-dev-containers.yml -K   # make up on zero, as root
-ssh -t zero 'cd ~/infra/dev && make up'      # or restart, status, verify, logs
+ansible-playbook playbooks/server-start-dev-containers.yml -K   # make up on one, as root
+ssh -t one 'cd ~/infra/dev && make up'       # or restart, status, verify, logs
 ```
 
 **The host half of `server-create-dev-container.yml` replaced `dev/seed-secrets.sh`, which is deleted.** Three of that

@@ -74,7 +74,7 @@ base_packages:
 # Images server-prune-images.yml keeps although no container uses them and no tracked
 # compose file names them: whole repositories, every tag. Only what a rebuild needs belongs
 # here, never "might want it later": the dev containers' base, which their Dockerfiles build
-# FROM and which `make base` on zero would otherwise have to fetch or rebuild first.
+# FROM and which `make base` on one would otherwise have to fetch or rebuild first.
 prune_keep_images:
   - ghcr.io/gsfernandes81/gsrpi-dev-base
 

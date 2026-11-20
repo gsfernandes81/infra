@@ -16,7 +16,7 @@
 # sidecar in dev/compose.yaml; nothing is published on the host.
 #
 # SAME BOTTOM LAYERS AS gsrpi-dev-base, on purpose: the python base by the same digest
-# (Dockerfile.base explains the pin), so on zero, which already holds the base, this image
+# (Dockerfile.base explains the pin), so on one, which already holds the base, this image
 # costs only its own few layers. Bump the two digests together.
 # ── claude-sessions: the hub's menu, and every container's hooks, agent and offloader ──
 # A PINNED RELEASE, HASH-CHECKED PER ARCHITECTURE, the shape Dockerfile.base used for it and
@@ -26,7 +26,7 @@
 # IN A STAGE OF ITS OWN, `fetch`, so the smoke test (.github/workflows/dev-smoke.yml) can
 # put a binary built from claude-sessions' source in its place with a named build context —
 # that is how an UNRELEASED claude-sessions is tested against this image before it is
-# published. Nothing else ever overrides it: zero builds this stage as written.
+# published. Nothing else ever overrides it: one builds this stage as written.
 #
 # A BUMP is the version and both hashes together, from the new release's SHA256SUMS asset
 # (also in its notes). A wrong hash fails this build at `sha256sum -c`, loudly, by design.

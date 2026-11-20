@@ -3022,6 +3022,27 @@ given.
 - **`make` is in every Leap host's first-boot packages**, because `dev/Makefile` is the dev
   stack's management interface and Leap's image has none.
 
+## The dev hub runs on `one`
+
+**Decided 2026-11-20**, by the owner. The whole `dev` Compose project moved from `zero` to
+`one` on that day: the hub, its sidecar, `infra` and the other repos' containers.
+
+- **Why.** The `infra` agent stays up through `zero`'s own move to Leap. `zero`'s move
+  shrinks to Immich, Syncthing, pearl-wallet and the backup source, with no dev containers
+  in it. `one` has 8 GB against `zero`'s 4 GB, so the memory ceiling the stack was sized
+  around is no longer the constraint. It was already planned for after the visit.
+- **How it moved.** Each volume went as a tar file over ssh from `zero` to a staging
+  subvolume on `one`'s SSD. `btrfs send` was rejected: the volumes are directories inside
+  `zero`'s Docker subvolume, not subvolumes. The secrets were copied and set to 0750 and
+  0640, group 1001, which on `one` is the `devstack` group with `gavin` in it. The hub's
+  ssh host key travels in the `dev_hub-state` volume, so no client re-pins it.
+- **The way back.** `zero`'s copy is stopped and kept for about three days, then removed.
+  `plans/dev-hub-to-one.md` holds that cleanup. `hosts/one/dev` replaces `hosts/zero/dev`,
+  never both, or the deploy play would deploy the stack on each host.
+- **Defaults follow.** `dev_host`, `cf_target` and the start play's `target` default to
+  `one`. The two halves of `server-create-dev-container.yml` move together, since either
+  alone would split a run across hosts.
+
 ## From the management plane, moved 2026-11-20
 
 **Moved here on 2026-11-20**, when `docs/management-plane.md` was cut to its phase table and

@@ -11,7 +11,8 @@ as the management plane, and a handful of Python tools in `bin/`.
 > **Two places this repo is worked on, and neither can touch the fleet from an agent
 > session.** The owner's **phone (Termux)** is the control node — the only machine with a
 > route to every box, and the only one on a metered connection. **The `infra` container**
-> on `zero` (`infra-dev` until 2026-10-27; every dev container is now named for its repo) is
+> on `one` (on `zero` until 2026-11-20; `infra-dev` until 2026-10-27; every dev container
+> is now named for its repo) is
 > where Claude usually runs: free data, `git`/`gh`/`ansible` present, **no route to `zero`, `one` or `two` by decision** (`docs/management-plane.md`
 > § *A control node inside the fleet*). In both, `gavin` is not in the `docker` group and
 > `sudo` wants a password. Anything that changes a box is **handed over**, not run — see
@@ -46,7 +47,7 @@ Full orientation is `README.md`; the reasoning is `docs/decisions.md`. Quick map
 - **`dev/`** — every dev container, in one `dev/compose.yaml` (project `dev`): the hub
   (`dev/hub/`, the menu behind `ssh dev`, and the offloader), its `cloudflared` sidecar,
   `infra`, and the other repos' containers, each named for its repo and all started by default. **Live
-  on `zero` since 2026-10-27**; what the cutover left open is [`docs/handoff/2026-10-26-dev-hub.md`](docs/handoff/2026-10-26-dev-hub.md). Lifecycle is
+  on `one` since 2026-11-20, on `zero` before that, since 2026-10-27**; what the cutover left open is [`docs/handoff/2026-10-26-dev-hub.md`](docs/handoff/2026-10-26-dev-hub.md). Lifecycle is
   `dev/Makefile` only (the dev user is a fixed 1001 on every host, in `dev/compose.yaml`
   and `make base`, and a second copy of the lifecycle would drift from them). The
   top-level `Makefile` forwards `dev-*` to it.
@@ -187,7 +188,7 @@ script**, run in a separate terminal, with the output pasted back.
 
 - **Write handover blocks for fish and a TTY.** `ssh host 'sudo …'` hangs — no TTY, so
   `sudo` cannot prompt. Give the owner `ssh host` first, then a block to paste *inside*
-  that shell. From the phone, `ssh -t zero 'cd ~/infra/dev && make up'` is the documented
+  that shell. From the phone, `ssh -t one 'cd ~/infra/dev && make up'` is the documented
   shape for the dev container, and the `-t` is why it works.
 - **Never assume a privileged command ran.** Verify from its output, or by re-reading
   state with unprivileged tools.

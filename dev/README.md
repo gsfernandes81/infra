@@ -1,6 +1,6 @@
-# dev — the dev containers on `zero`, and the hub in front of them
+# dev — the dev containers on `one`, and the hub in front of them
 
-This directory is one Compose project, `name: dev`, holding every dev container on `zero`
+This directory is one Compose project, `name: dev`, holding every dev container on `one`
 (Pi 5, arm64) and the **hub** that is the way in to all of them: `ssh dev` lands on one
 claude-sessions menu over every container. **`infra`** is this repo's own container —
 Claude Code against **this** repo, with Ansible in the image. `or3`, `destiny-director` (with
@@ -9,16 +9,17 @@ other repos'. **All of them start by default** on `make up`, the deploy and `doc
 up`; only the hub's tunnel has a profile. `claude-sessions` is the hub's own
 software, worked on in a container like any other repo: it adds a pinned Rust toolchain.
 
-> **Live on zero since the cutover of 2026-10-27.** What is still open from it is
+> **Live on one since 2026-11-20, moved from zero, where it went live on 2026-10-27.**
+> What is still open from it is
 > [`../docs/handoff/2026-10-26-dev-hub.md`](../docs/handoff/2026-10-26-dev-hub.md).
 
 ## Why this exists
 
-**To run Claude sessions on `zero` instead of driving them from the phone.** Every token of a
+**To run Claude sessions on `one` instead of driving them from the phone.** Every token of a
 response driven from the Android app or Remote Control crosses the phone's mobile data, the
 one metered link on the map (the **or3** repo's `CLAUDE.md` § *Data budget*: metering follows
-the destination, not the size). In a container on `zero` the model traffic goes out over
-zero's home line, and what crosses the radio is a terminal session.
+the destination, not the size). In a container on `one` the model traffic goes out over
+one's home line, and what crosses the radio is a terminal session.
 
 `ansible-core` and the collections are in infra as **development tools** — syntax-check,
 lint, read a playbook against the real `ansible.cfg` — and are not wired to the fleet.
@@ -56,12 +57,12 @@ lint, read a playbook against the real `ansible.cfg` — and are not wired to th
 | `config.fish`, `screenrc`, `claude-managed-settings.json` | fish's config (a login shell lands in `/workspace`), screen's, and Claude Code's managed settings (agent view off, the version pin with updates off, auto mode as every session's starting permission mode) |
 | `login.sh` | in the image: the interactive login walkthrough, and the clone if start-up could not make it — `make login` |
 | `status.sh` | on the host: the readouts — `make status`, `verify`, `fleet`, `collections`, `boot-log` |
-| `ci/compose.smoke.yaml` | the smoke test's override; never used on zero |
-| `.env.example` | copy to `.env` on zero; **one `.env` for the whole project, and every line in it is required** — every container starts, and Compose refuses a required variable it cannot fill even for a service whose profile is off |
+| `ci/compose.smoke.yaml` | the smoke test's override; never used on one |
+| `.env.example` | copy to `.env` on one; **one `.env` for the whole project, and every line in it is required** — every container starts, and Compose refuses a required variable it cannot fill even for a service whose profile is off |
 
 The host side is `ansible/playbooks/server-create-dev-container.yml`, run from the phone; the
 project is deployed by `server-deploy-compose.yml -e deployment=dev` (`deployments/dev` and
-`hosts/zero/dev` are links to this directory, its hooks in `ansible/deploy-hooks/dev/`).
+`hosts/one/dev` are links to this directory, its hooks in `ansible/deploy-hooks/dev/`).
 
 ## Bring-up, from nothing
 
@@ -81,7 +82,7 @@ empty `~/.infra-dev-secrets`, and writes the secrets paths and tunnel id into `d
 line. **The hub's own key is never made here**: the hub makes it at first start (*The hub*).
 
 Then the GitHub App, which compose requires — *GitHub tokens, one repo each*, steps 1–4 — and
-the rest of `.env` by hand. On zero, once, on a box that never had the old projects:
+the rest of `.env` by hand. On one, once, on a box that never had the old projects:
 
 ```sh
 cd ~/infra/dev && make volumes   # the external volumes, empty — never at a cutover
@@ -94,19 +95,19 @@ comparison, and a probe that the hub reaches each container:
 ansible-playbook playbooks/server-deploy-compose.yml -e deployment=dev -K
 ```
 
-**`make up` on zero is the break glass** — the same build and start with no plan and no
+**`make up` on one is the break glass** — the same build and start with no plan and no
 question; `make dev` is `make up` then `make login`. Each starts every container, the hub
 first, and the tunnel when `COMPOSE_PROFILES` names it, and refuses while an external volume is missing: at a cutover that
 is a mistyped name to fix in `compose.yaml`, never one to create.
-From the phone it is one play, which runs `make up` in `dev/` on zero as root and prints its
+From the phone it is one play, which runs `make up` in `dev/` on one as root and prints its
 output, or the same by hand:
 
 ```sh
-ansible-playbook playbooks/server-start-dev-containers.yml -K   # make up on zero, as root
-ssh -t zero 'cd ~/infra/dev && make up'                           # the same, typed
+ansible-playbook playbooks/server-start-dev-containers.yml -K   # make up on one, as root
+ssh -t one 'cd ~/infra/dev && make up'                           # the same, typed
 ```
 
-The play offers `up` only and runs what zero's checkout holds, as the hand command does; it
+The play offers `up` only and runs what one's checkout holds, as the hand command does; it
 prints that commit before make's output.
 
 On each client — the machine you ssh *from*:
@@ -118,7 +119,7 @@ ansible-playbook playbooks/client-home-claude-remote.yml   # optional: the remot
 claude-remote dev
 ```
 
-On zero, `make login` (`C=<c>` for another container) reports the hub's token, runs `claude
+On one, `make login` (`C=<c>` for another container) reports the hub's token, runs `claude
 auth login` if needed, and clones the workspace if start-up could not; re-running it is safe.
 Then `make verify` should read `sshd: running in the foreground`, `auth: claude logged in`,
 `tunnel: the hub's, serving dev`, `peers: claude 2.1.311 speaks peer protocol 1, and its inbox
@@ -156,7 +157,7 @@ start — no base bump, no child bump. Each file goes in through a temporary nam
 rename, so a hook already running keeps the binary it started from.
 
 **The key.** The hub makes an ed25519 key at its first start in its own `hub-state` volume
-(`~/.hub/id_ed25519`), and it is never anywhere else — not on zero, not on a control node,
+(`~/.hub/id_ed25519`), and it is never anywhere else — not on one, not on a control node,
 not in any other container; that is why the hub runs no agent of any kind. Only the public
 half leaves, as `hub.pub`, and each dev container's entrypoint writes it to
 `~/.ssh/authorized_keys.hub` at start as `restrict,pty <key>`: commands and a terminal, no
@@ -218,7 +219,7 @@ mockups 12 to 15, and binding as the rest of that file is:
 and nothing else** (owner, 2026-10-27). It is the ONLY way a container reaches GitHub: no
 deploy key, no `gh` login, no https-to-ssh rewrite, so the App is made before the cutover
 (step 0 there). or3's deploy key stays for one job only: lending BuildKit or3's private repo
-when its image is built on zero.
+when its image is built on one.
 
 How it works:
 
@@ -259,7 +260,7 @@ What changes for you:
 2. On the App's page, *Generate a private key* — a `.pem` downloads — then *Install App* on your
    account, *Only select repositories*: infra, or3, destiny-director, dossier, invective, nibbles,
    ionic-traces.
-3. The key to zero, never into a repo: from the phone, `scp <the.pem> zero:.dev-secrets/github-app.pem`,
+3. The key to one, never into a repo: from the phone, `scp <the.pem> one:.dev-secrets/github-app.pem`,
    then on the host `chgrp 1001 ~/.dev-secrets/github-app.pem && chmod 640 ~/.dev-secrets/github-app.pem` and delete the phone's copy.
 4. `HUB_GITHUB_APP_ID=<id>` in `dev/.env` — compose requires it, and `make check` refuses a
    missing `github-app.pem`.
@@ -312,7 +313,7 @@ claude-sessions' `docs/design.md` § *Agent messaging*.
   `hub/router`: woken, with the cost, or not woken and why, or the container is down. An
   offloaded slot shows no status in `ListAgents`, since Claude Code drops statuses it does
   not know, and every session is told so at start by the `peer-context` hook. **From 0.18.3
-  the router checks zero first**: its available memory (`MemAvailable` in the hub's
+  the router checks one first**: its available memory (`MemAvailable` in the hub's
   `/proc/meminfo`, which inside a container describes the host) must cover the session plus
   512 MB, and so must the dev pool's headroom once `CLAUDE_SESSIONS_POOL` names it. Wakes run
   one at a time across the fleet, so each reads what the last one left. A figure that cannot
@@ -355,8 +356,8 @@ is a leftover to delete.
 ## The workspace and the env volume
 
 **`/workspace` is each container's own named volume, cloned into** (`infra-workspace`,
-`or3-workspace`, …) — never a host clone. zero's `~gavin/infra` is only what the box runs, so
-a commit in a container can never leave zero's checkout diverged (`../CLAUDE.md` § *Git*).
+`or3-workspace`, …) — never a host clone. one's `~gavin/infra` is only what the box runs, so
+a commit in a container can never leave one's checkout diverged (`../CLAUDE.md` § *Git*).
 **Push to share work**, as from anywhere else.
 
 At start the entrypoint fills an empty `/workspace` from `DEV_REPO` (set per service from the
@@ -599,7 +600,7 @@ from its GitHub URL. The job summary carries two idle pis' CPU and memory over t
 window, the figures claude-sessions asked for. Its header lists what it cannot check (the Pi, the pool,
 Cloudflare, the App, or3). Dispatched with a claude-sessions ref, it builds the hub's binary
 from that ref instead of the pinned release, through `ci/compose.smoke.yaml` and the
-Makefile's `COMPOSE_OVERRIDE`; neither is ever used on zero.
+Makefile's `COMPOSE_OVERRIDE`; neither is ever used on one.
 
 ## What every container carries for work
 
@@ -660,11 +661,11 @@ it closes, a file goes over as a stream (`ssh dev ssh infra 'cat /workspace/f' >
 `$SHELL -c '…'`, not a login shell, so it lands in `~` — and a claude started there asks to
 trust a directory that is not the repo. Its header has the rest.
 
-**The break-glass way in is `docker exec` through zero's own ssh**, typed rather than aliased:
+**The break-glass way in is `docker exec` through one's own ssh**, typed rather than aliased:
 
 ```sh
-ssh -t zero 'cd ~/infra/dev && make shell'        # a shell in infra; C=<c> for another, C=hub the hub
-ssh -t zero 'cd ~/infra/dev && make claude'       # the hub's menu, as ssh dev lands on it
+ssh -t one 'cd ~/infra/dev && make shell'        # a shell in infra; C=<c> for another, C=hub the hub
+ssh -t one 'cd ~/infra/dev && make claude'       # the hub's menu, as ssh dev lands on it
 ```
 
 It survives a broken tunnel, Access application or token, and a hub whose sshd is down —
@@ -789,9 +790,9 @@ interpolates it.
 
 `- /var/run/docker.sock:/var/run/docker.sock` is missing from `compose.yaml` deliberately,
 and it is the most likely edit somebody makes in a hurry in a repo that drives docker
-deployments. The socket is root on zero (`../docs/decisions.md`: the docker group is
+deployments. The socket is root on one (`../docs/decisions.md`: the docker group is
 root-equivalent), handed to a container that runs a claude, on the box that runs Immich.
-**Nothing needs it**: Ansible drives docker on `zero` over ssh, as a host in the inventory.
+**Nothing needs it**: Ansible drives docker on `one` over ssh, as a host in the inventory.
 If something one day genuinely needs a socket, the answer is a rootless podman socket under
 a dedicated account, not this line.
 
@@ -807,9 +808,9 @@ Cloudflare and client change of its own. **A change to `cloudflared.yml` reaches
 only on a restart of `dev-cloudflared`** (`sudo docker stop` and `start`, then `make
 tunnel-log`; `make restart` works too, but its closing readout is a dev container's): cloudflared reads it at start, the mount is of a
 single file that `git pull` replaces, and a deploy recreates the sidecar only when its own
-service changes. Restart it from `ssh zero`, not from inside `ssh dev`, which it drops. The base carries no cloudflared.
+service changes. Restart it from `ssh one`, not from inside `ssh dev`, which it drops. The base carries no cloudflared.
 
-**Provisioning is two plays from the control node**, never ansible on zero. The server side,
+**Provisioning is two plays from the control node**, never ansible on one. The server side,
 `server-create-dev-container.yml` (*Bring-up*), reads the Cloudflare API token from
 `~/.config/cloudflare/api-token` and prints how to mint one if it is missing
 ([`../ansible/README.md`](../ansible/README.md) § *The Cloudflare API token*). It writes
@@ -872,20 +873,20 @@ Every session in every container ends; volumes, logins and history stay. The sam
 is the refresh when only the children's `main`s moved. `make base` builds the identical
 image locally under the ghcr name, and docker prefers a local image over a pull: the fallback for no network, or not waiting.
 
-**CI builds those images first, so zero's build is mostly pulls.** Each repo that owns a
+**CI builds those images first, so one's build is mostly pulls.** Each repo that owns a
 Dockerfile builds it in CI on a native arm64 runner on `x-base-tag` and pushes a registry
-cache, which that service's `cache_from` names. zero still builds every image itself; a
-step CI already ran is a cache hit and a layer pull. A miss is the build zero always did,
+cache, which that service's `cache_from` names. one still builds every image itself; a
+step CI already ran is a cache hit and a layer pull. A miss is the build one always did,
 and is still correct. `.github/workflows/dev-cache.yml` does this for the hub and infra
 after every `dev-base` run that passes, then dispatches each child repo's `dev-image.yml`
 with the base tag, through a GitHub App that can only run workflows. Every cache is a public
-package, so zero reads it with no credential; a private repo, as or3 is, caches only a
+package, so one reads it with no credential; a private repo, as or3 is, caches only a
 `toolchain` stage holding none of its own files. The contract a child keeps, and which
 children have one yet, are in
 [`plans/dev-image-caches.md`](../plans/dev-image-caches.md).
 
 So after a base bump, wait for the children's `dev-image` runs as well as `dev-base`
-before the recreate play. A deploy that does not wait is slower, not wrong. On zero, `sudo
+before the recreate play. A deploy that does not wait is slower, not wrong. On one, `sudo
 docker buildx history ls` shows each build's duration: seconds per image when the cache
 hit.
 
@@ -932,7 +933,7 @@ container restarted: hooks and offload passes run the binary from the volume eac
 each container's agent is started by the hub's menu over ssh and ends with that connection, so
 the old hub's agents go with it. From 0.7.0 the foot of the menu shows every container's RAM
 and the machines' load. The hub's load line, at the door and in the remote view's footer,
-reads zero's own memory and swap from 0.19.1 (the pool's, once one is mounted into the hub);
+reads the host's own memory and swap from 0.19.1 (the pool's, once one is mounted into the hub);
 before that it added up the containers' ceilings and read `RAM … / 16.0G` on a 4 GB Pi; each session's status line shows its own container's RAM, its swap (since
 0.18.5) and the host's load, and the pool's RAM and swap once the pool is mounted into the containers
 (`plans/dev-pool.md`); its design and screens are that repo's
@@ -1143,8 +1144,8 @@ mode, by the owner's call: the container is the boundary, and no call waits on a
 
 None are in git. `.env` and `.env.*` are gitignored; the rest live in directories, each
 mounted read-only into the one container that needs it. Since 2026-11-20 the plays write
-them 0750 and their files 0640, group 1001. `zero`'s are still 0700 and 0600 until the dev
-host play next runs there, and `make check` accepts both:
+them 0750 and their files 0640, group 1001. `zero`'s old copies are still 0700 and
+0600, and `make check` accepts both:
 
 | `.env` line, default | Mounted | Holds |
 |---|---|---|
@@ -1168,7 +1169,7 @@ Claude login (`*-claude`, or the shared `claude-login` volume while
 | the hub | nothing outward — the hub reaches *in*: commands and terminals, `restrict,pty` | `hub.pub`, written to `~/.ssh/authorized_keys.hub` at every start |
 
 Nothing is published on the host; the ways to a shell in a container are the hub, behind
-Access, and `docker exec` on zero. **The hub is as good as a shell in every container**, which
+Access, and `docker exec` on one. **The hub is as good as a shell in every container**, which
 is why its key lives in its volume alone and it runs no agent and no claude.
 
 ## The targets

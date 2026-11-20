@@ -1,4 +1,4 @@
-# The dev containers and their hub, from a terminal on zero. **This file is their
+# The dev containers and their hub, from a terminal on one. **This file is their
 # management interface** — the docker commands live here and nowhere else. One Compose
 # project (compose.yaml, `name: dev`): the hub, its cloudflared sidecar, infra, and each
 # other repo's container. Every container is named for its repo, and all of them start.
@@ -28,7 +28,7 @@
 # C=hub is the hub. The same targets are `make dev-up`, `make dev-login` … from the repo root.
 #
 # NOT runnable from an agent session: `gavin` is not in the docker group and sudo
-# wants a password. This is for your own terminal on zero.
+# wants a password. This is for your own terminal on one.
 #
 # The containers are USED over ssh, not from here — `ssh dev` from Termux or a PC lands on
 # the hub's menu over every one of them, and a zmx session holds each claude. These targets
@@ -47,7 +47,7 @@ SUDO := $(if $(filter 0,$(shell id -u)),,sudo)
 #
 # COMPOSE_OVERRIDE is a second compose file layered on top, for the smoke test only
 # (.github/workflows/dev-smoke.yml puts an unreleased claude-sessions into the hub's build).
-# Empty on zero, always.
+# Empty on one, always.
 COMPOSE_OVERRIDE ?=
 # BUILDX_BAKE_ENTITLEMENTS_FS=0 (owner, 2026-10-27): Compose builds through `buildx bake`, which
 # refuses to read a file outside the working directory unless it is granted, and Compose 5.6.1
@@ -184,8 +184,8 @@ _require-no-retired:
 # Warns rather than refuses: a missing file costs the thing that uses it, and the
 # container is still worth having up without it. The mode is not cosmetic: the containers
 # run as uid 1001 and read these directories through group 1001, so 750 is what lets them in
-# where gavin is not 1001. 700 is still what zero's directories are until the dev plays
-# re-run, and is not warned about.
+# where gavin is not 1001. 700 is still what zero's directories were before the dev plays
+# ran there, and is not warned about.
 _require-secrets:
 	@hub=$$(grep -E '^HUB_SECRETS=' $(CURDIR)/.env | cut -d= -f2-); \
 	[ -n "$$hub" ] || { echo "HUB_SECRETS is not set in .env" >&2; exit 1; }; \

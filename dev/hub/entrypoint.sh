@@ -107,8 +107,8 @@ if [ -s "$SECRETS/authorized_keys" ]; then
     cp "$SECRETS/authorized_keys" "$HOME/.ssh/authorized_keys"
     chmod 600 "$HOME/.ssh/authorized_keys"
 else
-    say "WARNING: no authorized_keys in $SECRETS — NOTHING can ssh in. From zero:"
-    say "         ssh -t zero 'cd ~/infra/dev && make shell C=hub'"
+    say "WARNING: no authorized_keys in $SECRETS — NOTHING can ssh in. From one:"
+    say "         ssh -t one 'cd ~/infra/dev && make shell C=hub'"
     rm -f "$HOME/.ssh/authorized_keys"
     : > "$HOME/.ssh/authorized_keys"
     chmod 600 "$HOME/.ssh/authorized_keys"

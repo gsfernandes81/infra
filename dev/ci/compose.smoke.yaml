@@ -1,5 +1,5 @@
 # Layered over compose.yaml by the smoke test ONLY (.github/workflows/dev-smoke.yml), through
-# the Makefile's COMPOSE_OVERRIDE. Never on zero.
+# the Makefile's COMPOSE_OVERRIDE. Never on one.
 #
 # It replaces the hub image's `fetch` stage — the pinned, checksummed release download — with
 # a directory holding a claude-sessions binary the workflow built from source, at

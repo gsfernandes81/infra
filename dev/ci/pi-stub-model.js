@@ -1,5 +1,5 @@
 // A scripted model for the smoke test (.github/workflows/dev-smoke.yml), loaded with
-// `pi -e /tmp/pi-stub-model.js --model smoke/stub`. Never in the image, never on zero.
+// `pi -e /tmp/pi-stub-model.js --model smoke/stub`. Never in the image, never on one.
 //
 // Why it exists: pi's permission gate decides on the MODEL's tool call, so a check of the gate
 // needs a model that makes one, and the runner has no key and should need no network. This

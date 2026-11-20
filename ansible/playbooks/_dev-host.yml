@@ -1,7 +1,7 @@
 ---
 # NOT A PLAYBOOK YOU RUN — the underscore says so. server-create-dev-container.yml imports it
 # for `-e container=dev` (the default), after the edge half has made the hub's tunnel, DNS
-# record and Access application. This is the dev project's HOST side on `zero`: what has to
+# record and Access application. This is the dev project's HOST side on `one`: what has to
 # exist before the deploy play (server-deploy-compose.yml -e deployment=dev) can bring it up.
 # One play for the hub and infra-dev since 2026-10-27, when infra-dev's deploy key went (the
 # hub's GitHub App is every container's GitHub credential) and left it nothing but a directory.
@@ -26,10 +26,10 @@
 #     same run, so the two cannot name different tunnels.
 #
 # GROUP 1001, AND WHY NOT THE SSH USER'S. The containers run as uid 1001 on every host. Where
-# gavin is 1001 (zero) the group is gavin's own and nothing widens; where gavin is 1000 (one)
-# the files are gavin's and the containers read them through the group. A re-run converges a
-# directory made at 0700 before this to 0750, which is what lets it be run against zero as it
-# stands. Both containers copy a key out of the mount before ssh sees it, so 0640 on the
+# gavin is 1000 (one) the files are gavin's and the containers read them through the group;
+# where gavin is 1001 (zero) the group is gavin's own and nothing widens. A re-run converges
+# a directory made at 0700 before this to 0750, which is what lets it be run against a host
+# as it stands. Both containers copy a key out of the mount before ssh sees it, so 0640 on the
 # host file does not meet ssh's own key-mode check.
 #
 # THE HUB'S OWN KEY IS NOT HERE, and must never be: the hub makes it at first start in its
@@ -39,7 +39,7 @@
 # checks what it recreated (decisions.md, the dev-project-as-a-deployment row).
 
 - name: Create the dev project's secrets and dev/.env lines
-  hosts: "{{ dev_host | default('zero') }}"
+  hosts: "{{ dev_host | default('one') }}"
   gather_facts: true
   become: false
 

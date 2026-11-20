@@ -77,7 +77,7 @@ anything invasive ([Immich's database](#immichs-database)).
 2026-10-25 with its files kept ([README](../README.md)).
 
 **Two things the greps do not show, by design.** The dev containers publish no port on
-`zero` at all since the hub (their sshd is reached on the project's own network, and the hub
+`one` at all since the hub (their sshd is reached on the project's own network, and the hub
 through its tunnel), so there is nothing of theirs to grep for. And 8384 and 22000 are Syncthing on host networking,
 on both boxes: they appear in `netstat` but not in `docker ps`'s ports. `one`'s Syncthing
 is part of the `torrents` deployment and syncs a different share from `zero`'s.
@@ -119,9 +119,10 @@ empty database, which here means an empty `/media/immich/db`: move the old clust
 on the same array and keep it until the restore is proved. It has not been rehearsed on
 this fleet.
 
-## The dev containers on `zero`
+## The dev containers on `one`
 
-Since the 2026-10-27 cutover they are one Compose project, `dev`, in `~/infra/dev`
+Since the 2026-10-27 cutover (on `one` since 2026-11-20) they are one Compose project,
+`dev`, in `~/infra/dev`
 ([dev/README.md](../dev/README.md)). The hub (`dev-hub`) and its tunnel (`dev-cloudflared`)
 are `restart: unless-stopped` and come back by themselves: `ssh dev` works after a reboot.
 The dev containers (`infra`, `or3` and the other repos', each named for its repo,
@@ -228,8 +229,8 @@ hand, with the key file or the owner's passphrase, is
 [`hosts/zero/system/README.md`](../hosts/zero/system/README.md) § *The encrypted member*.
 **`/var/lib/docker` is not on the array** but on the SSD's `sda2`, outside bcache, since
 2026-10-26 ([decisions.md](decisions.md)), with the same two guards. So a missing array
-takes Immich and Syncthing down while Docker and the dev containers still run; a missing
-SSD stops dockerd, so **nothing runs on `zero`, the dev containers included**, and the
+takes Immich and Syncthing down while Docker still runs; a missing
+SSD stops dockerd, so **nothing runs on `zero`**, and the
 array would also lose its cache. The box still boots and ssh still works, as on `one`.
 
 **`two`:** root on `/dev/mmcblk0p2`, an ordinary writable install, and no `/media` data
