@@ -231,7 +231,8 @@ key, its restore key and the two `from=` addresses. Its snapshots are the tracke
 script's, run by hand. `three` makes its pull key as its README says, and its public half
 goes into the stand-in's key line.
 
-Each numbered point is the design's (`plans/three-backup-pull.md`), with how it is shown:
+Each numbered point is the design's (`docs/decisions.md` § *The pull, as built*), with how
+it is shown:
 
 1. **A full pull.** `backup-pull.service`, started as the timer would, under the README's
    runtime drop-in that lifts the rate limit. `tree-hash.sh` hashes every path, owner,

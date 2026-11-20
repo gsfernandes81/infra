@@ -2720,6 +2720,34 @@ Alpine copies for `one` too, since `one` keeps both.
   edge/testing, pinned, run with `--no-dbus` from an hourly periodic script. The pull runs
   daily at 01:00 at 32 Mbit/s. `autodefrag` leaves the `/media/immich` line, since it
   unshares snapshot extents (issue #23 for a timed defrag).
+- **Each box reads from the other, and neither holds a key that writes to it** (the owner
+  approved the design and its keys, 2026-11-19). `three` reads `zero`'s snapshots for the
+  pull; `zero` reads its own backups on `three` for a restore, which the owner agreed to.
+  The one write-only key the fleet allowed between boxes (§ *`three` is the off-site
+  backup*) becomes two read-only ones. Each key runs an rsync daemon as an unprivileged
+  user holding only `CAP_DAC_READ_SEARCH`, which the owner agreed to for `zero`'s.
+- **What a compromised box can do, as approved.** A compromised `zero` can read its own
+  backups on `three` and serve bad data to the next pull. It cannot write, delete or run
+  anything on `three`, and `three`'s earlier snapshots are untouched; what it serves is
+  parsed by rsync as the unprivileged backup user, in a sandbox that writes only
+  `current/` and `state/`. A compromised `three` can read `zero`'s snapshots, the data it
+  exists to hold, and cannot write to `zero`, delete a snapshot or run anything there.
+  What a bug in either daemon would reach is in § *The pull, as built*.
+- **Retention** (the owner, 2026-11-19): `zero` keeps 24 hourly and 7 daily snapshots;
+  `three` keeps 14 daily, 8 weekly and 12 monthly, with no quarterly or yearly step.
+  Snapshots are named by snapper's numbers. The daily pull replaced the first proposal, a
+  poll about every 15 minutes.
+- **The alert is deferred** (the owner, 2026-11-19): a dead man's switch across the whole
+  fleet, as a mesh, from a prebuilt tool, designed separately. Until then nothing alerts
+  when the pull stops, and the gap is in the phase table of `management-plane.md`.
+- **Dead simple scripts, prebuilt tools where they exist, Python only where a script would
+  otherwise be complicated** (the owner's aim). None needed Python: the pull is about 40
+  lines of POSIX shell, and snapper and rsync do the rest.
+- **snapper on `zero` is pinned in apk's world and run from an hourly periodic script**,
+  so it gets no update until `zero` moves to Leap (revisit at Alpine 3.25,
+  `hosts/zero/system/README.md` § The backup). `.snapshots` is a nested subvolume made by
+  hand at the move, root's, mode 750, and `/mnt/ext`, the array's top level, stays
+  `noauto`.
 
 ## The pull, as built
 
@@ -2813,6 +2841,21 @@ and refine the owner's design without changing it.
   the runner's network, not the Ubuntu runner itself: snapper 0.13.1 from edge/testing,
   util-linux's `setpriv`, Alpine's sudo and BusyBox's `adduser` and `flock` are what `zero`
   runs, where the runner's would have been Ubuntu's, of another version.
+- **A snapshot is finished once its `info.xml` exists.** snapper writes it after the btrfs
+  snapshot, and deleting the highest snapshot leaves its directory without one, so the
+  pull takes the highest number with an `info.xml`. It compares both the number and
+  `info.xml`'s time with `last-pulled`, since a recreated snapper config numbers from 1
+  again.
+- **Nested subvolumes stay on `zero`.** A snapshot leaves out every nested subvolume, so
+  `data/thumbs` and `data/encoded-video`, which Immich regenerates, and `.snapshots` were
+  made nested at the move and are never pulled; rsync copies each as an empty directory.
+- **`current/` is an ordinary writable copy, rewritten in place** (`--inplace`), so a
+  changed file rewrites only its changed blocks and `three`'s snapshots share every
+  unchanged one.
+- **The backup user can rename `current/.snapshots`, and that is accepted.** It owns
+  `current/`, so it could hide the history from snapper, but never change or delete it:
+  snapshots are root's and read-only, deleting a subvolume needs root, and a rename cannot
+  leave the subvolume.
 
 ## The backup's names and layout on `three`
 

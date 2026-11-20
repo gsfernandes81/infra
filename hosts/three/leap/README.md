@@ -184,7 +184,8 @@ the last result.
 
 ## The backup
 
-`three` pulls `zero`'s backup ([`plans/three-backup-pull.md`](../../../plans/three-backup-pull.md)).
+`three` pulls `zero`'s backup ([`docs/decisions.md`](../../../docs/decisions.md)
+§ *`zero`'s backup is pulled by rsync from snapshots*).
 `zero` takes an hourly read-only snapper snapshot of its Immich, the library and Postgres in
 one subvolume. Daily at 01:00 UTC, `backup-pull.timer` starts `backup-pull.service`, which
 runs `/usr/local/bin/backup-pull` as the backup user: it lists `zero`'s snapshots, picks the

@@ -73,7 +73,8 @@ mountpoint, or you will get `Permission denied` as root and not know why.
 
 ## The backup
 
-`three` pulls `zero`'s backup ([`plans/three-backup-pull.md`](../../../plans/three-backup-pull.md)).
+`three` pulls `zero`'s backup ([`docs/decisions.md`](../../../docs/decisions.md)
+§ *`zero`'s backup is pulled by rsync from snapshots*).
 `zero` takes a read-only snapper snapshot of `/media/immich`, the library in `data/` and
 Postgres in `db/`, at the top of each hour, and keeps 24 hourly and 7 daily ones in
 `/media/immich/.snapshots/<N>/snapshot`. Daily at 01:00 UTC `three` logs in as `backup`,
