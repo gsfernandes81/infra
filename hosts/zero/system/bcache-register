@@ -17,6 +17,12 @@
 #   after modules - bcache.ko is loaded via /etc/modules-load.d. The modprobe in
 #                   start() covers the case where modules is not scheduled in
 #                   this phase at all.
+#   before dmcrypt btrfs-scan
+#                 - the array's devid 4 is LUKS on a bcache device (2026-11-19,
+#                   /etc/conf.d/dmcrypt), so the bcache devices must exist before
+#                   dmcrypt looks for the LUKS UUID, and before btrfs-scan looks
+#                   for the members. Until then no dependency ordered this
+#                   against btrfs-scan; the boots that worked did not show why.
 #
 # Registration is RETRIED inside the wait loop rather than attempted once up
 # front: a symlink that appears at second 7 is registered at second 7. The
@@ -34,7 +40,7 @@ description="Register bcache devices via sysfs and wait (bounded) for them"
 depend() {
 	need sysfs devfs procfs dev
 	after modules
-	before fsck localmount
+	before fsck localmount dmcrypt btrfs-scan
 }
 
 start() {
@@ -45,7 +51,7 @@ start() {
 	i=0
 	while [ "$i" -lt 30 ]; do
 		for uuid in f5ec31d1-faf2-4e71-ba18-7769a1172323 \
-		            908229e0-adce-4258-8b25-57d8a21d1d01 \
+		            589733f6-bc6c-414c-8154-2ccd390d80dd \
 		            a3d7a86c-2caa-4141-b7b4-513c58e7295d; do
 			case " $registered " in *" $uuid "*) continue ;; esac
 			dev="/dev/disk/by-uuid/$uuid"

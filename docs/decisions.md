@@ -443,7 +443,8 @@ instead. The uniformity was nobody's decision; it is now.
 — the monitoring exists to let you use it.
 
 Which settles the unlock: **manual passphrase over SSH, every boot. No keyfile, no
-tang, nothing automatic.** Anything that unlocks without you is a key at rest on
+tang, nothing automatic.** (Once protection is on. Until then the new disk of 2026-11-19
+opens with a key file, encrypted with protection off: the next section.) Anything that unlocks without you is a key at rest on
 hardware an attacker may be holding. The payoff is that a reboot *re-locks* the data,
 so rebooting into a root shell — the cheapest Pi attack — gets them a locked volume.
 
@@ -456,6 +457,25 @@ nor `clevis` on any architecture (checked Aug 2026). Reasoning in
 the cache SSD holds nothing the backing disks don't. It is a disposable accelerator
 today — but that is a *setting*, not a guarantee, and switching to `writeback` would
 make it live data. Re-check before trusting it.
+
+## `zero`'s encrypted member: encrypted now, protection off
+
+Decided by the owner on 2026-11-19, while at the cluster for the disk swap
+([`plans/visit-runbook.md`](../plans/visit-runbook.md) § Slice 2).
+
+| Decision | Because |
+|---|---|
+| **The new disk is encrypted at the swap, not later** | Encrypting a member later means another full copy through a replace; doing it while the owner is at the box costs one `luksFormat`. A disk that leaves `zero` alone (a warranty return, a disposal, a theft of the drive without the Pi) is then unreadable, with no wipe to remember. |
+| **Protection off: a key file on the SD card opens it at boot** | Boots stay unattended, as today. The key file is `/etc/keys/data.key`, 4096 random bytes, root's, 0400, in a 0700 directory; never in the repo, a backup push or a handover. It protects nothing against someone who takes the whole box, which is why it is "off". This does not reverse the section above: its manual unlock is what turning protection on leads to. |
+| **Turning protection on is two keyslot changes, no reformat** | The owner's passphrase is keyslot 1 from the start, in the password manager, and is also the way in if the SD card and its key file are lost. Turning protection on removes the `/etc/conf.d/dmcrypt` entry first (with no key, dmcrypt would ask at the console and the boot would wait), then `cryptsetup luksKillSlot` removes the key file's keyslot 0. Filed in the phase table of `management-plane.md`. |
+| **The SD card's flash is why the keyslot is killed, not the file deleted** | Deleting the key file does not erase it from an SD card, whose controller remaps writes, and an image of the card taken before keeps it too. Killing keyslot 0 makes the file useless whatever survives. The volume key itself is unchanged by that, so anyone who held the key file and the disk together could have kept it; `cryptsetup reencrypt` changes the volume key in place, online, and is the rotation if that ever matters. |
+| **Adiantum, as on `three`** (`--cipher xchacha12,aes-adiantum-plain64 --key-size 256`) | So a disk and its role can move between the boxes. `zero`'s Pi 5 has AES instructions and would run AES-XTS faster, but either is far above what a USB hard disk delivers. Both keyslots' Argon2 is held to 256 MiB (`--pbkdf-memory 262144`), so the disk still opens on a 1 GB board; sized to the Pi 5 it would ask for up to 1 GiB, which a 1 GB box refuses. |
+| **LUKS above bcache: disk, bcache backing device, LUKS2, btrfs** | The SSD cache then holds only ciphertext of this member, as `roadmap.md` § 4 requires. The WD Elements disk stays plain until it is replaced the same way, so the cache still holds its plaintext; the cache partition is discarded once both members are encrypted. |
+| **Opened by cryptsetup-openrc's `dmcrypt`, ordered by `rc_after` and `rc_before` in its conf file** | `dmcrypt` declares only `before checkfs fsck`. Its conf file puts it after `bcache-register` and `modules` and before `btrfs-scan` and `localmount`, and `bcache-register` says `before dmcrypt btrfs-scan` as well. On `zero` (2026-11-19) `bcache-register` is in `sysinit`, so it finishes before the boot runlevel starts at all; `dmcrypt`, `btrfs-scan` and `modules` are in `boot`; `localmount` is in no runlevel and is started there as `bootmisc`'s `need`, in the same ordering. A scan before the open would miss devid 4 and the array would not mount. `source=` is the LUKS UUID, which `findfs` resolves, BusyBox's and util-linux's alike (`sim/alpine/run-dmcrypt.sh`). |
+| **dm-crypt from `/etc/modules-load.d/dm-crypt.conf`** | `linux-rpi` builds `dm-mod` and `dm-crypt` as modules (`/proc/misc` on `zero` had no device-mapper entry on 2026-11-19), and a boot should not rest on libdevmapper loading them. The cipher's modules (`adiantum`, `chacha`, `nhpoly1305`, all modules in 6.18's `linux-rpi`) load by algorithm name. |
+| **`install-system-file` checks a dmcrypt entry by opening it** | A wrong entry costs a mount, which `nofail` and the immutable mountpoints absorb; an entry without `key=` costs the boot. So the check refuses a placeholder, an entry without `key=`, a key file others can read, a `source=` that `findfs` cannot resolve, and a key that does not open the volume (`cryptsetup open --test-passphrase`). Calibrated against a real LUKS2 volume in CI, where each refusal is shown refusing and the good entry passing. |
+| **One shutdown for the move and the reboot test** | The new disk goes into `sdb`'s bay at the same shutdown that tests the unattended unlock. Everything is named by UUID, so the move changes no file, and the boot that is tested is the configuration `zero` keeps. |
+| **A LUKS header backup is optional for this member** | The array's other copy covers it: a damaged header costs a second replace, not data. If one is taken, it is secret-bearing (with the key file or the passphrase it opens the disk, even after a keyslot is killed on the disk itself), so it never sits beside `/etc/keys`, in the repo or in `~/.infra-backups`. |
 
 ## Two things the original inventory got wrong
 

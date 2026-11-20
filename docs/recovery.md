@@ -219,6 +219,12 @@ degraded RAID1 mount without `degraded`. `/etc/init.d/bcache-register` registers
 waits up to 30 seconds for `/dev/bcache0` and `/dev/bcache1`. It always exits 0, so a
 failure there never stops the boot, and the immutable mountpoints mean nothing is written
 while the array is absent.
+**From the disk swap on** ([`plans/visit-runbook.md`](../plans/visit-runbook.md) § Slice 2),
+one member is LUKS on its bcache device, and `/etc/init.d/dmcrypt` opens it at boot with a
+key file on the SD card, after `bcache-register` and before `btrfs-scan`. A member that
+does not open leaves the array unmounted in the same way, and the box up. Opening it by
+hand, with the key file or the owner's passphrase, is
+[`hosts/zero/system/README.md`](../hosts/zero/system/README.md) § *The encrypted member*.
 **`/var/lib/docker` is not on the array** but on the SSD's `sda2`, outside bcache, since
 2026-10-26 ([decisions.md](decisions.md)), with the same two guards. So a missing array
 takes Immich and Syncthing down while Docker and the dev containers still run; a missing

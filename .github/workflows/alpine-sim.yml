@@ -11,6 +11,11 @@ name: alpine-sim
 # Pi's kernel, ntfy itself (a stand-in answers the test message), and a real tailnet (the
 # refusal to restart over one is shown from an address in its range). sim/alpine/README.md
 # says more.
+#
+# A second job, dmcrypt, runs sim/alpine/run-dmcrypt.sh: zero's encrypted array member as
+# far as a container takes it (Alpine's cryptsetup and dmcrypt service, the tracked files,
+# install-system-file's dmcrypt check, OpenRC's start order), on a loop device, on the
+# runner's kernel and not a Pi's. The reboot on zero is the proof of the rest.
 
 on:
   push:
@@ -83,3 +88,14 @@ jobs:
 
       - name: Run the setup plays against the Alpine box
         run: sim/alpine/run-setup-plays.sh
+
+  dmcrypt:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run the encrypted member's checks against the Alpine box
+        run: sim/alpine/run-dmcrypt.sh
