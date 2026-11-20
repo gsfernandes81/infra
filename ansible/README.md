@@ -98,7 +98,7 @@ The halves, for reading rather than running:
 
 | | |
 |---|---|
-| `_client-fleet-ssh.yml` | the fleet's aliases in this client's `~/.ssh/config`, Windows included |
+| `_client-fleet-ssh.yml` | the fleet's aliases in this client's `~/.ssh/config`, Windows included: `<host>` and `<host>-cf` by the tunnel, `<host>-ts` by the tailnet address in `group_vars/all.yml` |
 | `_client-dev-ssh.yml` | one dev container's service token and `~/.ssh/config` block, imported once per door (`dev`, `or3-dev`) |
 | `_client-retired-dev-ssh.yml` | the other direction: removes the blocks and token files of `infra-dev`, `dd-dev` and `ds-dev`, whose own doors the cutover retired. Whole runs only |
 | `_dev-container-tunnel.yml` | the **edge** side — tunnel, DNS, Access application and policy |
@@ -384,7 +384,7 @@ as above. A token that was ever on screen in a shared place is one to roll, not 
 |---|---|
 | `ansible.cfg` | read from the **cwd**, so run from this directory |
 | `inventory` | deliberately thin — `~/.ssh/config` owns the transport |
-| `group_vars/all.yml` | the fleet inventory's path and `dns_zone`; applies to `localhost` too |
+| `group_vars/all.yml` | the fleet inventory's path, `dns_zone` and each box's tailnet address; applies to `localhost` too |
 | `group_vars/fleet.yml` | the container CLI, the packages, and the Tailscale pin for Alpine hosts |
 | `host_vars/` | four files: the three hosts' container runtimes, plus `localhost.yml`'s Termux fixes — see below |
 | `playbooks/` | the ones above; `_assert-inventory.yml` is imported, never run |

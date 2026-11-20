@@ -942,6 +942,26 @@ admitted tokens.
 **Not covered:** `KbdInteractiveAuthentication` is still on in `sshd-infra.conf`; turning
 it off is a change to sshd itself, for the two-phase procedure, and is not chosen.
 
+## Each Pi's ssh alias has a `-cf` and a `-ts` name, and the bare name is movable
+
+**Decided 2026-11-20 (owner).** `client-home-ssh-config.yml` writes `Host <box> <box>-cf`
+for the tunnel and, beside it, `Host <box>-ts` for the box's tailnet address, with no
+ProxyCommand. Both share `HostKeyAlias <box>`, which the bare name already had.
+
+- **The bare name sits on the `-cf` line so it can move.** If the fleet ever leaves
+  Cloudflare, `<box>` moves to the `-ts` line in the template, and everything that says
+  `ssh <box>`, the inventory and the jump aliases included, follows without an edit.
+  `docs/ssh-clients.md` § *The fleet* has the steps.
+- **One `HostKeyAlias` across both**, so the run that adds them, and a later move of the
+  bare name, never looks like a changed host key: it is the same sshd, checked under the
+  same name.
+- **The addresses are `tailnet_addresses` in `ansible/group_vars/all.yml`**, one list,
+  where a play on `control` reads it as it reads `dns_zone`. A box with no line gets no
+  `-ts`, and the play says which. Today `zero` and `three`; `one` is on the tailnet but its
+  address is recorded nowhere yet. The reviewed `/etc` copies that name the same addresses
+  (the backup's `from=` lines and `backup-ssh-config`) stay literals, kept in step by hand,
+  because boot-path files are never generated from a template.
+
 ## Pinned images are bumped by a pull request, from Dependabot
 
 ⚠︎ **SUPERSEDED 2026-10-25 by the next section: Renovate, not Dependabot.** Kept because the

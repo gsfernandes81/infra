@@ -1,0 +1,71 @@
+name: client-sim
+
+# Runs client-home-ssh-config.yml --tags ssh, the blocks half, in a temporary HOME
+# (sim/client/run-fleet-ssh.sh) and reads the fleet block with `ssh -G`: each box's bare
+# name and -cf through the tunnel, -ts to the tailnet address in group_vars/all.yml, one
+# HostKeyAlias across them, no -ts for a box with no address, for the POSIX file, the
+# laptop's Windows file and the paste file; then a re-run that must change no byte, and the
+# refusal of a tailnet address that is not one. Every check is named PASS or FAIL in the
+# log, and any FAIL fails the job.
+#
+# WHAT IT CANNOT CHECK, so nobody reads a green run as more: any connection (`ssh -G` only
+# prints what ssh resolves), cloudflared and the Windows cloudflared.exe (scripts that print
+# a version), a real laptop (a directory stands in for /mnt/c), and the tokens, which are the
+# `access` half and need Cloudflare.
+
+on:
+  push:
+    paths:
+      - 'sim/client/**'
+      - 'ansible/playbooks/client-home-ssh-config.yml'
+      - 'ansible/playbooks/_client-*.yml'
+      - 'ansible/playbooks/_assert-inventory.yml'
+      - 'ansible/templates/ssh-*.j2'
+      - 'ansible/templates/*.cmd.j2'
+      - 'ansible/templates/fleet-access-ssh.sh.j2'
+      - 'ansible/group_vars/**'
+      - 'ansible/host_vars/localhost.yml'
+      - 'ansible/inventory'
+      - 'ansible/ansible.cfg'
+      - 'ansible/callback_plugins/**'
+      - '.github/workflows/client-sim.yml'
+  pull_request:
+    paths:
+      - 'sim/client/**'
+      - 'ansible/playbooks/client-home-ssh-config.yml'
+      - 'ansible/playbooks/_client-*.yml'
+      - 'ansible/playbooks/_assert-inventory.yml'
+      - 'ansible/templates/ssh-*.j2'
+      - 'ansible/templates/*.cmd.j2'
+      - 'ansible/templates/fleet-access-ssh.sh.j2'
+      - 'ansible/group_vars/**'
+      - 'ansible/host_vars/localhost.yml'
+      - 'ansible/inventory'
+      - 'ansible/ansible.cfg'
+      - 'ansible/callback_plugins/**'
+      - '.github/workflows/client-sim.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: client-sim-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  fleet-ssh:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install ansible-core
+        run: |
+          pipx install ansible-core
+          ansible --version
+
+      - name: Run the client play's ssh half and read the block with ssh -G
+        run: sim/client/run-fleet-ssh.sh
