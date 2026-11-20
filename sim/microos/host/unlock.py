@@ -2,12 +2,14 @@
 terminal, and answers its prompts: sudo's for gavin's password, then systemd's for the
 array's passphrase. run-host.sh uses it, through host/three.sh, to unlock three's array
 with the command hosts/three/leap/README.md gives, so the simulation proves that command and
-not a stand-in for it. Both prompts turn echo off, so the transcript it prints holds
+not a stand-in for it, and to lock it with the README's lock command, which asks only for
+sudo's (SIM_LUKS_PW unset). Both prompts turn echo off, so the transcript it prints holds
 neither secret.
 
-    SIM_SUDO_PW=... SIM_LUKS_PW=... python3 -I unlock.py <ssh argument>... -- <command>
+    SIM_SUDO_PW=... [SIM_LUKS_PW=...] python3 -I unlock.py <ssh argument>... -- <command>
 
-Exits with the command's own status, or 1 if a prompt never came within the time allowed.
+Exits with the command's own status, or 1 if the passphrase was to be asked for and never
+was within the time allowed.
 """
 import os
 import selectors
@@ -18,10 +20,9 @@ import time
 args = sys.argv[1:]
 split = args.index("--")
 ssh, command = args[:split], " ".join(args[split + 1:])
-answers = [
-    ("password for", os.environ["SIM_SUDO_PW"]),
-    ("passphrase", os.environ["SIM_LUKS_PW"]),
-]
+answers = [("password for", os.environ["SIM_SUDO_PW"])]
+if "SIM_LUKS_PW" in os.environ:
+    answers.append(("passphrase", os.environ["SIM_LUKS_PW"]))
 
 proc = subprocess.Popen(
     ["ssh", "-tt", *ssh, command],

@@ -4,8 +4,10 @@
 # Runs the setup plays end to end against an Alpine container with OpenRC as init, reached
 # over ssh as a fleet host is: server-install-tailscale.yml, server-create-restore-key.yml and
 # server-store-backup-ntfy-url.yml, and server-install-system-files.yml's dry run; then
-# zero's snapper install as hosts/zero/system/README.md gives it, and install-system-file's
-# sudoers check. Prints PASS or FAIL per check and exits 1 on any FAIL.
+# zero's snapper install as hosts/zero/system/README.md gives it, install-system-file's
+# sudoers check, server-start-dev-containers.yml, and server-unlock-arrays.yml, refused on the
+# box's OpenRC and run for real on the runner's systemd. Prints PASS or FAIL per check and
+# exits 1 on any FAIL.
 # CI runs it on an arm64 runner (.github/workflows/alpine-sim.yml), so the real pinned
 # tarball's binaries run in the container as they would on zero. sim/alpine/README.md says
 # what each part proves and what it cannot.
@@ -460,6 +462,92 @@ said=$(on 'su gavin -c "cd /home/gavin/infra && bin/install-system-file sudoers-
 case "$said" in *'fails validate_sudoers'*) pass "a broken copy is refused by visudo" ;; *) fail "a broken copy was not refused: $(echo "$said" | tail -n 3 | tr '\n' ' ')" ;; esac
 on 'test ! -e /etc/sudoers.d/backup && sudo true' && pass "nothing was written, and sudo still works" || fail "a broken sudoers file was written"
 on 'su gavin -c "cd /home/gavin/infra && git checkout -q hosts/zero/system/sudoers-backup"'
+
+# ════ server-start-dev-containers.yml ════════════════════════════════════════
+# The box has no Docker, so the real dev/Makefile is run only to its first guard, which
+# must refuse for want of dev/.env; a stand-in checkout's Makefile, whose `up` prints who ran
+# it and where, shows make runs as root in dev/ and its output prints. `two` is pointed at a
+# checkout with no dev/, which must be refused.
+echo "== the dev containers play: refusals, --check, the real Makefile's guard, a stand-in's up"
+on 'apk add --quiet make' || fail "could not install make in the box"
+if play server-start-dev-containers.yml -e target=nowhere; then fail "ran against a host not in the fleet"; else
+	says 'is not in the inventory' && pass "refused a target outside the fleet" || fail "a stray target failed, but not by its check"
+fi
+if play server-start-dev-containers.yml -e target=two -e infra_checkout=/nonexistent; then fail "ran on a host with no dev/"; else
+	says '/nonexistent/dev/Makefile is not on two' && pass "refused a host with no dev/Makefile" || fail "two failed, but not by its check"
+fi
+if play server-start-dev-containers.yml --check; then pass "--check exits 0, target zero by default"; else fail "--check failed"; fi
+says 'DRY RUN: would run make up in /home/gavin/infra/dev as root' && pass "--check says what it would run" || fail "--check did not say what it would run"
+if play server-start-dev-containers.yml; then fail "the real dev/Makefile's up succeeded with no .env"; else
+	says 'no /home/gavin/infra/dev/.env' && says 'make up exited 2' && pass "the real dev/Makefile ran as far as its .env guard, and its refusal printed and failed the play" ||
+		fail "the real dev/Makefile failed, but not at its .env guard"
+fi
+on 'mkdir -p /srv/fakeinfra/dev && printf "up:\n\t@echo \"make up as uid \$\$(id -u) in \$\$(pwd)\"\n" > /srv/fakeinfra/dev/Makefile'
+if play server-start-dev-containers.yml -e infra_checkout=/srv/fakeinfra; then pass "a stand-in's make up succeeds"; else fail "a stand-in's make up failed"; fi
+says 'make up as uid 0 in /srv/fakeinfra/dev' && pass "make ran as root in dev/, and its output printed" || fail "make's output does not show root in dev/"
+
+# ════ server-unlock-arrays.yml ═══════════════════════════════════════════════
+# The full unlock is microos-sim.yml's, on Leap. Here: the box's OpenRC, which the play has
+# no branch for and must refuse without asking; and the runner, `one`, whose systemd it
+# does: a LUKS volume on a loop device with crypttab and fstab lines, a wrong passphrase, a
+# right one at -vv through the default callback, and the units stopped as the lock command
+# stops them. play-prompts.py types at the play's prompts in a terminal, as the owner does.
+echo "== the unlock play: OpenRC refused; the runner's systemd unlocks"
+run_pw=sim-unlock-$(openssl rand -hex 8)
+unlock() { # <answers as JSON> [ansible-playbook argument]...
+	local answers=$1 rc
+	shift
+	SIM_ANSWERS=$answers python3 -I "$here/../microos/host/play-prompts.py" \
+		ansible-playbook -i inventory.sim playbooks/server-unlock-arrays.yml "$@" > play.log 2>&1
+	rc=$?
+	grep -qF "$run_pw" play.log && fail "the passphrase appeared in the unlock play's output"
+	leaks play.log "the unlock play's output"
+	tail -n 30 play.log | sed 's/^/    | /'
+	return $rc
+}
+vols='{"unlock_volumes": [{"name": "simrun", "mount": "/mnt/simrun"}]}'
+if unlock '{}' -l zero -e "$vols"; then fail "the play passed on OpenRC"; else
+	says 'zero simrun: failed: this play unlocks on systemd only so far' && pass "OpenRC is refused, by name" || fail "zero failed, but not as OpenRC"
+fi
+grep -q '^prompted: ' play.log && fail "the play asked on OpenRC" || pass "nothing was asked on OpenRC"
+if unlock '{}' -l one -e "$vols"; then fail "the play passed with no crypttab line"; else
+	says 'one simrun: failed: no systemd-cryptsetup@simrun.service: /etc/crypttab has no line for simrun' &&
+		pass "a volume crypttab does not name is refused, unprivileged" || fail "no crypttab line, but not refused by it"
+fi
+sudo apt-get install -y -q --no-install-recommends cryptsetup-bin > /dev/null 2>&1
+sudo apt-get install -y -q --no-install-recommends systemd-cryptsetup > /dev/null 2>&1
+if [ ! -x /usr/lib/systemd/system-generators/systemd-cryptsetup-generator ]; then
+	fail "the runner has no crypttab generator, so its systemd cannot be tried"
+else
+	sudo cp -a /etc/crypttab "$work/crypttab" 2> /dev/null || sudo touch "$work/crypttab.absent"
+	sudo cp -a /etc/fstab "$work/fstab"
+	truncate -s 64M "$work/simrun.img"
+	loopdev=$(sudo losetup -f --show "$work/simrun.img")
+	printf '%s' "$run_pw" | sudo cryptsetup luksFormat -q --type luks2 --pbkdf pbkdf2 --pbkdf-force-iterations 1000 --key-file=- "$loopdev"
+	printf '%s' "$run_pw" | sudo cryptsetup open --key-file=- "$loopdev" simrun && sudo mkfs.ext4 -q /dev/mapper/simrun && sudo cryptsetup close simrun
+	printf 'simrun %s none luks,noauto,password-cache=no\n' "$loopdev" | sudo tee -a /etc/crypttab > /dev/null
+	echo '/dev/mapper/simrun /mnt/simrun ext4 noauto,nofail,nosuid,nodev 0 0' | sudo tee -a /etc/fstab > /dev/null
+	sudo mkdir -p /mnt/simrun && sudo systemctl daemon-reload
+	if unlock '{"simrun on one": "not-it"}' -l one -e "$vols"; then fail "a wrong passphrase passed"; else
+		says 'one simrun: failed: wrong passphrase; still locked' && pass "a wrong passphrase is reported" || fail "a wrong passphrase was not reported as one"
+	fi
+	grep -qx 'prompted: simrun on one' play.log && pass "the locked volume was asked for, by volume and host" || fail "simrun was not asked for"
+	[ ! -e /dev/mapper/simrun ] && [ "$(systemctl show -p ActiveState --value systemd-cryptsetup@simrun.service)" = inactive ] &&
+		pass "it is left locked, its unit not failed" || fail "after a wrong passphrase: $(systemctl show -p ActiveState --value systemd-cryptsetup@simrun.service), $(ls /dev/mapper)"
+	if ANSIBLE_STDOUT_CALLBACK=default unlock "{\"simrun on one\": \"$run_pw\"}" -l one -e "$vols" -vv; then
+		pass "the right passphrase unlocks, at -vv, with no secret in the transcript"
+	else
+		fail "the right passphrase did not unlock"
+	fi
+	systemctl is-active --quiet systemd-cryptsetup@simrun.service && findmnt -no OPTIONS /mnt/simrun | grep -qw nosuid &&
+		pass "systemd-cryptsetup@simrun.service is active and the volume mounted nosuid" || fail "not unlocked as after a manual unlock"
+	if unlock '{}' -l one -e "$vols"; then pass "a re-run passes"; else fail "a re-run failed"; fi
+	says 'one simrun: already open' && ! grep -q '^prompted: ' play.log && pass "an open volume is reported and not asked for" || fail "an open volume was asked for or misreported"
+	sudo systemctl stop mnt-simrun.mount systemd-cryptsetup@simrun.service
+	[ ! -e /dev/mapper/simrun ] && pass "stopping the mount and the unit locks it, as the README's lock does" || fail "stopping the units left it open"
+	if [ -e "$work/crypttab.absent" ]; then sudo rm -f /etc/crypttab; else sudo cp -a "$work/crypttab" /etc/crypttab; fi
+	sudo cp -a "$work/fstab" /etc/fstab && sudo losetup -d "$loopdev" && sudo systemctl daemon-reload
+fi
 
 echo
 if [ "$fails" -gt 0 ]; then echo "$fails check(s) FAILED"; exit 1; fi

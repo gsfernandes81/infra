@@ -43,6 +43,7 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 | gate one Pi's ssh hostname behind Access, admitting each client's fleet token, proved from here and undone if the proof fails. **One host per run, `one` first, `zero` last** | `server-create-fleet-ssh-access.yml -e host=one` · `-e remove=true` to undo · no `-K` | the API token, and this client set up by the play above |
 | create the dev project's tunnel, DNS, Access and host side (the hub, `ssh dev`), or put or3-dev's hostname on that tunnel | `server-create-dev-container.yml` · `-e container=or3-dev -e via_hub=true` | the [API token](#the-cloudflare-api-token) |
 | bring the dev containers up, or change them: build, plan, y/N, compare ids, probe | `server-deploy-compose.yml -e deployment=dev -K` | sudo |
+| start the dev containers when they are down: `make up` in `dev/` on zero, as root, its output printed, with `dev/Makefile`'s own guards and no plan or question; the play form of `ssh -t zero 'cd ~/infra/dev && make up'`. `up` only. Refuses a host with no `dev/Makefile` | `server-start-dev-containers.yml -K` · `-e target=<host>` for another · `--check` runs nothing | sudo |
 | see what runs where, read-only, into `docs/fleet-inventory.md` — a full run that changed it commits it and asks before pushing | `server-generate-fleet-inventory.yml -K` · `-e push=true` / `push=false` / `commit=false` | sudo, and this checkout exactly at `origin/main` |
 | install the packages each Pi should have | `server-install-packages.yml -K` · `-l <host>` | sudo |
 | install the tracked `/etc` files, without restarting anything: each host's list comes from `bin/install-system-file --list` on it, so a host whose `hosts/<host>/leap/MOVED` exists gets its `leap/system/` copies | `server-install-system-files.yml -K` · `-l <host>` · `-e only=<file>`, a pattern matched against the whole name, so one file: `-l two -e only=sshd-infra.conf`, `-l three -e only=cloudflared-config.yml` | sudo |
@@ -60,15 +61,16 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 | move an Alpine Pi onto a new tunnel — **a deliberate outage** | `server-cutover-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | delete an Alpine Pi's old tunnel — **irreversible** | `server-delete-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | retire the dev containers' old tunnels (infra-dev, dd-dev, ds-dev whole; or3-dev's tunnel only) — **irreversible**, a plan and y/N first | `server-retire-dev-tunnels.yml` · `--check` stops at the plan | the API token |
+| unlock and mount every encrypted volume a host lists in `unlock_volumes` (`host_vars/`; `three`'s array today): reads each, asks once per locked volume without echoing, naming the volume and the host, and **Enter alone leaves that one locked**. The passphrase reaches the box on stdin only, where `systemd-cryptsetup@<name>.service` takes it as from the manual unlock, so the README's lock command works after. A wrong passphrase is reported and the play goes on; it ends with one line per host and volume: already open, unlocked, left locked by you, failed and why, or unreachable. systemd only so far; tested in CI against a Leap VM (`sim/microos/`) | `server-unlock-arrays.yml -K` · `-l <host>` · `--check` reads and asks nothing | sudo, and each passphrase |
 | update a Leap host: `transactional-update`, the `cloudflared` and Compose pins from `leap/pins` (keeping the previous), the update recipes for logins, a reboot, then done only once the tunnel serves and the tailnet reaches `zero`; asks before the reboot, reports what a lock held back and the Compose openSUSE offers | `server-update-leap.yml -e target=<host> -K` · `--check` reads and changes nothing | sudo; refuses a host that is not Leap |
 | update cloudflared on a Pi, deliberately | `server-update-cloudflared.yml -e target=<host> -e version=… -e sha256=… -K` | sudo; refuses while that host autoupdates, which today is all of them |
 
 **Three ways a play picks its host, each on purpose.** A play that changes one host at a time
 (the tunnel plays, the cloudflared and Leap updates, and the three setup plays) is aimed
 with `-e target=<host>`; its `hosts:` is that variable, so leaving it out falls back to
-`one` (or refuses, for the updates and the setup plays) and can never widen to the whole
-fleet. A fleet-wide play (packages, system files, the inventory) runs on
-`fleet` and is narrowed with `-l <host>`. A deployment play
+`one` (`zero`, for the dev containers' start; or refuses, for the updates and the setup
+plays) and can never widen to the whole fleet. A fleet-wide play (packages, system files,
+the inventory, the unlock) runs on `fleet` and is narrowed with `-l <host>`. A deployment play
 (`server-create-deployment-tunnel.yml` and the two `server-deploy-` plays) reads its host
 from the `hosts/<host>/<name>` symlink and takes no `-l` at all, because `-l` would skip
 the play that finds the host. `server-stop-deployments.yml` is both: `-e target=<host>` for
@@ -86,7 +88,7 @@ open.
 **Only `server-generate-fleet-inventory.yml` is read-only** on the hosts. On the control
 node it writes the report and commits it. Every other `server-` play changes something:
 packages, **boot-path `/etc` files**, the cloudflared and Tailscale binaries, the tailnet,
-zero's backup key and alert URL, tunnels and DNS,
+zero's backup key and alert URL, tunnels and DNS, which volumes are unlocked, the dev containers,
 `authorized_keys` on `zero`, Access in front of the fleet's ssh hostnames. **The two
 `server-deploy-` plays are the ones that start a deployment**, Phase 3's "Ansible drives
 deployments": `garmin-mcp` first, then `send2ereader`. `server-stop-deployments.yml` stops
@@ -249,9 +251,10 @@ deployment of `server-deploy-compose.yml` (`deployments/dev` links to `dev/`), s
 up and changed the way every deployment is: a preflight that runs `dev/Makefile`'s own guards
 (the uid guard among them — the play does not copy it, it calls it) and builds every image,
 then a dry-run plan, a `[y/N]`, `up`, a container-id comparison and a probe. `make up` on zero
-stays as the unguarded break glass:
+stays as the unguarded break glass, and `server-start-dev-containers.yml` runs it from here:
 
 ```sh
+ansible-playbook playbooks/server-start-dev-containers.yml -K   # make up on zero, as root
 ssh -t zero 'cd ~/infra/dev && make up'      # or restart, status, verify, logs
 ```
 
@@ -386,7 +389,7 @@ as above. A token that was ever on screen in a shared place is one to roll, not 
 | `inventory` | deliberately thin — `~/.ssh/config` owns the transport |
 | `group_vars/all.yml` | the fleet inventory's path and `dns_zone`; applies to `localhost` too |
 | `group_vars/fleet.yml` | the container CLI, the packages, and the Tailscale pin for Alpine hosts |
-| `host_vars/` | four files: the three hosts' container runtimes, plus `localhost.yml`'s Termux fixes — see below |
+| `host_vars/` | five files: the three Alpine hosts' container runtimes, `three`'s volumes to unlock, and `localhost.yml`'s Termux fixes — see below |
 | `playbooks/` | the ones above; `_assert-inventory.yml` is imported, never run |
 | `playbooks/client-home-ssh-config.yml` | the dev-container registry lives in its header |
 | `templates/` | the report, the two ssh blocks, and the Windows ProxyCommand wrapper |
@@ -495,10 +498,12 @@ nothing and print a clean report. A read is safe in check mode by definition.
 
 ## What is in `host_vars/`, and what is deliberately not
 
-It holds four files: `zero.yml`, `one.yml` and `two.yml`, each
-naming that host's container runtime and nothing else, and `localhost.yml`, which carries
+It holds five files: `zero.yml`, `one.yml` and `two.yml`, each
+naming that host's container runtime and nothing else; `three.yml`, naming the encrypted
+volumes `server-unlock-arrays.yml` unlocks there, a crypttab name and a mount point each,
+which are the host's own and nobody else's; and `localhost.yml`, which carries
 the two Ansible defaults that are wrong on Termux (`~` is not `$HOME` there, and there is
-no `/usr/bin/python3`).
+no `/usr/bin/python3`). `zero`'s volumes join its file when the play has an OpenRC branch.
 
 **The reason it was described as empty is still true and is the useful part:** per-host
 values are for when one deployment needs different ones on different hosts, and **no

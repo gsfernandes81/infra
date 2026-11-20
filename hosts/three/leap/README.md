@@ -134,7 +134,23 @@ is `backup-luks`, the crypttab name and the device `/dev/mapper/backup`, the btr
 
 ### Unlocking, after every boot
 
-Every boot leaves the array locked, and nothing waits for it. From the phone:
+Every boot leaves the array locked, and nothing waits for it. From the phone, the play,
+which asks for gavin's password (`-K`) and then for the passphrase of each volume still
+locked, three's array among them:
+
+```fish
+# unlock every listed volume that is locked; Enter alone at a passphrase prompt leaves that one locked
+cd ~/infra/ansible; and ansible-playbook playbooks/server-unlock-arrays.yml -l three -K
+```
+
+It reads the array first and asks nothing when it is already open. It ends with one line
+per volume, `three backup: unlocked, and mounted at /media/backup` when it worked; a wrong
+passphrase reads `failed: wrong passphrase; still locked`, and the play can be run again.
+The passphrase reaches the box only on stdin, and systemd takes it through the same unit
+as the command below, so everything after the unlock, the lock included, is the same
+whichever unlocked it. The list of volumes is `ansible/host_vars/three.yml`.
+
+Or by hand, where sudo asks for gavin's password and then systemd for the passphrase:
 
 ```fish
 # unlock three's array; sudo asks for gavin's password, then systemd for the passphrase

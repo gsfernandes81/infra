@@ -152,8 +152,24 @@ The run then checks, each as PASS or FAIL, and any FAIL fails the job:
   with the container context, `nosuid` and `nodev`, labelled `backup`, holding
   `make-backup`'s layout and nothing else at its top, that
   the mount started Docker and the pull and scrub timers, that a container reads and
-  writes it, and a scrub. After the reboot, the array is locked again, and the same
-  command brings it back;
+  writes it, and a scrub. After the reboot, the array is locked again, and on the new box
+  `server-unlock-arrays.yml` brings it back (below; the migrated box uses the README's
+  command again);
+- on `three`, after the reboot, the unlock play, from the runner as the control node, in a
+  terminal, with `host/play-prompts.py` typing at its prompts (`sim_unlock_play` in
+  `host/three.sh`). Its inventory adds `three-b`, the same VM under another name listing a
+  second volume made for the run, `simextra`, on a loop device with its own crypttab and
+  fstab lines, and `sim-gone`, which nothing answers. `--check` asks nothing and leaves the
+  array locked. The first run asks once for each locked volume, across both hosts, gets the
+  array's passphrase and a wrong one for `simextra`: the array is mounted `nosuid` and
+  `nodev` with `systemd-cryptsetup@backup.service` active, `simextra` is reported wrong and
+  left locked with its unit neither active nor failed and nothing waiting, `sim-gone` is
+  reported unreachable, and the play ends failed. The second, with the array open and Enter
+  alone for `simextra`, asks only for `simextra`, reports the array already open and
+  `simextra` left locked by you, and passes. Then the README's lock command, read out of
+  the README, prints `locked` and stops Docker, and a third run unlocks both. No run's
+  output may hold a passphrase or the sudo password. `simextra` is removed after, and
+  crypttab and fstab put back;
 - on `three`, zero's backup, pulled from the runner standing in for `zero`
   (`sim_backup` in `host/three.sh`, with `host/three-backup.sh` on the box), below.
 - on `three`, in the second job (`SIM_VARIANT=migrate`), in place of `make-backup` and the

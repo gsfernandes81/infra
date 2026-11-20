@@ -1,0 +1,254 @@
+---
+# UNLOCK AND MOUNT THE ENCRYPTED VOLUMES each host lists in `unlock_volumes`, asking for each
+# passphrase in turn. From the control node:
+#
+#     cd ansible
+#     ansible-playbook playbooks/server-unlock-arrays.yml -K
+#     ansible-playbook playbooks/server-unlock-arrays.yml -l three -K
+#
+# A host's list lives in its host_vars file, a crypttab name and a mount point each:
+#
+#     unlock_volumes:
+#       - name: backup
+#         mount: /media/backup
+#
+# Only three has one today. A host without the list is skipped without being reached.
+#
+# WHAT IT DOES:
+#   1. Reads every listed volume on every host, unprivileged: open and mounted, open and not
+#      mounted, locked, or something that stops it (no crypttab line, no fstab line, the
+#      drive not attached, an init this play has no branch for). A host it cannot reach is
+#      noted and left.
+#   2. Asks once for each volume still locked, naming the volume and the host, without
+#      echoing what is typed. EMPTY ANSWER = DECLINE: Enter alone leaves that volume locked,
+#      and the summary says "left locked by you". Anything typed is the passphrase, and
+#      typing it is the consent to unlock. A volume already open is never asked for: one not
+#      mounted is mounted, which needs no passphrase.
+#   3. Unlocks and mounts each volume given a passphrase, then checks the mount. On systemd
+#      that is the same two units as the manual unlock in hosts/three/leap/README.md §
+#      Unlocking: files/unlock-volumes.sh starts systemd-cryptsetup@<name>.service and
+#      answers its passphrase request through systemd-reply-password, so every crypttab
+#      option applies and the unit is active afterwards, as after a manual unlock, and the
+#      README's lock command works unchanged. A wrong passphrase is reported and the volume
+#      left locked; the play goes on to the next volume and host.
+#   4. Prints one line per host and volume: already open, unlocked, left locked by you,
+#      failed with the reason, or unreachable. A host with a failed volume then fails its
+#      last check, so the recap shows it.
+#
+# THE PASSPHRASE reaches the box on the unlock command's stdin, never on a command line,
+# which `ps` shows and sudo's journal keeps. Under pipelining (ansible.cfg) the module's
+# arguments, stdin among them, travel on the ssh session's own stdin, so the passphrase is
+# written to no file at either end. Every task that carries it is no_log. It is asked for
+# at a prompt and never read from a file or from -e: a file would keep a copy where the box
+# is meant to be the only place the array opens, and an extra var lands in shell history.
+#
+# THE PROMPT is `pause`, looped over every locked volume of every host. pause runs once for
+# the whole play, on the first host, not once per host (it bypasses the host loop), so the
+# loop is over all hosts' volumes, and the answers are copied to every host with a run_once
+# set_fact. With no terminal on stdin pause does not wait and answers empty, which declines
+# every volume. microos-sim.yml's three job answers the prompts through a terminal.
+#
+# Under --check it reads and reports, asks nothing and changes nothing. Without -K the read
+# still runs and every unlock fails for want of sudo, with that as its reason.
+#
+# -K IS REQUIRED to unlock: the units are root's.
+
+- name: Check the inventory is loaded
+  ansible.builtin.import_playbook: _assert-inventory.yml
+  vars:
+    required_group: fleet
+
+- name: Unlock each host's encrypted volumes
+  hosts: fleet
+  gather_facts: false
+  become: false
+
+  vars:
+    unlock_script: "{{ lookup('ansible.builtin.file', 'files/unlock-volumes.sh') }}"
+
+  tasks:
+    - name: "If {{ inventory_hostname }} lists no volumes: skip it"
+      ansible.builtin.meta: end_host
+      when: unlock_volumes | default([]) | length == 0
+
+    - name: Check each volume has a name and a mount point
+      ansible.builtin.assert:
+        that:
+          - item.name | default('') is match('^[A-Za-z0-9_.-]+$')
+          - item.mount | default('') is match('^/[^\s]*$')
+        fail_msg: >-
+          Each entry of {{ inventory_hostname }}'s unlock_volumes needs a crypttab name and
+          an absolute mount point without spaces, as `- name: backup` and `mount:
+          /media/backup`. This one is {{ item }}. Nothing has been read.
+        success_msg: ok
+        quiet: true
+      loop: "{{ unlock_volumes }}"
+      loop_control:
+        label: "{{ item.name | default('?') }}"
+
+    # Unprivileged, so --check needs no -K. ignore_unreachable keeps a host it cannot reach in
+    # the play long enough to be noted for the summary.
+    - name: Read each volume's state on {{ inventory_hostname }}
+      ansible.builtin.command:
+        argv: "{{ ['sh', '-c', unlock_script, 'unlock-volumes', 'read']
+                  + unlock_volumes | map(attribute='name') | zip(unlock_volumes | map(attribute='mount'))
+                    | flatten }}"
+      register: unlock_read
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      ignore_unreachable: true
+
+    - name: "If unreachable: note it for the summary"
+      ansible.builtin.set_fact:
+        unlock_unreachable: "{{ unlock_read.msg | default('') | regex_replace('\\s+', ' ') | truncate(160) }}"
+      when: unlock_read.unreachable | default(false)
+
+    - name: "If unreachable: leave {{ inventory_hostname }}"
+      ansible.builtin.meta: end_host
+      when: unlock_read.unreachable | default(false)
+
+    # One entry per listed volume. A volume the read did not answer for (the script failed
+    # outright) is a failure with the script's own error as the reason.
+    - name: Note what each volume needs
+      ansible.builtin.set_fact:
+        unlock_vols: >-
+          {%- set seen = {} -%}
+          {%- for line in unlock_read.stdout_lines | default([]) if line.split('\t') | length == 3 -%}
+          {%-   set _ = seen.update({line.split('\t')[0]: line.split('\t')}) -%}
+          {%- endfor -%}
+          {%- set out = [] -%}
+          {%- for v in unlock_volumes -%}
+          {%-   set r = seen.get(v.name, [v.name, 'fail', 'the read said nothing for it (exit '
+                  ~ unlock_read.rc | default('?') ~ '): ' ~ unlock_read.stderr | default('') | trim | truncate(160)]) -%}
+          {%-   set _ = out.append({'name': v.name, 'mount': v.mount, 'need': r[1], 'reason': r[2]}) -%}
+          {%- endfor -%}
+          {{ out }}
+
+    - name: Ask for each locked volume's passphrase
+      ansible.builtin.pause:
+        prompt: "Passphrase for {{ item.volume }} on {{ item.host }} (Enter alone leaves it locked)"
+        echo: false
+      loop: >-
+        {%- set asks = [] -%}
+        {%- for h in ansible_play_hosts -%}
+        {%-   for v in hostvars[h].unlock_vols | default([]) if v.need == 'ask' -%}
+        {%-     set _ = asks.append({'host': h, 'volume': v.name}) -%}
+        {%-   endfor -%}
+        {%- endfor -%}
+        {{ asks }}
+      loop_control:
+        label: "{{ item.volume }} on {{ item.host }}"
+      register: unlock_asked
+      no_log: true
+      when: not ansible_check_mode
+
+    # run_once, so every host gets the answers, not only the first, where pause registered.
+    - name: Note the answers for every host
+      ansible.builtin.set_fact:
+        unlock_given: >-
+          {%- set given = {} -%}
+          {%- for r in unlock_asked.results | default([]) if r.item is defined -%}
+          {%-   set _ = given.update({r.item.host ~ '/' ~ r.item.volume: r.user_input | default('')}) -%}
+          {%- endfor -%}
+          {{ given }}
+      run_once: true
+      no_log: true
+
+    # no_log because the passphrase is in the arguments; failed_when: false so a refusal is
+    # not censored with it. The script exits 0 whatever happens and says what did in its
+    # result= and reason= lines, which cannot hold the passphrase; a failure before the
+    # script ran (sudo, say) is in msg. The next task prints those and never the invocation,
+    # which holds the passphrase.
+    - name: Unlock and mount each volume given a passphrase
+      ansible.builtin.command:
+        argv: [sh, -c, "{{ unlock_script }}", unlock-volumes, unlock, "{{ item.name }}", "{{ item.mount }}"]
+        stdin: "{{ unlock_given[inventory_hostname ~ '/' ~ item.name] | default('') }}"
+      loop: "{{ unlock_vols | selectattr('need', 'eq', 'ask') | list }}"
+      when:
+        - not ansible_check_mode
+        - unlock_given[inventory_hostname ~ '/' ~ item.name] | default('') | length > 0
+      register: unlock_tried
+      changed_when: true
+      failed_when: false
+      no_log: true
+      become: true
+
+    - name: Mount each volume that is open already
+      ansible.builtin.command:
+        argv: [sh, -c, "{{ unlock_script }}", unlock-volumes, mount, "{{ item.name }}", "{{ item.mount }}"]
+      loop: "{{ unlock_vols | selectattr('need', 'eq', 'mount') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: not ansible_check_mode
+      register: unlock_mounted
+      changed_when: true
+      failed_when: false
+      become: true
+
+    # Reads only the result= and reason= lines, or msg when the command never ran.
+    - name: Note each volume's outcome on {{ inventory_hostname }}
+      ansible.builtin.set_fact:
+        unlock_outcome: >-
+          {%- set ran = {} -%}
+          {%- for r in (unlock_tried.results | default([])) + (unlock_mounted.results | default([]))
+                if r.item is defined and not r.skipped | default(false) -%}
+          {%-   set kv = {} -%}
+          {%-   for l in r.stdout_lines | default([]) if l is match('^(result|reason)=') -%}
+          {%-     set _ = kv.update({l.split('=', 1)[0]: l.split('=', 1)[1]}) -%}
+          {%-   endfor -%}
+          {%-   set _ = ran.update({r.item.name: kv if kv.result is defined else
+                  {'result': 'failed', 'reason': 'it did not run: ' ~ (r.msg | default('no reason given')
+                   | regex_replace('\\s+', ' ') | truncate(160))}}) -%}
+          {%- endfor -%}
+          {%- set out = [] -%}
+          {%- for v in unlock_vols -%}
+          {%-   set given = unlock_given[inventory_hostname ~ '/' ~ v.name] | default('') -%}
+          {%-   if v.need == 'open' -%}
+          {%-     set o = ['ok', 'already open (' ~ v.reason ~ ')'] -%}
+          {%-   elif v.need == 'fail' -%}
+          {%-     set o = ['failed', 'failed: ' ~ v.reason] -%}
+          {%-   elif ansible_check_mode -%}
+          {%-     set o = ['ok', 'DRY RUN: ' ~ v.reason ~ '; --check asks for nothing and changes nothing'] -%}
+          {%-   elif v.need == 'ask' and given | length == 0 -%}
+          {%-     set o = ['ok', 'left locked by you'] -%}
+          {%-   elif ran[v.name].result | default('') in ['unlocked', 'mounted'] -%}
+          {%-     set o = ['ok', ran[v.name].reason] -%}
+          {%-   else -%}
+          {%-     set o = ['failed', 'failed: ' ~ ran[v.name].reason | default('no outcome recorded')] -%}
+          {%-   endif -%}
+          {%-   set _ = out.append({'name': v.name, 'ok': o[0] == 'ok', 'line': v.name ~ ': ' ~ o[1]}) -%}
+          {%- endfor -%}
+          {{ out }}
+
+    # Every host the play began with and that lists volumes, from whichever host is still
+    # in it: one with no outcome dropped out unreachable, and says so.
+    - name: Print each host's volumes
+      ansible.builtin.debug:
+        msg: >-
+          {%- set lines = [] -%}
+          {%- for h in ansible_play_hosts_all if hostvars[h].unlock_volumes | default([]) | length > 0 -%}
+          {%-   if hostvars[h].unlock_outcome is defined -%}
+          {%-     for o in hostvars[h].unlock_outcome -%}
+          {%-       set _ = lines.append(h ~ ' ' ~ o.line) -%}
+          {%-     endfor -%}
+          {%-   else -%}
+          {%-     for v in hostvars[h].unlock_volumes -%}
+          {%-       set _ = lines.append(h ~ ' ' ~ v.name | default('?') ~ ': unreachable'
+                      ~ ((', ' ~ hostvars[h].unlock_unreachable) if hostvars[h].unlock_unreachable | default('') else
+                         ', dropped out of the play before its outcome; check by hand')) -%}
+          {%-     endfor -%}
+          {%-   endif -%}
+          {%- endfor -%}
+          {{ lines }}
+      run_once: true
+      changed_when: true
+
+    - name: Check no volume on {{ inventory_hostname }} failed
+      ansible.builtin.assert:
+        that: unlock_outcome | rejectattr('ok') | list | length == 0
+        fail_msg: >-
+          {{ unlock_outcome | rejectattr('ok') | map(attribute='name') | join(', ') }} on
+          {{ inventory_hostname }} did not unlock; the line above says why. Every other
+          volume is as the summary says.
+        success_msg: ok
