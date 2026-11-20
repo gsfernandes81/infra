@@ -205,6 +205,14 @@ _require-secrets:
 	  echo "note: fleet access IS configured — this container can reach all three hosts" >&2; \
 	mode=$$(stat -c %a "$$dir"); \
 	[ "$$mode" = 750 ] || [ "$$mode" = 700 ] || echo "WARNING — $$dir is mode $$mode, expected 750." >&2
+	@for v in HUB_SECRETS INFRA_SECRETS OR3_SECRETS DD_SECRETS DS_SECRETS; do \
+	  d=$$(grep -E "^$$v=" $(CURDIR)/.env | cut -d= -f2-); \
+	  [ -d "$$d" ] || continue; \
+	  [ "$$(stat -c %u "$$d")" != 1001 ] || continue; \
+	  g=$$(stat -c %g "$$d"); m=$$(printf %03d "$$(stat -c %a "$$d")"); gd=$$(printf %s "$$m" | cut -c2); \
+	  [ "$$g" = 1001 ] && case $$gd in 5|7) true;; *) false;; esac || \
+	    echo "WARNING — $$v=$$d is not owned by uid 1001, so the containers read it through group 1001 with r-x; it is group $$g, mode $$m." >&2; \
+	done
 
 # ── lifecycle ───────────────────────────────────────────────────────────────
 # The OFFLINE FALLBACK for the base image. The normal path is a pull: the child's

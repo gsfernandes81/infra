@@ -477,7 +477,7 @@ reconnects by itself.
    The old `.env` is backed up outside the directory at 600, never beside itself. A volume name
    that differs from `compose.yaml`'s is fixed there before `make up`.
 3. **From the control node: the dev project's tunnel and host side.** It starts the new
-   `dev/.env` from `.env.example` and writes its own lines (uid, secrets dirs, tunnel id).
+   `dev/.env` from `.env.example` and writes its own lines (secrets dirs, tunnel id).
    Then put `HUB_GITHUB_APP_ID` in that `.env` by hand.
 
    ```fish
@@ -1141,8 +1141,10 @@ mode, by the owner's call: the container is the boundary, and no call waits on a
 
 ## Secrets
 
-None are in git. `.env` and `.env.*` are gitignored; the rest live in mode-750 directories, group 1001,
-on zero, each mounted read-only into the one container that needs it:
+None are in git. `.env` and `.env.*` are gitignored; the rest live in directories, each
+mounted read-only into the one container that needs it. Since 2026-11-20 the plays write
+them 0750 and their files 0640, group 1001. `zero`'s are still 0700 and 0600 until the dev
+host play next runs there, and `make check` accepts both:
 
 | `.env` line, default | Mounted | Holds |
 |---|---|---|

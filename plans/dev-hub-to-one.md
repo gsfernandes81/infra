@@ -78,7 +78,11 @@ switch.
    directories, `cloudflared.yml`, and the long-form `tunnel.json` bind as `bind:
    {selinux: z}`. Lowercase `z`, since the hub and the sidecar share `HUB_SECRETS`. Docker
    on `zero` ignores it. `docker compose config` on `zero` changes only in those lines,
-   and the commit shows that diff.
+   and the commit shows that diff. The first `up` on `zero` after the merge recreates six
+   containers once (hub, cloudflared, infra, or3, destiny-director, dossier), because the
+   option changes each one's config hash. Do it through `server-deploy-compose.yml -e
+   deployment=dev`, which plans, asks y/N and compares container ids, at a moment no
+   session matters. `stop` and `start` do not trigger it.
 2. **The uid is a fixed 1001.** The hub's build argument and the sidecar's `user:` take
    1001 from one place in `compose.yaml`, not from the checkout's owner. The Makefile's
    `_require-uid` stops comparing against the host. Its reason, root-owned files in a
@@ -144,8 +148,11 @@ block 4.
    - Check that `one`'s cgroups include `memory` (`/sys/fs/cgroup/cgroup.controllers`),
      since the containers' `mem_limit` is the only ceiling without the pool.
    - Read the hub's `claude-sessions` version and the base tag `zero` runs. If they are
-     older than `main`'s, the owner runs `make up` on `zero` first, a separate day, so a
-     failure at block 7 means the move and not an upgrade.
+     older than `main`'s, the owner brings `zero` up to them first, a separate day, so a
+     failure at block 7 means the move and not an upgrade. That first `up` on `zero`
+     recreates the hub, cloudflared, infra, or3, destiny-director and dossier once, so run
+     it through `server-deploy-compose.yml -e deployment=dev` (plan, y/N, container ids)
+     at a moment no session matters.
    - Make a staging subvolume on `one`'s SSD, owned by `gavin`, mode 0700, mounted through
      the `noauto` top-level entry. Never the SD card.
 2. **Secrets and images on `one`.**
@@ -210,7 +217,8 @@ handover blocks and the switch commit.
 
 **Architecture:** the stack's uid becomes a literal 1001 in `dev/compose.yaml`; the host
 side meets it with group 1001 on every secrets directory and file. Every bind carries
-SELinux `z`. Nothing on `zero` changes in effect, because `gavin` is 1001:1001 there.
+SELinux `z`. Nothing on `zero` changes in effect, apart from that one recreate, because
+`gavin` is 1001:1001 there.
 
 **Tech stack:** Docker Compose 5.6.1, GNU make, Ansible, GitHub Actions, fish for the
 handover blocks.

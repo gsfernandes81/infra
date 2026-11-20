@@ -47,9 +47,9 @@ Full orientation is `README.md`; the reasoning is `docs/decisions.md`. Quick map
   (`dev/hub/`, the menu behind `ssh dev`, and the offloader), its `cloudflared` sidecar,
   `infra`, and the other repos' containers, each named for its repo and all started by default. **Live
   on `zero` since 2026-10-27**; what the cutover left open is [`docs/handoff/2026-10-26-dev-hub.md`](docs/handoff/2026-10-26-dev-hub.md). Lifecycle is
-  `dev/Makefile` only (the dev user is a fixed 1001 on every host, in `dev/compose.yaml` and
-  `make base`; a second copy of the lifecycle is how the two come to disagree). The top-level `Makefile` forwards
-  `dev-*` to it.
+  `dev/Makefile` only (the dev user is a fixed 1001 on every host, in `dev/compose.yaml`
+  and `make base`, and a second copy of the lifecycle would drift from them). The
+  top-level `Makefile` forwards `dev-*` to it.
 - **`clients/emacs/`** — the editor for the phone and WSL: our private layer on Emacs Solo,
   which `client-home-emacs.yml` checks out at the commit in `SOURCE` and links the layer
   into. Its README says how to move the pin.

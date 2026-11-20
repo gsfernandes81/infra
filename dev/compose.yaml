@@ -213,6 +213,8 @@ services:
       #   source: /sys/fs/cgroup/devpool
       #   target: /run/devpool
       #   read_only: true
+      #   # No `selinux: z`: relabelling cgroupfs is expected to fail (unchecked).
+      #   # dev-smoke's every-bind-carries-z check must exempt this one when enabled.
       #   bind: { create_host_path: false }
     healthcheck:
       # hub/health: what every container mounts is in place, and the offload and token loops,

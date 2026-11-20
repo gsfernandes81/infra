@@ -1312,10 +1312,12 @@ shape (below). claude-sessions' side is its `docs/design.md` § *The hub*, relea
   authorises it as `restrict,pty` — commands and a terminal, no forwarding, no agent. The
   hub learns each container's host key on first contact (`accept-new`) over the compose
   network nothing else joins, and pins it in its volume; a changed key still refuses.
-- **cloudflared is a sidecar** with one hostname, `dev.<dns_zone>`, the owner allowing either
-  and Phase 3 having settled sidecars for deployments. It runs as the checkout's owner rather
-  than the image's 65532, so the dev-container edge play's credentials (gavin, 0600) serve it
-  unchanged, and it is behind a `tunnel` profile so the rest comes up before the tunnel
+- **cloudflared is a sidecar** with one hostname, `dev.<dns_zone>`, the owner allowing
+  either and Phase 3 having settled sidecars for deployments. It runs as the checkout's
+  owner rather than the image's 65532, so the dev-container edge play's credentials
+  (gavin, 0600) serve it unchanged ⚠︎SUPERSEDED 2026-11-20: it runs as a fixed 1001:1001
+  and reads the credentials at 0640 in group 1001, see § *The dev stack runs as 1001 on
+  every host*. It is behind a `tunnel` profile so the rest comes up before the tunnel
   exists. The dev containers lose their own tunnels and their per-container hostnames; the
   break-glass path is the one that never needed a tunnel, `make shell C=<c>` on zero.
 - **Except or3-dev's hostname, which moves onto the hub's tunnel instead of going** (owner,
@@ -2980,8 +2982,8 @@ remembered `ssh -t` lines. Two so far.
 ## The dev stack runs as 1001 on every host
 
 **Decided 2026-11-20**, by the owner, to move the stack from `zero` to `one`, where `gavin`
-is 1000 and SELinux enforces. The first step of the move lands on `zero` first and changes
-nothing there.
+is 1000 and SELinux enforces. The first step of the move lands on `zero` first and
+changes nothing there in effect, apart from one recreate.
 
 - **The dev user is 1001:1001, a literal.** The hub's build args and the sidecar's `user:`
   say it in `compose.yaml`, and `make base` builds at it. The published base image bakes
@@ -2993,6 +2995,12 @@ nothing there.
   user.** The containers read through the group, so a gavin who is not 1001 still works. On
   `zero` group 1001 is gavin's own, so nothing there widens. Not 0755: a secrets directory
   nobody else needs to enter stays closed to others.
+- **The first `up` on `zero` after the merge recreates six containers, once.** `selinux:
+  z` changes each one's Compose config hash (hub, cloudflared, infra, or3,
+  destiny-director, dossier), so every session in them ends. Docker ignores the option, so
+  nothing differs afterwards. Do it through `server-deploy-compose.yml -e deployment=dev`,
+  which plans, asks y/N and compares container ids, at a moment no session matters. `stop`
+  and `start` do not trigger it.
 - **Every bind carries lowercase `z`.** `one` refuses a container any host path not
   labelled for it, as `calibre-web`'s sidecar did on 2026-11-18. The hub and the sidecar
   share `HUB_SECRETS`, so `Z` would label it for one and lock out the other. Docker on
