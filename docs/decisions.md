@@ -2860,6 +2860,19 @@ nothing there.
   share `HUB_SECRETS`, so `Z` would label it for one and lock out the other. Docker on
   `zero` ignores the option, and `dev-smoke` fails a bind without it.
 
+## `zero` waits for a Pi 4's proof, not a Pi 5's
+
+**Decided 2026-11-20**, by the owner. The owner's call of 2026-11-03 said `zero` stays on
+Alpine until Leap is proven on a Pi 5. The owner meant a Pi 4, which `one` and `three` have
+given.
+
+- **The gate is withdrawn.** `plans/microos-cutover.md`, `plans/three.md`,
+  `docs/roadmap.md` § 3 and the Phase 9 row of `docs/management-plane.md` carry
+  ⚠︎SUPERSEDED where they said a Pi 5.
+- **`zero`'s move is still its own piece.** It is not scheduled, and gets its own design.
+- **`make` is in every Leap host's first-boot packages**, because `dev/Makefile` is the dev
+  stack's management interface and Leap's image has none.
+
 ## The lesson worth keeping
 
 
