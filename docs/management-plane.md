@@ -87,7 +87,7 @@ One line each; each says where its detail is. Struck when closed, deleted at the
 
 **Housekeeping**
 - Renovate: no PR since 2026-10-25; check it still runs: [#26](https://github.com/gsfernandes81/infra/issues/26).
-- Delete the branches `send-receive`, `ci-speed` and `plan-three-send-receive`, and the session worktrees under `.claude/worktrees/` (prune only entries under `/workspace` that are gone, CLAUDE.md § *Git & workflow*).
+- Delete the branches `send-receive`, `three-array-play`, `ci-speed` and `plan-three-send-receive`, and the eleven session worktrees under `.claude/worktrees/` (nine on branches merged into `main`; `send-receive` and `three-array-play` are not merged, so read them first). Remove each by path; prune only entries under `/workspace` that are gone (CLAUDE.md § *Git & workflow*).
 - `one`'s dead containerd store: moot now the Alpine card is retired; confirm, then strike.
 
 ### Old labels
@@ -145,7 +145,7 @@ in `decisions.md` § *From the management plane*.
 | pearl-wallet | `zero` | yes | habit |
 | destiny-director (stopped) | `two` | yes | armv6 images today ([infra#11](https://github.com/gsfernandes81/infra/issues/11)) |
 | ionic-traces (stopped) | none | yes | `decisions.md` § *From the management plane* |
-| The dev hub and every dev container | `zero`, moving to `one` (phase 10) | yes | habit |
+| The dev hub and every dev container | `one` (`zero`'s stopped copy goes in phase 10) | yes | habit |
 
 What actually runs where is [`fleet-inventory.md`](fleet-inventory.md), which wins over this
 table when they disagree.
