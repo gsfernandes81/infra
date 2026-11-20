@@ -77,11 +77,15 @@ device that stands in for `zero`'s new bcache device. It runs:
 
 - the key file made with the runbook's commands, and the format and passphrase slot with
   the runbook's flags: Adiantum, the label, two keyslots, Argon2 at 256 MiB, read back
-  from `luksDump`;
+  from `luksDump`. One flag is added, `--uuid`: the stand-in takes the LUKS UUID the
+  tracked `hosts/zero/system/dmcrypt` names, so the file checked and installed below is
+  the tracked one, unchanged. While that entry still carried `FILL-FROM-LUKS-UUID`, a
+  fresh UUID stood in and was filled in; anything else in `source=` stops the run;
 - `findfs UUID=` resolving the LUKS2 UUID, BusyBox's and then util-linux's, since
   `dmcrypt` resolves `source=` with whichever `zero` has;
-- `install-system-file dmcrypt`: refusing the repo's placeholder, then, with the UUID
-  filled in, passing the good entry and refusing an unknown UUID, an entry with no `key=`,
+- `install-system-file dmcrypt`: refusing the entry before the format, while no volume
+  has its UUID, so the pass after it is the volume's doing; refusing the placeholder,
+  written back in for the purpose; then passing the good entry and refusing an unknown UUID, an entry with no `key=`,
   a key file outside `/etc`, a name dmcrypt does not read, a key file others can read and a key that does not open the volume; then installing it
   over cryptsetup-openrc's own `/etc/conf.d/dmcrypt`, with `bcache-register` and
   `dm-crypt.conf`;
