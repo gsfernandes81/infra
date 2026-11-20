@@ -62,6 +62,12 @@ while time.time() < deadline:
             if not termios.tcgetattr(fd)[3] & termios.ECHO:
                 break
             time.sleep(0.05)
+        # And just after turning echo off it flushes whatever was typed ahead (tcflush), so
+        # a reply written the instant echo goes off can be thrown away, leaving the play
+        # waiting until the deadline: it hung once in each sim on 2026-11-20, and passed on
+        # the next run of the same code. A person types after the prompt shows; a second
+        # stands in for that.
+        time.sleep(1)
         os.write(fd, (answers.get(key, "") + "\r").encode())
 
 rc = 1
