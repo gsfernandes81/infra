@@ -181,3 +181,42 @@ unchanged when `zero` moves.
 - **`autodefrag` is dropped**: it breaks the sharing between snapshots and their data and
   suits databases badly. A timed manual defrag is to be looked at later, issue #23, which
   notes that a defrag unshares snapshot extents too.
+
+## Work in progress, 2026-11-20: the rename of three's array, notes for the next stage
+
+The owner asked on 2026-11-19 for "mirror" to go wherever it means the backup, three's live
+array included, done tonight while three is not critical and the owner is beside it; and
+for the immich backup to sit at `/media/backup/immich/` (holding `current/` and its
+`.snapshots`), with no `received-backups` level. Not built yet. What was established
+before the work stopped for zero's reboot:
+
+- **The array's top level today** holds `incoming` (a subvolume, backup's, 700),
+  `snapshots` (a directory, root's, 700) and `syncthing` (a subvolume, gavin's). The old
+  `mirror-snapshot.timer` (06:00 and 18:00 UTC, started by the mount) snapshots `incoming`
+  read-only into `snapshots/<date>` daily, so `snapshots/` likely holds empty read-only
+  snapshots: the reshape deletes them after checking `incoming` itself is empty.
+- **fstab:** the live line lacks `nosuid,nodev`; replace the whole line from
+  `fstab.append`, never sed one option.
+- **syncthing-three:** its data stays in the `syncthing` subvolume, so only the mount path
+  changes; the container is recreated by a redeploy after the reboot. `docker compose stop`
+  before the reboot keeps `start` as the way back.
+- **The restore module's path is `/media/backup/immich`**, not `/media/backup`, or zero's
+  restore key could read three's Syncthing identity; the module is named `immich`, so
+  restores read `restore@three::immich/...`.
+- **`/media/backup` on three's read-only root** is made with
+  `transactional-update --non-interactive run`, as the update play and the simulation
+  already do, last after every /etc install, then the reboot;
+  `sudo transactional-update rollback` is the way back before it.
+- **Old files removed on three:** `/etc/systemd/system/docker.service.d/infra-mirror.conf`,
+  `/etc/systemd/system/media-mirror.mount.d/infra-wants.conf`,
+  `/etc/systemd/system/mirror-scrub.service` and `.timer`, and the push's leftovers that
+  `hosts/three/leap/README.md` step 3 lists.
+- **The fan:** `argon-fan`'s `DRIVE_LABEL` becomes `backup-luks`; install it and restart the
+  fan service after the LUKS relabel.
+- **PR #22:** `lb_layout` accepts only top-level names (`^[A-Za-z0-9._-]+$`); the new
+  layout needs nested entries (`immich`, `immich/current`, `immich/current/.snapshots`,
+  `immich/state`), so the change list must add parent-first ordering and refuse `..`; its
+  labels become `backup-luks` and `backup`.
+- **make-mirror** is renamed `make-backup` now and deleted when PR #22 merges.
+- The last microos-sim run on 376d65b (44638569513) was pending; its host (three) job had
+  passed on 6ddffca.
