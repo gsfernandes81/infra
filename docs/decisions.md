@@ -2912,6 +2912,21 @@ remembered `ssh -t` lines. Two so far.
   which plans and asks; this is the break glass, as a play. make runs as a polled async job,
   so a phone that drops its connection mid-build does not stop the build.
 
+## The tailnet stays open between the boxes
+
+**Decided 2026-11-20**, the owner's call, before `three` shipped.
+
+- **The tailnet's policy stays allow-all among the fleet's boxes**: no rule limits what
+  `zero`, `one`, `two` or `three` reach of each other over it. The tailnet is given no trust
+  of its own: what guards each box is its sshd (keys only, no root, `PermitOpen`), its
+  forced commands and its firewall, the same whichever network a connection comes over, so
+  a rule on the tailnet would add a second place to keep in step without adding a boundary.
+  And the box-to-box ssh mesh (each box reachable through each of the others) is meant one
+  day to run over the tailnet as well, which per-pair rules would get in the way of.
+- **Set aside**: the 2026-11-05 phase-table item, which limited `three` to `zero`'s sshd for
+  the pull and `zero` to `three`'s for restores. The backup's own confinement (two keys, each
+  forced into a read-only rsync daemon) does not rely on the network.
+
 ## The lesson worth keeping
 
 
