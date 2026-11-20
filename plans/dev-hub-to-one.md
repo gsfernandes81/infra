@@ -191,3 +191,163 @@ and the dev images. "Exited" is not "absent" (CLAUDE.md).
 - Whether the CI run in step 5 is practical.
 - Whether the caches (`*-uv-cache`, `*-zed-server`) move or are rebuilt. Moving is the
   default, since a cache rebuilt on a Pi 4 costs hours.
+
+## Build plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
+> to implement this plan task by task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** the first step of *What changes in the repo*, merged to `main`, then the
+handover blocks and the switch commit.
+
+**Architecture:** the stack's uid becomes a literal 1001 in `dev/compose.yaml`; the host
+side meets it with group 1001 on every secrets directory and file. Every bind carries
+SELinux `z`. Nothing on `zero` changes in effect, because `gavin` is 1001:1001 there.
+
+**Tech stack:** Docker Compose 5.6.1, GNU make, Ansible, GitHub Actions, fish for the
+handover blocks.
+
+**Spec:** this file's sections above.
+
+### Global constraints
+
+- uid and gid: `1001:1001`, a literal, read from nothing on the host.
+- Secrets directories `0750`, files inside `0640`, group `1001`, owned by the ssh user.
+- SELinux option: lowercase `z`, never `Z`.
+- `zero`'s running containers see no change. `docker compose config` with the same `.env`
+  differs only in the lines Task 1 names.
+- Docs change in the same commit as what they describe (CLAUDE.md § Git & workflow).
+- Tests run in their own call and are read before any commit; never chained to a push.
+- Each task: the two-way secret scan before commit; a Fable review of the task's diff, its
+  findings applied, before the merge.
+- No step runs against the fleet. Blocks are handed to the owner.
+
+### Review focus
+
+1. A `dev/.env` from before this change, still carrying `HOST_UID=` and `HOST_GID=`, must
+   pass `make check` and `docker compose config` unchanged. Task 1 tests it.
+2. The host tunnels' callers of `_cf-tunnel.yml` (root-owned
+   `/etc/cloudflared/<host>.json`) must still write mode `0600`. Task 2 tests it.
+3. A re-run of `_dev-host.yml` against a host whose secrets are `0700`/`0600` (as on
+   `zero` today) converges to `0750`/`0640`, group 1001, without refusing. Task 2 tests it.
+4. The long-form `tunnel.json` bind must still fail the start on a missing file after `z`
+   is added (`create_host_path: false` kept). Task 1 tests it.
+5. The hub built in CI at 1001 must still hit `dev-cache.yml`'s cache: the build args stay
+   `USER_UID=1001`, `USER_GID=1001`. Task 1 tests it.
+
+### Task 1: the fixed uid and SELinux `z` in the dev stack
+
+**Files:**
+- Modify: `dev/compose.yaml` (hub `build.args` at :141-142, sidecar `user:` at :234, the
+  binds at :202, :243, :246-250, :299, :363, :413, :476, and the comments explaining them)
+- Modify: `dev/Makefile` (`HOST_UID`/`HOST_GID` at :49-50, :60, :70; `_require-uid` at
+  :196-208 and its uses in `check` and `base`; `base` at :240-243 builds at 1001;
+  `_require-secrets`' mode warning at :231 expects 750)
+- Modify: `dev/.env.example` (:10-15, the *whose files* block goes)
+- Modify: `.github/workflows/dev-smoke.yml` (:106-107, :117-118), `dev-cache.yml` (:18-20,
+  :80, :97-98), `dev-base.yml` (:287-292 comment)
+- Modify: `dev/README.md:1203-1206`, `CLAUDE.md:50` (the `HOST_UID` sentence)
+- Modify: `docs/decisions.md`, a new row: *The dev stack runs as 1001 on every host*
+
+**Interfaces:**
+- Produces: compose no longer reads `HOST_UID`/`HOST_GID`; Task 2 stops writing them.
+
+- [ ] **Step 1: Capture the baseline.** With a stand-in `.env` built as `dev-smoke.yml`
+  builds it (`HOST_UID=1001`, `HOST_GID=1001`), run
+  `COMPOSE_PROFILES=tunnel docker compose config > $SCRATCH/before.yaml` in `dev/`. No
+  daemon is needed for `config`.
+- [ ] **Step 2: Add the failing CI checks to `dev-smoke.yml`.**
+  - *every bind carries z:* `docker compose config --format json | jq` lists every volume
+    of `type: bind` and fails unless each has `bind.selinux == "z"`.
+  - *secrets read through the group:* the stand-in secrets directories are made
+    `chown 0:1001`, `0750`, files `0640`, so the container user is not the owner, and the
+    existing smoke steps (hub healthy, a container reads its secrets mount) must pass.
+  - *an old .env still works:* `HOST_UID=1001` and `HOST_GID=1001` appended to the
+    stand-in `.env`, then `make check` and `docker compose config -q` must pass.
+- [ ] **Step 3: Run the checks locally where they can run** (the jq check against the
+  current compose file must fail, listing every bind). Expected: FAIL naming the binds.
+- [ ] **Step 4: Implement.** Hub `USER_UID: "1001"`, `USER_GID: "1001"`; sidecar
+  `user: "1001:1001"`; `:ro,z` on the short-form binds; `bind: {create_host_path: false,
+  selinux: z}` on the long form; Makefile, `.env.example`, workflows, README, CLAUDE.md
+  and the decisions row as listed. `make base` passes `USER_UID=1001 USER_GID=1001`.
+- [ ] **Step 5: Diff the config.** Same stand-in `.env`, `after.yaml`, then
+  `diff before.yaml after.yaml`. Expected: only `selinux: z` lines added to binds, and
+  the hub's args and the sidecar's user unchanged in value (1001).
+- [ ] **Step 6: Check the missing-file case.** With `tunnel.json` absent and the tunnel
+  profile on, `docker compose config` still shows `create_host_path: false` on that bind.
+- [ ] **Step 7: Commit, push the branch, and read `dev-smoke` and `dev-cache` on it.**
+  Message: `dev hub to one: the stack runs as 1001 on every host and every bind carries z,
+  so one's gavin at 1000 and its selinux both serve it, with nothing changed on zero`.
+
+### Task 2: the plays write the secrets for group 1001
+
+**Files:**
+- Modify: `ansible/playbooks/_dev-host.yml` (:51-56 directories `0750`, group 1001;
+  :67-72 `authorized_keys` `0640`, group 1001; :84-106 the checkout-owner stat and the
+  `HOST_UID`/`HOST_GID` lines go; :22-23 and :133 comments)
+- Modify: `ansible/playbooks/server-add-authorized-keys.yml` (:185-191 create `0640`,
+  group 1001; the live refresh at :233-266 is unchanged, and now reads)
+- Modify: `ansible/playbooks/_cf-tunnel.yml:250-266`: `mode: "{{ cf_creds_mode |
+  default('0600') }}"`; the dev caller (`_dev-container-tunnel.yml`) passes
+  `cf_creds_mode: "0640"` and `cf_creds_group: "1001"`
+- Modify: `dev/README.md` where it states the secrets modes
+
+**Interfaces:**
+- Consumes: Task 1's compose, which no longer reads `HOST_UID`.
+
+- [ ] **Step 1: Write the failing check.** A scratch play or `--check --diff` run of
+  `server-create-dev-container.yml` against a localhost stub whose secrets are
+  `0700`/`0600`, expecting the diff to show `0750`/`0640` and group 1001. Expected: FAIL
+  (the play still writes `0700`/`0600`).
+- [ ] **Step 2: Implement the modes and groups as listed.**
+- [ ] **Step 3: Run the check again.** Expected: the stub converges, and a second run
+  reports no change.
+- [ ] **Step 4: `ansible-playbook --syntax-check`** on `server-create-dev-container.yml`,
+  `server-add-authorized-keys.yml` and every play that imports `_cf-tunnel.yml`
+  (`grep -l _cf-tunnel ansible/playbooks`). Expected: all pass. Then
+  `grep -n cf_creds_mode ansible/playbooks` shows only the dev caller setting it.
+- [ ] **Step 5: Commit and push.** Message: `dev hub to one: the dev plays write secrets
+  for group 1001, so a re-run against one cannot lock the hub out of its own keys`.
+
+### Task 3: `make` on Leap hosts, and the Pi 5 gate withdrawn
+
+**Files:**
+- Modify: `leap/firstboot.sh:52-53` (`make` in `common_packages`), `leap/README.md` if it
+  lists the packages
+- Modify: `docs/decisions.md`, a row: *`zero` waits for a Pi 4's proof, not a Pi 5's*;
+  ⚠︎SUPERSEDED on the text it replaces
+- Modify: `plans/microos-cutover.md`, `docs/roadmap.md` §3, the Phase 9 row in
+  `docs/management-plane.md`, wherever they say `zero` waits for a Pi 5
+
+- [ ] **Step 1: Add `make` and the docs.**
+- [ ] **Step 2: `grep -rn "Pi 5" docs plans`** and read each hit. Expected: none still
+  says `zero` waits for one.
+- [ ] **Step 3: Push and read `microos-sim`'s aarch64 package job.** Expected: green.
+- [ ] **Step 4: Commit.** Message: `leap: make on every host, which the dev stack's
+  management interface needs, and zero's move waits only on the pi 4's proof, as the owner
+  meant`.
+
+### Task 4: merge the first step
+
+- [ ] A Fable review of the whole branch against this design; findings applied.
+- [ ] `dev-smoke`, `dev-cache` and `microos-sim` green on the branch head.
+- [ ] Merge to `main` and push. The branch stays for the switch.
+
+### Task 5: the handover (the agent, not a sub-agent)
+
+- [ ] Write blocks 1 and 2 (*The handover*) for the owner, in chat, and read their output.
+  Block 2 adds the on-box proof: as the owner's user,
+  ```fish
+  sudo docker run --rm --user 1001:1001 -v ~/.dev-secrets:/s:ro,z alpine:3.22 \
+      cat /s/authorized_keys
+  ```
+  must print the keys under SELinux on `one`.
+- [ ] From block 1's sizes, write blocks 3 to 7 and the way back into
+  `docs/handoff/<date>-dev-hub-to-one.md`, pushed before block 4, so the owner has them
+  once the agent is down.
+
+### Task 6: the switch commit
+
+- [ ] On the branch, after Task 4's merge: the second step of *What changes in the repo*.
+  Opened as a PR, not merged. The session that wakes on `one` merges it once block 7's
+  checks pass, and deletes this file once nothing in it is open.
