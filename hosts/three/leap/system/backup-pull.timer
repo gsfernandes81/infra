@@ -10,12 +10,12 @@
 # hour old, and one zero is still taking has no info.xml yet, so backup-pull takes the one
 # before it.
 #
-# Started by the array's mount (mirror-mount.conf), not at boot, and stopped with it.
+# Started by the array's mount (backup-mount.conf), not at boot, and stopped with it.
 # Persistent, so a day missed while three was off or locked pulls once the array is
 # unlocked.
 [Unit]
 Description=Pull zero's backup daily
-PartOf=media-mirror.mount
+PartOf=media-backup.mount
 
 [Timer]
 OnCalendar=*-*-* 01:00:00 UTC

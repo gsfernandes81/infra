@@ -1,1 +1,1 @@
-/dev/mapper/mirror	/media/mirror	btrfs	noauto,nofail,x-systemd.after=systemd-cryptsetup@mirror.service,x-systemd.device-timeout=5min,context=system_u:object_r:container_file_t:s0,noatime,nosuid,nodev 0 0
+/dev/mapper/backup	/media/backup	btrfs	noauto,nofail,x-systemd.after=systemd-cryptsetup@backup.service,x-systemd.device-timeout=5min,context=system_u:object_r:container_file_t:s0,noatime,nosuid,nodev 0 0

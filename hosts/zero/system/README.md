@@ -62,7 +62,7 @@ exemption, which is a real cost on a 512 MB armv6 box running diskless.
 | `sudoers-backup` | `/etc/sudoers.d/backup` | Lets the `backup` user run, as root, exactly one command: `setpriv` dropping back to `backup` with `CAP_DAC_READ_SEARCH` alone, then rsync's read-only daemon. `install-system-file` runs `visudo -cf` on it before writing. **Not installed**. |
 | `rsyncd-backup.conf` | `/etc/rsyncd-backup.conf` | That daemon's one module, `snapshots`, read-only, over `/media/immich/.snapshots`. **Not installed**. |
 | `backup-authorized-keys` | `/home/backup/.ssh/authorized_keys` | `three`'s pull key: `restrict`, only from `three`'s tailnet address, forced to the daemon above through sudo. Holds a placeholder until the owner makes the key on `three`. **Not installed**. |
-| `mirror-backup-age-check` | `/etc/periodic/daily/mirror-backup-age-check` | **Not used, and not to be installed.** It read the push's `last-success`, and the push is gone: with the pull, `zero` never learns whether a pull succeeded. The owner deferred the alert to a dead man's switch for the whole fleet, designed separately; this file and `server-store-backup-ntfy-url.yml` stay until that design says whether it reuses them. |
+| `backup-age-check` | `/etc/periodic/daily/backup-age-check` | **Not used, and not to be installed.** It read the push's `last-success`, and the push is gone: with the pull, `zero` never learns whether a pull succeeded. The owner deferred the alert to a dead man's switch for the whole fleet, designed separately; this file and `server-store-backup-ntfy-url.yml` stay until that design says whether it reuses them. Named `mirror-backup-age-check` until 2026-11-20; the ntfy URL it reads moves from `/var/lib/mirror-backup` to `/var/lib/backup-alert` (§ The install, below). |
 
 **The mountpoints are `chattr +i`.** That is the actual protection against a failed
 mount silently destroying the Immich library, and it is not visible in any file here.
@@ -164,6 +164,22 @@ It lists snapshot 0, `current`, and 1, `timeline`. `three`'s first pull is
 `hosts/three/leap/README.md`'s. Once it has worked, the push key goes:
 `sudo rm /root/.ssh/mirror-backup /root/.ssh/mirror-backup.pub`.
 
+The ntfy URL that `server-store-backup-ntfy-url.yml` stored for the push's alert is in
+`/var/lib/mirror-backup`, a name from before the rename (`docs/decisions.md` § *The backup's
+names and layout on `three`*). It moves to `/var/lib/backup-alert`, where the play and
+`backup-age-check` now look, whenever is convenient; nothing reads it until the fleet's
+dead man's switch is designed:
+
+```fish
+# on zero: move the stored ntfy URL's directory to its new name, only if the old one exists and the new one does not; it lists names and modes, never the URL
+sudo test -d /var/lib/mirror-backup; and sudo test ! -e /var/lib/backup-alert; and sudo mv /var/lib/mirror-backup /var/lib/backup-alert; and sudo ls -la /var/lib/backup-alert
+```
+
+The listing shows the directory root's at `drwx------` and `ntfy-url` root's at
+`-rw-------`. If it prints nothing, one of the two tests failed and nothing moved: `sudo ls
+-la /var/lib/mirror-backup /var/lib/backup-alert` says which. Way back: `sudo mv
+/var/lib/backup-alert /var/lib/mirror-backup`.
+
 **Checks:** `sudo snapper --no-dbus -c immich list` gains one snapshot an hour;
 `grep autodefrag /proc/mounts` prints nothing (the move's remount drops it);
 `rc-update show | grep -w dbus` prints nothing.
@@ -180,7 +196,7 @@ Into a new directory, never over `/media/immich` itself:
 
 ```fish
 # on zero: read three's snapshot N of zero's Immich back, with real owners and modes; put the snapshot's number in place of N
-sudo rsync -aHAX --numeric-ids --exclude=/.snapshots -e 'ssh -i /root/.ssh/restore' restore@100.101.45.78::backups/immich/current/.snapshots/N/snapshot/ /media/immich/restore-N/
+sudo rsync -aHAX --numeric-ids --exclude=/.snapshots -e 'ssh -i /root/.ssh/restore' restore@100.101.45.78::immich/current/.snapshots/N/snapshot/ /media/immich/restore-N/
 ```
 
 The first connection asks to accept `three`'s host key; its fingerprint is the one

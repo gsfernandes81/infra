@@ -1,25 +1,25 @@
 # infra-os:   leap
 # infra-init: systemd
 # infra-path: /etc/systemd/system
-# infra-name: mirror-scrub.service
+# infra-name: backup-scrub.service
 # infra-mode: 0644
 #
 # Reads every block on the array and checks it against its checksum (plans/three.md § The
 # drives). With one drive it finds corruption and cannot repair it; zero holds the copy
-# that can. The result is in this unit's journal and `btrfs scrub status /media/mirror`.
-# Skipped while the array is locked, by a condition (docker-mirror.conf says why). PartOf=
+# that can. The result is in this unit's journal and `btrfs scrub status /media/backup`.
+# Skipped while the array is locked, by a condition (docker-backup.conf says why). PartOf=
 # the mount, so locking the array mid-scrub stops it. Stopped with SIGINT, the one signal on
 # which `btrfs scrub start -B` cancels its scrub (btrfs-progs cmds/scrub.c); systemd's
 # default SIGTERM kills it without asking the kernel to cancel.
 [Unit]
 Description=Scrub the backup array
-After=media-mirror.mount
-PartOf=media-mirror.mount
-ConditionPathIsMountPoint=/media/mirror
+After=media-backup.mount
+PartOf=media-backup.mount
+ConditionPathIsMountPoint=/media/backup
 
 [Service]
 Type=oneshot
-ExecStart=/usr/sbin/btrfs scrub start -B /media/mirror
+ExecStart=/usr/sbin/btrfs scrub start -B /media/backup
 Nice=19
 IOSchedulingClass=idle
 KillSignal=SIGINT

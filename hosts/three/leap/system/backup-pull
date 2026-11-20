@@ -5,7 +5,7 @@
 # infra-name: backup-pull
 # infra-mode: 0755
 #
-# Pulls zero's newest finished snapper snapshot into /media/mirror/received-backups/immich/
+# Pulls zero's newest finished snapper snapshot into /media/backup/immich/
 # current, as the unprivileged backup user (plans/three-backup-pull.md). backup-pull.timer
 # runs it daily through backup-pull.service; on success the service starts
 # backup-snapshot.service, which snapshots current/ as root and records what was pulled.
@@ -34,13 +34,13 @@
 # pull.
 set -eu
 
-dst=/media/mirror/received-backups/immich
+dst=/media/backup/immich
 src=backup@zero::snapshots
 bwlimit=${BACKUP_PULL_BWLIMIT:-3906}
 die() { echo "backup-pull: $*" >&2; exit 1; }
 
 [ "$(id -un)" = backup ] || die "run as the backup user, not $(id -un)"
-mountpoint -q /media/mirror || die "/media/mirror is not mounted: the array is locked"
+mountpoint -q /media/backup || die "/media/backup is not mounted: the array is locked"
 [ -d "$dst/current/.snapshots" ] || die "$dst/current has no .snapshots: the layout is not made"
 rm -f "$dst/state/pulled"
 tmp=$(mktemp -d)

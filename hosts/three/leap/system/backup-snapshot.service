@@ -4,7 +4,7 @@
 # infra-name: backup-snapshot.service
 # infra-mode: 0644
 #
-# Snapshots /media/mirror/received-backups/immich/current once a pull has succeeded, then
+# Snapshots /media/backup/immich/current once a pull has succeeded, then
 # prunes to the limits in /etc/snapper/configs/received-immich, then records what was
 # pulled in last-pulled (plans/three-backup-pull.md). Started only by backup-pull.service's
 # OnSuccess=, as root: the snapshots are root's and read-only, out of the backup user's
@@ -19,18 +19,18 @@
 #
 # snapper runs with --no-dbus: the config is in no SNAPPER_CONFIGS list, so neither
 # snapperd nor Leap's own snapper timers know it. A condition, never RequiresMountsFor=
-# (docker-mirror.conf says why); PartOf= the mount, so a lock stops it first.
+# (docker-backup.conf says why); PartOf= the mount, so a lock stops it first.
 [Unit]
 Description=Snapshot the pull of zero's backup that just finished
-After=media-mirror.mount
-PartOf=media-mirror.mount
-ConditionPathIsMountPoint=/media/mirror
-ConditionPathExists=/media/mirror/received-backups/immich/state/pulled
+After=media-backup.mount
+PartOf=media-backup.mount
+ConditionPathIsMountPoint=/media/backup
+ConditionPathExists=/media/backup/immich/state/pulled
 
 [Service]
 Type=oneshot
 TimeoutStartSec=30min
-Environment=D=/media/mirror/received-backups/immich
+Environment=D=/media/backup/immich
 ExecStart=/bin/sh -euc '\
 	read -r n t < "$$D/state/pulled"; \
 	case "$$n" in "" | *[!0-9]*) echo "backup-snapshot: state/pulled holds no snapshot number" >&2; exit 1 ;; esac; \

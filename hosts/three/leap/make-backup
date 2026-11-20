@@ -1,27 +1,27 @@
 #!/bin/bash
 # Makes three's backup array on a new, empty drive, once, at the visit, as root on three:
 #
-#   sudo ~/infra/hosts/three/leap/make-mirror /dev/sdX
+#   sudo ~/infra/hosts/three/leap/make-backup /dev/sdX
 #
 # It ERASES <device>. It writes LUKS2 with Adiantum (plans/three.md § Encryption: a Pi 4
-# has no AES instructions), labelled mirror-luks, the label /etc/crypttab names; inside it a
-# btrfs labelled mirror holding the subvolume `syncthing` (gavin's, Syncthing's data and its
-# identity) and received-backups/immich, where zero's backup is pulled
+# has no AES instructions), labelled backup-luks, the label /etc/crypttab names; inside it a
+# btrfs labelled backup holding the subvolume `syncthing` (gavin's, Syncthing's data and its
+# identity) and the directory immich, where zero's backup is pulled
 # (plans/three-backup-pull.md): `current`, a subvolume the backup user owns and backup-pull
 # fills; inside it `.snapshots`, root's subvolume (754), where snapper keeps three's read-only
 # snapshots of current/; and `state`, the backup user's, for what a pull just copied. The
-# directories above them are root's, mode 755, so the backup user reaches its two and
+# directory above them, immich, is root's, mode 755, so the backup user reaches its two and
 # nothing else. It asks for the passphrase twice and stores it nowhere. It leaves the array
 # locked: unlocking is hosts/three/leap/README.md.
 #
 # It refuses a device that is not a whole disk, one that is mounted or holds anything a
 # signature scan finds (a drive in use is never new), and a box that already has a volume
-# labelled mirror-luks. It asks for the device name before it erases anything.
+# labelled backup-luks. It asks for the device name before it erases anything.
 set -euo pipefail
 
-die() { echo "make-mirror: $*" >&2; exit 1; }
+die() { echo "make-backup: $*" >&2; exit 1; }
 
-[ $# -eq 1 ] || die "usage: make-mirror <device>"
+[ $# -eq 1 ] || die "usage: make-backup <device>"
 dev=$1
 [ "$(id -u)" -eq 0 ] || die "run as root"
 [ "$(hostname)" = three ] || die "this is $(hostname), not three"
@@ -37,7 +37,7 @@ grep -q "^$dev" /proc/mounts && die "$dev is mounted"
 grep -q "^$dev" /proc/swaps && die "$dev is in use as swap"
 # The label is how crypttab finds the array, so two would make the unlock pick one at
 # random. A second drive is a second label and a second crypttab line (README).
-[ -z "$(blkid -L mirror-luks || true)" ] || die "a volume labelled mirror-luks exists: $(blkid -L mirror-luks)"
+[ -z "$(blkid -L backup-luks || true)" ] || die "a volume labelled backup-luks exists: $(blkid -L backup-luks)"
 
 lsblk -o NAME,SIZE,MODEL,SERIAL,TRAN "$dev"
 read -r -p "ERASE $dev for three's backup array? Type the device name to go on: " answer
@@ -53,38 +53,38 @@ mnt=$(mktemp -d)
 cleanup() {
 	umount "$mnt" 2>/dev/null || true
 	rmdir "$mnt" 2>/dev/null || true
-	cryptsetup close mirror-make 2>/dev/null || true
+	cryptsetup close backup-make 2>/dev/null || true
 }
 trap cleanup EXIT
 
 # The passphrase reaches cryptsetup on stdin with no newline, as systemd's prompt passes it
 # when the owner types it at the unlock, so the two read the same key.
 printf '%s' "$pass1" | cryptsetup luksFormat --batch-mode --type luks2 \
-	--cipher xchacha12,aes-adiantum-plain64 --key-size 256 --label mirror-luks \
+	--cipher xchacha12,aes-adiantum-plain64 --key-size 256 --label backup-luks \
 	--key-file=- "$dev"
-printf '%s' "$pass1" | cryptsetup open --key-file=- "$dev" mirror-make
+printf '%s' "$pass1" | cryptsetup open --key-file=- "$dev" backup-make
 unset pass1 pass2
 
-mkfs.btrfs -q -L mirror /dev/mapper/mirror-make
-mount /dev/mapper/mirror-make "$mnt"
-install -d -m 755 "$mnt/received-backups" "$mnt/received-backups/immich"
-btrfs subvolume create "$mnt/received-backups/immich/current" >/dev/null
-chown backup:backup "$mnt/received-backups/immich/current"
-chmod 700 "$mnt/received-backups/immich/current"
-btrfs subvolume create "$mnt/received-backups/immich/current/.snapshots" >/dev/null
+mkfs.btrfs -q -L backup /dev/mapper/backup-make
+mount /dev/mapper/backup-make "$mnt"
+install -d -m 755 "$mnt/immich"
+btrfs subvolume create "$mnt/immich/current" >/dev/null
+chown backup:backup "$mnt/immich/current"
+chmod 700 "$mnt/immich/current"
+btrfs subvolume create "$mnt/immich/current/.snapshots" >/dev/null
 # 754, not snapper's usual 750: deciding what --delete removes, the pull's rsync reads the
 # xattr of every entry in current/, the protected .snapshots too, and reading an xattr takes
 # read permission. r without x shows the backup user the numbers and lets it enter none.
-chmod 754 "$mnt/received-backups/immich/current/.snapshots"
-install -d -o backup -g backup -m 700 "$mnt/received-backups/immich/state"
+chmod 754 "$mnt/immich/current/.snapshots"
+install -d -o backup -g backup -m 700 "$mnt/immich/state"
 btrfs subvolume create "$mnt/syncthing" >/dev/null
 chown gavin:gavin "$mnt/syncthing"
-ls -la "$mnt" "$mnt/received-backups/immich" "$mnt/received-backups/immich/current"
+ls -la "$mnt" "$mnt/immich" "$mnt/immich/current"
 cleanup
 trap - EXIT
 
 # Proved by reading the header back, not by cryptsetup's exit status.
 cryptsetup luksDump "$dev" | grep -E '^(Version|Label):|^[[:space:]]+cipher:'
 udevadm settle
-blkid -L mirror-luks >/dev/null || die "$dev does not answer to LABEL=mirror-luks"
-echo "make-mirror: $dev is three's backup array, locked. Unlock it as hosts/three/leap/README.md says."
+blkid -L backup-luks >/dev/null || die "$dev does not answer to LABEL=backup-luks"
+echo "make-backup: $dev is three's backup array, locked. Unlock it as hosts/three/leap/README.md says."

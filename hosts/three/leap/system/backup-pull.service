@@ -9,7 +9,7 @@
 # success starts backup-snapshot.service, so no snapshot ever holds a partial pull.
 #
 # Skipped while the array is locked; a condition, never RequiresMountsFor=, which would start
-# the unlock and wait at a passphrase prompt (docker-mirror.conf says why). PartOf= the
+# the unlock and wait at a passphrase prompt (docker-backup.conf says why). PartOf= the
 # mount, so a lock stops a pull first rather than failing on a busy array. systemd never
 # starts a second run while one is still pulling.
 #
@@ -18,9 +18,9 @@
 # read-only.
 [Unit]
 Description=Pull zero's newest snapshot into the backup array
-After=media-mirror.mount
-PartOf=media-mirror.mount
-ConditionPathIsMountPoint=/media/mirror
+After=media-backup.mount
+PartOf=media-backup.mount
+ConditionPathIsMountPoint=/media/backup
 OnSuccess=backup-snapshot.service
 
 [Service]
@@ -35,5 +35,5 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=yes
-ReadWritePaths=/media/mirror/received-backups/immich/current /media/mirror/received-backups/immich/state
+ReadWritePaths=/media/backup/immich/current /media/backup/immich/state
 CapabilityBoundingSet=

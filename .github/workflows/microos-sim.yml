@@ -257,10 +257,17 @@ jobs:
     # from a stick laid out as leap/make-stick lays it out, with stand-ins for the carry-over
     # and the host's disks; then its ways in, users, disks, Docker, pins and rescue mode are
     # checked. Unlike the jobs above, any FAIL fails the job: this is the script's proof.
+    # three runs twice: as a new box, make-backup on a blank drive and the pull; and as the
+    # box made on 2026-11-18 (variant migrate), through hosts/three/leap/README.md § The
+    # rename, block by block (sim/microos/host/three.sh).
     strategy:
       fail-fast: false
       matrix:
-        host: [one, three]
+        include:
+          - host: one
+          - host: three
+          - host: three
+            variant: migrate
     runs-on: ubuntu-24.04
     timeout-minutes: 80
     steps:
@@ -287,6 +294,8 @@ jobs:
           ansible --version
 
       - name: Boot ${{ matrix.host }}'s first-boot script and check the box it makes
+        env:
+          SIM_VARIANT: ${{ matrix.variant }}
         run: sim/microos/run-host.sh "$RUNNER_TEMP/host" "${{ matrix.host }}"
 
       - name: Put the report in the job summary
@@ -301,7 +310,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: leap-host-${{ matrix.host }}
+          name: leap-host-${{ matrix.host }}${{ matrix.variant && format('-{0}', matrix.variant) || '' }}
           path: |
             ${{ runner.temp }}/host/report.txt
             ${{ runner.temp }}/host/serial.log

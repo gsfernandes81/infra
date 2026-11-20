@@ -747,23 +747,25 @@ visit, step 4); `one`'s old board free; a card written and labelled `three`.
    inventory.
 5. **Erase the stick,** once `ssh three` answers through the tunnel.
 6. **The backup** ([`three-backup-pull.md`](three-backup-pull.md)), in this order:
-   1. `three`'s side, steps 1 to 5 of [`hosts/three/leap/README.md`](../hosts/three/leap/README.md)
-      § The backup: the layout on the array, the old push's files gone, the restore user,
-      the pull key, whose public half goes to the infra agent for `zero`'s key line, and
-      the files.
+   1. `three`'s side, [`hosts/three/leap/README.md`](../hosts/three/leap/README.md) § The
+      backup: first § The rename, which renames the array made on 2026-11-18 from "mirror"
+      to "backup" and reshapes it to `immich/current`, removes the old push's files, makes
+      the restore user and redeploys Syncthing on the new path, with a reboot and an
+      unlock; then § The pull's setup, steps 1 and 2: the pull key, made 2026-11-19, whose
+      public half is in `zero`'s key line, and the files.
    2. The move on `zero`, below.
    3. `zero`'s side, [`hosts/zero/system/README.md`](../hosts/zero/system/README.md)
       § The backup: snapper, zero's backup user, the files, and the first snapshot.
-   4. The first pull, step 6 of `three`'s README § The backup: over the LAN with no rate
+   4. The first pull, step 3 of `three`'s README § The pull's setup: over the LAN with no rate
       limit, started without waiting, so a dropped session does not end it. About 93 GB,
       so hours. A pull that stops is finished by the next one, since `current/` keeps what
       arrived; no snapshot is taken of it.
 
 **Checks:** `journalctl -fu backup-pull` on `three` shows the pull under way, and `sudo du
--sh /media/mirror/received-backups/immich/current` climbs; `free -m` on `three` stays clear
+-sh /media/backup/immich/current` climbs; `free -m` on `three` stays clear
 of its swap. Once it ends, `sudo snapper --no-dbus -c received-immich list` on `three`
 lists one snapshot, `pulled <N>`, and `cat
-/media/mirror/received-backups/immich/last-pulled` names the same `<N>`.
+/media/backup/immich/last-pulled` names the same `<N>`.
 
 **Way back:** none needed: nothing depends on `three`. Power it off.
 
@@ -920,7 +922,7 @@ moving to Leap.
 
    ```fish
    # on zero: compare three's snapshot N with zero's snapshot M through the restore module; it prints nothing when they match; put the numbers in place of N and M
-   sudo rsync -naHAXc --numeric-ids -i --delete --exclude=/.snapshots --exclude=/data/thumbs --exclude=/data/encoded-video -e 'ssh -i /root/.ssh/restore' restore@100.101.45.78::backups/immich/current/.snapshots/N/snapshot/ /media/immich/.snapshots/M/snapshot/
+   sudo rsync -naHAXc --numeric-ids -i --delete --exclude=/.snapshots --exclude=/data/thumbs --exclude=/data/encoded-video -e 'ssh -i /root/.ssh/restore' restore@100.101.45.78::immich/current/.snapshots/N/snapshot/ /media/immich/.snapshots/M/snapshot/
    ```
 
    It reads every file on both boxes, so it takes a while, and prints nothing. The first
@@ -934,7 +936,7 @@ moving to Leap.
 
    ```fish
    # on three: copy the db of snapshot N by reflink, and start Immich's Postgres image on it with no network; put the image and digest from deployments/immich/compose.yaml in place of IMAGE
-   sudo cp -a --reflink=always /media/mirror/received-backups/immich/current/.snapshots/N/snapshot/db /media/mirror/restore-db; and sudo docker run -d --name restore-check --network none -v /media/mirror/restore-db:/var/lib/postgresql/data IMAGE
+   sudo cp -a --reflink=always /media/backup/immich/current/.snapshots/N/snapshot/db /media/backup/restore-db; and sudo docker run -d --name restore-check --network none -v /media/backup/restore-db:/var/lib/postgresql/data IMAGE
    sudo docker logs -f restore-check
    ```
 
@@ -942,7 +944,7 @@ moving to Leap.
    of Immich's assets, `sudo docker exec restore-check psql -U postgres -d immich -tAc
    'select count(*) from asset'` (`assets` before Immich 1.137), matches the web UI's but for
    uploads since the snapshot.
-   Then `sudo docker rm -f restore-check; and sudo rm -rf /media/mirror/restore-db`.
+   Then `sudo docker rm -f restore-check; and sudo rm -rf /media/backup/restore-db`.
 3. **Syncthing on `three`,** if `free -m` showed room through the pull:
    `ansible-playbook playbooks/server-deploy-compose.yml -e deployment=syncthing-three -K`.
    Then its GUI, behind an Access login, with one play from the phone:

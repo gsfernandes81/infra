@@ -15,8 +15,7 @@ check() {
 		printf '%s\n' "$out" | tail -n 15 | sed 's/^/    /'
 	fi
 }
-rb=/media/mirror/received-backups
-d=$rb/immich
+d=/media/backup/immich
 cur=$d/current
 cfg=received-immich
 
@@ -72,8 +71,9 @@ journal() {
 
 case "${1:?step}" in
 layout)
-	check "received-backups and immich are root's, mode 755" sh -c "
-		s=\$(stat -c '%U %a' $rb $d | sort -u); echo \"\$s\"; [ \"\$s\" = 'root 755' ]"
+	check "immich is root's, mode 755, beside syncthing at the top of the array" sh -c "
+		stat -c '%U %a' $d; [ \"\$(stat -c '%U %a' $d)\" = 'root 755' ] &&
+		[ \"\$(ls /media/backup | tr '\\n' ' ')\" = 'immich syncthing ' ]"
 	check "current is a subvolume, the backup user's, mode 700" sh -c "
 		stat -c '%i %U %a' $cur; [ \"\$(stat -c '%i %U %a' $cur)\" = '256 backup 700' ]"
 	check "current/.snapshots is a subvolume, root's, mode 754, holding no snapshot yet" sh -c "
@@ -280,8 +280,8 @@ caps) # <user>: the capabilities of that user's rsync daemon, while one runs
 		done"
 	;;
 locked)
-	check "the array is locked, and received-backups not there" sh -c "
-		! findmnt /media/mirror && ! test -e /dev/mapper/mirror && ! test -e $rb"
+	check "the array is locked, and immich not there" sh -c "
+		! findmnt /media/backup && ! test -e /dev/mapper/backup && ! test -e $d"
 	# An earlier failed run leaves its result on the unit until something resets it.
 	systemctl reset-failed backup-pull.service backup-snapshot.service 2>/dev/null
 	systemctl start backup-pull.service
@@ -324,7 +324,7 @@ newest)
 	;;
 restore-db) # <three's snapshot> <Postgres image>
 	src=$cur/.snapshots/$2/snapshot
-	r=/media/mirror/restore
+	r=/media/backup/restore
 	rm -rf "$r" && mkdir -p "$r"
 	docker rm -f sim-restore > /dev/null 2>&1
 	check "a reflink copy of the db in three's snapshot $2" cp -a --reflink=always "$src/db" "$r/db"

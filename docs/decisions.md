@@ -2758,7 +2758,8 @@ and refine the owner's design without changing it.
   `hosts/zero/system/`; `three`'s file of that name went with the push). `three`'s units are
   `backup-pull` and `backup-snapshot`. The names installed on `three` (`/media/mirror`,
   `mirror-luks`, `mirror-scrub`, `make-mirror` and the rest) and `zero`'s
-  `/var/lib/mirror-backup` stay until the owner decides them.
+  `/var/lib/mirror-backup` stay until the owner decides them. ⚠︎SUPERSEDED 2026-11-20: the owner
+  decided them, and they are renamed too (§ *The backup's names and layout on `three`*).
 - **The pull runs sandboxed**: `ProtectSystem=strict`, writable only `current/` and `state/`,
   no capabilities, no new privileges. It parses what `zero` sends.
 - **snapper runs with `--no-dbus` on `three` too.** Its config is in no `SNAPPER_CONFIGS`, so
@@ -2766,13 +2767,49 @@ and refine the owner's design without changing it.
   the image has it.
 - **The timer is `01:00:00 UTC`**, named in UTC so it means the same whatever timezone
   `three` is set to; it is 09:00 in Singapore.
-- **`mirror-backup-age-check` stays in the tree, marked not used**, with
+- **`mirror-backup-age-check` (`backup-age-check` since 2026-11-20) stays in the tree, marked not used**, with
   `server-store-backup-ntfy-url.yml`, until the fleet-wide dead man's switch is designed.
   Set aside: deleting both now, which would decide for that design.
 - **The simulation's `zero` is an Alpine container of `zero`'s release**, privileged and on
   the runner's network, not the Ubuntu runner itself: snapper 0.13.1 from edge/testing,
   util-linux's `setpriv`, Alpine's sudo and BusyBox's `adduser` and `flock` are what `zero`
   runs, where the runner's would have been Ubuntu's, of another version.
+
+## The backup's names and layout on `three`
+
+**Decided 2026-11-20** (the owner, asked on 2026-11-19), with `three` beside the owner and
+holding nothing but Syncthing, so the change costs least now.
+
+- **"mirror" leaves every name that means the backup**, because it reads as RAID. On
+  `three`: `/media/backup`, the LUKS label `backup-luks`, the crypttab name and device
+  `backup`, the btrfs label `backup`, `media-backup.mount`, `backup-scrub`,
+  `backup-mount.conf`, `docker-backup.conf` and `make-backup`. On `zero`: the unused
+  `backup-age-check`, and `/var/lib/backup-alert` for the ntfy URL it reads, named for what
+  it holds, the alert's address, so it outlives the age check if the fleet's dead man's
+  switch reuses the topic. Kept: names of things that exist under them and go soon, such as
+  `zero`'s `/root/.ssh/mirror-backup`, deleted once the pull works; and every row above, as
+  written.
+- **The copy sits at `/media/backup/immich/`**, holding `current/`, its `.snapshots`,
+  `state/` and `last-pulled`, with no `received-backups` level: the array holds one backup,
+  of one subvolume, beside Syncthing, and a level for more is made when there are more.
+- **The restore module is `immich`, over `/media/backup/immich` alone**, not the whole
+  array, because the array also holds `three`'s Syncthing identity, which `zero`'s restore
+  key must not read. Restores read `restore@three::immich/current/.snapshots/<N>/snapshot/`.
+- **The live array is renamed in place, not remade**: relabelled (LUKS header, after a
+  header backup; btrfs), reshaped (the push's empty `incoming` and its empty snapshots
+  deleted only after a check that they are empty), and remounted on a mountpoint a new
+  snapshot makes, by a procedure of owner-run fish blocks with a way back at each step
+  (`hosts/three/leap/README.md` § The rename). Syncthing's subvolume is never named in a
+  write; only its mount path changes. Set aside: `make-backup` on the drive after copying
+  Syncthing off, which needs somewhere to copy it and risks more than relabels do.
+- **The rename is simulated on the box as it was**, not argued: `microos-sim.yml` runs
+  `three` a second time, set back to the tree before the pull, with the old `make-mirror`'s
+  array and the old `syncthing-three` on it, and runs the README's blocks as written. The
+  checks read state, not exit codes: the subvolume's UUID and a hash of every path, size and
+  content in it, before and after.
+- **`snapper`'s config on `three` keeps its name, `received-immich`**, though the level it
+  was named after is gone: on `three` it says which side of the pull it is, beside `zero`'s
+  `immich`.
 
 ## The lesson worth keeping
 

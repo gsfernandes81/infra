@@ -1,14 +1,14 @@
 # infra-os:   leap
 # infra-init: systemd
 # infra-path: /etc/systemd/system
-# infra-name: mirror-scrub.timer
+# infra-name: backup-scrub.timer
 # infra-mode: 0644
 #
-# Monthly. Started by the array's mount (mirror-mount.conf), not at boot, and stopped with
+# Monthly. Started by the array's mount (backup-mount.conf), not at boot, and stopped with
 # it, so a month whose turn found the box off or locked scrubs once the array is unlocked.
 [Unit]
 Description=Scrub the backup array monthly
-PartOf=media-mirror.mount
+PartOf=media-backup.mount
 
 [Timer]
 OnCalendar=monthly

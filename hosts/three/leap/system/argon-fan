@@ -51,7 +51,7 @@ BUS = "/dev/i2c-1"
 ADDRESS = 0x1A
 I2C_SLAVE = 0x0703  # linux/i2c-dev.h
 CPU_SENSOR = "/sys/class/thermal/thermal_zone0/temp"
-DRIVE_LABEL = "/dev/disk/by-label/mirror-luks"
+DRIVE_LABEL = "/dev/disk/by-label/backup-luks"
 SMARTCTL = "/usr/sbin/smartctl"
 
 INTERVAL = 30  # seconds between turns: the CPU, and a look at the disk's counters

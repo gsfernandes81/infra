@@ -10,7 +10,7 @@ its first boot, in `one`'s shape ([`leap/README.md`](../../../leap/README.md)), 
 | `combustion/script` | The first-boot script. |
 | `system/` | Every file the first boot installs, each at the path its `infra-` header names. |
 | `fstab.append` | The array's entry, `noauto`. |
-| `make-mirror` | Formats the backup drive, once, at the visit. |
+| `make-backup` | Formats the backup drive, once, on a new drive. |
 
 ## Before the stick
 
@@ -107,24 +107,30 @@ and nothing on it. After `ssh three`:
 # find the new drive: the WD Red, about 3.6T, with no partitions
 lsblk -o NAME,SIZE,MODEL,SERIAL,TRAN
 # format it; it asks for the device name, then the passphrase twice, and leaves it locked
-sudo ~/infra/hosts/three/leap/make-mirror /dev/sdX
+sudo ~/infra/hosts/three/leap/make-backup /dev/sdX
 ```
 
-`make-mirror` refuses a drive with partitions or any signature on it, so it never formats a
-drive in use. It writes LUKS2 with Adiantum, labelled `mirror-luks`, which
-`/etc/crypttab` names. Inside is a btrfs holding `syncthing` and `received-backups`:
+`make-backup` refuses a drive with partitions or any signature on it, so it never formats a
+drive in use. It writes LUKS2 with Adiantum, labelled `backup-luks`, which
+`/etc/crypttab` names. Inside is a btrfs, labelled `backup`, holding `syncthing` and `immich`:
 
 | On the array | What | Whose |
 |---|---|---|
-| `received-backups/`, `received-backups/immich/` | directories | root's, 755 |
-| `received-backups/immich/current/` | subvolume: the copy of zero's newest snapshot that `backup-pull` keeps up to date | the backup user's, 700 |
-| `received-backups/immich/current/.snapshots/<N>/snapshot` | snapper's read-only snapshots of `current/`, one per good pull | root's; `.snapshots` 754, which lets the pull's rsync read its (absent) xattr while it decides what `--delete` removes, and enter nothing |
-| `received-backups/immich/state/` | `pulled`: what the last good pull copied | the backup user's, 700 |
-| `received-backups/immich/last-pulled` | what the last snapshot holds | root's |
+| `immich/` | a directory, the restore module's whole reach | root's, 755 |
+| `immich/current/` | subvolume: the copy of zero's newest snapshot that `backup-pull` keeps up to date | the backup user's, 700 |
+| `immich/current/.snapshots/<N>/snapshot` | snapper's read-only snapshots of `current/`, one per good pull | root's; `.snapshots` 754, which lets the pull's rsync read its (absent) xattr while it decides what `--delete` removes, and enter nothing |
+| `immich/state/` | `pulled`: what the last good pull copied | the backup user's, 700 |
+| `immich/last-pulled` | what the last snapshot holds | root's |
 | `syncthing/` | subvolume: Syncthing's data and identity | gavin's |
 
-The array made on 2026-11-18 holds the layout before the pull: `incoming` and `snapshots`.
-Its change is § The backup, below, step 2.
+The array made on 2026-11-18 was made by `make-backup`'s first version, `make-mirror`, under
+the names "mirror" had until 2026-11-20 (`mirror-luks`, `/media/mirror`), and holds the push's
+layout: `incoming` and `snapshots` beside `syncthing`. § The rename, below, renames and
+reshapes it in place.
+
+The names say "backup" because "mirror" reads as RAID (the owner, 2026-11-19). The LUKS label
+is `backup-luks`, the crypttab name and the device `/dev/mapper/backup`, the btrfs label
+`backup`, and the mount `/media/backup`, `media-backup.mount`.
 
 ### Unlocking, after every boot
 
@@ -132,13 +138,13 @@ Every boot leaves the array locked, and nothing waits for it. From the phone:
 
 ```fish
 # unlock three's array; sudo asks for gavin's password, then systemd for the passphrase
-ssh -t three 'sudo systemctl start systemd-cryptsetup@mirror.service; and sudo systemctl start media-mirror.mount'
+ssh -t three 'sudo systemctl start systemd-cryptsetup@backup.service; and sudo systemctl start media-backup.mount'
 ```
 
 Two starts, so the mount's 5-minute wait for the device begins only once the passphrase is
 in, however long finding it takes. The mount starts Docker, which brings Syncthing up
 under its restart policy, and the pull and scrub timers. Until then, Docker is skipped
-by its condition, and `docker` answers that it cannot connect. A hand `mount /media/mirror`
+by its condition, and `docker` answers that it cannot connect. A hand `mount /media/backup`
 starts none of them: only `systemctl start` does. For a few seconds while Docker first
 starts, a new ssh connection can be refused; the simulation saw one attempt fail between
 two that answered. Try again. The cause is not yet known (`docs/management-plane.md`,
@@ -151,13 +157,13 @@ the mount). The passphrase is not cached, so the next unlock asks for it again:
 ```fish
 # lock three's array: Docker first, then the mount, then the LUKS volume; it prints
 # "locked" only once the volume is really closed
-ssh -t three 'sudo systemctl stop docker.service media-mirror.mount systemd-cryptsetup@mirror.service; and test ! -e /dev/mapper/mirror; and echo locked'
+ssh -t three 'sudo systemctl stop docker.service media-backup.mount systemd-cryptsetup@backup.service; and test ! -e /dev/mapper/backup; and echo locked'
 ```
 
 ### Snapshots, scrubs
 
 Snapshots are the backup's, below. The scrub runs monthly; a month missed while the box was
-off or locked scrubs once the array is unlocked. `btrfs scrub status /media/mirror` shows
+off or locked scrubs once the array is unlocked. `sudo btrfs scrub status /media/backup` shows
 the last result.
 
 ## The backup
@@ -167,7 +173,7 @@ the last result.
 one subvolume. Daily at 01:00 UTC, `backup-pull.timer` starts `backup-pull.service`, which
 runs `/usr/local/bin/backup-pull` as the backup user: it lists `zero`'s snapshots, picks the
 newest finished one, and, if it is not the one pulled last, copies it with rsync into
-`received-backups/immich/current`, at 32 Mbit/s. Only a success starts
+`/media/backup/immich/current`, at 32 Mbit/s. Only a success starts
 `backup-snapshot.service`, which takes a read-only snapper snapshot of `current/`, prunes to
 14 daily, 8 weekly and 12 monthly, and writes `last-pulled`. A pull cut off, or one whose
 files vanish (rsync's exit 24, which a frozen snapshot cannot cause), takes no snapshot; the
@@ -184,37 +190,343 @@ is munged besides (`/rsyncd-munged/...`); the restore module turns both back.
 
 The timezone is UTC: 01:00 in a UK winter, 02:00 in a UK summer, 09:00 in Singapore.
 
-### The pull's setup, owner-run, on the array made on 2026-11-18
+### The rename, owner-run, on the array made on 2026-11-18
 
-Once, in this order, after `ssh three`. The first boot of a rebuilt `three` does steps 3 and 5
-itself, and `make-mirror` makes step 2's layout on a new drive; step 4, the key, is made on
-the box every time.
+Once, on the live array, before the pull's setup below. It renames the array from "mirror"
+to "backup" and reshapes it to the layout above, in place: the passphrase, the LUKS volume
+and the btrfs inside stay as they are. A new drive needs none of it: `make-backup` makes the
+new names and layout, and a rebuilt `three`'s first boot installs the new files.
 
-1. **Unlock**, as § Unlocking says, and pull the checkout: `cd ~/infra; and git pull --ff-only`.
-2. **The layout.** The old `incoming` and `snapshots` must be empty, since no push ever ran;
-   the first command prints nothing if so, and the rest runs only then:
+**What is at risk.** The array holds Syncthing's data and identity, in the subvolume
+`syncthing`, and nothing else of value: no pull has run, so `three` holds no copy of
+`zero`'s Immich yet, and the push's `incoming` and `snapshots` never received anything. No
+step below names `syncthing` in a command that writes; only its mount path changes, from
+`/media/mirror/syncthing` to `/media/backup/syncthing`. Rename 2 records its subvolume's
+UUID, its number of entries and Syncthing's certificate, and rename 15 compares all three.
+The only writes to the array are rename 3's reshape, which refuses unless the old places are
+empty, rename 4's btrfs label and rename 6's LUKS label, after a header backup.
+
+**Before:** the rename merged into `main`, the owner beside `three`, the array unlocked
+(§ Unlocking, with the old names: `systemd-cryptsetup@mirror.service`, then
+`media-mirror.mount`). Each block is pasted after `ssh three`, in fish, except rename 14 and
+rename 16, which are run on the phone. Each says what good output looks like; anything
+else, stop and read the way back at the end.
+
+1. **Read the state**, changing nothing:
 
    ```fish
-   # on three: check the old push's places are empty, then remove them and make received-backups
-   sudo find /media/mirror/incoming /media/mirror/snapshots -mindepth 1 | head
-   test -z (sudo find /media/mirror/incoming /media/mirror/snapshots -mindepth 1 | head -n 1); and sudo btrfs subvolume delete /media/mirror/incoming; and sudo rmdir /media/mirror/snapshots; and sudo install -d -m 755 /media/mirror/received-backups /media/mirror/received-backups/immich; and sudo btrfs subvolume create /media/mirror/received-backups/immich/current; and sudo chown backup:backup /media/mirror/received-backups/immich/current; and sudo chmod 700 /media/mirror/received-backups/immich/current; and sudo btrfs subvolume create /media/mirror/received-backups/immich/current/.snapshots; and sudo chmod 754 /media/mirror/received-backups/immich/current/.snapshots; and sudo install -d -o backup -g backup -m 700 /media/mirror/received-backups/immich/state; and sudo ls -la /media/mirror /media/mirror/received-backups/immich
+   # rename 1, on three: read the state before the rename, changing nothing
+   cd ~/infra; and git pull --ff-only; and test -e hosts/three/leap/make-backup; and echo "the checkout has the rename"
+   findmnt -no SOURCE,TARGET,OPTIONS /media/mirror; sudo btrfs filesystem label /media/mirror
+   sudo btrfs subvolume list /media/mirror
+   sudo blkid -L mirror-luks; readlink -f /dev/disk/by-label/mirror-luks
+   findmnt -no SOURCE /; sudo btrfs subvolume get-default /
+   systemctl is-system-running; systemctl --failed --no-legend
+   sudo docker ps -a --format '{{.Names}} {{.Status}} {{.Mounts}}'
    ```
 
-3. **What the push left, gone; the restore user made; the array's mount hardened.** The
-   timer first, so nothing starts the old script:
+   Good output: `the checkout has the rename`; `/dev/mapper/mirror /media/mirror` with
+   `noatime` and no `nosuid` (the line rename 7 replaces); the label `mirror`; the subvolume
+   list holds `incoming`, `syncthing` and one `snapshots/<date>` per day the old timer ran,
+   and nothing else; `blkid` and `readlink` name the same `/dev/sdX`, which shows the
+   by-label link rename 6 reads is working; `findmnt /` ends `/@/.snapshots/<N>/snapshot]`
+   and `get-default` names the same `<N>` (rename 11 changes the second, and rename 13 reads
+   both again); whatever `is-system-running` and `--failed` say, rename 13 compares with it;
+   and `syncthing` up, on `/media/mirror/syncthing`. Anything else in the subvolume list, or
+   an `immich` already there, stop.
+2. **Stop what uses the array**, and record Syncthing's subvolume:
 
    ```fish
-   # on three: stop and remove the old snapshot timer, service and script, the push's daemon config and key line; give backup no shell; make the restore user
-   sudo systemctl disable --now mirror-snapshot.timer; sudo rm -f /etc/systemd/system/mirror-snapshot.timer /etc/systemd/system/mirror-snapshot.service /usr/local/sbin/mirror-snapshot /etc/rsync-backup.conf /home/backup/.ssh/authorized_keys
-   sudo usermod -s /usr/sbin/nologin backup; and sudo useradd --system --user-group --no-create-home --home-dir /home/restore --shell /bin/bash --comment "zero's read-only restores" restore; and sudo install -d -m 755 /home/restore /home/restore/.ssh
-   sudo sed -i '/[[:space:]]\/media\/mirror[[:space:]]/s/,noatime /,noatime,nosuid,nodev /' /etc/fstab; and grep /media/mirror /etc/fstab
+   # rename 2, on three: stop Syncthing (docker compose start is the way back) and the old timers, then record the syncthing subvolume's UUID, its number of entries and Syncthing's certificate
+   cd ~/infra/deployments/syncthing-three; and sudo docker compose stop; and sudo docker compose ps -a
+   sudo systemctl stop mirror-snapshot.timer mirror-scrub.timer mirror-snapshot.service mirror-scrub.service
+   begin; sudo btrfs subvolume show /media/mirror/syncthing | awk '$1 == "UUID:" { print $2 }'; sudo find /media/mirror/syncthing | wc -l; sudo sha256sum /media/mirror/syncthing/config/cert.pem | cut -d' ' -f1; end > ~/rename-syncthing.txt; cat ~/rename-syncthing.txt
    ```
 
-   The fstab line ends `noatime,nosuid,nodev 0 0`; it takes effect at the next unlock.
-4. **The pull key**, made here and never carried:
+   `compose ps -a` shows `syncthing` `Exited`. The file holds three lines: a UUID, a number
+   and a hash. A line missing, or an error from `sha256sum`, means rename 15 has nothing to
+   compare with: find where Syncthing keeps its certificate (`sudo ls
+   /media/mirror/syncthing`) before going on. `syncthing-three`'s restart policy is
+   `unless-stopped`, so Docker leaves a container stopped this way stopped through the
+   reboot.
+3. **The reshape**, while the array is still mounted at `/media/mirror`. It refuses unless
+   `immich` is not there yet, `incoming` is an empty subvolume, and every entry of
+   `snapshots` is a subvolume holding nothing, as the old timer's read-only snapshots of an
+   empty `incoming` are; then it deletes them and makes `immich`, as `make-backup` does:
 
    ```fish
-   # on three: make the backup user's key to zero, then print its public half and fingerprint for zero's key line
+   # rename 3, on three: delete the push's empty incoming and its empty snapshots, then make immich, current, its .snapshots and state; it refuses, changing nothing, unless all of them are empty and immich is not there
+   sudo sh -euc '
+   m=/media/mirror
+   mountpoint -q $m
+   [ ! -e $m/immich ] || { echo "rename 3: $m/immich exists already; nothing changed"; exit 1; }
+   btrfs subvolume show $m/incoming > /dev/null
+   [ -d $m/snapshots ] || { echo "rename 3: no $m/snapshots; nothing changed"; exit 1; }
+   [ -z "$(find $m/incoming -mindepth 1 | head -n 1)" ] || { echo "rename 3: $m/incoming is not empty; nothing changed"; exit 1; }
+   [ -z "$(find $m/snapshots -mindepth 2 | head -n 1)" ] || { echo "rename 3: a snapshot in $m/snapshots is not empty; nothing changed"; exit 1; }
+   for s in $m/snapshots/*; do [ ! -e "$s" ] || btrfs subvolume show "$s" > /dev/null; done
+   for s in $m/snapshots/*; do [ ! -e "$s" ] || btrfs subvolume delete "$s"; done
+   rmdir $m/snapshots
+   btrfs subvolume delete $m/incoming
+   install -d -m 755 $m/immich
+   btrfs subvolume create $m/immich/current
+   chown backup:backup $m/immich/current
+   chmod 700 $m/immich/current
+   btrfs subvolume create $m/immich/current/.snapshots
+   chmod 754 $m/immich/current/.snapshots
+   install -d -o backup -g backup -m 700 $m/immich/state
+   btrfs subvolume list $m
+   ls -la $m $m/immich
+   '
+   ```
+
+   Good output: a `Delete subvolume` line for each snapshot and for `incoming`, two `Create
+   subvolume` lines, then a subvolume list of `syncthing`, `immich/current` and
+   `immich/current/.snapshots` alone; `immich` root's at `drwxr-xr-x`, `current` backup's at
+   `drwx------`, `state` backup's at `drwx------`. A `rename 3:` line means it stopped before
+   any change, and says why.
+4. **The btrfs label**, from `mirror` to `backup`. Nothing reads it; it is renamed so no
+   name on the array says "mirror":
+
+   ```fish
+   # rename 4, on three: relabel the btrfs inside the array from mirror to backup, then read the label back
+   sudo btrfs filesystem label /media/mirror backup; and sudo btrfs filesystem label /media/mirror
+   ```
+
+   It prints `backup`.
+5. **Lock the array**, under its old names, so its LUKS label can change and it can open
+   under its new one:
+
+   ```fish
+   # rename 5, on three: lock the array under its old names; it prints locked only once the LUKS volume is closed
+   sudo systemctl stop docker.service media-mirror.mount systemd-cryptsetup@mirror.service; and test ! -e /dev/mapper/mirror; and echo locked
+   ```
+
+   It prints `locked`. If it does not, `sudo fuser -vm /media/mirror` names what holds it.
+6. **The LUKS label**, from `mirror-luks` to `backup-luks`, after a backup of the header.
+   The label is in the LUKS2 header's metadata, which cryptsetup keeps two copies of; the
+   key slots and the data are not touched. The backup and the passphrase together open the
+   array, as the drive itself does, so it stays in root's home at mode 600 and goes at
+   rename 18:
+
+   ```fish
+   # rename 6, on three: back up the LUKS header into root's home, then relabel mirror-luks to backup-luks, and read the label back from the disk and from udev
+   set dev (sudo blkid -L mirror-luks); test -b "$dev"; and echo "the array is $dev"
+   test -b "$dev"; and sudo test ! -e /root/backup-luks-header.img; and sudo cryptsetup luksHeaderBackup $dev --header-backup-file /root/backup-luks-header.img; and sudo chmod 600 /root/backup-luks-header.img; and sudo ls -l /root/backup-luks-header.img
+   test -b "$dev"; and sudo test -s /root/backup-luks-header.img; and sudo cryptsetup config --label backup-luks $dev; and sudo udevadm trigger --settle --action=change $dev; and sudo cryptsetup luksDump $dev | grep -E '^(Version|Label):'; and readlink -f /dev/disk/by-label/backup-luks; and test ! -e /dev/disk/by-label/mirror-luks; and echo "relabelled"
+   ```
+
+   Good output: `the array is /dev/sdX`, the device rename 1 named; the header file root's,
+   `-rw-------`, about 16 MB; `Version: 2`, `Label: backup-luks`, the same `/dev/sdX`, and
+   `relabelled`. The first line printing nothing means `blkid` found no `mirror-luks`, and
+   nothing after it runs.
+7. **fstab**: the array's line replaced whole by `fstab.append`'s, never one option edited,
+   since the live line lacks `nosuid,nodev`, which the new line carries:
+
+   ```fish
+   # rename 7, on three: copy fstab into root's home, then replace the /media/mirror line with fstab.append's line; it refuses, changing nothing, unless there is exactly one /media/mirror line and no /media/backup line
+   sudo sh -euc '
+   new=/home/gavin/infra/hosts/three/leap/fstab.append
+   [ "$(wc -l < $new)" = 1 ] || { echo "rename 7: $new is not one line; nothing changed"; exit 1; }
+   [ "$(grep -c "^[^#]*[[:space:]]/media/mirror[[:space:]]" /etc/fstab)" = 1 ] || { echo "rename 7: not exactly one /media/mirror line in /etc/fstab; nothing changed"; exit 1; }
+   ! grep -q "^[^#]*[[:space:]]/media/backup[[:space:]]" /etc/fstab || { echo "rename 7: a /media/backup line is there already; nothing changed"; exit 1; }
+   install -m 600 /etc/fstab /root/fstab.before-rename
+   grep -v "^[^#]*[[:space:]]/media/mirror[[:space:]]" /etc/fstab > /etc/fstab.rename
+   cat $new >> /etc/fstab.rename
+   chmod 644 /etc/fstab.rename
+   mv /etc/fstab.rename /etc/fstab
+   restorecon /etc/fstab
+   diff /root/fstab.before-rename /etc/fstab || true
+   '
+   ```
+
+   The diff shows one line gone, `/dev/mapper/mirror /media/mirror ...noatime 0 0`, and one
+   added, `/dev/mapper/backup /media/backup ...noatime,nosuid,nodev 0 0`, still `noauto`,
+   which keeps a boot from waiting for the array and an SELinux relabel from mounting it
+   (`docs/management-plane.md`, phase 9).
+8. **crypttab and the array's units**, each with a dry run first:
+
+   ```fish
+   # rename 8, on three: install crypttab and the renamed mount, Docker and scrub units; each dry run shows its diff or a new file, then --commit writes it
+   sudo install -d -m 755 /etc/systemd/system/media-backup.mount.d
+   cd ~/infra
+   for f in crypttab backup-mount.conf docker-backup.conf backup-scrub.service backup-scrub.timer
+       bin/install-system-file $f --new; and sudo bin/install-system-file $f --new --commit --allow-content-change; or break
+   end
+   ```
+
+   `crypttab`'s diff changes its comments and its one line, to
+   `backup LABEL=backup-luks none luks,noauto,password-cache=no`; the four others are new
+   files. Each ends `post-install checks: ok`.
+9. **The old files out**, the push's leftovers with them, then the users as the pull wants
+   them and systemd reloaded. The old files hold no secret, so they are copied with their
+   modes into one directory of root's, outside every directory they came from:
+
+   ```fish
+   # rename 9, on three: copy the old units and the push's leftovers into root's home, remove them, give backup no shell, make the restore user, reload systemd, and read what systemd now has
+   sudo sh -euc '
+   b=/root/rename-2026-11-20
+   install -d -m 700 $b
+   systemctl disable mirror-snapshot.timer mirror-scrub.timer 2> /dev/null || true
+   for f in /etc/systemd/system/docker.service.d/infra-mirror.conf /etc/systemd/system/media-mirror.mount.d/infra-wants.conf /etc/systemd/system/mirror-scrub.service /etc/systemd/system/mirror-scrub.timer /etc/systemd/system/mirror-snapshot.service /etc/systemd/system/mirror-snapshot.timer /usr/local/sbin/mirror-snapshot /etc/rsync-backup.conf /home/backup/.ssh/authorized_keys; do
+   	if [ -e "$f" ]; then cp -a --parents "$f" $b/; rm "$f"; echo "removed $f"; else echo "absent  $f"; fi
+   done
+   [ ! -d /etc/systemd/system/media-mirror.mount.d ] || rmdir /etc/systemd/system/media-mirror.mount.d
+   usermod -s /usr/sbin/nologin backup
+   id restore > /dev/null 2>&1 || useradd --system --user-group --no-create-home --home-dir /home/restore --shell /bin/bash --comment "zero\'s read-only restores" restore
+   install -d -m 755 /home/restore /home/restore/.ssh
+   systemctl daemon-reload
+   '
+   systemctl show -p What -p Where -p Options media-backup.mount; systemctl show -p Wants --value media-backup.mount
+   systemctl show -p DropInPaths --value docker.service; systemctl list-unit-files --no-legend 'mirror-*' 'backup-scrub*'
+   getent passwd backup restore
+   ```
+
+   Good output: a `removed` line for each file the box has (an `absent` one is a file this
+   box never had); `What=/dev/mapper/backup`, `Where=/media/backup`, and options with
+   `nosuid,nodev`; the mount wants `docker.service backup-pull.timer backup-scrub.timer`
+   (the pull's timer arrives with the pull's setup); Docker's drop-ins name
+   `infra-backup.conf` and not `infra-mirror.conf`; the unit files are the two
+   `backup-scrub` ones, and no `mirror-` one; `backup` ends `/usr/sbin/nologin`, and
+   `restore` ends `/home/restore:/bin/bash`.
+10. **The fan**, which finds the drive by its LUKS label: since rename 6 it finds none, and
+    follows the CPU alone:
+
+    ```fish
+    # rename 10, on three: install the fan script that finds the drive by backup-luks, restart its unit (the stop sets the fan to full, the start picks the level again), and read what it found
+    cd ~/infra; and bin/install-system-file argon-fan; and sudo bin/install-system-file argon-fan --commit --allow-content-change; and sudo systemctl restart argon-fan.service
+    journalctl -b -u argon-fan.service --since -2min --no-pager | grep -E 'drive found|no /dev/disk'
+    ```
+
+    The diff shows `DRIVE_LABEL` moving to `backup-luks`. The journal reads `drive found at
+    /dev/sdX, by its LUKS label`, the device of rename 6; if it prints nothing, run the
+    `journalctl` line again in half a minute.
+11. **`/media/backup`**, on the read-only root, by a new snapshot, which also removes the
+    empty `/media/mirror`. Last, after every change to `/etc` above: the new snapshot takes
+    `/etc` as it is when it is made.
+
+    ```fish
+    # rename 11, on three: a new snapshot with /media/backup made and the empty /media/mirror removed, then read that it is the default and holds the right /media
+    sudo transactional-update --non-interactive run sh -c 'mkdir /media/backup && rmdir /media/mirror'
+    findmnt -no SOURCE /; sudo btrfs subvolume get-default /
+    set snap (sudo btrfs subvolume get-default / | sed -n 's|.* path @||p'); and sudo ls $snap/media
+    ```
+
+    `transactional-update` ends with its new snapshot's number; `get-default` now names
+    that `<N+1>` while `findmnt /` still names rename 1's `<N>`; the new snapshot's `/media`
+    holds `backup` alone. A failed run makes no snapshot and changes nothing.
+12. **The reboot**, into the new snapshot. The session ends:
+
+    ```fish
+    # rename 12, on three: reboot into the new snapshot
+    sudo systemctl reboot
+    ```
+
+    If `ssh three` does not answer within ten minutes, the console shows why; an SELinux
+    relabel of the new snapshot, if one runs, adds a few minutes and a second reboot.
+
+13. **Read the boot**, after `ssh three` again:
+
+    ```fish
+    # rename 13, on three: read that the boot is the new snapshot, with /media/backup, and the array locked under its new name
+    findmnt -no SOURCE /; sudo btrfs subvolume get-default /
+    ls -d /media/*
+    systemctl show -p ActiveState --value systemd-cryptsetup@backup.service media-backup.mount
+    systemctl is-system-running; systemctl --failed --no-legend
+    ```
+
+    Good output: `findmnt /` and `get-default` both name `<N+1>`; `/media/backup` alone;
+    `inactive` twice; the same `is-system-running` and failed units as rename 1. `findmnt /`
+    naming `<N>` again means health-checker rolled the boot back; stop there, and send the
+    infra agent `journalctl -b -1 --no-pager | tail -n 100`.
+14. **The unlock**, under the new names, from the phone: the command in § Unlocking.
+
+    ```fish
+    # rename 14, on the phone: unlock three's array under its new names; sudo asks for gavin's password, then systemd for the passphrase
+    ssh -t three 'sudo systemctl start systemd-cryptsetup@backup.service; and sudo systemctl start media-backup.mount'
+    ```
+
+15. **Read the array**, and compare Syncthing's subvolume with rename 2's record:
+
+    ```fish
+    # rename 15, on three: read the array under its new names, and compare the syncthing subvolume with rename 2's record; it changes nothing
+    findmnt -no SOURCE,OPTIONS /media/backup; sudo cryptsetup status backup | head -n 3; sudo btrfs filesystem label /media/backup
+    sudo btrfs subvolume list /media/backup; sudo ls -la /media/backup /media/backup/immich
+    begin; sudo btrfs subvolume show /media/backup/syncthing | awk '$1 == "UUID:" { print $2 }'; sudo find /media/backup/syncthing | wc -l; sudo sha256sum /media/backup/syncthing/config/cert.pem | cut -d' ' -f1; end > ~/rename-syncthing-after.txt
+    diff ~/rename-syncthing.txt ~/rename-syncthing-after.txt; and echo "syncthing: the same subvolume, the same number of entries, the same certificate"
+    systemctl is-active docker.service backup-scrub.timer
+    ```
+
+    Good output: `/dev/mapper/backup` with `nosuid,nodev` and the container context; `type:
+    LUKS2`; the label `backup`; the subvolume list and the listing as rename 3 left them;
+    `syncthing: the same subvolume, the same number of entries, the same certificate`; and
+    `active` twice. A diff line instead of that sentence: stop, and send it to the infra
+    agent; nothing has started Syncthing.
+16. **The redeploy**, from the phone, which recreates the container on the new path:
+
+    ```fish
+    # rename 16, on the phone: redeploy syncthing-three, which recreates its container on /media/backup/syncthing
+    cd ~/infra/ansible; and ansible-playbook playbooks/server-deploy-compose.yml -e deployment=syncthing-three -K
+    ```
+
+17. **Read Syncthing**:
+
+    ```fish
+    # rename 17, on three: read the container's mount and health; healthy takes a minute or two
+    sudo docker inspect syncthing --format '{{range .Mounts}}{{.Source}} {{end}}{{.State.Health.Status}}'
+    ```
+
+    It prints `/media/backup/syncthing healthy` (`starting` in the first minute). The GUI,
+    `https://syncthing-three.gsrpi.uk/`, shows the device ID it had, and its devices
+    reconnect.
+18. **Clean up**, once Syncthing is healthy:
+
+    ```fish
+    # rename 18, on three: delete the LUKS header backup, which opens the array with the passphrase, and the copies of the old files and of fstab
+    sudo rm /root/backup-luks-header.img; and sudo rm -r /root/rename-2026-11-20 /root/fstab.before-rename; and rm ~/rename-syncthing.txt ~/rename-syncthing-after.txt
+    ```
+
+**Way back, at each step.** None of these steps moves or rewrites Syncthing's data, so the
+way back is about names, and never about data:
+
+- rename 2: `sudo docker compose start` in `~/infra/deployments/syncthing-three`, and `sudo
+  systemctl start mirror-snapshot.timer mirror-scrub.timer`.
+- rename 3: nothing held data. The old layout, if wanted: `sudo btrfs subvolume delete
+  /media/mirror/immich/current/.snapshots /media/mirror/immich/current; and sudo rm -r
+  /media/mirror/immich`; nothing reads `incoming` or `snapshots` any more.
+- rename 4: `sudo btrfs filesystem label /media/mirror mirror`.
+- rename 5: the old unlock, `sudo systemctl start systemd-cryptsetup@mirror.service; and sudo
+  systemctl start media-mirror.mount`, while the LUKS label is still `mirror-luks`.
+- rename 6: `sudo cryptsetup config --label mirror-luks /dev/sdX`; if the header itself were
+  damaged, `sudo cryptsetup luksHeaderRestore /dev/sdX --header-backup-file
+  /root/backup-luks-header.img`, which writes back the header as it was before this step.
+- rename 7: `sudo install -m 644 /root/fstab.before-rename /etc/fstab; and sudo restorecon
+  /etc/fstab`.
+- rename 8: `crypttab` from the backup `install-system-file` printed (`backed up ... ->`),
+  and the four new files removed with `sudo rm`.
+- rename 9: `sudo cp -a /root/rename-2026-11-20/. /`, which puts every removed file back with
+  its mode; `sudo usermod -s /bin/bash backup; and sudo userdel restore`; then `sudo
+  systemctl daemon-reload`.
+- rename 10: `argon-fan` from the backup `install-system-file` printed, then `sudo systemctl
+  restart argon-fan.service`.
+- rename 11: `sudo transactional-update rollback`, which makes the running snapshot the
+  default again, so the reboot boots it; `get-default` then names `findmnt /`'s `<N>`.
+  Before the reboot this is the whole way back, with the steps above in reverse order: the
+  running system has every change to `/etc`, and its root has `/media/mirror` and no
+  `/media/backup`.
+- After rename 12, the old names would need all of that again, another snapshot and another
+  reboot. Nothing calls for it: the data is where it was, under new names.
+
+### The pull's setup, once the rename is done
+
+A rebuilt `three` does steps 1 and 2 at its first boot, and `make-backup` makes the layout on
+a new drive; step 1's key is then made again, and `zero`'s key line changes with it.
+
+1. **The pull key**, made here and never carried. **Made 2026-11-19**, fingerprint
+   `SHA256:9rZpPX2SVlOOQfM1T81VzH6sOdk+0AvyLIaXm8B5juM`, and committed into `zero`'s key line:
+
+   ```fish
+   # pull setup 1, on three: make the backup user's key to zero, then print its public half and fingerprint for zero's key line
    sudo ssh-keygen -t ed25519 -N '' -C 'three backup-pull' -f /home/backup/.ssh/zero-pull; and sudo chown backup:backup /home/backup/.ssh/zero-pull /home/backup/.ssh/zero-pull.pub
    cat /home/backup/.ssh/zero-pull.pub; ssh-keygen -lf /home/backup/.ssh/zero-pull.pub
    ```
@@ -222,32 +534,32 @@ the box every time.
    Send the infra agent the public key and its fingerprint: it commits the key into
    `hosts/zero/system/backup-authorized-keys`, which `zero` then installs
    (`hosts/zero/system/README.md` § The backup).
-5. **The files**, each with a dry run first, once the infra agent has committed zero's two
-   values (§ Before the stick):
+2. **The files**, each with a dry run first, once the infra agent has committed zero's two
+   values (§ Before the stick). After rename 13 there is no snapshot waiting for a reboot,
+   so these changes to `/etc` stay:
 
    ```fish
-   # on three: install the pull, its units, snapper's config, the restore module and both users' ssh files; then label them and reload systemd
+   # pull setup 2, on three: install the pull, its units, snapper's config, the restore module and both users' ssh files; then label them and reload systemd
    cd ~/infra; and git pull --ff-only
-   for f in backup-pull backup-pull.service backup-pull.timer backup-snapshot.service mirror-mount.conf snapper-config-received-immich backup-ssh-config zero-known-hosts sudoers-restore rsyncd-restore.conf restore-authorized-keys
+   for f in backup-pull backup-pull.service backup-pull.timer backup-snapshot.service snapper-config-received-immich backup-ssh-config zero-known-hosts sudoers-restore rsyncd-restore.conf restore-authorized-keys
        bin/install-system-file $f --new; and sudo bin/install-system-file $f --new --commit --allow-content-change; or break
    end
    sudo restorecon -Rv /home/backup /home/restore /usr/local/bin/backup-pull; and sudo systemctl daemon-reload; and sudo systemctl start backup-pull.timer
    ```
 
-   `mirror-mount.conf` exists already, so its dry run shows a content change; the rest are
-   new. From the phone,
-   `server-install-system-files.yml -l three -K` does the same installs.
-6. **The first pull**, once `zero` has its first snapshot (`hosts/zero/system/README.md`
+   Each is a new file. From the phone, `server-install-system-files.yml -l three -K` does the
+   same installs.
+3. **The first pull**, once `zero` has its first snapshot (`hosts/zero/system/README.md`
    § The backup). In the UK, over the LAN, with no rate limit, by a runtime drop-in that
    the next boot forgets:
 
    ```fish
-   # on three: lift the rate limit until the next boot, and start the first pull without waiting for it
+   # pull setup 3, on three: lift the rate limit until the next boot, and start the first pull without waiting for it
    sudo mkdir -p /run/systemd/system/backup-pull.service.d; and printf '[Service]\nEnvironment=BACKUP_PULL_BWLIMIT=0\n' | sudo tee /run/systemd/system/backup-pull.service.d/lan.conf; and sudo systemctl daemon-reload; and sudo systemctl start --no-block backup-pull.service
    ```
 
    ```fish
-   # on three: follow the pull and its snapshot, then list three's snapshots
+   # pull setup 3, on three: follow the pull and its snapshot, then list three's snapshots
    journalctl -fu backup-pull -u backup-snapshot
    sudo snapper --no-dbus -c received-immich list
    ```
@@ -268,13 +580,14 @@ man's switch (`docs/management-plane.md`, phase table).
 ### Restore
 
 A restore onto `zero` runs from `zero`, with its restore key
-(`hosts/zero/system/README.md` § A restore). On `three` itself, into a directory off
-`received-backups`, with the owners and modes `zero` had, the pull's xattr read back:
+(`hosts/zero/system/README.md` § A restore), through the module `immich`. On `three` itself,
+into a directory outside `immich`, with the owners and modes `zero` had, the pull's xattr
+read back:
 
 ```fish
-# on three: list three's snapshots, then restore Immich's library from snapshot N into /media/mirror/restore; --fake-super reads the kept owners, -M--super writes them
+# on three: list three's snapshots, then restore Immich's library from snapshot N into /media/backup/restore; --fake-super reads the kept owners, -M--super writes them
 sudo snapper --no-dbus -c received-immich list
-sudo rsync -aHA --numeric-ids --fake-super -M--super --mkpath /media/mirror/received-backups/immich/current/.snapshots/N/snapshot/data/library/ /media/mirror/restore/library/
+sudo rsync -aHA --numeric-ids --fake-super -M--super --mkpath /media/backup/immich/current/.snapshots/N/snapshot/data/library/ /media/backup/restore/library/
 ```
 
 Put a number from the list in place of `N`; its description, `pulled <M>`, names zero's
@@ -309,7 +622,7 @@ three files work together:
   reading. A SMART read on an idle drive that still spins would reset its standby timer,
   should one ever be set; a WD Red ships with none, so it does not spin down today.
   `smartctl` never wakes a drive that has spun down. An idle drive keeps its last reading
-  for as long as it stays idle. It finds the drive by the array's label, `mirror-luks`;
+  for as long as it stays idle. It finds the drive by the array's label, `backup-luks`;
   with the drive unplugged, it follows the CPU alone.
 - A temperature it cannot read sets the fan to 100: the CPU's, a failed drive read, or a
   drive working for 6 minutes with no good read. So does a stop. Without the bus, it logs

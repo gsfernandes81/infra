@@ -145,16 +145,39 @@ The run then checks, each as PASS or FAIL, and any FAIL fails the job:
   drive by its LUKS label; then the visit's next
   steps, as `host/three.sh` gives them. A stand-in tunnel goes in as
   `server-create-host-tunnel.yml` and `install-system-file` would leave it, and
-  `cloudflared` starts. `make-mirror`, the copy under test, formats the blank drive and
+  `cloudflared` starts. `make-backup`, the copy under test, formats the blank drive and
   refuses it a second time. The README's unlock command runs over `ssh -tt`, and
   `host/unlock.py` answers sudo's prompt and systemd's passphrase prompt as the owner
   would. `host/three-unlocked.sh` then checks the array is LUKS2 with Adiantum, mounted
-  with the container context, `nosuid` and `nodev`, holding `make-mirror`'s layout, that
+  with the container context, `nosuid` and `nodev`, labelled `backup`, holding
+  `make-backup`'s layout and nothing else at its top, that
   the mount started Docker and the pull and scrub timers, that a container reads and
   writes it, and a scrub. After the reboot, the array is locked again, and the same
   command brings it back;
 - on `three`, zero's backup, pulled from the runner standing in for `zero`
   (`sim_backup` in `host/three.sh`, with `host/three-backup.sh` on the box), below.
+- on `three`, in the second job (`SIM_VARIANT=migrate`), in place of `make-backup` and the
+  pull: the rename of the array made on 2026-11-18 (`hosts/three/leap/README.md` § The
+  rename). The box is first set back to that day's: the files of the tree before the pull
+  (`old_commit` in `host/three.sh`, fetched by its sha) in place of the new ones, the old
+  fstab line, the old users, and a snapshot swapping `/media/backup` for `/media/mirror`,
+  then a reboot. The old `make-mirror` formats the drive, the old command unlocks it, the old
+  timer's service and a hand snapshot leave two read-only snapshots of the empty `incoming`,
+  and the old `syncthing-three` runs on it and is given data. Then each of the README's fish
+  blocks runs as written, through fish as gavin, with a sudoers drop-in standing in for his
+  password until the rename ends, and `host/three-migrate.sh` reads what each left: rename 3
+  refusing with a file in `incoming` and again once `immich` exists, deleting nothing either
+  time; the layout; both labels; the header backup at 600; the fstab line whole, its
+  SELinux label as the policy wants, and rename 7 refusing a second run; the units, the old
+  ones gone and their copies kept with their modes; the users; the fan finding the drive by
+  `backup-luks`; the new snapshot with `/media/backup`; the boot into it; the unlock under
+  the new names; Syncthing's subvolume with the same UUID and every path, size and content
+  it had; Syncthing recreated on `/media/backup/syncthing`, healthy; the clean-up; and the
+  pull's setup, step 2, with the run's stand-ins for `zero`'s values. Then the same checks a
+  new array gets. Not run: rename 14 and 16 are the phone's (the unlock is typed by
+  `host/unlock.py`, the command checked word for word against the README's; the deploy
+  play's `up` is stood in for by `docker compose up -d`, the play being checked in
+  `--check` by the deploy stage), and the pull itself, which the first job proves.
 - in rescue mode (`host/rescue.sh`), entered with `systemctl isolate`: gavin logs in, and
   sshd, the network, `cloudflared`, `tailscaled` and logins are up while Docker is down;
 - after a reboot, proved by a new boot id, the box checks again on its static address;
@@ -238,8 +261,10 @@ Each numbered point is the design's (`plans/three-backup-pull.md`), with how it 
    contents, owners, modes, times and the symlink's real target. A real restore must write
    1000:1000 640 and Postgres's 70:70 700, and the symlink pointing at `a.jpg`; during it,
    the restore daemon on `three` must hold only `0x4`. The key must run no command, an upload
-   be refused as read only, and nothing outside the module be read; `sudo -l -U restore`
-   must allow exactly its command.
+   be refused as read only, and nothing outside the module be read. The module, `immich`,
+   must list `current`, `state` and `last-pulled` alone, and a path through `..` must not
+   reach `three`'s Syncthing beside it on the array; `sudo -l -U restore` must allow exactly
+   its command.
 10. **A database restore.** A reflink copy of `db` from `three`'s newest snapshot, in a
     throwaway Postgres on `three`, must log an automatic recovery, accept connections, and
     return all 100 rows written before the snapshots began; the snapshot stays read-only.

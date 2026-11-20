@@ -2,7 +2,7 @@
 # Syncthing on three). Its data and its identity (config and keys, under
 # /var/syncthing/config) live on the encrypted array, so a thief with the box cannot clone
 # three's device ID, and Docker on three starts only once the array is unlocked
-# (hosts/three/leap/system/docker-mirror.conf).
+# (hosts/three/leap/system/docker-backup.conf).
 #
 # 2.0.14 AT THE DIGEST deployments/torrents/compose.yaml PINS, the owner's call of
 # 2026-11-03: it has run on this same 1 GB board as one, and 2.1.5 to 2.1.7 can run out of
@@ -25,7 +25,7 @@ services:
       # torrents' is; `ssh -L` cannot, since sshd's PermitOpen allows port 22 only.
       - STGUIADDRESS=127.0.0.1:8384
     volumes:
-      - /media/mirror/syncthing:/var/syncthing
+      - /media/backup/syncthing:/var/syncthing
     # The host's network, as zero's Syncthing runs, so local discovery finds devices on
     # three's own network; firewalld opens Syncthing's ports and not the GUI's.
     network_mode: host

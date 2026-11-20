@@ -353,12 +353,12 @@ if ntfy -e '{"ntfy_url": "not a url"}' -e ntfy_test=n; then fail "stored somethi
 	says 'is not a URL with a topic' && pass "refused a value that is not a URL" || fail "failed, but not by the URL check"
 fi
 if ntfy -e "ntfy_url=$url" -e ntfy_test=y --check; then pass "dry run exits 0"; else fail "dry run failed"; fi
-on 'test ! -e /var/lib/mirror-backup/ntfy-url' && [ "$(posts 'len(s["posts"])')" = 0 ] && pass "dry run wrote and sent nothing" || fail "dry run wrote or sent"
+on 'test ! -e /var/lib/backup-alert/ntfy-url' && [ "$(posts 'len(s["posts"])')" = 0 ] && pass "dry run wrote and sent nothing" || fail "dry run wrote or sent"
 
 echo "== the ntfy URL: stored and tested (a -vv transcript, searched for the URL)"
 if play_verbose server-store-backup-ntfy-url.yml -e target=zero -e "ntfy_url=$url" -e ntfy_test=y; then pass "exits 0"; else fail "failed"; fi
-[ "$(on 'cat /var/lib/mirror-backup/ntfy-url')" = "$url" ] && pass "the file holds the URL" || fail "the file does not hold the URL"
-[ "$(on 'stat -c "%U %a" /var/lib/mirror-backup /var/lib/mirror-backup/ntfy-url' | tr '\n' ' ')" = "root 700 root 600 " ] && pass "directory 0700, file 0600, root's" || fail "modes wrong"
+[ "$(on 'cat /var/lib/backup-alert/ntfy-url')" = "$url" ] && pass "the file holds the URL" || fail "the file does not hold the URL"
+[ "$(on 'stat -c "%U %a" /var/lib/backup-alert /var/lib/backup-alert/ntfy-url' | tr '\n' ' ')" = "root 700 root 600 " ] && pass "directory 0700, file 0600, root's" || fail "modes wrong"
 [ "$(posts 'len(s["posts"])')" = 1 ] && [ "$(posts 's["posts"][0]["path"]')" = "/$ntfy_secret" ] && pass "one test message reached the topic" || fail "posts: $(posts 'len(s["posts"])')"
 grep -q 'HTTP 200' play.log && pass "printed the status" || fail "did not print the status"
 if ntfy -e "ntfy_url=$url" -e ntfy_test=n; then pass "re-run exits 0"; else fail "re-run failed"; fi
@@ -369,7 +369,7 @@ curl -fsS -X POST -d '{"ntfy_status": 403}' "http://127.0.0.1:$port/__control" >
 if ntfy -e "ntfy_url=$url-2" -e ntfy_test=yes; then fail "passed a refused test message"; else
 	says 'HTTP 403' && pass "stopped on the refusal and printed its status" || fail "failed, but not on the status"
 fi
-[ "$(on 'cat /var/lib/mirror-backup/ntfy-url')" = "$url-2" ] && pass "the new URL is stored anyway" || fail "the new URL was not stored"
+[ "$(on 'cat /var/lib/backup-alert/ntfy-url')" = "$url-2" ] && pass "the new URL is stored anyway" || fail "the new URL was not stored"
 
 # ════ server-install-system-files.yml ════════════════════════════════════════
 # Which files the play reads for each host, and that it reads them from the tool on the box.

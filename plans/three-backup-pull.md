@@ -9,7 +9,7 @@ stays until they are done:
 |---|---|---|
 | 1. The files on both boxes, the play for zero's restore key, the simulation | repo | **built**, proved by `microos-sim.yml` (`host`, `three`) and `alpine-sim.yml` |
 | 2. zero's restore key and host key, committed into three's files | `zero`, then the infra agent | not done |
-| 3. three's layout, users, pull key and files | `three` | the pull key made 2026-11-19 and committed into zero's key line; the rest not done: `hosts/three/leap/README.md` § The backup |
+| 3. three's rename and layout, users, pull key and files | `three` | the pull key made 2026-11-19 and committed into zero's key line; the rest not done: `hosts/three/leap/README.md` § The rename, then § The pull's setup |
 | 4. The move on `zero`: one `immich` subvolume, its `.snapshots`, the fstab line, Immich's `.env` | `zero` | not done: `plans/visit-runbook.md` § The move on `zero` |
 | 5. zero's packages, backup user and files; the first snapshot | `zero` | the packages (snapper pinned, setpriv, rsync, sudo) and the `backup` user done 2026-11-19; the files and the first snapshot not done: `hosts/zero/system/README.md` § The backup |
 | 6. The first pull, then slice 4's checks on the real data | `three`, `zero` | not done: `plans/visit-runbook.md` § Slice 3, step 6, and § Slice 4 |
@@ -34,7 +34,7 @@ the far side of a connection.
 
 ```
  zero (Alpine, snapper 0.13.1, --no-dbus)          three (Leap, snapper, --no-dbus)
- /media/immich: subvolume immich                   /media/mirror/received-backups/immich/
+ /media/immich: subvolume immich                   /media/backup/immich/
    data/   library upload backups profile            current/  ◄──────────┐ backup-pull, as `backup`,
    data/thumbs, data/encoded-video                     (writable copy)     │ daily 01:00 UTC, 32 Mbit/s,
            (nested subvolumes: left out)               .snapshots/<n>/     │ --fake-super --munge-links
@@ -81,7 +81,7 @@ the far side of a connection.
  zero ──ssh as restore, key /root/.ssh/restore─────────────► three
           restrict, from="100.121.158.58" (zero's tailnet address)
           forced: sudo -n /usr/bin/setpriv --reuid=restore ... rsync --server --daemon
-                  --config=/etc/rsyncd-restore.conf .  (module `backups`, read only, fake super)
+                  --config=/etc/rsyncd-restore.conf .  (module `immich`, read only, fake super)
 ```
 
 - **Each daemon runs as its own unprivileged user with one capability**,
@@ -123,18 +123,18 @@ This turns the one key the fleet allowed between boxes into two read-only ones (
 | `three` | `backup-snapshot.service` | as root: snapper create, cleanup timeline, write `last-pulled` |
 | `three` | `snapper-config-received-immich` | `TIMELINE_CREATE="no"`, daily 14, weekly 8, monthly 12, no quarterly or yearly |
 | `three` | `backup-ssh-config`, `zero-known-hosts` | zero by address, its one pinned host key; both root's |
-| `three` | `sudoers-restore`, `rsyncd-restore.conf`, `restore-authorized-keys` | the `restore` user's one command, its read-only module over `received-backups`, zero's key line |
+| `three` | `sudoers-restore`, `rsyncd-restore.conf`, `restore-authorized-keys` | the `restore` user's one command, its read-only module `immich` over `/media/backup/immich` alone, zero's key line |
 | control node | `server-create-restore-key.yml` | makes zero's restore key, prints it, zero's address and zero's host key |
 
 Removed: `zero`'s `mirror-backup`; `three`'s `rsync-backup.conf`, `backup-authorized-keys`,
 `mirror-snapshot` and `mirror-snapshot.timer`, and `mirror-snapshot.service`, whose job
 `backup-snapshot.service` does. Kept and marked not used:
-`mirror-backup-age-check` and `server-store-backup-ntfy-url.yml`, until the fleet-wide dead
+`backup-age-check` and `server-store-backup-ntfy-url.yml`, until the fleet-wide dead
 man's switch is designed.
 
 ## How the simulation proves it
 
-`microos-sim.yml`'s `host` job, `three`: the real first boot, `make-mirror`, the README's
+`microos-sim.yml`'s `host` job, `three`: the real first boot, `make-backup`, the README's
 unlock, then the runner stands in for `zero`: an Alpine container of zero's release with
 snapper from edge/testing, util-linux's `setpriv`, Alpine's sudo and rsync, zero's tracked
 files at their paths, and its own sshd; a loop btrfs laid out as after the move; a Postgres
@@ -182,41 +182,22 @@ unchanged when `zero` moves.
   suits databases badly. A timed manual defrag is to be looked at later, issue #23, which
   notes that a defrag unshares snapshot extents too.
 
-## Work in progress, 2026-11-20: the rename of three's array, notes for the next stage
+## Work in progress, 2026-11-20: the rename of three's array
 
 The owner asked on 2026-11-19 for "mirror" to go wherever it means the backup, three's live
-array included, done tonight while three is not critical and the owner is beside it; and
-for the immich backup to sit at `/media/backup/immich/` (holding `current/` and its
-`.snapshots`), with no `received-backups` level. Not built yet. What was established
-before the work stopped for zero's reboot:
+array included, and for the immich backup to sit at `/media/backup/immich/` with no
+`received-backups` level. Built on the branch `backup-rename`, from `backup-pull`:
 
-- **The array's top level today** holds `incoming` (a subvolume, backup's, 700),
-  `snapshots` (a directory, root's, 700) and `syncthing` (a subvolume, gavin's). The old
-  `mirror-snapshot.timer` (06:00 and 18:00 UTC, started by the mount) snapshots `incoming`
-  read-only into `snapshots/<date>` daily, so `snapshots/` likely holds empty read-only
-  snapshots: the reshape deletes them after checking `incoming` itself is empty.
-- **fstab:** the live line lacks `nosuid,nodev`; replace the whole line from
-  `fstab.append`, never sed one option.
-- **syncthing-three:** its data stays in the `syncthing` subvolume, so only the mount path
-  changes; the container is recreated by a redeploy after the reboot. `docker compose stop`
-  before the reboot keeps `start` as the way back.
-- **The restore module's path is `/media/backup/immich`**, not `/media/backup`, or zero's
-  restore key could read three's Syncthing identity; the module is named `immich`, so
-  restores read `restore@three::immich/...`.
-- **`/media/backup` on three's read-only root** is made with
-  `transactional-update --non-interactive run`, as the update play and the simulation
-  already do, last after every /etc install, then the reboot;
-  `sudo transactional-update rollback` is the way back before it.
-- **Old files removed on three:** `/etc/systemd/system/docker.service.d/infra-mirror.conf`,
-  `/etc/systemd/system/media-mirror.mount.d/infra-wants.conf`,
-  `/etc/systemd/system/mirror-scrub.service` and `.timer`, and the push's leftovers that
-  `hosts/three/leap/README.md` step 3 lists.
-- **The fan:** `argon-fan`'s `DRIVE_LABEL` becomes `backup-luks`; install it and restart the
-  fan service after the LUKS relabel.
-- **PR #22:** `lb_layout` accepts only top-level names (`^[A-Za-z0-9._-]+$`); the new
-  layout needs nested entries (`immich`, `immich/current`, `immich/current/.snapshots`,
-  `immich/state`), so the change list must add parent-first ordering and refuse `..`; its
-  labels become `backup-luks` and `backup`.
-- **make-mirror** is renamed `make-backup` now and deleted when PR #22 merges.
-- The last microos-sim run on 376d65b (44638569513) was pending; its host (three) job had
-  passed on 6ddffca.
+- **Done, in the repo:** every name (`docs/decisions.md` § *The backup's names and layout on
+  `three`*); the layout in `make-backup` and every unit; the restore module `immich` over
+  `/media/backup/immich` alone; `zero`'s `backup-age-check` and `/var/lib/backup-alert`, with
+  the move of the stored URL in `hosts/zero/system/README.md` § The backup; the rename's
+  procedure, `hosts/three/leap/README.md` § The rename, eighteen owner-run fish blocks with a
+  way back at each; and its simulation, `microos-sim.yml`'s second `three` job
+  (`SIM_VARIANT=migrate`).
+- **Not done:** the CI runs on the branch's head; the Fable review; on the boxes, all of it.
+- **PR #22** (the array as a play), for its change list: `lb_layout` accepts only top-level
+  names (`^[A-Za-z0-9._-]+$`); the new layout needs nested entries (`immich`,
+  `immich/current`, `immich/current/.snapshots`, `immich/state`), so the play must make
+  parents first and refuse `..`; its labels become `backup-luks` and `backup`.
+  `make-backup` is deleted when PR #22 merges.

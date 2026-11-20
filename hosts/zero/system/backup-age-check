@@ -2,7 +2,7 @@
 # infra-os:   alpine
 # infra-init: openrc
 # infra-path: /etc/periodic/daily
-# infra-name: mirror-backup-age-check
+# infra-name: backup-age-check
 # infra-mode: 0755
 #
 # NOT USED, AND NOT TO BE INSTALLED (2026-11-19). It reads last-success, which only the
@@ -17,11 +17,11 @@
 # hours before the night's push; three days is long enough that the order does not matter.
 #
 # The ntfy topic's URL is a secret, since anyone who knows it can read and post to it, so
-# it is in root's /var/lib/mirror-backup/ntfy-url, mode 600, never in git. Without it the
+# it is in root's /var/lib/backup-alert/ntfy-url, mode 600, never in git. Without it the
 # check still runs and says so on its own output.
 set -eu
 
-state=/var/lib/mirror-backup
+state=/var/lib/backup-alert
 max_age=$((3 * 24 * 3600))
 
 last=$(cat "$state/last-success" 2>/dev/null || echo 0)
@@ -31,11 +31,11 @@ age=$(( $(date +%s) - last ))
 if [ "$last" = 0 ]; then
 	msg="zero's backup to three has never succeeded"
 else
-	msg="zero's backup to three last succeeded $(date -d "@$last" '+%Y-%m-%d %H:%M'), $((age / 86400)) days ago; /var/lib/mirror-backup/last.log on zero says why"
+	msg="zero's backup to three last succeeded $(date -d "@$last" '+%Y-%m-%d %H:%M'), $((age / 86400)) days ago; /var/lib/backup-alert/last.log on zero says why"
 fi
 if [ -r "$state/ntfy-url" ]; then
 	curl -fsS -m 30 -H 'Title: zero backup' -d "$msg" "$(cat "$state/ntfy-url")" >/dev/null
 else
-	echo "mirror-backup-age-check: $msg; no $state/ntfy-url to tell the owner" >&2
+	echo "backup-age-check: $msg; no $state/ntfy-url to tell the owner" >&2
 	exit 1
 fi

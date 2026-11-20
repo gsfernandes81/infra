@@ -1,4 +1,4 @@
-# `three` joins the fleet as the off-site mirror
+# `three` joins the fleet as the off-site backup
 
 A proposal from the owner's discussions of 2026-11-02 and 2026-11-03, to be carried out at
 the November 2026 visit. [`microos-cutover.md`](microos-cutover.md) is how the visit does
@@ -44,8 +44,8 @@ bought in the UK, as a single-disk btrfs. A second, bought in Singapore, joins i
 and the owner converts the array to RAID1 in place, with the box serving throughout:
 
 ```
-btrfs device add /dev/sdX /media/mirror
-btrfs balance start -dconvert=raid1 -mconvert=raid1 /media/mirror
+btrfs device add /dev/sdX /media/backup
+btrfs balance start -dconvert=raid1 -mconvert=raid1 /media/backup
 ```
 
 Until then the data has one copy on `three`, which is acceptable because `three` holds the

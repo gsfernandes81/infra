@@ -7,15 +7,15 @@
 
 echo "-- the array, locked as every boot leaves it"
 check "crypttab names the array by its label, noauto" \
-	grep -qE '^mirror[[:space:]]+LABEL=mirror-luks[[:space:]]+none[[:space:]]+luks,noauto,password-cache=no$' /etc/crypttab
+	grep -qE '^backup[[:space:]]+LABEL=backup-luks[[:space:]]+none[[:space:]]+luks,noauto,password-cache=no$' /etc/crypttab
 check "fstab mounts it noauto, with the container context" sh -c '
-	awk "\$2 == \"/media/mirror\"" /etc/fstab | tee /dev/stderr | grep -E "(^|[[:space:],])noauto," | grep -q context='
+	awk "\$2 == \"/media/backup\"" /etc/fstab | tee /dev/stderr | grep -E "(^|[[:space:],])noauto," | grep -q context='
 # So one stop of both, or a shutdown, unmounts before it closes the LUKS volume.
 check "the mount is ordered after the LUKS unit" sh -c '
-	systemctl show -p After media-mirror.mount | tee /dev/stderr | grep -qw "systemd-cryptsetup@mirror.service"'
+	systemctl show -p After media-backup.mount | tee /dev/stderr | grep -qw "systemd-cryptsetup@backup.service"'
 check "the boot left it locked and unmounted" sh -c '
-	systemctl show -p ActiveState systemd-cryptsetup@mirror.service media-mirror.mount
-	! systemctl is-active --quiet systemd-cryptsetup@mirror.service && ! findmnt /media/mirror && ! test -e /dev/mapper/mirror'
+	systemctl show -p ActiveState systemd-cryptsetup@backup.service media-backup.mount
+	! systemctl is-active --quiet systemd-cryptsetup@backup.service && ! findmnt /media/backup && ! test -e /dev/mapper/backup'
 check "nothing waits at a passphrase prompt" sh -c '! ls /run/systemd/ask-password/ask.* 2>/dev/null'
 # Tried at boot, as multi-user wants it, and skipped: a condition timestamp proves it was
 # tried, not merely never started.
@@ -25,10 +25,10 @@ check "Docker was skipped at boot by its condition, not failed" sh -c '
 	[ "$(systemctl show -p ConditionResult --value docker)" = no ] &&
 	[ -n "$(systemctl show -p ConditionTimestamp --value docker)" ]'
 check "the mount starts Docker and both timers" sh -c '
-	w=$(systemctl show -p Wants --value media-mirror.mount); echo "$w"
-	for u in docker.service backup-pull.timer mirror-scrub.timer; do echo "$w" | grep -qw "$u" || exit 1; done'
+	w=$(systemctl show -p Wants --value media-backup.mount); echo "$w"
+	for u in docker.service backup-pull.timer backup-scrub.timer; do echo "$w" | grep -qw "$u" || exit 1; done'
 check "the timers wait for the mount, not started at boot" sh -c '
-	! systemctl is-active --quiet backup-pull.timer && ! systemctl is-active --quiet mirror-scrub.timer'
+	! systemctl is-active --quiet backup-pull.timer && ! systemctl is-active --quiet backup-scrub.timer'
 # Leap's docker.socket is BindsTo=docker.service; enabled, a client's connection would start
 # Docker by another road, so a preset that enables it should show here.
 check "docker.socket is disabled and idle" sh -c '
