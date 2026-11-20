@@ -132,6 +132,10 @@ block 4.
 1. **Prepare `one`, no downtime on `zero`.**
    - Check that gid 1001 is unused on `one` and that `/home/gavin` is mode 0700. If either
      fails, stop: the group read is only safe behind both.
+   - Create the group `devstack`, gid 1001, with `gavin` as its only member. The plays run
+     as `gavin` without `become`, and a user can set a file's group only to one they belong
+     to. `gavin` owns the files anyway, so the membership grants nothing new.
+     `hosts/one/leap/combustion/script` makes the same group, so a rebuilt `one` matches.
    - Install `make` with `transactional-update pkg install make` and reboot `one`, at the
      owner's say, since `one`'s own apps go down for a few minutes.
    - Pull the branch's first step into `~/infra` on `one`.
