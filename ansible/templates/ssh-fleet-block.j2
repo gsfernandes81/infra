@@ -15,7 +15,8 @@
 #
 # Every box is reachable through each of the others. That mesh exists because on
 # 2026-08-23 `two`'s tunnel was stopped while it was the only configured route to it.
-# `three`'s LAN paths work only while it is on this LAN; off-site, its tunnel is the way.
+# `three`'s LAN paths work only while it is on this LAN; off-site, its tunnel is the way,
+# and `three-ts` the other, while the client is on the tailnet.
 #
 # ORDERING: ssh takes the FIRST value it obtains for each keyword, so this block sits
 # ABOVE `Host *`. The playbook inserts it there rather than appending.
@@ -95,6 +96,7 @@ Host {{ h }} {{ h }}-cf
 
 Host {{ h }}-ts
   HostName {{ tailnet_addresses[h] }}
+  ConnectTimeout 10
 {% endif %}
 
 {% endfor %}

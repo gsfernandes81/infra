@@ -173,7 +173,7 @@ block writes `Host zero zero-cf` with the tunnel's `HostName` and `ProxyCommand`
 **`-ts` is the way in that does not go through Cloudflare.** It works only while this
 client is on the tailnet. On the phone that means giving Tailscale Android's one VPN slot,
 which is the emergency way in (`decisions.md` § *Every box has two ways in*); off the
-tailnet, `ssh zero-ts` waits and times out. The addresses are `tailnet_addresses` in
+tailnet, `ssh zero-ts` gives up after 10 seconds (`ConnectTimeout`). The addresses are `tailnet_addresses` in
 `ansible/group_vars/all.yml`, the one record of them. A box with no line there gets no
 `-ts` entry, and the play's last message names it. A box that joins gets its line from
 `tailscale ip -4`, then a re-run of the play.

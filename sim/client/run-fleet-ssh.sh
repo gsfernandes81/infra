@@ -91,7 +91,8 @@ check_render() {
 			&& [ -z "$(resolved "$cfg" "$box-ts" proxycommand)" ] \
 			&& [ "$(resolved "$cfg" "$box-ts" hostkeyalias)" = "$box" ] \
 			&& [ "$(resolved "$cfg" "$box-ts" user)" = gavin ] \
-			&& pass "$label: $box-ts resolves to $addr, no ProxyCommand, HostKeyAlias $box, User gavin" \
+			&& [ "$(resolved "$cfg" "$box-ts" connecttimeout)" = 10 ] \
+			&& pass "$label: $box-ts resolves to $addr, no ProxyCommand, HostKeyAlias $box, User gavin, ConnectTimeout 10" \
 			|| fail "$label: $box-ts resolves to hostname '$(resolved "$cfg" "$box-ts" hostname)', proxycommand '$(resolved "$cfg" "$box-ts" proxycommand)', hostkeyalias '$(resolved "$cfg" "$box-ts" hostkeyalias)'"
 		grep -qx "  HostName $addr" "$cfg" && pass "$label: $box-ts names the literal address" || fail "$label: no literal 'HostName $addr'"
 	done
@@ -123,7 +124,7 @@ wcfg="$win/.ssh/config"
 check_render "$posix" "$HOME/.config/fleet/access-ssh %h" posix
 check_render "$wcfg" 'C:\Users\gavin\.ssh\cf-access-fleet.cmd %h' windows
 [ "$(markers "$posix")" = 1 ] && [ "$(markers "$wcfg")" = 1 ] && pass "one fleet block in each file" || fail "fleet blocks: posix $(markers "$posix"), windows $(markers "$wcfg")"
-awk '/^# END infra-fleet /{e=NR} /^Host \*/{h=NR} END{exit !(e && h && e < h)}' "$posix" && pass "the block sits above Host *" || fail "the block is not above Host *"
+awk '/^# END infra-fleet /{e=NR} /^Host \*[[:space:]]*$/{h=NR} END{exit !(e && h && e < h)}' "$posix" && pass "the block sits above Host *" || fail "the block is not above Host *"
 says 'without, having no address in tailnet_addresses' && pass "the play names the boxes with no -ts" || fail "the play's output does not name the boxes with no -ts"
 for entry in "${ts_boxes[@]}"; do
 	read -r box _ <<< "$entry"
