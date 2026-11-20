@@ -385,7 +385,9 @@ listed=$(on 'su gavin -c "cd /home/gavin/infra && bin/install-system-file --list
 if sf -l zero; then pass "dry run exits 0"; else fail "dry run failed"; fi
 says "$zero_n of $zero_n under hosts/zero/system: ${zero_files% }" && pass "the play read the same $zero_n files" || fail "the play read another list for zero"
 # backup-age-check is tracked but not to be installed, so its header says init none.
-says 'backup-age-check declares init=none' && pass "the dry run refused backup-age-check, by its init none" || fail "the dry run did not refuse backup-age-check"
+# The callback prints each refused file's name under the task, one `~ <name>` line each.
+awk '/Print each file the dry run refused to install/ { r = 1; next } r && !/~ / { r = 0 } r' play.log | grep -q '~ backup-age-check$' &&
+	pass "the dry run refused backup-age-check, by its init none" || fail "the dry run did not refuse backup-age-check"
 if sf -l zero -e only=sshd-infra.conf; then pass "-e only exits 0"; else fail "-e only failed"; fi
 says "1 of $zero_n under hosts/zero/system: sshd-infra.conf" && pass "-e only narrowed it to one file" || fail "-e only did not narrow the list"
 on 'test ! -e /etc/init.d/bcache-register && test ! -e /etc/cloudflared/config.yml' && pass "the dry runs installed nothing" || fail "a dry run installed something"
