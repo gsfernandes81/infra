@@ -573,7 +573,7 @@ through `ssh dev`.
    # power lost during steps 7 and 8, on zero: register the new disk with bcache, open data-4 with the key file, scan, mount, and cycle immich and syncthing
    set d (lsblk -dbno NAME,SIZE | awk '$1 ~ /^sd/ && $2 > 3500000000000 {print $1}'); test (count $d) -eq 1; and echo /dev/$d | sudo tee /sys/fs/bcache/register; sleep 3; ls /dev/bcache*
    set l (sudo findfs UUID=LUKS-UUID); test -n "$l"; and sudo cryptsetup open --key-file /etc/keys/data.key $l data-4; and ls -l /dev/mapper/data-4
-   sudo btrfs device scan; and sudo mount -a; and findmnt -t btrfs -o TARGET,SOURCE; and sudo btrfs replace status -1 /media/immich-data
+   sudo btrfs device scan; and sudo mount -a; and grep ' btrfs ' /proc/mounts | cut -d' ' -f1,2; and sudo btrfs replace status -1 /media/immich-data
    cd ~/infra/hosts/zero/immich; and sudo docker compose stop; and sudo docker compose start
    cd ~/infra/hosts/zero/syncthing; and sudo docker compose stop; and sudo docker compose start
    ```
@@ -654,7 +654,7 @@ through `ssh dev`.
     # step 10, on zero: after the boot: dmcrypt opened the member with nobody there, the array mounted with both devices, the guards hold, Immich answers
     rc-service dmcrypt status; ls -l /dev/mapper/data-4
     sudo btrfs filesystem show /media/immich-data
-    findmnt -t btrfs -o TARGET,SOURCE
+    grep ' btrfs ' /proc/mounts | cut -d' ' -f1,2
     sudo btrfs device stats /media/immich-data
     cd ~/infra; and sudo bin/check-mount-guards
     curl -fsS http://127.0.0.1:2283/api/server/ping

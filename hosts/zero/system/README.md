@@ -184,7 +184,7 @@ directories:
 
 ```fish
 # data-4 is open: scan, mount, and cycle immich and syncthing
-sudo btrfs device scan; and sudo mount -a; and findmnt -t btrfs -o TARGET,SOURCE
+sudo btrfs device scan; and sudo mount -a; and grep ' btrfs ' /proc/mounts | cut -d' ' -f1,2
 cd ~/infra/hosts/zero/immich; and sudo docker compose stop; and sudo docker compose start
 cd ~/infra/hosts/zero/syncthing; and sudo docker compose stop; and sudo docker compose start
 ```
