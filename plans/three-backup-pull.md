@@ -200,6 +200,12 @@ array included, and for the immich backup to sit at `/media/backup/immich/` with
   `--allow-content-change` refuses a content change, so the loop never wrote `crypttab`.
   The dry runs now pass it, and renames 9 and 11 refuse to run until what comes before them
   is in place.
+- **The second run** (44701472432) passed every rename step, from the box of 2026-11-18 to
+  Syncthing healthy on the new path, and found a fault in `install-system-file`: an
+  unprivileged dry run of a file in a root-only directory (`/etc/sudoers.d`, 0750) crashed
+  on `Path.exists()`'s `PermissionError`, ending the pull's setup loop at `sudoers-restore`.
+  `zero`'s loop for `sudoers-backup` has the same shape. The tool now asks `sudo test -e`
+  and `sudo stat` when it cannot look itself, and `microos-sim.yml` runs on a change to it.
 - **Not done:** a green run of the rename's simulation; the Fable review; on the boxes, all
   of it.
 - **PR #22** (the array as a play), for its change list: `lb_layout` accepts only top-level

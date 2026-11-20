@@ -75,6 +75,31 @@ def read_bytes(path):
         return out.stdout
 
 
+def live_exists(path):
+    """Whether `path` exists, falling back to sudo for a root-only directory.
+
+    Path.exists() raises PermissionError on EACCES rather than answering, so an
+    unprivileged dry run of a file in /etc/sudoers.d (0750 on Leap and Alpine) crashed
+    before it showed anything: microos-sim's rename of three found it, with the dry run of
+    sudoers-restore ending the install loop. `sudo test -e` answers as root would.
+    """
+    try:
+        return path.exists()
+    except PermissionError:
+        return run(["sudo", "test", "-e", str(path)]).returncode == 0
+
+
+def live_mode(path):
+    """The permission bits of `path`, falling back to sudo, for the same reason."""
+    try:
+        return stat.S_IMODE(path.stat().st_mode)
+    except PermissionError:
+        out = run(["sudo", "stat", "-c", "%a", str(path)])
+        if out.returncode != 0:
+            raise
+        return int(out.stdout.strip(), 8)
+
+
 def write_modeless(data, live):
     """Write `live` on a filesystem with no Unix modes (vfat): dd into a new file beside
     it, then rename over it. `install -o -g -m` and `cp -a` both chmod, which FAT refuses
@@ -433,7 +458,7 @@ def main():
         return 1
 
     repo_bytes = entry.read_bytes()
-    exists = live.exists()
+    exists = live_exists(live)
 
     if not exists and not args.new:
         print(
@@ -457,7 +482,7 @@ def main():
         # Show a mode CHANGE before it happens, not after. `install -m` applies the
         # header's mode unconditionally, so a header written for another host -- or
         # guessed -- silently re-permissions a live file, and a plain diff cannot see it.
-        current_mode = stat.S_IMODE(live.stat().st_mode)
+        current_mode = live_mode(live)
         if modeless:
             current_mode = want_mode  # the mount's fmask, not the file's: never a change
         if current_mode != want_mode:
@@ -546,9 +571,9 @@ def main():
     problems = []
     if read_bytes(live) != repo_bytes:
         problems.append(f"{live} does not match the repo copy after install")
-    live_mode = stat.S_IMODE(live.stat().st_mode)
-    if live_mode != want_mode and not modeless:
-        problems.append(f"{live} is mode {live_mode:04o}, header says {want_mode:04o}")
+    installed_mode = live_mode(live)
+    if installed_mode != want_mode and not modeless:
+        problems.append(f"{live} is mode {installed_mode:04o}, header says {want_mode:04o}")
     for check in validators_for(live):
         problems.extend(check(live))
 
