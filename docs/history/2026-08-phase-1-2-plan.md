@@ -615,3 +615,25 @@ before declaring it done.
 7. **After 2c only:** new forwarded port visible in gluetun's log, matching `Session\Port`
    in `qBittorrent.conf`; qBittorrent reachable on 8080; `com.docker.compose.project` is
    `torrents` for the three containers and `ionic` for the other four.
+
+## Afterwards: what Phases 1 and 2 bought
+
+Added 2026-11-20 from `docs/management-plane.md`, where it was the only record. Three
+things, and none was the plan's stated goal, which is the argument for running the
+read-only phase before the writing ones.
+
+- **The audit found live faults nobody had reported:** `one`'s Syncthing `exited`,
+  `mysql-ionic` crash-looping (both the failing SP900, it turned out), and two containers on
+  `zero` reporting uptimes in the 1970s because they started before NTP.
+- **A `--check` run stopped a change rather than confirming one.** `docs` was in
+  `base_packages` for a day; the dry run showed it expanding to the whole TeX Live
+  documentation set on a 1 GB Pi, and it was removed before anything was applied.
+- **Standardising packages deleted two divergences that had been read as facts:** the
+  netstat branch in the inventory play (`ss` was on one host of three) and `one`'s
+  `hardware.md` looking hand-edited (`usbutils` was on two of three). The fallbacks stay,
+  since a host built tomorrow has not run the packages play yet.
+
+Phase 2's own corrections were the same shape: docs asserting ports that were not
+listening, and a dev container count of two when it was three. The fix was that
+`README.md` and `recovery.md` say what the compose files ask for and point at the
+generated inventory for what the boxes do.

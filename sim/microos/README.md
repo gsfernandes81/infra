@@ -326,6 +326,11 @@ hub's token cannot cancel one, so iterate on a branch and merge when green. When
 cannot be reached, the harness logs in as root on the serial console and prints why. Use
 `claude-sessions keepalive` while waiting. A Fable review comes before every merge.
 
+Two failures come from the runners, not the branch, and land on whatever branch runs
+then: a guest that gives no ssh within 10 minutes, and Docker Hub's `toomanyrequests` rate
+limit on an image pull. Both hit several branches on 2026-11-20. Rerun the failed jobs
+before reading either as a fault.
+
 ## What a green run does not show
 
 The simulations run on x86_64 under KVM, not on a Pi; the USB disks are qemu's. It does

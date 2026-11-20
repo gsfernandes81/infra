@@ -120,7 +120,7 @@ exists, and the first run of it found exactly that on `one`.
 
 | Host | |
 |---|---|
-| `one` | **8080** qBittorrent (via gluetun) · ~~**7777** ionic-traces~~ — **stopped**, see [2c](docs/management-plane.md#sequencing-and-where-podman-fits) · **8384/22000** syncthing · *the dev containers publish nothing — `ssh dev`, or `make shell` on one* · *send2ereader, calibre-web and garmin-mcp publish nothing — each is reached only through its own tunnel's sidecar* |
+| `one` | **8080** qBittorrent (via gluetun) · ~~**7777** ionic-traces~~ — **stopped**, see [`decisions.md`](docs/decisions.md) § *From the management plane* · **8384/22000** syncthing · *the dev containers publish nothing — `ssh dev`, or `make shell` on one* · *send2ereader, calibre-web and garmin-mcp publish nothing — each is reached only through its own tunnel's sidecar* |
 | `zero` | **2283** Immich · **8384/22000** syncthing · *pearl-wallet publishes nothing; its RPC is on the container's own loopback* |
 | `two` | **none published** — the bot's web UI (8080) and break-glass sshd (2222) exist inside the container and are deliberately not mapped. See the commented `ports:` block in `deployments/destiny-director/compose.yaml` |
 
