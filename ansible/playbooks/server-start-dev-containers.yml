@@ -39,7 +39,7 @@
   tasks:
     - name: Check -e target, if given, names a fleet host
       ansible.builtin.assert:
-        that: target | default('zero') in groups['fleet']
+        that: (target | default('zero')) in groups['fleet']
         fail_msg: "-e target={{ target | default('zero') }} is not in the inventory's fleet group."
         success_msg: "target: {{ target | default('zero') }}"
 

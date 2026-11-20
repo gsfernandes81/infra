@@ -466,15 +466,15 @@ on 'su gavin -c "cd /home/gavin/infra && git checkout -q hosts/zero/system/sudoe
 # ════ server-start-dev-containers.yml ════════════════════════════════════════
 # The box has no Docker, so the real dev/Makefile is run only to its first guard, which
 # must refuse for want of dev/.env; a stand-in checkout's Makefile, whose `up` prints who ran
-# it and where, shows make runs as root in dev/ and its output prints. `two` is pointed at a
-# checkout with no dev/, which must be refused.
+# it and where, shows make runs as root in dev/ and its output prints. `three`, the box's
+# second name by now, is pointed at a checkout with no dev/, which must be refused.
 echo "== the dev containers play: refusals, --check, the real Makefile's guard, a stand-in's up"
 on 'apk add --quiet make' || fail "could not install make in the box"
 if play server-start-dev-containers.yml -e target=nowhere; then fail "ran against a host not in the fleet"; else
 	says 'is not in the inventory' && pass "refused a target outside the fleet" || fail "a stray target failed, but not by its check"
 fi
-if play server-start-dev-containers.yml -e target=two -e infra_checkout=/nonexistent; then fail "ran on a host with no dev/"; else
-	says '/nonexistent/dev/Makefile is not on two' && pass "refused a host with no dev/Makefile" || fail "two failed, but not by its check"
+if play server-start-dev-containers.yml -e target=three -e infra_checkout=/nonexistent; then fail "ran on a host with no dev/"; else
+	says '/nonexistent/dev/Makefile is not on three' && pass "refused a host with no dev/Makefile" || fail "three failed, but not by its check"
 fi
 if play server-start-dev-containers.yml --check; then pass "--check exits 0, target zero by default"; else fail "--check failed"; fi
 says 'DRY RUN: would run make up in /home/gavin/infra/dev as root' && pass "--check says what it would run" || fail "--check did not say what it would run"
@@ -537,7 +537,8 @@ else
 	if ANSIBLE_STDOUT_CALLBACK=default unlock "{\"simrun on one\": \"$run_pw\"}" -l one -e "$vols" -vv; then
 		pass "the right passphrase unlocks, at -vv, with no secret in the transcript"
 	else
-		fail "the right passphrase did not unlock"
+		fail "the right passphrase did not unlock; the runner's journal:"
+		sudo journalctl -b --no-pager --since -2min | grep -iE 'simrun|crypt|mnt' | tail -n 40 | sed 's/^/    ! /'
 	fi
 	systemctl is-active --quiet systemd-cryptsetup@simrun.service && findmnt -no OPTIONS /mnt/simrun | grep -qw nosuid &&
 		pass "systemd-cryptsetup@simrun.service is active and the volume mounted nosuid" || fail "not unlocked as after a manual unlock"

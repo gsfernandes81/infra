@@ -52,6 +52,13 @@ mounted_from() {
 crypt_unit() { systemd-escape --template=systemd-cryptsetup@.service "$1"; }
 mount_unit() { systemd-escape -p --suffix=mount "$1"; }
 state_of() { systemctl show -p ActiveState --value "$1"; }
+# Each unit $1 requires, with its state, on one line: which one failed, when a start fails
+# for a dependency.
+deps() {
+	for d in $(systemctl show -p Requires -p BindsTo -p Requisite --value "$1"); do
+		printf '%s=%s ' "$d" "$(state_of "$d")"
+	done
+}
 # What the unit said since $2 (seconds since the epoch), on one line.
 said() { journalctl -u "$1" --since "@$2" -o cat --no-pager 2> /dev/null | tail -n 3 | tr '\n' ' '; }
 
@@ -111,7 +118,7 @@ mount_systemd() {
 		fi
 		sleep 1
 	done
-	systemctl start "$munit" || result failed "$munit did not start: $(said "$munit" "$since")"
+	systemctl start "$munit" || result failed "$munit did not start: $(said "$munit" "$since") Its dependencies: $(deps "$munit")"
 	at=$(mounted_from "$mount")
 	if [ -z "$at" ] || [ "$at" != "$(readlink -f "/dev/mapper/$name")" ]; then
 		result failed "$munit started, but $mount is not mounted from /dev/mapper/$name"
