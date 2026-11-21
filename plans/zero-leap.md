@@ -5,6 +5,9 @@ A design from 2026-11-20, for the owner to review before anything is built. It m
 at the November visit. When it is done its reasoning moves to
 [`docs/decisions.md`](../docs/decisions.md) and this file is deleted.
 
+**Deferred until the owner is back from Singapore** (owner, 2026-11-21); approval and
+the build wait until then.
+
 **For the owner's approval.** Nothing here is decided beyond the owner's calls below.
 Calls marked *agent's call* are the design's own and the owner can overturn any of them.
 Phase 12 in `docs/management-plane.md`, ordered after 10 and 11.
