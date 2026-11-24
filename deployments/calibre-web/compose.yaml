@@ -44,7 +44,7 @@ services:
     logging: *logging
 
   cloudflared:
-    image: cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39
+    image: cloudflare/cloudflared:2026.11.2@sha256:55c7e3e8d89d5e8d20b75a82f3602cbf98e06db406e73e282073cfdc5a9a3af6
     container_name: calibre-web-cloudflared
     restart: unless-stopped
     # The image's ENTRYPOINT is `cloudflared --no-autoupdate`. The tunnel id is an argument
