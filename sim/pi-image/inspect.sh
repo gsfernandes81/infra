@@ -348,12 +348,16 @@ section "The Pi 5 and zero's array"
 # carries a calibration line: something known present that must read present, and a
 # made-up name that must read absent.
 
-# Yes when a device tree has a node whose compatible list holds this exact string: dtc
-# decompiles it, so a string is matched whole and quoted, never inside another. No grep -q
-# in the pipe: it exits at the first match, the writer before it dies of SIGPIPE, and
-# pipefail turns a match early in the tree into a no.
+# Yes when a device tree has a node whose compatible list holds this exact string. dtc
+# decompiles the tree and writes a list as "a", "b" or as "a\0b"; each entry is split out
+# onto a line of its own and matched whole, so a string never matches inside another. No
+# grep -q in the pipe: it exits at the first match, the writer before it dies of SIGPIPE,
+# and pipefail turns a match early in the tree into a no.
 # shellcheck disable=SC2317  # called through yn
-dtbhas() { dtc -q -I dtb -O dts "$1" 2>/dev/null | grep -E '^[[:space:]]*compatible = ' | grep -F "\"$2\"" >/dev/null; }
+dtbhas() {
+	dtc -q -I dtb -O dts "$1" 2>/dev/null | grep -E '^[[:space:]]*compatible = ' |
+		sed -E 's/^[^=]*= //; s/;$//; s/\\0/\n/g; s/", "/\n/g' | tr -d '"' | grep -xF "$2" >/dev/null
+}
 yn() { "$@" && echo yes || echo no; }
 
 fats=()
