@@ -23,10 +23,12 @@
 #      and the play stops short of the reboot, so a bad pin never costs the way in.
 #   7. Reboots, and waits for the box to answer this play again.
 #   8. Reports what changed, then is done only once both ways in answer: the tunnel serving
-#      (cloudflared's ready connections) and the tailnet reaching another fleet host
-#      (tailscale ping, a relayed path counting), nothing failed but openSUSE's known
-#      first-boot unit, and both pins in place. On a host with a locked array, the report
-#      ends with the unlock command, printed even when a check after the reboot fails.
+#      (cloudflared's ready connections) and the tailnet reaching another fleet host,
+#      tailnet_peer, which is zero, or three from zero (tailscale ping, a relayed path
+#      counting), nothing failed but openSUSE's known first-boot unit, and both pins in
+#      place. On a host with a locked array, one whose crypttab entry is noauto as three's
+#      is, the report ends with the unlock command, printed even when a check after the
+#      reboot fails. An array opened at boot from a key file is not locked.
 #
 # The update recipes every login shows (leap/motd) are installed before the update, so
 # they are in the snapshot it builds.
@@ -78,8 +80,9 @@
     # Beside the plugin directory, not in it: Docker reads every docker-* file there as a
     # plugin (leap/README.md § Moving a pin by hand).
     compose_previous: /usr/local/lib/docker/docker-compose.previous
-    # The fleet host the tailnet must reach after the reboot.
-    tailnet_peer: zero
+    # The fleet host the tailnet must reach after the reboot is tailnet_peer, zero by
+    # default and three for zero (group_vars/fleet.yml, host_vars/zero.yml). Not set here:
+    # play vars outrank host_vars and would hide zero's.
     ways_in_check: true
     confirm: ""
 
