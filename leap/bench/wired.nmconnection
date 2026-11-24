@@ -1,0 +1,23 @@
+# The bench boot's wired profile (leap/bench/script, plans/zero-leap.md § The bench boot):
+# 192.168.86.100, the address zero answers on, since the bench card boots on zero's board
+# in its place. The gateway, resolvers and IPv6 are one's, on the same network
+# (hosts/one/leap/system/wired.nmconnection). No interface name, so it holds on whatever
+# Leap calls the Pi 5's port. NetworkManager reads only a root-owned file at mode 0600, which the bench
+# script gives it.
+#
+# Not a host's /etc copy, so it carries no infra- header: the bench script installs it, and
+# no tool of the repo's reads it.
+[connection]
+id=wired
+type=ethernet
+autoconnect=true
+autoconnect-priority=100
+
+[ipv4]
+method=manual
+address1=192.168.86.100/24,192.168.86.1
+dns=1.1.1.1;8.8.8.8;
+dns-search=lan;
+
+[ipv6]
+method=auto

@@ -37,6 +37,7 @@ say "starting $host"
 set_clock
 check_carry "$host"
 mount_subvolumes
+grow_root
 
 echo "$host" > /etc/hostname
 # cryptsetup for make-backup; the unlock itself is systemd's, in the udev package every
@@ -62,14 +63,21 @@ install_host_keys
 # real shell, because sshd runs a key's forced command through the user's shell, so nologin
 # would refuse that too; the key's restrictions are what keep it from being used as one.
 # Neither has a password. Both homes and .ssh directories are root's, so neither user can
-# change its keys, its ssh config or the host key it trusts.
-for u in backup restore; do
-	id "$u" >/dev/null 2>&1 && die "a $u user exists already in this image"
-done
-useradd --system --user-group --no-create-home --home-dir /home/backup --shell /usr/sbin/nologin \
-	--comment "pulls zero's backup" backup
-useradd --system --user-group --no-create-home --home-dir /home/restore --shell /bin/bash \
-	--comment "zero's read-only restores" restore
+# change its keys, its ssh config or the host key it trusts. A user of either name that this
+# script did not make, one the image brought, stops it; one it made, on an earlier run over
+# this snapshot, is kept.
+make_system_user() {
+	local name=$1 shell=$2 comment=$3
+	if id "$name" >/dev/null 2>&1; then
+		[ "$(getent passwd "$name" | cut -d: -f1,5,6,7)" = "$name:$comment:/home/$name:$shell" ] ||
+			die "a $name user exists already in this image, not the one this script makes"
+		return 0
+	fi
+	useradd --system --user-group --no-create-home --home-dir "/home/$name" --shell "$shell" \
+		--comment "$comment" "$name"
+}
+make_system_user backup /usr/sbin/nologin "pulls zero's backup"
+make_system_user restore /bin/bash "zero's read-only restores"
 install -d -m 755 /home/backup /home/backup/.ssh /home/restore /home/restore/.ssh
 
 # Every tracked file for this host, each at the path its header names. Notes kept beside
@@ -87,7 +95,7 @@ fi
 # The array's mountpoint exists only if this snapshot makes it, and while the array is
 # locked the read-only root refuses every write to it. Then its entry, noauto.
 mkdir -p /media/backup
-cat "$stick/host/fstab.append" >> /etc/fstab
+append_fstab
 
 enable_units
 # The Argon EON's fan, from the CPU's temperature. Without the bus extraconfig.txt turns on
@@ -96,7 +104,8 @@ systemctl enable argon-fan.service
 install_motd
 # Syncthing's sync and discovery ports, for devices on the same network as three; its GUI
 # stays on 127.0.0.1. firewalld is on in Leap and allows only ssh and DHCPv6 otherwise.
-firewall-offline-cmd --add-service=syncthing >/dev/null
+firewall-offline-cmd --query-service=syncthing >/dev/null ||
+	firewall-offline-cmd --add-service=syncthing >/dev/null
 clone_infra
 label_subvolumes
 
