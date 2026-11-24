@@ -1,0 +1,54 @@
+#!/bin/bash
+# The bench boot's whole first-boot script (plans/zero-leap.md § The bench boot), run by
+# Combustion from what `leap/make-stick --bench` writes, on a stick or on the card itself.
+# It makes gavin with the authorized_keys of the box make-stick ran on, enables sshd, and
+# puts the wired port on 192.168.86.100, so the owner can ssh in from the LAN and read the
+# board. Nothing else: no host key, password hash, tunnel credential, key file, Tailscale
+# state, fstab line or host script, so the bench card holds nothing secret and nothing that
+# names a disk. It does not source leap/firstboot.sh, which would bring all of those.
+#
+# It needs no network, so it has no `# combustion:` line: Combustion brings none up for it,
+# and the profile below takes over at the first boot. gavin has no password and no sudo;
+# the owner's login is by key, and the box is flashed again after the bench.
+#
+# Safe to run again, as Combustion does when a first boot stops before it is committed:
+# each step checks what it would create.
+set -euo pipefail
+
+say() { echo "firstboot: $*" > /dev/console; echo "firstboot: $*"; }
+
+# The same log as a host's first boot (leap/firstboot.sh), in the real /var/log, so a bench
+# boot that never answers is read the same way: a raw search of the card for "firstboot:"
+# (leap/README.md § What the first boot does).
+mkdir -p /var/log
+exec > >(tee -a /var/log/infra-firstboot.log) 2>&1
+say "starting the bench boot"
+
+# transactional-update's shell does not bind /home, so gavin's home is written through its
+# own subvolume, as leap/firstboot.sh's mount_subvolumes does, or it would vanish at boot.
+findmnt -n /home >/dev/null || mount /home
+
+install -D -m 600 bench/wired.nmconnection /etc/NetworkManager/system-connections/wired.nmconnection
+
+if ! id gavin >/dev/null 2>&1; then
+	if [ -d /home/gavin ]; then
+		useradd -M -U -c gavin gavin
+	else
+		useradd -m -U -c gavin gavin
+	fi
+fi
+# No password, and not locked either: `*` matches no password, where useradd's `!` reads as
+# a locked account, which sshd may refuse even a key for.
+usermod -p '*' gavin
+install -d -m 700 -o gavin -g gavin /home/gavin/.ssh
+install -m 600 -o gavin -g gavin carry/gavin/authorized_keys /home/gavin/.ssh/authorized_keys
+
+systemctl enable sshd.service
+
+# This runs before the SELinux policy is loaded and the boot's relabel skips /home, so
+# sshd would be refused the key file until it is labelled (leap/firstboot.sh's
+# label_subvolumes).
+policy=$(sed -n 's/^SELINUXTYPE=//p' /etc/selinux/config)
+setfiles -F "/etc/selinux/$policy/contexts/files/file_contexts" /home
+
+say "done; the bench boot answers ssh on 192.168.86.100 next"

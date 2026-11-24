@@ -7,73 +7,212 @@
 #
 #   sudo leap/make-stick --new <host> <device>  e.g. sudo leap/make-stick --new three /dev/sdb
 #
+# or the bench boot's, which carries nothing of any host's (plans/zero-leap.md § The bench
+# boot), on any box of the fleet:
+#
+#   sudo leap/make-stick --bench <device>
+#
 # --new makes the new host's ssh host key on the stick and prints its fingerprint, asks for
 # its root password, and takes gavin's password hash and authorized_keys from the box it
-# runs on. It carries no tunnel credentials, .env, secrets directory or volume: a new host
-# has none until its first boot is done (server-create-host-tunnel.yml makes its tunnel).
+# runs on. It carries no tunnel credentials, .env, secrets directory, key file, Tailscale
+# state, restore key or volume: a new host has none until its first boot is done
+# (server-create-host-tunnel.yml makes its tunnel).
 #
-# It ERASES <device>. It writes an ext4 filesystem labelled `combustion`, which Combustion
-# finds at the new system's first boot, holding the host's reviewed first-boot files from
-# this checkout and the carry-over read from this live system: ssh host keys, password
-# hashes, gavin's authorized_keys, the host's tunnel credentials, each deployment's .env and
-# ~gavin/.<deployment>-secrets directory, and the named volumes the host lists.
-# leap/README.md says what each part is.
+# --bench writes leap/bench/ only: a script that makes gavin with this box's authorized_keys,
+# enables sshd and puts the wired port on 192.168.86.100. No host key, password hash,
+# credential or host file.
 #
-# THE STICK THEN HOLDS LIVE SECRETS. Keep it with the other secret-bearing media, and once
-# the new system is proven, erase it whole with `blkdiscard`, or `blkdiscard -z` on a stick
-# that cannot discard, never by deleting files, which flash keeps.
+# --card, with any of the above, writes onto an SD card in a USB reader, freshly flashed with
+# the pinned image, instead of erasing a stick (plans/zero-leap.md § One card). It refuses a
+# card that does not read exactly as the image: a DOS table with two partitions, p1 vfat
+# labelled EFI, p2 btrfs labelled ROOT, root last and nothing after it. It never erases or
+# formats either. It moves the end of p2's partition entry, not its filesystem, to the last
+# MiB boundary at least 256 MiB before the card's end, and makes p3 there, ext4 labelled
+# `combustion`, which Combustion reads as it reads a stick. leap/firstboot.sh's grow_root
+# grows root's filesystem into the larger entry at the first boot.
 #
-# POSIX sh, because it runs on Alpine. It reads; the only thing it writes is the stick.
+# Without --card it ERASES <device>, a whole stick, and writes one ext4 filesystem labelled
+# `combustion` across it. Either way the filesystem holds the host's reviewed first-boot
+# files from this checkout and the carry-over read from this live system: ssh host keys,
+# password hashes, gavin's authorized_keys, the host's tunnel credentials, each deployment's
+# .env and ~gavin/.<deployment>-secrets directory, the named volumes the host lists, and,
+# where this system has them, the array's key file /etc/keys/data.key, Tailscale's state
+# and root's restore key with its known_hosts lines for three. leap/README.md says what
+# each part is.
+#
+# It refuses, before it writes anything: a device that is not a whole USB disk, one that is
+# mounted or used as swap, one holding a UUID /etc/fstab names, one where blkid -p finds a
+# bcache, LUKS or btrfs signature on the disk or any partition (a disk of an array; a card's
+# own ROOT is the one btrfs let through), and one over 256G. Then a host directory with a
+# FILL-FROM- placeholder, a carry-over with anything missing, a key file the host's crypttab
+# names and this system lacks, and ~gavin/.*-secrets directories on a host with no dev
+# link. It lists, and does not refuse, the files in this checkout that git does not track,
+# other than .env files, since the new system clones the repository fresh and keeps none.
+#
+# THE STICK OR CARD THEN HOLDS LIVE SECRETS. Keep it with the other secret-bearing media.
+# Once the new system is proven, erase a stick whole with `blkdiscard`, or `blkdiscard -z`
+# on a stick that cannot discard, never by deleting files, which flash keeps. A card's
+# `combustion` partition is discarded the same way, then deleted, and its space given to
+# root (leap/README.md § One card).
+#
+# POSIX sh, because it runs on Alpine. It reads; the only thing it writes is the device.
 set -eu
 
 die() { echo "make-stick: $*" >&2; exit 1; }
 
+usage="usage: make-stick [--new] [--card] <host> <device>, or make-stick --bench [--card] <device>"
 new=
-if [ "${1-}" = --new ]; then
-	new=1
+bench=
+card=
+while :; do
+	case "${1-}" in
+	--new) new=1 ;;
+	--bench) bench=1 ;;
+	--card) card=1 ;;
+	-*) die "$usage" ;;
+	*) break ;;
+	esac
 	shift
+done
+[ -z "$new" ] || [ -z "$bench" ] || die "--new and --bench do not go together"
+if [ -n "$bench" ]; then
+	[ $# -eq 1 ] || die "$usage"
+	host="the bench"
+	dev=$1
+else
+	[ $# -eq 2 ] || die "$usage"
+	host=$1
+	dev=$2
 fi
-[ $# -eq 2 ] || die "usage: make-stick [--new] <host> <device>"
-host=$1
-dev=$2
+what=stick
+[ -z "$card" ] || what=card
 repo=$(cd "$(dirname "$0")/.." && pwd)
 hostdir=$repo/hosts/$host/leap
 
-[ "$(id -u)" -eq 0 ] || die "run as root: the carry-over is root's to read"
-[ -d "$hostdir" ] || die "no $hostdir"
-# The short name: one's hostname is its full name, one.gsrpi.uk.
-this=$(hostname)
-this=${this%%.*}
-if [ -z "$new" ]; then
-	# The carry-over is this box's own, so building one host's stick on another would carry
-	# the wrong keys and credentials.
-	[ "$this" = "$host" ] || die "this is $this, not $host"
-else
-	# A new host's stick takes nothing of this box's but gavin's, and a host with a tunnel
-	# or volumes to carry has an old system to build its stick on.
-	[ "$this" != "$host" ] || die "this is $host itself; leave out --new"
-	[ ! -e "$hostdir/system/cloudflared-config.yml" ] || die "$host has a tunnel config, so it is not new"
-	[ ! -e "$hostdir/volumes" ] || die "$host lists volumes to carry, so it is not new"
+[ "$(id -u)" -eq 0 ] || die "run as root: the carry-over and the device are root's"
+# BusyBox's blkid takes none of the options the guards below rely on, and would answer
+# nothing rather than refuse, so every guard built on it would pass. Alpine's is `blkid`.
+blkid -V 2>/dev/null | grep -q util-linux || die "blkid is not util-linux's: apk add blkid"
+if [ -n "$card" ]; then
+	command -v sfdisk >/dev/null || die "--card needs util-linux's sfdisk: apk add sfdisk"
 fi
-if grep -rl 'FILL-FROM-' "$hostdir" >/dev/null 2>&1; then
-	die "a placeholder is left in: $(grep -rl 'FILL-FROM-' "$hostdir" | tr '\n' ' ')"
+if [ -z "$bench" ]; then
+	[ -d "$hostdir" ] || die "no $hostdir"
+	# The short name: one's hostname is its full name, one.gsrpi.uk.
+	this=$(hostname)
+	this=${this%%.*}
+	if [ -z "$new" ]; then
+		# The carry-over is this box's own, so building one host's stick on another would carry
+		# the wrong keys and credentials.
+		[ "$this" = "$host" ] || die "this is $this, not $host"
+	else
+		# A new host's stick takes nothing of this box's but gavin's, and a host with a tunnel
+		# or volumes to carry has an old system to build its stick on.
+		[ "$this" != "$host" ] || die "this is $host itself; leave out --new"
+		[ ! -e "$hostdir/system/cloudflared-config.yml" ] || die "$host has a tunnel config, so it is not new"
+		[ ! -e "$hostdir/volumes" ] || die "$host lists volumes to carry, so it is not new"
+	fi
+	if grep -rl 'FILL-FROM-' "$hostdir" >/dev/null 2>&1; then
+		die "a placeholder is left in: $(grep -rl 'FILL-FROM-' "$hostdir" | tr '\n' ' ')"
+	fi
 fi
 
-# Only a whole USB disk that nothing has mounted, and small enough to be a stick.
+# Only a whole USB disk that nothing has mounted, and small enough to be a stick or a card.
 case "$dev" in /dev/sd[a-z]) ;; *) die "$dev is not a whole /dev/sdX disk" ;; esac
 name=${dev#/dev/}
 readlink -f "/sys/block/$name" | grep -q '/usb' || die "$dev is not on USB"
 grep -q "^$dev" /proc/mounts && die "$dev or a partition of it is mounted"
 grep -q "^$dev" /proc/swaps && die "$dev or a partition of it is in use as swap"
+# Its partitions, as the kernel sees them.
+parts() {
+	for p in "/sys/block/$name/$name"*; do
+		[ -e "$p" ] && echo "/dev/${p##*/}"
+	done
+	return 0
+}
 # A disk this box's fstab names is never a stick, whatever its size.
 for uuid in $(blkid -o value -s UUID "$dev"* 2>/dev/null); do
 	grep -q "$uuid" /etc/fstab && die "$dev holds $uuid, which /etc/fstab names"
 done
+# Nor is a disk of an array, which the guards above can miss: zero's array disks are on USB
+# like a stick, its bcache backing disks are unpartitioned, and fstab names neither those
+# nor the LUKS member under them. So each node is read for a bcache superblock, a LUKS
+# header or a btrfs filesystem, on the whole disk and on each partition. blkid -p reads the
+# device itself, never blkid's cache, which can answer for a disk as it used to be. Its exit
+# 2 is "nothing found"; anything else but 0 is a result it cannot settle, and refused.
+for node in "$dev" $(parts); do
+	rc=0
+	sig=$(blkid -p -o value -s TYPE "$node" 2>/dev/null) || rc=$?
+	case "$rc" in
+	0 | 2) ;;
+	*) die "blkid -p cannot say what $node holds (exit $rc); wipefs -n $node lists its signatures" ;;
+	esac
+	case "$sig" in
+	bcache | crypto_LUKS) die "$node holds a $sig signature, so $dev is a disk of an array" ;;
+	btrfs)
+		# The one btrfs let through: a card's root, as the image makes it, on p2, labelled
+		# ROOT, and a filesystem the kernel has not mounted, which an array's member would
+		# be. The layout check below proves the rest of the card is the image's.
+		if [ -n "$card" ] && [ "$node" = "${dev}2" ] &&
+			[ "$(blkid -p -o value -s LABEL "$node" 2>/dev/null)" = ROOT ] &&
+			[ ! -e "/sys/fs/btrfs/$(blkid -p -o value -s UUID "$node" 2>/dev/null)" ]; then
+			continue
+		fi
+		die "$node holds a btrfs filesystem, so $dev may be a disk of an array" ;;
+	esac
+done
 size_gb=$(( $(cat "/sys/block/$name/size") / 2 / 1024 / 1024 ))
-[ "$size_gb" -le 256 ] || die "$dev is ${size_gb}G, too large to be a stick"
+[ "$size_gb" -le 256 ] || die "$dev is ${size_gb}G, too large to be a $what"
+
+# A card must read exactly as the pinned image writes it (sim/pi-image/inspect.sh reads the
+# image's layout in CI): a DOS table, p1 vfat labelled EFI, p2 btrfs labelled ROOT after it,
+# and nothing else. Anything other than that is not a card just flashed, and a partition
+# written onto it would be a guess about what it holds. Sizes are in the card's logical
+# sectors, as sfdisk counts them. --dump writes `start=     4096,`; the spaces go first.
+if [ -n "$card" ]; then
+	dump=$(sfdisk --dump "$dev" 2>/dev/null) || die "sfdisk cannot read $dev's partition table"
+	table=$(printf '%s\n' "$dump" | sed 's/= */=/g')
+	field() {
+		printf '%s\n' "$table" | awk -v d="$1" -v k="$2=" '$1 == d {
+			for (i = 2; i <= NF; i++) { f = $i; sub(/,$/, "", f)
+				if (index(f, k) == 1) { print substr(f, length(k) + 1); exit } } }'
+	}
+	[ "$(printf '%s\n' "$table" | sed -n 's/^label: *//p')" = dos ] || die "$dev has no DOS partition table; flash the image again"
+	n=$(printf '%s\n' "$table" | grep -c '^/dev/' || true)
+	{ [ "$n" -eq 2 ] && [ "$(parts | wc -l)" -eq 2 ]; } || die "$dev has $n partitions, not the image's two; flash it again"
+	is_fs() {
+		{ [ "$(blkid -p -o value -s TYPE "$1" 2>/dev/null)" = "$2" ] &&
+			[ "$(blkid -p -o value -s LABEL "$1" 2>/dev/null)" = "$3" ]; } ||
+			die "$1 is not $2 labelled $3, as the image's is; flash $dev again"
+	}
+	is_fs "${dev}1" vfat EFI
+	is_fs "${dev}2" btrfs ROOT
+	p1_start=$(field "${dev}1" start)
+	p1_size=$(field "${dev}1" size)
+	p2_start=$(field "${dev}2" start)
+	p2_size=$(field "${dev}2" size)
+	for v in "$p1_start" "$p1_size" "$p2_start" "$p2_size"; do
+		case "$v" in '' | *[!0-9]*) die "cannot read $dev's partitions from sfdisk --dump" ;; esac
+	done
+	[ $((p1_start + p1_size)) -le "$p2_start" ] || die "$dev's ROOT is not after EFI, as the image's is"
+	lsec=$(cat "/sys/block/$name/queue/logical_block_size")
+	# The kernel counts the size in 512-byte units whatever the card's sectors are.
+	total=$(( $(cat "/sys/block/$name/size") / (lsec / 512) ))
+	mib=$((1048576 / lsec))
+	p3_start=$(( (total - 256 * mib) / mib * mib ))
+	p2_new=$((p3_start - p2_start))
+	# A card the image has booted from has its root grown to the end, by kiwi-repart, and
+	# Combustion would not run on it again anyway.
+	[ $((p2_start + p2_size)) -lt "$p3_start" ] ||
+		die "$dev's ROOT already reaches into its last 256 MiB: booted before, or too small; flash it again"
+	p1_uuid=$(blkid -p -o value -s UUID "${dev}1" 2>/dev/null || true)
+	p2_uuid=$(blkid -p -o value -s UUID "${dev}2" 2>/dev/null || true)
+	p1_line=$(printf '%s\n' "$table" | grep "^${dev}1 ")
+fi
 
 # A named volume copied while its container writes to it may be torn, so each must be idle.
-if [ -z "$new" ] && [ -f "$hostdir/volumes" ]; then
+if [ -z "$new" ] && [ -z "$bench" ] && [ -f "$hostdir/volumes" ]; then
+	# shellcheck disable=SC2013  # a volume name is one word, and Docker's names have no spaces
 	for vol in $(grep -v '^#' "$hostdir/volumes"); do
 		if [ -n "$(docker ps -q --filter "volume=$vol")" ]; then
 			die "a running container uses $vol; stop its deployment first"
@@ -81,16 +220,61 @@ if [ -z "$new" ] && [ -f "$hostdir/volumes" ]; then
 	done
 fi
 
-# The carry-over must be complete before anything is erased.
-gavin_hash=$(awk -F: '$1 == "gavin" { print $2 }' /etc/shadow)
-case "$gavin_hash" in \$*) ;; *) die "gavin has no password hash" ;; esac
+# The carry-over must be complete before anything is written.
 [ -s /home/gavin/.ssh/authorized_keys ] || die "no /home/gavin/.ssh/authorized_keys"
-if [ -z "$new" ]; then
+if [ -z "$bench" ]; then
+	gavin_hash=$(awk -F: '$1 == "gavin" { print $2 }' /etc/shadow)
+	case "$gavin_hash" in \$*) ;; *) die "gavin has no password hash" ;; esac
+	# The key file the host's crypttab names, which opens its encrypted member at boot. Only
+	# /etc/keys/data.key travels, so a crypttab naming another is refused rather than
+	# carried somewhere the first boot does not look. A new host has no key to carry.
+	if [ -f "$hostdir/system/crypttab" ]; then
+		# shellcheck disable=SC2013  # the third field alone, a path, which has no spaces in crypttab
+		for key in $(awk '!/^[[:space:]]*(#|$)/ { print $3 }' "$hostdir/system/crypttab"); do
+			case "$key" in
+			none | -) ;;
+			/etc/keys/data.key)
+				[ -z "$new" ] || die "$host's crypttab names $key, which a new host has no old system to carry from"
+				[ -s "$key" ] || die "$host's crypttab names $key, and this system has none: without it the array cannot mount"
+				;;
+			*) die "$host's crypttab names $key; make-stick carries only /etc/keys/data.key" ;;
+			esac
+		done
+	fi
+fi
+if [ -z "$new" ] && [ -z "$bench" ]; then
 	root_hash=$(awk -F: '$1 == "root" { print $2 }' /etc/shadow)
 	case "$root_hash" in \$*) ;; *) die "root has no password; set one with passwd first (the console needs it)" ;; esac
 	[ -s "/etc/cloudflared/$host.json" ] || die "no /etc/cloudflared/$host.json"
 	[ -s /etc/ssh/ssh_host_ed25519_key ] || die "no ed25519 host key"
-else
+	# The dev containers' secrets belong to a host that runs the dev stack, and only there
+	# would the first boot put them back to use. Anywhere else they are leftovers, which
+	# would travel to the new system and live on there.
+	if [ ! -L "$repo/hosts/$host/dev" ]; then
+		for d in /home/gavin/.*-secrets; do
+			if [ -d "$d" ]; then
+				die "$d exists, and $host runs no dev stack (no hosts/$host/dev); remove it first"
+			fi
+		done
+	fi
+	# root's restore key for reading this host's backups back from three, with three's
+	# host key, each as server-create-restore-key.yml and the first restore left them.
+	# three is found in known_hosts by its tailnet address and by name.
+	if [ -e /root/.ssh/restore ]; then
+		{ [ -s /root/.ssh/restore ] && [ -s /root/.ssh/restore.pub ]; } || die "/root/.ssh/restore or its .pub is empty or missing"
+		three_addr=$(awk '/^tailnet_addresses:/ { f = 1; next } f && /^[^[:space:]]/ { f = 0 }
+			f && $1 == "three:" { print $2 }' "$repo/ansible/group_vars/all.yml")
+		case "$three_addr" in
+		[0-9]*.[0-9]*.[0-9]*.[0-9]*) ;;
+		*) die "cannot read three's tailnet address from ansible/group_vars/all.yml" ;;
+		esac
+	fi
+	# What the new system's fresh clone will not have: everything git does not track here,
+	# ignored files included, but the .env files, which are carried.
+	others=$(git -c safe.directory="$repo" -C "$repo" ls-files --others --directory) ||
+		die "git cannot list the untracked files in $repo"
+	untracked=$(printf '%s\n' "$others" | grep -vE '(^|/)\.env$' | grep . || true)
+elif [ -n "$new" ]; then
 	# The new host's root password, typed twice and kept only as its hash. openssl where
 	# it is installed, else BusyBox's mkpasswd, which Alpine has; both read it on stdin,
 	# never from the command line. Echo comes back however the prompt ends: a refusal, an
@@ -116,44 +300,91 @@ else
 	case "$root_hash" in \$6\$*) ;; *) die "could not hash the root password" ;; esac
 fi
 
-lsblk -o NAME,SIZE,MODEL,TRAN "$dev" 2>/dev/null || true
-printf 'ERASE %s (%sG) for %s? Type the device name to go on: ' "$dev" "$size_gb" "$host"
+if [ -n "${untracked-}" ]; then
+	echo "make-stick: not tracked in $repo, so not on the new system unless copied by hand:"
+	printf '%s\n' "$untracked" | sed 's/^/    /'
+fi
+lsblk -o NAME,SIZE,FSTYPE,LABEL,MODEL,TRAN "$dev" 2>/dev/null || true
+if [ -n "$card" ]; then
+	printf 'WRITE a combustion partition at the end of %s (%sG), the card for %s, and grow ROOT'"'"'s entry to meet it? Type the device name to go on: ' "$dev" "$size_gb" "$host"
+else
+	printf 'ERASE %s (%sG) for %s? Type the device name to go on: ' "$dev" "$size_gb" "$host"
+fi
 read -r answer
 [ "$answer" = "$dev" ] || die "not confirmed; nothing written"
 
-# Zero the start of the disk first: a stick's old partition table can survive mkfs on the
-# whole disk, and the kernel would then read partitions over the new filesystem, so the
-# label Combustion looks for would never appear.
-dd if=/dev/zero of="$dev" bs=1M count=4 2>/dev/null
-mkfs.ext4 -q -F -L combustion "$dev"
+if [ -n "$card" ]; then
+	# p2's entry first, its start kept (sfdisk -N changes only the fields given), then p3
+	# in the space after it, to the card's end. -w and -W never: sfdisk otherwise may wipe
+	# signatures it finds, and ROOT's is the image's. sfdisk tells the kernel each time.
+	echo "size=$p2_new" | sfdisk -q --lock -w never -W never -N 2 "$dev" ||
+		die "sfdisk could not grow ROOT's entry; flash $dev again before another try"
+	echo "start=$p3_start, type=83" | sfdisk -q --lock -w never -W never --append "$dev" ||
+		die "sfdisk could not add the combustion partition; flash $dev again before another try"
+	target=${dev}3
+	i=0
+	while [ ! -b "$target" ]; do
+		i=$((i + 1))
+		[ "$i" -le 10 ] || die "$target did not appear after the new partition was written"
+		sleep 1
+	done
+	# Proved by reading the table and the filesystems back, not by sfdisk's exit status:
+	# EFI's entry as it was, ROOT's at its old start with the new size, the new one where
+	# it was put, and both filesystems still the image's.
+	dump=$(sfdisk --dump "$dev" 2>/dev/null) || die "sfdisk cannot read $dev's new table"
+	table=$(printf '%s\n' "$dump" | sed 's/= */=/g')
+	[ "$(printf '%s\n' "$table" | grep "^${dev}1 ")" = "$p1_line" ] || die "EFI's entry changed; flash $dev again"
+	{ [ "$(field "${dev}2" start)" = "$p2_start" ] && [ "$(field "${dev}2" size)" = "$p2_new" ]; } ||
+		die "ROOT's entry is not at $p2_start with $p2_new sectors; flash $dev again"
+	[ "$(field "$target" start)" = "$p3_start" ] || die "$target is not at sector $p3_start; flash $dev again"
+	{ [ "$(blkid -p -o value -s UUID "${dev}1" 2>/dev/null || true)" = "$p1_uuid" ] &&
+		[ "$(blkid -p -o value -s UUID "${dev}2" 2>/dev/null || true)" = "$p2_uuid" ]; } ||
+		die "EFI or ROOT no longer reads as it did; flash $dev again"
+else
+	target=$dev
+fi
+# Zero the start first: a stick's old partition table can survive mkfs on the whole disk,
+# and the kernel would then read partitions over the new filesystem, so the label
+# Combustion looks for would never appear. On a card, whatever the new partition's space
+# held before goes the same way.
+dd if=/dev/zero of="$target" bs=1M count=4 2>/dev/null
+mkfs.ext4 -q -F -L combustion "$target"
 mnt=$(mktemp -d)
-mount "$dev" "$mnt"
+mount "$target" "$mnt"
 trap 'umount "$mnt" 2>/dev/null; rmdir "$mnt" 2>/dev/null' EXIT
 
 # The reviewed files, as they are in this checkout. Everything goes under combustion/,
 # because Combustion copies that directory alone and runs the script from the copy.
 s=$mnt/combustion
-install -D -m 755 "$hostdir/combustion/script" "$s/script"
-install -D -m 644 "$repo/leap/firstboot.sh" "$s/leap/firstboot.sh"
-install -D -m 644 "$repo/leap/pins" "$s/leap/pins"
-install -D -m 644 "$repo/leap/motd" "$s/leap/motd"
-install -D -m 644 "$repo/leap/tailscale-repo.gpg" "$s/leap/tailscale-repo.gpg"
-install -D -m 644 "$hostdir/fstab.append" "$s/host/fstab.append"
-mkdir -p "$s/host/system"
-cp -p "$hostdir"/system/* "$s/host/system/"
-
-# The carry-over, root's only.
-umask 077
 c=$s/carry
-mkdir -p "$c/ssh" "$c/shadow" "$c/gavin" "$c/cloudflared" "$c/env" "$c/volumes"
-printf '%s\n' "$root_hash" > "$c/shadow/root"
-printf '%s\n' "$gavin_hash" > "$c/shadow/gavin"
-cp /home/gavin/.ssh/authorized_keys "$c/gavin/authorized_keys"
+if [ -n "$bench" ]; then
+	install -D -m 755 "$repo/leap/bench/script" "$s/script"
+	install -D -m 644 "$repo/leap/bench/wired.nmconnection" "$s/bench/wired.nmconnection"
+	umask 077
+	mkdir -p "$c/gavin"
+	cp /home/gavin/.ssh/authorized_keys "$c/gavin/authorized_keys"
+else
+	install -D -m 755 "$hostdir/combustion/script" "$s/script"
+	install -D -m 644 "$repo/leap/firstboot.sh" "$s/leap/firstboot.sh"
+	install -D -m 644 "$repo/leap/pins" "$s/leap/pins"
+	install -D -m 644 "$repo/leap/motd" "$s/leap/motd"
+	install -D -m 644 "$repo/leap/tailscale-repo.gpg" "$s/leap/tailscale-repo.gpg"
+	install -D -m 644 "$hostdir/fstab.append" "$s/host/fstab.append"
+	mkdir -p "$s/host/system"
+	cp -p "$hostdir"/system/* "$s/host/system/"
+
+	# The carry-over, root's only.
+	umask 077
+	mkdir -p "$c/ssh" "$c/shadow" "$c/gavin" "$c/cloudflared" "$c/env" "$c/volumes"
+	printf '%s\n' "$root_hash" > "$c/shadow/root"
+	printf '%s\n' "$gavin_hash" > "$c/shadow/gavin"
+	cp /home/gavin/.ssh/authorized_keys "$c/gavin/authorized_keys"
+fi
 if [ -n "$new" ]; then
 	# The new host's own key, made here and nowhere else. Its fingerprint is printed at the
 	# end, so the first `ssh` to the host can be checked against it, not taken on trust.
 	ssh-keygen -q -t ed25519 -N '' -C "root@$host" -f "$c/ssh/ssh_host_ed25519_key"
-else
+elif [ -z "$bench" ]; then
 	cp -p /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub "$c/ssh/"
 	cp "/etc/cloudflared/$host.json" "$c/cloudflared/$host.json"
 	for link in "$repo/hosts/$host"/*; do
@@ -168,10 +399,35 @@ else
 		mkdir -p "$c/home"
 		cp -a "$d" "$c/home/"
 	done
+	# The array's key file, already required above when the crypttab names it. 0400 in a
+	# 0700 directory, as it lives on the box.
+	if [ -s /etc/keys/data.key ]; then
+		mkdir -p "$c/keys"
+		chmod 700 "$c/keys"
+		cp /etc/keys/data.key "$c/keys/data.key"
+		chmod 400 "$c/keys/data.key"
+	fi
+	# Tailscale's state, so the new system is the same node at the same tailnet address.
+	if [ -s /var/lib/tailscale/tailscaled.state ]; then
+		mkdir -p "$c/tailscale"
+		cp /var/lib/tailscale/tailscaled.state "$c/tailscale/tailscaled.state"
+	fi
+	# root's restore key, and the lines of root's known_hosts that pin three, so a restore
+	# needs neither a new key, which three would refuse, nor three's key taken on trust.
+	if [ -e /root/.ssh/restore ]; then
+		mkdir -p "$c/root-ssh"
+		cp /root/.ssh/restore /root/.ssh/restore.pub "$c/root-ssh/"
+		if [ -f /root/.ssh/known_hosts ]; then
+			for h in "$three_addr" three; do
+				ssh-keygen -F "$h" -f /root/.ssh/known_hosts 2>/dev/null | grep -v '^#' || true
+			done | sort -u > "$c/root-ssh/known_hosts"
+			[ -s "$c/root-ssh/known_hosts" ] || rm -f "$c/root-ssh/known_hosts"
+		fi
+	fi
 fi
 # Named volumes live in Docker's store, which the new system does not take over
 # (plans/microos-cutover.md), so each one the host lists travels as a tar file.
-if [ -f "$hostdir/volumes" ]; then
+if [ -z "$bench" ] && [ -f "$hostdir/volumes" ]; then
 	grep -v '^#' "$hostdir/volumes" | while read -r vol; do
 		[ -n "$vol" ] || continue
 		src=/var/lib/docker/volumes/$vol/_data
@@ -182,12 +438,17 @@ fi
 chmod -R go-rwx "$c"
 
 sync
-# Proved by reading it back, not by mkfs's exit status: the label is all Combustion uses.
-blkid "$dev" | grep -q 'LABEL="combustion"' || die "$dev does not answer to LABEL=combustion"
-echo "make-stick: $dev holds $host's first boot. Names only, no contents:"
+# Proved by reading it back off the device, not by mkfs's exit status: the label is all
+# Combustion uses.
+blkid -p "$target" | grep -q 'LABEL="combustion"' || die "$target does not answer to LABEL=combustion"
+echo "make-stick: $target holds $host's first boot. Names only, no contents:"
 (cd "$mnt" && find . -type f | sort)
 if [ -n "$new" ]; then
 	echo "make-stick: $host's host key, to check at the first ssh to it:"
 	ssh-keygen -l -f "$c/ssh/ssh_host_ed25519_key.pub"
 fi
-echo "make-stick: erase it whole once $host is proven: blkdiscard, or blkdiscard -z."
+if [ -n "$card" ]; then
+	echo "make-stick: once $host is proven, discard $target, delete it and grow ROOT into its space (leap/README.md § One card)."
+else
+	echo "make-stick: erase it whole once $host is proven: blkdiscard, or blkdiscard -z."
+fi

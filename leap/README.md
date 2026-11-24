@@ -9,7 +9,8 @@ made on the host's old Alpine system, that the new system reads once at its firs
 | `firstboot.sh` | The first-boot steps every Leap host shares. Sourced by each host's script. |
 | `pins` | The versions and SHA-256s of the binaries a package would get wrong (`cloudflared`, Compose): what a new host's first boot installs, and what `ansible/playbooks/server-update-leap.yml` moves a running host to. Also the Pi image's URL and SHA-256, which `plans/visit-runbook.md` must quote and no host reads. |
 | `motd` | The update recipes every login shows, at `/etc/motd.d/50-infra-updates`: the normal update, and the locked boot firmware's. A plain file, with no `infra-` header for logins to show. |
-| `make-stick` | Builds a host's stick. Run as root on the host's old system, or with `--new` for a host that has none. |
+| `make-stick` | Builds a host's stick, or with `--card` writes the same onto the host's new SD card. Run as root on the host's old system, or with `--new` for a host that has none. With `--bench` it writes the bench boot's config instead. |
+| `bench/` | The bench boot's whole config: a script that makes `gavin` with his keys, enables sshd and gives the wired port `192.168.86.100`, and that port's profile. |
 | `tailscale-repo.gpg` | Tailscale's repository signing key, fingerprint `2596 A99E AAB3 3821 893C 0A79 458C A832 957F 5868`. The first boot trusts the repository through this reviewed copy. |
 
 Each host's own part is in `hosts/<host>/leap/`:
@@ -32,10 +33,69 @@ cd ~/infra; and git pull
 sudo leap/make-stick one /dev/sdX
 ```
 
-It refuses a device that is not a whole USB disk, one that is mounted, one over 256G, a
-host directory with a `FILL-FROM-` placeholder left in it, and a carry-over with anything
-missing, among them a root password, which the console needs. It asks for the device name
-before it erases anything.
+`make-stick` refuses a device that is not a whole USB disk, one that is mounted or used as
+swap, one holding a UUID `/etc/fstab` names, and one over 256G. It also refuses a device
+where `blkid -p` finds a bcache superblock, a LUKS header or a btrfs filesystem on the
+disk or on any partition. That guard is for `zero`, whose array disks are on USB like a
+stick, and whose bcache backing disks have no partitions and no UUID in fstab, so the
+guards before it miss them. It refuses a host directory with a `FILL-FROM-` placeholder
+left in it, and a carry-over with anything missing, among them a root password, which the
+console needs. It asks for the device name before it writes anything.
+
+It carries these where the old system has them, and leaves them out where it does not:
+
+- **The array's key file**, `/etc/keys/data.key`, at 0400 in a 0700 directory. When the
+  host's `system/crypttab` names a key file, `make-stick` refuses unless it is that one
+  and this system has it, since without it the array cannot mount.
+- **Tailscale's state**, `/var/lib/tailscale/tailscaled.state`, so the new system is the
+  same node at the same tailnet address. The old system and the new one are then one
+  node, and must never both be up.
+- **root's restore key**, `/root/.ssh/restore` and its `.pub`, with the lines of root's
+  `known_hosts` that name `three`, by its address in `ansible/group_vars/all.yml` or by
+  name. `three` accepts only that key.
+
+It refuses any `~gavin/.*-secrets` directory on a host with no `hosts/<host>/dev` link:
+those are the dev containers' secrets, and a host without the dev stack has no use for
+them. It lists every file and directory in the checkout that git does not track, ignored
+ones included, other than the `.env` files it carries. The new system clones the
+repository fresh, so a file in that list stays on the old system unless the owner copies
+it.
+
+### One card
+
+With `--card`, `make-stick` writes onto the host's new SD card, in a USB reader, instead
+of erasing a stick, so the day needs no stick (`plans/zero-leap.md` § One card):
+
+```fish
+cd ~/infra; and git pull
+sudo leap/make-stick --card zero /dev/sdX
+```
+
+The card must be freshly flashed with the pinned image and read exactly as the image
+does: a DOS partition table with two partitions, `EFI` (vfat) and then `ROOT` (btrfs),
+root last, nothing after it. `make-stick` refuses anything else, and it never erases or
+formats either partition. The disk guard lets through this one btrfs: `ROOT` on the
+card's second partition, which the kernel has not mounted. `make-stick` moves the end of
+root's partition entry to the last MiB boundary at least 256 MiB before the card's end,
+and makes a third partition in that space, ext4 labelled `combustion`, with the same
+contents a stick gets. It reads the table and both filesystems back to prove the first
+two partitions are as they were, and the new label to prove Combustion will find it.
+
+The first boot grows root's filesystem to fill its larger partition before it installs
+anything. The `combustion` partition stays until the first boot's checks are done. It
+holds a second copy of every secret on the card, and Combustion would read it again on
+any boot caught by the relabel trap below, so the owner then discards it with
+`blkdiscard`, deletes it and grows root into its space, by hand.
+
+### The bench boot
+
+`make-stick --bench <device>`, with or without `--card`, writes only `bench/`: a script
+that makes `gavin` with the `authorized_keys` of the box it runs on, enables sshd and
+gives the wired port `192.168.86.100`, and that port's profile. It carries no host key,
+password hash, tunnel credential, key file or Tailscale state, and no fstab entry, so a
+bench card holds nothing secret. `gavin` has no password and no sudo there. It runs on any
+box of the fleet, and the card is flashed again after the bench
+(`plans/zero-leap.md` § The bench boot).
 
 ### A new host
 
@@ -61,12 +121,19 @@ combustion/carry/            the carry-over: ssh host keys, root's and gavin's p
                              hashes, gavin's authorized_keys, the tunnel credentials, each
                              deployment's .env and ~gavin/.<deployment>-secrets, the volumes
                              (a new host's: its new host key, the hashes and the keys only)
+combustion/carry/keys/       the array's key file, where the old system has one
+combustion/carry/tailscale/  Tailscale's state, where the old system has one
+combustion/carry/root-ssh/   root's restore key and three's known_hosts lines, likewise
 ```
+
+A bench config holds `combustion/script`, `combustion/bench/wired.nmconnection` and
+`combustion/carry/gavin/authorized_keys`, and nothing else.
 
 **The stick then holds live secrets.** Keep it with the other secret-bearing media, and
 once the new system is proven, erase it whole, never by deleting files, which flash keeps:
 `blkdiscard`, or `blkdiscard -z`, which writes zeros, on the many sticks that cannot
-discard (`plans/visit-runbook.md` § Writing a card, and erasing a stick).
+discard (`plans/visit-runbook.md` § Writing a card, and erasing a stick). A card's
+`combustion` partition is discarded the same way before it is deleted.
 
 ## What the first boot does
 
@@ -198,7 +265,8 @@ the tailnet, or at the console, since the phone's one VPN slot is taken.
 `sim/microos/run-host.sh` boots each host's real script in a Leap VM, from a stick laid out
 as `make-stick` lays it out, with stand-ins for the carry-over and the host's disks, and
 checks the box it makes ([`sim/microos/README.md`](../sim/microos/README.md)). `make-stick`
-itself reads a live Alpine host, so CI does not run it.
+itself reads a live Alpine host and writes a real USB device, so CI runs neither it nor
+`--card`'s partitioning, and the bench boot is the first run of `--card`.
 
 That VM is x86_64, so `.github/workflows/pi-image.yml` covers what it cannot. Its `image`
 job downloads the Pi image `pins` names, checks its SHA-256 and inspects it read-only with
