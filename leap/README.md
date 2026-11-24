@@ -203,8 +203,12 @@ itself reads a live Alpine host, so CI does not run it.
 That VM is x86_64, so `.github/workflows/pi-image.yml` covers what it cannot. Its `image`
 job downloads the Pi image `pins` names, checks its SHA-256 and inspects it read-only with
 `sim/pi-image/inspect.sh`: whether the initrd carries Combustion, which Wi-Fi firmware and
-packages the image has, what is on its FAT partition and its partition table. It does the
-same for the newest build openSUSE publishes, once that is not the pinned one. It reports
+packages the image has, what is on its FAT partition and its partition table. For `zero`
+it also reads the Pi 5's device tree and the `[pi5]` section of `config.txt`, asks the
+image's own `modprobe` which drivers the SD card and the RP1 Ethernet need and whether the
+initrd has them, finds the array's `bcache`, `dm-crypt` and Adiantum modules, and checks
+that `bcache-tools` is absent. It does the same for the newest build openSUSE publishes,
+once that is not the pinned one. It reports
 ANSWER lines and fails only when a download or checksum fails; a pinned build openSUSE has
 since withdrawn is reported, since the pin records the copy kept on `two`. It runs when
 `pins`, the script or the workflow changes.
