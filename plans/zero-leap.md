@@ -1,16 +1,15 @@
 # `zero` moves to Leap 16.1 Immutable
 
-A design from 2026-11-20, for the owner to review before anything is built. It moves
+A design from 2026-11-20, approved by the owner on 2026-11-24. It moves
 `zero` from Alpine to openSUSE Leap 16.1 in its Immutable mode, as `one` and `three` moved
 at the November visit. When it is done its reasoning moves to
 [`docs/decisions.md`](../docs/decisions.md) and this file is deleted.
 
-**Deferred until the owner is back from Singapore** (owner, 2026-11-21); approval and
-the build wait until then.
-
-**For the owner's approval.** Nothing here is decided beyond the owner's calls below.
-Calls marked *agent's call* are the design's own and the owner can overturn any of them.
-Phase 12 in `docs/management-plane.md`, ordered after 10 and 11.
+**Approved 2026-11-24; the move waits until the owner is back from Singapore.** The repo
+work needs no box and is built on the branch `zero-leap` meanwhile (§ *The build*). The
+bench boot and the day each wait for the owner's word. Calls marked *agent's call* are the
+design's own and the owner can overturn any of them. Phase 12 in
+`docs/management-plane.md`, ordered after 10 and 11.
 
 ## The owner's calls, 2026-11-20
 
@@ -39,6 +38,8 @@ Phase 12 in `docs/management-plane.md`, ordered after 10 and 11.
 13. **snapper runs natively over D-Bus** (2026-11-24): `immich` joins Leap's
     `SNAPPER_CONFIGS` and Leap's own timers take the snapshots. Set aside: `--no-dbus`
     from an own timer, as `three` runs it, which has no case on `zero` (§ *snapper*).
+14. **One card instead of card plus stick, tried on the bench** (2026-11-24). If the bench
+    proves it, the day uses one card; if not, the stick (§ *One card*).
 
 ## What `zero` has that `one` and `three` did not
 
@@ -195,12 +196,16 @@ of the dev images leaves room for both.
 - **A disk guard for `zero`:** refuse any disk holding a bcache superblock, a LUKS header
   or a btrfs member, read with `blkid` on the whole disk and on each partition (the
   backing disks are unpartitioned), before the size cap.
-- **Refuse dev secrets** on a host with no `dev` link.
+- **Refuse dev secrets** on a host with no `dev` link, and list untracked files in the
+  checkout.
+- **`--bench`** (§ *The bench boot*) and **`--card <device>`** (§ *One card*).
 - **The first-boot script safe to re-run**, and `leap/README.md` and `firstboot.sh` no
   longer saying a failed run leaves the image unconfigured: writes to `/home`,
   `/usr/local`, `/root`, `/var` and the FAT partition survive one (phase 12's
   prerequisites). Each step checks what it would create (the group, the users, the clone,
   the fstab lines) and skips it when present.
+- **When the config came from a partition on the boot disk,** the script grows root's
+  filesystem to its partition.
 
 ## The plays
 
@@ -224,14 +229,41 @@ not use the array and runs throughout. The simulation proves this by attaching t
 after Docker has started. Phase 16's gate is this proof: with protection on, every boot is
 a late array until the owner unlocks it.
 
+## One card
+
+The owner's call 14. Combustion reads any filesystem labelled `combustion`, and a
+partition on the SD card itself counts, so the stick's contents can go on the card. The
+visit kept the stick because this was untried (2026-11-04).
+
+- **Layout.** Build 3.17 is a 512 MB `EFI` partition then `ROOT`, with root last, and
+  `kiwi-repart` grows root to fill the card at first boot (CI run 43361792126). A
+  partition after root would block that. So `make-stick --card <device>`, run on a card
+  just flashed with the pinned image, grows root's partition entry to all but the last
+  256 MB and makes an ext4 `combustion` partition there with the same payload a stick
+  gets. It refuses a card that does not read exactly as the image (two partitions, root
+  last, nothing after it) and never erases it.
+- **Root's filesystem** stays at the image's 3.8 GB until the first-boot script grows it
+  with `btrfs filesystem resize max` through a writable subvolume, before its package
+  installs.
+- **The partition goes after the day's checks.** Unlike a stick it cannot be pulled out,
+  and a boot caught by the relabel trap (§ *Traps already known*) would re-run Combustion
+  from it. A handover block deletes it and hands its space to root. The first-boot
+  script's re-run safety is required for this route.
+- **Secrets.** Everything the partition carries also lands on the root filesystem, so it
+  is a second copy, there until it is deleted.
+- **The bench card proves it**, with `make-stick --bench --card`: Combustion ran, root
+  fills the card, the partition went cleanly. Nobody has tested whether `kiwi-repart`
+  leaves a card laid out this way alone.
+
 ## The bench boot
 
 A spare SD card with build 3.17 and a minimal Combustion config, booted on `zero` with
 the Alpine card out, to prove the Pi 5 boots the image and reaches the LAN before the day.
 
-- **The stick:** `leap/make-stick --bench` writes only a script that installs gavin's
-  `authorized_keys`, enables sshd and gives the wired port `192.168.86.100`. It carries
-  no host key, password hash, tunnel credential, key file or Tailscale state.
+- **The config:** `leap/make-stick --bench --card` (§ *One card*) writes only a script
+  that installs gavin's `authorized_keys`, enables sshd and gives the wired port
+  `192.168.86.100`. It carries no host key, password hash, tunnel credential, key file or
+  Tailscale state.
 - **The disks are unplugged** (*agent's call*). The image would not touch them, since
   nothing names them in its fstab and `bcache-tools`, whose udev rule registers bcache
   devices, is not in it. Unplugging removes the question. USB power with the disks is
@@ -291,21 +323,23 @@ paste from the box cover those.
 7. **`leap/pins` moves to build 3.17** (the owner's call 12), with its SHA-256 from
    openSUSE's `.sha256` file. `one` and `three` booted 3.16, which openSUSE has
    withdrawn; the pin records what the next first boot uses.
-8. **The bench boot** (above).
+8. **The bench boot** (above), on one card.
 
 ## The day
 
 1. On Alpine, after `three`'s last pull has finished: stop Immich, Syncthing and
-   pearl-wallet (`server-stop-deployments.yml`), then `make-stick` on `zero`.
+   pearl-wallet (`server-stop-deployments.yml`), then `make-stick` on `zero`: with
+   `--card` onto the new card if the bench proved one card, onto a stick otherwise.
 2. Power off. Every disk attached, as a precondition: a missing one sends the first boot
-   to emergency mode. The new card in, the stick in, power on.
+   to emergency mode. The new card in, and the stick if there is one, power on.
 3. The first boot runs. The owner reaches `zero` over the LAN at `192.168.86.100`, then
    checks the tunnel and the tailnet answer at the old address.
 4. Checks: the array mounted with both devices, `data-4` open, gavin at 1001, the ssh host
    key unchanged.
 5. Restore pearl-wallet's volume. Deploy Immich and Syncthing, then pearl-wallet.
 6. Run `three`'s pull by hand and read its result.
-7. Commit `hosts/zero/leap/MOVED`. Slice 4's checks run again later.
+7. On one card: delete the `combustion` partition and grow root into its space.
+8. Commit `hosts/zero/leap/MOVED`. Slice 4's checks run again later.
 
 **The way back,** at any step: power off, the Alpine card in, power on. Alpine's Docker
 store is untouched, the array carries no labels from Leap, and Immich's database is the
@@ -325,4 +359,31 @@ snapper, which continues the numbering.
 
 ## Open questions for the owner
 
-None. The owner's answers of 2026-11-20 are calls 7 to 12 above.
+None. The owner's answers are calls 7 to 14 above.
+
+## The build
+
+On the branch `zero-leap`, one commit per task, each by a sub-agent and reviewed; then a
+whole-branch Fable review, its findings applied in their own commit, and a merge to
+`main` on the owner's word.
+
+1. **`leap/make-stick`:** the carry-over above, the disk guard, refusing dev secrets,
+   listing untracked files, `--bench`, `--card`; `leap/README.md` to match.
+2. **`leap/firstboot.sh`:** `check_carry` entries and installers for the new items, the
+   Tailscale state staged to survive the transactional-update shell, every step safe to
+   re-run, root grown when the config came from the card, and the rollback claim
+   corrected in it and in `leap/README.md`. `one`'s and `three`'s simulations still pass.
+3. **`hosts/zero/leap/`:** `combustion/script`, `fstab.append` with the store's id as a
+   `FILL-FROM-` placeholder until the subvolume exists, `system/` as § *The files* lists,
+   `volumes`; pearl-wallet's config binds gain `,z`.
+4. **The plays:** `server-update-leap.yml`'s `tailnet_peer` a host var, `three` for
+   `zero`; `server-create-restore-key.yml` reading through `MOVED` with the package's
+   `tailscale` path.
+5. **The image:** `leap/pins` at 3.17; `pi-image.yml` and `sim/pi-image/inspect.sh`
+   checking the Pi 5, the array's modules and that `bcache-tools` is absent;
+   `leap-pins.yml` reconciled with the visit runbook's record of 3.16.
+6. **The simulation:** `host/zero.sh`, `checks-zero.sh`, the disk-building boot, `zero`
+   in `microos-sim.yml`'s matrix, the checks in § *The simulation*, and a second run with
+   the `combustion` partition on the boot disk.
+7. **Docs:** `hosts/zero/system/README.md`'s stale lines and a way-back note, the phase
+   12 row.
