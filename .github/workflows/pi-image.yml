@@ -5,7 +5,8 @@ name: pi-image
 #
 # image: downloads the Pi image leap/pins names, checks its SHA-256, and inspects it
 # read-only (sim/pi-image/inspect.sh): Combustion in the initrd, the Wi-Fi firmware, the
-# packages, the boot path, the partition table. openSUSE's directory keeps only the newest
+# packages, the boot path, the partition table, and for zero the Pi 5's boot files and
+# Ethernet drivers and the array's kernel modules. openSUSE's directory keeps only the newest
 # build, so the pinned image disappears at the next rebuild; the `current` leg inspects the
 # newest build as well, so a run still answers once the pin is gone and shows what a rebuild
 # changed; while the pin is the newest build, that leg says so and stops. Report-only: a leg
@@ -46,7 +47,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends btrfs-progs xz-utils zstd cpio \
-            initramfs-tools-core binutils
+            initramfs-tools-core binutils device-tree-compiler
 
       - name: Inspect the ${{ matrix.build }} Pi image
         run: sudo sim/pi-image/inspect.sh "$RUNNER_TEMP/pi" "${{ matrix.build }}"

@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Inspects openSUSE's Leap 16.1 Immutable Raspberry Pi image read-only, on an arm64 GitHub
-# runner, and reports what the first boot and the visit's bench test lean on: Combustion in
-# the initrd, the Pi 4's Wi-Fi firmware, the packages the image carries, its boot path and
-# its partition table. .github/workflows/pi-image.yml runs it; leap/README.md § How it is
-# tested says what it is for.
+# runner, and reports what a first boot and a bench boot lean on: Combustion in the initrd,
+# the Pi 4's Wi-Fi firmware, the packages the image carries, its boot path and its partition
+# table; and for zero, the Pi 5's device tree and config.txt section, the drivers between
+# its SD card and its RP1 Ethernet and whether the initrd has them, the array's bcache,
+# dm-crypt and Adiantum modules, and that bcache-tools is absent.
+# .github/workflows/pi-image.yml runs it; leap/README.md § How it is tested says what it is
+# for.
 #
 #   sudo sim/pi-image/inspect.sh <workdir> pinned    the image leap/pins names
 #   sudo sim/pi-image/inspect.sh <workdir> current   the newest build openSUSE publishes
@@ -234,6 +237,8 @@ for d in "$mnt"/*; do
 	while IFS= read -r f; do initrds+=("$f"); done < <(find "$w" -xdev \( -iname 'initrd*' -o -iname '*.initrd' \) -type f 2>/dev/null)
 done
 [ ${#initrds[@]} -eq 0 ] && answer "initrd: none found on any partition"
+# Each initrd that could be listed, as "path|listing", for the Pi 5's checks below.
+listed=()
 n=0
 for f in "${initrds[@]}"; do
 	n=$((n + 1))
@@ -253,6 +258,7 @@ for f in "${initrds[@]}"; do
 	fi
 	[ -n "$ch" ] && rm -f "$ch/tmp/initrd"
 	say "listed with $how; the full listing is initrd-$n.txt in the artifact"
+	listed+=("$f|$list")
 	# lsinitrd prints dracut's module list before the files.
 	show sed -n '/dracut modules:/,/^==/p' "$list"
 	show grep -iE 'combustion|ignition' "$list"
@@ -331,6 +337,169 @@ if [ -n "$root" ]; then
 	answer "grub.cfg names env_block: $(grep -c env_block "$root/boot/grub2/grub.cfg") lines; /boot/writable: $(find "$top/@/boot/writable" -mindepth 1 2>/dev/null | wc -l) entries"
 	answer "health-checker plugins: ${hc:-none found}"
 	answer "health-checker files that touch the GRUB env: ${hcg:-none}"
+fi
+
+section "The Pi 5 and zero's array"
+# zero is a Pi 5 whose array is bcache under LUKS2 with Adiantum (plans/zero-leap.md). The
+# answers ask the image's own modprobe, in the chroot, what it would load for a module, a
+# crypto algorithm or a device's modalias, so aliases and built-in modules resolve as on
+# the booted box. A module file counts as in an initrd only when its exact path under
+# lib/modules is in that initrd's listing, so bcache never matches mbcache. Each group
+# carries a calibration line: something known present that must read present, and a
+# made-up name that must read absent.
+
+# Yes when a device tree has a node whose compatible list holds this exact string: dtc
+# decompiles it, so a string is matched whole and quoted, never inside another.
+# shellcheck disable=SC2317  # called through yn
+dtbhas() { dtc -q -I dtb -O dts "$1" 2>/dev/null | grep -E '^[[:space:]]*compatible = ' | grep -qF "\"$2\""; }
+yn() { "$@" && echo yes || echo no; }
+
+fats=()
+for d in "$mnt"/*; do
+	[ "$d" = "$mnt/overlay" ] || [ "$d" = "$mnt/top" ] || [ "$d" = "$root" ] && continue
+	fats+=("$d")
+done
+pi5dtb=
+pi4dtb=
+for d in "${fats[@]}"; do
+	f=${d##*/}
+	# The firmware loads the first for a Pi 5 and the second for a D0-stepping board.
+	for dtb in bcm2712-rpi-5-b.dtb bcm2712d0-rpi-5-b.dtb; do
+		if [ -f "$d/$dtb" ]; then
+			answer "pi5: $f/$dtb: present, $(stat -c %s "$d/$dtb") bytes; a device tree for raspberrypi,5-model-b: $(yn dtbhas "$d/$dtb" raspberrypi,5-model-b)"
+		else
+			answer "pi5: $f/$dtb: absent"
+		fi
+	done
+	[ -z "$pi5dtb" ] && [ -f "$d/bcm2712-rpi-5-b.dtb" ] && pi5dtb=$d/bcm2712-rpi-5-b.dtb
+	[ -z "$pi4dtb" ] && [ -f "$d/bcm2711-rpi-4-b.dtb" ] && pi4dtb=$d/bcm2711-rpi-4-b.dtb
+	if [ -f "$d/config.txt" ]; then
+		if grep -qxF '[pi5]' "$d/config.txt"; then
+			answer "pi5: $f/config.txt [pi5] section: yes: $(awk '/^\[/ { on = ($0 == "[pi5]"); next } on && !/^[[:space:]]*(#|$)/' "$d/config.txt" | tr '\n' ' ')"
+		else
+			answer "pi5: $f/config.txt [pi5] section: no"
+		fi
+	fi
+	# U-Boot names the device tree of each board it recognises; the Pi 4's is the control.
+	if [ -f "$d/u-boot.bin" ]; then
+		ub=$(strings "$d/u-boot.bin")
+		answer "pi5: $f/u-boot.bin names bcm2712-rpi-5-b.dtb: $(yn grep -qE '(^|/)bcm2712-rpi-5-b\.dtb$' <<<"$ub"); calibration, bcm2711-rpi-4-b.dtb: $(yn grep -qE '(^|/)bcm2711-rpi-4-b\.dtb$' <<<"$ub")"
+	fi
+done
+[ -n "$pi5dtb" ] && show dtc -q -I dtb -O dts -o "$work/bcm2712-rpi-5-b.dts" "$pi5dtb"
+
+kver=
+ird=
+irdlist=
+[ -n "$root" ] && kver=$(cd "$root/usr/lib/modules" 2>/dev/null &&
+	for k in *; do [ -f "$k/modules.dep" ] && echo "$k"; done | sort -V | tail -n 1)
+
+# What the image's modprobe would load for a module, dependencies first: one line per
+# module, "name path" with the path under /lib/modules, or "name builtin".
+chain() {
+	inroot modprobe -S "$kver" --show-depends "$1" 2>/dev/null | awk '
+		$1 == "insmod" { p = $2; sub(/^.*\/lib\/modules\//, "", p); n = p; sub(/^.*\//, "", n)
+			sub(/\.ko(\.(zst|xz|gz))?$/, "", n); gsub(/-/, "_", n); print n, p }
+		$1 == "builtin" { print $2, "builtin" }'
+}
+# The modules an alias, a modalias or a module name resolves to.
+targets() { inroot modprobe -S "$kver" -R "$1" 2>/dev/null | tr - _ | sort -u; }
+# One module as the root has it, and, given an initrd's path index, whether that initrd
+# has its file and every module file it depends on.
+modline() {
+	local m=$1 idx=${2-} c self name path n=0 miss=()
+	c=$(chain "$m")
+	self=$(awk -v m="$m" '$1 == m { print $2; exit }' <<<"$c")
+	case $self in
+	'') printf '%s: not in the root' "$m" && return ;;
+	builtin) printf '%s: built into the kernel' "$m" && return ;;
+	esac
+	printf '%s: module %s' "$m" "${self#"$kver"/}"
+	[ -n "$idx" ] || return
+	if ! grep -qxF "$self" "$idx"; then
+		printf ', not in the initrd'
+		return
+	fi
+	while read -r name path; do
+		[ "$path" = builtin ] || [ "$name" = "$m" ] && continue
+		n=$((n + 1))
+		grep -qxF "$path" "$idx" || miss+=("$name")
+	done <<<"$c"
+	if [ ${#miss[@]} -eq 0 ]; then
+		printf ', in the initrd with all %s module dependencies' "$n"
+	else
+		printf ', in the initrd but without %s of %s dependencies: %s' "${#miss[@]}" "$n" "${miss[*]}"
+	fi
+}
+# Every module a lookup resolves to, joined.
+resolved() {
+	local t out=
+	for t in $(targets "$1"); do out="$out${out:+; }$(modline "$t" "${2-}")"; done
+	printf '%s' "${out:-no module in the root resolves it}"
+}
+
+if [ -z "$ch" ] || [ -z "$kver" ]; then
+	answer "pi5 and array modules: not checked (chroot: ${ch:-none}; kernel: ${kver:-none})"
+else
+	say "kernel modules: /lib/modules/$kver"
+	# The initrd the boot loader pairs with this kernel, or else the first one listed.
+	for e in "${listed[@]}"; do
+		case ${e%%|*} in *"-$kver") ird=${e%%|*} irdlist=${e#*|} ;; esac
+	done
+	[ -z "$ird" ] && [ ${#listed[@]} -gt 0 ] && ird=${listed[0]%%|*} irdlist=${listed[0]#*|}
+	idx=
+	if [ -n "$irdlist" ]; then
+		idx=$work/initrd-paths.txt
+		awk '{ for (i = 1; i <= NF; i++) if ((j = index($i, "lib/modules/"))) print substr($i, j + 12) }' \
+			"$irdlist" | sort -u >"$idx"
+		say "initrd for the module checks: ${ird#"$mnt"/}"
+	else
+		answer "pi5: no initrd could be listed, so the initrd half is not checked"
+	fi
+	say "--- modules.alias lines for RP1's PCI id and its device tree nodes"
+	show grep -iE 'v00001DE4|rp1' "$root/usr/lib/modules/$kver/modules.alias"
+	show grep -aiE 'rp1' "$root/usr/lib/modules/$kver/modules.builtin"
+	# The devices zero's first boot needs before it reaches the LAN: the SD card, then the
+	# Ethernet behind RP1, which sits on PCIe. "label|compatible|lookup": the compatible is
+	# checked in the Pi 5's device tree, and the lookup, a modalias, is resolved by modprobe.
+	for item in \
+		"SD card|brcm,bcm2712-sdhci|" \
+		"PCIe, which RP1 sits on|brcm,bcm2712-pcie|" \
+		"RP1 itself, PCI 1de4:0001|pci1de4,1|pci:v00001DE4d00000001sv00001DE4sd00000001bc02sc00i00" \
+		"RP1 clocks|raspberrypi,rp1-clocks|" \
+		"RP1 pin control|raspberrypi,rp1-gpio|" \
+		"RP1 Ethernet MAC|raspberrypi,rp1-gem|" \
+		"Ethernet PHY, BCM54213PE, id 0x600d84a2|-|mdio:01100000000011011000010010100010"; do
+		label=${item%%|*}
+		rest=${item#*|}
+		compat=${rest%%|*}
+		lookup=${rest#*|}
+		[ -n "$lookup" ] || lookup="of:NnodeT<NULL>C$compat"
+		indt=
+		[ "$compat" != - ] && indt="; in bcm2712-rpi-5-b.dtb: $([ -n "$pi5dtb" ] && yn dtbhas "$pi5dtb" "$compat" || echo 'no dtb')"
+		answer "pi5 $label ($compat)$indt; driver: $(resolved "$lookup" "$idx")"
+	done
+	answer "pi5 calibration, the Pi 4's Ethernet (brcm,bcm2711-genet-v5, which one and three first-booted over); in bcm2711-rpi-4-b.dtb: $([ -n "$pi4dtb" ] && yn dtbhas "$pi4dtb" brcm,bcm2711-genet-v5 || echo 'no dtb'); driver: $(resolved 'of:NnodeT<NULL>Cbrcm,bcm2711-genet-v5' "$idx")"
+	answer "pi5 calibration, a made-up device (infra,no-such-device); in bcm2712-rpi-5-b.dtb: $([ -n "$pi5dtb" ] && yn dtbhas "$pi5dtb" infra,no-such-device || echo 'no dtb'); driver: $(resolved 'of:NnodeT<NULL>Cinfra,no-such-device' "$idx")"
+
+	# The array: bcache under LUKS2, cipher xchacha12,aes-adiantum-plain64. The crypto API
+	# loads an algorithm's module by its crypto- alias, so that is what is resolved.
+	for m in bcache dm_mod dm_crypt; do
+		answer "array module $(modline "$m")"
+	done
+	for a in adiantum xchacha12 xchacha20 nhpoly1305 aes; do
+		answer "array crypto $a (crypto-$a): $(resolved "crypto-$a")"
+	done
+	answer "array calibration: $(modline btrfs) (the root's own filesystem); $(modline mbcache); $(modline no_such_module_infra) (made up)"
+fi
+
+if [ -n "$root" ]; then
+	bt=$([ -n "$ch" ] && inroot rpm -q bcache-tools 2>&1)
+	rules=$(cd "$root" && find usr/lib/udev etc/udev -name '*bcache*' 2>/dev/null | tr '\n' ' ')
+	btr=$(cd "$root" && find usr/lib/udev etc/udev -name '*btrfs*' 2>/dev/null | tr '\n' ' ')
+	irules=
+	[ -n "$irdlist" ] && irules=$(grep -oE '[^ ]*udev/[^ ]*bcache[^ /]*$' "$irdlist" | sort -u | tr '\n' ' ')
+	answer "bcache-tools: ${bt:-rpm did not run}; bcache udev files in the root: ${rules:-none}; in the initrd: ${irules:-none}; calibration, btrfs udev files in the root: ${btr:-none}"
 fi
 
 exit 0
