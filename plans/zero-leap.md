@@ -46,11 +46,16 @@ design's own and the owner can overturn any of them. Phase 12 in
 Each of these is new to a Leap first boot, and each is the reason for a piece of work
 below.
 
-- **A Pi 5.** No Pi 5 has booted Leap on this fleet. The pinned image carries
-  `bcm2712-rpi-5-b.dtb` and a `[pi5]` section in `config.txt` (CI run 43361792126), but
-  nothing has checked that its kernel and initramfs drive the Pi 5's Ethernet, which sits
-  behind the RP1 chip. The first boot needs a wired LAN, since the initramfs has no Wi-Fi
-  (`leap/README.md`). The simulation is an x86_64 VM and cannot answer this.
+- **A Pi 5.** No Pi 5 has booted Leap on this fleet. Builds 3.17 and 3.22 carry the
+  Pi 5's device trees and a `[pi5]` section in `config.txt` (CI runs 44271041125 and
+  45458244546). **The initrd has no driver for RP1, the chip the Pi 5's Ethernet sits
+  behind:** it carries `macb`, the PHY, `clk_rp1` and `pinctrl_rp1`, but not `rp1_pci`,
+  which they hang off (`sim/pi-image/inspect.sh`, run 45458244546; the same in 3.17's
+  initrd listing). It has no Wi-Fi either. So a Pi 5's first boot most likely has no
+  network before switch-root, where Combustion runs and the first-boot script sets the
+  clock, installs packages, fetches the pins and clones the repo. The booted system has
+  every driver. The simulation is an x86_64 VM and cannot answer this; the bench boot
+  does, since its script needs no network.
 - **LUKS above bcache, opened at boot from a key file.** The encrypted member is the WD
   Red Plus, its bcache backing device, then LUKS2 `data-luks-4`, mapping `data-4`, then
   btrfs devid 4 (`hosts/zero/system/dmcrypt:13-15`). `three`'s LUKS is a passphrase,
@@ -236,7 +241,7 @@ partition on the SD card itself counts, so the stick's contents can go on the ca
 visit kept the stick because this was untried (2026-11-04).
 
 - **Layout.** Build 3.17 is a 512 MB `EFI` partition then `ROOT`, with root last, and
-  `kiwi-repart` grows root to fill the card at first boot (CI run 43361792126). A
+  `kiwi-repart` grows root to fill the card at first boot (CI run 44271041125). A
   partition after root would block that. So `make-stick --card <device>`, run on a card
   just flashed with the pinned image, grows root's partition entry to all but the last
   256 MB and makes an ext4 `combustion` partition there with the same payload a stick
@@ -253,7 +258,10 @@ visit kept the stick because this was untried (2026-11-04).
   is a second copy, there until it is deleted.
 - **The bench card proves it**, with `make-stick --bench --card`: Combustion ran, root
   fills the card, the partition went cleanly. Nobody has tested whether `kiwi-repart`
-  leaves a card laid out this way alone.
+  leaves a card laid out this way alone. If it refuses instead, its initrd hook fails
+  before Combustion and the box never answers ssh. The tell is the card itself: no
+  `firstboot:` line at all in the raw search (`leap/README.md`) means the initrd stopped
+  before the script, not the script.
 
 ## The bench boot
 
@@ -271,8 +279,10 @@ the Alpine card out, to prove the Pi 5 boots the image and reaches the LAN befor
 - **The owner reaches it** from the LAN with a throwaway host key:
   `ssh -o UserKnownHostsFile=NUL -o StrictHostKeyChecking=no gavin@192.168.86.100` from
   Windows, `/dev/null` in place of `NUL` elsewhere. Then a read-only check block: the
-  kernel, the RP1 Ethernet link, `modinfo bcache dm_crypt adiantum`, `lsusb`, `dmesg`
-  warnings, health-checker's state.
+  kernel, the RP1 Ethernet link and whether `rp1_pci` loaded, `modinfo bcache dm_crypt
+  adiantum`, `lsusb`, `dmesg` warnings, health-checker's state, and on one card
+  `lsblk -o NAME,SIZE,FSTYPE,LABEL /dev/mmcblk0` with `journalctl -b | grep -i repart`.
+  `dmesg`, health-checker's state and deleting the partition need root (open question 3).
 - **After it:** power off, the Alpine card back in. The spare card is flashed again for
   the day, since Combustion runs on a first boot only. `zero`'s services are down for the
   length of the bench boot.
@@ -359,7 +369,22 @@ snapper, which continues the numbering.
 
 ## Open questions for the owner
 
-None. The owner's answers are calls 7 to 14 above.
+The build found three, 2026-11-24:
+
+1. **The pin.** Build 3.17 has been withdrawn since call 12; openSUSE offers only 3.22,
+   same kernel, its SHA-256 from openSUSE's file and checked by CI. The agent's
+   recommendation: pin 3.22 and keep a copy on `two`. The other choice is 3.17, only if
+   the owner kept a copy.
+2. **The Pi 5's first-boot network** (§ *What `zero` has*). The agent's recommendation:
+   split `zero`'s first boot. Combustion does only what needs no network (users, keys,
+   the carried files, fstab), and a one-shot unit in the booted system installs the
+   packages, clones the repo and reboots once. Also a report to openSUSE. Set aside for
+   now: rebuilding the card's initrd by hand; a USB Ethernet adapter whose driver the
+   initrd carries.
+3. **Root on the bench.** The bench gives gavin a key and no password or sudo, so the
+   bench cannot delete the partition, read `dmesg` or health-checker's state. The agent's
+   recommendation: the bench also carries gavin's password hash and `one`'s
+   `sudoers-gavin`, which asks for the password.
 
 ## The build
 
