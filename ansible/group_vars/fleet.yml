@@ -84,6 +84,11 @@ prune_keep_images:
 # not define it again, because play vars outrank host_vars and would hide that override.
 infra_checkout: /home/gavin/infra
 
+# The fleet host server-update-leap.yml pings over the tailnet after a reboot, to prove
+# that way in. zero for every host but zero itself, which would ping itself and sets
+# three in its host_vars file. As with infra_checkout, a play must not define it again.
+tailnet_peer: zero
+
 # ---------------------------------------------------------------- Tailscale on Alpine
 #
 # The static build server-install-tailscale.yml installs on an Alpine host, which has no

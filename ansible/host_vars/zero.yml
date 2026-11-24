@@ -4,3 +4,7 @@
 extra_packages:
   - docker
   - docker-cli-compose
+
+# The one other exception: server-update-leap.yml's tailnet check after a reboot pings
+# zero from every other host (group_vars/fleet.yml), so zero pings three.
+tailnet_peer: three

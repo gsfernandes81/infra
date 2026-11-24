@@ -6,10 +6,10 @@
 #     ansible-playbook playbooks/server-create-restore-key.yml -e target=zero -K
 #
 # WHAT IT DOES:
-#   1. Refuses a host whose snapshots three does not pull (no
-#      hosts/<host>/system/rsyncd-backup.conf), and one that is not on the tailnet, because
-#      the second value it prints is the box's tailnet address: server-install-tailscale.yml
-#      first.
+#   1. Refuses a host whose snapshots three does not pull (no rsyncd-backup.conf in its
+#      tracked copies), and one that is not on the tailnet, because the second value it
+#      prints is the box's tailnet address: server-install-tailscale.yml first, or on Leap
+#      the join leap/README.md gives.
 #   2. Makes /root/.ssh (0700), then /root/.ssh/restore, ed25519, comment "<host> restore",
 #      only if no key is there. It NEVER replaces one: three's authorized_keys names the
 #      key, so a new one would lock restores out until three's line is changed too.
@@ -22,6 +22,11 @@
 #      of their placeholders; until then leap/make-stick refuses three's stick. It prints
 #      each key's fingerprint too, which the agent checks the key against: a key wraps on a
 #      phone's screen.
+#
+# A HOST ON LEAP is told apart as everywhere else, by hosts/<host>/leap/MOVED, the rule
+# bin/_infra.py's system_dir() keeps: with it, the tracked copies are hosts/<host>/leap/system/
+# and tailscale is the repo package's /usr/bin/tailscale; without it, hosts/<host>/system/
+# and the static tarball's /usr/local/bin/tailscale.
 #
 # The private key never leaves the box and never reaches this play's output; only public
 # halves are read. Under --check it reads and says whether it would make the key.
@@ -61,12 +66,20 @@
   vars:
     key: /root/.ssh/restore
     host_key: /etc/ssh/ssh_host_ed25519_key.pub
-    tailscale_bin: /usr/local/bin/tailscale
+    # The tracked copy and the tailscale binary, by system_dir()'s rule (the header).
+    # Repo-relative, for the messages.
+    bk_host_dir: "{{ control_checkout }}/hosts/{{ inventory_hostname }}"
+    bk_conf: >-
+      hosts/{{ inventory_hostname }}/{{ 'leap/system' if (bk_host_dir ~ '/leap/MOVED') is file
+      else 'system' }}/rsyncd-backup.conf
+    tailscale_bin: >-
+      {{ '/usr/bin/tailscale' if (bk_host_dir ~ '/leap/MOVED') is file
+      else '/usr/local/bin/tailscale' }}
 
   tasks:
     - name: Read whether three pulls this host's snapshots
       ansible.builtin.stat:
-        path: "{{ control_checkout }}/hosts/{{ inventory_hostname }}/system/rsyncd-backup.conf"
+        path: "{{ control_checkout }}/{{ bk_conf }}"
       register: bk_tracked
       delegate_to: localhost
 
@@ -74,7 +87,7 @@
       ansible.builtin.assert:
         that: bk_tracked.stat.exists
         fail_msg: >-
-          hosts/{{ inventory_hostname }}/system/rsyncd-backup.conf is not in this checkout,
+          {{ bk_conf }} is not in this checkout,
           so three pulls no backup from {{ inventory_hostname }} and it needs no restore key.
           Nothing has been made.
         success_msg: tracked
@@ -94,9 +107,11 @@
           - bk_ts.stdout is match('\s*\{')
           - (bk_ts.stdout | from_json).BackendState | default('') == 'Running'
         fail_msg: >-
-          {{ inventory_hostname }} is not on the tailnet, and the address three's key line
-          needs is its tailnet address. Run server-install-tailscale.yml -e
-          target={{ inventory_hostname }} first. Nothing has been made.
+          {{ inventory_hostname }} is not on the tailnet, as {{ tailscale_bin }} status
+          reads it, and the address three's key line needs is its tailnet address.
+          {{ 'Join it first, as leap/README.md says.' if tailscale_bin == '/usr/bin/tailscale'
+          else 'Run server-install-tailscale.yml -e target=' ~ inventory_hostname ~ ' first.' }}
+          Nothing has been made.
         success_msg: on the tailnet
 
     - name: Create /root/.ssh, root's alone
