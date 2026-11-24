@@ -3,7 +3,7 @@
 #
 #   sudo leap/make-stick <host> <device>      e.g. sudo leap/make-stick one /dev/sdb
 #
-# or, for a NEW host, which has no old system to read, on any Alpine host of the fleet:
+# or, for a NEW host, which has no old system to read, on any other host of the fleet:
 #
 #   sudo leap/make-stick --new <host> <device>  e.g. sudo leap/make-stick --new three /dev/sdb
 #
@@ -18,9 +18,10 @@
 # state, restore key or volume: a new host has none until its first boot is done
 # (server-create-host-tunnel.yml makes its tunnel).
 #
-# --bench writes leap/bench/ only: a script that makes gavin with this box's authorized_keys,
-# enables sshd and puts the wired port on 192.168.86.100. No host key, password hash,
-# credential or host file.
+# --bench writes leap/bench/ and this box's /home/gavin/.ssh/authorized_keys, nothing else:
+# a script that makes gavin with those keys, enables sshd and puts the wired port on
+# 192.168.86.100, and that port's profile. No host key, password hash, credential or host
+# file.
 #
 # --card, with any of the above, writes onto an SD card in a USB reader, freshly flashed with
 # the pinned image, instead of erasing a stick (plans/zero-leap.md § One card). It refuses a
@@ -40,14 +41,18 @@
 # and root's restore key with its known_hosts lines for three. leap/README.md says what
 # each part is.
 #
-# It refuses, before it writes anything: a device that is not a whole USB disk, one that is
-# mounted or used as swap, one holding a UUID /etc/fstab names, one where blkid -p finds a
-# bcache, LUKS or btrfs signature on the disk or any partition (a disk of an array; a card's
-# own ROOT is the one btrfs let through), and one over 256G. Then a host directory with a
-# FILL-FROM- placeholder, a carry-over with anything missing, a key file the host's crypttab
-# names and this system lacks, and ~gavin/.*-secrets directories on a host with no dev
-# link. It lists, and does not refuse, the files in this checkout that git does not track,
-# other than .env files, since the new system clones the repository fresh and keeps none.
+# It refuses, before it writes anything, in this order: a tool it needs that is missing; a
+# host directory with a FILL-FROM- placeholder; a device that is not a whole USB disk, one
+# that is mounted or used as swap, one holding a UUID /etc/fstab names, one where blkid -p
+# finds a bcache, LUKS or btrfs signature on the disk or any partition (a disk of an array;
+# a card's own ROOT is the one btrfs let through), and one over 256G; a card not laid out
+# as the image; a carry-over with anything missing, a key file the host's crypttab names and
+# this system lacks, a restore key with no known_hosts line for three, and ~gavin/.*-secrets
+# directories on a host with no dev link; and a card whose payload would not fit its
+# partition. It lists, and does not refuse, the files in this checkout that git does not
+# track, other than .env files, since the new system clones the repository fresh and keeps
+# none. After the typed confirmation it reads the device's identity again, and refuses if
+# anything changed while the prompt waited.
 #
 # THE STICK OR CARD THEN HOLDS LIVE SECRETS. Keep it with the other secret-bearing media.
 # Once the new system is proven, erase a stick whole with `blkdiscard`, or `blkdiscard -z`
@@ -55,7 +60,9 @@
 # `combustion` partition is discarded the same way, then deleted, and its space given to
 # root (leap/README.md § One card).
 #
-# POSIX sh, because it runs on Alpine. It reads; the only thing it writes is the device.
+# POSIX sh, because the old systems it runs on are Alpine's, with BusyBox's sh; its tools are
+# util-linux's and e2fsprogs', which Leap has as well, and each one missing is named before
+# anything happens. It reads; the only thing it writes is the device.
 set -eu
 
 die() { echo "make-stick: $*" >&2; exit 1; }
@@ -90,12 +97,22 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 hostdir=$repo/hosts/$host/leap
 
 [ "$(id -u)" -eq 0 ] || die "run as root: the carry-over and the device are root's"
+# Every tool the writes need, before anything is read or written, so none is found missing
+# after the stick is zeroed or the card's table rewritten. The hints are Alpine's package
+# names; Leap carries all of these in its image.
+need() {
+	command -v "$1" >/dev/null || die "$1 is missing${2:+ (on Alpine: apk add $2)}; nothing written"
+}
+need lsblk lsblk
+need mkfs.ext4 e2fsprogs
+for t in dd mount umount install mktemp find sort sync; do need "$t"; done
+[ -z "$card" ] || need sfdisk sfdisk
+[ -n "$bench" ] || need tar
+[ -z "$new" ] || need ssh-keygen openssh-keygen
+[ -n "$new" ] || [ -n "$bench" ] || need git git
 # BusyBox's blkid takes none of the options the guards below rely on, and would answer
-# nothing rather than refuse, so every guard built on it would pass. Alpine's is `blkid`.
-blkid -V 2>/dev/null | grep -q util-linux || die "blkid is not util-linux's: apk add blkid"
-if [ -n "$card" ]; then
-	command -v sfdisk >/dev/null || die "--card needs util-linux's sfdisk: apk add sfdisk"
-fi
+# nothing rather than refuse, so every guard built on it would pass.
+blkid -V 2>/dev/null | grep -q util-linux || die "blkid is not util-linux's (on Alpine: apk add blkid); nothing written"
 if [ -z "$bench" ]; then
 	[ -d "$hostdir" ] || die "no $hostdir"
 	# The short name: one's hostname is its full name, one.gsrpi.uk.
@@ -212,6 +229,8 @@ fi
 
 # A named volume copied while its container writes to it may be torn, so each must be idle.
 if [ -z "$new" ] && [ -z "$bench" ] && [ -f "$hostdir/volumes" ]; then
+	# Without docker the check below would read no container and pass.
+	need docker
 	# shellcheck disable=SC2013  # a volume name is one word, and Docker's names have no spaces
 	for vol in $(grep -v '^#' "$hostdir/volumes"); do
 		if [ -n "$(docker ps -q --filter "volume=$vol")" ]; then
@@ -268,6 +287,16 @@ if [ -z "$new" ] && [ -z "$bench" ]; then
 		[0-9]*.[0-9]*.[0-9]*.[0-9]*) ;;
 		*) die "cannot read three's tailnet address from ansible/group_vars/all.yml" ;;
 		esac
+		# The key without three's host key would leave the first restore to trust whatever
+		# answers, so the pair travels whole or not at all.
+		need ssh-keygen openssh-keygen
+		three_kh=
+		if [ -f /root/.ssh/known_hosts ]; then
+			three_kh=$(for h in "$three_addr" three; do
+				ssh-keygen -F "$h" -f /root/.ssh/known_hosts 2>/dev/null | grep -v '^#' || true
+			done | sort -u)
+		fi
+		[ -n "$three_kh" ] || die "root's known_hosts has no line for three ($three_addr or three), which the restore key needs; connect once as the restore does (hosts/zero/system/README.md § A restore), then run this again"
 	fi
 	# What the new system's fresh clone will not have: everything git does not track here,
 	# ignored files included, but the .env files, which are carried.
@@ -300,11 +329,72 @@ elif [ -n "$new" ]; then
 	case "$root_hash" in \$6\$*) ;; *) die "could not hash the root password" ;; esac
 fi
 
+# A card's payload must fit the partition, which is fixed at 256 MiB so that root keeps the
+# rest. The estimate is generous: every file in leap/ and the host's directory, each
+# secrets directory, the small carried files, and each listed volume's data, which travels
+# as a tar file. It must leave a quarter of the partition free, for ext4's own journal and
+# tables and for tar's headers, or the card is refused before anything is written.
+if [ -n "$card" ]; then
+	kib() { du -sk "$@" 2>/dev/null | awk '{ n += $1 } END { print n + 0 }'; }
+	if [ -n "$bench" ]; then
+		payload=$(kib "$repo/leap/bench" /home/gavin/.ssh/authorized_keys)
+	else
+		payload=$(kib "$repo/leap" "$hostdir" /home/gavin/.ssh/authorized_keys /etc/ssh)
+		if [ -z "$new" ]; then
+			for d in /home/gavin/.*-secrets /etc/keys/data.key /var/lib/tailscale/tailscaled.state \
+				/root/.ssh/restore /root/.ssh/restore.pub; do
+				[ -e "$d" ] && payload=$((payload + $(kib "$d")))
+			done
+			if [ -f "$hostdir/volumes" ]; then
+				# shellcheck disable=SC2013  # a volume name is one word, and Docker's names have no spaces
+				for vol in $(grep -v '^#' "$hostdir/volumes"); do
+					[ -d "/var/lib/docker/volumes/$vol/_data" ] || die "no volume $vol at /var/lib/docker/volumes/$vol/_data"
+					payload=$((payload + $(kib "/var/lib/docker/volumes/$vol/_data")))
+				done
+			fi
+		fi
+	fi
+	[ "$payload" -le $((192 * 1024)) ] ||
+		die "the payload is about $((payload / 1024)) MiB, more than the 192 MiB a card's 256 MiB partition takes; use a stick"
+fi
+
 if [ -n "${untracked-}" ]; then
 	echo "make-stick: not tracked in $repo, so not on the new system unless copied by hand:"
 	printf '%s\n' "$untracked" | sed 's/^/    /'
 fi
-lsblk -o NAME,SIZE,FSTYPE,LABEL,MODEL,TRAN "$dev" 2>/dev/null || true
+# What the device is, read now and again after the answer, immediately before the first
+# write: the prompt can wait for minutes, and a stick pulled and another plugged in meanwhile
+# can take the same name. Its place on the USB bus, its size, the serial of the first USB
+# device above it, the signatures blkid -p reads on it and its partitions, and for a card
+# its partition table, which the writes are computed from.
+# The serial is the first one above the disk in sysfs that a USB device reports, skipping
+# the root hubs (vendor 1d6b, Linux's own), whose serial names only the controller.
+usb_serial() {
+	d=$(readlink -f "/sys/block/$name")
+	while [ "$d" != /sys ] && [ "$d" != / ] && [ -n "$d" ]; do
+		if [ -r "$d/serial" ] && [ -r "$d/idVendor" ] && [ "$(cat "$d/idVendor")" != 1d6b ]; then
+			cat "$d/serial"
+			return 0
+		fi
+		d=${d%/*}
+	done
+	echo "(no serial)"
+}
+identity() {
+	readlink -f "/sys/block/$name"
+	cat "/sys/block/$name/size"
+	usb_serial
+	for node in "$dev" $(parts); do
+		echo "$node $(blkid -p -o export "$node" 2>/dev/null | grep -E '^(TYPE|LABEL|UUID|PTTYPE)=' | tr '\n' ' ')"
+	done
+	if [ -n "$card" ]; then
+		sfdisk --dump "$dev" 2>/dev/null | sed 's/= */=/g'
+	fi
+}
+before=$(identity)
+[ "$(usb_serial)" != "(no serial)" ] ||
+	echo "make-stick: $dev reports no USB serial; its bus path, size and signatures identify it across the prompt"
+lsblk -o NAME,SIZE,FSTYPE,LABEL,MODEL,TRAN "$dev" || die "lsblk cannot show $dev, and its model is the check before the prompt; nothing written"
 if [ -n "$card" ]; then
 	printf 'WRITE a combustion partition at the end of %s (%sG), the card for %s, and grow ROOT'"'"'s entry to meet it? Type the device name to go on: ' "$dev" "$size_gb" "$host"
 else
@@ -312,11 +402,32 @@ else
 fi
 read -r answer
 [ "$answer" = "$dev" ] || die "not confirmed; nothing written"
+[ "$(identity)" = "$before" ] || die "$dev is not the device it was before the prompt; nothing written"
+grep -q "^$dev" /proc/mounts && die "$dev or a partition of it was mounted during the prompt; nothing written"
+grep -q "^$dev" /proc/swaps && die "$dev or a partition of it became swap during the prompt; nothing written"
+
+# From here on a failure leaves the device half written. A stick is erased again by the next
+# run; a card's table is not the image's any more, so the card must be flashed again first.
+written=
+mnt=
+finish() {
+	rc=$?
+	if [ -n "$mnt" ]; then
+		umount "$mnt" 2>/dev/null
+		rmdir "$mnt" 2>/dev/null
+	fi
+	if [ "$rc" -ne 0 ] && [ -n "$written" ]; then
+		echo "make-stick: $dev was left half written; flash it again with the pinned image before another try" >&2
+	fi
+	return "$rc"
+}
+trap finish EXIT
 
 if [ -n "$card" ]; then
 	# p2's entry first, its start kept (sfdisk -N changes only the fields given), then p3
 	# in the space after it, to the card's end. -w and -W never: sfdisk otherwise may wipe
 	# signatures it finds, and ROOT's is the image's. sfdisk tells the kernel each time.
+	written=1
 	echo "size=$p2_new" | sfdisk -q --lock -w never -W never -N 2 "$dev" ||
 		die "sfdisk could not grow ROOT's entry; flash $dev again before another try"
 	echo "start=$p3_start, type=83" | sfdisk -q --lock -w never -W never --append "$dev" ||
@@ -351,7 +462,6 @@ dd if=/dev/zero of="$target" bs=1M count=4 2>/dev/null
 mkfs.ext4 -q -F -L combustion "$target"
 mnt=$(mktemp -d)
 mount "$target" "$mnt"
-trap 'umount "$mnt" 2>/dev/null; rmdir "$mnt" 2>/dev/null' EXIT
 
 # The reviewed files, as they are in this checkout. Everything goes under combustion/,
 # because Combustion copies that directory alone and runs the script from the copy.
@@ -417,12 +527,7 @@ elif [ -z "$bench" ]; then
 	if [ -e /root/.ssh/restore ]; then
 		mkdir -p "$c/root-ssh"
 		cp /root/.ssh/restore /root/.ssh/restore.pub "$c/root-ssh/"
-		if [ -f /root/.ssh/known_hosts ]; then
-			for h in "$three_addr" three; do
-				ssh-keygen -F "$h" -f /root/.ssh/known_hosts 2>/dev/null | grep -v '^#' || true
-			done | sort -u > "$c/root-ssh/known_hosts"
-			[ -s "$c/root-ssh/known_hosts" ] || rm -f "$c/root-ssh/known_hosts"
-		fi
+		printf '%s\n' "$three_kh" > "$c/root-ssh/known_hosts"
 	fi
 fi
 # Named volumes live in Docker's store, which the new system does not take over

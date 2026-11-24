@@ -33,14 +33,18 @@ cd ~/infra; and git pull
 sudo leap/make-stick one /dev/sdX
 ```
 
-`make-stick` refuses a device that is not a whole USB disk, one that is mounted or used as
-swap, one holding a UUID `/etc/fstab` names, and one over 256G. It also refuses a device
-where `blkid -p` finds a bcache superblock, a LUKS header or a btrfs filesystem on the
-disk or on any partition. That guard is for `zero`, whose array disks are on USB like a
-stick, and whose bcache backing disks have no partitions and no UUID in fstab, so the
-guards before it miss them. It refuses a host directory with a `FILL-FROM-` placeholder
-left in it, and a carry-over with anything missing, among them a root password, which the
-console needs. It asks for the device name before it writes anything.
+`make-stick` first names any tool it needs that is missing, with its Alpine package, and
+refuses a host directory with a `FILL-FROM-` placeholder left in it. Then it refuses a
+device that is not a whole USB disk, one that is mounted or used as swap, one holding a
+UUID `/etc/fstab` names, and one over 256G. It also refuses a device where `blkid -p`
+finds a bcache superblock, a LUKS header or a btrfs filesystem on the disk or on any
+partition. That guard is for `zero`, whose array disks are on USB like a stick, and whose
+bcache backing disks have no partitions and no UUID in fstab, so the guards before it miss
+them. It refuses a carry-over with anything missing, among them a root password, which the
+console needs. It asks for the device name before it writes anything, shows the device's
+model and labels for that, and reads the device again after the answer: its place on the
+USB bus, its size, its USB serial, its signatures and, for a card, its partition table. If
+any of them changed while the prompt waited, it stops with nothing written.
 
 It carries these where the old system has them, and leaves them out where it does not:
 
@@ -52,7 +56,8 @@ It carries these where the old system has them, and leaves them out where it doe
   node, and must never both be up.
 - **root's restore key**, `/root/.ssh/restore` and its `.pub`, with the lines of root's
   `known_hosts` that name `three`, by its address in `ansible/group_vars/all.yml` or by
-  name. `three` accepts only that key.
+  name. `three` accepts only that key. A restore key with no such line is refused, since
+  the first restore would then trust whatever answered at `three`'s address.
 
 It refuses any `~gavin/.*-secrets` directory on a host with no `hosts/<host>/dev` link:
 those are the dev containers' secrets, and a host without the dev stack has no use for
@@ -81,6 +86,12 @@ and makes a third partition in that space, ext4 labelled `combustion`, with the 
 contents a stick gets. It reads the table and both filesystems back to prove the first
 two partitions are as they were, and the new label to prove Combustion will find it.
 
+The partition is fixed at 256 MiB, so `make-stick` estimates the payload first, the
+volumes' data included, and refuses a card whose payload is over 192 MiB, leaving room for
+ext4's own journal and tables. A host whose volumes are larger uses a stick. Once the
+table is rewritten, any failure prints a `make-stick:` line saying the card must be
+flashed again before another try.
+
 The first boot grows root's filesystem to fill its larger partition before it installs
 anything. The `combustion` partition stays until the first boot's checks are done. It
 holds a second copy of every secret on the card, and Combustion would read it again on
@@ -100,7 +111,7 @@ box of the fleet, and the card is flashed again after the bench
 ### A new host
 
 A host with no old system, `three` first, gets its stick from `make-stick --new <host>
-<device>`, run on any Alpine host of the fleet. It makes the new host's ssh host key on the
+<device>`, run on any other host of the fleet. It makes the new host's ssh host key on the
 stick and prints its fingerprint, asks for the new host's root password, and takes gavin's
 password hash and `authorized_keys` from the box it runs on. It carries no tunnel
 credentials, `.env`, secrets directory or volume, and refuses a host whose directory has a
@@ -115,7 +126,7 @@ copy:
 
 ```
 combustion/script            the host's script
-combustion/leap/             firstboot.sh and the Tailscale key
+combustion/leap/             firstboot.sh, pins, motd and the Tailscale key
 combustion/host/             the host's system/ files and fstab.append
 combustion/carry/            the carry-over: ssh host keys, root's and gavin's password
                              hashes, gavin's authorized_keys, the tunnel credentials, each
@@ -278,7 +289,12 @@ the tailnet, or at the console, since the phone's one VPN slot is taken.
 as `make-stick` lays it out, with stand-ins for the carry-over and the host's disks, and
 checks the box it makes ([`sim/microos/README.md`](../sim/microos/README.md)). `make-stick`
 itself reads a live Alpine host and writes a real USB device, so CI runs neither it nor
-`--card`'s partitioning, and the bench boot is the first run of `--card`.
+`--card`'s partitioning, and the bench boot is the first run of `--card`. The stand-in
+carry-over has no key file, Tailscale state or restore key, the stand-in stick is a disk
+of its own, and each host's script runs once. So CI runs `grow_root`'s stick branch only,
+and none of `install_data_key`, `install_tailscale_state`, `install_restore_key`, the card
+branch or a second run. `zero`'s simulation is to run them (`plans/zero-leap.md` § The
+build, item 6).
 
 That VM is x86_64, so `.github/workflows/pi-image.yml` covers what it cannot. Its `image`
 job downloads the Pi image `pins` names, checks its SHA-256 and inspects it read-only with

@@ -310,7 +310,9 @@ install_data_key() {
 # as Combustion mounts the x-initrd entries; the state is written through it and labelled
 # as /var/lib/tailscale for the policy, which is not loaded yet; and the mount goes. A
 # state already there is tailscaled's own, newer than the stick's, so a second run leaves
-# it. The simulation proves the file is there after the reboot.
+# it. Nothing in CI runs this yet: the simulation's stand-in carry-over has no Tailscale
+# state. zero's simulation (plans/zero-leap.md § The build, item 6) is to prove the file is
+# there after the reboot.
 install_tailscale_state() {
 	local f=$stick/carry/tailscale/tailscaled.state t policy
 	[ -e "$f" ] || return 0
