@@ -349,9 +349,11 @@ section "The Pi 5 and zero's array"
 # made-up name that must read absent.
 
 # Yes when a device tree has a node whose compatible list holds this exact string: dtc
-# decompiles it, so a string is matched whole and quoted, never inside another.
+# decompiles it, so a string is matched whole and quoted, never inside another. No grep -q
+# in the pipe: it exits at the first match, the writer before it dies of SIGPIPE, and
+# pipefail turns a match early in the tree into a no.
 # shellcheck disable=SC2317  # called through yn
-dtbhas() { dtc -q -I dtb -O dts "$1" 2>/dev/null | grep -E '^[[:space:]]*compatible = ' | grep -qF "\"$2\""; }
+dtbhas() { dtc -q -I dtb -O dts "$1" 2>/dev/null | grep -E '^[[:space:]]*compatible = ' | grep -F "\"$2\"" >/dev/null; }
 yn() { "$@" && echo yes || echo no; }
 
 fats=()
@@ -386,7 +388,13 @@ for d in "${fats[@]}"; do
 		answer "pi5: $f/u-boot.bin names bcm2712-rpi-5-b.dtb: $(yn grep -qE '(^|/)bcm2712-rpi-5-b\.dtb$' <<<"$ub"); calibration, bcm2711-rpi-4-b.dtb: $(yn grep -qE '(^|/)bcm2711-rpi-4-b\.dtb$' <<<"$ub")"
 	fi
 done
-[ -n "$pi5dtb" ] && show dtc -q -I dtb -O dts -o "$work/bcm2712-rpi-5-b.dts" "$pi5dtb"
+if [ -n "$pi5dtb" ]; then
+	dts=$work/bcm2712-rpi-5-b.dts
+	show dtc -q -I dtb -O dts -o "$dts" "$pi5dtb"
+	say "--- ${pi5dtb#"$mnt"/}: model, and the compatibles naming RP1, PCIe or Ethernet"
+	show grep -E '^[[:space:]]*model = ' "$dts"
+	show grep -nE '^[[:space:]]*compatible = .*(rp1|1de4|pcie|macb|gem|ethernet)' "$dts"
+fi
 
 kver=
 ird=
@@ -425,8 +433,10 @@ modline() {
 		n=$((n + 1))
 		grep -qxF "$path" "$idx" || miss+=("$name")
 	done <<<"$c"
-	if [ ${#miss[@]} -eq 0 ]; then
-		printf ', in the initrd with all %s module dependencies' "$n"
+	if [ "$n" -eq 0 ]; then
+		printf ', in the initrd, with no module dependencies'
+	elif [ ${#miss[@]} -eq 0 ]; then
+		printf ', in the initrd with all %s of its module dependencies' "$n"
 	else
 		printf ', in the initrd but without %s of %s dependencies: %s' "${#miss[@]}" "$n" "${miss[*]}"
 	fi
