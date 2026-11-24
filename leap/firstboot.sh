@@ -8,8 +8,19 @@
 # combustion/ directory, unmounts the stick, and runs the script from the copy, so
 # everything the script reads lives under combustion/: this library, the host's files and
 # the carry-over. Every write to the root filesystem happens here or never, because the root is
-# read-only afterwards. A failed command stops the script, and Combustion then leaves the
-# image unconfigured rather than half-configured: set -e in the host's script is the point.
+# read-only afterwards.
+#
+# A FAILED RUN IS ONLY HALF UNDONE. A failed command stops the script (set -e in the host's
+# script), and Combustion rolls the new snapshot back, so /etc, the packages and the rest of
+# the snapshot are dropped. What the script wrote outside the snapshot stays: /home and
+# /usr/local, through the mounts below, /root and /var/log, which the shell binds, /var's
+# subvolume where install_tailscale_state writes, and the FAT boot partition. And a first
+# boot that stops before it is committed runs Combustion again at the next boot while its
+# config is still there, over a snapshot this script may have finished (leap/README.md
+# § What the November visit's first boots taught). So every step checks what it would
+# create and skips it when it is there, or refuses when what is there is not what it would
+# make, and running the script again finishes the box rather than stopping at the first
+# thing it finds.
 #
 # THE SHELL MOUNTS LESS THAN IT SEEMS. transactional-update's shell binds /root, /var/log
 # and a few /var paths into the new snapshot, and not /home or /usr/local: a write there
@@ -91,6 +102,34 @@ mount_subvolumes() {
 	done
 }
 
+# The one-card route (make-stick --card, leap/README.md § One card): Combustion read this
+# config from a partition on the boot disk itself, after root. kiwi's first-boot growth of
+# root stops at that partition, so make-stick grew root's partition entry instead, and
+# root's filesystem may still be the image's size, with little room for the packages. It is
+# grown here to fill its partition, before they install, through /home, which
+# mount_subvolumes has mounted writable from the same filesystem: btrfs grows the whole
+# filesystem through any writable mount of it. The route is told by the disk: a partition
+# labelled combustion on root's own disk. A stick is another disk, and root is left as kiwi
+# made it. Growing a filesystem that fills its partition already does nothing, so a second
+# run is safe. The partition itself is deleted by hand after the first boot's checks, never
+# here.
+grow_root() {
+	local rootdev rootdisk d
+	rootdev=$(findmnt -n -v -o SOURCE /)
+	[ -b "$rootdev" ] || die "cannot tell root's device: findmnt reads '$rootdev'"
+	rootdisk=$(lsblk -ndo PKNAME "$rootdev")
+	[ -n "$rootdisk" ] || die "cannot tell which disk $rootdev is on"
+	for d in $(blkid -o device -t LABEL=combustion || true); do
+		[ "$(lsblk -ndo PKNAME "$d")" = "$rootdisk" ] || continue
+		[ "$(findmnt -n -v -o SOURCE /home)" = "$rootdev" ] || die "/home is not on $rootdev, so root cannot be grown through it"
+		say "the config came from $d, on root's disk $rootdisk; growing root's filesystem"
+		btrfs filesystem resize max /home
+		say "root's filesystem is $(findmnt -n -o SIZE /home) now"
+		return 0
+	done
+	say "root is on $rootdev; the config came from another disk, so root is left as kiwi made it"
+}
+
 label_subvolumes() {
 	local policy
 	policy=$(sed -n 's/^SELINUXTYPE=//p' /etc/selinux/config)
@@ -104,7 +143,7 @@ install_tracked() {
 	path=$(sed -n 's/^# infra-path:[[:space:]]*//p' "$file")
 	name=$(sed -n 's/^# infra-name:[[:space:]]*//p' "$file")
 	mode=$(sed -n 's/^# infra-mode:[[:space:]]*//p' "$file")
-	[ -n "$path" ] && [ -n "$name" ] && [ -n "$mode" ] || die "$file has no full infra- header"
+	{ [ -n "$path" ] && [ -n "$name" ] && [ -n "$mode" ]; } || die "$file has no full infra- header"
 	if [ "$path" = /boot/efi ]; then
 		install_boot_file "$file" "$name"
 		return 0
@@ -148,17 +187,41 @@ install_pinned() {
 }
 
 # Refuses to start on a stick without the carry-over a host cannot run without, so a
-# forgotten file stops the first boot instead of leaving a box nobody can log in to.
+# forgotten file stops the first boot instead of leaving a box nobody can log in to. Any
+# further arguments are carry-over paths this host requires besides, such as the optional
+# items below, which make-stick carries only where the old system has them.
 check_carry() {
-	local host=$1 f
+	local host=$1 f key
+	shift
 	for f in shadow/root shadow/gavin gavin/authorized_keys \
-		ssh/ssh_host_ed25519_key ssh/ssh_host_ed25519_key.pub; do
+		ssh/ssh_host_ed25519_key ssh/ssh_host_ed25519_key.pub "$@"; do
 		[ -s "$stick/carry/$f" ] || die "carry/$f is missing or empty"
 	done
 	# A host with a tunnel config must carry the tunnel's credentials. A new host has
 	# neither: its tunnel is made after its first boot (make-stick --new).
 	if [ -e "$stick/host/system/cloudflared-config.yml" ]; then
 		[ -s "$stick/carry/cloudflared/$host.json" ] || die "carry/cloudflared/$host.json is missing or empty"
+	fi
+	# A host whose crypttab names a key file must carry it, or its encrypted member stays
+	# shut at boot and the array cannot mount. make-stick carries /etc/keys/data.key only.
+	if [ -e "$stick/host/system/crypttab" ]; then
+		# shellcheck disable=SC2013  # the third field alone, a path, which has no spaces in crypttab
+		for key in $(awk '!/^[[:space:]]*(#|$)/ { print $3 }' "$stick/host/system/crypttab"); do
+			case "$key" in
+			none | -) ;;
+			/etc/keys/data.key) [ -s "$stick/carry/keys/data.key" ] || die "crypttab names $key, and carry/keys/data.key is missing or empty" ;;
+			*) die "crypttab names $key; only /etc/keys/data.key is carried" ;;
+			esac
+		done
+	fi
+	# The optional items, whole where they are carried at all.
+	if [ -e "$stick/carry/root-ssh" ]; then
+		for f in root-ssh/restore root-ssh/restore.pub; do
+			[ -s "$stick/carry/$f" ] || die "carry/$f is missing or empty"
+		done
+	fi
+	if [ -e "$stick/carry/tailscale" ]; then
+		[ -s "$stick/carry/tailscale/tailscaled.state" ] || die "carry/tailscale/tailscaled.state is missing or empty"
 	fi
 	for f in shadow/root shadow/gavin; do
 		grep -q '^\$' "$stick/carry/$f" || die "carry/$f is not a password hash"
@@ -171,11 +234,33 @@ set_root_password() {
 	printf 'root:%s\n' "$(cat "$stick/carry/shadow/root")" | chpasswd -e
 }
 
-# gavin keeps his Alpine uid and gid, so files he owns on the data disks stay his.
+# A group at the gid given, made once: a second run finds it and goes on, and a group of that
+# name at another gid stops the script, since files would then belong to the wrong number.
+make_group() {
+	local name=$1 gid=$2 have
+	have=$(getent group "$name" | cut -d: -f3 || true)
+	if [ -z "$have" ]; then
+		groupadd -g "$gid" "$name"
+	elif [ "$have" != "$gid" ]; then
+		die "a $name group exists at gid $have, not $gid"
+	fi
+}
+
+# gavin keeps his Alpine uid and gid, so files he owns on the data disks stay his. A home
+# left by a failed run is kept, and is his already by number.
 make_gavin() {
-	local uid=$1 gid=$2
-	groupadd -g "$gid" gavin
-	useradd -m -u "$uid" -g gavin -s /usr/bin/fish -c gavin gavin
+	local uid=$1 gid=$2 have
+	make_group gavin "$gid"
+	have=$(id -u gavin 2>/dev/null || true)
+	if [ -z "$have" ]; then
+		if [ -d /home/gavin ]; then
+			useradd -M -u "$uid" -g gavin -s /usr/bin/fish -c gavin gavin
+		else
+			useradd -m -u "$uid" -g gavin -s /usr/bin/fish -c gavin gavin
+		fi
+	elif [ "$have" != "$uid" ]; then
+		die "a gavin user exists at uid $have, not $uid"
+	fi
 	printf 'gavin:%s\n' "$(cat "$stick/carry/shadow/gavin")" | chpasswd -e
 	install -d -m 700 -o gavin -g gavin /home/gavin/.ssh
 	install -m 600 -o gavin -g gavin "$stick/carry/gavin/authorized_keys" \
@@ -189,6 +274,77 @@ install_host_keys() {
 		install -m 600 "$f" "/etc/ssh/$(basename "$f")"
 		install -m 644 "$f.pub" "/etc/ssh/$(basename "$f").pub"
 	done
+}
+
+# Appends each line of a file to another that does not already hold that exact line, so a
+# second run adds nothing.
+append_missing() {
+	local src=$1 dest=$2 line
+	while IFS= read -r line || [ -n "$line" ]; do
+		grep -qxF -- "$line" "$dest" 2>/dev/null || printf '%s\n' "$line" >> "$dest"
+	done < "$src"
+}
+
+# The host's data entries, after the image's own root entries.
+append_fstab() {
+	append_missing "$stick/host/fstab.append" /etc/fstab
+}
+
+# The array's key file, at the path the host's crypttab names, which systemd-cryptsetup
+# reads at boot to open the encrypted member with nobody at the console. Called before the
+# fstab entries go in, so nothing that could mount the array exists without it. /etc is the
+# snapshot's, so the file lives and dies with the snapshot, and the boot's relabel labels
+# it. Root's alone: the directory 0700, the key 0400.
+install_data_key() {
+	[ -e "$stick/carry/keys/data.key" ] || return 0
+	install -d -m 700 -o root -g root /etc/keys
+	install -m 400 -o root -g root "$stick/carry/keys/data.key" /etc/keys/data.key
+}
+
+# Tailscale's state from the old system, so the host is the same node at the same tailnet
+# address and needs no new login. /var/lib/tailscale is not among the few /var paths
+# transactional-update binds into this shell (snapMount in tukit's lib/Transaction.cpp), so
+# a write there would land in the snapshot's own /var, which the real /var subvolume covers
+# at boot, as /home did before mount_subvolumes.
+# So /var's subvolume is mounted beside, under a temporary prefix, by its own fstab entry,
+# as Combustion mounts the x-initrd entries; the state is written through it and labelled
+# as /var/lib/tailscale for the policy, which is not loaded yet; and the mount goes. A
+# state already there is tailscaled's own, newer than the stick's, so a second run leaves
+# it. The simulation proves the file is there after the reboot.
+install_tailscale_state() {
+	local f=$stick/carry/tailscale/tailscaled.state t policy
+	[ -e "$f" ] || return 0
+	findmnt --fstab -n /var >/dev/null || die "/var has no fstab entry, so where Tailscale's state would survive is unknown"
+	t=$(mktemp -d)
+	mkdir "$t/var"
+	mount --target-prefix "$t" --fstab /etc/fstab /var
+	if [ -e "$t/var/lib/tailscale/tailscaled.state" ]; then
+		say "Tailscale's state is in /var already; the carried one is left out"
+	else
+		install -d -m 700 "$t/var/lib/tailscale"
+		install -m 600 "$f" "$t/var/lib/tailscale/tailscaled.state"
+		policy=$(sed -n 's/^SELINUXTYPE=//p' /etc/selinux/config)
+		setfiles -F -r "$t" "/etc/selinux/$policy/contexts/files/file_contexts" "$t/var/lib/tailscale"
+		say "installed Tailscale's state in /var/lib/tailscale"
+	fi
+	umount "$t/var"
+	rmdir "$t/var" "$t"
+}
+
+# root's key for reading this host's backups back from three, and the known_hosts lines
+# that pin three's host key (hosts/zero/system/README.md § A restore). three accepts that
+# key alone, so a new one would lock restores out. /root is bound into this shell, so both
+# persist, and label_subvolumes labels them.
+install_restore_key() {
+	local d=$stick/carry/root-ssh
+	[ -e "$d/restore" ] || return 0
+	install -d -m 700 /root/.ssh
+	install -m 600 "$d/restore" /root/.ssh/restore
+	install -m 644 "$d/restore.pub" /root/.ssh/restore.pub
+	if [ -s "$d/known_hosts" ]; then
+		[ -e /root/.ssh/known_hosts ] || install -m 600 /dev/null /root/.ssh/known_hosts
+		append_missing "$d/known_hosts" /root/.ssh/known_hosts
+	fi
 }
 
 # Tailscale's repository, trusted through the reviewed copy of its key, then every package.
@@ -243,7 +399,15 @@ install_motd() {
 # from the carry-over.
 clone_infra() {
 	local f name
-	git clone --quiet https://github.com/gsfernandes81/infra.git /home/gavin/infra
+	# A checkout already there is left as it is: a failed run's, or the finished box's, which
+	# may hold work. One with no commit is a clone that never finished, and is refused.
+	if [ -e /home/gavin/infra ]; then
+		git -c safe.directory=/home/gavin/infra -C /home/gavin/infra rev-parse -q --verify HEAD >/dev/null ||
+			die "/home/gavin/infra exists and holds no commit; move it aside"
+		say "/home/gavin/infra is a checkout already; it is left as it is"
+	else
+		git clone --quiet https://github.com/gsfernandes81/infra.git /home/gavin/infra
+	fi
 	for f in "$stick"/carry/env/*.env; do
 		[ -e "$f" ] || continue
 		name=$(basename "$f" .env)

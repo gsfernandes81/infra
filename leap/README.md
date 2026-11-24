@@ -142,20 +142,32 @@ network is up: the host's NetworkManager profile goes in there, so the network C
 brings up for the packages already uses the host's own address rather than a DHCP lease.
 Then for real, in the new system, in order: sets the clock from a plain-HTTP answer's
 `Date` header (a Pi has no clock, and HTTPS refuses certificates from the future), checks
-the carry-over, sets the hostname, installs the packages (Tailscale's from
-its own repository, openSUSE's `docker-compose` locked out, the Pi's boot firmware locked), installs `cloudflared` and
-Compose from their pinned downloads after checking each SHA-256, sets root's password,
-makes `gavin` with his old uid and gid, his password and his keys, installs the old ssh
-host keys and every file in `system/`, makes the `/media` mountpoints, appends the fstab
-entries, enables the units, masks the update timer, turns off the reboot strategy, keeps
-sshd, the network, `cloudflared`, `tailscaled` and logins up in rescue mode, clones this
-repository into `~gavin/infra` with each deployment's `.env`, and leaves the volume tar
-files in `/root/volumes` for the runbook to restore once Docker runs.
+the carry-over, grows root's filesystem when the config came from the card itself (§ One
+card), sets the hostname, installs the packages (Tailscale's from its own repository,
+openSUSE's `docker-compose` locked out, the Pi's boot firmware locked), installs
+`cloudflared` and Compose from their pinned downloads after checking each SHA-256, sets
+root's password, makes `gavin` with his old uid and gid, his password and his keys,
+installs the old ssh host keys and every file in `system/`, makes the `/media`
+mountpoints, appends the fstab entries, enables the units, masks the update timer, turns
+off the reboot strategy, keeps sshd, the network, `cloudflared`, `tailscaled` and logins
+up in rescue mode, clones this repository into `~gavin/infra` with each deployment's
+`.env`, and leaves the volume tar files in `/root/volumes` for the runbook to restore once
+Docker runs. For the optional carry-over, `firstboot.sh` has a step each, which a host's
+script calls when its stick carries the item: `install_data_key`, before the fstab
+entries; `install_tailscale_state`, which writes through `/var`'s own subvolume, since
+the shell Combustion runs in does not bind `/var/lib/tailscale`; and
+`install_restore_key`. `check_carry` takes the items a host requires as arguments.
 
-A failed step stops the script, and Combustion then leaves the image unconfigured rather
-than half-configured. Everything the script prints is also kept in
-`/var/log/infra-firstboot.log`, which survives a failed run: with no screen to hand, a raw
-search of the card for `firstboot:` reads it.
+A failed step stops the script, and Combustion then rolls back the new snapshot: `/etc`,
+the packages and everything else in it are gone. What the script wrote outside the
+snapshot stays: `/home`, `/usr/local`, `/root`, `/var` and the FAT boot partition.
+Combustion runs the script again at the next boot while its config is there, and that run
+meets the half-written state, or, after the relabel trap below, a finished snapshot. So
+each step checks what it would create and skips it when it is there: the groups, the
+users, the clone, each fstab line and Tailscale's state. A group or user of the same name
+but another id stops the script rather than being used. Everything the script prints is
+also kept in `/var/log/infra-firstboot.log`, which survives a failed run: with no screen
+to hand, a raw search of the card for `firstboot:` reads it.
 
 **If the first boot never answers ssh** (it answers ping on its address, but port 22 is
 refused): the script stopped. Read its log off the card on `two`, through the card reader
