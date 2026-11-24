@@ -15,8 +15,8 @@ Phase 12 in `docs/management-plane.md`, ordered after 10 and 11.
 ## The owner's calls, 2026-11-20
 
 1. **The day:** the owner is at `zero` with two things ready, a new SD card with Leap and
-   a USB stick for Combustion. They boot `zero` from the new card, finish over ssh, and
-   it is done.
+   a USB stick for Combustion. They boot `zero` from the new card, finish over ssh, and it
+   is done.
 2. **The way back** is the Alpine card, untouched. So the move writes nothing the Alpine
    system cannot read on its next boot.
 3. **Go or no-go is decided when it is ready.** A no-go is acceptable, and nothing is
@@ -36,6 +36,9 @@ Phase 12 in `docs/management-plane.md`, ordered after 10 and 11.
 10. **Syncthing is reachable on the LAN:** firewalld lets its ports through.
 11. **A bench boot first,** of a minimal image the owner can ssh into and test.
 12. **Build 3.17** of the Pi image.
+13. **snapper runs natively over D-Bus** (2026-11-24): `immich` joins Leap's
+    `SNAPPER_CONFIGS` and Leap's own timers take the snapshots. Set aside: `--no-dbus`
+    from an own timer, as `three` runs it, which has no case on `zero` (§ *snapper*).
 
 ## What `zero` has that `one` and `three` did not
 
@@ -134,8 +137,8 @@ directory is `hosts/zero/leap/`, laid out as `one`'s.
 | `cloudflared`, `cloudflared-config.yml` | `one`'s `cloudflared.service`, pinned binary, `--no-autoupdate`; the config's body unchanged apart from stale comments |
 | `sshd-infra.conf` | `one`'s, with `KbdInteractiveAuthentication no` |
 | `tailscaled` | Tailscale's repo package (`one`'s `tailscale.repo`) and its unit, with the carried state |
-| `snapper-config-immich` | its header, and its comment saying Leap's timers take over |
-| `snapper-sysconfig`, `snapper-immich` | `snapper --no-dbus` with `immich` kept out of `SNAPPER_CONFIGS`, as `three` runs it (*agent's call*), from a new hourly service and timer: create then cleanup, with `RequiresMountsFor=/media/immich`. `three`'s own snapshot fires after its daily pull, not on a timer, so the timer is new. One snapper pattern on the fleet, hourly cleanup kept, and the mount check kept. Leap's own timers would clean up daily and lose the check. `snapper-sysconfig` stays on Alpine |
+| `snapper-config-immich` | unchanged apart from its header and its line about Alpine's scripts sourcing it |
+| `snapper-sysconfig`, `snapper-immich` | nothing: `combustion/script` adds `immich` to Leap's `/etc/sysconfig/snapper` and enables `snapper-timeline.timer` and `snapper-cleanup.timer` (§ *snapper*). Both files stay on Alpine |
 | `sudoers-backup`, `backup-authorized-keys` | `/bin/setpriv` becomes `/usr/bin/setpriv` in both, in the same commit, as `three`'s `sudoers-restore` and `restore-authorized-keys` have it |
 | `rsyncd-backup.conf` | unchanged apart from its header |
 | `backup-age-check` | stays on Alpine, not installed |
@@ -145,6 +148,27 @@ directory is `hosts/zero/leap/`, laid out as `one`'s.
 | none | `volumes`: `pearl-wallet_wallet` |
 | none | firewalld: `firewall-offline-cmd --add-service=syncthing` in `combustion/script`, as `three`'s has it (22000 tcp and udp, 21027 udp) |
 | none | `MOVED`, committed on the day once `zero` answers |
+
+**snapper** (the owner's call 13). `three` uses `--no-dbus` because its snapshot follows a
+pull, not a timeline, so Leap's timers have no part in it. `zero`'s snapshots are a plain
+hourly timeline, which is what Leap's timers do. Three consequences, none a reason
+against:
+
+- **Cleanup is daily**, not hourly, so up to a day of extra hourly snapshots exists before
+  it runs. That costs little on a filesystem where snapshots share blocks, and it widens
+  the window `three`'s pull has before a snapshot goes (phase 11's `TIMELINE_LIMIT_HOURLY`
+  watch).
+- **No mount check.** With the array missing, `/media/immich` is a bare directory on the
+  read-only root, so the timeline run for `immich` fails and writes nothing. Root's config
+  is unaffected.
+- **SELinux is the one unknown.** Over D-Bus, snapshots are made by `snapperd` in its own
+  confined domain, on a mount labelled `container_file_t`. Nothing on this fleet has run
+  that: `three`'s snapper runs from its own unit, outside `snapperd`. The simulation runs
+  enforcing and checks for a snapshot and for no denial. If `snapperd` is refused, the
+  owner is told, and the fallback is `--no-dbus` from an own timer.
+
+The script never runs `snapper create-config`: `.snapshots` exists on the array as
+subvolume 284, and its numbering continues.
 
 **The recreate puzzle** (`server-deploy-compose.yml` planning to recreate Immich and
 Syncthing on Alpine, under *Open items*) does not block the move: Leap starts with an
@@ -237,10 +261,11 @@ keeps `make-bcache` and `cryptsetup` off the runner (*agent's call*).
 **The checks:** both bcache devices attached and writethrough; `data-4` open with no
 password prompt; btrfs with two devices; each mount by subvolid with `context=`; Docker on
 the new store; swap on the SSD; gavin at 1001; the `backup` user, its forced command run
-end to end with an `rsync` listing of the `snapshots` module; snapper's timer taking a
-snapshot; Tailscale's state file present after the reboot; no `security.selinux` xattr
-written to a file on the array, so the Alpine card reads the array as it left it; a
-pearl-wallet volume restored; the deploy play's plan for Immich and Syncthing.
+end to end with an `rsync` listing of the `snapshots` module; `snapper-timeline` taking a
+snapshot of `immich` through `snapperd`, with SELinux enforcing and no denial logged;
+Tailscale's state file present after the reboot; no `security.selinux` xattr written to a
+file on the array, so the Alpine card reads the array as it left it; a pearl-wallet volume
+restored; the deploy play's plan for Immich and Syncthing.
 
 **And the failures:** a boot with the key file missing, and one with a backing disk
 missing, to record what the box does. The first-boot relabel trap predicts emergency mode
