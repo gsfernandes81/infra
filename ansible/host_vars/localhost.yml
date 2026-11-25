@@ -1,5 +1,6 @@
 ---
-# The control node is Termux, and two of Ansible's defaults are wrong there.
+# One control node is Termux, and two of Ansible's defaults are wrong there. Both values
+# below are also right on the laptop's WSL.
 #
 # 1. `~` does not expand to $HOME. Android's passwd entry for an app uid reports a home
 #    of /data, which is not writable, so the default remote_tmp of ~/.ansible/tmp becomes

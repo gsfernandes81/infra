@@ -29,12 +29,12 @@ order they run.
 | ~~8~~ | ~~`two` as the scheduled read-only control node~~ | | | dropped 2026-10-25 → `decisions.md` (no control node inside the fleet) |
 | ~~5~~ | ~~Dev hub: one compose file, the hub, its sidecar tunnel~~ | | | done 2026-10-27 → `decisions.md` § *Dev containers: one compose file*; what is left is under *Open items: dev* |
 | ~~9~~ | ~~The November visit: `one` and `three` on Leap, `zero`'s encrypted disk swap, the daily pull~~ | | | done 2026-11-20 → [`plans/visit-runbook.md`](../plans/visit-runbook.md) § *What the visit did*; the remainder is phase 11 |
-| 10 | **The dev hub moves from `zero` to `one`.** Docker as it is, no pool; `zero`'s copy removed after about three days | `zero`, `one` | nothing | In progress: the switch merged with PR #24; `zero`'s copy goes from about 2026-11-23 ([`docs/handoff/2026-11-20-zero-after-the-hub.md`](handoff/2026-11-20-zero-after-the-hub.md) § 1) |
+| ~~10~~ | ~~The dev hub moves from `zero` to `one`~~ | | | done 2026-11-24 → `decisions.md` § *The dev hub runs on `one`* |
 | 11 | **The backup proven.** Slice 4: the whole tree compared through the restore module, Immich's database started from `three`'s copy, `syncthing-three`'s login, a lock and an unlock. Then `zero`'s old `media-immich-data` and `media-immich-db` deleted (measured first), PR #22's change list (in [`plans/three-backup-pull.md`](../plans/three-backup-pull.md)) merged or closed, and a watch on `TIMELINE_LIMIT_HOURLY`: hourly snapshots are kept 24 hours, so a pull from Singapore longer than that meets snapper's cleanup; raise it to 48 if one does | `three`, `zero` | nothing; runs over the tailnet | Open: [`plans/visit-runbook.md`](../plans/visit-runbook.md) § *Slice 4* |
 | 12 | **`zero` to Leap 16.1 Immutable**, its own design. Before it: the first boots' lessons ([`leap/README.md`](../leap/README.md) § *What the November visit's first boots taught*), the first-boot script made safe to re-run, `leap/README.md` and `firstboot.sh` no longer overstating the rollback (writes to `/home`, `/usr/local`, `/root` and `/var` survive a failed run), bcache and the LUKS member assembling on Leap, `RequiresMountsFor=` guards for Immich, subvolume ids recorded, the recreate puzzle answered (open items), and maybe Combustion's config on a partition of the card itself. Slice 4 runs again after | `zero` | nothing since Leap's Pi 4 proof (`decisions.md`); ordered after 10 and 11 | Open: the owner is at the box on the day (2026-11-20). Design approved 2026-11-24 ([`plans/zero-leap.md`](../plans/zero-leap.md)); the repo work is built on the branch `zero-leap` meanwhile. The move waits until the owner is back from Singapore (owner, 2026-11-21) |
 | 13 | **Rootless podman on `one`**: declared memory limits proven to bind, the dev build key under podman, the dev containers' autostart, the `containers.podman` collection. Was 7 | `one` | 10 settled | Open. Notes below |
 | 14 | **Fleet monitoring: a dead man's switch**, designed first. Covers `three`'s daily pull (its alert was deferred here), garmin-mcp's login lapsing, host uptime, "`zero` rebooted while you were away", and with uptime known, the gated `server-update-cloudflared.yml` becomes usable. Candidates: a prebuilt mesh (the owner's direction), the Worker with cron and email (proposed 2026-10-25: `gsrpi.uk` already has Email Routing, and a Worker's `send_email` binding reaches the owner's verified inbox; garmin-mcp's probe runs on `one` inside its own compose project, over the compose network, and posts to the Worker behind a service token; the signal must be a real Garmin call, `tools/call get_full_name`, or a scheduled restart plus `/readyz`), `two`'s lifeboat job ([`roadmap.md`](roadmap.md) §5) | fleet | nothing | Open |
-| 15 | **Vault**: `torrents`' VPN login, each host's tunnel credentials file, the dev containers' secrets. Not in Vault, by design: the Cloudflare API token (one per machine), Access service tokens (one per client), anything that rotates as it is used, and Immich's database password, which root on `zero` can reset and whose dumps restore under any password. Was 4 | `one`, all hosts, dev | nothing | Open. Mechanism: `decisions.md` § *From the management plane* |
+| 15 | **Secrets: deferred, no mechanism chosen.** Ansible Vault, SOPS with age and the rest are all open. Nothing the fleet holds is lost for want of a store: the only secrets that cannot be regenerated are the two LUKS passphrases, both in Proton Pass. What a store would buy is a move that is the same for every stack. Was 4 | fleet | nothing | Deferred 2026-11-25: `decisions.md` § *Secrets wait, with no mechanism chosen* |
 | 16 | **`zero`'s encryption protection on**: prove the passphrase on keyslot 1, take `data-4` out of `hosts/zero/system/dmcrypt`, `luksKillSlot <device> 0`; from then on every boot leaves the array closed until the owner opens it over ssh. Any older header backup destroyed and a new one taken | `zero` | phase 12's proof that Immich recovers by itself once a late array mounts (`plans/zero-leap.md` § *A late or missing array*), and 14, so a reboot while away is noticed | Open: `decisions.md` § *`zero`'s encrypted member*; [`roadmap.md`](roadmap.md) §4 |
 | 17 | **Podman on `zero`**, once `one` has answered the two questions in *Notes for the phases ahead* | `zero` | 12, 13, 14 | Open |
 
@@ -76,7 +76,7 @@ One line each; each says where its detail is. Struck when closed, deleted at the
 - `dev-smoke` runs Compose v2.38, not the fleet's v5.6.1.
 - Each base bump rebuilds all nine images; needs a design decision first.
 - A container cannot report which base tag it runs: an `/etc/dev-base-version` next time the base is touched.
-- [`plans/dev-pool.md`](../plans/dev-pool.md) step 1 is written for `zero`'s OpenRC, and the hub moves to `one` with no pool: re-scope it as a systemd slice on `one`, or delete it (the owner's call).
+- [`plans/dev-pool.md`](../plans/dev-pool.md) step 1 is written for `zero`'s OpenRC, and the hub moved to `one` with no pool: re-scope it as a systemd slice on `one`, or delete it (the owner's call; phase 13's design, since podman on `one` is where a slice would bind). Either way `hosts/zero/system/devpool`, written and never installed, goes with its row and section in `hosts/zero/system/README.md`, and the references in `dev/README.md`, `dev/.env.example`, `dev/compose.yaml`, `dev/status.sh` and `dev-smoke.yml` are repointed at whatever replaces it.
 
 **Cloudflare**
 - The `Restricted` and `or3-dev` Access applications, carried from the visit's handoff unexamined.
@@ -126,13 +126,14 @@ and why there is no identity provider: `decisions.md` § *From the management pl
 - ~~Claude dev containers stay in their own app repos.~~ Every dev container is now in one
   `dev/compose.yaml` here (`decisions.md` § *Dev containers: one compose file*).
 - **`gavin` is not in the `docker` group, and nothing privileged runs from an agent
-  session.** Playbooks are run by a person, from the phone, in their own terminal.
+  session.** Playbooks are run by a person, from the phone or the laptop, in their own terminal.
 
 ### A control node inside the fleet: no
 
 The owner's call, 2026-10-25: `infra` stays a development container with no route to the
-fleet, and the phone is the only control node. The argument, and what would change it, is
-in `decisions.md` § *From the management plane*.
+fleet. The argument, and what would change it, is in `decisions.md` § *From the management
+plane*. The control nodes are the phone and the laptop (`decisions.md` § *Two control
+nodes*).
 
 ## Placement
 

@@ -1,25 +1,26 @@
 # Ansible
 
-## RUN THESE FROM THE CONTROL NODE, WHICH IS THE PHONE
+## RUN THESE FROM A CONTROL NODE: THE PHONE OR THE LAPTOP
 
 **There is no `ansible` on `zero`, `one` or `two`, and there should not be** — they are
-the boxes being managed. Every command in this file is typed in Termux. `fish: Unknown
-command: ansible-playbook` on a Pi means you are on the wrong machine, not that something
-is missing from it.
+the boxes being managed. Every command in this file is typed on a control node: Termux on
+the phone, or WSL on the laptop. `fish: Unknown command: ansible-playbook` on a Pi means
+you are on the wrong machine, not that something is missing from it. Ansible has no
+locking, so a play that changes a box runs from one of the two at a time, never both
+(`../docs/decisions.md` § *Two control nodes*).
 
 **The `client-` plays are the exception, and only because they target the client.**
 `client-home-ssh-config.yml` writes `~/.ssh/config` on whatever machine runs it and
 reaches no host at all. `client-home-claude-remote.yml` likewise installs one binary
 there, and `client-home-emacs.yml` sets up Emacs there. Each is run wherever that client
 is: the phone, or WSL on the laptop, where one run of the ssh play also configures
-Windows. See *The laptop is two clients* below. That is not a second control plane: it
-cannot touch a Pi.
+Windows. See *The laptop is two clients* below. These plays reach no Pi.
 
 The design and the reasoning are in
 [`../docs/management-plane.md`](../docs/management-plane.md); this file is how to run it.
 
 ```sh
-# in Termux
+# in Termux or WSL
 cd ~/infra/ansible
 # transport works
 ansible fleet -m ping

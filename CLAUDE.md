@@ -8,13 +8,14 @@ no secrets, no data.** Alpine + OpenRC on all three today; `one` and `zero` are 
 for openSUSE MicroOS. Docker Compose on `one`/`zero`, `podman-compose` on `two`, Ansible
 as the management plane, and a handful of Python tools in `bin/`.
 
-> **Two places this repo is worked on, and neither can touch the fleet from an agent
-> session.** The owner's **phone (Termux)** is the control node — the only machine with a
-> route to every box, and the only one on a metered connection. **The `infra` container**
+> **Where this repo is worked on, and none of it can touch the fleet from an agent
+> session.** The owner's two **control nodes**, the **phone (Termux)** and the **laptop
+> (WSL)**, are the machines with a route to every box; the phone is on a metered
+> connection (`docs/decisions.md` § *Two control nodes*). **The `infra` container**
 > on `one` (on `zero` until 2026-11-20; `infra-dev` until 2026-10-27; every dev container
 > is now named for its repo) is
 > where Claude usually runs: free data, `git`/`gh`/`ansible` present, **no route to `zero`, `one` or `two` by decision** (`docs/management-plane.md`
-> § *A control node inside the fleet*). In both, `gavin` is not in the `docker` group and
+> § *A control node inside the fleet*). In each, `gavin` is not in the `docker` group and
 > `sudo` wants a password. Anything that changes a box is **handed over**, not run — see
 > *Privileged commands*.
 

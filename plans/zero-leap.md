@@ -271,8 +271,9 @@ visit kept the stick because this was untried (2026-11-04).
 
 ## The bench boot
 
-A spare SD card with the pinned build and a minimal Combustion config, booted on `zero` with
-the Alpine card out, to prove the Pi 5 boots the image and reaches the LAN before the day.
+A spare SD card with the pinned build and a minimal Combustion config, booted on `zero`
+with the Alpine card out, to prove the Pi 5 boots the image and reaches the LAN before the
+day.
 
 - **The config:** `leap/make-stick --bench --card` (§ *One card*) writes only a script
   that installs gavin's `authorized_keys` and password hash, a sudo rule that asks for
@@ -291,8 +292,8 @@ the Alpine card out, to prove the Pi 5 boots the image and reaches the LAN befor
   `dmesg`, health-checker's state and deleting the partition need `sudo`.
 - **After it:** power off, the Alpine card back in. The spare card is erased whole and
   flashed again for the day, since Combustion runs on a first boot only, and a new image
-  leaves the card's last 256 MB, with gavin's hash in it, as they were. `zero`'s services are down for the
-  length of the bench boot.
+  leaves the card's last 256 MB, with gavin's hash in it, as they were. `zero`'s services
+  are down for the length of the bench boot.
 
 ## The simulation
 
