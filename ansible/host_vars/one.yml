@@ -2,3 +2,17 @@
 extra_packages:
   - docker
   - docker-cli-compose
+
+# ── for server-setup-leap.yml, only where one differs (group_vars/leap.yml) ──
+# The address in one's tracked profile, hosts/one/leap/system/wired.nmconnection. A run that
+# came in on another address, a fresh box's DHCP one, reconnects here after the reboot that
+# brings the profile in.
+leap_static_address: 192.168.86.101
+
+# The dev stack runs as uid and gid 1001 on every host, and gavin is 1000 here, so the plays
+# that write its secrets (group 1001, 0640) can only do it as a member of that group
+# (docs/decisions.md § The dev stack runs as 1001 on every host).
+leap_groups:
+  - name: devstack
+    gid: 1001
+    members: [gavin]

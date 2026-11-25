@@ -33,10 +33,11 @@ The routine is the same for both; a dead card's host comes back with a new ident
 3. Boot the Pi. Combustion sets its identity and puts the carried secrets in place. It
    needs no network.
 4. Run one play from the control node. It installs the package list, the tracked files and
-   the rest, and reboots the Pi once, after asking.
-5. Only if the host's disks are new: make the filesystems by hand, once the play's reboot
-   has brought `cryptsetup` and `bcache-tools`, then run the play again. Disks that
-   already hold the array need nothing: the play's reboot mounts them.
+   the rest, and reboots the Pi twice, asking before each: once into the packages, once
+   for the rest (item 7 below says why).
+5. Only if the host's disks are new: make the filesystems by hand, once the play's first
+   reboot has brought `cryptsetup` and `bcache-tools`, then run the play again. Disks that
+   already hold the array need nothing: the play's second reboot mounts them.
 6. For a new host, or one back from a dead card: its tunnel
    (`server-create-host-tunnel.yml`) and its tailnet join, as today. A host
    moved from a working old system carries both.
@@ -157,10 +158,14 @@ custom modules, no layers of includes.
    `leap_system_users` (a list of name, shell, comment and home), `leap_groups` (name,
    gid and members), `leap_firewalld_services`, `leap_snapper_configs` and
    `leap_extra_units_enabled`.
-7. **One reboot, only if something changed** that needs it: a package install makes a new
-   snapshot, and the static address and the array's fstab and crypttab entries take effect
-   at boot. **It asks first, every time**, showing what is running, as
-   `server-update-leap.yml` does. Health-checker rolls back a boot that fails.
+7. **Two reboots on a fresh Pi, and none or one on a running host**, each only if
+   something changed that needs it. A transactional-update install is usable only after
+   a reboot, and the stock image likely has no python3 or git, so the play installs the
+   packages first, over plain ssh, and reboots into them before anything else. The static
+   address and the array's fstab and crypttab entries then take effect at the second
+   boot. (Corrected 2026-11-25 while building the play; the design said one reboot.)
+   **It asks first, every time**, showing what is running, as `server-update-leap.yml`
+   does. Health-checker rolls back a boot that fails.
    - **The restart rule** (the owner's call, 2026-11-25). The play restarts a service
      whose tracked file it changed, except `sshd`, `NetworkManager`, `cloudflared`,
      `tailscaled` and `docker`, which take effect at the reboot it asks about. The

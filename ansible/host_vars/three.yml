@@ -5,3 +5,41 @@
 unlock_volumes:
   - name: backup
     mount: /media/backup
+
+# ── for server-setup-leap.yml, only where three differs (group_vars/leap.yml) ─
+# The address in three's tracked UK profile, hosts/three/leap/system/wired.nmconnection. A
+# run that came in on another address, a fresh box's DHCP one, reconnects here after the
+# reboot that brings the profile in.
+leap_static_address: 192.168.86.103
+
+# Two users for zero's backup (plans/three-backup-pull.md). `backup` pulls it: systemd runs
+# backup-pull as this user, which owns the copy and nothing else, so whatever zero sends is
+# parsed without privilege. It never logs in, so no shell; its key to zero is made on the
+# box by the owner. `restore` lets zero read its own backups back, by one authorized_keys
+# line whose forced command starts a read-only rsync daemon: a real shell, because sshd runs
+# a forced command through the user's shell, and the key's restrictions keep it from being
+# used as one. Neither has a password. Both homes, and the .ssh in each, are root's at 0755,
+# so neither user can change its keys, its ssh config or the host key it trusts. A user of
+# either name the play did not make, one the image brought, stops the play.
+leap_system_users:
+  - name: backup
+    shell: /usr/sbin/nologin
+    comment: pulls zero's backup
+    home: /home/backup
+  - name: restore
+    shell: /bin/bash
+    comment: zero's read-only restores
+    home: /home/restore
+
+# The Argon EON's fan, from the CPU's temperature. Without the I2C bus extraconfig.txt turns
+# on at the next power-on, it waits and retries, running rather than failed.
+leap_extra_units_enabled:
+  - argon-fan.service
+
+# Syncthing's sync and discovery ports, for devices on the same network as three; its GUI
+# stays on 127.0.0.1. firewalld is on in Leap and allows only ssh and DHCPv6 otherwise.
+leap_firewalld_services:
+  - syncthing
+
+# No leap_snapper_configs: received-immich is in no SNAPPER_CONFIGS on purpose, so neither
+# snapperd nor Leap's timers know it (decisions.md § The pull, as built).

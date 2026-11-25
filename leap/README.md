@@ -191,6 +191,11 @@ sudo sh -c "setsid nohup sh -c 'dd if=/dev/sdX2 bs=4M count=1536 2>/dev/null | s
 
 `cat ~/firstboot-lines.txt` once its last line says `done`; the `STOPPED` line says why.
 
+**Then the play.** Once the box answers ssh, `ansible/playbooks/server-setup-leap.yml`
+does the rest from the control node, over the LAN through `one` (through `two` when the
+box is `one`); its header has the command. It asks before each of the two reboots a fresh
+Pi takes, and reconnects at the static address after the second.
+
 ## What it does not do
 
 It does not join the tailnet, which needs the owner's login (`sudo tailscale up

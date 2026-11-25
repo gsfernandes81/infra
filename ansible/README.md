@@ -63,12 +63,13 @@ control node. A leading **`_`** is a half that one of these imports — not a th
 | delete an Alpine Pi's old tunnel — **irreversible** | `server-delete-tunnel.yml -e target=<host> -K` | sudo, the API token |
 | retire the dev containers' old tunnels (infra-dev, dd-dev, ds-dev whole; or3-dev's tunnel only) — **irreversible**, a plan and y/N first | `server-retire-dev-tunnels.yml` · `--check` stops at the plan | the API token |
 | unlock and mount every encrypted volume a host lists in `unlock_volumes` (`host_vars/`; `three`'s array today): reads each, asks once per locked volume without echoing, naming the volume and the host, and **Enter alone leaves that one locked**. The passphrase reaches the box on stdin only, where `systemd-cryptsetup@<name>.service` takes it as from the manual unlock, so the README's lock command works after. A wrong passphrase is reported and the play goes on; it ends with one line per host and volume: already open, unlocked, left locked with no passphrase given, failed and why, or unreachable. A missing or wrong sudo password stops a host at its sudo check, before any prompt for it. Run it from a terminal: without one every prompt reads as empty. systemd only so far; tested in CI against a Leap VM (`sim/microos/`) | `server-unlock-arrays.yml -K` · `-l <host>` · `--check` reads and asks nothing | sudo, and each passphrase |
+| set up a Leap Pi after Combustion's offline first boot, or put back what drifted on one: the one package list in `group_vars/leap.yml` in one snapshot with Tailscale's repository, the locks and the `/media` mountpoints, then a reboot into it (over plain ssh, since a fresh image may have no python); a report of packages on no list, never a removal; the `leap/pins` binaries; the checkout, and the `.env` files and secrets Combustion staged in `/root/carry`; the host's groups and users; the tracked `/etc` files through `server-install-system-files.yml`; `fstab.append`, the units, firewalld, snapper and the motd; a restart of each running service whose file changed, except `sshd`, `NetworkManager`, `cloudflared`, `tailscaled` and `docker`; a reboot only if one of those, the profile, crypttab, fstab or a waiting snapshot needs it, asking first; then the ways in the host has. A fresh Pi reboots twice, and is reached over the LAN through another box | `server-setup-leap.yml -e target=<host> -K` · a fresh Pi: `-e ansible_host=<its DHCP address> -e 'ansible_ssh_common_args=-J one -o HostKeyAlias=<host>'` (`-J two` for `one`) · `--check` on a host already set up · `-e confirm=yes` answers both questions | sudo; refuses a host outside the `leap` group, one without `hosts/<host>/leap/MOVED`, and one that is not Leap |
 | update a Leap host: `transactional-update`, the `cloudflared` and Compose pins from `leap/pins` (keeping the previous), the update recipes for logins, a reboot, then done only once the tunnel serves and the tailnet reaches `tailnet_peer` (`zero`, or `three` from `zero`); asks before the reboot, reports what a lock held back and the Compose openSUSE offers | `server-update-leap.yml -e target=<host> -K` · `--check` reads and changes nothing | sudo; refuses a host that is not Leap |
 | update cloudflared on a Pi, deliberately | `server-update-cloudflared.yml -e target=<host> -e version=… -e sha256=… -K` | sudo; refuses while that host autoupdates, which today is all of them |
 
 **Three ways a play picks its host, each on purpose.** A play that changes one host at a time
-(the tunnel plays, the cloudflared and Leap updates, and the three setup plays) is aimed
-with `-e target=<host>`; its `hosts:` is that variable, so leaving it out falls back to
+(the tunnel plays, the cloudflared and Leap updates, the Leap setup, and the three setup
+plays) is aimed with `-e target=<host>`; its `hosts:` is that variable, so leaving it out falls back to
 `one` (or refuses, for the updates and the setup
 plays) and can never widen to the whole fleet. A fleet-wide play (packages, system files,
 the inventory, the unlock) runs on `fleet` and is narrowed with `-l <host>`. A deployment play
@@ -390,7 +391,8 @@ as above. A token that was ever on screen in a shared place is one to roll, not 
 | `inventory` | deliberately thin — `~/.ssh/config` owns the transport |
 | `group_vars/all.yml` | the fleet inventory's path, `dns_zone` and each box's tailnet address; applies to `localhost` too |
 | `group_vars/fleet.yml` | the container CLI, the packages, and the Tailscale pin for Alpine hosts |
-| `host_vars/` | five files: the three Alpine hosts' container runtimes, `three`'s volumes to unlock, and `localhost.yml`'s Termux fixes — see below |
+| `group_vars/leap.yml` | every Leap Pi's one package list, its locks, and the units every Leap Pi enables, masks and keeps in rescue mode |
+| `host_vars/` | five files: the three Alpine hosts' container runtimes, `three`'s volumes to unlock, what `one` and `three` add to a Leap Pi's setup, and `localhost.yml`'s Termux fixes — see below |
 | `playbooks/` | the ones above; `_assert-inventory.yml` is imported, never run |
 | `playbooks/client-home-ssh-config.yml` | the dev-container registry lives in its header |
 | `templates/` | the report, the two ssh blocks, and the Windows ProxyCommand wrapper |
@@ -500,11 +502,15 @@ nothing and print a clean report. A read is safe in check mode by definition.
 ## What is in `host_vars/`, and what is deliberately not
 
 It holds five files: `zero.yml`, `one.yml` and `two.yml`, each
-naming that host's container runtime and nothing else; `three.yml`, naming the encrypted
+naming that host's container runtime; `three.yml`, naming the encrypted
 volumes `server-unlock-arrays.yml` unlocks there, a crypttab name and a mount point each,
 which are the host's own and nobody else's; and `localhost.yml`, which carries
 the two Ansible defaults that are wrong on Termux (`~` is not `$HOME` there, and there is
 no `/usr/bin/python3`). `zero`'s volumes join its file when the play has an OpenRC branch.
+`one.yml` and `three.yml` also carry what `server-setup-leap.yml` sets up there and on no
+other Leap Pi: each one's static address, `one`'s `devstack` group, and `three`'s backup
+users, fan unit and Syncthing ports in firewalld. The package list is one list, in
+`group_vars/leap.yml`.
 
 **The reason it was described as empty is still true and is the useful part:** per-host
 values are for when one deployment needs different ones on different hosts, and **no

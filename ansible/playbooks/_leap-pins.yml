@@ -1,0 +1,144 @@
+---
+# NOT A PLAYBOOK YOU RUN. Imported, with import_tasks, by the two plays that put leap/pins
+# on a Leap host: server-update-leap.yml, which moves a running host to the pins, and
+# server-setup-leap.yml, which gives a new one its first. Moved here from the update play on
+# 2026-11-25 unchanged, so both install the same way: download from the release, install
+# only on a SHA-256 match, keep the binary it replaces, prove cloudflared, and put the
+# previous back if the proof fails.
+#
+# Takes, from the play that imports it:
+#   pins                    leap/pins as a dict
+#   cloudflared_bin, cloudflared_previous, compose_bin, compose_previous
+#                           where each binary lives, and where its previous is kept
+#   upd_was                 what is installed now: arch, cloudflared, compose (empty if
+#                           missing), as the update play's read leaves it
+#   upd_asset               the release asset names for this architecture
+#   upd_cfd_moves, upd_compose_moves
+#                           whether each binary is off its pin
+#   pins_untouched          the last sentence of the stop message, saying what the importing
+#                           play has left waiting
+# Leaves:  upd_cfd_get, upd_compose_get, upd_proof
+#
+# The names keep the update play's upd_ prefix, which they had before the move; the setup
+# play sets the same ones.
+
+# A two-minute timeout and up to four tries: get_url's own 10 s ended a simulated run when
+# GitHub was slow to answer, and a Pi's line can be slower. Not under --check, which
+# touches no network and reports the move it would make.
+- name: "If cloudflared is off its pin: download it"
+  ansible.builtin.get_url:
+    url: "https://github.com/cloudflare/cloudflared/releases/download/{{ pins.cloudflared_version }}/cloudflared-linux-{{ upd_asset.cloudflared }}"
+    dest: /var/tmp/infra-cloudflared
+    checksum: "sha256:{{ pins['cloudflared_sha256_' ~ upd_was.arch] }}"
+    mode: "0755"
+    force: true
+    timeout: 120
+  register: upd_cfd_get
+  until: upd_cfd_get is succeeded
+  retries: 3
+  delay: 15
+  when: upd_cfd_moves | bool and not ansible_check_mode
+  become: true
+
+- name: "If cloudflared moves: keep the current as previous"
+  ansible.builtin.copy:
+    src: "{{ cloudflared_bin }}"
+    dest: "{{ cloudflared_previous }}"
+    remote_src: true
+    mode: "0755"
+  when: upd_cfd_moves | bool and upd_was.cloudflared != ''
+  become: true
+
+- name: "If cloudflared moves: install the pinned binary"
+  ansible.builtin.copy:
+    src: /var/tmp/infra-cloudflared
+    dest: "{{ cloudflared_bin }}"
+    remote_src: true
+    mode: "0755"
+  when: upd_cfd_moves | bool and not ansible_check_mode
+  become: true
+
+- name: "If Compose is off its pin: download it"
+  ansible.builtin.get_url:
+    url: "https://github.com/docker/compose/releases/download/v{{ pins.compose_version }}/docker-compose-linux-{{ upd_asset.compose }}"
+    dest: /var/tmp/infra-docker-compose
+    checksum: "sha256:{{ pins['compose_sha256_' ~ upd_was.arch] }}"
+    mode: "0755"
+    force: true
+    timeout: 120
+  register: upd_compose_get
+  until: upd_compose_get is succeeded
+  retries: 3
+  delay: 15
+  when: upd_compose_moves | bool and not ansible_check_mode
+  become: true
+
+- name: "If Compose moves: keep the current as previous"
+  ansible.builtin.copy:
+    src: "{{ compose_bin }}"
+    dest: "{{ compose_previous }}"
+    remote_src: true
+    mode: "0755"
+  when: upd_compose_moves | bool and upd_was.compose != ''
+  become: true
+
+- name: "If Compose moves: install the pinned binary"
+  ansible.builtin.copy:
+    src: /var/tmp/infra-docker-compose
+    dest: "{{ compose_bin }}"
+    remote_src: true
+    mode: "0755"
+  when: upd_compose_moves | bool and not ansible_check_mode
+  become: true
+
+- name: Remove the downloads
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: [/var/tmp/infra-cloudflared, /var/tmp/infra-docker-compose]
+  become: true
+
+# The reboot restarts the tunnel this play may have come in by, so the binary it will
+# start is proved first (CLAUDE.md § Changing the thing you are connected through).
+- name: Prove the new cloudflared before the reboot
+  when: not ansible_check_mode
+  block:
+    - name: Run the installed cloudflared, and validate the tunnel config
+      ansible.builtin.shell: |
+        set -e
+        v=$({{ cloudflared_bin }} --version | sed -n 's/.*version \([^ ]*\).*/\1/p' | head -n 1)
+        echo "version $v"
+        [ "$v" = '{{ pins.cloudflared_version }}' ]
+        if [ -e /etc/cloudflared/config.yml ]; then
+          {{ cloudflared_bin }} tunnel --config /etc/cloudflared/config.yml ingress validate
+        fi
+        {{ compose_bin }} version --short | grep -qx 'v\{0,1\}{{ pins.compose_version }}'
+      register: upd_proof
+      changed_when: false
+      become: true
+  rescue:
+    - name: "If unproved: put the previous cloudflared back"
+      ansible.builtin.copy:
+        src: "{{ cloudflared_previous }}"
+        dest: "{{ cloudflared_bin }}"
+        remote_src: true
+        mode: "0755"
+      when: upd_cfd_moves | bool and upd_was.cloudflared != ''
+      become: true
+
+    - name: "If unproved: put the previous Compose back"
+      ansible.builtin.copy:
+        src: "{{ compose_previous }}"
+        dest: "{{ compose_bin }}"
+        remote_src: true
+        mode: "0755"
+      when: upd_compose_moves | bool and upd_was.compose != ''
+      become: true
+
+    - name: "If unproved: stop before the reboot"
+      ansible.builtin.fail:
+        msg: >-
+          The pinned binaries did not prove themselves:
+          {{ upd_proof.stdout | default('') }} {{ upd_proof.stderr | default('') }}.
+          The previous ones are back in place and nothing has rebooted.
+          {{ pins_untouched }}

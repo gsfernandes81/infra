@@ -3142,6 +3142,11 @@ review the shell that built a Pi, and wanted less of it.
   guarded more specifically by `bin/install-system-file`'s validators and rollback, which
   still never restarts. This amends CLAUDE.md's "activating what you installed stays a
   separate, human step" for this play only.
+- **A fresh Pi reboots twice; a running host none or one.** Found building the play, the
+  same day. A transactional-update install is usable only after a reboot, and the stock
+  image likely has no python3 or git, so the packages go in first, over plain ssh, with
+  a reboot into them; the rest follows, with a second reboot for the profile, the fstab
+  entries and the five's files. The play asks before each.
 - **What it replaces.** The network half of the first boot (the clock, packages, pinned
   downloads, units, motd and clone in `leap/firstboot.sh`), and the image pin:
   `pi_image_*` in `leap/pins` and its runbook check. The bullet in § *The visit

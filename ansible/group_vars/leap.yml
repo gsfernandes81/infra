@@ -1,0 +1,83 @@
+---
+# Every Leap Pi, which server-setup-leap.yml sets up from these lists. One list for every
+# host, with no per-host packages (docs/decisions.md § Every Leap Pi: the stock image, an
+# offline Combustion, one play): every Pi is set up the same way, and nobody expects a tool
+# a host does not have. A host's own units, users and services are in its host_vars file.
+#
+# INSTALLING IS NOT ENABLING. A package here gives a host the tool; the units it runs are
+# leap_units_enabled below and a host's leap_extra_units_enabled.
+
+# The play installs only what `rpm -q --whatprovides` does not find, in one
+# transactional-update, and never removes anything: a package dropped from here stays on
+# the hosts that have it, and the play's extras report names it until the owner removes it.
+leap_packages:
+  # The common list leap/firstboot.sh installed until 2026-11-25.
+  - docker
+  - docker-buildx
+  - smartmontools
+  - btrfsprogs
+  - fish
+  - htop
+  - nano
+  - curl
+  - jq
+  - git
+  - python3
+  - rsync
+  - tailscale          # from Tailscale's repository, which the play adds first
+  - zram-generator
+  - make
+  # What three's first boot added, and zero's array needs, now on every Pi.
+  - cryptsetup         # three's make-backup and zero's encrypted member
+  - wpa_supplicant     # Wi-Fi, which NetworkManager drives, in case a host has no Ethernet
+  - bcm43xx-firmware   # the Pi radio's own files. Its driver firmware, kernel-firmware-brcm,
+                       # is left to the image, which may carry all firmware in one package
+  - snapper            # three's backup snapshots, named although the image carries it
+  - bcache-tools       # zero's array. Its udev rule registers a bcache disk on any host it
+                       # is plugged into, so zero's old member is wiped on a machine without
+                       # it (decisions.md § Every Leap Pi, the cost)
+
+# zypper locks, added before the install and kept for every update after it.
+leap_package_locks:
+  # openSUSE's Compose. The host runs upstream's pinned binary (leap/pins), and the lock
+  # stops docker's recommendation, or a later update, pulling the package in (decisions.md
+  # § Leap hosts carry upstream's Compose).
+  - docker-compose
+  # The Pi's boot chain: U-Boot, the GPU firmware with config.txt and the device trees, and
+  # the Pi 4's bootloader image. They live on the FAT boot partition outside every snapshot,
+  # so a rollback cannot undo a bad update to them (decisions.md § The Pi's boot firmware is
+  # locked). Locked by name, so the lock holds on an image that ships none of them, as the
+  # simulation's x86 one does.
+  - u-boot-rpi*
+  - raspberrypi-firmware*
+  - raspberrypi-eeprom*
+
+# Enabled on every Leap host. Each starts at the next boot: the play starts none of these,
+# since each is one of the five the restart rule leaves to the reboot (decisions.md § Every
+# Leap Pi). cloudflared waits for its config on a host with no tunnel yet.
+leap_units_enabled:
+  - sshd.service
+  - docker.service
+  - cloudflared.service
+  - tailscaled.service
+
+# Masked, not disabled: systemd applies the image's presets on a first boot, and a disable
+# was undone at the first start.
+leap_units_masked:
+  # Updates are by hand, through server-update-leap.yml, so a failure happens while the
+  # owner watches (decisions.md § Rescue mode keeps a way in, the owner's call).
+  - transactional-update.timer
+  # Leap's first-boot wizard waits at a console nobody watches, and powers the box off if it
+  # fails. A successful Combustion run keeps it away already; the mask is in case.
+  - jeos-firstboot.service
+
+# What rescue mode keeps, so a box sent there still answers over both ways in (decisions.md
+# § Rescue mode keeps a way in on every Leap host). systemd-user-sessions as well: rescue
+# mode would otherwise stop it, its stop writes /run/nologin, and that refuses every login
+# but root's, which sshd refuses anyway.
+leap_rescue_wants:
+  - sshd.service
+  - NetworkManager.service
+  - cloudflared.service
+  - tailscaled.service
+  - systemd-user-sessions.service

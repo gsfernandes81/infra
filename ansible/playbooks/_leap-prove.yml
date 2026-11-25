@@ -1,0 +1,44 @@
+---
+# NOT A PLAYBOOK YOU RUN. Imported, with import_tasks, after the reboot of the two plays
+# that reboot a Leap host, server-update-leap.yml and server-setup-leap.yml: the waits that
+# prove each way in, and the units that failed this boot. Moved here from the update play on
+# 2026-11-25 unchanged, apart from the two conditions a new host needs. The importing play
+# reads the results and judges them.
+#
+# Takes:   ways_in_check    false skips both ways in (the simulation, which has neither)
+#          prove_tunnel     false skips the tunnel, on a host with no tunnel yet
+#          prove_tailnet    false skips the tailnet, on a host not on it yet
+#          tailnet_peer     the fleet host Tailscale must reach (group_vars/fleet.yml)
+# Leaves:  upd_ready, upd_tailnet, upd_failed, each skipped under --check
+#
+# The names keep the update play's upd_ prefix, which they had before the move.
+
+- name: "Ways in: wait for the tunnel's ready connections"
+  ansible.builtin.command: curl -fsS -m 5 http://127.0.0.1:20241/ready
+  register: upd_ready
+  until: upd_ready.rc == 0 and (upd_ready.stdout | from_json).readyConnections | default(0) > 0
+  retries: 18
+  delay: 10
+  changed_when: false
+  failed_when: false
+  when: ways_in_check | bool and prove_tunnel | bool and not ansible_check_mode
+
+# --until-direct=false: a relayed path is still a way in, and zero is remote.
+- name: "Ways in: check Tailscale reaches {{ tailnet_peer }}"
+  ansible.builtin.command: tailscale ping --until-direct=false -c 3 {{ tailnet_peer }}
+  register: upd_tailnet
+  until: upd_tailnet.rc == 0
+  retries: 6
+  delay: 10
+  changed_when: false
+  failed_when: false
+  when: ways_in_check | bool and prove_tailnet | bool and not ansible_check_mode
+
+- name: Read the units that failed this boot
+  ansible.builtin.shell: |
+    timeout 600 systemctl is-system-running --wait >/dev/null 2>&1 || true
+    systemctl --failed --no-legend --plain | awk '{print $1}'
+  register: upd_failed
+  changed_when: false
+  become: true
+  when: not ansible_check_mode

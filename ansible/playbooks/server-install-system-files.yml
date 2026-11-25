@@ -45,7 +45,9 @@
 # that was pushed, and the --check run shows every byte before anything is written.
 
 - name: Install tracked system files on the fleet
-  hosts: fleet
+  # fleet, unless server-setup-leap.yml imports this play for its one target and says so in
+  # system_files_hosts. A run of its own is narrowed with -l, as before.
+  hosts: "{{ system_files_hosts | default('fleet') }}"
   gather_facts: false
   # NO serial. Lockstep (the linear strategy's default) is better here twice over: the
   # output reads as one banner with a row per host instead of the whole play repeated

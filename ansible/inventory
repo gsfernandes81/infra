@@ -25,6 +25,13 @@ zero
 one
 three
 
+# Hosts that run openSUSE Leap, which server-setup-leap.yml sets up and group_vars/leap.yml
+# describes: one package list and the units every Leap Pi carries. `zero` joins at its move
+# (plans/zero-leap.md), in the same commit as its hosts/zero/leap/MOVED.
+[leap]
+one
+three
+
 # Declared so host_vars/localhost.yml is loaded for the delegated report task. Termux
 # needs both an interpreter and a tmp path that Ansible's defaults get wrong there.
 [control]

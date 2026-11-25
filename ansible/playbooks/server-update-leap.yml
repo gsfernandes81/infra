@@ -33,6 +33,9 @@
 # The update recipes every login shows (leap/motd) are installed before the update, so
 # they are in the snapshot it builds.
 #
+# Steps 5 and 6 are _leap-pins.yml, and the two waits and the failed units in step 8 are
+# _leap-prove.yml, both shared with server-setup-leap.yml.
+#
 # -K IS REQUIRED: every step past the first runs as root.
 #
 # MOVING A PIN is a commit to leap/pins (both architectures' SHA-256), then this play.
@@ -198,126 +201,15 @@
       check_mode: false
       become: true
 
-    # A two-minute timeout and up to four tries: get_url's own 10 s ended a simulated run when
-    # GitHub was slow to answer, and a Pi's line can be slower. Not under --check, which
-    # touches no network and reports the move it would make.
-    - name: "If cloudflared is off its pin: download it"
-      ansible.builtin.get_url:
-        url: "https://github.com/cloudflare/cloudflared/releases/download/{{ pins.cloudflared_version }}/cloudflared-linux-{{ upd_asset.cloudflared }}"
-        dest: /var/tmp/infra-cloudflared
-        checksum: "sha256:{{ pins['cloudflared_sha256_' ~ upd_was.arch] }}"
-        mode: "0755"
-        force: true
-        timeout: 120
-      register: upd_cfd_get
-      until: upd_cfd_get is succeeded
-      retries: 3
-      delay: 15
-      when: upd_cfd_moves | bool and not ansible_check_mode
-      become: true
-
-    - name: "If cloudflared moves: keep the current as previous"
-      ansible.builtin.copy:
-        src: "{{ cloudflared_bin }}"
-        dest: "{{ cloudflared_previous }}"
-        remote_src: true
-        mode: "0755"
-      when: upd_cfd_moves | bool and upd_was.cloudflared != ''
-      become: true
-
-    - name: "If cloudflared moves: install the pinned binary"
-      ansible.builtin.copy:
-        src: /var/tmp/infra-cloudflared
-        dest: "{{ cloudflared_bin }}"
-        remote_src: true
-        mode: "0755"
-      when: upd_cfd_moves | bool and not ansible_check_mode
-      become: true
-
-    - name: "If Compose is off its pin: download it"
-      ansible.builtin.get_url:
-        url: "https://github.com/docker/compose/releases/download/v{{ pins.compose_version }}/docker-compose-linux-{{ upd_asset.compose }}"
-        dest: /var/tmp/infra-docker-compose
-        checksum: "sha256:{{ pins['compose_sha256_' ~ upd_was.arch] }}"
-        mode: "0755"
-        force: true
-        timeout: 120
-      register: upd_compose_get
-      until: upd_compose_get is succeeded
-      retries: 3
-      delay: 15
-      when: upd_compose_moves | bool and not ansible_check_mode
-      become: true
-
-    - name: "If Compose moves: keep the current as previous"
-      ansible.builtin.copy:
-        src: "{{ compose_bin }}"
-        dest: "{{ compose_previous }}"
-        remote_src: true
-        mode: "0755"
-      when: upd_compose_moves | bool and upd_was.compose != ''
-      become: true
-
-    - name: "If Compose moves: install the pinned binary"
-      ansible.builtin.copy:
-        src: /var/tmp/infra-docker-compose
-        dest: "{{ compose_bin }}"
-        remote_src: true
-        mode: "0755"
-      when: upd_compose_moves | bool and not ansible_check_mode
-      become: true
-
-    - name: Remove the downloads
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: absent
-      loop: [/var/tmp/infra-cloudflared, /var/tmp/infra-docker-compose]
-      become: true
-
-    # The reboot restarts the tunnel this play may have come in by, so the binary it will
-    # start is proved first (CLAUDE.md § Changing the thing you are connected through).
-    - name: Prove the new cloudflared before the reboot
-      when: not ansible_check_mode
-      block:
-        - name: Run the installed cloudflared, and validate the tunnel config
-          ansible.builtin.shell: |
-            set -e
-            v=$({{ cloudflared_bin }} --version | sed -n 's/.*version \([^ ]*\).*/\1/p' | head -n 1)
-            echo "version $v"
-            [ "$v" = '{{ pins.cloudflared_version }}' ]
-            if [ -e /etc/cloudflared/config.yml ]; then
-              {{ cloudflared_bin }} tunnel --config /etc/cloudflared/config.yml ingress validate
-            fi
-            {{ compose_bin }} version --short | grep -qx 'v\{0,1\}{{ pins.compose_version }}'
-          register: upd_proof
-          changed_when: false
-          become: true
-      rescue:
-        - name: "If unproved: put the previous cloudflared back"
-          ansible.builtin.copy:
-            src: "{{ cloudflared_previous }}"
-            dest: "{{ cloudflared_bin }}"
-            remote_src: true
-            mode: "0755"
-          when: upd_cfd_moves | bool and upd_was.cloudflared != ''
-          become: true
-
-        - name: "If unproved: put the previous Compose back"
-          ansible.builtin.copy:
-            src: "{{ compose_previous }}"
-            dest: "{{ compose_bin }}"
-            remote_src: true
-            mode: "0755"
-          when: upd_compose_moves | bool and upd_was.compose != ''
-          become: true
-
-        - name: "If unproved: stop before the reboot"
-          ansible.builtin.fail:
-            msg: >-
-              The pinned binaries did not prove themselves:
-              {{ upd_proof.stdout | default('') }} {{ upd_proof.stderr | default('') }}.
-              The previous ones are back in place and nothing has rebooted. The update's
-              snapshot is built and waits for the next boot; leap/pins is the thing to look at.
+    # leap/pins: download, install on a SHA-256 match, keep the previous, prove cloudflared
+    # before the reboot that starts it, and put the previous back if unproved. Shared with
+    # server-setup-leap.yml.
+    - name: Move cloudflared and Compose to leap/pins
+      ansible.builtin.import_tasks: _leap-pins.yml
+      vars:
+        pins_untouched: >-
+          The update's snapshot is built and waits for the next boot; leap/pins is the
+          thing to look at.
 
     - name: Reboot {{ inventory_hostname }}
       ansible.builtin.reboot:
@@ -326,35 +218,12 @@
       become: true
 
     # ── after the reboot: read everything, report, then judge ────────────────
-    - name: "Ways in: wait for the tunnel's ready connections"
-      ansible.builtin.command: curl -fsS -m 5 http://127.0.0.1:20241/ready
-      register: upd_ready
-      until: upd_ready.rc == 0 and (upd_ready.stdout | from_json).readyConnections | default(0) > 0
-      retries: 18
-      delay: 10
-      changed_when: false
-      failed_when: false
-      when: ways_in_check | bool and not ansible_check_mode
-
-    # --until-direct=false: a relayed path is still a way in, and zero is remote.
-    - name: "Ways in: check Tailscale reaches {{ tailnet_peer }}"
-      ansible.builtin.command: tailscale ping --until-direct=false -c 3 {{ tailnet_peer }}
-      register: upd_tailnet
-      until: upd_tailnet.rc == 0
-      retries: 6
-      delay: 10
-      changed_when: false
-      failed_when: false
-      when: ways_in_check | bool and not ansible_check_mode
-
-    - name: Read the units that failed this boot
-      ansible.builtin.shell: |
-        timeout 600 systemctl is-system-running --wait >/dev/null 2>&1 || true
-        systemctl --failed --no-legend --plain | awk '{print $1}'
-      register: upd_failed
-      changed_when: false
-      become: true
-      when: not ansible_check_mode
+    # The tunnel, the tailnet and the failed units. Shared with server-setup-leap.yml.
+    - name: Prove the ways in, and read the failed units
+      ansible.builtin.import_tasks: _leap-prove.yml
+      vars:
+        prove_tunnel: true
+        prove_tailnet: true
 
     - name: Read the kernel and pinned versions after
       ansible.builtin.shell: *read_versions
