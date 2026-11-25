@@ -52,16 +52,16 @@ design's own and the owner can overturn any of them. Phase 12 in
 Each of these is new to a Leap first boot, and each is the reason for a piece of work
 below.
 
-- **A Pi 5.** No Pi 5 has booted Leap on this fleet. Builds 3.17 and 3.22 carry the
-  Pi 5's device trees and a `[pi5]` section in `config.txt` (CI runs 44271041125 and
-  45458244546). **The initrd has no driver for RP1, the chip the Pi 5's Ethernet sits
-  behind:** it carries `macb`, the PHY, `clk_rp1` and `pinctrl_rp1`, but not `rp1_pci`,
-  which they hang off (`sim/pi-image/inspect.sh`, run 45458244546; the same in 3.17's
-  initrd listing). It has no Wi-Fi either. So a Pi 5's first boot most likely has no
-  network before switch-root, where Combustion runs and the first-boot script sets the
-  clock, installs packages, fetches the pins and clones the repo. The booted system has
-  every driver. The simulation is an x86_64 VM and cannot answer this; the bench boot
-  does, since its script needs no network.
+- **A Pi 5.** No Pi 5 has booted Leap on this fleet. Builds 3.17, 3.22 and 3.23 carry the
+  Pi 5's device trees and a `[pi5]` section in `config.txt` (CI runs 44271041125,
+  45458244546 and 45532879407). **The initrd has no driver for RP1, the chip the Pi 5's
+  Ethernet sits behind:** it carries `macb`, the PHY, `clk_rp1` and `pinctrl_rp1`, but not
+  `rp1_pci`, which they hang off (`sim/pi-image/inspect.sh`, runs 45458244546 and
+  45532879407; the same in 3.17's initrd listing). It has no Wi-Fi either. So a Pi 5's
+  first boot most likely has no network before switch-root, where Combustion runs and the
+  first-boot script sets the clock, installs packages, fetches the pins and clones the
+  repo. The booted system has every driver. The simulation is an x86_64 VM and cannot
+  answer this; the bench boot does, since its script needs no network.
 - **LUKS above bcache, opened at boot from a key file.** The encrypted member is the WD
   Red Plus, its bcache backing device, then LUKS2 `data-luks-4`, mapping `data-4`, then
   btrfs devid 4 (`hosts/zero/system/dmcrypt:13-15`). `three`'s LUKS is a passphrase,
