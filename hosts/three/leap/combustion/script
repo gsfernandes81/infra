@@ -1,5 +1,4 @@
 #!/bin/bash
-# combustion: prepare network
 #
 # three's first-boot script for Leap 16.1 Immutable, run once by Combustion from the stick
 # `leap/make-stick --new three` builds (leap/README.md). Reviewed like any boot-path file;
@@ -11,19 +10,11 @@
 # made after this boot), no deployment .env and no volumes. Its backup array is not
 # touched here: the drive is formatted at the visit by hosts/three/leap/make-backup, and
 # unlocked by hand after every boot (hosts/three/leap/README.md).
+#
+# No `# combustion:` line on purpose: Combustion brings up no network, so everything here
+# is offline work, and the rest is the play's (plans/pi-setup.md). The wired port is on
+# DHCP until the play installs three's UK profile.
 set -euo pipefail
-
-# Combustion runs this first with --prepare, in the initramfs, before any network is up.
-# three's UK profile goes in there, so the first boot's network, which Combustion needs for
-# the packages, already runs on 192.168.86.103; the same profile is installed into the
-# system below. The initramfs carries few tools (no `install`), so this uses mkdir and cp,
-# with a umask that gives the 0600 NetworkManager requires of a profile.
-if [ "${1-}" = --prepare ]; then
-	umask 077
-	mkdir -p /etc/NetworkManager/system-connections
-	cp host/system/wired.nmconnection /etc/NetworkManager/system-connections/wired.nmconnection
-	exit 0
-fi
 
 host=three
 # gavin's uid and gid, the fleet's usual, which Syncthing's PUID and PGID name.
@@ -34,79 +25,56 @@ gavin_gid=1000
 . ./leap/firstboot.sh
 
 say "starting $host"
-set_clock
+record_baseline
 check_carry "$host"
 mount_subvolumes
 grow_root
 
 echo "$host" > /etc/hostname
-# cryptsetup for make-backup; the unlock itself is systemd's, in the udev package every
-# image has. Wi-Fi in case Singapore has no Ethernet for it: wpa_supplicant, which
-# NetworkManager drives, and the Pi radio's own files (noarch, so the simulation installs
-# them too). The radio's driver firmware, kernel-firmware-brcm, is left to the Pi image,
-# and is a bench check (`rpm -q kernel-firmware-brcm`): installing it here could clash with
-# an image that carries all firmware in one package. No Wi-Fi profile: its password is
-# added on the box before shipping (hosts/three/leap/README.md). snapper for the backup's
-# snapshots, named although an Immutable image carries it for its own root.
-install_packages cryptsetup wpa_supplicant bcm43xx-firmware snapper
-install_binaries
 set_root_password
 make_gavin "$gavin_uid" "$gavin_gid"
 install_host_keys
-
-# Two users for zero's backup (plans/three-backup-pull.md). `backup` pulls it: systemd runs
-# backup-pull as this user, which owns the copy in /media/backup/immich/current and
-# nothing else, so whatever zero sends is parsed without privilege. It never logs in, so it
-# has no shell and no authorized_keys. Its key to zero is made on the box by the owner, not
-# carried (hosts/three/leap/README.md § The backup). `restore` lets zero read its own backups
-# back, by one authorized_keys line whose forced command starts a read-only rsync daemon. A
-# real shell, because sshd runs a key's forced command through the user's shell, so nologin
-# would refuse that too; the key's restrictions are what keep it from being used as one.
-# Neither has a password. Both homes and .ssh directories are root's, so neither user can
-# change its keys, its ssh config or the host key it trusts. A user of either name that this
-# script did not make, one the image brought, stops it; one it made, on an earlier run over
-# this snapshot, is kept.
-make_system_user() {
-	local name=$1 shell=$2 comment=$3
-	if id "$name" >/dev/null 2>&1; then
-		[ "$(getent passwd "$name" | cut -d: -f1,5,6,7)" = "$name:$comment:/home/$name:$shell" ] ||
-			die "a $name user exists already in this image, not the one this script makes"
-		return 0
-	fi
-	useradd --system --user-group --no-create-home --home-dir "/home/$name" --shell "$shell" \
-		--comment "$comment" "$name"
-}
-make_system_user backup /usr/sbin/nologin "pulls zero's backup"
-make_system_user restore /bin/bash "zero's read-only restores"
-install -d -m 755 /home/backup /home/backup/.ssh /home/restore /home/restore/.ssh
-
-# Every tracked file for this host, each at the path its header names. Notes kept beside
-# them (*.md, *.toml) are not installed, as bin/_infra.py skips them.
-for f in "$stick"/host/system/*; do
-	case "$f" in *.md | *.toml) continue ;; esac
-	install_tracked "$f"
-done
+install_login
 # The tunnel's credentials, once three has a tunnel: a rebuild carries them, check_carry
-# requires them whenever the config above is there, and cloudflared reads nothing else.
+# requires them whenever the config is there, and cloudflared reads nothing else.
 if [ -e "$stick/host/system/cloudflared-config.yml" ]; then
 	install -D -m 600 "$stick/carry/cloudflared/$host.json" "/etc/cloudflared/$host.json"
 fi
-
-# The array's mountpoint exists only if this snapshot makes it, and while the array is
-# locked the read-only root refuses every write to it. Then its entry, noauto.
-mkdir -p /media/backup
-append_fstab
-
-enable_units
-# The Argon EON's fan, from the CPU's temperature. Without the bus extraconfig.txt turns on
-# at the next power-on, it waits and retries, running rather than failed.
-systemctl enable argon-fan.service
-install_motd
-# Syncthing's sync and discovery ports, for devices on the same network as three; its GUI
-# stays on 127.0.0.1. firewalld is on in Leap and allows only ssh and DHCPv6 otherwise.
-firewall-offline-cmd --query-service=syncthing >/dev/null ||
-	firewall-offline-cmd --add-service=syncthing >/dev/null
-clone_infra
+stage_carry
+keep_volume_tars
 label_subvolumes
 
 say "done; $host boots into its configured snapshot next"
+
+# What the play does, that this script used to (notes for its author; nothing here runs):
+# - Packages beyond the common list: cryptsetup for make-backup (the unlock itself is
+#   systemd's, in the udev package every image has); Wi-Fi in case Singapore has no Ethernet
+#   for it: wpa_supplicant, which NetworkManager drives, and the Pi radio's own files
+#   (bcm43xx-firmware, noarch). The radio's driver firmware, kernel-firmware-brcm, is left
+#   to the Pi image and is a bench check (`rpm -q kernel-firmware-brcm`): installing it
+#   could clash with an image that carries all firmware in one package. No Wi-Fi profile:
+#   its password is added on the box before shipping (hosts/three/leap/README.md). snapper
+#   for the backup's snapshots, named although an Immutable image carries it for its own root.
+# - Two users for zero's backup (plans/three-backup-pull.md). `backup` pulls it: systemd
+#   runs backup-pull as this user, which owns the copy in /media/backup/immich/current and
+#   nothing else, so whatever zero sends is parsed without privilege. It never logs in, so
+#   it has no shell (/usr/sbin/nologin) and no authorized_keys; its key to zero is made on
+#   the box by the owner, not carried. `restore` lets zero read its own backups back, by
+#   one authorized_keys line whose forced command starts a read-only rsync daemon. A real
+#   shell (/bin/bash), because sshd runs a key's forced command through the user's shell,
+#   so nologin would refuse that too; the key's restrictions keep it from being used as one.
+#   Neither has a password. Both are system users with their own group, homes /home/backup
+#   and /home/restore (0755, with a .ssh each, 0755) owned by root, so neither user can
+#   change its keys, its ssh config or the host key it trusts. A user of either name that
+#   the play did not make stops it; one it made, on an earlier run, is kept.
+# - Every tracked file for this host, each at the path its header names; notes (*.md,
+#   *.toml) are skipped, a sudoers file is checked with visudo -cf.
+# - The array's mountpoint /media/backup exists only if a snapshot makes it, and while the
+#   array is locked the read-only root refuses every write to it. Then its fstab entry,
+#   noauto, appended only if that exact line is missing.
+# - systemctl enable argon-fan.service: the Argon EON's fan, from the CPU's temperature.
+#   Without the bus extraconfig.txt turns on at the next power-on, it waits and retries,
+#   running rather than failed.
+# - Syncthing's sync and discovery ports in firewalld, for devices on the same network as
+#   three; its GUI stays on 127.0.0.1. firewalld is on in Leap and allows only ssh and
+#   DHCPv6 otherwise.

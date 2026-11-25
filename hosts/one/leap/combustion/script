@@ -1,24 +1,14 @@
 #!/bin/bash
-# combustion: prepare network
 #
 # one's first-boot script for Leap 16.1 Immutable, run once by Combustion from the stick
 # leap/make-stick builds (leap/README.md). Reviewed like any boot-path file; it carries no
 # secret, and reads the carry-over from the stick. The steps it shares with every Leap
 # host are in leap/firstboot.sh; what follows is one's own.
+#
+# No `# combustion:` line on purpose: Combustion brings up no network, so everything here
+# is offline work, and the rest is the play's (plans/pi-setup.md). The wired port is on
+# DHCP until the play installs one's static profile.
 set -euo pipefail
-
-# Combustion runs this first with --prepare, in the initramfs, before any network is up.
-# one's own profile goes in there, so the first boot's network, which Combustion needs for
-# the packages, already runs on 192.168.86.101 instead of the initramfs's default DHCP; the
-# same profile is installed into the system below, so the system carries straight on.
-# The initramfs carries few tools (no `install`), so this uses mkdir and cp, with a umask
-# that gives the 0600 NetworkManager requires of a profile.
-if [ "${1-}" = --prepare ]; then
-	umask 077
-	mkdir -p /etc/NetworkManager/system-connections
-	cp host/system/wired.nmconnection /etc/NetworkManager/system-connections/wired.nmconnection
-	exit 0
-fi
 
 host=one
 # gavin's uid and gid on one's Alpine system, kept so his files on the SSD stay his.
@@ -29,43 +19,33 @@ gavin_gid=1000
 . ./leap/firstboot.sh
 
 say "starting $host"
-set_clock
+record_baseline
 check_carry "$host"
 mount_subvolumes
 grow_root
 
 echo "$host" > /etc/hostname
-# shellcheck disable=SC2119  # one needs no packages beyond the common ones
-install_packages
-install_binaries
 set_root_password
 make_gavin "$gavin_uid" "$gavin_gid"
-# The dev stack runs as uid and gid 1001 on every host, and gavin is 1000 here, so the plays
-# that write its secrets (group 1001, 0640) can only do it as a member of that group
-# (docs/decisions.md § The dev stack runs as 1001 on every host).
-make_group devstack 1001
-usermod -aG devstack gavin
 install_host_keys
-
-# Every tracked file for this host's /etc, each at the path its header names. Notes kept
-# beside them (*.md, *.toml) are not installed, as bin/_infra.py skips them.
-for f in "$stick"/host/system/*; do
-	case "$f" in *.md | *.toml) continue ;; esac
-	install_tracked "$f"
-done
+install_login
 install -D -m 600 "$stick/carry/cloudflared/$host.json" "/etc/cloudflared/$host.json"
-
-# The data mountpoints exist only if this snapshot makes them, and while nothing is mounted
-# on one the read-only root refuses every write to it: the mount guard chattr +i was on
-# Alpine. Then the SSD's entries, after the image's own root entries.
-mkdir -p /media/ionic-mysql /media/torrents /media/torrents-config /media/syncthing-config \
-	/media/calibre/library /media/calibre/config
-append_fstab
-
-enable_units
-install_motd
-clone_infra
+stage_carry
 keep_volume_tars
 label_subvolumes
 
 say "done; $host boots into its configured snapshot next"
+
+# What the play does, that this script used to (notes for its author; nothing here runs):
+# - make_group devstack 1001 and usermod -aG devstack gavin. The dev stack runs as uid and
+#   gid 1001 on every host, and gavin is 1000 here, so the plays that write its secrets
+#   (group 1001, 0640) can only do it as a member of that group (docs/decisions.md § The dev
+#   stack runs as 1001 on every host).
+# - Every tracked file for this host's /etc, each at the path its header names, with
+#   install_tracked's rules: notes beside them (*.md, *.toml) are skipped, as bin/_infra.py
+#   skips them, and a sudoers file is checked with visudo -cf before it stays.
+# - The data mountpoints (/media/ionic-mysql, torrents, torrents-config, syncthing-config,
+#   calibre/library, calibre/config) exist only if a snapshot makes them, and while nothing
+#   is mounted on one the read-only root refuses every write to it (the mount guard chattr
+#   +i was on Alpine). Then the SSD's entries from fstab.append, after the image's own root
+#   entries, each appended only if that exact line is missing.

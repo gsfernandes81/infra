@@ -150,25 +150,22 @@ discard (`plans/visit-runbook.md` § Writing a card, and erasing a stick). A car
 
 ## What the first boot does
 
-Combustion runs the script twice. First with `--prepare`, in the initramfs before any
-network is up: the host's NetworkManager profile goes in there, so the network Combustion
-brings up for the packages already uses the host's own address rather than a DHCP lease.
-Then for real, in the new system, in order: sets the clock from a plain-HTTP answer's
-`Date` header (a Pi has no clock, and HTTPS refuses certificates from the future), checks
-the carry-over, grows root's filesystem when the config came from the card itself (§ One
-card), sets the hostname, installs the packages (Tailscale's from its own repository,
-openSUSE's `docker-compose` locked out, the Pi's boot firmware locked), installs
-`cloudflared` and Compose from their pinned downloads after checking each SHA-256, sets
-root's password, makes `gavin` with his old uid and gid, his password and his keys,
-installs the old ssh host keys and every file in `system/`, makes the `/media`
-mountpoints, appends the fstab entries, enables the units, masks the update timer, turns
-off the reboot strategy, keeps sshd, the network, `cloudflared`, `tailscaled` and logins
-up in rescue mode, clones this repository into `~gavin/infra` with each deployment's
-`.env`, and leaves the volume tar files in `/root/volumes` for the runbook to restore once
-Docker runs. For the optional carry-over, `firstboot.sh` has a step each, which a host's
-script calls when its stick carries the item: `install_data_key`, before the fstab
-entries; `install_tailscale_state`, which writes through `/var`'s own subvolume, since
-the shell Combustion runs in does not bind `/var/lib/tailscale`; and
+Combustion runs the script once, in the new system, with no network: the script carries no
+`# combustion:` line, so none is brought up. It does only the offline work, in order:
+records the image's package names in `/etc/infra/image-packages`, checks the carry-over,
+grows root's filesystem when the config came from the card itself (§ One card), sets the
+hostname and root's password, makes `gavin` with his old uid and gid, his password and his
+keys, installs the old ssh host keys, installs sshd's drop-in and `sudoers-gavin` and
+enables sshd, installs the tunnel credentials, stages each deployment's `.env` and secrets
+in `/root/carry`, and leaves the volume tar files in `/root/volumes`. The wired port is on
+DHCP until the play installs the static profile.
+
+Everything else is the play's, over ssh once the box is up: packages and locks, the pinned
+binaries, the other tracked files, the fstab entries, the units, the checkout and the
+network profile. `plans/pi-setup.md` has the design. For the optional carry-over,
+`firstboot.sh` has a step each, which a host's script calls when its stick carries the
+item: `install_data_key`; `install_tailscale_state`, which writes through `/var`'s own
+subvolume, since the shell Combustion runs in does not bind `/var/lib/tailscale`; and
 `install_restore_key`. `check_carry` takes the items a host requires as arguments.
 
 A failed step stops the script, and Combustion then rolls back the new snapshot: `/etc`,
@@ -177,8 +174,8 @@ snapshot stays: `/home`, `/usr/local`, `/root`, `/var` and the FAT boot partitio
 Combustion runs the script again at the next boot while its config is there, and that run
 meets the half-written state, or, after the relabel trap below, a finished snapshot. So
 each step checks what it would create and skips it when it is there: the groups, the
-users, the clone, each fstab line and Tailscale's state. A group or user of the same name
-but another id stops the script rather than being used. Everything the script prints is
+users, the baseline file, the staged carry and Tailscale's state. A group or user of the
+same name but another id stops the script rather than being used. Everything the script prints is
 also kept in `/var/log/infra-firstboot.log`, which survives a failed run: with no screen
 to hand, a raw search of the card for `firstboot:` reads it.
 
@@ -198,7 +195,8 @@ sudo sh -c "setsid nohup sh -c 'dd if=/dev/sdX2 bs=4M count=1536 2>/dev/null | s
 
 It does not join the tailnet, which needs the owner's login (`sudo tailscale up
 --advertise-tags=tag:fleet --accept-dns=false`), and it does not start a deployment: those
-are the visit's runbook, after the box answers.
+are the visit's runbook, after the box answers. Packages, the checkout and the units are
+the play's, not this script's.
 
 ## What the November visit's first boots taught
 

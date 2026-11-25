@@ -29,39 +29,17 @@
 # So mount_subvolumes mounts them first, and label_subvolumes labels what was written,
 # since this runs before the SELinux policy is loaded and the boot's relabel skips them.
 #
+# WHAT THIS DOES, AND WHAT IT LEAVES. The first boot does only what needs no network and
+# cannot be done later: the image's package baseline, the carry-over, the login (gavin, his
+# keys, sshd and its drop-in, the sudoers file), the host's old ssh keys, the volume tars,
+# and the secrets staged in /root/carry. Combustion brings up no network, so nothing here
+# downloads, installs a package or reads the clock. The rest is the play's, over ssh once
+# the box is up: packages and locks, the pinned binaries, every other tracked file, the
+# fstab entries, the units, the checkout and the network profile (plans/pi-setup.md,
+# ansible/playbooks/server-setup-leap.yml).
+#
 # Nothing here is generated: each file it installs is a reviewed file from the repo,
 # installed at the path its own infra- header names, or a carry-over file copied verbatim.
-
-# The pins for binaries a distro package would get wrong, in leap/pins, which the update
-# play reads too (server-update-leap.yml): what a new host starts on, and what the play
-# moves a running one to. aarch64 is the Pi's; x86_64 exists for the simulation
-# (sim/microos/run-host.sh), which boots this script in a VM.
-# shellcheck source=leap/pins
-. ./leap/pins
-case "$(uname -m)" in
-aarch64)
-	cloudflared_asset=cloudflared-linux-arm64
-	cloudflared_sha256=$cloudflared_sha256_aarch64
-	compose_asset=docker-compose-linux-aarch64
-	compose_sha256=$compose_sha256_aarch64
-	;;
-x86_64)
-	cloudflared_asset=cloudflared-linux-amd64
-	cloudflared_sha256=$cloudflared_sha256_x86_64
-	compose_asset=docker-compose-linux-x86_64
-	compose_sha256=$compose_sha256_x86_64
-	;;
-*)
-	echo "firstboot: no pins for $(uname -m)" >&2
-	exit 1
-	;;
-esac
-
-# The packages every host carries. openSUSE's docker-compose is locked out rather than
-# left as a recommendation of docker's: the host runs upstream's, and a lock also stops a
-# later update pulling it back in.
-common_packages=(docker docker-buildx smartmontools btrfsprogs fish htop nano curl jq git
-	python3 rsync tailscale zram-generator make)
 
 say() { echo "firstboot: $*" > /dev/console; echo "firstboot: $*"; }
 die() { say "STOPPED: $*"; exit 1; }
@@ -74,23 +52,6 @@ die() { say "STOPPED: $*"; exit 1; }
 # first boot stopped without a trace.
 mkdir -p /var/log
 exec > >(tee -a /var/log/infra-firstboot.log) 2>&1
-
-# A Pi has no clock of its own: it boots at whatever date its software was built, and
-# nothing sets the time inside the initramfs, where this runs. Months behind, every HTTPS
-# certificate the downloads meet reads "not yet valid". So the time is read first from a plain
-# HTTP answer's Date header, which needs no certificate. A VM has its host's clock, which is
-# why the simulation never met this.
-set_clock() {
-	local d
-	d=$(curl -fsSI --max-time 30 http://download.opensuse.org/ | sed -n 's/^[Dd]ate: *//p' |
-		tr -d '\r' | head -n 1) || true
-	say "the clock read $(date -u '+%F %T') UTC"
-	if [ -n "$d" ] && date -u -s "$d" >/dev/null; then
-		say "set the clock from download.opensuse.org: $(date -u '+%F %T') UTC"
-	else
-		say "could not read the time over plain HTTP; the downloads may refuse their certificates"
-	fi
-}
 
 # Combustion's copy of the stick's combustion/ directory, which the script runs from.
 stick=$PWD
@@ -174,16 +135,6 @@ install_boot_file() {
 	cat "$file" > "/boot/efi/$name"
 	sync "/boot/efi/$name"
 	say "wrote /boot/efi/$name"
-}
-
-# Downloads a pinned binary and installs it only if its SHA-256 matches.
-install_pinned() {
-	local url=$1 sha256=$2 dest=$3 tmp
-	tmp=$(mktemp)
-	curl -fsSL -o "$tmp" "$url" || die "could not download $url"
-	echo "$sha256  $tmp" | sha256sum -c - >/dev/null || die "SHA-256 mismatch for $url"
-	install -D -m 0755 "$tmp" "$dest"
-	rm -f "$tmp"
 }
 
 # Refuses to start on a stick without the carry-over a host cannot run without, so a
@@ -285,14 +236,9 @@ append_missing() {
 	done < "$src"
 }
 
-# The host's data entries, after the image's own root entries.
-append_fstab() {
-	append_missing "$stick/host/fstab.append" /etc/fstab
-}
-
 # The array's key file, at the path the host's crypttab names, which systemd-cryptsetup
 # reads at boot to open the encrypted member with nobody at the console. Called before the
-# fstab entries go in, so nothing that could mount the array exists without it. /etc is the
+# fstab entries go in (the play's), so nothing that could mount the array exists without it. /etc is the
 # snapshot's, so the file lives and dies with the snapshot, and the boot's relabel labels
 # it. Root's alone: the directory 0700, the key 0400.
 install_data_key() {
@@ -349,99 +295,6 @@ install_restore_key() {
 	fi
 }
 
-# Tailscale's repository, trusted through the reviewed copy of its key, then every package.
-# The repository goes in first: the first simulated boot added it with the other /etc
-# files, after the packages, and got openSUSE's tailscale.
-install_packages() {
-	install_tracked "$stick/host/system/tailscale.repo"
-	rpm --import "$stick/leap/tailscale-repo.gpg"
-	zypper --non-interactive addlock docker-compose
-	# The Pi's boot chain, which lives on the FAT boot partition outside every snapshot, so a
-	# rollback cannot undo a bad update to it (docs/decisions.md § The Pi's boot firmware is
-	# locked). Locked by name, so the lock holds on an image that ships none of them, as the
-	# simulation's x86 one does.
-	zypper --non-interactive addlock 'u-boot-rpi*' 'raspberrypi-firmware*' 'raspberrypi-eeprom*'
-	zypper --non-interactive refresh
-	zypper --non-interactive install "${common_packages[@]}" "$@"
-}
-
-install_binaries() {
-	install_pinned \
-		"https://github.com/cloudflare/cloudflared/releases/download/$cloudflared_version/$cloudflared_asset" \
-		"$cloudflared_sha256" /usr/local/bin/cloudflared
-	install_pinned \
-		"https://github.com/docker/compose/releases/download/v$compose_version/$compose_asset" \
-		"$compose_sha256" /usr/local/lib/docker/cli-plugins/docker-compose
-}
-
-# The units every host runs, the reboot policy, and the two ways in kept in rescue mode
-# (decisions.md § Rescue mode keeps a way in on every Leap host).
-enable_units() {
-	systemctl enable sshd.service docker.service cloudflared.service tailscaled.service
-	# Masked, not disabled: systemd applies the image's presets on a first boot, and Leap's
-	# enable this timer, so a disable here was undone at the first start.
-	systemctl mask transactional-update.timer
-	# systemd-user-sessions as well: rescue mode would otherwise stop it, its stop writes
-	# /run/nologin, and that refuses every login but root's, which sshd refuses anyway.
-	systemctl add-wants rescue.target sshd.service NetworkManager.service \
-		cloudflared.service tailscaled.service systemd-user-sessions.service
-	# Leap's first-boot wizard waits at a console nobody watches and powers the box off if
-	# it fails. A successful Combustion run already keeps it away; the mask is in case.
-	systemctl mask jeos-firstboot.service
-}
-
-# The update recipes, at every login (leap/motd): the normal update, and the boot firmware's,
-# which is locked. A plain file, so it carries no infra- header for logins to show; the
-# update play installs it afresh at every run.
-install_motd() {
-	install -D -m 644 "$stick/leap/motd" /etc/motd.d/50-infra-updates
-}
-
-# The repo's checkout, as on every host, and each deployment's .env and secrets directory
-# from the carry-over.
-clone_infra() {
-	local f name
-	# A checkout already there is left as it is: a failed run's, or the finished box's, which
-	# may hold work. One with no commit is a clone that never finished, and is refused.
-	if [ -e /home/gavin/infra ]; then
-		git -c safe.directory=/home/gavin/infra -C /home/gavin/infra rev-parse -q --verify HEAD >/dev/null ||
-			die "/home/gavin/infra exists and holds no commit; move it aside"
-		say "/home/gavin/infra is a checkout already; it is left as it is"
-	else
-		git clone --quiet https://github.com/gsfernandes81/infra.git /home/gavin/infra
-	fi
-	for f in "$stick"/carry/env/*.env; do
-		[ -e "$f" ] || continue
-		name=$(basename "$f" .env)
-		[ -d "/home/gavin/infra/deployments/$name" ] || die "carry/env/$name.env has no deployment"
-		install -m 600 "$f" "/home/gavin/infra/deployments/$name/.env"
-	done
-	chown -R gavin:gavin /home/gavin/infra
-	# Each deployment's secrets directory, as its play left it in gavin's home. Combustion's
-	# copy of the stick keeps no owners, so they are set here: everything gavin's, then each
-	# file a deployment's .env names as TUNNEL_CREDENTIALS 65532's at 0600, as
-	# server-create-deployment-tunnel.yml leaves it for the cloudflared image's user. Keyed on
-	# the .env, not the file name: the dev hub's tunnel.json stays gavin's, since its
-	# connector runs as gavin. Found at one's move, where the sidecars could not read their
-	# credentials.
-	for f in "$stick"/carry/home/.*-secrets; do
-		[ -d "$f" ] || continue
-		cp -a "$f" /home/gavin/
-		chown -R gavin:gavin "/home/gavin/$(basename "$f")"
-	done
-	for f in /home/gavin/infra/deployments/*/.env; do
-		[ -e "$f" ] || continue
-		name=$(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?TUNNEL_CREDENTIALS[[:space:]]*=[[:space:]]*["\x27]?([^"\x27]*)["\x27]?[[:space:]]*$/\2/p' "$f" | tail -n 1)
-		case "$name" in
-		/home/gavin/.*-secrets/*)
-			[ -f "$name" ] || die "$f names $name as TUNNEL_CREDENTIALS, which the stick did not carry"
-			chown 65532:65532 "$name"
-			chmod 600 "$name"
-			;;
-		esac
-	done
-}
-
 # Named volumes cannot be restored here, with no Docker running, so their tar files wait in
 # root's home for the runbook's restore, and leave the stick that is about to be erased.
 keep_volume_tars() {
@@ -449,5 +302,49 @@ keep_volume_tars() {
 	for f in "$stick"/carry/volumes/*.tar; do
 		[ -e "$f" ] || continue
 		install -D -m 600 "$f" "/root/volumes/$(basename "$f")"
+	done
+}
+
+# The image's package baseline, written before anything can install a package: one name per
+# line, sorted. The play reads it to tell the image's packages from the ones it added, so a
+# package it later drops from its list is only removed when it is not in the image. Written
+# once: a second run, over a snapshot a first run finished, would record a changed system,
+# so an existing file is left alone.
+record_baseline() {
+	[ -e /etc/infra/image-packages ] && return 0
+	install -d -m 755 /etc/infra
+	rpm -qa --qf '%{NAME}\n' | sort -u > /etc/infra/image-packages
+	chmod 644 /etc/infra/image-packages
+}
+
+# The way in for the play's first run: sshd's drop-in and gavin's sudoers file, both
+# tracked, so the play logs in as gavin and uses sudo with gavin's own password. The unit
+# is enabled here and starts at the boot, since the play has nothing else to reach it by.
+install_login() {
+	install_tracked "$stick/host/system/sshd-infra.conf"
+	install_tracked "$stick/host/system/sudoers-gavin"
+	systemctl enable sshd.service
+}
+
+# Each deployment's .env and secrets directory, staged for the play. /root is bound into
+# this shell by transactional-update (see the header), so these persist as keep_volume_tars'
+# files do. The play puts them in the checkout once it has cloned it, then removes
+# /root/carry; the ownership rules for them (gavin's, and TUNNEL_CREDENTIALS' file 65532's
+# at 0600) are the play's too. Copies of the stick's own files, so a second run overwrites
+# its own and adds nothing.
+stage_carry() {
+	local f
+	install -d -m 700 -o root -g root /root/carry /root/carry/env /root/carry/home
+	for f in "$stick"/carry/env/*.env; do
+		[ -e "$f" ] || continue
+		install -m 600 -o root -g root "$f" "/root/carry/env/$(basename "$f")"
+	done
+	for f in "$stick"/carry/home/.*-secrets; do
+		[ -d "$f" ] || continue
+		rm -rf "/root/carry/home/$(basename "$f")"
+		cp -a "$f" /root/carry/home/
+		chown -R root:root "/root/carry/home/$(basename "$f")"
+		find "/root/carry/home/$(basename "$f")" -type d -exec chmod 700 {} +
+		find "/root/carry/home/$(basename "$f")" -type f -exec chmod 600 {} +
 	done
 }
