@@ -67,7 +67,7 @@ project is deployed by `server-deploy-compose.yml -e deployment=dev` (`deploymen
 ## Bring-up, from nothing
 
 **One Cloudflare tunnel, the hub's, and no fleet access.** On a box that already runs the old
-layout, follow *The cutover from the old layout* instead. From the control node — the phone:
+layout, follow *The cutover from the old layout* instead. From a control node, the phone or the laptop:
 
 ```sh
 cd ~/infra/ansible

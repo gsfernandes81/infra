@@ -1,7 +1,7 @@
 # Recovery
 
 For a box that rebooted while you are remote: getting its deployments back without losing
-data or the way in. Read it on the phone, which is the control node.
+data or the way in. Read it on a control node: the phone, or the laptop.
 
 What should be running is [fleet-inventory.md](fleet-inventory.md), which a playbook
 generates from the boxes themselves. Its Listening section for the host you are
@@ -145,8 +145,8 @@ Volumes section of [fleet-inventory.md](fleet-inventory.md), before removing any
 **The `infra` container is not a control node.** It carries Ansible and the inventory but has no
 route to `zero`, `one` or `two`, by decision
 ([management-plane.md](management-plane.md) § *A control node inside the fleet*), so it
-cannot run a playbook against a host. When the fleet is broken, the phone is the control
-node. It also runs on `zero`, so it cannot help when `zero` is down
+cannot run a playbook against a host. When the fleet is broken, the phone or the laptop is
+the control node. It also runs on `one`, so it cannot help when `one` is down
 ([dev/README.md](../dev/README.md)).
 
 ## The mount trap
