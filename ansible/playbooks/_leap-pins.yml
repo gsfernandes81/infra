@@ -7,11 +7,11 @@
 # previous back if the proof fails.
 #
 # Takes, from the play that imports it:
-#   pins                    leap/pins as a dict
+#   pins                    leap/pins as a dict, as _leap-pins-read.yml leaves it
 #   cloudflared_bin, cloudflared_previous, compose_bin, compose_previous
 #                           where each binary lives, and where its previous is kept
 #   upd_was                 what is installed now: arch, cloudflared, compose (empty if
-#                           missing), as the update play's read leaves it
+#                           missing), as _leap-pins-read.yml leaves it
 #   upd_asset               the release asset names for this architecture
 #   upd_cfd_moves, upd_compose_moves
 #                           whether each binary is off its pin

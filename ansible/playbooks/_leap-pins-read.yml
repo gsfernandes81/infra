@@ -1,0 +1,55 @@
+---
+# NOT A PLAYBOOK YOU RUN. Imported, with import_tasks, by server-update-leap.yml and
+# server-setup-leap.yml before _leap-pins.yml: what is installed, leap/pins, and whether
+# each binary moves. Moved here from the update play on 2026-11-25 unchanged, apart from
+# defining pins and pins_file here, once, for both plays.
+#
+# Takes:   cloudflared_bin, compose_bin   where each binary lives
+#          pins_untouched                 the last sentence of the failure message
+# Leaves:  upd_before (its .cmd reads the versions again after a reboot), upd_was,
+#          pins_file, pins, upd_asset, upd_cfd_moves, upd_compose_moves
+
+# key=value lines, each printed even when its value is empty, so a missing or odd
+# binary cannot shift the others. check_mode: false, here and below, on reads that
+# change nothing: --check would otherwise skip them and have nothing to report.
+- name: Read the architecture, kernel and pinned versions
+  ansible.builtin.shell: |
+    printf 'arch=%s\n' "$(uname -m)"
+    printf 'kernel=%s\n' "$(uname -r)"
+    printf 'cloudflared=%s\n' "$({{ cloudflared_bin }} --version 2>/dev/null | sed -n 's/.*version \([^ ]*\).*/\1/p' | head -n 1)"
+    printf 'compose=%s\n' "$({{ compose_bin }} version --short 2>/dev/null | sed 's/^v//' | head -n 1)"
+    printf 'array=%s\n' "$(grep -qE '^[^#].*noauto' /etc/crypttab 2>/dev/null && echo locked || echo none)"
+  register: upd_before
+  changed_when: false
+  check_mode: false
+
+- name: Note the pins and what is installed
+  ansible.builtin.set_fact:
+    upd_was: "{{ dict(upd_before.stdout_lines | map('split', '=')) }}"
+    pins_file: "{{ control_checkout }}/leap/pins"
+    # KEY=value lines, comments and blanks left out, split at the first "=" only; a shell
+    # sources the same file.
+    pins: >-
+      {{ dict(lookup('file', control_checkout ~ '/leap/pins').splitlines()
+         | reject('match', '^\s*(#|$)') | map('split', '=', 1)) }}
+
+- name: Check leap/pins has both pins for this architecture
+  ansible.builtin.assert:
+    that:
+      - upd_was.arch in ['aarch64', 'x86_64']
+      - pins.cloudflared_version | default('') | length > 0
+      - pins['cloudflared_sha256_' ~ upd_was.arch] | default('') | length == 64
+      - pins.compose_version | default('') | length > 0
+      - pins['compose_sha256_' ~ upd_was.arch] | default('') | length == 64
+    fail_msg: "{{ pins_file }} lacks a version or a {{ upd_was.arch }} SHA-256. {{ pins_untouched }}"
+    success_msg: >-
+      cloudflared {{ upd_was.cloudflared or 'missing' }} -> {{ pins.cloudflared_version | default('?') }},
+      Compose {{ upd_was.compose or 'missing' }} -> {{ pins.compose_version | default('?') }}
+
+- name: Note the release assets for this architecture
+  ansible.builtin.set_fact:
+    upd_asset: >-
+      {{ {'aarch64': {'cloudflared': 'arm64', 'compose': 'aarch64'},
+          'x86_64': {'cloudflared': 'amd64', 'compose': 'x86_64'}}[upd_was.arch] }}
+    upd_cfd_moves: "{{ upd_was.cloudflared != pins.cloudflared_version }}"
+    upd_compose_moves: "{{ upd_was.compose != pins.compose_version }}"

@@ -1,0 +1,85 @@
+---
+# NOT A PLAYBOOK YOU RUN. Imported, with import_tasks, by server-setup-leap.yml for each of
+# its two reboots: ask first, showing what is running, then reboot and wait for the new
+# boot. raw throughout, since before the first reboot the box may have no python.
+#
+# Not ansible.builtin.reboot: it runs the setup module first, which needs that python, and
+# it waits at the address it left from, which a new network profile may have moved.
+#
+# Takes:   reboot_for       why, a list of reasons; empty means no reboot is needed
+#          reboot_must      true if a no must stop the play (the packages: nothing after
+#                           them can run until the box boots into them)
+#          reboot_to        an address to reconnect at after the reboot (default none)
+#          confirm          'yes' answers the question for a run nobody types into
+# Leaves:  reboot_go, whether it rebooted. Under --check it never does.
+
+- name: "If a reboot is needed: read the containers"
+  ansible.builtin.raw: docker ps --format '{{ "{{" }}.Names{{ "}}" }}'
+  register: reboot_containers
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: reboot_for | length > 0
+  become: true
+
+# raw's output is stdout and stderr together, so an error reads from stdout.
+- name: "If a reboot is needed: ask first"
+  ansible.builtin.pause:
+    prompt: |
+      {{ inventory_hostname }} will be REBOOTED, for {{ reboot_for | join(', ') }}. Running there now:
+        {{ ('Docker did not answer: ' ~ reboot_containers.stdout | default('') | trim) if reboot_containers.rc | default(1) != 0
+           else (reboot_containers.stdout_lines | join(', ') or 'no containers') }}
+      The reboot ends all of them, and every live session. Go on? [y/N]
+  register: reboot_answer
+  when: reboot_for | length > 0 and confirm != 'yes' and not ansible_check_mode
+
+- name: Note whether to reboot
+  ansible.builtin.set_fact:
+    reboot_go: >-
+      {{ reboot_for | length > 0 and not ansible_check_mode
+         and (confirm == 'yes' or (reboot_answer.user_input | default('') | lower) in ['y', 'yes']) }}
+
+- name: "If refused and needed: stop"
+  ansible.builtin.fail:
+    msg: >-
+      Not confirmed. {{ reboot_for | join(', ') | capitalize }} waits for the next boot, and
+      nothing after it was set up; run the play again after that boot.
+  when: reboot_must | bool and reboot_for | length > 0 and not reboot_go | bool and not ansible_check_mode
+
+- name: "If rebooting: read the boot's id"
+  ansible.builtin.raw: cat /proc/sys/kernel/random/boot_id
+  register: reboot_before
+  changed_when: false
+  when: reboot_go | bool
+
+# A timer a few seconds out lets this command return before the connection drops.
+- name: "If rebooting: reboot {{ inventory_hostname }}"
+  ansible.builtin.raw: systemd-run --on-active=5 /usr/bin/systemctl reboot
+  changed_when: true
+  when: reboot_go | bool
+  become: true
+
+# -e ansible_host outranks anything a play can set, so the new address goes to ssh as its
+# HostName, which wins over the destination; the jump and the HostKeyAlias still apply.
+- name: "If the address moves: reconnect at {{ reboot_to | default('') }}"
+  ansible.builtin.set_fact:
+    ansible_ssh_extra_args: -o HostName={{ reboot_to }}
+  when: reboot_go | bool and reboot_to | default('') | length > 0
+
+- name: "If rebooting: wait for it to answer"
+  ansible.builtin.wait_for_connection:
+    delay: 30
+    sleep: 10
+    timeout: 900
+  when: reboot_go | bool
+
+# Retried, since a slow shutdown can still answer on the old boot. If the old boot goes
+# away mid-retry the task stops unreachable, and the play is safe to run again.
+- name: "If rebooting: wait for the new boot's id"
+  ansible.builtin.raw: cat /proc/sys/kernel/random/boot_id
+  register: reboot_after
+  until: reboot_after.stdout | trim != reboot_before.stdout | trim
+  retries: 30
+  delay: 10
+  changed_when: false
+  when: reboot_go | bool

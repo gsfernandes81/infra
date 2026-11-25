@@ -1,57 +1,26 @@
 ---
-# SET UP ONE LEAP PI, after Combustion's offline first boot, or again at any time to put back
-# what drifted (plans/pi-setup.md; docs/decisions.md § Every Leap Pi). For the hosts in the
-# inventory's `leap` group. From the control node, one host at a time.
-#
-# A host that is up and reachable as usual:
+# SET UP ONE LEAP PI after Combustion's offline first boot, or again to put back what
+# drifted (plans/pi-setup.md; decisions.md § Every Leap Pi). For hosts in `leap`:
 #
 #     cd ansible
 #     ansible-playbook playbooks/server-setup-leap.yml -e target=one -K
 #
-# A fresh Pi, which has neither way in yet, over the LAN through another box: its DHCP
-# address from its console or the router, and the jump through `one` (`two` when the Pi is
-# `one`). HostKeyAlias checks the carried host key against the entry clients pin already.
+# A fresh Pi has no way in yet: it is reached over the LAN at its DHCP address, through
+# another box (`two` when the Pi is `one`), and HostKeyAlias checks its carried host key:
 #
-#     ansible-playbook playbooks/server-setup-leap.yml -e target=three \
-#       -e ansible_host=192.168.86.57 -e 'ansible_ssh_common_args=-J one -o HostKeyAlias=three' -K
+#     ansible-playbook playbooks/server-setup-leap.yml -e target=three -K \
+#       -e ansible_host=192.168.86.57 -e 'ansible_ssh_common_args=-J one -o HostKeyAlias=three'
 #
-# WHAT IT DOES, in order, and a failure at any step stops it:
-#   1. Refuses a host outside `leap`, one with no hosts/<host>/leap/MOVED (the system files
-#      would be its Alpine copies), and one that is not openSUSE Leap.
-#   2. The packages, with no python needed: reads which of leap_packages are missing. If
-#      any are, or a lock, Tailscale's repository or a /media mountpoint from the host's
-#      fstab.append is, it builds ONE new snapshot with Tailscale's key, the repository,
-#      the locks, the packages and the mountpoints, asks, reboots into it, and reconnects.
-#   3. Reports the packages installed by hand that are on neither leap_packages nor the
-#      image's baseline, /etc/infra/image-packages. It never removes one.
-#   4. cloudflared and Compose at leap/pins, as server-update-leap.yml moves them
-#      (_leap-pins.yml).
-#   5. Clones the checkout if absent, then puts the .env files and secrets Combustion staged
-#      in /root/carry in place, and removes /root/carry.
-#   6. The groups and users a host needs (its host_vars), before the files that name them.
-#   7. The tracked /etc files, by importing server-install-system-files.yml for this host.
-#   8. fstab.append's entries, the units (enabled, masked, rescue mode's wants), firewalld's
-#      services, snapper's config list and the update recipes for logins.
-#   9. Restarts each running service whose tracked file changed, except sshd,
-#      NetworkManager, cloudflared, tailscaled and docker, which take effect at the reboot.
-#  10. Reboots, after asking, only if one of those five's files, the network profile,
-#      crypttab or fstab changed, or a new snapshot waits. A run that came in on another
-#      address than the host's static one reconnects at the static one.
-#  11. Proves the ways in the host has: the tunnel if it has a config and credentials, the
-#      tailnet if it is logged in. A host without either yet is told so, not failed. Then
-#      the failed units, the pins, and a report.
+# WHAT IT DOES, in order, safe to run again: what is missing of the packages, locks,
+# repository and /media mountpoints, in one snapshot, then a reboot; a report of packages
+# on no list; the leap/pins binaries; the checkout, groups, users and carry-over; the
+# tracked /etc files; fstab, units, firewalld, snapper, motd; restarts by the rule
+# (decisions.md § Every Leap Pi); the reboot that needs; the ways in. A fresh Pi reboots twice:
+# a transactional-update install is usable only after a reboot, and the image likely has
+# no python3 or git, so the packages go in first, with raw, before anything else.
 #
-# A FRESH PI REBOOTS TWICE: once into the packages, since a transactional-update install is
-# usable only after a reboot and the stock image likely has no python3 or git, then once
-# for the rest. A running host usually takes none or one.
-#
-# -K IS REQUIRED: almost every step runs as root, through gavin's sudo, which Combustion set
-# up so the first run already has it.
-#
-# Under --check it reads, reports what it would change, and changes nothing: no install,
-# download, write, restart or reboot. That is for a host that is set up already: a fresh
-# Pi has no python for the reads past step 2. -e confirm=yes answers both questions, for a
-# run nobody types into; -e ways_in_check=false skips the ways in, as the update play's does.
+# -K is required. --check changes nothing, on a host already set up. -e confirm=yes answers
+# both questions; -e ways_in_check=false skips the ways in, as in the update play.
 
 - name: Check the inventory is loaded
   ansible.builtin.import_playbook: _assert-inventory.yml
@@ -62,43 +31,35 @@
   hosts: localhost
   gather_facts: false
   tasks:
-    # Without it the plays below match no host and exit 0 having done nothing
-    # (_assert-inventory.yml, the same trap).
-    - name: Check -e target names a host in the leap group
+    # Without MOVED, bin/install-system-file would read the host's Alpine copies.
+    - name: Check -e target names a moved host in leap
       ansible.builtin.assert:
         that:
-          - target is defined
-          - target in groups['leap']
-        fail_msg: Name the host, -e target=<host>, one in the inventory's leap group.
+          - target is defined and target in groups['leap']
+          - (control_checkout ~ '/hosts/' ~ target ~ '/leap/MOVED') is file
+        fail_msg: Name a host in the leap group with -e target=<host>, one with a hosts/<host>/leap/MOVED.
         success_msg: "target: {{ target | default('?') }}"
-
-    # The tool the system files go through reads hosts/<host>/system/ until this file
-    # exists, and those are the host's Alpine copies.
-    - name: Check hosts/{{ target }}/leap/MOVED exists
-      ansible.builtin.assert:
-        that: (control_checkout ~ '/hosts/' ~ target ~ '/leap/MOVED') is file
-        fail_msg: >-
-          hosts/{{ target }}/leap/MOVED is missing, so bin/install-system-file would install
-          {{ target }}'s Alpine copies. Add it in the commit that moves the host. Nothing has
-          been touched.
-        success_msg: hosts/{{ target }}/leap/MOVED is there
 
 - name: Set up a Leap host's packages and checkout
   hosts: "{{ target }}"
   gather_facts: false
 
   vars:
-    leap_dir: "{{ control_checkout }}/hosts/{{ inventory_hostname }}/leap"
-    repo_file: "{{ leap_dir }}/system/tailscale.repo"
-    repo_head: "{{ lookup('ansible.builtin.file', repo_file, rstrip=false) }}"
+    repo_head: >-
+      {{ lookup('ansible.builtin.file', control_checkout ~ '/hosts/' ~ inventory_hostname
+         ~ '/leap/system/tailscale.repo', rstrip=false) }}
     repo_dest: >-
       {{ repo_head | regex_search('(?m)^# infra-path:\s*(\S+)', '\1') | first }}/{{
          repo_head | regex_search('(?m)^# infra-name:\s*(\S+)', '\1') | first }}
-    # The same pins and paths as server-update-leap.yml, which _leap-pins.yml reads.
-    pins_file: "{{ control_checkout }}/leap/pins"
-    pins: >-
-      {{ dict(lookup('file', pins_file).splitlines()
-         | reject('match', '^\s*(#|$)') | map('split', '=', 1)) }}
+    setup_mounts: >-
+      {{ (lookup('ansible.builtin.file', control_checkout ~ '/hosts/' ~ inventory_hostname
+          ~ '/leap/fstab.append', errors='ignore') or '').splitlines()
+         | reject('match', '^\s*(#|$)') | map('split') | map(attribute='1')
+         | select('match', '^/media/') | list }}
+    setup_missing: "{{ setup_lack.stdout_lines | select('match', '^package=') | map('regex_replace', '^package=', '') | list }}"
+    setup_nomount: "{{ setup_lack.stdout_lines | select('match', '^mount=') | map('regex_replace', '^mount=', '') | list }}"
+    setup_lacks: "{{ setup_lack.stdout_lines | select('match', '^(package|lock|repo|mount)=') | list }}"
+    setup_snapshot: "{{ setup_lacks | length > 0 }}"
     cloudflared_bin: /usr/local/bin/cloudflared
     cloudflared_previous: /usr/local/lib/cloudflared.previous
     compose_bin: /usr/local/lib/docker/cli-plugins/docker-compose
@@ -107,142 +68,64 @@
     confirm: ""
 
   tasks:
-    # The bytes this play sends from here (the repository and its key, fstab.append, the
-    # motd, leap/pins) and the ones the system files play delivers through the host's
-    # checkout must be the commit, not a working tree's edits.
+    # Bytes sent from here (the repository, its key, fstab.append, motd, pins) are the commit.
     - name: Check the bytes sent from here are committed
       ansible.builtin.import_tasks: _review-anchor.yml
       vars:
         anchor_paths: [hosts/, leap/]
         anchor_untouched: Nothing was set up.
 
-    # ── 1. the host: raw, since a fresh image may have no python ─────────────
-    # check_mode: false on every raw read: raw is skipped under --check otherwise.
-    - name: Read {{ inventory_hostname }}'s OS, with no python yet
-      ansible.builtin.raw: cat /etc/os-release
-      register: setup_os
-      changed_when: false
-      check_mode: false
-
-    - name: Check {{ inventory_hostname }} runs openSUSE Leap
-      ansible.builtin.assert:
-        that: setup_os.stdout is search('^ID="?opensuse-leap"?\r?$', multiline=True)
-        fail_msg: >-
-          {{ inventory_hostname }} is not openSUSE Leap, and this play sets up only Leap
-          hosts. Nothing has been touched.
-        success_msg: "{{ setup_os.stdout | regex_search('PRETTY_NAME=\"?([^\"\\r\\n]*)', '\\1') | default(['Leap'], true) | first }}"
-
-    # The data entries' mountpoints under /media. The root is read-only outside a
-    # transaction, so they are made in the package snapshot. No fstab.append, no entries.
-    - name: Note fstab.append's entries and /media mountpoints
-      ansible.builtin.set_fact:
-        setup_fstab_lines: "{{ setup_fstab_read }}"
-        setup_mounts: "{{ setup_fstab_read | map('split') | map(attribute='1') | select('match', '^/media/') | list }}"
-      vars:
-        setup_fstab_read: >-
-          {{ (lookup('ansible.builtin.file', leap_dir ~ '/fstab.append', errors='ignore') or '').splitlines()
-             | reject('match', '^\s*(#|$)') | list }}
-
-    # One key=value line each. --whatprovides, so a name another package provides (python3
-    # on a release whose package is python313) reads as present, as zypper resolves it.
-    - name: Read the packages, locks and repository missing
+    # raw, since the image may have no python, and check_mode: false, since --check skips
+    # raw. --whatprovides, so a name another package provides (python3) reads as present.
+    - name: Read the OS, and the packages and locks missing
       ansible.builtin.raw: |
+        cat /etc/os-release
         for p in {{ leap_packages | map('quote') | join(' ') }}; do
-          rpm -q --whatprovides "$p" >/dev/null 2>&1 || printf 'package=%s\n' "$p"
+          rpm -q --whatprovides "$p" >/dev/null 2>&1 || echo "package=$p"
         done
         for l in {{ leap_package_locks | map('quote') | join(' ') }}; do
-          grep -qxF "solvable_name: $l" /etc/zypp/locks 2>/dev/null || printf 'lock=%s\n' "$l"
+          grep -qxF "solvable_name: $l" /etc/zypp/locks 2>/dev/null || echo "lock=$l"
         done
-        [ -e {{ repo_dest | quote }} ] || echo 'repo=absent'
-        for m in {{ setup_mounts | map('quote') | join(' ') }}; do
-          [ -d "$m" ] || printf 'mount=%s\n' "$m"
-        done
+        [ -e {{ repo_dest | quote }} ] || echo repo=absent
+        for m in {{ setup_mounts | map('quote') | join(' ') }}; do [ -d "$m" ] || echo "mount=$m"; done
       register: setup_lack
       changed_when: false
       check_mode: false
       become: true
 
-    - name: Note what the package snapshot needs
-      ansible.builtin.set_fact:
-        setup_missing: "{{ setup_lack.stdout_lines | select('match', '^package=') | map('regex_replace', '^package=', '') | list }}"
-        setup_unlocked: "{{ setup_lack.stdout_lines | select('match', '^lock=') | map('regex_replace', '^lock=', '') | list }}"
-        setup_norepo: "{{ 'repo=absent' in setup_lack.stdout_lines }}"
-        setup_nomount: "{{ setup_lack.stdout_lines | select('match', '^mount=') | map('regex_replace', '^mount=', '') | list }}"
+    - name: Check {{ inventory_hostname }} runs openSUSE Leap
+      ansible.builtin.assert:
+        that: setup_lack.stdout is search('^ID="?opensuse-leap"?\r?$', multiline=True)
+        fail_msg: "{{ inventory_hostname }} is not openSUSE Leap. Nothing has been touched."
+        quiet: true
 
-    - name: Note whether a package snapshot is needed
-      ansible.builtin.set_fact:
-        setup_snapshot: "{{ (setup_missing + setup_unlocked + setup_nomount) | length > 0 or setup_norepo | bool }}"
-
-    - name: "If anything is missing: print what goes in"
-      ansible.builtin.debug:
-        msg: >-
-          {{ ('DRY RUN, would put' if ansible_check_mode else 'Putting') ~ ' into one new snapshot: '
-             ~ (('packages ' ~ setup_missing | join(' ') ~ '; ') if setup_missing else '')
-             ~ (('locks ' ~ setup_unlocked | join(' ') ~ '; ') if setup_unlocked else '')
-             ~ ("Tailscale's repository; " if setup_norepo | bool else '')
-             ~ (('mountpoints ' ~ setup_nomount | join(' ') ~ '; ') if setup_nomount else '')
-             ~ 'then a reboot into it.' }}
-      changed_when: true
-      when: setup_snapshot | bool
-
-    # A Pi has no clock of its own. It reads the time from the network once it is up, but a
-    # box that has not yet makes every HTTPS download refuse its certificate as not yet
-    # valid, so the time is read from a plain HTTP answer's Date header, which needs none.
-    - name: "If the clock has not synced: set it over HTTP"
-      ansible.builtin.raw: |
-        if [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" = yes ]; then
-          echo synced
-        else
-          d=$(curl -fsSI --max-time 30 http://download.opensuse.org/ | sed -n 's/^[Dd]ate: *//p' | tr -d '\r' | head -n 1)
-          if [ -n "$d" ] && date -u -s "$d" >/dev/null; then
-            echo "set from download.opensuse.org: $(date -u '+%F %T') UTC"
-          else
-            echo "not synced, and the time could not be read over HTTP"
-          fi
-        fi
-      register: setup_clock
-      changed_when: "'set from' in setup_clock.stdout"
-      when: setup_snapshot | bool
-      become: true
-
-    # THE ONE PLACE BYTES TRAVEL OVER THE ANSIBLE CONNECTION for /etc: the checkout cannot
-    # exist before git does, and git is one of the packages. So Tailscale's key and the
-    # host's tailscale.repo go across as base64, into root's home, which transactional-
-    # update binds into the snapshot. Step 7 installs tailscale.repo again from the
-    # checkout, through bin/install-system-file, which finds it identical.
-    - name: "If anything is missing: stage the repository and key"
-      ansible.builtin.raw: >-
-        umask 077 && mkdir -p /root/infra-bootstrap &&
-        printf '%s' {{ lookup('ansible.builtin.file', control_checkout ~ '/leap/tailscale-repo.gpg', rstrip=false) | b64encode | quote }}
-        | base64 -d > /root/infra-bootstrap/tailscale-repo.gpg &&
-        printf '%s' {{ repo_head | b64encode | quote }}
-        | base64 -d > /root/infra-bootstrap/tailscale.repo
-      when: setup_snapshot | bool
-      become: true
-
-    # Everything in ONE snapshot, so a declined reboot leaves the running system as it was
-    # and `transactional-update rollback` undoes all of it: the key and repository before
-    # zypper reads them (the first simulated boot added the repository late and got
-    # openSUSE's tailscale), the locks before the install, the packages in one install, and
-    # the mountpoints, which only a snapshot can make. Each later step continues the
-    # snapshot the one before made.
+    # Compose's plugin directory too, which copy will not make for _leap-pins.yml. Then
+    # ONE snapshot, so a refused reboot changes nothing running and a rollback undoes it
+    # all: the key and repository before zypper reads them, the locks before the install,
+    # then the packages and the mountpoints the read-only root refuses outside one. First
+    # the clock, which a Pi lacks until it syncs: HTTPS refuses every download until then,
+    # and a plain HTTP Date header needs no certificate. The key and repository are the one
+    # place bytes for /etc cross the connection, since there is no checkout before git.
     - name: "If anything is missing: build the package snapshot"
       ansible.builtin.raw: |
         set -e
+        if [ "$(timedatectl show -p NTPSynchronized --value)" != yes ]; then
+          date -u -s "$(curl -fsSI -m 30 http://download.opensuse.org/ | sed -n 's/^[Dd]ate: *//p' | tr -d '\r')" || true
+        fi
+        mkdir -p {{ compose_bin | dirname }}
         trap 'rm -rf /root/infra-bootstrap' EXIT
+        umask 077 && mkdir -p /root/infra-bootstrap
+        printf '%s' {{ lookup('ansible.builtin.file', control_checkout ~ '/leap/tailscale-repo.gpg', rstrip=false) | b64encode | quote }} | base64 -d > /root/infra-bootstrap/key
+        printf '%s' {{ repo_head | b64encode | quote }} | base64 -d > /root/infra-bootstrap/repo
         tu='transactional-update --non-interactive'
         $tu run sh -c {{ setup_inner | quote }}
-        {% if setup_missing %}
-        $tu --continue pkg install {{ setup_missing | map('quote') | join(' ') }}
-        {% endif %}
-        {% if setup_nomount %}
-        $tu --continue run mkdir -p {{ setup_nomount | map('quote') | join(' ') }}
-        {% endif %}
+        {% if setup_missing %}$tu --continue pkg install {{ setup_missing | map('quote') | join(' ') }}{% endif %}
+
+        {% if setup_nomount %}$tu --continue run mkdir -p {{ setup_nomount | map('quote') | join(' ') }}{% endif %}
       vars:
         setup_inner: >-
-          set -e;
-          rpm --import /root/infra-bootstrap/tailscale-repo.gpg;
-          install -D -m 0644 /root/infra-bootstrap/tailscale.repo {{ repo_dest | quote }};
+          set -e; rpm --import /root/infra-bootstrap/key;
+          install -D -m 0644 /root/infra-bootstrap/repo {{ repo_dest | quote }};
           for l in {{ leap_package_locks | map('quote') | join(' ') }}; do
           grep -qxF "solvable_name: $l" /etc/zypp/locks 2>/dev/null ||
           zypper --non-interactive addlock "$l"; done
@@ -251,351 +134,71 @@
       when: setup_snapshot | bool and not ansible_check_mode
       become: true
 
-    - name: "If a snapshot was built: read the containers"
-      ansible.builtin.raw: docker ps --format '{{ "{{" }}.Names{{ "}}" }}'
-      register: setup_tx_containers
-      changed_when: false
-      failed_when: false
-      when: setup_tx is changed
-      become: true
+    - name: Reboot into the package snapshot
+      ansible.builtin.import_tasks: _leap-reboot.yml
+      vars:
+        reboot_for: "{{ ['the package snapshot (' ~ setup_lacks | join(' ') ~ ')'] if setup_tx is changed else [] }}"
+        reboot_must: true
 
-    - name: "If a snapshot was built: ask before the reboot"
-      ansible.builtin.pause:
-        prompt: |
-          {{ inventory_hostname }} has its packages in a new snapshot and will be REBOOTED into it. Running there now:
-            {{ ('Docker did not answer: ' ~ (setup_tx_containers.stdout | default('') | trim)) if setup_tx_containers.rc | default(1) != 0
-               else (setup_tx_containers.stdout_lines | join(', ') if setup_tx_containers.stdout_lines else 'no containers') }}
-          The reboot ends all of them, and every live session. Go on? [y/N]
-      register: setup_tx_answer
-      when: setup_tx is changed and confirm != 'yes'
-
-    - name: "If a snapshot was built: check the answer was yes"
-      ansible.builtin.assert:
-        that: confirm == 'yes' or (setup_tx_answer.user_input | default('') | lower) in ['y', 'yes']
-        fail_msg: >-
-          Not confirmed. The packages wait in a new snapshot for the next boot, and nothing
-          past them was set up; run the play again after that boot.
-        success_msg: going on
-      when: setup_tx is changed
-
-    # Not ansible.builtin.reboot, which runs the setup module first and so needs python,
-    # which the snapshot only brings at this boot. A timer a few seconds out lets this
-    # command return before the connection drops.
-    - name: "If a snapshot was built: read the boot's id"
-      ansible.builtin.raw: cat /proc/sys/kernel/random/boot_id
-      register: setup_tx_boot
-      changed_when: false
-      when: setup_tx is changed
-
-    - name: "If a snapshot was built: reboot into it"
-      ansible.builtin.raw: systemd-run --on-active=5 /usr/bin/systemctl reboot
-      changed_when: true
-      when: setup_tx is changed
-      become: true
-
-    # Its ping is python's, which the new snapshot has, so an answer is the new snapshot.
-    - name: "If a snapshot was built: wait for python to answer"
-      ansible.builtin.wait_for_connection:
-        delay: 30
-        sleep: 10
-        timeout: 900
-      when: setup_tx is changed
-
-    - name: "If a snapshot was built: read the new boot's id"
-      ansible.builtin.raw: cat /proc/sys/kernel/random/boot_id
-      register: setup_tx_booted
-      changed_when: false
-      when: setup_tx is changed
-
-    - name: "If a snapshot was built: check the box rebooted"
-      ansible.builtin.assert:
-        that: setup_tx_booted.stdout | trim != setup_tx_boot.stdout | trim
-        fail_msg: "{{ inventory_hostname }} answered, but on the same boot. Nothing past the packages was set up."
-        success_msg: rebooted into the package snapshot
-      when: setup_tx is changed
-
-    # ── 3. the extras: reported, never removed ───────────────────────────────
-    # zypper's own record of what was installed by request, as opposed to pulled in as a
-    # dependency (/var/lib/zypp/AutoInstalled, inverted), through its documented command
-    # rather than the file. Its table's third column is the name; a user-installed row is
-    # marked i+. Less leap_packages and the image's baseline, it leaves what someone added.
+    # zypper's record of what was installed by request, less what provides each list entry
+    # and less the image's baseline, which Combustion writes and one and three predate.
     - name: Read the packages installed by request
-      ansible.builtin.shell: >-
+      ansible.builtin.shell: |
+        listed=$(rpm -q --whatprovides --qf '%{NAME}\n' {{ leap_packages | map('quote') | join(' ') }} | grep -v ' ')
+        if [ -r /etc/infra/image-packages ]; then echo baseline; else echo none; fi
         zypper --quiet --no-refresh packages --userinstalled |
-        awk -F'|' 'NF >= 3 && $1 ~ /^ *i/ { gsub(/ /, "", $3); print $3 }' | sort -u
-      register: setup_userinstalled
+          awk -F'|' 'NF >= 3 && $1 ~ /^ *i/ { gsub(/ /, "", $3); print $3 }' | sort -u |
+          grep -vxF "$listed" | grep -vxF "$(cat /etc/infra/image-packages 2>/dev/null)" || true
+      register: setup_extras
       changed_when: false
       check_mode: false
       become: true
-
-    # Combustion writes it on a new host. one and three were set up before it existed.
-    - name: Read the image's package baseline
-      ansible.builtin.command: cat /etc/infra/image-packages
-      register: setup_baseline
-      changed_when: false
-      failed_when: false
-      check_mode: false
 
     - name: Print the packages on no list, which stay
       ansible.builtin.debug:
         msg: >-
-          {{ ('No baseline (/etc/infra/image-packages is absent), so this is every package '
-              ~ 'installed by request and not on leap_packages: '
-              if setup_baseline.rc != 0 else
-              'Installed by request, on neither leap_packages nor the image baseline: ')
-             ~ (setup_extras | join(' ') if setup_extras else 'none')
-             ~ ". Nothing was removed; removing one is the owner's call, by hand." }}
-      vars:
-        setup_extras: >-
-          {{ setup_userinstalled.stdout_lines | difference(leap_packages)
-             | difference(setup_baseline.stdout_lines if setup_baseline.rc == 0 else []) }}
+          On no list{{ '' if setup_extras.stdout_lines[0] == 'baseline' else " (no baseline, so the image's own too)" }}:
+          {{ setup_extras.stdout_lines[1:] | join(' ') or 'none' }}. Removing one is the owner's call.
       changed_when: true
 
-    # ── 4. the pinned binaries ───────────────────────────────────────────────
-    - name: Read the architecture and pinned versions
-      ansible.builtin.shell: &setup_versions |
-        printf 'arch=%s\n' "$(uname -m)"
-        printf 'kernel=%s\n' "$(uname -r)"
-        printf 'cloudflared=%s\n' "$({{ cloudflared_bin }} --version 2>/dev/null | sed -n 's/.*version \([^ ]*\).*/\1/p' | head -n 1)"
-        printf 'compose=%s\n' "$({{ compose_bin }} version --short 2>/dev/null | sed 's/^v//' | head -n 1)"
-        printf 'array=%s\n' "$(grep -qE '^[^#].*noauto' /etc/crypttab 2>/dev/null && echo locked || echo none)"
-      register: setup_before
-      changed_when: false
-      check_mode: false
-
-    - name: Note the pins and what is installed
-      ansible.builtin.set_fact:
-        upd_was: "{{ dict(setup_before.stdout_lines | map('split', '=')) }}"
-
-    - name: Check leap/pins has both pins for this architecture
-      ansible.builtin.assert:
-        that:
-          - upd_was.arch in ['aarch64', 'x86_64']
-          - pins.cloudflared_version | default('') | length > 0
-          - pins['cloudflared_sha256_' ~ upd_was.arch] | default('') | length == 64
-          - pins.compose_version | default('') | length > 0
-          - pins['compose_sha256_' ~ upd_was.arch] | default('') | length == 64
-        fail_msg: "{{ pins_file }} lacks a version or a {{ upd_was.arch }} SHA-256. Nothing past the packages was set up."
-        success_msg: >-
-          cloudflared {{ upd_was.cloudflared or 'missing' }} -> {{ pins.cloudflared_version | default('?') }},
-          Compose {{ upd_was.compose or 'missing' }} -> {{ pins.compose_version | default('?') }}
-
-    - name: Note the release assets for this architecture
-      ansible.builtin.set_fact:
-        upd_asset: >-
-          {{ {'aarch64': {'cloudflared': 'arm64', 'compose': 'aarch64'},
-              'x86_64': {'cloudflared': 'amd64', 'compose': 'x86_64'}}[upd_was.arch] }}
-        upd_cfd_moves: "{{ upd_was.cloudflared != pins.cloudflared_version }}"
-        upd_compose_moves: "{{ upd_was.compose != pins.compose_version }}"
-
-    # A new host has no plugin directory, and copy makes no parent directories.
-    - name: Make Compose's plugin directory
-      ansible.builtin.file:
-        path: "{{ compose_bin | dirname }}"
-        state: directory
-        mode: "0755"
-      become: true
+    - name: Read the versions and leap/pins
+      ansible.builtin.import_tasks: _leap-pins-read.yml
+      vars:
+        pins_untouched: Nothing past the packages was set up.
 
     - name: Move cloudflared and Compose to leap/pins
       ansible.builtin.import_tasks: _leap-pins.yml
       vars:
         pins_untouched: Nothing past the pinned binaries was set up; leap/pins is the thing to look at.
 
-    # ── 5. the checkout, and the staged carry-over ───────────────────────────
-    # As gavin, who owns it. One already there is left as it is: it may hold work, and the
-    # system files play pulls it. One with no commit is a clone that never finished.
-    - name: Read whether the checkout exists
-      ansible.builtin.stat:
-        path: "{{ infra_checkout }}"
-      register: setup_checkout
-
-    - name: "If the checkout exists: read its commit"
-      ansible.builtin.command:
-        cmd: git rev-parse -q --verify HEAD
-        chdir: "{{ infra_checkout }}"
-      register: setup_checkout_head
-      changed_when: false
-      failed_when: false
-      check_mode: false
-      when: setup_checkout.stat.exists
-
-    - name: Check the checkout holds a commit
-      ansible.builtin.assert:
-        that: not setup_checkout.stat.exists or setup_checkout_head.rc | default(1) == 0
-        fail_msg: "{{ infra_checkout }} exists and holds no commit; move it aside, then run the play again."
-        quiet: true
-
+    # As gavin. One already there is left; one with no commit fails the system files pull.
     - name: "If there is no checkout: clone it"
-      ansible.builtin.command: git clone --quiet https://github.com/gsfernandes81/infra.git {{ infra_checkout }}
-      changed_when: true
-      when: not setup_checkout.stat.exists
+      ansible.builtin.command:
+        cmd: git clone --quiet https://github.com/gsfernandes81/infra.git {{ infra_checkout }}
+        creates: "{{ infra_checkout }}"
 
-    # /root/carry exists only after Combustion staged it; a running host has none.
-    - name: Read whether Combustion staged a carry-over
-      ansible.builtin.stat:
-        path: "{{ carry }}"
-      register: setup_carry
-      become: true
-
-    - name: "If staged: read the .env files"
-      ansible.builtin.find:
-        paths: "{{ carry }}/env"
-        patterns: "*.env"
-      register: setup_carry_envs
-      become: true
-      when: setup_carry.stat.exists
-
-    - name: "If staged: read the secrets directories"
-      ansible.builtin.find:
-        paths: "{{ carry }}/home"
-        patterns: ".*-secrets"
-        file_type: directory
-        hidden: true
-      register: setup_carry_secrets
-      become: true
-      when: setup_carry.stat.exists
-
-    - name: "If staged: note each .env's deployment"
-      ansible.builtin.set_fact:
-        setup_deps: "{{ setup_carry_envs.files | map(attribute='path') | map('basename') | map('regex_replace', '\\.env$', '') | list }}"
-      when: setup_carry.stat.exists
-
-    - name: "If staged: read each deployment's directory"
-      ansible.builtin.stat:
-        path: "{{ infra_checkout }}/deployments/{{ item }}"
-      register: setup_dep_dirs
-      loop: "{{ setup_deps }}"
-      when: setup_carry.stat.exists
-
-    - name: "If staged: check each .env has a deployment"
-      ansible.builtin.assert:
-        that: setup_dep_missing | length == 0
-        fail_msg: >-
-          {{ carry }}/env has a .env for a deployment the checkout lacks:
-          {{ setup_dep_missing | join(', ') }}. Nothing was put in place.
-        quiet: true
-      vars:
-        setup_dep_missing: >-
-          {{ setup_dep_dirs.results | rejectattr('stat.exists') | map(attribute='item') | list
-             + setup_dep_dirs.results | selectattr('stat.exists') | rejectattr('stat.isdir')
-               | map(attribute='item') | list }}
-      when: setup_carry.stat.exists
-
-    - name: "If staged: put each .env in its deployment"
-      ansible.builtin.copy:
-        src: "{{ carry }}/env/{{ item }}.env"
-        dest: "{{ infra_checkout }}/deployments/{{ item }}/.env"
-        remote_src: true
-        owner: gavin
-        group: gavin
-        mode: "0600"
-      loop: "{{ setup_deps }}"
-      become: true
-      when: setup_carry.stat.exists
-
-    # gavin's, every file in them, as each deployment's play left them in his home.
-    - name: "If staged: put each secrets directory in his home"
-      ansible.builtin.copy:
-        src: "{{ item }}"
-        dest: /home/gavin/
-        remote_src: true
-        owner: gavin
-        group: gavin
-      loop: "{{ setup_carry_secrets.files | map(attribute='path') | list }}"
-      become: true
-      when: setup_carry.stat.exists
-
-    # Then each file a .env names as TUNNEL_CREDENTIALS is 65532's at 0600, as
-    # server-create-deployment-tunnel.yml leaves it for the cloudflared image's user. Keyed
-    # on the .env, not the file name: the dev hub's tunnel.json stays gavin's, since its
-    # connector runs as gavin. Found at one's move, where the sidecars could not read theirs.
-    # Read from the staged copies, which are the same bytes, so --check reads them too.
-    - name: "If staged: read each .env"
-      ansible.builtin.slurp:
-        src: "{{ carry }}/env/{{ item }}.env"
-      register: setup_env_bytes
-      loop: "{{ setup_deps }}"
-      become: true
-      when: setup_carry.stat.exists
-
-    - name: "If staged: note the tunnel credentials files"
-      ansible.builtin.set_fact:
-        setup_tunnel_creds: >-
-          {{ setup_env_bytes.results | map(attribute='content') | map('b64decode')
-             | map('regex_findall', '(?m)^\s*(?:export\s+)?TUNNEL_CREDENTIALS\s*=\s*["\x27]?([^"\x27\n]*?)["\x27]?\s*$')
-             | map('default', [''], true) | map('last')
-             | select('match', '^/home/gavin/\.[^/]*-secrets/') | list }}
-      when: setup_carry.stat.exists
-
-    - name: "If staged: read each tunnel credentials file"
-      ansible.builtin.stat:
-        path: "{{ item | regex_replace('^/home/gavin/', carry ~ '/home/') }}"
-      register: setup_cred_files
-      loop: "{{ setup_tunnel_creds }}"
-      become: true
-      when: setup_carry.stat.exists
-
-    - name: "If staged: check each was carried"
-      ansible.builtin.assert:
-        that: setup_cred_missing | length == 0
-        fail_msg: >-
-          A .env names as TUNNEL_CREDENTIALS a file the stick did not carry:
-          {{ setup_cred_missing | join(', ') }}. /root/carry is kept.
-        quiet: true
-      vars:
-        setup_cred_missing: >-
-          {{ setup_cred_files.results | rejectattr('stat.exists') | map(attribute='item') | list
-             + setup_cred_files.results | selectattr('stat.exists') | rejectattr('stat.isreg')
-               | map(attribute='item') | list }}
-      when: setup_carry.stat.exists
-
-    - name: "If staged: give each to the cloudflared image's user"
-      ansible.builtin.file:
-        path: "{{ item }}"
-        owner: "65532"
-        group: "65532"
-        mode: "0600"
-      loop: "{{ setup_tunnel_creds }}"
-      become: true
-      # Under --check the files are not in place yet, and file refuses a path that is not.
-      when: setup_carry.stat.exists and not ansible_check_mode
-
-    - name: "If staged: remove /root/carry"
-      ansible.builtin.file:
-        path: "{{ carry }}"
-        state: absent
-      become: true
-      when: setup_carry.stat.exists
-
-    # ── 6. groups and users, before the files that name them ─────────────────
-    # A group or user of the same name that is not the one this play makes stops it, since
-    # files would then belong to the wrong number, or to an account the image brought.
-    - name: Read the groups and users
+    # Before the carry-over and the tracked files that name them. A group at another gid
+    # stops the play, since files would belong to the wrong number.
+    - name: Read the groups
       ansible.builtin.getent:
-        database: "{{ item }}"
-      loop: [group, passwd]
+        database: group
 
     - name: Check no group of the same name has another gid
       ansible.builtin.assert:
         that: >-
           item.name not in ansible_facts.getent_group
           or ansible_facts.getent_group[item.name][1] == item.gid | string
-        fail_msg: >-
-          A {{ item.name }} group exists at gid
-          {{ ansible_facts.getent_group[item.name][1] | default('?') }}, not {{ item.gid }}.
-          Nothing was changed.
+        fail_msg: A {{ item.name }} group exists at another gid than {{ item.gid }}. Nothing was changed.
         quiet: true
       loop: "{{ leap_groups | default([]) }}"
-      loop_control:
-        label: "{{ item.name }}"
 
+    # Each of leap_groups at its gid, and a group of its own for each system user.
     - name: Make each group
       ansible.builtin.group:
         name: "{{ item.name }}"
-        gid: "{{ item.gid }}"
-      loop: "{{ leap_groups | default([]) }}"
-      loop_control:
-        label: "{{ item.name }}"
+        gid: "{{ item.gid | default(omit) }}"
+        system: "{{ item.gid is not defined }}"
+      loop: "{{ leap_groups | default([]) + leap_system_users | default([]) }}"
       become: true
 
     - name: Add each group's members
@@ -604,35 +207,9 @@
         groups: "{{ item.0.name }}"
         append: true
       loop: "{{ leap_groups | default([]) | subelements('members') }}"
-      loop_control:
-        label: "{{ item.1 }} in {{ item.0.name }}"
       become: true
 
-    - name: Check no user of the same name differs
-      ansible.builtin.assert:
-        that: >-
-          item.name not in ansible_facts.getent_passwd
-          or ansible_facts.getent_passwd[item.name][3:] == [item.comment, item.home, item.shell]
-        fail_msg: >-
-          A {{ item.name }} user exists already that is not the one this play makes, one
-          the image brought: {{ ([item.name] + ansible_facts.getent_passwd[item.name] | default([])) | join(':') }}.
-          Nothing was changed.
-        quiet: true
-      loop: "{{ leap_system_users | default([]) }}"
-      loop_control:
-        label: "{{ item.name }}"
-
-    # A system user with a group of its own and no password, its home made below.
-    - name: Make each system user's group
-      ansible.builtin.group:
-        name: "{{ item.name }}"
-        system: true
-      loop: "{{ leap_system_users | default([]) }}"
-      loop_control:
-        label: "{{ item.name }}"
-      become: true
-
-    - name: Make each system user
+    - name: Make each system user, with no password
       ansible.builtin.user:
         name: "{{ item.name }}"
         group: "{{ item.name }}"
@@ -642,10 +219,9 @@
         shell: "{{ item.shell }}"
         comment: "{{ item.comment }}"
       loop: "{{ leap_system_users | default([]) }}"
-      loop_control:
-        label: "{{ item.name }}"
       become: true
 
+    # Root's, so a user cannot change its own keys, ssh config or the host key it trusts.
     - name: Make each system user's home and .ssh, root's
       ansible.builtin.file:
         path: "{{ item.0.home }}{{ item.1 }}"
@@ -654,13 +230,75 @@
         group: root
         mode: "0755"
       loop: "{{ leap_system_users | default([]) | product(['', '/.ssh']) | list }}"
-      loop_control:
-        label: "{{ item.0.home }}{{ item.1 }}"
       become: true
 
-# ── 7. the tracked /etc files, through the play that installs them everywhere ──
+    # Only a new box has /root/carry; find skips paths that do not exist.
+    - name: Read what Combustion staged in /root/carry
+      ansible.builtin.find:
+        paths: ["{{ carry }}/env", "{{ carry }}/home"]
+        patterns: ["*.env", ".*-secrets"]
+        file_type: any
+        hidden: true
+      register: setup_carry
+      become: true
+
+    # Each .env into its deployment at 0600, each secrets directory into gavin's home, his.
+    - name: "If staged: put each in place"
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: >-
+          {{ infra_checkout ~ '/deployments/' ~ item | basename | regex_replace('[.]env$', '') ~ '/.env'
+             if item is match('.*[.]env$') else '/home/gavin/' }}
+        remote_src: true
+        owner: gavin
+        group: gavin
+        mode: "{{ '0600' if item is match('.*[.]env$') else omit }}"
+      loop: "{{ setup_carry.files | map(attribute='path') | list }}"
+      become: true
+
+    # As the plays write them: KEY=value, TUNNEL_CREDENTIALS and dev's *_SECRETS.
+    - name: "If staged: read the secrets each .env names"
+      ansible.builtin.shell: cat {{ carry }}/env/*.env 2>/dev/null | grep -E '^(TUNNEL_CREDENTIALS|[A-Z_]+_SECRETS)=' || true
+      register: setup_named
+      changed_when: false
+      check_mode: false
+      become: true
+
+    # Each carried directory dev's .env names: the dev stack reads them as group 1001
+    # (decisions.md § The dev stack runs as 1001 on every host), directories 0750 and files
+    # 0640. Under --check they are not in place yet.
+    - name: "If staged: give the dev stack's secrets group 1001"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        group: "1001"
+        mode: u=rwX,g=rX,o=
+        recurse: true
+      loop: >-
+        {{ setup_named.stdout_lines | select('match', '^[A-Z_]+_SECRETS=') | map('regex_replace', '^[^=]*=', '')
+           | select('in', setup_carry.files | map(attribute='path') | map('basename') | map('regex_replace', '^', '/home/gavin/'))
+           | list }}
+      when: not ansible_check_mode
+      become: true
+
+    # For the cloudflared image's user, as server-create-deployment-tunnel.yml leaves it.
+    - name: "If staged: give each tunnel credentials file 65532"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        owner: "65532"
+        group: "65532"
+        mode: "0600"
+      loop: "{{ setup_named.stdout_lines | select('match', '^TUNNEL_CREDENTIALS=/home/gavin/') | map('regex_replace', '^[^=]*=', '') | list }}"
+      when: not ansible_check_mode
+      become: true
+
+    - name: Remove /root/carry
+      ansible.builtin.file:
+        path: "{{ carry }}"
+        state: absent
+      become: true
+
 # For this host only: its hosts line is fleet otherwise, and a fresh Pi's -e ansible_host
-# would then send every fleet host's run to this box. Its guards are its own, unchanged.
+# would send every fleet host's run to this box. Its guards are its own, unchanged.
 - name: Install the tracked /etc files on this host
   ansible.builtin.import_playbook: server-install-system-files.yml
   vars:
@@ -673,99 +311,48 @@
   vars:
     confirm: ""
     ways_in_check: true
-    pins: >-
-      {{ dict(lookup('file', control_checkout ~ '/leap/pins').splitlines()
-         | reject('match', '^\s*(#|$)') | map('split', '=', 1)) }}
-    # The restart rule's exceptions (decisions.md § Every Leap Pi): the connection this
-    # play runs over, and every container, which docker restarts. Each takes effect at the
-    # reboot instead.
-    setup_held_units:
-      - sshd.service
-      - NetworkManager.service
-      - cloudflared.service
-      - tailscaled.service
-      - docker.service
-    # The unit a tracked file outside /etc/systemd/system belongs to, by its installed path,
-    # or failing that its directory. A file in none, a sudoers file or a repository, is
-    # read when it is used and restarts nothing.
-    setup_unit_of:
-      /etc/ssh/sshd_config.d: sshd.service
-      /etc/cloudflared: cloudflared.service
-      /etc/NetworkManager/system-connections: NetworkManager.service
-      /etc/rebootmgr: rebootmgr.service
-      /usr/local/sbin/argon-fan: argon-fan.service
-    # Files read only at boot, which a restart cannot apply and which alone are not worth
-    # a reboot: zram's size, a module to load, and the Pi's firmware settings, which want
-    # a power-off besides.
-    setup_boot_only: [/etc/systemd/zram-generator.conf, /etc/modules-load.d, /boot/efi]
+    # From the system files play's dry run; a real run installed exactly these, or stopped.
+    setup_changed: "{{ dry.results | rejectattr('stdout', 'search', 'Nothing to do') | selectattr('rc', 'equalto', 0) | map(attribute='item') | list }}"
+    setup_refused: "{{ dry.results | rejectattr('rc', 'equalto', 0) | map(attribute='item') | list }}"
+    setup_restart: "{{ leap_restart_on_change | dict2items | selectattr('key', 'in', setup_changed) | map(attribute='value') | unique | list }}"
+    setup_held: "{{ setup_changed | select('in', leap_reboot_on_change) | list }}"
+    setup_reasons: >-
+      {{ setup_held + (['the fstab entries'] if setup_fstab is changed else [])
+         + (['a new snapshot'] if setup_pending.stdout | trim == 'waits' else []) }}
+    # A refused reboot leaves the five on their old files, so nothing is proved then.
+    setup_waits: "{{ setup_reasons | length > 0 and not reboot_go | bool and not ansible_check_mode }}"
+    setup_proved: "{{ ways_in_check | bool and not setup_waits | bool and not ansible_check_mode }}"
+    setup_tunnel_ok: "{{ upd_ready.rc | default(1) == 0 and (upd_ready.stdout | default('{}') | from_json).readyConnections | default(0) > 0 }}"
+    setup_tailnet_ok: "{{ upd_tailnet.rc | default(1) == 0 }}"
+    setup_now: "{{ dict(setup_after.stdout_lines | default([]) | map('split', '=')) }}"
+    # openSUSE's import-pubring-from-rpmdb fails harmlessly, as the update play says.
+    setup_bad: "{{ upd_failed.stdout_lines | default([]) | reject('equalto', 'import-pubring-from-rpmdb.service') | list }}"
+    # Reconnect only when the run came in on another address of the static one's LAN, the
+    # lease the new profile replaces: never through an ssh alias or a simulation's 127.0.0.1.
+    setup_reconnect: >-
+      {{ leap_static_address if setup_changed | select('match', '.*\.nmconnection$') | list
+         and ansible_host != leap_static_address
+         and ansible_host is match((leap_static_address | regex_replace('\d+$', '')) | regex_escape)
+         else '' }}
 
   tasks:
-    # ── what the system files play changed ───────────────────────────────────
-    # Its dry run, which every run makes, lists what differed; a real run installs exactly
-    # those, and an install that failed would have stopped the host there. Each file's
-    # header, from this checkout, which the host's is (that play asserts it), says where it
-    # went.
-    - name: Note the tracked files that changed
-      ansible.builtin.set_fact:
-        setup_changed_paths: >-
-          {{ tracked.stdout_lines | zip(tracked.stdout_lines | map('basename'))
-             | selectattr('1', 'in', dry.results | rejectattr('stdout', 'search', 'Nothing to do')
-                 | selectattr('rc', 'equalto', 0) | map(attribute='item') | list)
-             | map(attribute='0') | list }}
-        setup_changed: []
-
-    - name: Note where each went, and the unit it belongs to
-      ansible.builtin.set_fact:
-        setup_changed: "{{ setup_changed + [{'dest': setup_dest, 'unit': setup_unit}] }}"
-      loop: "{{ setup_changed_paths }}"
-      vars:
-        setup_head: "{{ lookup('ansible.builtin.file', control_checkout ~ '/' ~ item) }}"
-        setup_dir: "{{ setup_head | regex_search('(?m)^# infra-path:\\s*(\\S+)', '\\1') | first }}"
-        setup_dest: "{{ setup_dir ~ '/' ~ (setup_head | regex_search('(?m)^# infra-name:\\s*(\\S+)', '\\1') | first) }}"
-        setup_unit: >-
-          {{ (setup_dest | basename) if setup_dir == '/etc/systemd/system'
-             else (setup_dir | regex_replace('^/etc/systemd/system/(.+)\\.d$', '\\1'))
-               if setup_dir is match('^/etc/systemd/system/.+\\.d$')
-             else setup_unit_of[setup_dest] | default(setup_unit_of[setup_dir] | default('')) }}
-
-    # A restart is for a service or a timer. A mount's drop-in takes effect at the reload
-    # and its next mount: restarting a mount unmounts it, which is never this play's to do.
-    - name: Note what to restart, and what waits for a boot
-      ansible.builtin.set_fact:
-        setup_restart: >-
-          {{ setup_units | difference(setup_held_units) | select('match', '.*\.(service|timer)$') | list }}
-        setup_held: "{{ setup_units | intersect(setup_held_units) }}"
-        setup_reload: "{{ setup_changed | map(attribute='dest') | select('match', '^/etc/systemd/system/') | list | length > 0 }}"
-        setup_profile_changed: "{{ 'NetworkManager.service' in setup_units }}"
-        setup_crypttab_changed: "{{ '/etc/crypttab' in setup_changed | map(attribute='dest') }}"
-        setup_at_boot: >-
-          {{ setup_changed | map(attribute='dest')
-             | select('match', '^(' ~ setup_boot_only | map('regex_escape') | join('|') ~ ')(/|$)') | list }}
-      vars:
-        setup_units: "{{ setup_changed | map(attribute='unit') | select | unique | list }}"
-
-    # ── 8. what is not a tracked file ────────────────────────────────────────
-    - name: "If a unit file changed: reload systemd"
-      ansible.builtin.systemd_service:
-        daemon_reload: true
-      when: setup_reload | bool and not ansible_check_mode
-      become: true
-
-    # One entry per line, appended only if that exact line is missing, after the image's
-    # own root entries. No markers and no comments: the fstab is entries only, and the why
-    # is in each host's README.
+    # Each line appended if missing; no markers or comments, since the fstab is entries only.
     - name: Add fstab.append's entries to /etc/fstab
       ansible.builtin.lineinfile:
         path: /etc/fstab
         line: "{{ item }}"
-      loop: "{{ setup_fstab_lines }}"
+      loop: >-
+        {{ (lookup('ansible.builtin.file', control_checkout ~ '/hosts/' ~ inventory_hostname
+            ~ '/leap/fstab.append', errors='ignore') or '').splitlines() | reject('match', '^\s*(#|$)') | list }}
       register: setup_fstab
       become: true
 
+    # daemon_reload first, for the unit files the system files play may have installed.
     - name: Enable the units
       ansible.builtin.systemd_service:
         name: "{{ item }}"
         enabled: true
+        daemon_reload: true
       loop: "{{ leap_units_enabled + leap_extra_units_enabled | default([]) }}"
       register: setup_enabled
       become: true
@@ -784,41 +371,26 @@
       loop: "{{ leap_rescue_wants }}"
       become: true
 
-    # Starting a stopped unit is not a restart, so only the five wait for the reboot.
-    - name: Start each newly enabled unit outside the five
+    # Starting a stopped unit is not a restart; the common units all wait for the reboot.
+    - name: Start each newly enabled unit of the host's own
       ansible.builtin.systemd_service:
         name: "{{ item }}"
         state: started
-      loop: >-
-        {{ setup_enabled.results | selectattr('changed') | map(attribute='item')
-           | difference(setup_held_units) }}
+      loop: "{{ setup_enabled.results | selectattr('changed') | map(attribute='item') | difference(leap_units_enabled) }}"
       when: not ansible_check_mode
       become: true
 
-    - name: Read firewalld's services
-      ansible.builtin.command: firewall-cmd --permanent --query-service={{ item }}
+    # Then a reload, firewalld's own restart, which the rule allows.
+    - name: Add each firewalld service missing, and reload
+      ansible.builtin.shell: |
+        added=$(for s in {{ leap_firewalld_services | map('quote') | join(' ') }}; do
+          firewall-cmd -q --permanent --query-service="$s" ||
+            { firewall-cmd -q --permanent --add-service="$s" && echo "$s"; }
+        done)
+        [ -z "$added" ] || { firewall-cmd -q --reload && echo "$added"; }
       register: setup_fw
-      changed_when: false
-      failed_when: setup_fw.rc not in [0, 1]
-      check_mode: false
-      loop: "{{ leap_firewalld_services | default([]) }}"
-      become: true
-
-    - name: Add each firewalld service missing
-      ansible.builtin.command: firewall-cmd --permanent --add-service={{ item.item }}
-      register: setup_fw_added
-      changed_when: true
-      loop: "{{ setup_fw.results }}"
-      loop_control:
-        label: "{{ item.item }}"
-      when: item.rc == 1
-      become: true
-
-    # A reload is firewalld's own restart, which the rule allows: it is not one of the five.
-    - name: "If a service was added: reload firewalld"
-      ansible.builtin.command: firewall-cmd --reload
-      changed_when: true
-      when: setup_fw_added is changed
+      changed_when: setup_fw.stdout | length > 0
+      when: leap_firewalld_services | default([]) | length > 0
       become: true
 
     # Only on a host whose host_vars name the list, which must then name root's too.
@@ -837,9 +409,6 @@
         mode: "0644"
       become: true
 
-    # ── 9. restarts, by the rule ─────────────────────────────────────────────
-    # try-restart: a service that is not running stays stopped, so a oneshot a timer runs is
-    # not run here.
     - name: Restart each running unit whose file changed
       ansible.builtin.command: systemctl try-restart {{ item }}
       changed_when: true
@@ -847,191 +416,76 @@
       when: not ansible_check_mode
       become: true
 
-    # ── 10. the reboot, only if something needs it ───────────────────────────
-    # The root findmnt names, against btrfs's default: a snapshot built and not yet booted.
+    # The snapshot root is mounted from, against btrfs's default: one built, not yet booted.
     - name: Read whether a new snapshot waits
       ansible.builtin.shell: |
         cur=$(findmnt -n -o SOURCE / | sed -n 's|.*\[/*\(.*\)\]$|\1|p')
         def=$(btrfs subvolume get-default / | sed -n 's|.* path /*||p')
-        if [ -n "$cur" ] && [ -n "$def" ] && [ "$cur" != "$def" ]; then echo waits; else echo none; fi
+        [ -n "$cur" ] && [ -n "$def" ] && [ "$cur" != "$def" ] && echo waits || echo none
       register: setup_pending
       changed_when: false
       check_mode: false
       become: true
 
-    - name: Note what the reboot would apply
-      ansible.builtin.set_fact:
-        setup_reasons: >-
-          {{ setup_held | map('regex_replace', '$', "'s files") | list
-             + (['crypttab'] if setup_crypttab_changed | bool else [])
-             + (['the fstab entries'] if setup_fstab is changed else [])
-             + (['a new snapshot'] if setup_pending.stdout | trim == 'waits' else []) }}
+    - name: Reboot if anything needs it
+      ansible.builtin.import_tasks: _leap-reboot.yml
+      vars:
+        reboot_for: "{{ setup_reasons }}"
+        reboot_must: false
+        reboot_to: "{{ setup_reconnect }}"
 
-    - name: "If a reboot is needed: read the containers"
-      ansible.builtin.command: docker ps --format '{{ "{{" }}.Names{{ "}}" }}'
-      register: setup_containers
-      changed_when: false
-      failed_when: false
-      check_mode: false
-      when: setup_reasons | length > 0
-      become: true
-
-    - name: "If a reboot is needed: ask first"
-      ansible.builtin.pause:
-        prompt: |
-          {{ inventory_hostname }} will be REBOOTED, for {{ setup_reasons | join(', ') }}. Running there now:
-            {{ ('Docker did not answer: ' ~ (setup_containers.stderr | default('') | trim)) if setup_containers.rc | default(1) != 0
-               else (setup_containers.stdout_lines | join(', ') if setup_containers.stdout_lines else 'no containers') }}
-          The reboot ends all of them, and every live session. Go on? [y/N]
-      register: setup_answer
-      when: setup_reasons | length > 0 and confirm != 'yes' and not ansible_check_mode
-
-    - name: Note whether to reboot
-      ansible.builtin.set_fact:
-        setup_reboot: >-
-          {{ setup_reasons | length > 0 and not ansible_check_mode
-             and (confirm == 'yes' or (setup_answer.user_input | default('') | lower) in ['y', 'yes']) }}
-
-    - name: "If rebooting: read the boot's id"
-      ansible.builtin.command: cat /proc/sys/kernel/random/boot_id
-      register: setup_boot_before
-      changed_when: false
-      when: setup_reboot | bool
-
-    # Not ansible.builtin.reboot, which waits at the address it left from: a box whose new
-    # profile gives it its static address would never answer there. A timer a few seconds
-    # out lets this command return before the connection drops.
-    - name: "If rebooting: reboot {{ inventory_hostname }}"
-      ansible.builtin.command: systemd-run --on-active=5 /usr/bin/systemctl reboot
-      changed_when: true
-      when: setup_reboot | bool
-      become: true
-
-    # -e ansible_host outranks anything a play can set, so the new address goes to ssh as
-    # its HostName, which wins over the destination given; the jump and the HostKeyAlias
-    # still apply.
-    - name: "If the address moves: reconnect at the static one"
-      ansible.builtin.set_fact:
-        ansible_ssh_extra_args: -o HostName={{ leap_static_address }}
-      when:
-        - setup_reboot | bool
-        - setup_profile_changed | bool
-        - ansible_host is defined
-        - ansible_host != leap_static_address
-
-    - name: "If rebooting: wait for it to answer"
-      ansible.builtin.wait_for_connection:
-        delay: 30
-        sleep: 10
-        timeout: 900
-      when: setup_reboot | bool
-
-    - name: "If rebooting: read the new boot's id"
-      ansible.builtin.command: cat /proc/sys/kernel/random/boot_id
-      register: setup_boot_after
-      changed_when: false
-      when: setup_reboot | bool
-
-    - name: "If rebooting: check the box rebooted"
-      ansible.builtin.assert:
-        that: setup_boot_after.stdout | trim != setup_boot_before.stdout | trim
-        fail_msg: "{{ inventory_hostname }} answered, but on the same boot."
-        success_msg: rebooted
-      when: setup_reboot | bool
-
-    # ── 11. the ways in the host has ─────────────────────────────────────────
-    # A reboot that was declined leaves the five on their old files, so nothing is proved.
-    - name: Read whether a tunnel config and credentials exist
+    - name: Read whether a tunnel and a tailnet login exist
       ansible.builtin.shell: |
         f=$(sed -n 's/^credentials-file: *//p' /etc/cloudflared/config.yml 2>/dev/null)
-        if [ -n "$f" ] && [ -s "$f" ]; then echo yes; else echo no; fi
-      register: setup_tunnel
+        if [ -n "$f" ] && [ -s "$f" ]; then echo tunnel; fi
+        tailscale status --json 2>/dev/null | jq -r .BackendState
+      register: setup_ways
       changed_when: false
       check_mode: false
       become: true
-
-    - name: Read whether Tailscale is logged in
-      ansible.builtin.command: tailscale status --json
-      register: setup_ts
-      changed_when: false
-      failed_when: false
-      check_mode: false
-
-    - name: Note which ways in to prove
-      ansible.builtin.set_fact:
-        setup_waits: "{{ setup_reasons | length > 0 and not setup_reboot | bool and not ansible_check_mode }}"
-        setup_has_tunnel: "{{ setup_tunnel.stdout | trim == 'yes' }}"
-        setup_on_tailnet: >-
-          {{ setup_ts.rc == 0 and (setup_ts.stdout | from_json).BackendState | default('') == 'Running' }}
 
     - name: Prove the ways in, and read the failed units
       ansible.builtin.import_tasks: _leap-prove.yml
       vars:
-        prove_tunnel: "{{ setup_has_tunnel | bool and not setup_waits | bool }}"
-        prove_tailnet: "{{ setup_on_tailnet | bool and not setup_waits | bool }}"
+        prove_tunnel: "{{ 'tunnel' in setup_ways.stdout_lines and not setup_waits | bool }}"
+        prove_tailnet: "{{ 'Running' in setup_ways.stdout_lines and not setup_waits | bool }}"
 
+    # The same command as the read before the pins moved.
     - name: Read the kernel and pinned versions after
-      ansible.builtin.shell: *setup_versions
-      register: setup_after_raw
+      ansible.builtin.shell: "{{ upd_before.cmd }}"
+      register: setup_after
       changed_when: false
       when: not ansible_check_mode
 
-    # openSUSE's import-pubring-from-rpmdb (bsc#1245786) can fail on a boot whose rpm
-    # database has new keys, after importing every one; harmless, and fixed upstream. Any
-    # other failed unit is a failure here, as in server-update-leap.yml.
-    - name: Note what the checks found
-      ansible.builtin.set_fact:
-        setup_now: "{{ dict(setup_after_raw.stdout_lines | default([]) | map('split', '=')) }}"
-        setup_bad_units: "{{ upd_failed.stdout_lines | default([]) | reject('equalto', 'import-pubring-from-rpmdb.service') | list }}"
-        setup_tunnel_ok: "{{ upd_ready.rc | default(1) == 0 and ((upd_ready.stdout | default('{}') | from_json).readyConnections | default(0)) > 0 }}"
-        setup_tailnet_ok: "{{ upd_tailnet.rc | default(1) == 0 }}"
-        setup_proved: "{{ ways_in_check | bool and not setup_waits | bool and not ansible_check_mode }}"
-
+    # changed_when: true, or display_ok_hosts = False hides the report (ansible.cfg).
     - name: Print what changed, and what is next
-      # changed_when: true, or display_ok_hosts = False in ansible.cfg hides the report this
-      # play exists to give (ansible.cfg, beside the setting).
       ansible.builtin.debug:
-        msg: >-
-          {{ (['DRY RUN: nothing was installed, written, restarted or rebooted.'] if ansible_check_mode else []) +
-             [('Packages: ' ~ setup_missing | join(' ') ~ (' would go' if ansible_check_mode else ' went') ~ ' into a new snapshot.')
-                if setup_missing else 'Packages: none missing.',
-              'cloudflared ' ~ (upd_was.cloudflared or 'missing') ~ ' -> ' ~ pins.cloudflared_version ~
-                ', Compose ' ~ (upd_was.compose or 'missing') ~ ' -> ' ~ pins.compose_version ~ '.',
-              ('Checkout: cloned to ' ~ infra_checkout ~ '.') if not setup_checkout.stat.exists else 'Checkout: already there, left as it was.',
-              ('Carry-over: ' ~ setup_deps | length ~ ' .env file(s) and ' ~ setup_carry_secrets.files | length
-                ~ ' secrets director(ies) put in place, /root/carry removed.') if setup_carry.stat.exists else 'Carry-over: none staged.',
-              ('Tracked files changed: ' ~ setup_changed | map(attribute='dest') | join(', ') ~ '.') if setup_changed else 'Tracked files: none changed.',
-              (('Would restart' if ansible_check_mode else 'Restarted') ~ ', where running: ' ~ setup_restart | join(', ') ~ '.')
-                if setup_restart else 'Restarted: nothing.'] +
-             (['At the reboot: ' ~ setup_held | join(', ') ~ '.'] if setup_held else []) +
-             (['At the next boot, which this play does not ask for: ' ~ setup_at_boot | join(', ') ~ '.'] if setup_at_boot else []) +
-             [('Rebooted, for ' ~ setup_reasons | join(', ') ~ '.') if setup_reboot | bool else
-              ('NOT REBOOTED: ' ~ setup_reasons | join(', ') ~ ' wait for the next boot, and the ways in were not proved.')
-                if setup_waits | bool else
-              ('Would reboot, for ' ~ setup_reasons | join(', ') ~ '.') if setup_reasons and ansible_check_mode else
-              'No reboot needed.'] +
-             ([] if not setup_proved | bool else
-              ['Ways in: the tunnel ' ~ (('serving' if setup_tunnel_ok | bool else 'NOT SERVING') if setup_has_tunnel | bool else 'not there yet (no config and credentials)')
-               ~ ', the tailnet ' ~ ((('reaching ' if setup_tailnet_ok | bool else 'NOT REACHING ') ~ tailnet_peer)
-                 if setup_on_tailnet | bool else 'not joined yet (tailscale up, leap/README.md)') ~ '.']) +
-             (['Ways in: NOT CHECKED (-e ways_in_check=false).'] if not ways_in_check | bool else []) +
-             ([] if ansible_check_mode else
-              [('Failed units: ' ~ setup_bad_units | join(', ') ~ '.') if setup_bad_units else "No unit failed, beyond openSUSE's known one."]) +
-             (['The array is locked; unlock it as hosts/three/leap/README.md § Unlocking says.']
-                if not ansible_check_mode and setup_now.array | default('') == 'locked' else []) }}
+        msg:
+          - "{{ 'DRY RUN: nothing was changed.' if ansible_check_mode else inventory_hostname ~ ' is set up.' }}"
+          - "cloudflared {{ upd_was.cloudflared or 'missing' }} -> {{ pins.cloudflared_version }}, Compose {{ upd_was.compose or 'missing' }} -> {{ pins.compose_version }}."
+          - "Tracked files changed: {{ setup_changed | join(', ') or 'none' }}."
+          - "REFUSED by install-system-file: {{ setup_refused | join(', ') or 'none' }}."
+          - "Restarted where running: {{ setup_restart | join(', ') or 'nothing' }}."
+          - "{{ 'NOT REBOOTED, so these wait for the next boot' if setup_waits | bool else 'Reboot' }} for: {{ setup_reasons | join(', ') or 'nothing' }}."
+          - "Tunnel: {{ 'none yet' if 'tunnel' not in setup_ways.stdout_lines else 'not proved' if not setup_proved | bool
+              else 'serving' if setup_tunnel_ok | bool else 'NOT SERVING' }}."
+          - "Tailnet to {{ tailnet_peer }}: {{ 'not joined yet' if 'Running' not in setup_ways.stdout_lines
+              else 'not proved' if not setup_proved | bool else 'reaching' if setup_tailnet_ok | bool else 'NOT REACHING' }}."
+          - "Failed units: {{ setup_bad | join(', ') or 'none' }}."
+          - "Array: {{ 'locked; server-unlock-arrays.yml unlocks it' if setup_now.array | default('') == 'locked' else 'none locked' }}."
       changed_when: true
 
-    - name: Check the ways in it has, the units and the pins
+    - name: Check the files, ways in, units and pins
       ansible.builtin.assert:
         that:
-          - not setup_proved | bool or not setup_has_tunnel | bool or setup_tunnel_ok | bool
-          - not setup_proved | bool or not setup_on_tailnet | bool or setup_tailnet_ok | bool
-          - setup_bad_units | length == 0
+          - setup_refused | length == 0
+          - not setup_proved | bool or 'tunnel' not in setup_ways.stdout_lines or setup_tunnel_ok | bool
+          - not setup_proved | bool or 'Running' not in setup_ways.stdout_lines or setup_tailnet_ok | bool
+          - setup_bad | length == 0
           - setup_now.cloudflared | default('') == pins.cloudflared_version
           - setup_now.compose | default('') == pins.compose_version
         fail_msg: >-
-          {{ inventory_hostname }} is set up, but not whole; the report above says which
-          part. `systemctl status <unit>` there says why a unit failed. Running the play
-          again is safe.
+          {{ inventory_hostname }} is set up, but not whole; the report above says which part.
+          Running the play again is safe.
         success_msg: done
       when: not ansible_check_mode

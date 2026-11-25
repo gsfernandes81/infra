@@ -81,3 +81,31 @@ leap_rescue_wants:
   - cloudflared.service
   - tailscaled.service
   - systemd-user-sessions.service
+
+# What a change to a tracked file means, by its name under hosts/<host>/leap/system/. A file
+# in neither list is read when it is used (a sudoers file, a repository), or at boot and
+# waits for the next one (zram-generator.conf, i2c-dev.conf, extraconfig.txt). A new file
+# that a running service reads joins one of these in the commit that adds it.
+#
+# Restarted where running (systemctl try-restart): a stopped unit, such as a oneshot a
+# timer starts, stays stopped. Never a mount unit: a restart would unmount it.
+leap_restart_on_change:
+  argon-fan: argon-fan.service
+  argon-fan.service: argon-fan.service
+  backup-pull.timer: backup-pull.timer
+  backup-scrub.timer: backup-scrub.timer
+  rebootmgr.conf: rebootmgr.service
+
+# Applied by the reboot the play asks about: crypttab, and the files of the five units the
+# restart rule leaves to the reboot (sshd, NetworkManager, cloudflared, tailscaled, docker),
+# since they carry the play's own connection and every container (decisions.md § Every
+# Leap Pi).
+leap_reboot_on_change:
+  - sshd-infra.conf
+  - wired.nmconnection
+  - wired-dhcp.nmconnection
+  - cloudflared-config.yml
+  - cloudflared.service
+  - docker-mounts.conf
+  - docker-backup.conf
+  - crypttab
