@@ -36,6 +36,7 @@ Full orientation is `README.md`; the reasoning is `docs/decisions.md`. Quick map
   the plays read `leap/system/` while it exists (`one`, `three`) and `system/` otherwise.
 - **`leap/`** — what every Leap host's first boot shares (`firstboot.sh`) and
   `make-stick`, which builds a host's first-boot stick on its old system. Its README.
+  `ansible/playbooks/server-setup-leap.yml` sets a Pi up after Combustion.
 - **`bin/`** — `check-sources`, `check-system-drift` (reports, never writes),
   `install-system-file` (writes, never restarts), `check-boot-layout`,
   `check-mount-guards`, `hw-inventory`. `_infra.py` is their shared header parser. **Not
@@ -466,7 +467,10 @@ bin/install-system-file <name> --commit --allow-content-change
 
 A change beyond the `infra-` header needs the third form, so "just adding a comment"
 can never be cover for a real edit to a boot-path file. Activating what you installed
-stays a separate, human step.
+stays a separate, human step. The one exception is `server-setup-leap.yml`, which
+restarts a service whose file it changed, except the five that carry the connection or
+the containers (`docs/decisions.md` § *Every Leap Pi: the stock image, an offline
+Combustion, one play*).
 
 **When adding a validator to it, calibrate against known-good state first.** The fstab
 UUID check failed twice before it was right: `/dev/disk/by-uuid` alone reported the

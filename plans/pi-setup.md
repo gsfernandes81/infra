@@ -1,7 +1,8 @@
 # Setting up a Leap Pi: stock image, small Combustion, one play
 
-A proposal, discussed with the owner on 2026-11-25 and not yet approved. When it is taken,
-its reasoning moves to `docs/decisions.md` and this file goes once the work is done.
+Approved by the owner on 2026-11-25, and being built on `zero-leap`. The reasoning is in
+`docs/decisions.md` § *Every Leap Pi: the stock image, an offline Combustion, one play*.
+This file goes once the work is done.
 
 ## Why
 
@@ -34,12 +35,11 @@ The routine is the same for both; a dead card's host comes back with a new ident
 4. Run one play from the control node. It installs the package list, the tracked files and
    the rest, and reboots the Pi once, after asking.
 5. Only if the host's disks are new: make the filesystems by hand, once the play's reboot
-   has brought `cryptsetup` and `bcache-tools`, then run the play again
-   (*agent's call*). Disks that already hold the array need nothing: the play's reboot
-   mounts them.
+   has brought `cryptsetup` and `bcache-tools`, then run the play again. Disks that
+   already hold the array need nothing: the play's reboot mounts them.
 6. For a new host, or one back from a dead card: its tunnel
-   (`server-create-host-tunnel.yml`) and its tailnet join, as today (*agent's call*). A
-   host moved from a working old system carries both.
+   (`server-create-host-tunnel.yml`) and its tailnet join, as today. A host
+   moved from a working old system carries both.
 
 The owner is at the box, with a laptop or the phone, and can reach the Pi from `one` or
 `two`.
@@ -77,19 +77,22 @@ no network, so the Pi 5's missing `rp1_pci` in the initrd (`plans/zero-leap.md` 
 
 - The hostname, root's password hash, `gavin` with his password hash, uid and gid, and his
   `authorized_keys`; sshd enabled, with `sshd-infra.conf` and `sudoers-gavin`, so the play
-  starts in the fleet's usual sudo, `-K` with gavin's own password (*agent's call*: stock
-  Leap's sudo asks for root's password, and a play that changed that partway through would
-  fail its own later steps).
+  starts in the fleet's usual sudo, `-K` with gavin's own password (stock Leap's sudo asks
+  for root's password, and a play that changed that partway through would fail its own
+  later steps).
 - The old host's ssh host keys, so every client's pinned key still matches.
 - The carried secrets: the array's key file, the Tailscale state, root's restore key, the
   tunnel credentials. Each deployment's `.env` and secrets directory and each volume's tar
-  are staged in a root-only directory, for the play to put in place once the checkout
-  exists.
+  are staged for the play to put in place once the checkout exists. Each `.env` is at
+  `/root/carry/env/<dep>.env` and each secrets directory at
+  `/root/carry/home/.<dep>-secrets/`, under a root-only (0700) `/root/carry`. The volume
+  tars stay at `/root/volumes/<name>.tar`, as today.
 - The wired port on DHCP, as the image ships it. The static address comes from the play.
 - What the transactional-update shell needs to write into the right places: mounting the
   subvolumes, growing root on the one-card route, labelling what it wrote.
-- The image's own package list, written to a file on the Pi, the baseline the play's
-  extras report reads (below).
+- The image's own package list, written to `/etc/infra/image-packages` before anything
+  else is installed: one package name per line, sorted, from
+  `rpm -qa --qf '%{NAME}\n'`. It is the baseline the play's extras report reads (below).
 
 `leap/firstboot.sh` keeps these steps and loses the rest: the clock, the packages, the
 pinned downloads, the units, the motd and the clone move to the play.
@@ -107,41 +110,64 @@ the play. So the play reaches the Pi over the LAN, through `one` or `two`:
 
 ## The play
 
-One play, for every Leap host, safe to run again. The same run rebuilds a Pi, sets up a
-new one, and puts back anything that drifted. Plain Ansible: tasks in order, no roles, no
+One play, `ansible/playbooks/server-setup-leap.yml`, for every Leap host, safe to run
+again. It runs as `ansible-playbook playbooks/server-setup-leap.yml -e target=<host> -K`,
+for the hosts in a new inventory group `leap`: `one` and `three`, and `zero` when it
+moves. The same run rebuilds a Pi, sets up a new one, and puts back anything that
+drifted. Plain Ansible: tasks in order, no roles, no
 custom modules, no layers of includes.
 
-1. **Packages.** The list is one file in git (*agent's call*: a common list for every Leap
-   host and a per-host list for extras, `bcache-tools` on `zero` say, both as plain YAML
-   lists under `ansible/`). The play reads what is installed, installs only what is
-   missing, in one `transactional-update pkg install`, after Tailscale's repository and
-   the existing package locks. The standard package module cannot write the read-only
-   root, so this is a command, guarded by the comparison.
+1. **Packages.** One list for every Leap Pi, `leap_packages` in
+   `ansible/group_vars/leap.yml`, with no per-host extras (the owner's call, 2026-11-25).
+   It is the common list in `leap/firstboot.sh` (`common_packages`) plus what `three` and
+   `zero` add: `cryptsetup`, `wpa_supplicant`, `bcm43xx-firmware`, `snapper` and
+   `bcache-tools`. The play reads what is installed, installs only what is missing, in one
+   `transactional-update pkg install`, after Tailscale's repository and the existing
+   package locks. The standard package module cannot write the read-only
+   root, so this is a command, guarded by the comparison. The package locks are
+   `leap_package_locks` in the same file.
+   - **Why one list.** Every Pi is set up the same way, and no host is left with a package
+     its neighbours lack, so nobody expects a tool a host does not have.
+   - **The one cost found.** `bcache-tools` ships a udev rule that registers a bcache disk
+     on any host it is plugged into. Wiping an old member of `zero`'s array "on another
+     machine" (`docs/decisions.md` § *`zero`'s encrypted member*, the row "The old member
+     is wiped on another machine, never `zero`") now means a machine without
+     `bcache-tools`, `two` or the laptop, or unregistering the device first.
+   - **Installing is not enabling.** The play enables services per host from host vars.
+     Common units are `leap_units_enabled` and `leap_units_masked` in the same file; a
+     host's own are `leap_extra_units_enabled`.
 2. **Extras are reported, never removed.** A package someone installed that is neither on
-   the list nor in the image's baseline is printed (*agent's call*: zypper's own record of
-   user-installed packages, less the list and the baseline, so dependencies and the
-   image's hundreds of packages stay out of it; the builder calibrates it on `one` and
-   `three`, where no baseline was recorded, and the report must stay short enough
-   to read).
+   the list nor in `/etc/infra/image-packages` is printed. The report is zypper's own
+   record of user-installed packages, less the list and the baseline, so dependencies and
+   the image's hundreds of packages stay out of it. The builder calibrates it on `one` and
+   `three`, where no baseline was recorded, and it must stay short enough to read.
    Removing a package is the owner's call, by hand, so a typo in the list cannot take
    something live away.
 3. **The pinned binaries**, cloudflared and Compose, from `leap/pins`, as today (below).
 4. **The checkout** cloned to `/home/gavin/infra`, then the staged `.env` files and
-   secrets directories put in place, with today's ownership rules.
+   secrets directories put in place, with today's ownership rules, and `/root/carry`
+   removed.
 5. **The tracked `/etc` files**, through the existing `server-install-system-files.yml`
    path and `bin/install-system-file`, unchanged. The play also owns what is not a tracked
    file: the host's `fstab.append` lines and the bare `/media/*` mountpoints, which need
    the read-only root and so go in with the package snapshot.
 6. **The rest, each a few plain tasks:** the users and groups a host needs (`backup` on
    `zero`, `devstack`), enabled and masked units, firewalld's services, snapper's config
-   list, the motd.
+   list, the motd. Only where a host differs, its host vars carry them:
+   `leap_system_users` (a list of name, shell, comment and home), `leap_groups` (name,
+   gid and members), `leap_firewalld_services`, `leap_snapper_configs` and
+   `leap_extra_units_enabled`.
 7. **One reboot, only if something changed** that needs it: a package install makes a new
    snapshot, and the static address and the array's fstab and crypttab entries take effect
    at boot. **It asks first, every time**, showing what is running, as
-   `server-update-leap.yml` does (*agent's call*). It never restarts a service on its own:
-   a changed file whose service needs a restart is named in the report, as
-   `server-install-system-files.yml` does, and the reboot covers it on a fresh host.
-   Health-checker rolls back a boot that fails.
+   `server-update-leap.yml` does. Health-checker rolls back a boot that fails.
+   - **The restart rule** (the owner's call, 2026-11-25). The play restarts a service
+     whose tracked file it changed, except `sshd`, `NetworkManager`, `cloudflared`,
+     `tailscaled` and `docker`, which take effect at the reboot it asks about. The
+     exceptions guard the connection the play runs over (CLAUDE.md § *Changing the thing
+     you are connected through*) and every container, which `docker` restarts. A bad
+     config is guarded more specifically already, by `bin/install-system-file`'s
+     validators and rollback, which stays as it is and still never restarts anything.
 8. **The ways in the host has, proved after the reboot**, as `server-update-leap.yml`
    proves them today. A new host without a tunnel or a tailnet join yet is told so, not
    failed.
@@ -200,11 +226,9 @@ block reads the kernel modules the array needs.
 
 ## Left to the builder
 
-- The play's file name and the package lists' exact file names.
 - How the play finds what is installed (`rpm -q` against the list, or package facts).
 - Whether the static address is a tracked NetworkManager profile, as on `one` today, or a
   task.
-- How the staged secrets directory is named and emptied after the play uses it.
 
 ## Traps already known
 

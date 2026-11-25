@@ -2413,7 +2413,8 @@ carries them out.
   against its release, and fails when the runbook quotes another image or names another
   build anywhere: the runbook's blocks are what a person runs, and they cannot drift from
   the pin. No host reads the pair. Set aside: a file of its own, one more place for the runbook's quote
-  to disagree with.
+  to disagree with. **⚠︎ SUPERSEDED 2026-11-25:** the image is no longer pinned; see
+  *Every Leap Pi: the stock image, an offline Combustion, one play*.
 - **Every Pi joins the tailnet with `--accept-dns=false`.** By default `tailscale up` points a
   box's resolver at `tailscaled`, and on `zero` that would put every lookup, the tunnel's
   included, behind `tailscaled`: a broken `tailscaled` would then cost both ways in at
@@ -3057,6 +3058,8 @@ fleet targets the newest version of the software it runs.
   written from (§ *The visit runbook's choices*). It moves again if openSUSE has replaced
   the build by the time the owner downloads it, and `zero`'s bench and day use that one
   download, since the bench is what proves it (`plans/zero-leap.md`, call 12).
+  **The image pin itself is gone since the same day:** see *Every Leap Pi: the
+  stock image, an offline Combustion, one play*.
 
 ## Two control nodes: the phone and the laptop
 
@@ -3102,6 +3105,48 @@ Ansible Vault (chosen 2026-08-21), SOPS with age and anything else are all open 
   it comes back, and one play that mints, carries or asks.
 - **When the mechanism is chosen,** two control nodes count for SOPS with age: a key per
   node and one on paper, against one Ansible Vault password copied to both.
+
+## Every Leap Pi: the stock image, an offline Combustion, one play
+
+**Decided 2026-11-25**, by the owner. Every Leap Pi, `zero` included, is set up the same
+way; [`plans/pi-setup.md`](../plans/pi-setup.md) carries it out. The owner could not
+review the shell that built a Pi, and wanted less of it.
+
+- **The stock image, with no pin of ours.** The card is openSUSE's Leap 16.1 Immutable Pi
+  image, the newest at download and checked against openSUSE's `.sha256`. The file
+  stays on `two`, so `zero`'s bench boot and the day use one download, and the bench is
+  the gate for `zero` (`plans/zero-leap.md`, call 12). Because openSUSE replaces builds
+  within days, a pin broke whenever the owner downloaded late, and moving it was work
+  for nothing.
+- **Combustion needs no network.** It sets the identity, puts the carried secrets in
+  `/root/carry` and writes `/etc/infra/image-packages`. So the Pi 5's initrd lacking
+  `rp1_pci` stops mattering: nothing in the initrd waits for a network.
+- **One plain play, one package list.** `server-setup-leap.yml` installs
+  `leap_packages`, the same list on every Pi, and reports a package that is neither on it
+  nor in the image's baseline, never removes one. Why one list: standardisation, and no
+  false expectation of what a host has. The cost: `bcache-tools`' udev rule registers a
+  bcache disk on any host, so wiping `zero`'s old member happens on a machine without it
+  (§ *`zero`'s encrypted member*). Installing is not enabling; units are enabled per host.
+- **Versions stay openSUSE's, by the by-hand update play.** Unchanged: the timer stays
+  masked and `server-update-leap.yml` is the update.
+- **cloudflared and Compose stay pinned.** The reasons were checked on 2026-11-25: Leap
+  16.1 still ships cloudflared 2026.9.1 and Compose 2.33.1, the versions the decisions
+  were made against.
+- **A dead card means a new identity.** The host comes back with a new ssh host key and
+  new tunnel and tailnet joins, not from a stored copy. § *Secrets wait* is why nothing is
+  lost: the only secrets that cannot be regenerated are in Proton Pass or on paper.
+- **The play restarts a service whose tracked file it changed, except `sshd`,
+  `NetworkManager`, `cloudflared`, `tailscaled` and `docker`,** which take effect at the
+  reboot the play asks about. They guard the connection the play runs over (CLAUDE.md
+  § *Changing the thing you are connected through*) and every container. A bad config is
+  guarded more specifically by `bin/install-system-file`'s validators and rollback, which
+  still never restarts. This amends CLAUDE.md's "activating what you installed stays a
+  separate, human step" for this play only.
+- **What it replaces.** The network half of the first boot (the clock, packages, pinned
+  downloads, units, motd and clone in `leap/firstboot.sh`), and the image pin:
+  `pi_image_*` in `leap/pins` and its runbook check. The bullet in § *The visit
+  runbook's choices* that pins the image is marked superseded. Nothing else there is
+  reversed.
 
 ## From the management plane, moved 2026-11-20
 
