@@ -1,0 +1,8 @@
+# The bench boot's sudo rule for gavin (plans/zero-leap.md § The bench boot), installed by
+# leap/bench/script at /etc/sudoers.d/50-gavin, mode 0440. The same rule as each Leap
+# host's tracked copy (hosts/one/leap/system/sudoers-gavin): Leap ships `Defaults
+# targetpw` with `ALL ALL=(ALL) ALL`, so sudo asks for ROOT's password, which the bench
+# has none of, and there is no wheel group. gavin types his own, carried from the box
+# make-stick ran on.
+Defaults:gavin !targetpw
+gavin ALL=(ALL) ALL

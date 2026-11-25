@@ -34,12 +34,18 @@ design's own and the owner can overturn any of them. Phase 12 in
    and the stick wiped after the day. Phase 16 turns it on later.
 10. **Syncthing is reachable on the LAN:** firewalld lets its ports through.
 11. **A bench boot first,** of a minimal image the owner can ssh into and test.
-12. **Build 3.17** of the Pi image.
+12. **The newest build** of the Pi image (2026-11-25, in place of build 3.17, which
+    openSUSE had withdrawn). The owner's rule: where there is a choice and no major
+    downside, the newest version. Builds turn over within days, so the pin moves to the
+    newest when the owner downloads it to `two` before the bench, and the bench and the
+    day use that one download, since the bench is what proves it (*agent's reading*).
 13. **snapper runs natively over D-Bus** (2026-11-24): `immich` joins Leap's
     `SNAPPER_CONFIGS` and Leap's own timers take the snapshots. Set aside: `--no-dbus`
     from an own timer, as `three` runs it, which has no case on `zero` (§ *snapper*).
 14. **One card instead of card plus stick, tried on the bench** (2026-11-24). If the bench
     proves it, the day uses one card; if not, the stick (§ *One card*).
+15. **Root on the bench** (2026-11-25): the bench carries gavin's password hash and a sudo
+    rule that asks for it, as on `one` (§ *The bench boot*).
 
 ## What `zero` has that `one` and `three` did not
 
@@ -240,7 +246,7 @@ The owner's call 14. Combustion reads any filesystem labelled `combustion`, and 
 partition on the SD card itself counts, so the stick's contents can go on the card. The
 visit kept the stick because this was untried (2026-11-04).
 
-- **Layout.** Build 3.17 is a 512 MB `EFI` partition then `ROOT`, with root last, and
+- **Layout.** The image is a 512 MB `EFI` partition then `ROOT`, with root last, and
   `kiwi-repart` grows root to fill the card at first boot (CI run 44271041125). A
   partition after root would block that. So `make-stick --card <device>`, run on a card
   just flashed with the pinned image, grows root's partition entry to all but the last
@@ -265,13 +271,13 @@ visit kept the stick because this was untried (2026-11-04).
 
 ## The bench boot
 
-A spare SD card with build 3.17 and a minimal Combustion config, booted on `zero` with
+A spare SD card with the pinned build and a minimal Combustion config, booted on `zero` with
 the Alpine card out, to prove the Pi 5 boots the image and reaches the LAN before the day.
 
 - **The config:** `leap/make-stick --bench --card` (§ *One card*) writes only a script
-  that installs gavin's `authorized_keys`, enables sshd and gives the wired port
-  `192.168.86.100`. It carries no host key, password hash, tunnel credential, key file or
-  Tailscale state.
+  that installs gavin's `authorized_keys` and password hash, a sudo rule that asks for
+  that password, enables sshd and gives the wired port `192.168.86.100` (call 15). It
+  carries no host key, root password, tunnel credential, key file or Tailscale state.
 - **The disks are unplugged** (*agent's call*). The image would not touch them, since
   nothing names them in its fstab and `bcache-tools`, whose udev rule registers bcache
   devices, is not in it. Unplugging removes the question. USB power with the disks is
@@ -282,9 +288,10 @@ the Alpine card out, to prove the Pi 5 boots the image and reaches the LAN befor
   kernel, the RP1 Ethernet link and whether `rp1_pci` loaded, `modinfo bcache dm_crypt
   adiantum`, `lsusb`, `dmesg` warnings, health-checker's state, and on one card
   `lsblk -o NAME,SIZE,FSTYPE,LABEL /dev/mmcblk0` with `journalctl -b | grep -i repart`.
-  `dmesg`, health-checker's state and deleting the partition need root (open question 3).
-- **After it:** power off, the Alpine card back in. The spare card is flashed again for
-  the day, since Combustion runs on a first boot only. `zero`'s services are down for the
+  `dmesg`, health-checker's state and deleting the partition need `sudo`.
+- **After it:** power off, the Alpine card back in. The spare card is erased whole and
+  flashed again for the day, since Combustion runs on a first boot only, and a new image
+  leaves the card's last 256 MB, with gavin's hash in it, as they were. `zero`'s services are down for the
   length of the bench boot.
 
 ## The simulation
@@ -330,9 +337,9 @@ paste from the box cover those.
    `dm-crypt`, `adiantum`, `nhpoly1305` and the `xchacha` modules in the kernel, for the
    build `zero` will boot. Today they are proven only on the x86_64 image the simulation
    boots.
-7. **`leap/pins` moves to build 3.17** (the owner's call 12), with its SHA-256 from
-   openSUSE's `.sha256` file. `one` and `three` booted 3.16, which openSUSE has
-   withdrawn; the pin records what the next first boot uses.
+7. **`leap/pins` at the newest build** (call 12). It is at 3.23, with openSUSE's SHA-256,
+   since 2026-11-25. If openSUSE has replaced it when the owner downloads it to `two`, the
+   pin moves again, as `plans/visit-runbook.md` § The Pi image says.
 8. **The bench boot** (above), on one card.
 
 ## The day
@@ -369,22 +376,14 @@ snapper, which continues the numbering.
 
 ## Open questions for the owner
 
-The build found three, 2026-11-24:
+The build found three, 2026-11-24. The pin and root on the bench are calls 12 and 15.
 
-1. **The pin.** Build 3.17 has been withdrawn since call 12; openSUSE offers only 3.22,
-   same kernel, its SHA-256 from openSUSE's file and checked by CI. The agent's
-   recommendation: pin 3.22 and keep a copy on `two`. The other choice is 3.17, only if
-   the owner kept a copy.
-2. **The Pi 5's first-boot network** (§ *What `zero` has*). The agent's recommendation:
+1. **The Pi 5's first-boot network** (§ *What `zero` has*). The agent's recommendation:
    split `zero`'s first boot. Combustion does only what needs no network (users, keys,
    the carried files, fstab), and a one-shot unit in the booted system installs the
    packages, clones the repo and reboots once. Also a report to openSUSE. Set aside for
    now: rebuilding the card's initrd by hand; a USB Ethernet adapter whose driver the
    initrd carries.
-3. **Root on the bench.** The bench gives gavin a key and no password or sudo, so the
-   bench cannot delete the partition, read `dmesg` or health-checker's state. The agent's
-   recommendation: the bench also carries gavin's password hash and `one`'s
-   `sudoers-gavin`, which asks for the password.
 
 ## The build
 
@@ -392,21 +391,22 @@ On the branch `zero-leap`, one commit per task, each by a sub-agent and reviewed
 whole-branch Fable review, its findings applied in their own commit, and a merge to
 `main` on the owner's word.
 
-1. **`leap/make-stick`:** the carry-over above, the disk guard, refusing dev secrets,
-   listing untracked files, `--bench`, `--card`; `leap/README.md` to match.
-2. **`leap/firstboot.sh`:** `check_carry` entries and installers for the new items, the
+1. ~~**`leap/make-stick`:** the carry-over above, the disk guard, refusing dev secrets,
+   listing untracked files, `--bench`, `--card`; `leap/README.md` to match.~~
+2. ~~**`leap/firstboot.sh`:** `check_carry` entries and installers for the new items, the
    Tailscale state staged to survive the transactional-update shell, every step safe to
    re-run, root grown when the config came from the card, and the rollback claim
-   corrected in it and in `leap/README.md`. `one`'s and `three`'s simulations still pass.
+   corrected in it and in `leap/README.md`. `one`'s and `three`'s simulations still
+   pass.~~
 3. **`hosts/zero/leap/`:** `combustion/script`, `fstab.append` with the store's id as a
    `FILL-FROM-` placeholder until the subvolume exists, `system/` as § *The files* lists,
    `volumes`; pearl-wallet's config binds gain `,z`.
-4. **The plays:** `server-update-leap.yml`'s `tailnet_peer` a host var, `three` for
+4. ~~**The plays:** `server-update-leap.yml`'s `tailnet_peer` a host var, `three` for
    `zero`; `server-create-restore-key.yml` reading through `MOVED` with the package's
-   `tailscale` path.
-5. **The image:** `leap/pins` at 3.17; `pi-image.yml` and `sim/pi-image/inspect.sh`
-   checking the Pi 5, the array's modules and that `bcache-tools` is absent;
-   `leap-pins.yml` reconciled with the visit runbook's record of 3.16.
+   `tailscale` path.~~
+5. ~~**The image:** `leap/pins` at the newest build; `pi-image.yml` and
+   `sim/pi-image/inspect.sh` checking the Pi 5, the array's modules and that
+   `bcache-tools` is absent; `leap-pins.yml` reconciled with the visit runbook.~~
 6. **The simulation:** `host/zero.sh`, `checks-zero.sh`, the disk-building boot, `zero`
    in `microos-sim.yml`'s matrix, the checks in § *The simulation*, and a second run with
    the `combustion` partition on the boot disk.

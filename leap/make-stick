@@ -18,10 +18,10 @@
 # state, restore key or volume: a new host has none until its first boot is done
 # (server-create-host-tunnel.yml makes its tunnel).
 #
-# --bench writes leap/bench/ and this box's /home/gavin/.ssh/authorized_keys, nothing else:
-# a script that makes gavin with those keys, enables sshd and puts the wired port on
-# 192.168.86.100, and that port's profile. No host key, password hash, credential or host
-# file.
+# --bench writes leap/bench/ and this box's gavin's authorized_keys and password hash,
+# nothing else: a script that makes gavin with those, gives him sudo that asks for that
+# password, enables sshd and puts the wired port on 192.168.86.100, and that port's
+# profile. No host key, root password, credential or host file.
 #
 # --card, with any of the above, writes onto an SD card in a USB reader, freshly flashed with
 # the pinned image, instead of erasing a stick (plans/zero-leap.md § One card). It refuses a
@@ -241,9 +241,9 @@ fi
 
 # The carry-over must be complete before anything is written.
 [ -s /home/gavin/.ssh/authorized_keys ] || die "no /home/gavin/.ssh/authorized_keys"
+gavin_hash=$(awk -F: '$1 == "gavin" { print $2 }' /etc/shadow)
+case "$gavin_hash" in \$*) ;; *) die "gavin has no password hash" ;; esac
 if [ -z "$bench" ]; then
-	gavin_hash=$(awk -F: '$1 == "gavin" { print $2 }' /etc/shadow)
-	case "$gavin_hash" in \$*) ;; *) die "gavin has no password hash" ;; esac
 	# The key file the host's crypttab names, which opens its encrypted member at boot. Only
 	# /etc/keys/data.key travels, so a crypttab naming another is refused rather than
 	# carried somewhere the first boot does not look. A new host has no key to carry.
@@ -470,8 +470,10 @@ c=$s/carry
 if [ -n "$bench" ]; then
 	install -D -m 755 "$repo/leap/bench/script" "$s/script"
 	install -D -m 644 "$repo/leap/bench/wired.nmconnection" "$s/bench/wired.nmconnection"
+	install -D -m 644 "$repo/leap/bench/sudoers-gavin" "$s/bench/sudoers-gavin"
 	umask 077
-	mkdir -p "$c/gavin"
+	mkdir -p "$c/gavin" "$c/shadow"
+	printf '%s\n' "$gavin_hash" > "$c/shadow/gavin"
 	cp /home/gavin/.ssh/authorized_keys "$c/gavin/authorized_keys"
 else
 	install -D -m 755 "$hostdir/combustion/script" "$s/script"

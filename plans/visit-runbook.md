@@ -34,11 +34,11 @@ the copy on `two` is the one the cards are written from. The pin in `leap/pins` 
 that copy.
 
 ```fish
-# on two: download Leap 16.1's Pi image, build 3.16, with openSUSE's .sha256 file, and check the image against that file and then against the pin
+# on two: download Leap 16.1's Pi image, build 3.23, with openSUSE's .sha256 file, and check the image against that file and then against the pin
 df -h ~
-cd ~; curl -fLO https://download.opensuse.org/distribution/leap/16.1/appliances/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.16.raw.xz.sha256; and curl -fLO https://download.opensuse.org/distribution/leap/16.1/appliances/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.16.raw.xz
-sha256sum -c Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.16.raw.xz.sha256
-echo '6b224592371168a6991b540bc8e2755383004d6b153f9898a309c2a15d395551  Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.16.raw.xz' | sha256sum -c -
+cd ~; curl -fLO https://download.opensuse.org/distribution/leap/16.1/appliances/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.23.raw.xz.sha256; and curl -fLO https://download.opensuse.org/distribution/leap/16.1/appliances/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.23.raw.xz
+sha256sum -c Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.23.raw.xz.sha256
+echo 'bced65e56302549ee7555ac38ea0b4dd947990a4568bdff9c1d431c01544cc38  Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.23.raw.xz' | sha256sum -c -
 ```
 
 It needs about 1.3 GB free, and both `sha256sum` lines must print `OK`: the first
@@ -64,7 +64,7 @@ lsblk -o NAME,SIZE,MODEL,TRAN
 
 ```fish
 # on two: write the image to the card, detached from this session, only if the device is a USB disk nothing has mounted; put the card's device in place of sdX
-set d sdX; readlink -f /sys/block/$d | grep -q usb; and not grep -q "^/dev/$d" /proc/mounts; and sudo sh -c "setsid nohup sh -c 'xzcat /home/gavin/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.16.raw.xz | dd of=/dev/$d bs=4M conv=fsync && sync && echo written' </dev/null >/var/log/card-write.log 2>&1 &"
+set d sdX; readlink -f /sys/block/$d | grep -q usb; and not grep -q "^/dev/$d" /proc/mounts; and sudo sh -c "setsid nohup sh -c 'xzcat /home/gavin/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.23.raw.xz | dd of=/dev/$d bs=4M conv=fsync && sync && echo written' </dev/null >/var/log/card-write.log 2>&1 &"
 ```
 
 `sudo cat /var/log/card-write.log` ends with `written` when it is done. Then the card is
@@ -73,10 +73,10 @@ is caught before the card reaches a Pi:
 
 ```fish
 # on two: compare the card with the image over the bytes dd wrote; put the card's device in place of sdX; the two hashes must match
-xzcat /home/gavin/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.16.raw.xz | sha256sum; sudo head -c 4599054336 /dev/sdX | sha256sum
+xzcat /home/gavin/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.23.raw.xz | sha256sum; sudo head -c 4607442944 /dev/sdX | sha256sum
 ```
 
-4,599,054,336 is build 3.16's uncompressed size, the byte count `dd` reports in the log;
+4,607,442,944 is build 3.23's uncompressed size, the byte count `dd` reports in the log;
 `two` has no `xz` to read it from the file, only BusyBox's `xzcat`.
 
 The only card reader to hand on 2026-11-19 was a Lexar RW047, an SDHC reader, which shows a

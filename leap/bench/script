@@ -1,15 +1,17 @@
 #!/bin/bash
 # The bench boot's whole first-boot script (plans/zero-leap.md § The bench boot), run by
 # Combustion from what `leap/make-stick --bench` writes, on a stick or on the card itself.
-# It makes gavin with the authorized_keys of the box make-stick ran on, enables sshd, and
-# puts the wired port on 192.168.86.100, so the owner can ssh in from the LAN and read the
-# board. Nothing else: no host key, password hash, tunnel credential, key file, Tailscale
-# state, fstab line or host script, so the bench card holds nothing secret and nothing that
-# names a disk. It does not source leap/firstboot.sh, which would bring all of those.
+# It makes gavin with the authorized_keys and password hash of the box make-stick ran on,
+# gives him sudo that asks for that password, enables sshd, and puts the wired port on
+# 192.168.86.100, so the owner can ssh in from the LAN and read the board as root. Nothing
+# else: no host key, root password, tunnel credential, key file, Tailscale state, fstab line
+# or host script, so the only secret on the bench card is gavin's hash, and nothing names a
+# disk. It does not source leap/firstboot.sh, which would bring all of those.
 #
 # It needs no network, so it has no `# combustion:` line: Combustion brings none up for it,
-# and the profile below takes over at the first boot. gavin has no password and no sudo;
-# the owner's login is by key, and the box is flashed again after the bench.
+# and the profile below takes over at the first boot. The owner's login is by key; the
+# password is for sudo, which dmesg, health-checker's state and deleting the card's
+# combustion partition need. The card is erased and flashed again after the bench.
 #
 # Safe to run again, as Combustion does when a first boot stops before it is committed:
 # each step checks what it would create.
@@ -37,9 +39,11 @@ if ! id gavin >/dev/null 2>&1; then
 		useradd -m -U -c gavin gavin
 	fi
 fi
-# No password, and not locked either: `*` matches no password, where useradd's `!` reads as
-# a locked account, which sshd may refuse even a key for.
-usermod -p '*' gavin
+grep -q '^\$' carry/shadow/gavin || { say "carry/shadow/gavin is not a password hash"; exit 1; }
+printf 'gavin:%s\n' "$(cat carry/shadow/gavin)" | chpasswd -e
+# Checked before it is installed: a sudoers.d file sudo cannot parse breaks sudo for everyone.
+visudo -cq -f bench/sudoers-gavin
+install -D -m 440 bench/sudoers-gavin /etc/sudoers.d/50-gavin
 install -d -m 700 -o gavin -g gavin /home/gavin/.ssh
 install -m 600 -o gavin -g gavin carry/gavin/authorized_keys /home/gavin/.ssh/authorized_keys
 

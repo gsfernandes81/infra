@@ -10,7 +10,7 @@ made on the host's old Alpine system, that the new system reads once at its firs
 | `pins` | The versions and SHA-256s of the binaries a package would get wrong (`cloudflared`, Compose): what a new host's first boot installs, and what `ansible/playbooks/server-update-leap.yml` moves a running host to. Also the Pi image's URL and SHA-256, which `plans/visit-runbook.md` must quote and no host reads. |
 | `motd` | The update recipes every login shows, at `/etc/motd.d/50-infra-updates`: the normal update, and the locked boot firmware's. A plain file, with no `infra-` header for logins to show. |
 | `make-stick` | Builds a host's stick, or with `--card` writes the same onto the host's new SD card. Run as root on the host's old system, or with `--new` for a host that has none. With `--bench` it writes the bench boot's config instead. |
-| `bench/` | The bench boot's whole config: a script that makes `gavin` with his keys, enables sshd and gives the wired port `192.168.86.100`, and that port's profile. |
+| `bench/` | The bench boot's whole config: a script that makes `gavin` with his keys, password and sudo, enables sshd and gives the wired port `192.168.86.100`, that port's profile and the sudo rule. |
 | `tailscale-repo.gpg` | Tailscale's repository signing key, fingerprint `2596 A99E AAB3 3821 893C 0A79 458C A832 957F 5868`. The first boot trusts the repository through this reviewed copy. |
 
 Each host's own part is in `hosts/<host>/leap/`:
@@ -100,13 +100,14 @@ any boot caught by the relabel trap below, so the owner then discards it with
 
 ### The bench boot
 
-`make-stick --bench <device>`, with or without `--card`, writes only `bench/`: a script
-that makes `gavin` with the `authorized_keys` of the box it runs on, enables sshd and
-gives the wired port `192.168.86.100`, and that port's profile. It carries no host key,
-password hash, tunnel credential, key file or Tailscale state, and no fstab entry, so a
-bench card holds nothing secret. `gavin` has no password and no sudo there. It runs on any
-box of the fleet, and the card is flashed again after the bench
-(`plans/zero-leap.md` § The bench boot).
+`make-stick --bench <device>`, with or without `--card`, writes only `bench/` and two
+things of `gavin`'s from the box it runs on: his `authorized_keys` and his password hash.
+The script makes `gavin` with them, gives him sudo that asks for that password, enables
+sshd and gives the wired port `192.168.86.100`. It carries no host key, root password,
+tunnel credential, key file or Tailscale state, and no fstab entry. The hash is the one
+secret on a bench card, so the card is erased whole before it is flashed again, as a
+stick is (below). It runs on any box of the fleet (`plans/zero-leap.md` § The bench
+boot).
 
 ### A new host
 
@@ -137,8 +138,9 @@ combustion/carry/tailscale/  Tailscale's state, where the old system has one
 combustion/carry/root-ssh/   root's restore key and three's known_hosts lines, likewise
 ```
 
-A bench config holds `combustion/script`, `combustion/bench/wired.nmconnection` and
-`combustion/carry/gavin/authorized_keys`, and nothing else.
+A bench config holds `combustion/script`, `combustion/bench/wired.nmconnection`,
+`combustion/bench/sudoers-gavin`, `combustion/carry/gavin/authorized_keys` and
+`combustion/carry/shadow/gavin`, and nothing else.
 
 **The stick then holds live secrets.** Keep it with the other secret-bearing media, and
 once the new system is proven, erase it whole, never by deleting files, which flash keeps:

@@ -3044,6 +3044,19 @@ given.
   `one`. The two halves of `server-create-dev-container.yml` move together, since either
   alone would split a run across hosts.
 
+## The newest version, where there is a choice
+
+**Decided 2026-11-25**, by the owner. Where there is a choice and no major downside, the
+fleet targets the newest version of the software it runs.
+
+- **First applied to the Pi image.** `leap/pins` moved from build 3.16, which `one` and
+  `three` were written from, to 3.23, the newest. The owner's earlier call for 3.17
+  (2026-11-20) is replaced: openSUSE had withdrawn 3.17, then 3.22, within days.
+- **The newest when downloaded.** The pin records the copy on `two` that the cards are
+  written from (§ *The visit runbook's choices*). It moves again if openSUSE has replaced
+  the build by the time the owner downloads it, and `zero`'s bench and day use that one
+  download, since the bench is what proves it (`plans/zero-leap.md`, call 12).
+
 ## From the management plane, moved 2026-11-20
 
 **Moved here on 2026-11-20**, when `docs/management-plane.md` was cut to its phase table and
