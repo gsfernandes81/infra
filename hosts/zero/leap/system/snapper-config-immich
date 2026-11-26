@@ -7,10 +7,9 @@
 # snapper's config for zero's Immich subvolume, mounted at /media/immich: the library in
 # data/ and Postgres in db/, so one snapshot holds both at the same instant. three pulls
 # the newest finished snapshot from /media/immich/.snapshots (plans/three-backup-pull.md).
-# immich is in Leap's SNAPPER_CONFIGS beside root (host_vars/zero.yml), so Leap's own
-# timers take the hourly snapshots through snapperd and clean up daily (plans/zero-leap.md
-# § snapper). With the array missing, /media/immich is a bare directory on the read-only
-# root, so the hour's run fails and writes nothing.
+# snapper-immich.service reads this, from its hourly timer, with --no-dbus; immich is in no
+# SNAPPER_CONFIGS, so snapperd and Leap's own snapper timers leave it alone
+# (plans/zero-leap.md § snapper). With the array missing, the hour is skipped.
 #
 # The limits are plain numbers, never ranges, so FREE_LIMIT and SPACE_LIMIT change
 # nothing: snapper's space-aware cleanup only moves within a range. No qgroup, so no
@@ -30,7 +29,7 @@ SYNC_ACL="no"
 # Nothing ever compares two snapshots here, and a comparison reads both whole trees.
 BACKGROUND_COMPARISON="no"
 
-# A snapshot the owner takes by hand, `sudo snapper -c immich create
+# A snapshot the owner takes by hand, `sudo snapper --no-dbus -c immich create
 # --cleanup-algorithm number --description "<why>"`, before an Immich upgrade say: the
 # newest 10 are kept, each for at least an hour.
 NUMBER_CLEANUP="yes"

@@ -95,6 +95,7 @@ leap_restart_on_change:
   backup-pull.timer: backup-pull.timer
   backup-scrub.timer: backup-scrub.timer
   rebootmgr.conf: rebootmgr.service
+  snapper-immich.timer: snapper-immich.timer
 
 # Applied by the reboot the play asks about: crypttab, and the files of the five units the
 # restart rule leaves to the reboot (sshd, NetworkManager, cloudflared, tailscaled, docker),

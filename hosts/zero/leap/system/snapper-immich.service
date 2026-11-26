@@ -1,0 +1,36 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /etc/systemd/system
+# infra-name: snapper-immich.service
+# infra-mode: 0644
+#
+# Takes zero's hourly read-only snapshot of /media/immich, then prunes the snapshots to
+# the limits in /etc/snapper/configs/immich (plans/three-backup-pull.md).
+# snapper-immich.timer starts it at the top of each hour, and three pulls the newest
+# finished snapshot. Alpine's hourly script (hosts/zero/system/snapper-immich), as a unit.
+#
+# snapper runs with --no-dbus, from this unit, and immich is in no SNAPPER_CONFIGS, so
+# neither snapperd nor Leap's own snapper timers know it, as on three. Leap's policy
+# refuses snapperd a directory on the array's container_file_t mount, which the simulation
+# showed (plans/zero-leap.md § snapper); snapper run from here writes there as three's
+# does. It says `fsetfilecon … errno: 95` on each run and carries on, since the context=
+# mount gives every file one label.
+#
+# A condition, so with the array missing the hour is skipped, not failed, and nothing is
+# written to the bare mountpoint. systemd never runs a second start of a oneshot beside
+# the first, so a slow cleanup cannot race the next hour's run. The cleanups run even when
+# the create fails, since on a full filesystem they are what frees space; the unit then
+# fails with the last failure's status.
+[Unit]
+Description=Snapshot zero's Immich subvolume for three's pull
+ConditionPathIsMountPoint=/media/immich
+
+[Service]
+Type=oneshot
+TimeoutStartSec=50min
+ExecStart=/bin/sh -uc '\
+	s=0; \
+	/usr/bin/snapper --no-dbus -q -c immich create --cleanup-algorithm timeline --description timeline || s=$$?; \
+	/usr/bin/snapper --no-dbus -q -c immich cleanup timeline || s=$$?; \
+	/usr/bin/snapper --no-dbus -q -c immich cleanup number || s=$$?; \
+	exit $$s'

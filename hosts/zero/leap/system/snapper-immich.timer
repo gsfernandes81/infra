@@ -1,0 +1,17 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /etc/systemd/system
+# infra-name: snapper-immich.timer
+# infra-mode: 0644
+#
+# zero's hourly snapshot of /media/immich (snapper-immich.service), at the top of each
+# hour as Alpine's cron ran it. Not persistent: an hour missed while zero was off is not
+# taken late, as the next hour's snapshot holds the same data.
+[Unit]
+Description=Snapshot zero's Immich subvolume hourly
+
+[Timer]
+OnCalendar=hourly
+
+[Install]
+WantedBy=timers.target

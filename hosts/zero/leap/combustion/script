@@ -73,8 +73,9 @@ say "done; $host boots into its configured snapshot next"
 # - The array's mountpoints, /media/immich and /media/syncthing, exist only if a snapshot
 #   makes them, and while nothing is mounted there the read-only root refuses every write.
 #   Then fstab.append's entries, each appended only if that exact line is missing.
-# - immich in Leap's SNAPPER_CONFIGS, beside root, and Leap's snapper timers, so snapperd
-#   takes the hourly snapshots (plans/zero-leap.md § snapper). Never `snapper
-#   create-config`: .snapshots is already on the array, and its numbering continues.
+# - snapper-immich.timer, zero's own, which takes the hourly snapshot with snapper
+#   --no-dbus, as three's snapshots are taken (plans/zero-leap.md § snapper). Never
+#   `snapper create-config`: .snapshots is already on the array, and its numbering
+#   continues.
 # - Syncthing's sync and discovery ports in firewalld, for devices on the LAN; its GUI
 #   stays on 127.0.0.1.

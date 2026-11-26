@@ -14,8 +14,8 @@ tailnet_peer: three
 # of this yet.
 #
 # The address in zero's tracked profile, hosts/zero/leap/system/wired.nmconnection. A run
-# that came in on another address, a fresh box's DHCP one, reconnects here after the reboot
-# that brings the profile in.
+# that came in on another address, a fresh box's DHCP one, reconnects here after the
+# reboot that brings the profile in.
 leap_static_address: 192.168.86.100
 
 # The user three's pull logs in as (plans/three-backup-pull.md), by the one key line in
@@ -29,20 +29,14 @@ leap_system_users:
     comment: serves zero's snapshots to three
     home: /home/backup
 
-# Syncthing's sync and discovery ports, for devices on the LAN; its GUI stays on 127.0.0.1.
-# firewalld is on in Leap and allows only ssh and DHCPv6 otherwise.
+# Syncthing's sync and discovery ports, for devices on the LAN; its GUI stays on
+# 127.0.0.1. firewalld is on in Leap and allows only ssh and DHCPv6 otherwise.
 leap_firewalld_services:
   - syncthing
 
-# snapper natively over D-Bus (the owner's call, 2026-11-24): immich's snapshots are taken
-# by snapperd from Leap's own timers. The play writes this list as SNAPPER_CONFIGS whole, so
-# it names root's config too, which the image's cleanup of its own snapshots reads.
-leap_snapper_configs:
-  - root
-  - immich
-
-# Leap's snapper timers, named so they run whatever the image's presets say: the hourly
-# timeline and the daily cleanup (plans/zero-leap.md § snapper).
+# No leap_snapper_configs: immich is in no SNAPPER_CONFIGS, so neither snapperd nor Leap's
+# timers know it. Leap's policy refuses snapperd a directory on the array's
+# container_file_t mount, so the hourly snapshot is snapper --no-dbus from zero's own
+# timer, as on three (plans/zero-leap.md § snapper).
 leap_extra_units_enabled:
-  - snapper-timeline.timer
-  - snapper-cleanup.timer
+  - snapper-immich.timer

@@ -1,8 +1,9 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2016  # the checks are shell code for sh -c, quoted on purpose
-# zero's own checks, appended to checks.sh by run-host.sh, so check, show and docker_checks
-# are defined: the array assembled and opened with nobody at the box, Docker on its new
-# store, the carry-over only zero has, the backup source, and snapper through snapperd.
+# zero's own checks, appended to checks.sh by run-host.sh, so check, show and
+# docker_checks are defined: the array assembled and opened with nobody at the box, Docker
+# on its new store, the carry-over only zero has, the backup source, and its hourly
+# snapshot.
 
 echo "-- the array"
 check "both bcache devices are attached to the cache, writethrough" sh -c '
@@ -57,33 +58,37 @@ check "backup has a real shell, no password, and root's home and .ssh" sh -c '
 	[ "$(stat -c "%U %a" /home/backup /home/backup/.ssh | sort -u)" = "root 755" ] &&
 	stat -c "%a %U %n" /home/backup/.ssh/authorized_keys | tee /dev/stderr | grep -q "^644 root "'
 check "firewalld lets Syncthing through" sh -c 'firewall-cmd --list-services | tee /dev/stderr | grep -qw syncthing'
-check "snapper's configs are root and immich, for Leap's timers" grep -qx 'SNAPPER_CONFIGS="root immich"' /etc/sysconfig/snapper
-check "Leap's snapper timers are enabled" systemctl is-enabled snapper-timeline.timer snapper-cleanup.timer
+# immich is in no SNAPPER_CONFIGS: snapperd is refused a directory on the array's
+# container_file_t mount, which this check's first run, on 2026-11-26, read in the audit
+# log below with immich listed. So zero's own unit takes the snapshot with --no-dbus, as
+# three's does (plans/zero-leap.md § snapper).
+check "immich is in no SNAPPER_CONFIGS, so snapperd leaves it alone" sh -c '
+	grep "^SNAPPER_CONFIGS=" /etc/sysconfig/snapper | tee /dev/stderr | grep -vqw immich'
+check "zero's hourly snapshot timer is enabled and waiting" sh -c '
+	systemctl is-enabled snapper-immich.timer && systemctl is-active snapper-immich.timer'
 
-# The timeline run as Leap's hourly timer starts it: the service asks snapperd over D-Bus,
-# so the snapshot is made in snapperd's own confined domain, on a mount labelled
-# container_file_t, which nothing else on the fleet has run (plans/zero-leap.md § snapper).
+# The hour's run, started as the timer starts it, on the array as the box mounts it.
 timeline() { snapper --no-dbus --csvout -c immich list --columns number,description | grep -c ',timeline$'; }
 since=$(date +%s)
 before=$(timeline)
-show systemctl start snapper-timeline.service
+show systemctl start snapper-immich.service
 after=$(timeline)
-show sh -c 'ps -eZ | grep -w snapperd || echo "snapperd has exited"'
-check "snapper-timeline took a snapshot of immich through snapperd, $before before, $after after" \
-	sh -c "[ $after -gt $before ] && ! systemctl cat snapper-timeline.service | grep -e --no-dbus &&
-		systemctl is-active snapperd.service"
-show sh -c "journalctl --since @$since --no-pager -u snapper-timeline -u snapperd | tail -n 8"
-# Where a denial would be read: the journal, and auditd's log where auditd runs.
+check "snapper-immich took a timeline snapshot of immich, $before before, $after after" \
+	sh -c "[ $after -gt $before ] && [ \"\$(systemctl show -p Result --value snapper-immich.service)\" = success ]"
+show sh -c "journalctl --since @$since --no-pager -u snapper-immich | tail -n 6"
+# Where a denial would be read: the journal, and auditd's log where auditd runs, which is
+# where the snapperd denial above was found while the journal held none.
 show sh -c 'systemctl is-active auditd; journalctl -b --no-pager | grep -ci "avc:"'
 check "SELinux enforced and denied snapper nothing" sh -c "
 	[ \"\$(getenforce)\" = Enforcing ] || exit 1
 	d=\$({ journalctl --since @$since --no-pager; ausearch --input-logs -m avc -ts recent 2>/dev/null; } |
 		grep -i 'avc: *denied' | grep -i snapper); echo \"\$d\"; [ -z \"\$d\" ]"
 
-# On disk, not through the mount: context= makes every file read as container_file_t whatever
-# it holds, so the array's trees are read off the device for a security.selinux item. A file
-# written through a container and snapper's snapshot are what Leap wrote there. The same read
-# of /home, which the first boot labelled, must find some, or the read proves nothing.
+# On disk, not through the mount: context= makes every file read as container_file_t
+# whatever it holds, so the array's trees are read off the device for a security.selinux
+# item. A file written through a container and snapper's snapshot are what Leap wrote
+# there. The same read of /home, which the first boot labelled, must find some, or the
+# read proves nothing.
 show docker run --rm -v /media/syncthing:/d docker.io/library/alpine:3.22 sh -c 'echo leap > /d/sim-written-on-leap'
 sync
 home_dev=$(findmnt -no SOURCE /home | sed 's/\[.*//')

@@ -225,12 +225,13 @@ The run then checks, each as PASS or FAIL, and any FAIL fails the job:
   key file root's at 0400; the carried Tailscale state in `/var/lib/tailscale`, told from
   a new one by the run's key in it; the restore key and `three`'s host key; no secrets
   directory; the `backup` user with a real shell, no password and root's home; firewalld's
-  Syncthing service; `SNAPPER_CONFIGS` naming root and immich, and Leap's snapper timers
-  enabled; a timeline snapshot of immich taken by `snapper-timeline.service` through
-  `snapperd`, with SELinux enforcing and no denial for snapper in the journal or the audit
-  log; and no `security.selinux` item anywhere in the array's trees, read off the device
-  after a container has written to it, where the same read of `/home` finds the first
-  boot's labels. Then, after the play again (`host/zero.sh`): `three`'s pull, from the
+  Syncthing service; immich in no `SNAPPER_CONFIGS` and `snapper-immich.timer` waiting; a
+  timeline snapshot of immich taken by `snapper-immich.service` with `--no-dbus`, with
+  SELinux enforcing and no denial for snapper in the journal or the audit log (the first
+  run, through `snapperd`, found `snapperd_t` refused a directory on `container_file_t`);
+  and no `security.selinux` item anywhere in the array's trees, read off the device after
+  a container has written to it, where the same read of `/home` finds the first boot's
+  labels. Then, after the play again (`host/zero.sh`): `three`'s pull, from the
   runner with the run's key in the line the play installed, lists the snapshots module
   through the forced command, sudo's rule and `setpriv`, naming the newest timeline
   snapshot, and the key gets the daemon whatever command it asks for. Then a late array: a
