@@ -343,11 +343,11 @@ setup_again() {
 
 	# A hand edit to two tracked files: rebootmgr.conf, whose service the rule restarts,
 	# and sshd-infra.conf, which waits for the reboot. No confirm=yes, so it is refused.
-	pids=$(root_sh 'systemctl show -p MainPID --value rebootmgr sshd' | paste -sd' ')
+	pids=$(root_sh 'systemctl show -p MainPID --value rebootmgr sshd' | grep . | paste -sd' ')
 	root_sh "echo '# sim: a hand edit' >> $(live_path rebootmgr.conf)
 		echo '# sim: a hand edit' >> $(live_path sshd-infra.conf)"
 	setup_run restart
-	now=$(root_sh 'systemctl show -p MainPID --value rebootmgr sshd' | paste -sd' ')
+	now=$(root_sh 'systemctl show -p MainPID --value rebootmgr sshd' | grep . | paste -sd' ')
 	echo "    MainPID of rebootmgr and sshd: $pids before, $now after"
 	[ "$setup_rc" = 0 ] && [ "$(boot_id)" = "$before" ] && grep -q 'NOT REBOOTED' setup-restart.log &&
 		echo "PASS the play asks before the reboot, and a no leaves the box running" ||
@@ -379,7 +379,7 @@ setup_again() {
 		"~ '/ansible/group_vars/leap.yml') | from_yaml).leap_packages + ['tree'] }}\"" > setup-list.yml
 	setup_run list -e confirm=yes -e "@$PWD/setup-list.yml"
 	wait_gavin static
-	[ "$setup_rc" = 0 ] && root_sh 'rpm -q tree' &&
+	[ "$setup_rc" = 0 ] && root_sh 'rpm -q tree' > /dev/null &&
 		echo "PASS a package added to the list is installed by the next run" ||
 		echo "FAIL tree, added to the list, was not installed (exit $setup_rc)"
 	line=$(grep -o 'On no list[^:]*: [^.]*' setup-list.log | head -n 1)
@@ -387,7 +387,7 @@ setup_again() {
 	case " ${line#*: } " in
 	*" tmux "*) case " ${line#*: } " in *" tree "*) false ;; *) true ;; esac ;;
 	*) false ;;
-	esac && root_sh 'rpm -q tmux' &&
+	esac && root_sh 'rpm -q tmux' > /dev/null &&
 		echo "PASS a package installed by hand is reported as an extra and left installed" ||
 		echo "FAIL tmux was not reported as an extra and left, or tree was reported"
 }

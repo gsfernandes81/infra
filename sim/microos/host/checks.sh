@@ -109,6 +109,12 @@ if [ -e /etc/systemd/zram-generator.conf ]; then
 		swapon --show=NAME,PRIO --noheadings | tee /dev/stderr | grep -qE "^/dev/zram0 +100$"'
 fi
 check "the bare /media refuses a write" sh -c '! touch /media/sim-write-test 2>/dev/null'
+# The play makes them in its package snapshot; a service user (three's backup) must reach
+# its mount through them.
+check "the directories above each /media mount are 0755" sh -c '
+	for m in $(awk "\$2 ~ \"^/media/\" { print \$2 }" /etc/fstab); do
+		d=$(dirname "$m"); stat -c "%a %n" "$d"; [ "$(stat -c %a "$d")" = 755 ] || exit 1
+	done'
 show findmnt -no TARGET,OPTIONS /var/lib/docker
 show findmnt -no TARGET,OPTIONS /media/torrents
 check "no mount was refused for differing SELinux options on one superblock" \

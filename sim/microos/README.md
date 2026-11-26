@@ -139,7 +139,7 @@ The run then checks, each as PASS or FAIL, and any FAIL fails the job:
   rule, its clone is on the commit under test, and no log holds the sudo password;
 - on the box (`host/checks.sh`, with `host/checks-<host>.sh` appended): the static address, SELinux, gavin's uid, shell and sudo,
   root's password, sshd's settings, every data mount by `subvolid=`, swap, the read-only
-  bare `/media`, on `one` Docker on its new store on the SSD with a fresh pull and a read
+  bare `/media`, the directories above each `/media` mount at 0755, on `one` Docker on its new store on the SSD with a fresh pull and a read
   through the `context=` mount, upstream's Compose, the pinned `cloudflared` and its ingress,
   `tailscaled` from Tailscale's repository, the update timer, the reboot strategy, the
   first boot's log, the checkout, `/root/carry` gone, and the carry-over's files and

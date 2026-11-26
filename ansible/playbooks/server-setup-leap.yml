@@ -114,7 +114,7 @@
         fi
         mkdir -p {{ compose_bin | dirname }}
         trap 'rm -rf /root/infra-bootstrap' EXIT
-        umask 077 && mkdir -p /root/infra-bootstrap
+        install -d -m 0700 /root/infra-bootstrap
         printf '%s' {{ lookup('ansible.builtin.file', control_checkout ~ '/leap/tailscale-repo.gpg', rstrip=false) | b64encode | quote }} | base64 -d > /root/infra-bootstrap/key
         printf '%s' {{ repo_head | b64encode | quote }} | base64 -d > /root/infra-bootstrap/repo
         tu='transactional-update --non-interactive'
