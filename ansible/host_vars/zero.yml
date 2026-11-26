@@ -8,3 +8,41 @@ extra_packages:
 # The one other exception: server-update-leap.yml's tailnet check after a reboot pings
 # zero from every other host (group_vars/fleet.yml), so zero pings three.
 tailnet_peer: three
+
+# ── for server-setup-leap.yml, once zero has moved (group_vars/leap.yml) ──────
+# zero is not in the leap group until its move (ansible/inventory), so the play reads none
+# of this yet.
+#
+# The address in zero's tracked profile, hosts/zero/leap/system/wired.nmconnection. A run
+# that came in on another address, a fresh box's DHCP one, reconnects here after the reboot
+# that brings the profile in.
+leap_static_address: 192.168.86.100
+
+# The user three's pull logs in as (plans/three-backup-pull.md), by the one key line in
+# hosts/zero/leap/system/backup-authorized-keys, whose forced command starts a read-only
+# rsync daemon. A real shell, because sshd runs a forced command through the user's shell,
+# and the key's restrictions keep it from being used as one. No password. Its home and the
+# .ssh in it are root's at 0755, so the user cannot change its own keys.
+leap_system_users:
+  - name: backup
+    shell: /bin/bash
+    comment: serves zero's snapshots to three
+    home: /home/backup
+
+# Syncthing's sync and discovery ports, for devices on the LAN; its GUI stays on 127.0.0.1.
+# firewalld is on in Leap and allows only ssh and DHCPv6 otherwise.
+leap_firewalld_services:
+  - syncthing
+
+# snapper natively over D-Bus (the owner's call, 2026-11-24): immich's snapshots are taken
+# by snapperd from Leap's own timers. The play writes this list as SNAPPER_CONFIGS whole, so
+# it names root's config too, which the image's cleanup of its own snapshots reads.
+leap_snapper_configs:
+  - root
+  - immich
+
+# Leap's snapper timers, named so they run whatever the image's presets say: the hourly
+# timeline and the daily cleanup (plans/zero-leap.md § snapper).
+leap_extra_units_enabled:
+  - snapper-timeline.timer
+  - snapper-cleanup.timer

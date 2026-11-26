@@ -309,12 +309,11 @@ the tailnet, or at the console, since the phone's one VPN slot is taken.
 as `make-stick` lays it out, with stand-ins for the carry-over and the host's disks, and
 checks the box it makes ([`sim/microos/README.md`](../sim/microos/README.md)). `make-stick`
 itself reads a live Alpine host and writes a real USB device, so CI runs neither it nor
-`--card`'s partitioning, and the bench boot is the first run of `--card`. The stand-in
-carry-over has no key file, Tailscale state or restore key, the stand-in stick is a disk
-of its own, and each host's script runs once. So CI runs `grow_root`'s stick branch only,
-and none of `install_data_key`, `install_tailscale_state`, `install_restore_key`, the card
-branch or a second run. `zero`'s simulation is to run them (`plans/zero-leap.md` § The
-build, item 6).
+`--card`'s partitioning, and the bench boot is the first run of `--card`. `zero`'s
+stand-in carry-over has the key file, a Tailscale state and the restore key, so its run
+covers `install_data_key`, `install_tailscale_state` and `install_restore_key`. The
+stand-in stick is a disk of its own, and each host's script runs once, so CI runs
+`grow_root`'s stick branch only, and neither the card branch nor a second run.
 
 That VM is x86_64, so `.github/workflows/pi-image.yml` covers what it cannot. Its `image`
 job downloads the newest Pi image openSUSE publishes, checks it against the `.sha256` beside

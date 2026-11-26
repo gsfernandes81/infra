@@ -1,0 +1,26 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /etc/NetworkManager/system-connections
+# infra-name: wired.nmconnection
+# infra-mode: 0600
+#
+# zero's own address, set on the host as on Alpine, so it stays 192.168.86.100 on a new
+# board or card: sshd's PermitOpen, every client's ssh config and the bench boot name it.
+# The gateway, resolvers and search domain are one's (hosts/one/leap/system/), on the same
+# LAN; IPv6 takes the router's advertised address. No interface name, so it holds on
+# whatever Leap calls the Pi 5's port. NetworkManager reads only a root-owned file at mode
+# 0600.
+[connection]
+id=wired
+type=ethernet
+autoconnect=true
+autoconnect-priority=100
+
+[ipv4]
+method=manual
+address1=192.168.86.100/24,192.168.86.1
+dns=1.1.1.1;8.8.8.8;
+dns-search=lan;
+
+[ipv6]
+method=auto

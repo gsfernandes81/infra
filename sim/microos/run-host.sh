@@ -10,7 +10,8 @@
 # It writes only inside <workdir>, except one loop mount under sudo to make the stand-in
 # SSD's subvolumes, a play inventory in ansible/ while it runs, and for three a loop
 # device, two mounts and two containers on the runner's network, one holding its port 22,
-# for the stand-in for zero (host/three.sh).
+# for the stand-in for zero (host/three.sh). For zero, which has not moved, the play
+# inventory goes in the clone below, inside <workdir>.
 # Every check prints PASS or FAIL; any FAIL fails the run.
 set -euo pipefail
 
@@ -32,6 +33,31 @@ new_host=no
 
 report() { tee -a report.txt; }
 : > report.txt
+
+# A host that has not moved yet (zero) is set up as its day will set it up: its
+# hosts/<host>/leap/MOVED committed, which the play requires, and each FILL-FROM-
+# placeholder in hosts/<host>/leap holding the value the owner commits before the stick.
+# Here both go into a throwaway commit on a clone of the commit under test, with
+# host/<host>.sh's stand-ins for the placeholders, and the run tests that commit: the play
+# reads fstab.append and the tracked files from the control node's checkout and the box's
+# clone of the same commit, not from the stick.
+if [ ! -e "$repo/hosts/$host/leap/MOVED" ]; then
+	under_test=$(git -C "$repo" rev-parse HEAD)
+	rm -rf sim-repo
+	git clone -q --shared --no-checkout "$repo" sim-repo
+	git -C sim-repo checkout -q --detach "$under_test"
+	for token in "${!standin[@]}"; do
+		{ grep -rl -- "$token" "sim-repo/hosts/$host/leap" || true; } |
+			xargs -r sed -i "s|$token|${standin[$token]}|g"
+	done
+	: > "sim-repo/hosts/$host/leap/MOVED"
+	git -C sim-repo add -A "hosts/$host/leap"
+	git -C sim-repo -c user.name=sim -c user.email=sim@sim.invalid commit -q \
+		-m "sim: $host has moved, with the run's stand-ins"
+	repo=$PWD/sim-repo
+	echo "$host has not moved: testing $(git -C "$repo" rev-parse --short HEAD), which is" \
+		"$under_test with MOVED and the stand-ins committed" | report
+fi
 
 # The play is the routine's second half, so without it there is no box to check.
 command -v ansible-playbook >/dev/null ||
@@ -91,6 +117,8 @@ for vol in "${volumes[@]}"; do
 	mkdir -p "vol-$vol" && echo "$vol" > "vol-$vol/marker"
 	tar -C "vol-$vol" -cf "$c/volumes/$vol.tar" .
 done
+# What make-stick carries for this host beyond the above, if host/<host>.sh says: zero's.
+if declare -F sim_carry >/dev/null; then sim_carry | report; fi
 mke2fs -q -t ext4 -L combustion -d stick combustion.img 64M
 
 # ── the host's disks ─────────────────────────────────────────────────────────

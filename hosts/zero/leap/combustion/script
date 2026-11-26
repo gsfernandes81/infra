@@ -1,0 +1,80 @@
+#!/bin/bash
+#
+# zero's first-boot script for Leap 16.1 Immutable, run once by Combustion from the stick
+# or card leap/make-stick builds (leap/README.md, plans/zero-leap.md). Reviewed like any
+# boot-path file; it carries no secret, and reads the carry-over from the stick. The steps
+# it shares with every Leap host are in leap/firstboot.sh; what follows is zero's own.
+#
+# No `# combustion:` line on purpose: Combustion brings up no network, so everything here
+# is offline work, and the rest is the play's (plans/pi-setup.md). That also means the Pi
+# 5's initrd, which has no driver for the chip its Ethernet sits behind, costs nothing.
+# The wired port is on DHCP until the play installs zero's static profile.
+set -euo pipefail
+
+host=zero
+# gavin's uid and gid on zero's Alpine system, kept so his files on the array stay his.
+# Syncthing's data is 1000's, an old Alpine account; no account is made for 1000 here, and
+# the container needs none (plans/zero-leap.md § What zero has).
+gavin_uid=1001
+gavin_gid=1001
+
+# shellcheck source=leap/firstboot.sh
+. ./leap/firstboot.sh
+
+say "starting $host"
+record_baseline
+# zero's own carry-over besides the common one: the array's key file, the Tailscale state
+# and root's restore key, so the array opens at boot, zero is the same tailnet node at the
+# address three pulls from, and three's restore line still accepts its key. A new host
+# after a card's death (carry/NEW) has none of them, and remakes each after the play.
+if [ -e "$stick/carry/NEW" ]; then
+	check_carry "$host"
+else
+	check_carry "$host" keys/data.key tailscale/tailscaled.state \
+		root-ssh/restore root-ssh/restore.pub
+fi
+mount_subvolumes
+grow_root
+
+echo "$host" > /etc/hostname
+set_root_password
+make_gavin "$gavin_uid" "$gavin_gid"
+install_host_keys
+install_login
+# Before the play appends the array's fstab entries and installs crypttab, so nothing that
+# could mount the array exists without the key that opens data-4.
+install_data_key
+install_tailscale_state
+install_restore_key
+# The tunnel's credentials, unless this is a new host after a card's death: its tunnel is
+# remade after the play, and check_carry did not require the file.
+if [ -e "$stick/carry/cloudflared/$host.json" ]; then
+	install -D -m 600 "$stick/carry/cloudflared/$host.json" "/etc/cloudflared/$host.json"
+fi
+stage_carry
+keep_volume_tars
+label_subvolumes
+
+say "done; $host boots into its configured snapshot next"
+
+# What the play does, that this script used to (notes for its author; nothing here runs):
+# - The backup user three's pull logs in as, by the one key line in
+#   backup-authorized-keys, whose forced command starts a read-only rsync daemon through
+#   sudoers-backup. A real shell (/bin/bash), because sshd runs a key's forced command
+#   through the user's shell, so nologin would refuse it; the key's restrictions keep it
+#   from being used as one. No password. Its home, /home/backup, and the .ssh in it are
+#   root's at 0755, so the user cannot change its own keys (host_vars/zero.yml).
+# - Every tracked file for this host, each at the path its header names: crypttab, which
+#   opens data-4 from the key file installed above; snapper's immich config; the backup
+#   user's files; the tunnel, sshd, network and update files one has. Notes (*.md) are
+#   skipped, a sudoers file is checked with visudo -cf.
+# - bcache-tools, from the one package list, whose udev rule assembles the array's bcache
+#   devices; Alpine's bcache-register is not carried.
+# - The array's mountpoints, /media/immich and /media/syncthing, exist only if a snapshot
+#   makes them, and while nothing is mounted there the read-only root refuses every write.
+#   Then fstab.append's entries, each appended only if that exact line is missing.
+# - immich in Leap's SNAPPER_CONFIGS, beside root, and Leap's snapper timers, so snapperd
+#   takes the hourly snapshots (plans/zero-leap.md § snapper). Never `snapper
+#   create-config`: .snapshots is already on the array, and its numbering continues.
+# - Syncthing's sync and discovery ports in firewalld, for devices on the LAN; its GUI
+#   stays on 127.0.0.1.

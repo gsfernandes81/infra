@@ -115,9 +115,29 @@ volumes, and on `one` the dev stack's `.env` and secrets. `host/<host>.sh` gives
 stand-in for each `FILL-FROM-` placeholder still in the host's files, and makes the host's
 disks: for `one`, a btrfs SSD with one's filesystem UUID and its subvolumes in the order
 that gives the fstab's ids, and a swap disk with its UUID, both on USB; for `three`, a
-blank drive. The VM sits on the host's own subnet. A host with no tunnel config yet is
-new, and its stick is `make-stick --new`'s: no tunnel credentials, `.env`, secrets or
-volumes, and the `carry/NEW` marker.
+blank drive; for `zero`, its disks as below. The VM sits on the host's own subnet. A host
+with no tunnel config yet is new, and its stick is `make-stick --new`'s: no tunnel
+credentials, `.env`, secrets or volumes, and the `carry/NEW` marker.
+
+A host that has not moved yet, `zero`, is tested as its day will leave the repo: the run
+clones the commit under test into its work directory and commits on top of it the host's
+`leap/MOVED`, which the play requires, and `host/<host>.sh`'s stand-ins for the
+`FILL-FROM-` placeholders and for the values only the real box can answer, since the play
+reads the tracked files from the control node's checkout and the box's clone, not from the
+stick. The rest of the run then tests that commit. `zero`'s stick carries what
+`make-stick` carries on `zero` (`sim_carry` in `host/zero.sh`): Immich's `.env` and no
+secrets directory, the array's key file, a Tailscale state holding a key of the run's,
+root's restore key with a stand-in for `three`'s host key, and `pearl-wallet`'s volume.
+
+`zero`'s disks are built first, in a VM of their own booted from the same image
+(`host/zero-disks/`), so `make-bcache` and `cryptsetup` never run on the runner: an SSD
+with the bcache cache, a btrfs holding Alpine's Docker store and the new one at the
+stand-in id, and swap, each with `zero`'s UUID; two hard disks as bcache backing devices,
+unpartitioned; LUKS2 `data-luks-4` with Adiantum on one of them, from the run's key file,
+with `zero`'s LUKS UUID; and btrfs RAID1 with `zero`'s UUID over the other and `data-4`,
+its subvolumes made so `media-syncthing` and `immich` get ids 278 and 281, as on `zero`.
+Every filesystem is written under `zero`'s `context=`, so the box under test is the only
+thing that could label a file there.
 
 The first boot leaves the wired port on DHCP, so gavin's ssh must answer first at qemu's
 DHCP address. The runner then runs `server-setup-leap.yml` as the control node, logged in
@@ -198,6 +218,28 @@ The run then checks, each as PASS or FAIL, and any FAIL fails the job:
   crypttab and fstab put back;
 - on `three`, zero's backup, pulled from the runner standing in for `zero`
   (`sim_backup` in `host/three.sh`, with `host/three-backup.sh` on the box), below.
+- on `zero` (`host/checks-zero.sh`, on each pass of the box's checks): both bcache devices
+  attached and writethrough; `data-4` open from the key file with no passphrase asked;
+  btrfs RAID1 on two devices, none missing; `/media/immich` and `/media/syncthing` mounted
+  by subvolumes 281 and 278 with the container `context=`; Docker on the new store; the
+  key file root's at 0400; the carried Tailscale state in `/var/lib/tailscale`, told from
+  a new one by the run's key in it; the restore key and `three`'s host key; no secrets
+  directory; the `backup` user with a real shell, no password and root's home; firewalld's
+  Syncthing service; `SNAPPER_CONFIGS` naming root and immich, and Leap's snapper timers
+  enabled; a timeline snapshot of immich taken by `snapper-timeline.service` through
+  `snapperd`, with SELinux enforcing and no denial for snapper in the journal or the audit
+  log; and no `security.selinux` item anywhere in the array's trees, read off the device
+  after a container has written to it, where the same read of `/home` finds the first
+  boot's labels. Then, after the play again (`host/zero.sh`): `three`'s pull, from the
+  runner with the run's key in the line the play installed, lists the snapshots module
+  through the forced command, sudo's rule and `setpriv`, naming the newest timeline
+  snapshot, and the key gets the daemon whatever command it asks for. Then a late array: a
+  container under `restart: always` that exits without the array's marker, `zero` powered
+  off and booted with the SSD alone, the two hard disks plugged in inside the 180 s device
+  timeout; the array must open and mount by itself and the container come back on it. The
+  deploy stage restores `pearl-wallet`'s volume and plans Immich and Syncthing;
+  `pearl-wallet` is not planned, as its image is built on the box and its preflight hook
+  refuses a volume with no wallet.
 - on `three`, in the second job (`SIM_VARIANT=migrate`), in place of `make-backup` and the
   pull: the rename of the array made on 2026-11-18 (`hosts/three/leap/README.md` § The
   rename). The box is first set back to that day's: the files of the tree before the pull

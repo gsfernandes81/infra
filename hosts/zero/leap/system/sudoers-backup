@@ -1,0 +1,17 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /etc/sudoers.d
+# infra-name: 60-backup
+# infra-mode: 0440
+#
+# The one command zero's backup user may run as root, with no password: the forced command
+# in backup-authorized-keys, word for word (plans/three-backup-pull.md). util-linux's
+# setpriv, at /usr/bin on Leap as on three (sudoers-restore there), drops back to zero's
+# backup user, keeps CAP_DAC_READ_SEARCH alone in the inheritable, ambient and bounding
+# sets, sets no_new_privs so no setuid binary can raise it again, and runs rsync's daemon,
+# which so reads any file and can change none. Root lasts only as long as setpriv takes,
+# and the rsync is the system's own, so an update to rsync applies at its next boot.
+#
+# sudo matches the arguments exactly, so the forced command and this line change together.
+# In sudoers a = inside an argument is written \=, and a comma \,.
+backup ALL=(root) NOPASSWD: /usr/bin/setpriv --reuid\=backup --regid\=backup --init-groups --inh-caps\=+dac_read_search --ambient-caps\=+dac_read_search --bounding-set\=-all\,+dac_read_search --no-new-privs /usr/bin/rsync --server --daemon --config\=/etc/rsyncd-backup.conf .

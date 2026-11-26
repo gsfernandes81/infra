@@ -1,0 +1,28 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /etc
+# infra-name: crypttab
+# infra-mode: 0644
+#
+# zero's encrypted array member, opened at every boot from the key file, so a boot needs
+# nobody. This is the protection-off mode the owner chose on 2026-11-19 (docs/decisions.md
+# § zero's encrypted member): real encryption, unlocked by a key that sits in the same
+# box. It protects the disk when the disk leaves zero alone, not when the whole box is
+# taken.
+#
+# Layers, bottom up: the WD Red Plus, its bcache backing device, LUKS2 labelled
+# data-luks-4 and named by its LUKS UUID here, then btrfs devid 4 of the array.
+# bcache-tools' udev rule assembles the bcache devices, and systemd-cryptsetup opens this
+# once its device appears, before btrfs sees the array whole. The key file is root's, 0400
+# in a 0700 /etc/keys, put there by the first boot from the stick
+# (hosts/zero/leap/combustion/script).
+#
+# nofail, so a missing disk or key costs the array, never the boot, and every /media entry
+# carries nofail too. The 180 s device timeout matches the fstab entries, so a slow USB
+# disk still opens at boot. Not noauto while protection is off. No discard: the disk
+# beneath is a hard disk with no use for one, and passing discards through would show
+# which blocks are free.
+#
+# Turning protection on (phase 16) makes this entry noauto, or removes it, BEFORE the key
+# file's keyslot is killed: without a working key the boot would wait at the console.
+data-4	UUID=c00f99a6-20ba-4fdc-af80-b6fde37131f1	/etc/keys/data.key	luks,nofail,x-systemd.device-timeout=180s

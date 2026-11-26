@@ -27,8 +27,8 @@ services:
       # log. On zero's root filesystem under /var/lib/docker, not /media, so the mount
       # guards do not apply. Not backed up: the seed on paper is the backup (README.md).
       - wallet:/home/nonroot/.oyster
-      - ./oyster.conf:/etc/oyster/oyster.conf:ro
-      - ./prlctl.conf:/home/nonroot/.prlctl/prlctl.conf:ro
+      - ./oyster.conf:/etc/oyster/oyster.conf:ro,z
+      - ./prlctl.conf:/home/nonroot/.prlctl/prlctl.conf:ro,z
     # No `ports:`. The RPC server listens on the container's own loopback (oyster.conf),
     # and the light client's peer connections are all outbound.
     read_only: true

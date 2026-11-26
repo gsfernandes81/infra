@@ -14,7 +14,7 @@ name: microos-sim
 on:
   push:
     paths: ['sim/microos/**', '.github/workflows/microos-sim.yml', 'leap/**', 'hosts/*/leap/**',
-      'hosts/one/*', 'hosts/three/*', 'hosts/zero/system/snapper-*',
+      'hosts/one/*', 'hosts/three/*', 'hosts/zero/*', 'hosts/zero/system/snapper-*',
       'hosts/zero/system/sudoers-backup', 'hosts/zero/system/rsyncd-backup.conf',
       'hosts/zero/system/backup-authorized-keys', 'hosts/zero/system/sshd-infra.conf',
       'sim/alpine/host/Dockerfile', 'bin/install-system-file', 'bin/_infra.py',
@@ -29,10 +29,11 @@ on:
       'ansible/ansible.cfg', 'ansible/group_vars/**', 'ansible/host_vars/**',
       'ansible/requirements.yml', 'ansible/deploy-hooks/**', 'deployments/calibre-web/**',
       'deployments/garmin-mcp/**', 'deployments/send2ereader/**', 'deployments/torrents/**',
-      'deployments/syncthing-three/**', '!deployments/*/README.md']
+      'deployments/syncthing-three/**', 'deployments/immich/**', 'deployments/syncthing/**',
+      'deployments/pearl-wallet/**', '!deployments/*/README.md']
   pull_request:
     paths: ['sim/microos/**', '.github/workflows/microos-sim.yml', 'leap/**', 'hosts/*/leap/**',
-      'hosts/one/*', 'hosts/three/*', 'hosts/zero/system/snapper-*',
+      'hosts/one/*', 'hosts/three/*', 'hosts/zero/*', 'hosts/zero/system/snapper-*',
       'hosts/zero/system/sudoers-backup', 'hosts/zero/system/rsyncd-backup.conf',
       'hosts/zero/system/backup-authorized-keys', 'hosts/zero/system/sshd-infra.conf',
       'sim/alpine/host/Dockerfile', 'bin/install-system-file', 'bin/_infra.py',
@@ -47,7 +48,8 @@ on:
       'ansible/ansible.cfg', 'ansible/group_vars/**', 'ansible/host_vars/**',
       'ansible/requirements.yml', 'ansible/deploy-hooks/**', 'deployments/calibre-web/**',
       'deployments/garmin-mcp/**', 'deployments/send2ereader/**', 'deployments/torrents/**',
-      'deployments/syncthing-three/**', '!deployments/*/README.md']
+      'deployments/syncthing-three/**', 'deployments/immich/**', 'deployments/syncthing/**',
+      'deployments/pearl-wallet/**', '!deployments/*/README.md']
   workflow_dispatch:
 
 permissions:
@@ -271,6 +273,9 @@ jobs:
     # the routine's proof. three runs twice: with make-backup on a blank drive and the pull;
     # and as the box made on 2026-11-18 (variant migrate), through
     # hosts/three/leap/README.md § The rename, block by block (sim/microos/host/three.sh).
+    # zero has not moved, so its run tests the commit with its MOVED and stand-ins added,
+    # on disks a first VM builds as zero's are: bcache, LUKS from a key file, btrfs RAID1
+    # (sim/microos/host/zero.sh).
     strategy:
       fail-fast: false
       matrix:
@@ -279,6 +284,7 @@ jobs:
           - host: three
           - host: three
             variant: migrate
+          - host: zero
     runs-on: ubuntu-24.04
     timeout-minutes: 80
     steps:

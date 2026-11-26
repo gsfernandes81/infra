@@ -174,16 +174,17 @@ else
 	# cloudflared image's user, or that deployment's sidecar cannot read it; everything else in
 	# a secrets directory is gavin's. One is required for each of the host's deployments whose
 	# compose.yaml asks for one, so the check cannot pass on a .env it failed to read.
+	# A host whose deployments ask for none (zero) carries no secrets directory at all.
 	check "each tunnel's credentials are 65532's at 0600, all else gavin's" sh -c '
-		ls -ld /home/gavin/.*-secrets || exit 1
 		creds=$(sed -nE "s/^TUNNEL_CREDENTIALS=//p" /home/gavin/infra/deployments/*/.env)
 		want=$(grep -l TUNNEL_CREDENTIALS /home/gavin/infra/hosts/$(hostname)/*/compose.yaml | wc -l)
+		ls -ld /home/gavin/.*-secrets 2>/dev/null || [ "$want" = 0 ] || exit 1
 		[ "$(echo "$creds" | grep -c .)" = "$want" ] || { echo "$want wanted, found: $creds"; exit 1; }
 		for c in $creds; do
 			stat -c "%u %g %a %n" "$c"
 			[ "$(stat -c "%u %g %a" "$c")" = "65532 65532 600" ] || exit 1
 		done
-		for f in $(find /home/gavin/.*-secrets); do
+		for f in $(find /home/gavin/.*-secrets 2>/dev/null); do
 			case " $(echo $creds) " in *" $f "*) continue ;; esac
 			[ "$(stat -c %U "$f")" = gavin ] || { echo "not gavin'"'"'s: $f"; exit 1; }
 		done'

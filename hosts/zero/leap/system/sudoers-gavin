@@ -1,0 +1,10 @@
+# infra-os:   leap
+# infra-init: systemd
+# infra-path: /etc/sudoers.d
+# infra-name: 50-gavin
+# infra-mode: 0440
+#
+# Leap ships `Defaults targetpw` with `ALL ALL=(ALL) ALL`, so sudo asks for ROOT's
+# password and there is no wheel group. gavin types his own, as on Alpine.
+Defaults:gavin !targetpw
+gavin ALL=(ALL) ALL

@@ -1,0 +1,20 @@
+#!/bin/bash
+# combustion: network
+#
+# First-boot script for the VM that builds zero's simulated disks (host/zero.sh, make_disks);
+# not a host's. It gives root the run's key and the two tools the disks need, so
+# make-bcache and cryptsetup run inside a guest and never on the runner. Runs once inside a
+# transactional-update shell, from the config drive's "combustion" directory.
+set -euxo pipefail
+
+# Leap's first-boot wizard waits at the console and powers the box off if it fails; a
+# successful Combustion run keeps it away, and the mask is in case one does not.
+systemctl mask jeos-firstboot.service || true
+
+install -d -m 700 /root/.ssh
+install -m 600 authorized_keys /root/.ssh/authorized_keys
+systemctl enable sshd
+
+zypper --non-interactive install bcache-tools cryptsetup
+
+echo "combustion-zero-disks: done" > /dev/console
