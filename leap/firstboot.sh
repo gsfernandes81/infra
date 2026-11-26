@@ -148,14 +148,15 @@ check_carry() {
 		ssh/ssh_host_ed25519_key ssh/ssh_host_ed25519_key.pub "$@"; do
 		[ -s "$stick/carry/$f" ] || die "carry/$f is missing or empty"
 	done
-	# A host with a tunnel config must carry the tunnel's credentials. A new host has
-	# neither: its tunnel is made after its first boot (make-stick --new).
-	if [ -e "$stick/host/system/cloudflared-config.yml" ]; then
+	# A host with a tunnel config must carry the tunnel's credentials. A new host (carry/NEW,
+	# which make-stick --new writes) has none: its tunnel is made after its first boot.
+	if [ ! -e "$stick/carry/NEW" ] && [ -e "$stick/host/system/cloudflared-config.yml" ]; then
 		[ -s "$stick/carry/cloudflared/$host.json" ] || die "carry/cloudflared/$host.json is missing or empty"
 	fi
 	# A host whose crypttab names a key file must carry it, or its encrypted member stays
-	# shut at boot and the array cannot mount. make-stick carries /etc/keys/data.key only.
-	if [ -e "$stick/host/system/crypttab" ]; then
+	# shut at boot and the array cannot mount. make-stick carries /etc/keys/data.key only. A
+	# new host has none: the owner adds one to the array before the play installs crypttab.
+	if [ ! -e "$stick/carry/NEW" ] && [ -e "$stick/host/system/crypttab" ]; then
 		# shellcheck disable=SC2013  # the third field alone, a path, which has no spaces in crypttab
 		for key in $(awk '!/^[[:space:]]*(#|$)/ { print $3 }' "$stick/host/system/crypttab"); do
 			case "$key" in

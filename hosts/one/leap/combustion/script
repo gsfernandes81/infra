@@ -29,7 +29,11 @@ set_root_password
 make_gavin "$gavin_uid" "$gavin_gid"
 install_host_keys
 install_login
-install -D -m 600 "$stick/carry/cloudflared/$host.json" "/etc/cloudflared/$host.json"
+# The tunnel's credentials, unless this is a new host after a card's death: its tunnel is
+# remade after the play, and check_carry did not require the file.
+if [ -e "$stick/carry/cloudflared/$host.json" ]; then
+	install -D -m 600 "$stick/carry/cloudflared/$host.json" "/etc/cloudflared/$host.json"
+fi
 stage_carry
 keep_volume_tars
 label_subvolumes

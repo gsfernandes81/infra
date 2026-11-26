@@ -12,11 +12,13 @@
 #
 #   sudo leap/make-stick --bench <device>
 #
-# --new makes the new host's ssh host key on the stick and prints its fingerprint, asks for
-# its root password, and takes gavin's password hash and authorized_keys from the box it
-# runs on. It carries no tunnel credentials, .env, secrets directory, key file, Tailscale
-# state, restore key or volume: a new host has none until its first boot is done
-# (server-create-host-tunnel.yml makes its tunnel).
+# --new is for a host with no old system: one never built, or one whose SD card died, which
+# comes back with a new identity. It makes the new host's ssh host key on the stick and
+# prints its fingerprint, asks for its root password, and takes gavin's password hash and
+# authorized_keys from the box it runs on. It carries no tunnel credentials, .env, secrets
+# directory, key file, Tailscale state, restore key or volume, and writes an empty
+# carry/NEW so the first boot does not ask for them. It ends by printing what the owner
+# remakes for that host (a tunnel, the tailnet join, the array's key file, the secrets).
 #
 # --bench writes leap/bench/ and this box's gavin's authorized_keys and password hash,
 # nothing else: a script that makes gavin with those, gives him sudo that asks for that
@@ -123,11 +125,10 @@ if [ -z "$bench" ]; then
 		# the wrong keys and credentials.
 		[ "$this" = "$host" ] || die "this is $this, not $host"
 	else
-		# A new host's stick takes nothing of this box's but gavin's, and a host with a tunnel
-		# or volumes to carry has an old system to build its stick on.
+		# A new host's stick takes nothing of this box's but gavin's. A host whose card died
+		# comes back as a new host too, so a tunnel config or a volumes list is no refusal; it
+		# only means there is more to remake afterwards, printed at the end.
 		[ "$this" != "$host" ] || die "this is $host itself; leave out --new"
-		[ ! -e "$hostdir/system/cloudflared-config.yml" ] || die "$host has a tunnel config, so it is not new"
-		[ ! -e "$hostdir/volumes" ] || die "$host lists volumes to carry, so it is not new"
 	fi
 	if grep -rl 'FILL-FROM-' "$hostdir" >/dev/null 2>&1; then
 		die "a placeholder is left in: $(grep -rl 'FILL-FROM-' "$hostdir" | tr '\n' ' ')"
@@ -246,15 +247,15 @@ case "$gavin_hash" in \$*) ;; *) die "gavin has no password hash" ;; esac
 if [ -z "$bench" ]; then
 	# The key file the host's crypttab names, which opens its encrypted member at boot. Only
 	# /etc/keys/data.key travels, so a crypttab naming another is refused rather than
-	# carried somewhere the first boot does not look. A new host has no key to carry.
+	# carried somewhere the first boot does not look. A new host has no key to carry, and
+	# what that means for it is printed at the end.
 	if [ -f "$hostdir/system/crypttab" ]; then
 		# shellcheck disable=SC2013  # the third field alone, a path, which has no spaces in crypttab
 		for key in $(awk '!/^[[:space:]]*(#|$)/ { print $3 }' "$hostdir/system/crypttab"); do
 			case "$key" in
 			none | -) ;;
 			/etc/keys/data.key)
-				[ -z "$new" ] || die "$host's crypttab names $key, which a new host has no old system to carry from"
-				[ -s "$key" ] || die "$host's crypttab names $key, and this system has none: without it the array cannot mount"
+				[ -n "$new" ] || [ -s "$key" ] || die "$host's crypttab names $key, and this system has none: without it the array cannot mount"
 				;;
 			*) die "$host's crypttab names $key; make-stick carries only /etc/keys/data.key" ;;
 			esac
@@ -330,7 +331,7 @@ elif [ -n "$new" ]; then
 fi
 
 # A card's payload must fit the partition, which is fixed at 256 MiB so that root keeps the
-# rest. The estimate is generous: every file in leap/ and the host's directory, each
+# rest. The estimate is generous: the files copied from leap/ and the host's directory, each
 # secrets directory, the small carried files, and each listed volume's data, which travels
 # as a tar file. It must leave a quarter of the partition free, for ext4's own journal and
 # tables and for tar's headers, or the card is refused before anything is written.
@@ -339,7 +340,8 @@ if [ -n "$card" ]; then
 	if [ -n "$bench" ]; then
 		payload=$(kib "$repo/leap/bench" /home/gavin/.ssh/authorized_keys)
 	else
-		payload=$(kib "$repo/leap" "$hostdir" /home/gavin/.ssh/authorized_keys /etc/ssh)
+		payload=$(kib "$repo/leap/firstboot.sh" "$hostdir/combustion" "$hostdir/system" \
+			/home/gavin/.ssh/authorized_keys /etc/ssh)
 		if [ -z "$new" ]; then
 			for d in /home/gavin/.*-secrets /etc/keys/data.key /var/lib/tailscale/tailscaled.state \
 				/root/.ssh/restore /root/.ssh/restore.pub; do
@@ -478,10 +480,6 @@ if [ -n "$bench" ]; then
 else
 	install -D -m 755 "$hostdir/combustion/script" "$s/script"
 	install -D -m 644 "$repo/leap/firstboot.sh" "$s/leap/firstboot.sh"
-	install -D -m 644 "$repo/leap/pins" "$s/leap/pins"
-	install -D -m 644 "$repo/leap/motd" "$s/leap/motd"
-	install -D -m 644 "$repo/leap/tailscale-repo.gpg" "$s/leap/tailscale-repo.gpg"
-	install -D -m 644 "$hostdir/fstab.append" "$s/host/fstab.append"
 	mkdir -p "$s/host/system"
 	cp -p "$hostdir"/system/* "$s/host/system/"
 
@@ -496,6 +494,9 @@ if [ -n "$new" ]; then
 	# The new host's own key, made here and nowhere else. Its fingerprint is printed at the
 	# end, so the first `ssh` to the host can be checked against it, not taken on trust.
 	ssh-keygen -q -t ed25519 -N '' -C "root@$host" -f "$c/ssh/ssh_host_ed25519_key"
+	# The marker the first boot reads: this host has no tunnel credentials or key file to
+	# carry, so its check does not ask for them.
+	: > "$c/NEW"
 elif [ -z "$bench" ]; then
 	cp -p /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub "$c/ssh/"
 	cp "/etc/cloudflared/$host.json" "$c/cloudflared/$host.json"
@@ -553,6 +554,18 @@ echo "make-stick: $target holds $host's first boot. Names only, no contents:"
 if [ -n "$new" ]; then
 	echo "make-stick: $host's host key, to check at the first ssh to it:"
 	ssh-keygen -l -f "$c/ssh/ssh_host_ed25519_key.pub"
+	# What a new host does not have until the owner remakes it, for a host whose card died
+	# as for one that never ran. Read from the same tracked files the first boot reads.
+	echo "make-stick: for $host, after the first boot and the play (plans/pi-setup.md § When a card dies):"
+	if [ -e "$hostdir/system/cloudflared-config.yml" ]; then
+		echo "    - a new tunnel: server-create-host-tunnel.yml"
+	fi
+	echo "    - the tailnet join: remove the old node in the admin console, give its address to the new one"
+	if [ -f "$hostdir/system/crypttab" ] && awk '!/^[[:space:]]*(#|$)/ { print $3 }' "$hostdir/system/crypttab" | grep -qx /etc/keys/data.key; then
+		echo "    - the array's key file: BEFORE the play, which installs crypttab, open the array with its"
+		echo "      passphrase and add a new key file (cryptsetup luksAddKey)"
+	fi
+	echo "    - each deployment's secrets, from where docs/decisions.md § Secrets wait says"
 fi
 if [ -n "$card" ]; then
 	echo "make-stick: once $host is proven, discard $target, delete it and grow ROOT into its space (leap/README.md § One card)."

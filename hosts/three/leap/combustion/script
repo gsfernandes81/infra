@@ -35,9 +35,10 @@ set_root_password
 make_gavin "$gavin_uid" "$gavin_gid"
 install_host_keys
 install_login
-# The tunnel's credentials, once three has a tunnel: a rebuild carries them, check_carry
-# requires them whenever the config is there, and cloudflared reads nothing else.
-if [ -e "$stick/host/system/cloudflared-config.yml" ]; then
+# The tunnel's credentials, once three has a tunnel: a planned move carries them and
+# check_carry requires them whenever the config is there, except after a card's death
+# (carry/NEW), when the tunnel is remade after the play. cloudflared reads nothing else.
+if [ -e "$stick/carry/cloudflared/$host.json" ]; then
 	install -D -m 600 "$stick/carry/cloudflared/$host.json" "/etc/cloudflared/$host.json"
 fi
 stage_carry

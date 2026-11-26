@@ -7,11 +7,11 @@ made on the host's old Alpine system, that the new system reads once at its firs
 | File | What it is |
 |---|---|
 | `firstboot.sh` | The first-boot steps every Leap host shares. Sourced by each host's script. |
-| `pins` | The versions and SHA-256s of the binaries a package would get wrong (`cloudflared`, Compose): what a new host's first boot installs, and what `ansible/playbooks/server-update-leap.yml` moves a running host to. Also the Pi image's URL and SHA-256, which `plans/visit-runbook.md` must quote and no host reads. |
+| `pins` | The versions and SHA-256s of the binaries a package would get wrong (`cloudflared`, Compose): what `ansible/playbooks/server-setup-leap.yml` installs on a new host, and what `ansible/playbooks/server-update-leap.yml` moves a running host to. Also the Pi image's URL and SHA-256, which `plans/visit-runbook.md` must quote and no host reads. |
 | `motd` | The update recipes every login shows, at `/etc/motd.d/50-infra-updates`: the normal update, and the locked boot firmware's. A plain file, with no `infra-` header for logins to show. |
 | `make-stick` | Builds a host's stick, or with `--card` writes the same onto the host's new SD card. Run as root on the host's old system, or with `--new` for a host that has none. With `--bench` it writes the bench boot's config instead. |
 | `bench/` | The bench boot's whole config: a script that makes `gavin` with his keys, password and sudo, enables sshd and gives the wired port `192.168.86.100`, that port's profile and the sudo rule. |
-| `tailscale-repo.gpg` | Tailscale's repository signing key, fingerprint `2596 A99E AAB3 3821 893C 0A79 458C A832 957F 5868`. The first boot trusts the repository through this reviewed copy. |
+| `tailscale-repo.gpg` | Tailscale's repository signing key, fingerprint `2596 A99E AAB3 3821 893C 0A79 458C A832 957F 5868`. `server-setup-leap.yml` trusts the repository through this reviewed copy; the stick does not carry it. |
 
 Each host's own part is in `hosts/<host>/leap/`:
 
@@ -20,7 +20,7 @@ Each host's own part is in `hosts/<host>/leap/`:
 | `combustion/script` | The host's first-boot script: its values, then the shared steps in order. |
 | `system/` | Every `/etc` file the host gets, each with the `infra-` header that names where it installs ([`hosts/zero/system/README.md`](../hosts/zero/system/README.md)). When the host has moved, these replace `hosts/<host>/system/`, whose copies describe the Alpine system until then. |
 | `MOVED` | The record that the host runs Leap, committed on the day it moved. While it exists, `bin/install-system-file`, `bin/check-system-drift` and the plays read `leap/system/`; without it they read `hosts/<host>/system/`. A new host such as `three` has one from its first boot. Deleting it is the repo's half of going back to the Alpine card ([`docs/decisions.md`](../docs/decisions.md) § *A host's move to Leap is a file in the repo*). |
-| `fstab.append` | The data entries, appended to the image's own fstab. Each names its subvolume by `subvolid=`, never `subvol=`, so stock health-checker cannot strand the box ([`plans/microos-cutover.md`](../plans/microos-cutover.md)). Every entry on one filesystem carries the same `context=`, Docker's store included: the subvolumes share one superblock, and SELinux refuses a second mount of it whose options differ from the first, so mixed options would make which mounts fail depend on which mounted first. |
+| `fstab.append` | The data entries, appended to the image's own fstab by the play, not the stick. Each names its subvolume by `subvolid=`, never `subvol=`, so stock health-checker cannot strand the box ([`plans/microos-cutover.md`](../plans/microos-cutover.md)). Every entry on one filesystem carries the same `context=`, Docker's store included: the subvolumes share one superblock, and SELinux refuses a second mount of it whose options differ from the first, so mixed options would make which mounts fail depend on which mounted first. |
 | `volumes` | The named Docker volumes the stick carries as tar files. |
 
 ## Making the stick
@@ -112,13 +112,25 @@ boot).
 ### A new host
 
 A host with no old system, `three` first, gets its stick from `make-stick --new <host>
-<device>`, run on any other host of the fleet. It makes the new host's ssh host key on the
-stick and prints its fingerprint, asks for the new host's root password, and takes gavin's
-password hash and `authorized_keys` from the box it runs on. It carries no tunnel
-credentials, `.env`, secrets directory or volume, and refuses a host whose directory has a
-tunnel config or a volume list, since such a host has an old system to build on. The new
-host's tunnel is made after its first boot, by `server-create-host-tunnel.yml`; until its
-config is installed, the host's `cloudflared` unit is skipped by a condition.
+<device>`, run on any other host of the fleet. A host whose SD card died gets its config
+the same way: it comes back with a new identity, and nothing is lost
+([`docs/decisions.md`](../docs/decisions.md) § *Secrets wait*). `make-stick` refuses only
+the host it runs on.
+
+It makes the new host's ssh host key on the stick and prints its fingerprint, asks for the
+new host's root password, and takes gavin's password hash and `authorized_keys` from the
+box it runs on. It carries no tunnel credentials, `.env`, secrets directory, key file or
+volume, and writes an empty `carry/NEW`, so the first boot does not ask for them. At the
+end it prints what you remake for that host:
+
+- a new tunnel, if the host has a tunnel config: `server-create-host-tunnel.yml`. Until
+  its config is installed, the host's `cloudflared` unit is skipped by a condition.
+- the tailnet join: remove the old node in the admin console and give its address to the
+  new one.
+- if its `crypttab` names a key file: open the array with the passphrase and add a new key
+  file (`cryptsetup luksAddKey`) before you run the play, since the play installs `crypttab`.
+- each deployment's secrets, from where `docs/decisions.md` § *Secrets wait* says.
+
 [`hosts/three/leap/README.md`](../hosts/three/leap/README.md) has `three`'s steps.
 
 The stick holds an ext4 filesystem labelled `combustion`. Everything is under
@@ -127,12 +139,15 @@ copy:
 
 ```
 combustion/script            the host's script
-combustion/leap/             firstboot.sh, pins, motd and the Tailscale key
-combustion/host/             the host's system/ files and fstab.append
+combustion/leap/             firstboot.sh
+combustion/host/system/      the host's system/ files, of which the first boot installs
+                             sshd's drop-in and gavin's sudoers and reads crypttab and
+                             the cloudflared config
 combustion/carry/            the carry-over: ssh host keys, root's and gavin's password
                              hashes, gavin's authorized_keys, the tunnel credentials, each
                              deployment's .env and ~gavin/.<deployment>-secrets, the volumes
-                             (a new host's: its new host key, the hashes and the keys only)
+                             (a new host's: its new host key, the hashes and the keys
+                             only, and an empty NEW)
 combustion/carry/keys/       the array's key file, where the old system has one
 combustion/carry/tailscale/  Tailscale's state, where the old system has one
 combustion/carry/root-ssh/   root's restore key and three's known_hosts lines, likewise
