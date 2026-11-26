@@ -71,8 +71,8 @@ check "systemd reached running, nothing failed" sh -c '
 	echo "state: $s"; echo "$f"
 	for u in $(echo "$f" | awk "{print \$1}"); do journalctl -b --no-pager -u "$u" | tail -n 12; done
 	[ "$s" = running ] && [ -z "$f" ]'
-# Which address is up is the harness's to judge: the first boot may still run the
-# initramfs's DHCP connection, and from the second boot only the static one is accepted.
+# Which address is up is the harness's to judge: the static one, from the play's second
+# reboot on.
 show ip -4 -br addr
 show nmcli -f NAME,DEVICE,ACTIVE,FILENAME connection show
 show sh -c 'journalctl -b -u NetworkManager --no-pager | grep -iE "policy|activation|keyfile|wired|initrd" | tail -n 15'
@@ -147,12 +147,14 @@ check "the update timer is masked" sh -c '
 check "rebootmgr's strategy is off" sh -c 'rebootmgrctl get-strategy | tee /dev/stderr | grep -q off'
 check "jeos-firstboot is masked" sh -c '[ "$(systemctl is-enabled jeos-firstboot.service)" = masked ]'
 check "the update recipes are there for every login" grep -q 'Updates on this box are by hand' /etc/motd.d/50-infra-updates
-check "the first boot kept its log, from the clock to done" sh -c '
+check "the first boot kept its log, from start to done" sh -c '
 	f=/var/log/infra-firstboot.log; tail -n 3 "$f"
-	grep -q "firstboot: set the clock from download.opensuse.org" "$f" && grep -q "firstboot: done" "$f"'
+	grep -q "firstboot: starting $(hostname)" "$f" && grep -q "firstboot: done" "$f"'
 
 echo "-- the checkout and the carry-over"
 check "the checkout is gavin's" sh -c '[ "$(stat -c %U /home/gavin/infra)" = gavin ] && git -C /home/gavin/infra log --oneline -1'
+# The play moves what Combustion staged into place, then removes the stage.
+check "/root/carry is gone" test ! -e /root/carry
 if [ "${EXPECT_NEW_HOST:-}" = yes ]; then
 	# make-stick --new carries none of these: they belong to the box it ran on.
 	check "a new host carries no .env and no secrets directory" sh -c '

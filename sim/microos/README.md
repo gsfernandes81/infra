@@ -102,31 +102,55 @@ GRUB or BLS), since they decide differently.
 Not tested: a mount failing at once on an update's first boot, and a disk that arrives
 during boot, inside the device timeout, which is the fleet's usual case.
 
-## A host's first boot
+## A host, set up as the routine sets up a Pi
 
-`run-host.sh <workdir> <host>` boots the host's real first-boot script
-(`hosts/<host>/leap/combustion/script`, [`leap/README.md`](../../leap/README.md)) from a
-stick laid out as `leap/make-stick` lays it out. The carry-over is made up for the run: a
-fresh ssh host key, password hashes for a password only the run knows, the run's key as
-gavin's, stand-in tunnel credentials, `.env` files and volumes. `host/<host>.sh` gives a
+`run-host.sh <workdir> <host>` sets a VM up as
+[`plans/pi-setup.md`](../../plans/pi-setup.md) § The routine sets up a Pi: an offline
+first boot, then one play from the control node. It boots the host's real first-boot
+script (`hosts/<host>/leap/combustion/script`, [`leap/README.md`](../../leap/README.md))
+from a stick laid out as `leap/make-stick` lays it out. The carry-over is made up for the
+run: a fresh ssh host key, password hashes for a password only the run knows, the run's
+key as gavin's, stand-in tunnel credentials, `.env` files, secrets directories and
+volumes, and on `one` the dev stack's `.env` and secrets. `host/<host>.sh` gives a
 stand-in for each `FILL-FROM-` placeholder still in the host's files, and makes the host's
 disks: for `one`, a btrfs SSD with one's filesystem UUID and its subvolumes in the order
 that gives the fstab's ids, and a swap disk with its UUID, both on USB; for `three`, a
-blank drive. The VM sits on the host's own subnet, so its static address answers. A host
-with no tunnel config yet is new, and its stick is `make-stick --new`'s: no tunnel
-credentials, `.env`, secrets or volumes.
+blank drive. The VM sits on the host's own subnet. A host with no tunnel config yet is
+new, and its stick is `make-stick --new`'s: no tunnel credentials, `.env`, secrets or
+volumes, and the `carry/NEW` marker.
+
+The first boot leaves the wired port on DHCP, so gavin's ssh must answer first at qemu's
+DHCP address. The runner then runs `server-setup-leap.yml` as the control node, logged in
+as gavin with his sudo password given as `-K` gives it, with `-e confirm=yes` and
+`-e ways_in_check=false`. The runner reaches each of the guest's two addresses at
+`127.0.0.<its last number>`, and the play is given the static address in that form, so
+its own reconnect rule follows the box from the DHCP address to the static one at its
+second reboot. gavin's git on the box is pointed at a copy of the commit under test, a
+bare repository the runner sends and a `url.insteadOf` line for GitHub's address, so the
+play's own clone lands on that commit, which the system files play requires.
 
 The run then checks, each as PASS or FAIL, and any FAIL fails the job:
 
-- from outside: the host key is the carried one, sshd offers public keys only, root is
-  refused over ssh even with a valid key in its `authorized_keys`, by `PermitRootLogin` as
-  sshd's own log says, and root logs in on the serial console with its password;
+- from outside, after the first boot: the host key is the carried one, sshd offers public
+  keys only, root is refused over ssh even with a valid key in its `authorized_keys`, by
+  `PermitRootLogin` as sshd's own log says, and root logs in on the serial console with
+  its password;
+- the play: it exits 0, reboots the box, reconnects at the static address by its own
+  rule, its clone is on the commit under test, and no log holds the sudo password;
 - on the box (`host/checks.sh`, with `host/checks-<host>.sh` appended): the static address, SELinux, gavin's uid, shell and sudo,
   root's password, sshd's settings, every data mount by `subvolid=`, swap, the read-only
   bare `/media`, on `one` Docker on its new store on the SSD with a fresh pull and a read
   through the `context=` mount, upstream's Compose, the pinned `cloudflared` and its ingress,
   `tailscaled` from Tailscale's repository, the update timer, the reboot strategy, the
-  checkout, and the carry-over's files and modes;
+  first boot's log, the checkout, `/root/carry` gone, and the carry-over's files and
+  modes: each `.env` at 0600, each tunnel's credentials 65532's at 0600, and on `one`
+  the dev stack's secrets at group 1001, 0750 and 0640;
+- the play again: a second run installs nothing (no new snapshot), changes no tracked
+  file and does not reboot. Then `rebootmgr.conf` and `sshd-infra.conf` are edited by
+  hand, and a run with no `confirm=yes` and no terminal puts both back, restarts
+  `rebootmgr` (a new MainPID) and not `sshd` (the same one), asks about the reboot and
+  takes the refusal. Then `tmux` is installed by hand and booted into, and a run given the
+  list with `tree` added installs `tree` and reports `tmux` as on no list, left installed;
 - the deploy play: `server-deploy-compose.yml --check` for each of the host's deployments,
   from the runner as the control node, logged in as gavin with his sudo password, after the
   box's checkout is put on the commit under test. Each must plan, and no log may hold the
@@ -139,7 +163,7 @@ The run then checks, each as PASS or FAIL, and any FAIL fails the job:
   torrents' stand-in has none of gluetun's VPN settings, which only `up` reads. The box's
   checkout is put on exactly the commit under test, a pull request's merge commit
   included, and in CI a stage that cannot run fails;
-- on `three`, after that first look: the array locked as every boot leaves it, with nothing
+- on `three`, after the play: the array locked as every boot leaves it, with nothing
   waiting at a passphrase prompt and Docker skipped by its condition, and the fan's unit
   running while it waits for an I2C bus the VM does not have, later finding the array's
   drive by its LUKS label; then the visit's next
@@ -227,7 +251,8 @@ edge/testing (x86_64 here; `alpine-sim.yml` checks the README's aarch64 SHA-256)
 `zero`'s tracked files at their headers' paths, sudoers through `visudo`. Its sshd answers on
 the runner's port 22, which the VM reaches at qemu's host address, the address `three`'s
 tracked ssh config is given in place of `zero`'s; the run's stand-ins replace `zero`'s host
-key, its restore key and the two `from=` addresses. Its snapshots are the tracked hourly
+key, its restore key and the two `from=` addresses, in the copies the play installed. Its
+snapshots are the tracked hourly
 script's, run by hand. `three` makes its pull key as its README says, and its public half
 goes into the stand-in's key line.
 
@@ -300,8 +325,13 @@ Kept here for whoever changes a first boot or the harness next.
 - The script runs inside `transactional-update shell`, which binds `/root` and some of
   `/var`, not `/home` or `/usr/local`: `leap/firstboot.sh` mounts them and labels what it
   wrote (`setfiles`), since SELinux's policy is not loaded yet.
-- The `--prepare` stage runs in the initramfs, with no `install`; it puts the host's network
-  profile in place so the first boot already has the static address.
+- The first boot leaves the wired port on DHCP, and the static profile comes in with the
+  play, at its second reboot, so the box changes address mid-run. The runner reaches each
+  address at `127.0.0.<its last number>`, which lets the play's own reconnect rule follow
+  it.
+- The play clones from GitHub, and the system files play then requires the box on the
+  control node's commit, which a branch under test is not on GitHub's main. gavin's git
+  on the box is pointed at a copy of the commit under test instead.
 - systemd applies presets on a first boot, so a `disable` is undone: mask instead.
 - Leap's sshd uses PAM: `KbdInteractiveAuthentication no` as well as `PasswordAuthentication
   no`. Leap ships its own `tailscale`: Tailscale's repo has priority 90 and is added before
@@ -333,9 +363,9 @@ before reading either as a fault.
 
 ## What a green run does not show
 
-The simulations run on x86_64 under KVM, not on a Pi; the USB disks are qemu's. It does
-not exercise USB bridges, real disks, Cloudflare, or any host's own first-boot script.
-Those come in later simulations or on the bench at the visit.
+The simulations run on x86_64 under KVM, not on a Pi; the USB disks are qemu's. They do
+not exercise USB bridges, real disks or Cloudflare, nor the Pi image's own first boot,
+which the bench boot covers (plans/pi-setup.md § The simulation).
 
 ## Running it elsewhere
 
@@ -344,7 +374,8 @@ Those come in later simulations or on the bench at the visit.
 on any Linux machine with KVM, `qemu-system-x86_64`, `qemu-img`, `mke2fs` and an ssh
 client. `run-docker-store.sh` also needs Docker, btrfs-progs and sudo for one loop mount,
 and `run-host.sh` needs btrfs-progs, openssl and sudo for one loop mount, and
-`ansible-playbook` with `ansible/requirements.yml`'s collections for its deploy stage; for `three`,
+`ansible-playbook` with `ansible/requirements.yml`'s collections for the setup play and the
+others; for `three`,
 Docker, a loop device and two mounts under sudo, and the runner's port 22, whose own sshd it
 stops if one holds it. Each writes only
 inside its work directory. Do not run them in the `infra` container: that container is on

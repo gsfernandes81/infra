@@ -2,20 +2,21 @@
 # shellcheck disable=SC2034,SC2054  # read by run-host.sh; commas belong to qemu
 # three's stand-ins for sim/microos/run-host.sh; sourced, never run.
 #
-# three is a NEW host, so its stick is the one `make-stick --new` builds: no tunnel
-# credentials, .env, secrets or volumes (run-host.sh leaves them out for a host with no
-# tunnel config). After the first boot, the hooks below do what the visit does next: put a
-# tunnel in place as server-create-host-tunnel.yml and install-system-file would, format
-# the drive with make-backup, and unlock it with the README's own command. Then the runner
-# stands in for zero, and three pulls zero's backup from it (sim_backup, below).
+# three's tunnel config has been tracked since the visit, so run-host.sh gives it a moved
+# box's stick, with tunnel credentials and syncthing-three's .env. After the first boot
+# and the setup play, the hooks below do what the visit did next: put a tunnel in place as
+# server-create-host-tunnel.yml and install-system-file would, format the drive with
+# make-backup, and unlock it with the README's own command. Then the runner stands in for
+# zero, and three pulls zero's backup from it (sim_backup, below).
 
-# zero's three values in three's files, swapped on the stick for the run's own: zero's host
-# key, which the runner's stand-in for zero answers with (zero-known-hosts); zero's restore
-# key, which the stand-in reads its backups back with (restore-authorized-keys); and zero's
-# tailnet address, which is both where three's pull connects (backup-ssh-config) and where
-# a restore must come from (from=). qemu's host address on this network is both: the VM
-# reaches the runner there, and the runner's connections into the VM arrive from it.
-# Everything else in the files is the tracked text, as the box carries it.
+# zero's three values in three's files, swapped for the run's own (sim_zero_standins):
+# zero's host key, which the runner's stand-in for zero answers with (zero-known-hosts);
+# zero's restore key, which the stand-in reads its backups back with
+# (restore-authorized-keys); and zero's tailnet address, which is both where three's pull
+# connects (backup-ssh-config) and where a restore must come from (from=). qemu's host
+# address on this network is both: the VM reaches the runner there, and the runner's
+# connections into the VM arrive from it. Everything else in the files is the tracked
+# text, as the box carries it.
 rm -f zero-host zero-host.pub restore-key restore-key.pub
 ssh-keygen -q -t ed25519 -N '' -C 'sim zero host' -f zero-host
 ssh-keygen -q -t ed25519 -N '' -C 'sim zero restore' -f restore-key
@@ -51,6 +52,7 @@ variant=${SIM_VARIANT:-fresh}
 # syncthing-three requires no name from .env; anything asked for gets a made-up value.
 standin_env() { openssl rand -hex 16; }
 deployments=(syncthing-three)
+carried=()
 volumes=()
 
 # The WD Red, new and blank, on USB as the Argon's bridge puts it. Its size is how the
@@ -102,7 +104,7 @@ DIAG
 	fi
 }
 
-sim_after_firstboot() {
+sim_after_setup() {
 	local dev
 	echo "===== three's tunnel, as server-create-host-tunnel.yml and install-system-file leave it"
 	# Stand-in credentials, and a config in the shape of every host's, then the start the
@@ -154,7 +156,24 @@ TUNNEL
 	# A FAIL is already printed; returning keeps the run from dying silently under set -e.
 	sim_unlock || return 0
 	as_root three-unlocked.sh first
+	sim_zero_standins
 	sim_backup
+}
+
+# The play installed three's files from its checkout, which holds zero's real values, so
+# here the run's stand-ins replace them in the installed copies, where the stick's copies
+# held them before the play. Root's files, so through sudo, and labelled again after sed.
+# The migrate variant needs none of this: its pull setup installs them with the stand-ins.
+sim_zero_standins() {
+	local token f live=()
+	for token in "${!standin[@]}"; do printf 's|%s|%s|g\n' "$token" "${standin[$token]}"; done > standin.sed
+	for f in restore-authorized-keys zero-known-hosts backup-ssh-config; do live+=("$(live_path "$f")"); done
+	ssh_as gavin@127.0.0.1 "cat > /tmp/standin.sed" < standin.sed
+	if root_sh "sed -i -f /tmp/standin.sed ${live[*]} && restorecon ${live[*]}"; then
+		echo "zero's values swapped for the run's stand-ins in ${live[*]}"
+	else
+		echo "FAIL could not swap zero's values for the stand-ins"
+	fi
 }
 
 # ── zero's backup, pulled by three from the runner standing in for zero ──────

@@ -32,6 +32,7 @@ standin_env() {
 	TZ) echo Europe/London ;;
 	SRC_ROOT) echo /home/gavin/src ;;
 	PUBLIC_BASE_URL) echo "https://$dep.sim.invalid" ;;
+	*_SECRETS) echo "/home/gavin/.$dep-secrets" ;;
 	*) openssl rand -hex 16 ;;
 	esac
 }
@@ -49,6 +50,9 @@ git -C ~/src/garmin-mcp checkout -q '$sha'
 STEP
 }
 deployments=(calibre-web garmin-mcp send2ereader torrents)
+# Carried as make-stick carries it, but not planned by the deploy stage: the dev stack.
+# Its .env names its secrets directories (*_SECRETS), which the play gives group 1001.
+carried=(dev)
 volumes=(garmin-mcp_garmin-tokens)
 
 # The SSD as Alpine left it: one btrfs with one's filesystem UUID and its subvolumes made in

@@ -8,8 +8,8 @@ name: microos-sim
 # job summary and an artifact; the job fails only when the VM does not boot or answer ssh.
 #
 # WHAT IT CANNOT CHECK, so nobody reads a green run as more: the Pi itself (this is x86_64
-# under KVM; the aarch64 job only asks the package repositories), USB bridges, real disks,
-# Cloudflare, and any host's own first-boot script. sim/microos/README.md says more.
+# under KVM; the aarch64 job only asks the package repositories), USB bridges, real disks
+# and Cloudflare. sim/microos/README.md says more.
 
 on:
   push:
@@ -20,7 +20,8 @@ on:
       'sim/alpine/host/Dockerfile', 'bin/install-system-file', 'bin/_infra.py',
       'ansible/playbooks/server-deploy-compose.yml', 'ansible/playbooks/server-update-leap.yml',
       'ansible/playbooks/_leap-pins.yml', 'ansible/playbooks/_leap-pins-read.yml',
-      'ansible/playbooks/_leap-prove.yml',
+      'ansible/playbooks/_leap-prove.yml', 'ansible/playbooks/_leap-reboot.yml',
+      'ansible/playbooks/server-setup-leap.yml', 'ansible/playbooks/server-install-system-files.yml',
       'ansible/playbooks/server-unlock-arrays.yml', 'ansible/playbooks/files/unlock-volumes.sh',
       'ansible/playbooks/_deploy-compose-one.yml', 'ansible/playbooks/_sync-host-checkout.yml',
       'ansible/playbooks/_review-anchor.yml', 'ansible/playbooks/_assert-inventory.yml',
@@ -37,7 +38,8 @@ on:
       'sim/alpine/host/Dockerfile', 'bin/install-system-file', 'bin/_infra.py',
       'ansible/playbooks/server-deploy-compose.yml', 'ansible/playbooks/server-update-leap.yml',
       'ansible/playbooks/_leap-pins.yml', 'ansible/playbooks/_leap-pins-read.yml',
-      'ansible/playbooks/_leap-prove.yml',
+      'ansible/playbooks/_leap-prove.yml', 'ansible/playbooks/_leap-reboot.yml',
+      'ansible/playbooks/server-setup-leap.yml', 'ansible/playbooks/server-install-system-files.yml',
       'ansible/playbooks/server-unlock-arrays.yml', 'ansible/playbooks/files/unlock-volumes.sh',
       'ansible/playbooks/_deploy-compose-one.yml', 'ansible/playbooks/_sync-host-checkout.yml',
       'ansible/playbooks/_review-anchor.yml', 'ansible/playbooks/_assert-inventory.yml',
@@ -259,13 +261,16 @@ jobs:
           if-no-files-found: warn
 
   host:
-    # Each Leap host's real first-boot script (hosts/<host>/leap/combustion/script), booted
-    # from a stick laid out as leap/make-stick lays it out, with stand-ins for the carry-over
-    # and the host's disks; then its ways in, users, disks, Docker, pins and rescue mode are
-    # checked. Unlike the jobs above, any FAIL fails the job: this is the script's proof.
-    # three runs twice: as a new box, make-backup on a blank drive and the pull; and as the
-    # box made on 2026-11-18 (variant migrate), through hosts/three/leap/README.md § The
-    # rename, block by block (sim/microos/host/three.sh).
+    # Each Leap host set up as the routine sets up a Pi (plans/pi-setup.md): its real
+    # first-boot script (hosts/<host>/leap/combustion/script), booted offline from a stick
+    # laid out as leap/make-stick lays it out, with stand-ins for the carry-over and the
+    # host's disks; then server-setup-leap.yml from the runner as the control node. Then its
+    # ways in, users, disks, Docker, pins and rescue mode are checked, and the play is run
+    # again: it must change nothing, restart by its rule, report an extra package and
+    # install one added to the list. Unlike the jobs above, any FAIL fails the job: this is
+    # the routine's proof. three runs twice: with make-backup on a blank drive and the pull;
+    # and as the box made on 2026-11-18 (variant migrate), through
+    # hosts/three/leap/README.md § The rename, block by block (sim/microos/host/three.sh).
     strategy:
       fail-fast: false
       matrix:
@@ -291,7 +296,7 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils btrfs-progs
 
-      - name: Install ansible-core and the collections the deploy play uses
+      - name: Install ansible-core and the collections the plays use
         run: |
           # Pinned to a minor series, so a green run speaks for the version the control
           # node runs rather than whatever PyPI serves that day; move it with the phone's.
@@ -299,7 +304,7 @@ jobs:
           ansible-galaxy collection install -r ansible/requirements.yml
           ansible --version
 
-      - name: Boot ${{ matrix.host }}'s first-boot script and check the box it makes
+      - name: Set ${{ matrix.host }} up as the routine does, and check the box
         env:
           SIM_VARIANT: ${{ matrix.variant }}
         run: sim/microos/run-host.sh "$RUNNER_TEMP/host" "${{ matrix.host }}"
