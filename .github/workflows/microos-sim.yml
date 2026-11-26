@@ -322,7 +322,9 @@ jobs:
         if: always()
         with:
           name: leap-host-${{ matrix.host }}${{ matrix.variant && format('-{0}', matrix.variant) || '' }}
+          # The setup play's logs too, each with the sudo password already masked.
           path: |
             ${{ runner.temp }}/host/report.txt
             ${{ runner.temp }}/host/serial.log
+            ${{ runner.temp }}/host/setup-*.log
           if-no-files-found: warn

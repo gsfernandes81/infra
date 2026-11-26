@@ -33,6 +33,8 @@
 #
 # usage: bin/install-system-file <name> [--commit] [--allow-content-change] [--new]
 #        bin/install-system-file --list
+# --new permits creating a file that does not exist yet, and its directory with it (root's,
+# 0755), as a fresh Leap box needs for its drop-in directories.
 # exit 0 = installed (or dry run clean)   1 = refused, failed, or rolled back
 #
 # --list prints the repo path of every file this host's copy would accept, one per line,
@@ -429,7 +431,7 @@ def main():
     ap.add_argument("--allow-content-change", action="store_true",
                     help="permit changes beyond the infra- header")
     ap.add_argument("--new", action="store_true",
-                    help="permit creating a file that does not exist yet")
+                    help="permit creating a file that does not exist yet, and its directory")
     args = ap.parse_args()
 
     host = this_host()
@@ -565,6 +567,17 @@ def main():
                   file=sys.stderr)
             return 1
         print(f"\nbacked up {live} -> {backup}")
+
+    # A new file's directory may not exist yet either (a drop-in directory on a fresh box),
+    # so --new makes it, root's at 0755, as install -D would. It is left if a check below
+    # removes the file again: an empty directory changes nothing.
+    if not exists and not live_exists(live.parent):
+        out = run(["sudo", "install", "-d", "-o", "root", "-g", "root", "-m", "0755",
+                   str(live.parent)])
+        if out.returncode != 0:
+            print(f"install failed: {out.stderr.strip()}", file=sys.stderr)
+            return 1
+        print(f"made the directory {live.parent}")
 
     if modeless:
         ok, err = write_modeless(repo_bytes, live)
