@@ -26,7 +26,8 @@
 # profile. No host key, root password, credential or host file.
 #
 # --card, with any of the above, writes onto an SD card in a USB reader, freshly flashed with
-# the pinned image, instead of erasing a stick (plans/zero-leap.md § One card). It refuses a
+# the image as downloaded (openSUSE's newest build, the file kept on two), instead of
+# erasing a stick (plans/zero-leap.md § One card). It refuses a
 # card that does not read exactly as the image: a DOS table with two partitions, p1 vfat
 # labelled EFI, p2 btrfs labelled ROOT, root last and nothing after it. It never erases or
 # formats either. It moves the end of p2's partition entry, not its filesystem, to the last
@@ -420,7 +421,7 @@ finish() {
 		rmdir "$mnt" 2>/dev/null
 	fi
 	if [ "$rc" -ne 0 ] && [ -n "$written" ]; then
-		echo "make-stick: $dev was left half written; flash it again with the pinned image before another try" >&2
+		echo "make-stick: $dev was left half written; flash it again with the image as downloaded before another try" >&2
 	fi
 	return "$rc"
 }
