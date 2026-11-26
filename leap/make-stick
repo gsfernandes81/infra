@@ -182,7 +182,8 @@ done
 size_gb=$(( $(cat "/sys/block/$name/size") / 2 / 1024 / 1024 ))
 [ "$size_gb" -le 256 ] || die "$dev is ${size_gb}G, too large to be a $what"
 
-# A card must read exactly as the pinned image writes it (sim/pi-image/inspect.sh reads the
+# A card must read exactly as the image as downloaded writes it (openSUSE's newest build,
+# the file kept on two; sim/pi-image/inspect.sh reads the
 # image's layout in CI): a DOS table, p1 vfat labelled EFI, p2 btrfs labelled ROOT after it,
 # and nothing else. Anything other than that is not a card just flashed, and a partition
 # written onto it would be a guess about what it holds. Sizes are in the card's logical
@@ -535,7 +536,7 @@ elif [ -z "$bench" ]; then
 fi
 # Named volumes live in Docker's store, which the new system does not take over
 # (plans/microos-cutover.md), so each one the host lists travels as a tar file.
-if [ -z "$bench" ] && [ -f "$hostdir/volumes" ]; then
+if [ -z "$bench" ] && [ -z "$new" ] && [ -f "$hostdir/volumes" ]; then
 	grep -v '^#' "$hostdir/volumes" | while read -r vol; do
 		[ -n "$vol" ] || continue
 		src=/var/lib/docker/volumes/$vol/_data
