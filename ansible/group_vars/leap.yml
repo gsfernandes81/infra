@@ -27,6 +27,8 @@ leap_packages:
   - tailscale          # from Tailscale's repository, which the play adds first
   - zram-generator
   - make
+  - netcat-openbsd     # nc, for reaching a fresh Pi's DHCP address through this one, as
+                       # ProxyCommand=ssh <host> nc %h %p; PermitOpen refuses a jump there
   # What three's first boot added, and zero's array needs, now on every Pi.
   - cryptsetup         # three's make-backup and zero's encrypted member
   - wpa_supplicant     # Wi-Fi, which NetworkManager drives, in case a host has no Ethernet

@@ -206,7 +206,7 @@ jobs:
             uname -m
             for p in docker docker-compose docker-buildx cloudflared tailscale bcache-tools smartmontools \
                 btrfsprogs zram-generator syncthing health-checker cryptsetup rsync \
-                wpa_supplicant bcm43xx-firmware kernel-firmware-brcm NetworkManager-wifi; do
+                wpa_supplicant bcm43xx-firmware kernel-firmware-brcm NetworkManager-wifi netcat-openbsd; do
               echo "== $p"
               zypper --non-interactive --quiet search --match-exact --details "$p" || echo "NOT FOUND: $p"
             done' | tee packages.txt

@@ -105,10 +105,16 @@ Neither way in exists yet on a fresh Pi: cloudflared and Tailscale's packages co
 the play. So the play reaches the Pi over the LAN, through `one` or `two`:
 
 - The owner reads the Pi's DHCP address from its console or the router.
-- `ssh -J one -o HostKeyAlias=<host> gavin@<address>` checks the carried host key against
-  the pinned entry, so nothing is accepted on trust.
-- The play runs the same way, with the address and the jump given on the command line. The
-  inventory and `~/.ssh/config` stay as they are.
+- `ssh -o 'ProxyCommand=ssh one nc %h %p' -o HostKeyAlias=<host> gavin@<address>` checks
+  the carried host key against the pinned entry, so nothing is accepted on trust. Through
+  `nc` on `one` (`netcat-openbsd`, in the package list) or on `two` (BusyBox's), not `-J`:
+  every host's `PermitOpen` names the fleet's static addresses only and governs a jump,
+  not a session running `nc`.
+- The play runs the same way, with the address and the proxy given on the command line,
+  the second as JSON, since `-e key=value` splits at spaces. In fish:
+  `-e ansible_host=<address> -e '{"ansible_ssh_common_args": "-o ProxyCommand=\"ssh one nc
+  %h %p\" -o HostKeyAlias=<host>"}'`, on one line. The inventory and `~/.ssh/config` stay
+  as they are.
 
 ## The play
 

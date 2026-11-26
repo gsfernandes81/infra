@@ -402,13 +402,19 @@ carry-over.
 2. Power off. Every disk attached, so the play's reboots open the array. The new card in,
    and the stick if there is one, power on.
 3. The first boot runs, offline. The owner reads `zero`'s DHCP address from the router or
-   the console and reaches it through `one`, checking the carried host key against the
-   pinned one: `ssh -J one -o HostKeyAlias=zero gavin@<address>`.
+   the console and reaches it through `nc` on `one`, checking the carried host key against
+   the pinned one: `ssh -o 'ProxyCommand=ssh one nc %h %p' -o HostKeyAlias=zero
+   gavin@<address>`. Not `-J`: `PermitOpen` names the static addresses only and governs a
+   jump, not a session running `nc`. The order matters: `one` has `nc` only once its own
+   play has run with `netcat-openbsd` in the list, so that run comes before the day, or
+   `two` stands in, whose BusyBox has `nc` (`ssh two nc %h %p`).
 4. On the control node, one commit, pushed: `hosts/zero/leap/MOVED`, and `zero` in the
    inventory's `leap` group. The play refuses `zero` without both.
-5. The play, from the control node: `ansible-playbook playbooks/server-setup-leap.yml -e
-   target=zero -K -e ansible_host=<address> -e 'ansible_ssh_common_args=-J one -o
-   HostKeyAlias=zero'`. It asks before each of its two reboots. After the second, `zero`
+5. The play, from the control node, in fish, on one line: `ansible-playbook
+   playbooks/server-setup-leap.yml -e target=zero -K -e ansible_host=<address> -e
+   '{"ansible_ssh_common_args": "-o ProxyCommand=\"ssh one nc %h %p\" -o
+   HostKeyAlias=zero"}'`. The proxy goes as JSON, since `-e key=value` splits at spaces.
+   It asks before each of its two reboots. After the second, `zero`
    answers at `192.168.86.100` with the array open, and the play proves the tunnel and the
    tailnet answer at the old address.
 6. Checks: the array mounted with both devices, `data-4` open, gavin at 1001, the ssh host

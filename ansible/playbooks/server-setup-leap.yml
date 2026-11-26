@@ -6,10 +6,13 @@
 #     ansible-playbook playbooks/server-setup-leap.yml -e target=one -K
 #
 # A fresh Pi has no way in yet: it is reached over the LAN at its DHCP address, through
-# another box (`two` when the Pi is `one`), and HostKeyAlias checks its carried host key:
+# another box's nc (`two`'s, BusyBox's, when the Pi is `one`), and HostKeyAlias checks its
+# carried host key. Not -J: every sshd-infra.conf's PermitOpen names the fleet's static
+# addresses only, and governs a jump, not a session running nc. The vars go as JSON, since
+# -e key=value splits at the spaces; in fish, as given:
 #
-#     ansible-playbook playbooks/server-setup-leap.yml -e target=three -K \
-#       -e ansible_host=192.168.86.57 -e 'ansible_ssh_common_args=-J one -o HostKeyAlias=three'
+#     ansible-playbook playbooks/server-setup-leap.yml -e target=three -K -e ansible_host=192.168.86.57 \
+#       -e '{"ansible_ssh_common_args": "-o ProxyCommand=\"ssh one nc %h %p\" -o HostKeyAlias=three"}'
 #
 # WHAT IT DOES, in order, safe to run again: what is missing of the packages, locks,
 # repository and /media mountpoints, in one snapshot, then a reboot; a report of packages

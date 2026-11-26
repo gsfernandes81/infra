@@ -121,10 +121,10 @@ sim_after_setup() {
 }
 
 # ── three's pull, from the runner standing in for three ──────────────────────
-# The run's pull key, in the line the play installed for three's, with the runner's address
-# in its from=. The listing of the snapshots module must name the newest timeline snapshot,
-# which checks-zero.sh had snapperd take, so the forced command, sudo's rule, setpriv and
-# the daemon's config are all proved at once.
+# The run's pull key, in the line the play installed for three's, with the runner's
+# address in its from=. The listing of the snapshots module must name the newest timeline
+# snapshot, which checks-zero.sh had snapper-immich.service take with --no-dbus, so the
+# forced command, sudo's rule, setpriv and the daemon's config are all proved at once.
 sim_pull() {
 	local newest out rsh
 	rsh="ssh -i $PWD/pull-key -p $(cat port) -o StrictHostKeyChecking=no"
