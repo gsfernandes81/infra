@@ -177,6 +177,13 @@
         cmd: git clone --quiet https://github.com/gsfernandes81/infra.git {{ infra_checkout }}
         creates: "{{ infra_checkout }}"
 
+    # The first boot gave him bash, since the image has no fish until the packages.
+    - name: Make fish gavin's shell
+      ansible.builtin.user:
+        name: gavin
+        shell: /usr/bin/fish
+      become: true
+
     # Before the carry-over and the tracked files that name them. A group at another gid
     # stops the play, since files would belong to the wrong number.
     - name: Read the groups

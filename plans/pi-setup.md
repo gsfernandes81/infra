@@ -77,7 +77,8 @@ no network, so the Pi 5's missing `rp1_pci` in the initrd (`plans/zero-leap.md` 
 `zero` has*) stops mattering. No `# combustion: network` line.
 
 - The hostname, root's password hash, `gavin` with his password hash, uid and gid, and his
-  `authorized_keys`; sshd enabled, with `sshd-infra.conf` and `sudoers-gavin`, so the play
+  `authorized_keys`, with bash as his shell until the play installs fish and makes it his
+  (sshd refuses a user whose shell does not exist); sshd enabled, with `sshd-infra.conf` and `sudoers-gavin`, so the play
   starts in the fleet's usual sudo, `-K` with gavin's own password (stock Leap's sudo asks
   for root's password, and a play that changed that partway through would fail its own
   later steps).

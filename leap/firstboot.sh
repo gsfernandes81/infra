@@ -199,16 +199,18 @@ make_group() {
 }
 
 # gavin keeps his Alpine uid and gid, so files he owns on the data disks stay his. A home
-# left by a failed run is kept, and is his already by number.
+# left by a failed run is kept, and is his already by number. His shell is bash until the
+# play installs fish and makes it his: sshd refuses a user whose shell does not exist, and
+# the image has no fish, so the play could not log in.
 make_gavin() {
 	local uid=$1 gid=$2 have
 	make_group gavin "$gid"
 	have=$(id -u gavin 2>/dev/null || true)
 	if [ -z "$have" ]; then
 		if [ -d /home/gavin ]; then
-			useradd -M -u "$uid" -g gavin -s /usr/bin/fish -c gavin gavin
+			useradd -M -u "$uid" -g gavin -s /bin/bash -c gavin gavin
 		else
-			useradd -m -u "$uid" -g gavin -s /usr/bin/fish -c gavin gavin
+			useradd -m -u "$uid" -g gavin -s /bin/bash -c gavin gavin
 		fi
 	elif [ "$have" != "$uid" ]; then
 		die "a gavin user exists at uid $have, not $uid"
