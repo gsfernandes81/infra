@@ -290,14 +290,18 @@ setup_first() {
 	set +e
 	echo "===== the setup play, from the runner, at the box's DHCP address"
 	sha=$(git -C "$repo" rev-parse HEAD)
-	rm -rf seed && mkdir seed && git init -q --bare seed/.sim-infra.git &&
+	# scp, since the image has no tar.
+	if ! { rm -rf seed && mkdir seed && git init -q --bare seed/.sim-infra.git &&
 		git -C seed/.sim-infra.git config receive.shallowUpdate true &&
 		git -C "$repo" push -q "$PWD/seed/.sim-infra.git" "$sha:refs/heads/sim-under-test" &&
 		git -C seed/.sim-infra.git symbolic-ref HEAD refs/heads/sim-under-test &&
-		tar -C seed -cf - .sim-infra.git | ssh_as gavin@127.0.0.1 tar -C /home/gavin -xf - &&
+		scp -q -r -i key -P "$(cat port)" -o StrictHostKeyChecking=no -o UserKnownHostsFile=known \
+			-o BatchMode=yes seed/.sim-infra.git gavin@127.0.0.1:/home/gavin/ &&
 		printf '[url "/home/gavin/.sim-infra.git"]\n\tinsteadOf = https://github.com/gsfernandes81/infra.git\n' |
-		ssh_as gavin@127.0.0.1 'cat > /home/gavin/.gitconfig' ||
-		echo "FAIL could not give the box a copy of the commit under test, $sha"
+		ssh_as gavin@127.0.0.1 'cat > /home/gavin/.gitconfig'; } > seed.log 2>&1; then
+		echo "FAIL could not give the box a copy of the commit under test, $sha:"
+		sed 's/^/    /' seed.log
+	fi
 	before=$(boot_id)
 	setup_run first -e confirm=yes -e "ansible_host=$play_dhcp"
 	[ "$setup_rc" = 0 ] && echo "PASS the setup play set $host up" ||
