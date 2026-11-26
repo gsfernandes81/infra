@@ -4,7 +4,7 @@ The runbook for [`microos-cutover.md`](microos-cutover.md). The visit ended on 2
 and its finished slices are deleted; what each did, and where its record now lives, is the
 first section. What stays is still open: slice 4, the clean-up it unlocks and the items
 for after the visit. The Pi image and card steps stay too, since the next Leap host's card
-reuses them and `.github/workflows/leap-pins.yml` checks them against `leap/pins`. Once
+reuses them. Once
 slice 4 and the clean-up are done, those steps need another home, with the workflow
 following them, before this file is deleted.
 
@@ -28,28 +28,35 @@ The procedures as run are in the history: `git show 774eb42:plans/visit-runbook.
 
 ## The Pi image
 
-**The Pi image, downloaded and checked on `two`,** and kept there: openSUSE's
-directory holds only the newest build, and builds have turned over within days, so
-the copy on `two` is the one the cards are written from. The pin in `leap/pins` records
-that copy.
+**The Pi image, downloaded and checked on `two`,** and kept there. There is no pin of
+ours: the card is written from the newest build openSUSE lists on the day, checked against
+openSUSE's own `.sha256`. The directory holds only the newest build and builds have turned
+over within days, so the file on `two` is the one every card is written from. The bench
+boot and the day use the same file; do not replace it in between, since the bench is what
+proves it.
+
+Each block below is fish, run on `two` after `ssh two`. Set the image name once, in the
+shell that runs the blocks, to the newest build
+[the directory](https://download.opensuse.org/distribution/leap/16.1/appliances/) lists
+(`Leap-16.1-Immutable.aarch64-RaspberryPi-Build*.raw.xz`):
 
 ```fish
-# on two: download Leap 16.1's Pi image, build 3.23, with openSUSE's .sha256 file, and check the image against that file and then against the pin
-df -h ~
-cd ~; curl -fLO https://download.opensuse.org/distribution/leap/16.1/appliances/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.23.raw.xz.sha256; and curl -fLO https://download.opensuse.org/distribution/leap/16.1/appliances/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.23.raw.xz
-sha256sum -c Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.23.raw.xz.sha256
-echo 'bced65e56302549ee7555ac38ea0b4dd947990a4568bdff9c1d431c01544cc38  Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.23.raw.xz' | sha256sum -c -
+# on two: name the image, the newest build the directory lists; change the number to match
+set img Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.23.raw.xz
+set dir https://download.opensuse.org/distribution/leap/16.1/appliances
 ```
 
-It needs about 1.3 GB free, and both `sha256sum` lines must print `OK`: the first
-against openSUSE's file, the second against the pin. If a `curl` answers 404, openSUSE
-has replaced the build. Then take the newest
-`Leap-16.1-Immutable.aarch64-RaspberryPi-Build*.raw.xz` from
-[the directory](https://download.opensuse.org/distribution/leap/16.1/appliances/),
-download it and its `.sha256` the same way, check it with the first `sha256sum` line,
-and move the pin to it, in one commit, in all three places that carry the build:
-`leap/pins` (URL and SHA-256), this block, and the card-write block in *Writing a card,
-and erasing a stick*. CI fails when they disagree (`.github/workflows/leap-pins.yml`).
+```fish
+# on two: download the image and openSUSE's .sha256 file, and check the image against that file
+df -h ~
+cd ~; curl -fLO $dir/$img.sha256; and curl -fLO $dir/$img
+sha256sum -c $img.sha256
+```
+
+It needs about 1.3 GB free, and `sha256sum` must print `OK`. If a `curl` answers 404,
+openSUSE has replaced the build: read the directory again, set `img` to the newest and
+repeat. Keep the file and its `.sha256` in `~` on `two`. Every card-write block below uses
+`$img`, so set it again in a new shell.
 
 ## Writing a card, and erasing a stick
 
@@ -64,7 +71,7 @@ lsblk -o NAME,SIZE,MODEL,TRAN
 
 ```fish
 # on two: write the image to the card, detached from this session, only if the device is a USB disk nothing has mounted; put the card's device in place of sdX
-set d sdX; readlink -f /sys/block/$d | grep -q usb; and not grep -q "^/dev/$d" /proc/mounts; and sudo sh -c "setsid nohup sh -c 'xzcat /home/gavin/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.23.raw.xz | dd of=/dev/$d bs=4M conv=fsync && sync && echo written' </dev/null >/var/log/card-write.log 2>&1 &"
+set d sdX; readlink -f /sys/block/$d | grep -q usb; and not grep -q "^/dev/$d" /proc/mounts; and sudo sh -c "setsid nohup sh -c 'xzcat /home/gavin/$img | dd of=/dev/$d bs=4M conv=fsync && sync && echo written' </dev/null >/var/log/card-write.log 2>&1 &"
 ```
 
 `sudo cat /var/log/card-write.log` ends with `written` when it is done. Then the card is
@@ -72,12 +79,18 @@ read back over the image's length and compared with the image, so a write that w
 is caught before the card reaches a Pi:
 
 ```fish
-# on two: compare the card with the image over the bytes dd wrote; put the card's device in place of sdX; the two hashes must match
-xzcat /home/gavin/Leap-16.1-Immutable.aarch64-RaspberryPi-Build3.23.raw.xz | sha256sum; sudo head -c 4607442944 /dev/sdX | sha256sum
+# on two: get the image's uncompressed size from its own stream; slow on a Pi 1, wait for it
+set n (xzcat ~/$img | wc -c); echo $n
 ```
 
-4,607,442,944 is build 3.23's uncompressed size, the byte count `dd` reports in the log;
-`two` has no `xz` to read it from the file, only BusyBox's `xzcat`.
+```fish
+# on two: compare the card with the image over those bytes; put the card's device in place of sdX; the two hashes must match
+xzcat ~/$img | sha256sum; sudo head -c $n /dev/sdX | sha256sum
+```
+
+`$n` is the byte count `dd` reports in the log. `two` has no `xz` to read it from the
+file, only BusyBox's `xzcat`, so the first block counts the decompressed stream, which
+takes a while on a Pi 1.
 
 The only card reader to hand on 2026-11-19 was a Lexar RW047, an SDHC reader, which shows a
 128 GB card as about 25 GB. That is enough for this write, which stays inside the first

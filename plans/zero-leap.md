@@ -36,9 +36,10 @@ design's own and the owner can overturn any of them. Phase 12 in
 11. **A bench boot first,** of a minimal image the owner can ssh into and test.
 12. **The newest build** of the Pi image (2026-11-25, in place of build 3.17, which
     openSUSE had withdrawn). The owner's rule: where there is a choice and no major
-    downside, the newest version. Builds turn over within days, so the pin moves to the
-    newest when the owner downloads it to `two` before the bench, and the bench and the
-    day use that one download, since the bench is what proves it (*agent's reading*).
+    downside, the newest version. Builds turn over within days, so there is no pin: the
+    owner downloads the newest build to `two` before the bench and checks it against
+    openSUSE's `.sha256`, and the bench and the day use that one download, since the bench
+    is what proves it (*agent's reading*).
 13. **snapper runs natively over D-Bus** (2026-11-24): `immich` joins Leap's
     `SNAPPER_CONFIGS` and Leap's own timers take the snapshots. Set aside: `--no-dbus`
     from an own timer, as `three` runs it, which has no case on `zero` (§ *snapper*).
@@ -271,7 +272,7 @@ visit kept the stick because this was untried (2026-11-04).
 
 ## The bench boot
 
-A spare SD card with the pinned build and a minimal Combustion config, booted on `zero`
+A spare SD card with the newest build, as downloaded to `two`, and a minimal Combustion config, booted on `zero`
 with the Alpine card out, to prove the Pi 5 boots the image and reaches the LAN before the
 day.
 
@@ -338,9 +339,9 @@ paste from the box cover those.
    `dm-crypt`, `adiantum`, `nhpoly1305` and the `xchacha` modules in the kernel, for the
    build `zero` will boot. Today they are proven only on the x86_64 image the simulation
    boots.
-7. **`leap/pins` at the newest build** (call 12). It is at 3.23, with openSUSE's SHA-256,
-   since 2026-11-25. If openSUSE has replaced it when the owner downloads it to `two`, the
-   pin moves again, as `plans/visit-runbook.md` § The Pi image says.
+7. **The newest build downloaded to `two` and checked** (call 12), against openSUSE's
+   `.sha256`, as `plans/visit-runbook.md` § The Pi image says. It is the file the bench and
+   the day both use.
 8. **The bench boot** (above), on one card.
 
 ## The day
@@ -405,7 +406,7 @@ whole-branch Fable review, its findings applied in their own commit, and a merge
 4. ~~**The plays:** `server-update-leap.yml`'s `tailnet_peer` a host var, `three` for
    `zero`; `server-create-restore-key.yml` reading through `MOVED` with the package's
    `tailscale` path.~~
-5. ~~**The image:** `leap/pins` at the newest build; `pi-image.yml` and
+5. ~~**The image:** the newest build; `pi-image.yml` and
    `sim/pi-image/inspect.sh` checking the Pi 5, the array's modules and that
    `bcache-tools` is absent; `leap-pins.yml` reconciled with the visit runbook.~~
 6. **The simulation:** `host/zero.sh`, `checks-zero.sh`, the disk-building boot, `zero`

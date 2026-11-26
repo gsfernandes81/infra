@@ -1,25 +1,23 @@
 name: pi-image
 
 # What the Leap simulation cannot see, because it boots openSUSE's x86_64 image: the Pi
-# image the cards are written from. leap-pins.yml checks the binaries' pins and the runbook.
+# image the cards are written from. leap-pins.yml checks the binaries' pins.
 #
-# image: downloads the Pi image leap/pins names, checks its SHA-256, and inspects it
-# read-only (sim/pi-image/inspect.sh): Combustion in the initrd, the Wi-Fi firmware, the
-# packages, the boot path, the partition table, and for zero the Pi 5's boot files and
-# Ethernet drivers and the array's kernel modules. openSUSE's directory keeps only the newest
-# build, so the pinned image disappears at the next rebuild; the `current` leg inspects the
-# newest build as well, so a run still answers once the pin is gone and shows what a rebuild
-# changed; while the pin is the newest build, that leg says so and stops. Report-only: a leg
-# fails only when its download or checksum fails. A pinned build openSUSE has withdrawn is
-# reported, not failed, since the pin records the copy kept on two.
+# image: downloads the newest build openSUSE publishes, checks its SHA-256 against the
+# .sha256 file beside it, and inspects it read-only (sim/pi-image/inspect.sh): Combustion
+# in the initrd, the Wi-Fi firmware, the packages, the boot path, the partition table, and
+# for zero the Pi 5's boot files and Ethernet drivers and the array's kernel modules. There
+# is no pin of ours: a card is written from the newest build at the day's download, kept on
+# two, so this run shows what a rebuild changed. Report-only: it fails only when the
+# download or checksum fails.
 #
-# The current leg trusts openSUSE's server: it checks the image against the .sha256 file
-# beside it, not the signed .sha256.asc. Both legs run the image's own binaries as root, in
-# a chroot, which is fine on a throwaway runner and nowhere else.
+# It trusts openSUSE's server: the image is checked against the .sha256 file beside it, not
+# the signed .sha256.asc. It runs the image's own binaries as root, in a chroot, which is
+# fine on a throwaway runner and nowhere else.
 
 on:
   push:
-    paths: ['.github/workflows/pi-image.yml', 'sim/pi-image/**', 'leap/pins']
+    paths: ['.github/workflows/pi-image.yml', 'sim/pi-image/**']
   workflow_dispatch:
 
 permissions:
@@ -31,10 +29,6 @@ concurrency:
 
 jobs:
   image:
-    strategy:
-      fail-fast: false
-      matrix:
-        build: [pinned, current]
     # arm64, so the image's own rpm and lsinitrd run in a chroot.
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
@@ -49,14 +43,14 @@ jobs:
           sudo apt-get install -y -q --no-install-recommends btrfs-progs xz-utils zstd cpio \
             initramfs-tools-core binutils device-tree-compiler
 
-      - name: Inspect the ${{ matrix.build }} Pi image
-        run: sudo sim/pi-image/inspect.sh "$RUNNER_TEMP/pi" "${{ matrix.build }}"
+      - name: Inspect the newest Pi image
+        run: sudo sim/pi-image/inspect.sh "$RUNNER_TEMP/pi"
 
       - name: Put the answers in the job summary
         if: always()
         run: |
           {
-            echo '### ${{ matrix.build }}'
+            echo '### The newest Pi image'
             echo '```'
             grep '^ANSWER' "$RUNNER_TEMP/pi/report.txt" 2>/dev/null || echo 'no report'
             echo '```'
@@ -72,7 +66,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: pi-image-${{ matrix.build }}
+          name: pi-image
           path: |
             ${{ runner.temp }}/pi/report.txt
             ${{ runner.temp }}/pi/packages.txt

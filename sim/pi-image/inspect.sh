@@ -8,29 +8,22 @@
 # .github/workflows/pi-image.yml runs it; leap/README.md § How it is tested says what it is
 # for.
 #
-#   sudo sim/pi-image/inspect.sh <workdir> pinned    the image leap/pins names
-#   sudo sim/pi-image/inspect.sh <workdir> current   the newest build openSUSE publishes
+#   sudo sim/pi-image/inspect.sh <workdir>
 #
-# It fails only when the download or the checksum fails; every other finding is an ANSWER
-# line in <workdir>/report.txt. A pinned build openSUSE has withdrawn is a finding, not a
-# failure: the pin records the copy the owner keeps on two (plans/visit-runbook.md), and
-# the current leg still inspects the newest build. Nothing is written to the image: the
-# loop device is read-only, and the image's own rpm and lsinitrd run in a chroot whose
-# writes land in a tmpfs overlay. Run it only on a throwaway runner: it mounts, chroots,
-# loops and runs the image's own binaries as root.
+# It inspects the newest build openSUSE publishes, the one a card is written from: there is
+# no pin of ours (plans/visit-runbook.md keeps the download on two). It fails only when the
+# download or the checksum fails; every other finding is an ANSWER line in
+# <workdir>/report.txt. Nothing is written to the image: the loop device is read-only, and
+# the image's own rpm and lsinitrd run in a chroot whose writes land in a tmpfs overlay.
+# Run it only on a throwaway runner: it mounts, chroots, loops and runs the image's own
+# binaries as root.
 #
-# The current leg trusts openSUSE's server: it checks the image against the .sha256 file
-# beside it and not against the signed .sha256.asc. Its report is evidence about openSUSE's
-# newest build, never a pin.
+# It trusts openSUSE's server: it checks the image against the .sha256 file beside it and
+# not against the signed .sha256.asc. Its report is evidence about openSUSE's newest build.
 
 set -euo pipefail
 
-work=${1:?usage: inspect.sh <workdir> pinned|current}
-which=${2:?usage: inspect.sh <workdir> pinned|current}
-repo=$(cd "$(dirname "$0")/../.." && pwd)
-# shellcheck source=leap/pins
-. "$repo/leap/pins"
-: "${pi_image_url:?leap/pins has no pi_image_url}" "${pi_image_sha256:?leap/pins has no pi_image_sha256}"
+work=${1:?usage: inspect.sh <workdir>}
 
 mkdir -p "$work"
 report=$work/report.txt
@@ -43,59 +36,24 @@ show() { "$@" 2>&1 | tee -a "$report" || true; }
 
 # Which build is newest is read from openSUSE's directory listing, since the unversioned
 # alias's .sha256 names no build.
-base=${pi_image_url%/*}
-stem=${pi_image_url##*/}
-stem=${stem%-Build*}
+base=https://download.opensuse.org/distribution/leap/16.1/appliances
+stem=Leap-16.1-Immutable.aarch64-RaspberryPi
 listing=$(curl -fsSL --retry 3 "$base/" || true)
-current_name=$(printf '%s\n' "$listing" |
+name=$(printf '%s\n' "$listing" |
 	grep -oE "${stem//./\\.}-Build[0-9.]+\\.raw\\.xz" | sort -uV | tail -n 1 || true)
-current_sha=
-[ -n "$current_name" ] &&
-	current_sha=$(curl -fsSL --retry 3 "$base/$current_name.sha256" | awk '{print $1; exit}' || true)
+sha=
+[ -n "$name" ] &&
+	sha=$(curl -fsSL --retry 3 "$base/$name.sha256" | awk '{print $1; exit}' || true)
+[ -n "$name" ] && [ -n "$sha" ] || {
+	answer "FAIL: no current build found in $base/"
+	exit 1
+}
+url=$base/$name
 
-case $which in
-pinned)
-	url=$pi_image_url
-	sha=$pi_image_sha256
-	;;
-current)
-	[ -n "$current_name" ] && [ -n "$current_sha" ] || {
-		answer "FAIL: no current build found in $base/"
-		exit 1
-	}
-	url=$base/$current_name
-	sha=$current_sha
-	;;
-*)
-	echo "inspect.sh: pinned or current, not $which" >&2
-	exit 2
-	;;
-esac
-
-section "Image ($which)"
+section "Image"
 say "url: $url"
 say "expected sha256: $sha"
-answer "pinned build: ${pi_image_url##*/}"
-if [ -z "$listing" ] || [ -z "$current_sha" ]; then
-	answer "current build on openSUSE: unknown (openSUSE's directory did not answer)"
-elif [ "$current_sha" = "$pi_image_sha256" ]; then
-	answer "current build on openSUSE: $current_name sha256 $current_sha"
-	answer "the pinned build is still the current one: yes"
-else
-	answer "current build on openSUSE: $current_name sha256 $current_sha"
-	answer "the pinned build is still the current one: no"
-fi
-if [ "$which" = current ] && [ "$current_sha" = "$pi_image_sha256" ]; then
-	answer "current: the pinned leg inspects this build"
-	exit 0
-fi
-
-# openSUSE answers 404 for a build it has replaced; any other failure is the download's.
-if [ "$which" = pinned ] &&
-	[ "$(curl -sIL --retry 3 -o /dev/null -w '%{http_code}' "$url")" = 404 ]; then
-	answer "the pinned build is withdrawn from openSUSE (404): only the copy on two remains, and the current leg inspects ${current_name:-the newest build}"
-	exit 0
-fi
+answer "newest build on openSUSE: $name sha256 $sha"
 
 img=$work/image.raw
 if ! curl -fL --retry 3 --retry-delay 15 -sS -o "$img.xz" "$url"; then

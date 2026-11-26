@@ -317,18 +317,18 @@ branch or a second run. `zero`'s simulation is to run them (`plans/zero-leap.md`
 build, item 6).
 
 That VM is x86_64, so `.github/workflows/pi-image.yml` covers what it cannot. Its `image`
-job downloads the Pi image `pins` names, checks its SHA-256 and inspects it read-only with
+job downloads the newest Pi image openSUSE publishes, checks it against the `.sha256` beside
+it and inspects it read-only with
 `sim/pi-image/inspect.sh`: whether the initrd carries Combustion, which Wi-Fi firmware and
 packages the image has, what is on its FAT partition and its partition table. For `zero`
 it also reads the Pi 5's device tree and the `[pi5]` section of `config.txt`, asks the
 image's own `modprobe` which drivers the SD card and the RP1 Ethernet need and whether the
 initrd has them, finds the array's `bcache`, `dm-crypt` and Adiantum modules, and checks
-that `bcache-tools` is absent. It does the same for the newest build openSUSE publishes,
-once that is not the pinned one. It reports
-ANSWER lines and fails only when a download or checksum fails; a pinned build openSUSE has
-since withdrawn is reported, since the pin records the copy kept on `two`. It runs when
-`pins`, the script or the workflow changes.
+that `bcache-tools` is absent. The image has no pin of ours: a card is written from the
+newest build at download, kept on `two` (`plans/visit-runbook.md`). It reports ANSWER lines
+and fails only when a download or checksum fails. It runs when the script or the workflow
+changes.
 
 `.github/workflows/leap-pins.yml` downloads both architectures' `cloudflared` and Compose
-and fails when one differs from its SHA-256 in `pins`, or when `plans/visit-runbook.md`
-quotes another image or names another build. It runs when `pins` or the runbook changes.
+and fails when one differs from its SHA-256 in `pins`. It runs when `pins` or the workflow
+changes.
